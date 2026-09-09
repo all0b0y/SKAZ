@@ -1,0 +1,108 @@
+/*
+ * AudioHelper design tokens — a quiet, warm, editorial desktop world.
+ * Light is warm paper under a desk lamp; dark is a dim room at night.
+ * Theme follows the OS via prefers-color-scheme; a manual override sets
+ * data-theme on <html>.
+ */
+
+:root {
+  /* Warm paper light theme */
+  --paper: oklch(97.5% 0.01 85);
+  --paper-raised: oklch(99% 0.008 85);
+  --paper-sunken: oklch(94.5% 0.013 82);
+  --edge: oklch(88% 0.015 80);
+  --edge-strong: oklch(80% 0.02 78);
+
+  --ink: oklch(26% 0.02 70);
+  --ink-soft: oklch(44% 0.02 72);
+  --ink-faint: oklch(58% 0.018 75);
+
+  /* Restrained ochre accent for interaction; coral reserved for live capture */
+  --accent: oklch(58% 0.12 62);
+  --accent-hover: oklch(52% 0.13 60);
+  --accent-quiet: oklch(58% 0.12 62 / 0.12);
+  --live: oklch(56% 0.19 25);
+  --live-quiet: oklch(56% 0.19 25 / 0.14);
+  --positive: oklch(56% 0.11 150);
+  --warning: oklch(64% 0.13 75);
+
+  --shadow-1: 0 1px 2px oklch(30% 0.02 70 / 0.06), 0 2px 6px oklch(30% 0.02 70 / 0.05);
+  --shadow-2: 0 4px 10px oklch(30% 0.02 70 / 0.08), 0 12px 28px oklch(30% 0.02 70 / 0.07);
+
+  --radius-sm: 7px;
+  --radius: 11px;
+  --radius-lg: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 36px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-read: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+
+  --text-xs: 11.5px;
+  --text-sm: 13px;
+  --text-base: 14.5px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --text-xl: 27px;
+
+  --dur-fast: 130ms;
+  --dur: 220ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: oklch(21% 0.012 75);
+    --paper-raised: oklch(24.5% 0.014 76);
+    --paper-sunken: oklch(18% 0.01 74);
+    --edge: oklch(31% 0.014 76);
+    --edge-strong: oklch(40% 0.018 76);
+
+    --ink: oklch(92% 0.012 82);
+    --ink-soft: oklch(76% 0.014 80);
+    --ink-faint: oklch(60% 0.014 78);
+
+    --accent: oklch(74% 0.11 70);
+    --accent-hover: oklch(80% 0.12 72);
+    --accent-quiet: oklch(74% 0.11 70 / 0.16);
+    --live: oklch(66% 0.18 27);
+    --live-quiet: oklch(66% 0.18 27 / 0.18);
+    --positive: oklch(70% 0.12 152);
+    --warning: oklch(76% 0.13 78);
+
+    --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 2px 8px oklch(0% 0 0 / 0.28);
+    --shadow-2: 0 6px 16px oklch(0% 0 0 / 0.4), 0 16px 40px oklch(0% 0 0 / 0.34);
+
+    color-scheme: dark;
+  }
+}
+
+/* Manual dark override (used when user pins dark regardless of OS) */
+:root[data-theme='dark'] {
+  --paper: oklch(21% 0.012 75);
+  --paper-raised: oklch(24.5% 0.014 76);
+  --paper-sunken: oklch(18% 0.01 74);
+  --edge: oklch(31% 0.014 76);
+  --edge-strong: oklch(40% 0.018 76);
+  --ink: oklch(92% 0.012 82);
+  --ink-soft: oklch(76% 0.014 80);
+  --ink-faint: oklch(60% 0.014 78);
+  --accent: oklch(74% 0.11 70);
+  --accent-hover: oklch(80% 0.12 72);
+  --accent-quiet: oklch(74% 0.11 70 / 0.16);
+  --live: oklch(66% 0.18 27);
+  --live-quiet: oklch(66% 0.18 27 / 0.18);
+  --positive: oklch(70% 0.12 152);
+  --warning: oklch(76% 0.13 78);
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 2px 8px oklch(0% 0 0 / 0.28);
+  --shadow-2: 0 6px 16px oklch(0% 0 0 / 0.4), 0 16px 40px oklch(0% 0 0 / 0.34);
+  color-scheme: dark;
+}
