@@ -1,5 +1,10 @@
 # Состояние AudioHelper — миграция Soniox
 
+## Восстановление UI
+- Утраченный white/graphite редизайн восстановлен из реальных snapshots/patches чатов Hermes; не реконструирован по описанию. App.tsx уже совпадал; возвращены CSS, AssistantPanel, SessionList и Icon. Причина — широкий `git checkout --` в предыдущей сессии, а не доказанный sibling-процесс.
+- Текущий frontend: **394 tests / 44 files passed**, typecheck/build passed; visual capture **1 passed**, screenshot просмотрен. Исторические403tests ниже относятся к состоянию ДО отката:9AssistantPanel tests пока не восстановлены. Backend в recovery-срезе не запускался.
+- Восстановление пока uncommitted; before/recovered/provenance в `.runtime/recovery/`. Незавершённый эксперимент групп сохранён отдельно, не подключён.
+
 ## Реализовано
 - Все прежние бордовые/красные UI-акценты заменены на базовый `#20202A`; тёмная тема использует его контрастный оттенок `#A4A4B2`. Красная ткань в empty-state иллюстрации перекрашена в ту же графитово-синюю гамму с сохранением фактуры.
 - Native capture/storage/lifecycle; отзыв consent завершает provider, не локальное сохранение. Ошибки сохранения/overflow/retry видимы; штатное Saving locally убрано.

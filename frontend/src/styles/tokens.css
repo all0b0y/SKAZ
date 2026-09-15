@@ -1,33 +1,43 @@
 /*
- * AudioHelper design tokens — a quiet, warm, editorial desktop world.
- * Light is warm paper under a desk lamp; dark is a dim room at night.
+ * SKAZ design tokens — a white field, black text, graphite accent world.
+ * Light is a clean white page; dark is a dim room at night.
  * Theme follows the OS via prefers-color-scheme; a manual override sets
  * data-theme on <html>.
  */
 
 :root {
-  /* Warm paper light theme */
-  --paper: oklch(97.5% 0.01 85);
-  --paper-raised: oklch(99% 0.008 85);
-  --paper-sunken: oklch(94.5% 0.013 82);
-  --edge: oklch(88% 0.015 80);
-  --edge-strong: oklch(80% 0.02 78);
+  /* White field light theme */
+  --paper: oklch(100% 0 0);
+  --paper-raised: oklch(100% 0 0);
+  --paper-sunken: oklch(97% 0 0);
+  --edge: oklch(91% 0 0);
+  --edge-strong: oklch(82% 0 0);
 
-  --ink: oklch(26% 0.02 70);
-  --ink-soft: oklch(44% 0.02 72);
-  --ink-faint: oklch(58% 0.018 75);
+  --ink: oklch(18% 0 0);
+  --ink-soft: oklch(42% 0 0);
+  --ink-faint: oklch(60% 0 0);
 
-  /* Restrained ochre accent for interaction; coral reserved for live capture */
-  --accent: oklch(58% 0.12 62);
-  --accent-hover: oklch(52% 0.13 60);
-  --accent-quiet: oklch(58% 0.12 62 / 0.12);
-  --live: oklch(56% 0.19 25);
-  --live-quiet: oklch(56% 0.19 25 / 0.14);
+  /* One graphite-blue accent replaces every former burgundy/red detail. */
+  --accent: #20202a;
+  --accent-hover: #20202a;
+  --accent-quiet: rgb(32 32 42 / 0.12);
+  --accent-wash: rgb(32 32 42 / 0.08);
+  --live: #20202a;
+  --live-quiet: rgb(32 32 42 / 0.14);
   --positive: oklch(56% 0.11 150);
   --warning: oklch(64% 0.13 75);
 
-  --shadow-1: 0 1px 2px oklch(30% 0.02 70 / 0.06), 0 2px 6px oklch(30% 0.02 70 / 0.05);
-  --shadow-2: 0 4px 10px oklch(30% 0.02 70 / 0.08), 0 12px 28px oklch(30% 0.02 70 / 0.07);
+  /* Muted session-group palette (hashtag chips). Deliberately one restrained
+     family — no rainbow — and readable on white. Group 1 follows the new
+     graphite accent; the remaining groups retain their distinct roles. */
+  --group-1: #20202a; /* graphite blue */
+  --group-2: oklch(46% 0.09 250); /* deep blue */
+  --group-3: oklch(50% 0.07 145); /* muted green */
+  --group-4: oklch(55% 0.01 0); /* neutral gray */
+  --group-5: oklch(48% 0.08 305); /* restrained violet */
+
+  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.05), 0 2px 6px oklch(0% 0 0 / 0.04);
+  --shadow-2: 0 4px 10px oklch(0% 0 0 / 0.07), 0 12px 28px oklch(0% 0 0 / 0.06);
 
   --radius-sm: 7px;
   --radius: 11px;
@@ -40,9 +50,14 @@
   --space-5: 24px;
   --space-6: 36px;
 
+  --panel-head-h: 52px;
+  --panel-foot-h: 80px;
+
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-read: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
+  /* Logo-only display face for the SKAZ wordmark — never used for body text. */
+  --font-display: 'Playfair Display', 'Bodoni 72', Didot, Georgia, serif;
 
   --text-xs: 11.5px;
   --text-sm: 13px;
@@ -60,23 +75,31 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --paper: oklch(21% 0.012 75);
-    --paper-raised: oklch(24.5% 0.014 76);
-    --paper-sunken: oklch(18% 0.01 74);
-    --edge: oklch(31% 0.014 76);
-    --edge-strong: oklch(40% 0.018 76);
+    --paper: oklch(16% 0 0);
+    --paper-raised: oklch(20% 0 0);
+    --paper-sunken: oklch(12% 0 0);
+    --edge: oklch(28% 0 0);
+    --edge-strong: oklch(38% 0 0);
 
-    --ink: oklch(92% 0.012 82);
-    --ink-soft: oklch(76% 0.014 80);
-    --ink-faint: oklch(60% 0.014 78);
+    --ink: oklch(96% 0 0);
+    --ink-soft: oklch(76% 0 0);
+    --ink-faint: oklch(58% 0 0);
 
-    --accent: oklch(74% 0.11 70);
-    --accent-hover: oklch(80% 0.12 72);
-    --accent-quiet: oklch(74% 0.11 70 / 0.16);
-    --live: oklch(66% 0.18 27);
-    --live-quiet: oklch(66% 0.18 27 / 0.18);
+    /* Contrast-safe tint of the #20202a brand base for dark surfaces. */
+    --accent: #a4a4b2;
+    --accent-hover: #b8b8c4;
+    --accent-quiet: rgb(164 164 178 / 0.18);
+    --accent-wash: rgb(164 164 178 / 0.14);
+    --live: #a4a4b2;
+    --live-quiet: rgb(164 164 178 / 0.18);
     --positive: oklch(70% 0.12 152);
     --warning: oklch(76% 0.13 78);
+
+    --group-1: #a4a4b2;
+    --group-2: oklch(68% 0.1 250);
+    --group-3: oklch(70% 0.08 145);
+    --group-4: oklch(72% 0.01 0);
+    --group-5: oklch(70% 0.09 305);
 
     --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 2px 8px oklch(0% 0 0 / 0.28);
     --shadow-2: 0 6px 16px oklch(0% 0 0 / 0.4), 0 16px 40px oklch(0% 0 0 / 0.34);
@@ -87,21 +110,28 @@
 
 /* Manual dark override (used when user pins dark regardless of OS) */
 :root[data-theme='dark'] {
-  --paper: oklch(21% 0.012 75);
-  --paper-raised: oklch(24.5% 0.014 76);
-  --paper-sunken: oklch(18% 0.01 74);
-  --edge: oklch(31% 0.014 76);
-  --edge-strong: oklch(40% 0.018 76);
-  --ink: oklch(92% 0.012 82);
-  --ink-soft: oklch(76% 0.014 80);
-  --ink-faint: oklch(60% 0.014 78);
-  --accent: oklch(74% 0.11 70);
-  --accent-hover: oklch(80% 0.12 72);
-  --accent-quiet: oklch(74% 0.11 70 / 0.16);
-  --live: oklch(66% 0.18 27);
-  --live-quiet: oklch(66% 0.18 27 / 0.18);
+  --paper: oklch(16% 0 0);
+  --paper-raised: oklch(20% 0 0);
+  --paper-sunken: oklch(12% 0 0);
+  --edge: oklch(28% 0 0);
+  --edge-strong: oklch(38% 0 0);
+  --ink: oklch(96% 0 0);
+  --ink-soft: oklch(76% 0 0);
+  --ink-faint: oklch(58% 0 0);
+  /* Contrast-safe tint of the #20202a brand base for dark surfaces. */
+  --accent: #a4a4b2;
+  --accent-hover: #b8b8c4;
+  --accent-quiet: rgb(164 164 178 / 0.18);
+  --accent-wash: rgb(164 164 178 / 0.14);
+  --live: #a4a4b2;
+  --live-quiet: rgb(164 164 178 / 0.18);
   --positive: oklch(70% 0.12 152);
   --warning: oklch(76% 0.13 78);
+  --group-1: #a4a4b2;
+  --group-2: oklch(68% 0.1 250);
+  --group-3: oklch(70% 0.08 145);
+  --group-4: oklch(72% 0.01 0);
+  --group-5: oklch(70% 0.09 305);
   --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 2px 8px oklch(0% 0 0 / 0.28);
   --shadow-2: 0 6px 16px oklch(0% 0 0 / 0.4), 0 16px 40px oklch(0% 0 0 / 0.34);
   color-scheme: dark;

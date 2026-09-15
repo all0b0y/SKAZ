@@ -21,14 +21,16 @@ beforeEach(() => {
 });
 
 describe('AssistantPanel', () => {
-  it('shows the empty prompt when there are no messages', () => {
+  it('shows the restored illustration and tagline when there are no messages', () => {
     render(<AssistantPanel onCite={vi.fn()} />);
-    expect(screen.getByText('What did I miss?')).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-figure')).toBeInTheDocument();
+    expect(screen.getByText('Больше чем слушать')).toBeInTheDocument();
   });
 
   it('changes the question scope in the store', async () => {
     const user = userEvent.setup();
     render(<AssistantPanel onCite={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Auto' }));
     await user.click(screen.getByRole('tab', { name: 'Search' }));
     expect(useStore.getState().chatScope).toBe('search');
   });
@@ -36,6 +38,8 @@ describe('AssistantPanel', () => {
   it('hides the window presets for non-window scopes', async () => {
     const user = userEvent.setup();
     render(<AssistantPanel onCite={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '5m' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Auto' }));
     expect(screen.getByRole('button', { name: '5m' })).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'All' }));
     expect(screen.queryByRole('button', { name: '5m' })).not.toBeInTheDocument();
