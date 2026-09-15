@@ -9,7 +9,7 @@ import { encodeWavPcm16Mono } from './wav';
 // as needed (docs/API.md).
 
 const WINDOW_SECONDS = 5;
-const LEVEL_SMOOTHING = 0.2;
+
 
 // Served from public/ so it loads under CSP script-src 'self'. BASE_URL ends
 // in '/', and is '/' in dev and './' in the packaged file:// build.
@@ -23,11 +23,28 @@ export interface RecordedChunk {
   sampleRate: number;
 }
 
+export interface RecordedSignal {
+  /** Unamplified RMS for this frame, linear 0..1. */
+  rms: number;
+  /** Peak absolute sample for this frame, linear 0..1 — needed for real clip detection. */
+  peak: number;
+  /** Number of PCM samples represented by this measurement frame. */
+  sampleCount: number;
+  /** Device sample rate used to derive recording-time duration. */
+  sampleRate: number;
+}
+
 export interface RecorderCallbacks {
+  /** Establish durable transport at the device sample rate before capture connects. */
+  onReady?: (sampleRate: number) => Promise<void>;
   onChunk: (chunk: RecordedChunk) => boolean | void;
   onLevel?: (level: number) => void;
+  /** Raw per-frame rms/peak for a level meter to aggregate; unthrottled, no gain applied. */
+  onSignal?: (sample: RecordedSignal) => void;
   onError?: (message: string) => void;
   onDisconnected?: () => void;
+  /** Sticky loss of confidence: received PCM is saved, but an in-flight tail may be missing. */
+  onCaptureIncomplete?: () => void;
 }
 
 export type RecorderState = 'idle' | 'recording' | 'paused' | 'processing' | 'stopped';
@@ -49,12 +66,24 @@ export class AudioRecorder {
   private chunker: WindowChunker | null = null;
   private sampleRate = 48000;
   private sequence = 0;
-  private level = 0;
+
   private _state: RecorderState = 'idle';
+  private draining = false;
+  private drainPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private stopRequested = false;
   private barrierId = 0;
   private readonly barrierWaiters = new Map<number, () => void>();
 
-  constructor(private readonly callbacks: RecorderCallbacks) {}
+  constructor(
+    private readonly callbacks: RecorderCallbacks,
+    private readonly options: { windowSeconds?: number } = {},
+  ) {
+    const seconds = options.windowSeconds ?? WINDOW_SECONDS;
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds > WINDOW_SECONDS) {
+      throw new Error('Invalid recording window duration.');
+    }
+  }
 
   get state(): RecorderState {
     return this._state;
@@ -65,20 +94,27 @@ export class AudioRecorder {
   }
 
   async start(deviceId?: string): Promise<void> {
-    if (this._state === 'recording') return;
+    if (['recording', 'processing', 'paused'].includes(this._state)) return;
+    this._state = 'processing';
+    this.stopRequested = false;
+    this.stopPromise = null;
     const constraints: MediaStreamConstraints = {
       audio: deviceId
-        ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false }
-        : { echoCancellation: false, noiseSuppression: false },
+        ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        : { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     };
     try {
       this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      if (this.stopRequested) throw new Error('Recording start was cancelled.');
       this.context = new AudioContext();
       this.sampleRate = this.context.sampleRate;
       this.timeline = new SampleTimeline(this.sampleRate);
-      this.chunker = new WindowChunker(Math.round(WINDOW_SECONDS * this.sampleRate));
+      this.chunker = new WindowChunker(Math.max(1, Math.round((this.options.windowSeconds ?? WINDOW_SECONDS) * this.sampleRate)));
 
       await this.context.audioWorklet.addModule(WORKLET_URL);
+      if (this.stopRequested) throw new Error('Recording start was cancelled.');
+      await this.callbacks.onReady?.(this.sampleRate);
+      if (this.stopRequested) throw new Error('Recording start was cancelled.');
       this.source = this.context.createMediaStreamSource(this.stream);
       this.worklet = new AudioWorkletNode(this.context, 'pcm-forwarder');
       this.worklet.port.onmessage = (event: MessageEvent<Float32Array | BarrierMessage>) => {
@@ -102,20 +138,32 @@ export class AudioRecorder {
       this._state = 'recording';
     } catch (err) {
       await this.teardown();
-      this._state = 'idle';
+      this._state = this.stopRequested ? 'stopped' : 'idle';
       throw err;
     }
   }
 
   private onFrame(frame: Float32Array): void {
-    if (this._state !== 'recording' || !this.chunker) return;
+    if ((this._state !== 'recording' && !this.draining) || !this.chunker) return;
     this.timeline?.accept(frame.length);
 
     let sum = 0;
-    for (let i = 0; i < frame.length; i += 1) sum += frame[i]! * frame[i]!;
-    const rms = Math.sqrt(sum / Math.max(1, frame.length));
-    this.level = this.level + LEVEL_SMOOTHING * (rms - this.level);
-    this.callbacks.onLevel?.(Math.min(1, this.level * 4));
+    let peak = 0;
+    for (let i = 0; i < frame.length; i += 1) {
+      const v = frame[i]!;
+      sum += v * v;
+      const abs = Math.abs(v);
+      if (abs > peak) peak = abs;
+    }
+    const rms = Math.min(1, Math.sqrt(sum / Math.max(1, frame.length)));
+    const clampedPeak = Math.min(1, peak);
+    this.callbacks.onLevel?.(rms);
+    this.callbacks.onSignal?.({
+      rms,
+      peak: clampedPeak,
+      sampleCount: frame.length,
+      sampleRate: this.sampleRate,
+    });
 
     for (const window of this.chunker.push(frame)) {
       const accepted = this.emitWindow(window);
@@ -141,10 +189,8 @@ export class AudioRecorder {
   async pause(): Promise<void> {
     if (this._state !== 'recording') return;
     this._state = 'processing';
-    this.source?.disconnect();
-    await this.awaitWorkletBarrier();
-    this.flushTail();
-    this._state = 'paused';
+    await this.drainCapture();
+    if (!this.stopRequested) this._state = 'paused';
   }
 
   async resume(): Promise<void> {
@@ -154,13 +200,44 @@ export class AudioRecorder {
   }
 
   async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
     if (this._state === 'idle' || this._state === 'stopped') return;
+    this.stopRequested = true;
     this._state = 'processing';
+    // Stop the physical input immediately; still accept queued PCM up to the barrier.
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.stopPromise = this.finishStop();
+    return this.stopPromise;
+  }
+
+  private async finishStop(): Promise<void> {
+    try {
+      await this.drainCapture();
+    } finally {
+      await this.teardown();
+      this._state = 'stopped';
+    }
+  }
+
+  private drainCapture(): Promise<void> {
+    if (this.drainPromise) return this.drainPromise;
+    this.draining = true;
     this.source?.disconnect();
-    await this.awaitWorkletBarrier();
-    this.flushTail();
-    await this.teardown();
-    this._state = 'stopped';
+    this.drainPromise = this.awaitWorkletBarrier().then(async (complete) => {
+      this.draining = false;
+      this.flushTail();
+      if (!complete) {
+        this.stopRequested = true;
+        this.callbacks.onCaptureIncomplete?.();
+        this.callbacks.onError?.('Audio flush failed; capture completeness is unknown. Received audio is being saved.');
+        await this.teardown();
+        this._state = 'stopped';
+      }
+    }).finally(() => {
+      this.draining = false;
+      this.drainPromise = null;
+    });
+    return this.drainPromise;
   }
 
   /** Emit whatever partial window remains as a final short chunk. */
@@ -170,20 +247,22 @@ export class AudioRecorder {
     if (tail && tail.length > 0) this.emitWindow(tail);
   }
 
-  private awaitWorkletBarrier(): Promise<void> {
-    if (!this.worklet) return Promise.resolve();
+  private awaitWorkletBarrier(): Promise<boolean> {
+    if (!this.worklet) return Promise.resolve(true);
     const id = ++this.barrierId;
     return new Promise((resolve) => {
-      const timer = window.setTimeout(() => {
-        this.barrierWaiters.delete(id);
-        this.callbacks.onError?.('Audio flush barrier timed out; stopping capture safely');
-        resolve();
-      }, BARRIER_TIMEOUT_MS);
-      this.barrierWaiters.set(id, () => {
+      const finish = (complete: boolean) => {
         window.clearTimeout(timer);
-        resolve();
-      });
-      this.worklet!.port.postMessage({ type: 'barrier', id });
+        this.barrierWaiters.delete(id);
+        resolve(complete);
+      };
+      const timer = window.setTimeout(() => finish(false), BARRIER_TIMEOUT_MS);
+      this.barrierWaiters.set(id, () => finish(true));
+      try {
+        this.worklet!.port.postMessage({ type: 'barrier', id });
+      } catch {
+        finish(false);
+      }
     });
   }
 

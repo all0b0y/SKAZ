@@ -8,26 +8,39 @@ import { TranscriptView } from './components/transcript/TranscriptView';
 import { NotesPanel } from './components/notes/NotesPanel';
 import { AssistantPanel } from './components/assistant/AssistantPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
+import { SearchPalette } from './components/search/SearchPalette';
 import { Icon } from './components/ui/Icon';
+import { InlineEditableText } from './components/ui/InlineEditableText';
+import { formatTimecode } from './lib/time';
 import type { Citation } from './api/types';
 
 type CenterTab = 'transcript' | 'notes';
 
-function BackendPill() {
-  const backend = useStore((s) => s.backend);
-  const label =
-    backend.phase === 'ready'
-      ? 'Backend ready'
-      : backend.phase === 'starting'
-        ? 'Starting backend…'
-        : backend.phase === 'error'
-          ? 'Backend error'
-          : 'Backend stopped';
+function TitlebarSession() {
+  const activeId = useStore((s) => s.activeSessionId);
+  const sessions = useStore((s) => s.sessions);
+  const renameSession = useStore((s) => s.renameSession);
+  const session = sessions.find((s) => s.id === activeId);
+  if (!session) return null;
+
+  const created = new Date(session.created_at);
+  const dateLabel = Number.isNaN(created.getTime())
+    ? null
+    : created.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const durationLabel = session.duration_ms > 0 ? formatTimecode(session.duration_ms) : null;
+  const metaLabel = [dateLabel, durationLabel].filter(Boolean).join(' · ');
+
   return (
-    <span className={clsx('status-pill', `status-pill--${backend.phase}`)} title={backend.detail}>
-      <Icon name="dot" size={11} filled />
-      {label}
-    </span>
+    <div className="titlebar__session">
+      <InlineEditableText
+        value={session.title}
+        onCommit={(title) => void renameSession(session.id, title)}
+        className="titlebar__session-name"
+        inputClassName="titlebar__session-rename"
+        ariaLabel="Session name"
+      />
+      {metaLabel && <span className="titlebar__session-meta tabular">{metaLabel}</span>}
+    </div>
   );
 }
 
@@ -41,7 +54,7 @@ function BackendGate() {
           <Icon name={backend.phase === 'error' ? 'warning' : 'dot'} size={22} />
         </div>
         <h2>
-          {backend.phase === 'error' ? 'The backend didn’t start' : 'Starting AudioHelper…'}
+          {backend.phase === 'error' ? 'The backend didn’t start' : 'Starting SKAZ…'}
         </h2>
         <p>
           {backend.phase === 'error'
@@ -66,6 +79,7 @@ export default function App() {
   const activeId = useStore((s) => s.activeSessionId);
   const [tab, setTab] = useState<CenterTab>('transcript');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [focusSegmentId, setFocusSegmentId] = useState<string | null>(null);
 
   useTheme(theme);
@@ -73,6 +87,17 @@ export default function App() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const onCite = (citation: Citation) => {
     setTab('transcript');
@@ -84,30 +109,13 @@ export default function App() {
   return (
     <div className="app">
       <header className="titlebar">
-        <div className="titlebar__brand">
-          <span className="titlebar__mark" aria-hidden>
-            <Icon name="mic" size={16} filled />
-          </span>
-          <span className="titlebar__name">AudioHelper</span>
-        </div>
-        <div className="titlebar__right">
-          <BackendPill />
-          <button
-            className="titlebar__gear"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Icon name="settings" size={18} />
-          </button>
-        </div>
+        <TitlebarSession />
       </header>
 
       <main className="workspace">
-        <SessionList />
+        <SessionList onOpenSettings={() => setSettingsOpen(true)} onOpenSearch={() => setSearchOpen(true)} />
 
         <section className="center" aria-label="Transcript and notes">
-          <RecorderBar />
           <div className="center__tabs" role="tablist" aria-label="View">
             <button
               role="tab"
@@ -134,15 +142,17 @@ export default function App() {
             ) : tab === 'transcript' ? (
               <TranscriptView focusSegmentId={focusSegmentId} />
             ) : (
-              <NotesPanel />
+              <NotesPanel onCite={onCite} />
             )}
           </div>
+          <RecorderBar />
         </section>
 
         <AssistantPanel onCite={onCite} />
       </main>
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} onCite={onCite} />
       {!ready && <BackendGate />}
     </div>
   );

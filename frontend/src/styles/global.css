@@ -1,5 +1,14 @@
 @import './tokens.css';
 
+/* Local logo wordmark face — SIL OFL, latin subset, no network fetch. */
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('../assets/fonts/PlayfairDisplay-Medium-latin.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {

@@ -1,0 +1,39 @@
+.transcript-layout--native { position: relative; }
+.native-monologues {
+  list-style: none;
+  margin: 0;
+  padding: 24px;
+}
+
+.native-monologue + .native-monologue { margin-top: 32px; }
+.native-transcript-notice {
+  height: 44px;
+  flex-shrink: 0;
+  padding: 8px 24px;
+  overflow: auto;
+  font-size: 12px;
+}
+.transcript__follow {
+  position: absolute;
+  bottom: 16px;
+  right: 24px;
+  z-index: 1;
+  border-radius: 999px;
+  padding: 8px 16px;
+}
+.native-monologue__speaker {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 12px;
+}
+.native-monologue__text {
+  margin: 12px 0 0;
+  font-size: 17px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.native-monologue__original { margin-top: 12px; }
+.native-monologue__original > summary { cursor: pointer; font-size: 12px; opacity: 0.7; }

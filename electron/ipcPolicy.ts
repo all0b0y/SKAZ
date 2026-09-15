@@ -23,6 +23,13 @@ export interface AudioUploadMetaShape {
   endMs: number;
 }
 
+export type AudioUploadPurpose = 'transcribe' | 'store';
+
+/** Exact backend target for the two binary-only audio channels. */
+export function audioUploadPath(sessionId: string, purpose: AudioUploadPurpose): string {
+  return `/sessions/${encodeURIComponent(sessionId)}/audio${purpose === 'store' ? '/store' : ''}`;
+}
+
 // A JSON body larger than this is almost certainly a bug or abuse; settings
 // updates and questions are tiny. Audio never travels through this path.
 const MAX_JSON_BODY_CHARS = 64 * 1024;
@@ -37,19 +44,30 @@ interface Route {
   pattern: RegExp;
 }
 
-// Mirrors docs/API.md exactly. `[^/]+` is a single id/sequence segment.
+// Mirrors docs/API.md, plus the two UI-facing local-model status/preparation
+// routes documented in .runtime/asr-local-contract.md. `[^/]+` is a single
+// id/sequence segment.
 const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/health$/ },
   { method: 'GET', pattern: /^\/settings$/ },
   { method: 'PUT', pattern: /^\/settings$/ },
   { method: 'GET', pattern: /^\/models$/ },
+  { method: 'POST', pattern: /^\/models\/local\/prepare$/ },
+  { method: 'GET', pattern: /^\/models\/local\/status$/ },
+  { method: 'DELETE', pattern: /^\/models\/local$/ },
+  { method: 'GET', pattern: /^\/asr\/live\/capabilities$/ },
   { method: 'GET', pattern: /^\/sessions$/ },
   { method: 'POST', pattern: /^\/sessions$/ },
   { method: 'GET', pattern: /^\/sessions\/[^/]+$/ },
   { method: 'PATCH', pattern: /^\/sessions\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/sessions\/[^/]+$/ },
   { method: 'POST', pattern: /^\/sessions\/[^/]+\/audio$/ },
+  { method: 'GET', pattern: /^\/sessions\/[^/]+\/audio$/ },
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/audio\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/sessions\/[^/]+\/live$/ },
+  { method: 'GET', pattern: /^\/sessions\/[^/]+\/asr\/live$/ },
+  { method: 'GET', pattern: /^\/sessions\/[^/]+\/asr\/live\/scheduler$/ },
+  { method: 'POST', pattern: /^\/sessions\/[^/]+\/asr\/live\/advance$/ },
   { method: 'POST', pattern: /^\/sessions\/[^/]+\/ask$/ },
   { method: 'POST', pattern: /^\/sessions\/[^/]+\/notes$/ },
 ];
@@ -133,7 +151,7 @@ export function validateAudioUpload(
     !Number.isInteger(meta.endMs) ||
     meta.startMs < 0 ||
     meta.endMs < 0 ||
-    meta.endMs < meta.startMs
+    meta.endMs <= meta.startMs
   ) {
     return 'invalid time range';
   }

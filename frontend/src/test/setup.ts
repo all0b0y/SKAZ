@@ -28,6 +28,7 @@ if (!('audiohelper' in window)) {
     value: {
       request: vi.fn(async () => ({ ok: true, status: 200, data: null })),
       uploadAudio: vi.fn(async () => ({ ok: true, status: 200, data: { duplicate: false, segments: [] } })),
+      storeAudio: vi.fn(async () => ({ ok: true, status: 201, data: { sequence: 0, duplicate: false } })),
       fetchAudio: vi.fn(async () => ({ ok: true, status: 200, data: new ArrayBuffer(0) })),
       getBackendStatus: vi.fn(async () => ({ phase: 'ready' })),
       onBackendStatus: vi.fn(() => () => undefined),

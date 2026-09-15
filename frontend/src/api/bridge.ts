@@ -4,6 +4,8 @@
 // both and attaches the Authorization header to every proxied request. The
 // bridge can therefore only reach the loopback backend, nothing else.
 
+import type { NativeAudioMeta, NativeFailure, NativeOpened, NativeSaved, NativeStopped } from './nativeLive';
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface BridgeRequest {
@@ -44,10 +46,21 @@ export interface CaptureState {
 }
 
 export interface BridgeApi {
+  /** Native PCM lifecycle, authenticated and bounded in Electron main. */
+  openNative(sessionId: string, sampleRate: number): Promise<JsonResponse<NativeOpened>>;
+  sendNativeAudio(sessionId: string, meta: NativeAudioMeta, pcm: ArrayBuffer): Promise<JsonResponse<NativeSaved>>;
+  endNative(sessionId: string, action: 'pause' | 'stop'): Promise<JsonResponse<NativeStopped>>;
+  onNativeFailure(listener: (failure: NativeFailure) => void): () => void;
   /** Proxy a JSON request to the backend with auth attached by main. */
   request<T = unknown>(req: BridgeRequest): Promise<JsonResponse<T>>;
   /** Upload one standalone PCM16 mono WAV window for a session. */
   uploadAudio<T = unknown>(
+    sessionId: string,
+    meta: AudioUploadMeta,
+    wav: ArrayBuffer,
+  ): Promise<JsonResponse<T>>;
+  /** Durably store captured WAV without starting ASR. */
+  storeAudio<T = unknown>(
     sessionId: string,
     meta: AudioUploadMeta,
     wav: ArrayBuffer,
@@ -60,6 +73,9 @@ export interface BridgeApi {
   onBackendStatus(listener: (status: BackendStatus) => void): () => void;
   /** Report live capture state to main (one-way) so close/quit can be guarded. */
   reportCaptureState?(state: CaptureState): void;
+  /** Main requests Stop/drain; only the boolean save outcome is returned. */
+  onPrepareQuit?(listener: () => Promise<boolean>): () => void;
+  onQuitCancelled?(listener: () => void): () => void;
   readonly platform: string;
 }
 

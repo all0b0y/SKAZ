@@ -12,9 +12,17 @@ import type {
 
 // The only object exposed to the renderer. Context isolation is on and node
 // integration is off, so this is the entire trusted surface. No token, no port,
-// no filesystem, no shell — just the four backend request channels and status.
+// no filesystem, no shell — just the narrow backend request channels and status.
 
 const api: BridgeApi = {
+  openNative: (sessionId, sampleRate) => ipcRenderer.invoke(CHANNELS.nativeOpen, sessionId, sampleRate),
+  sendNativeAudio: (sessionId, meta, pcm) => ipcRenderer.invoke(CHANNELS.nativeAudio, sessionId, meta, pcm),
+  endNative: (sessionId, action) => ipcRenderer.invoke(CHANNELS.nativeEnd, sessionId, action),
+  onNativeFailure(listener) {
+    const handler = (_event: unknown, failure: Parameters<typeof listener>[0]): void => listener(failure);
+    ipcRenderer.on(CHANNELS.nativeFailure, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.nativeFailure, handler);
+  },
   request<T = unknown>(req: BridgeRequest): Promise<JsonResponse<T>> {
     return ipcRenderer.invoke(CHANNELS.request, req) as Promise<JsonResponse<T>>;
   },
@@ -24,6 +32,13 @@ const api: BridgeApi = {
     wav: ArrayBuffer,
   ): Promise<JsonResponse<T>> {
     return ipcRenderer.invoke(CHANNELS.uploadAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
+  },
+  storeAudio<T = unknown>(
+    sessionId: string,
+    meta: AudioUploadMeta,
+    wav: ArrayBuffer,
+  ): Promise<JsonResponse<T>> {
+    return ipcRenderer.invoke(CHANNELS.storeAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
   },
   fetchAudio(sessionId: string, sequence: number): Promise<BinaryResponse> {
     return ipcRenderer.invoke(CHANNELS.fetchAudio, sessionId, sequence) as Promise<BinaryResponse>;
@@ -38,6 +53,22 @@ const api: BridgeApi = {
   },
   reportCaptureState(state: CaptureState): void {
     ipcRenderer.send(CHANNELS.captureState, state);
+  },
+  onPrepareQuit(listener) {
+    const handler = (_event: unknown, id: unknown): void => {
+      if (!Number.isSafeInteger(id)) return;
+      void Promise.resolve().then(listener).then(
+        (saved) => ipcRenderer.send(CHANNELS.quitPrepared, id, saved === true),
+        () => ipcRenderer.send(CHANNELS.quitPrepared, id, false),
+      );
+    };
+    ipcRenderer.on(CHANNELS.prepareQuit, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
+  },
+  onQuitCancelled(listener) {
+    const handler = (): void => listener();
+    ipcRenderer.on(CHANNELS.cancelQuit, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.cancelQuit, handler);
   },
   platform: process.platform,
 };

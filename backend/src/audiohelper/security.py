@@ -6,6 +6,7 @@ import hmac
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
+from starlette.requests import HTTPConnection
 
 from .config import AppConfig
 
@@ -23,7 +24,7 @@ def require_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Missing or invalid bearer token.")
 
 
-def local_access_error(request: Request, config: AppConfig) -> str | None:
+def local_access_error(request: HTTPConnection, config: AppConfig) -> str | None:
     """Return a rejection reason for non-local callers, or None when the request is local."""
     host_header = request.headers.get("host")
     if host_header is not None and _hostname(host_header) not in LOOPBACK_HOSTS:

@@ -15,6 +15,10 @@
 // (reported, then the app still quits) with no unhandled rejection.
 
 export interface QuitDeps {
+  /** Stop capture and await durable renderer/backend ACKs before shutdown. */
+  saveBeforeQuit?: () => Promise<boolean>;
+  /** Release the renderer quit lock if saving failed and the user stays. */
+  onCancelQuit?: () => void;
   /** Is there audio worth protecting (recording/draining/failed)? */
   hasUnsentAudio: () => boolean;
   /** Show the blocking warning. Returns true if the user chose to discard + quit. */
@@ -27,7 +31,7 @@ export interface QuitDeps {
   onShutdownError?: (error: unknown) => void;
 }
 
-type Phase = 'idle' | 'draining' | 'settled';
+type Phase = 'idle' | 'saving' | 'draining' | 'settled';
 
 export class QuitController {
   private phase: Phase = 'idle';
@@ -38,13 +42,14 @@ export class QuitController {
   constructor(private readonly deps: QuitDeps) {}
 
   get isShuttingDown(): boolean {
-    return this.phase === 'draining';
+    return this.phase === 'saving' || this.phase === 'draining';
   }
 
   /** Wire to app 'before-quit'. Returns true when the caller must preventDefault. */
   onBeforeQuit(): boolean {
     if (this.phase === 'settled') return false; // shutdown finished → let the real quit proceed
-    if (this.phase === 'draining') return true; // shutdown in progress → keep blocking
+    if (this.phase === 'saving' || this.phase === 'draining') return true;
+    if (this.deps.saveBeforeQuit) { this.beginSave(); return true; }
     if (!this.decide()) return true; // cancelled or a dialog is open → block, stay alive
     this.beginShutdown();
     return true; // block this quit; we re-issue it once the shutdown settles
@@ -52,7 +57,10 @@ export class QuitController {
 
   /** Wire to the main window 'close'. Returns true when the caller must preventDefault. */
   onWindowClose(): boolean {
-    if (this.phase !== 'idle') return false; // draining/settled → let the close through
+    if (this.phase === 'settled') return false;
+    if (this.phase === 'saving' || (this.phase === 'draining' && this.deps.saveBeforeQuit)) return true;
+    if (this.phase === 'draining') return false;
+    if (this.deps.saveBeforeQuit) { this.beginSave(); return true; }
     if (!this.deps.hasUnsentAudio()) return false; // nothing to protect → allow
     if (!this.decide()) return true; // cancelled → block, backend preserved
     this.beginShutdown();
@@ -80,6 +88,25 @@ export class QuitController {
     }
     this.authorized = true;
     return true;
+  }
+
+  private beginSave(): void {
+    if (this.phase !== 'idle') return;
+    this.phase = 'saving';
+    this.pending = (async () => {
+      let saved = false;
+      try { saved = await this.deps.saveBeforeQuit!(); } catch { /* explicit discard gate below */ }
+      if (!saved && !this.deps.confirmDiscard()) {
+        this.phase = 'idle';
+        this.authorized = false;
+        this.deps.onCancelQuit?.();
+        return;
+      }
+      this.authorized = true;
+      this.phase = 'idle';
+      this.beginShutdown();
+      await this.pending;
+    })();
   }
 
   private beginShutdown(): void {

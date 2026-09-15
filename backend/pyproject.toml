@@ -9,10 +9,14 @@ dependencies = [
     "pydantic>=2.9",
     "httpx>=0.27",
     "keyring>=25.4",
+    "websockets>=15.0,<16",
 ]
 
 [project.optional-dependencies]
 local-asr = ["faster-whisper>=1.0"]
+local-gigachat-mlx = [
+    "gigachat-audio-mlx==0.1.4; python_version >= '3.12' and python_version < '3.14'",
+]
 
 [dependency-groups]
 dev = [

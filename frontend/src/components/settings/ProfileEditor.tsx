@@ -2,16 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from '../../state/store';
 import { Icon } from '../ui/Icon';
-import type { ModelInfo, Profile, ProfileUpdate, ProviderName, TaskKind } from '../../api/types';
-
-const PROVIDERS: Record<TaskKind, ProviderName[]> = {
-  asr: ['local-whisper', 'openai', 'openrouter', 'openai-compatible'],
-  agent: ['openrouter', 'openai', 'anthropic', 'openai-compatible'],
-  notes: ['openrouter', 'openai', 'anthropic', 'openai-compatible'],
-};
-
-const needsBaseUrl = (p: ProviderName): boolean => p === 'openai-compatible';
-const needsKey = (p: ProviderName): boolean => p !== 'local-whisper';
+import { ProviderIcon, PROVIDER_LABELS } from './ProviderIcon';
+import { PROVIDERS, needsKey } from './providers';
+import type {
+  ModelInfo,
+  Profile,
+  ProfileUpdate,
+  ProviderName,
+  TaskKind,
+} from '../../api/types';
 
 interface ProfileEditorProps {
   task: TaskKind;
@@ -22,7 +21,14 @@ interface ProfileEditorProps {
   onChange: (update: ProfileUpdate) => void;
 }
 
-export function ProfileEditor({ task, label, description, profile, draft, onChange }: ProfileEditorProps) {
+export function ProfileEditor({
+  task,
+  label,
+  description,
+  profile,
+  draft,
+  onChange,
+}: ProfileEditorProps) {
   const loadModels = useStore((s) => s.loadModels);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -77,6 +83,9 @@ export function ProfileEditor({ task, label, description, profile, draft, onChan
   const selectable = task === 'asr' ? models : models.filter(emitsText);
 
   const trimmedQuery = query.trim().toLowerCase();
+  // Search is scoped to the provider tab currently open, not the whole catalog
+  // of every provider — a global search would need every provider's catalog
+  // fetched up front, which this task deliberately avoids.
   const matches = trimmedQuery
     ? selectable.filter(
         (m) => m.name.toLowerCase().includes(trimmedQuery) || m.id.toLowerCase().includes(trimmedQuery),
@@ -84,8 +93,8 @@ export function ProfileEditor({ task, label, description, profile, draft, onChan
     : selectable;
   const selectedModel = models.find((m) => m.id === model);
   // When the catalog is empty or failed to load we still owe the user their exact
-  // stored ID: synthesize a placeholder option so the selection stays visible and the
-  // <select> keeps its value instead of silently resetting to "Select a model".
+  // stored ID: synthesize a placeholder entry so the selection stays visible and
+  // the list keeps its highlighted row instead of silently losing the selection.
   const storedEntry: ModelInfo | undefined =
     selectedModel ??
     (model
@@ -105,6 +114,24 @@ export function ProfileEditor({ task, label, description, profile, draft, onChan
   // selection we still show it (honest provenance) but disable it and warn definitively.
   const isIncompatible = (m: ModelInfo): boolean => task !== 'asr' && !emitsText(m);
   const incompatibleSelection = selectedModel && isIncompatible(selectedModel);
+  // Local ASR checkpoints have an explicit, honest download/preparation path,
+  // managed independently in the Local models section (see
+  // LocalModelsBrowser) — not tied to whichever checkpoint is picked here.
+
+  // The key itself lives in the API keys section, but its absence is this
+  // card's problem: a cloud provider assigned here with no key set anywhere
+  // (draft or already-saved) will fail every real request. Say so plainly
+  // instead of letting the user discover it only when a call errors out.
+  // A draft key of '' (cleared in this session) counts as missing too.
+  const hasResolvedKey = draft.api_key !== undefined ? draft.api_key.trim().length > 0 : profile.has_api_key;
+  const missingKey = needsKey(provider) && !hasResolvedKey;
+
+  const selectProvider = (next: ProviderName) => {
+    if (next === provider) return;
+    setCustom(false);
+    // Credentials belong to a provider, never carry an unsaved key across.
+    onChange({ ...draft, provider: next, model: '', api_key: undefined, base_url: '' });
+  };
 
   return (
     <section className="profile">
@@ -113,71 +140,76 @@ export function ProfileEditor({ task, label, description, profile, draft, onChan
         <p>{description}</p>
       </header>
 
-      <div className="field">
-        <label htmlFor={`${task}-provider`}>Provider</label>
-        <select
-          id={`${task}-provider`}
-          value={provider}
-          onChange={(e) => {
-            setCustom(false);
-            onChange({ ...draft, provider: e.target.value as ProviderName, model: '' });
-          }}
-        >
-          {PROVIDERS[task].map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {needsBaseUrl(provider) && (
-        <div className="field">
-          <label htmlFor={`${task}-baseurl`}>Base URL</label>
-          <input
-            id={`${task}-baseurl`}
-            type="url"
-            placeholder="https://host/v1"
-            value={draft.base_url ?? profile.base_url ?? ''}
-            onChange={(e) => onChange({ ...draft, base_url: e.target.value })}
-          />
-        </div>
+      {missingKey && (
+        <p className="profile__note profile__note--warn">
+          <Icon name="warning" size={13} /> No API key set for {PROVIDER_LABELS[provider]}. Add one in
+          API keys, or every request from this task will fail.
+        </p>
       )}
 
+      <div role="tablist" aria-label={`${label} provider`} className="provider-tabs">
+        {PROVIDERS[task].map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="tab"
+            aria-selected={p === provider}
+            className={clsx('provider-tabs__tab', p === provider && 'provider-tabs__tab--active')}
+            onClick={() => selectProvider(p)}
+          >
+            <ProviderIcon provider={p} size={16} />
+            {PROVIDER_LABELS[p]}
+          </button>
+        ))}
+      </div>
+
       <div className="field">
-        <label htmlFor={`${task}-model`}>Model</label>
         {custom ? (
-          <input
-            id={`${task}-model`}
-            type="text"
-            placeholder="Custom model ID"
-            value={model}
-            onChange={(e) => onChange({ ...draft, model: e.target.value })}
-          />
+          <>
+            <label htmlFor={`${task}-model`}>Model</label>
+            <input
+              id={`${task}-model`}
+              type="text"
+              placeholder="Custom model ID"
+              value={model}
+              onChange={(e) => onChange({ ...draft, model: e.target.value })}
+            />
+          </>
         ) : (
           <>
             <input
-              id={`${task}-model-search`}
               type="search"
               className="field__search"
-              placeholder="Search by name or exact ID"
+              placeholder={`Search ${PROVIDER_LABELS[provider]} models`}
               aria-label="Search models"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-            <select
-              id={`${task}-model`}
-              value={model}
-              onChange={(e) => onChange({ ...draft, model: e.target.value })}
-            >
-              <option value="">{loading ? 'Loading models…' : 'Select a model'}</option>
-              {visibleModels.map((m) => (
-                <option key={m.id} value={m.id} disabled={isIncompatible(m)}>
-                  {m.name}
-                  {m.verified ? ' ✓' : ' (unverified)'}
-                </option>
-              ))}
-            </select>
+            <ul className="model-list" role="listbox" aria-label="Model" id={`${task}-model`}>
+              {loading && <li className="model-list__empty">Loading models…</li>}
+              {!loading &&
+                visibleModels.map((m) => {
+                  const disabled = isIncompatible(m);
+                  const active = m.id === model;
+                  return (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={active}
+                        disabled={disabled}
+                        className={clsx('model-list__row', active && 'model-list__row--active')}
+                        onClick={() => onChange({ ...draft, model: m.id })}
+                      >
+                        <span className="model-list__name">{m.name}</span>
+                        <span className={clsx('model-list__badge', m.verified && 'model-list__badge--verified')}>
+                          {m.verified ? 'Verified' : 'Unverified'}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+            </ul>
           </>
         )}
         <button type="button" className="field__toggle" onClick={() => setCustom((c) => !c)}>
@@ -214,6 +246,9 @@ export function ProfileEditor({ task, label, description, profile, draft, onChan
           transcription. The backend will flag it until a real transcription succeeds.
         </p>
       )}
+      {!custom && selectedModel?.note && (
+        <p className="profile__note">{selectedModel.note}</p>
+      )}
       {!custom && unverifiedSelection && task !== 'asr' && (
         <p className="profile__note profile__note--warn">
           <Icon name="warning" size={13} /> This model is in the catalog but has not been verified for this
@@ -221,28 +256,6 @@ export function ProfileEditor({ task, label, description, profile, draft, onChan
         </p>
       )}
 
-      {needsKey(provider) && (
-        <div className="field">
-          <label htmlFor={`${task}-key`}>API key</label>
-          <input
-            id={`${task}-key`}
-            type="password"
-            autoComplete="off"
-            placeholder={profile.has_api_key ? '•••••••• stored' : 'Not set'}
-            value={draft.api_key ?? ''}
-            onChange={(e) => onChange({ ...draft, api_key: e.target.value })}
-          />
-          <span className={clsx('profile__key', profile.has_api_key && 'profile__key--set')}>
-            {profile.has_api_key ? (
-              <>
-                <Icon name="check" size={12} /> Key stored securely (write-only)
-              </>
-            ) : (
-              'Keys are stored by the backend and never shown again.'
-            )}
-          </span>
-        </div>
-      )}
     </section>
   );
 }

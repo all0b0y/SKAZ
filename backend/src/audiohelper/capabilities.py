@@ -13,6 +13,7 @@ Two separate questions are kept apart:
 from __future__ import annotations
 
 from .catalog import OPENAI_TRANSCRIPTION_MODELS, CatalogUnavailable, ProviderCatalogs
+from .local_models import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
 from .schemas import Profile, Task
 from .settings_store import StoredProfile
 
@@ -45,6 +46,13 @@ async def _validate_asr(profile: StoredProfile, catalogs: ProviderCatalogs) -> N
                 f"Known: {', '.join(entry.id for entry in known)}."
             )
         return
+    if provider == GIGACHAT_PROVIDER:
+        if profile.model != GIGACHAT_MODEL_ID:
+            raise IncompatibleProfile(
+                f"'{profile.model}' is not the pinned GigaChat Audio MLX artifact. "
+                f"Known: {GIGACHAT_MODEL_ID}."
+            )
+        return
     if provider == "openai":
         if profile.model not in OPENAI_TRANSCRIPTION_MODELS:
             raise IncompatibleProfile(
@@ -67,8 +75,10 @@ async def _validate_asr(profile: StoredProfile, catalogs: ProviderCatalogs) -> N
 
 
 async def _validate_chat(task: Task, profile: StoredProfile, catalogs: ProviderCatalogs) -> None:
-    if profile.provider == "local-whisper":
-        raise IncompatibleProfile("local-whisper is a speech-to-text model and cannot answer questions.")
+    if profile.provider in ("local-whisper", GIGACHAT_PROVIDER):
+        raise IncompatibleProfile(
+            f"{profile.provider} is a local audio model and cannot answer text-only questions."
+        )
     if profile.provider == "openai" and profile.model in OPENAI_TRANSCRIPTION_MODELS:
         raise IncompatibleProfile(
             f"'{profile.model}' uses the transcription endpoint and cannot be used for {task}."
@@ -105,7 +115,9 @@ def describe(
         provider=profile.provider,
         model=profile.model,
         base_url=profile.base_url,
-        has_api_key=has_api_key,
+        has_api_key=(
+            has_api_key if profile.provider not in ("local-whisper", GIGACHAT_PROVIDER) else False
+        ),
         verified=verification is not None,
         verification_note=(
             verification if verification is not None else _pending_note(task, profile, asr_kind)
@@ -118,8 +130,13 @@ def _pending_note(task: Task, profile: StoredProfile, asr_kind: str | None) -> s
         return "Model is not configured."
     if profile.provider == "local-whisper":
         return (
-            "faster-whisper checkpoint; weights are downloaded on first local run. "
+            "faster-whisper checkpoint; weights download only after explicit model preparation. "
             "No successful local transcription recorded yet."
+        )
+    if profile.provider == GIGACHAT_PROVIDER:
+        return (
+            "Pinned local GigaChat audio-language model; chunk timing only, no word timestamps or "
+            "contextual finality. No successful local transcription is claimed."
         )
     if task == "asr" and profile.provider == "openrouter":
         if asr_kind == "legacy":

@@ -18,6 +18,7 @@ Three properties are checked everywhere:
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -27,12 +28,13 @@ import pytest
 
 from audiohelper.app import create_app
 from audiohelper.config import AppConfig
-from audiohelper.gateways.asr import OPERATION as ASR_OPERATION
-from audiohelper.gateways.chat import OPERATION as CHAT_OPERATION
 from audiohelper.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, chat_completion, make_wav
 
 AGENT_MODEL = "qwen/qwen3-30b-a3b-instruct-2507"
+# Public log labels, not imports from gateway implementation details.
+ASR_OPERATION = "provider audio transcription"
+CHAT_OPERATION = "provider text completion"
 ASR_MODEL = "qwen/qwen3-asr-1.7b"
 API_KEY = "sk-live-9f3TOPSECRET"
 QUESTION = "Что решили по бюджету на секретном совещании?"
@@ -416,8 +418,11 @@ async def test_a_malformed_transcription_reply_is_recorded_as_an_invalid_respons
 
 async def test_a_local_transcription_without_its_dependency_is_recorded(
     client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The default local profile still produces one honest attempt record."""
+    # Model availability on the developer machine must not turn this into inference.
+    monkeypatch.setitem(sys.modules, "numpy", None)
     session = await start_session(client)
     refused = await upload(client, session)
     assert refused.status_code == 400, refused.text
@@ -532,3 +537,53 @@ async def test_a_hostile_model_id_is_stored_verbatim_and_stays_one_record(
     chat = [entry for entry in entries(await logs(client)) if entry["operation"] == CHAT_OPERATION]
     assert len(chat) == 1, "a model ID cannot forge a second record"
     assert chat[0]["model"] == hostile, "the exact model ID survives"
+
+
+async def test_usage_cannot_smuggle_payloads_into_the_log(
+    client: httpx.AsyncClient, outbound: FakeHttp
+) -> None:
+    await configure(client)
+    session = await start_session(client)
+    outbound.json_route("POST", "audio/transcriptions", transcription(TRANSCRIPT, usage={
+        "input_tokens": True, "output_tokens": -1, "total_tokens": 7,
+        "prompt": QUESTION, "secret": API_KEY, "details": {"text": TRANSCRIPT},
+    }))
+    assert (await upload(client, session)).status_code == 200
+    (entry,) = entries(await logs(client))
+    assert entry["usage"] == {"total_tokens": 7}
+
+
+async def test_concurrent_installations_keep_independent_logs(
+    client: httpx.AsyncClient, other_client: httpx.AsyncClient, outbound: FakeHttp
+) -> None:
+    await configure(client)
+    await configure(other_client)
+    session = await start_session(client)
+    other = await start_session(other_client)
+    outbound.json_route("POST", "audio/transcriptions", transcription(TRANSCRIPT))
+    responses = await asyncio.gather(upload(client, session), upload(other_client, other))
+    assert [response.status_code for response in responses] == [200, 200]
+    for installation in (client, other_client):
+        (entry,) = entries(await logs(installation))
+        assert entry["sequence"] == 1
+
+
+@pytest.mark.parametrize("provider", ["openai", "openai-compatible"])
+async def test_other_asr_adapters_also_reject_error_payloads_without_leaking(
+    client: httpx.AsyncClient, outbound: FakeHttp, provider: str
+) -> None:
+    configured = await client.put("/settings", json={
+        "asr": {
+            "provider": provider, "model": "whisper-1", "api_key": API_KEY,
+            "base_url": "http://127.0.0.1:1234/v1" if provider == "openai-compatible" else None,
+        },
+        "cloud_consent": True,
+    })
+    assert configured.status_code == 200
+    session = await start_session(client)
+    outbound.routes[("POST", "audio/transcriptions")] = lambda _r: httpx.Response(200, text=LEAKY_BODY)
+    refused = await upload(client, session)
+    assert refused.status_code == 502
+    assert_no_leak(refused.text)
+    (entry,) = entries(await logs(client))
+    assert (entry["provider"], entry["outcome"], entry["status"]) == (provider, "invalid_response", 200)

@@ -10,8 +10,9 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from .activity import current_activity
 from .config import AppConfig
-from .routes import agent, health, models, sessions, settings
+from .routes import agent, asr, health, live, logs, models, sessions, settings
 from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
@@ -31,6 +32,7 @@ def create_app(
         try:
             yield
         finally:
+            await runtime.stop_native()
             await runtime.http.aclose()
             runtime.close()
 
@@ -44,7 +46,11 @@ def create_app(
         reason = local_access_error(request, config)
         if reason is not None:
             return JSONResponse(status_code=403, content={"detail": reason})
-        return await call_next(request)
+        token = current_activity.set(runtime.activity_log)
+        try:
+            return await call_next(request)
+        finally:
+            current_activity.reset(token)
 
     @app.exception_handler(RequestValidationError)
     async def validation_handler(_request: Request, error: RequestValidationError) -> JSONResponse:
@@ -52,11 +58,15 @@ def create_app(
         return JSONResponse(status_code=422, content={"detail": _describe_validation(error)})
 
     app.include_router(health.router)
+    # WebSocket authentication is explicit in the route, not the HTTP dependency.
+    app.include_router(live.router)
     protected = [Depends(require_token)]
     app.include_router(settings.router, dependencies=protected)
+    app.include_router(asr.router, dependencies=protected)
     app.include_router(sessions.router, dependencies=protected)
     app.include_router(agent.router, dependencies=protected)
     app.include_router(models.router, dependencies=protected)
+    app.include_router(logs.router, dependencies=protected)
     return app
 
 

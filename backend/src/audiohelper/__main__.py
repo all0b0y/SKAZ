@@ -17,6 +17,7 @@ import uvicorn
 
 from .app import create_app
 from .config import AppConfig
+from .routes.live import MAX_MESSAGE_BYTES
 
 
 def _free_port(host: str) -> int:
@@ -37,7 +38,11 @@ def main(argv: list[str] | None = None) -> int:
 
     # The parent process reads this line to learn where the backend listens.
     print(json.dumps({"event": "listening", "host": config.host, "port": config.port}), flush=True)
-    uvicorn.run(app, host=config.host, port=config.port, log_level=arguments.log_level, access_log=False)
+    uvicorn.run(
+        app, host=config.host, port=config.port, log_level=arguments.log_level, access_log=False,
+        ws="websockets", ws_max_size=MAX_MESSAGE_BYTES, ws_max_queue=8,
+        ws_per_message_deflate=False,
+    )
     return 0
 
 

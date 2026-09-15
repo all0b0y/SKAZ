@@ -30,8 +30,9 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test('renders the AudioHelper shell', async () => {
-  await expect(page.locator('.titlebar__name')).toHaveText('AudioHelper');
+test('renders the SKAZ shell', async () => {
+  // The titlebar is a bare drag strip now (no wordmark) — the session rail is
+  // the shell's first real landmark.
   await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
 });
 

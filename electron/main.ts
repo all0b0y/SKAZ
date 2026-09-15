@@ -3,12 +3,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BackendManager } from './backend';
 import { registerIpc } from './ipc';
+import type { NativeLiveClient } from './nativeLive';
 import { CHANNELS } from './channels';
 import { isAllowedExternalUrl } from './ipcPolicy';
 import { hasUnsentAudio, type CaptureProtectionState } from './captureProtection';
 import { isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
 import { isTrustedFrame, validateCaptureState } from './ipcSender';
 import { QuitController } from './quitController';
+import { RendererSaveBarrier } from './rendererSaveBarrier';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
@@ -35,6 +37,7 @@ const CSP =
   "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 let mainWindow: BrowserWindow | null = null;
+let nativeClient: NativeLiveClient | null = null;
 
 // Latest capture snapshot reported by the renderer (validated). Consulted on
 // close/quit so unsent audio is never dropped without a warning.
@@ -50,21 +53,30 @@ const manager = new BackendManager({
 
 // Single authority for close/quit: authorize (warn) before any shutdown, keep
 // the backend alive on cancel, and never double-dialog or double-shutdown.
+const rendererSave = new RendererSaveBarrier((id) => {
+  if (!mainWindow || mainWindow.webContents.isDestroyed()) throw new Error('Renderer unavailable');
+  mainWindow.webContents.send(CHANNELS.prepareQuit, id);
+});
+
 const quitController = new QuitController({
+  saveBeforeQuit: () => mainWindow ? rendererSave.request() : Promise.resolve(!hasUnsentAudio(captureState)),
+  onCancelQuit: () => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(CHANNELS.cancelQuit);
+  },
   hasUnsentAudio: () => hasUnsentAudio(captureState),
   confirmDiscard: () => {
-    if (!mainWindow) return true;
-    const choice = dialog.showMessageBoxSync(mainWindow, {
+    const options: Electron.MessageBoxSyncOptions = {
       type: 'warning',
-      buttons: ['Keep recording', 'Discard and quit'],
+      buttons: ['Stay in SKAZ', 'Discard unsaved audio and quit'],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
-      message: 'Recording in progress or audio still uploading',
+      message: 'Saving before exit could not be confirmed',
       detail:
         'Some captured audio has not been saved yet. Quitting now may lose it. ' +
-        'Keep recording, or discard the unsent audio and quit anyway?',
-    });
+        'Stay to retry saving, or explicitly discard unsaved audio and quit.',
+    };
+    const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
     return choice === 1;
   },
   stopBackend: () => manager.stop(),
@@ -127,7 +139,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     icon: APP_ICON,
-    backgroundColor: '#f4f1ea',
+    backgroundColor: '#ffffff',
     show: false,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
@@ -165,7 +177,10 @@ function createWindow(): void {
     if (quitController.onWindowClose()) event.preventDefault();
   });
 
+  mainWindow.webContents.on('render-process-gone', () => { nativeClient?.abort(); rendererSave.disconnected(); });
   mainWindow.on('closed', () => {
+    rendererSave.disconnected();
+    nativeClient?.abort();
     mainWindow = null;
   });
 }
@@ -173,7 +188,19 @@ function createWindow(): void {
 app.whenReady().then(() => {
   hardenSession();
   if (process.platform === 'darwin') app.dock?.setIcon(APP_ICON);
-  registerIpc(manager, () => mainWindow?.webContents.id ?? null);
+  nativeClient = registerIpc(manager, () => mainWindow?.webContents.id ?? null, (failure) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(CHANNELS.nativeFailure, failure);
+    }
+  });
+  ipcMain.on(CHANNELS.quitPrepared, (event, id: unknown, saved: unknown) => {
+    if (!isTrustedFrame({
+      senderId: event.sender.id,
+      expectedId: mainWindow?.webContents.id ?? null,
+      isMainFrame: event.senderFrame?.parent === null,
+    })) return;
+    rendererSave.acknowledge(id, saved);
+  });
   ipcMain.on(CHANNELS.captureState, (event, payload: unknown) => {
     const trusted = isTrustedFrame({
       senderId: event.sender.id,

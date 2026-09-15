@@ -10,6 +10,8 @@ export default defineConfig({
       outDir: 'dist/main',
       lib: { entry: resolve(__dirname, 'electron/main.ts') },
       rollupOptions: {
+        // Keep ws optional native-addon detection intact in Electron/Node.
+        external: ['ws'],
         output: { entryFileNames: 'main.js' },
       },
     },

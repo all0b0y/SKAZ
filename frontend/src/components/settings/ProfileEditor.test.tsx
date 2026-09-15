@@ -1,10 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useState } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ProfileEditor } from './ProfileEditor';
 import { useStore } from '../../state/store';
-import type { ModelInfo, Profile, ProfileUpdate, TaskKind } from '../../api/types';
+import type {
+  ModelInfo,
+  Profile,
+  ProfileUpdate,
+  TaskKind,
+} from '../../api/types';
 
 // Deterministic per-provider catalogs. The frontend renders whatever the backend
 // returns; these fixtures exercise search + honest labels only. output_modalities
@@ -34,6 +39,9 @@ const profileFor = (overrides: Partial<Profile> = {}): Profile => ({
   ...overrides,
 });
 
+// Local checkpoint download/delete management lives entirely in the Local
+// models section now (see LocalModelsBrowser.test.tsx) — ProfileEditor only
+// ever picks a provider + model id, it no longer renders that panel inline.
 function Harness({
   task = 'agent',
   profile,
@@ -61,6 +69,42 @@ function Harness({
 
 beforeEach(() => {
   useStore.setState({ loadModels: vi.fn(async (provider: string) => catalog(provider)) });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/** Providers moved from a <select> to a tab strip; tabs are labelled by their
+ * PROVIDER_LABELS display name (e.g. "OpenAI", not the raw id "openai"). */
+const selectProviderTab = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
+  await user.click(screen.getByRole('tab', { name: label }));
+};
+
+/** Models moved from a <select> to a listbox of role="option" rows; clicking
+ * a row is the new equivalent of selectOptions on the old <select>. */
+const selectModelOption = async (user: ReturnType<typeof userEvent.setup>, name: RegExp | string) => {
+  await user.click(screen.getByRole('option', { name }));
+};
+
+describe('ProfileEditor provider switch', () => {
+  // The key/base_url fields themselves moved to the Providers section
+  // (see ProviderCredentials.test.tsx); this only covers what stays here —
+  // switching provider must still reset the draft's model and clear any
+  // stale api_key/base_url slot so a later Providers-section write never
+  // lands under the wrong provider.
+  it('resets model and clears the credential slots in the draft on provider switch', async () => {
+    const user = userEvent.setup();
+    const onDraft = vi.fn();
+    render(
+      <Harness
+        profile={profileFor({ provider: 'openai-compatible', base_url: 'https://old.example/v1', model: 'old-model' })}
+        onDraft={onDraft}
+      />,
+    );
+    await selectProviderTab(user, 'OpenAI');
+    expect(onDraft).toHaveBeenLastCalledWith({ provider: 'openai', model: '', base_url: '', api_key: undefined });
+  });
 });
 
 describe('ProfileEditor model search', () => {
@@ -128,7 +172,7 @@ describe('ProfileEditor model search', () => {
     render(<Harness profile={profileFor()} onDraft={onDraft} />);
 
     await screen.findByRole('option', { name: /Claude 3.5 Sonnet/ });
-    await user.selectOptions(screen.getByLabelText('Model'), 'anthropic/claude-3-5');
+    await selectModelOption(user, /Claude 3.5 Sonnet/);
 
     expect(onDraft).toHaveBeenCalledWith(expect.objectContaining({ model: 'anthropic/claude-3-5' }));
   });
@@ -141,7 +185,7 @@ describe('ProfileEditor model search', () => {
     await user.type(screen.getByRole('searchbox'), 'claude');
     expect(screen.queryByRole('option', { name: /Llama 3 70B/ })).not.toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText('Provider'), 'openai');
+    await selectProviderTab(user, 'OpenAI');
 
     expect(await screen.findByRole('option', { name: /GPT-4o/ })).toBeInTheDocument();
     expect(screen.getByRole('searchbox')).toHaveValue('');
@@ -162,7 +206,7 @@ describe('ProfileEditor model search', () => {
     const user = userEvent.setup();
     render(<Harness profile={profileFor()} />);
 
-    await user.selectOptions(screen.getByLabelText('Provider'), 'openai');
+    await selectProviderTab(user, 'OpenAI');
 
     // The newer provider resolves first, then the stale one resolves late.
     resolvers.openai!(catalog('openai'));
@@ -183,16 +227,17 @@ describe('ProfileEditor honest labels', () => {
       return [];
     }) });
     render(<Harness profile={profileFor({ model: 'private/Exact-ID' })} />);
-    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveValue('private/Exact-ID'));
-    expect(screen.getByRole('option', { name: /private\/Exact-ID/ })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: /private\/Exact-ID/ })).toHaveAttribute('aria-selected', 'true'),
+    );
   });
 
   it('marks unverified and verified catalog models for text tasks', async () => {
     render(<Harness task="agent" profile={profileFor({ provider: 'openai' })} />);
 
     const unverified = await screen.findByRole('option', { name: /O3/ });
-    expect(unverified).toHaveTextContent('(unverified)');
-    expect(screen.getByRole('option', { name: /GPT-4o/ })).toHaveTextContent('✓');
+    expect(unverified).toHaveTextContent('Unverified');
+    expect(screen.getByRole('option', { name: /GPT-4o/ })).toHaveTextContent('Verified');
   });
 
   it('warns when the selected text-task model is unverified', async () => {
@@ -248,5 +293,54 @@ describe('ProfileEditor text-output filtering', () => {
     render(<Harness task="asr" profile={{ provider: 'openrouter', model: '', has_api_key: false }} />);
     expect(await screen.findByRole('option', { name: /Gemini Vision/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Flux Image/ })).toBeInTheDocument();
+  });
+});
+
+// Contract: .runtime/asr-local-contract.md. Local checkpoint download/delete
+// preparation itself is now covered by LocalModelsBrowser.test.tsx — this file
+// only needs to prove ProfileEditor never triggers it (custom id -> no catalog
+// entry -> no status check).
+describe('ProfileEditor never touches local model preparation on its own', () => {
+  it('never checks status or shows preparation UI for a custom (non-catalog) model id', async () => {
+    const localModelStatus = vi.fn();
+    useStore.setState({
+      loadModels: vi.fn(async () => [
+        { id: 'small', name: 'Whisper Small', input_modalities: ['audio'], output_modalities: ['text'], verified: true },
+      ]),
+      localModelStatus,
+      prepareLocalModel: vi.fn(),
+    });
+
+    render(<Harness task="asr" profile={{ provider: 'local-whisper', model: 'my-custom-checkpoint', has_api_key: false }} />);
+
+    // A non-catalog id is not a known checkpoint: the picker falls back to the
+    // custom text input (no catalog options), which is the signal the catalog
+    // has loaded. ProfileEditor never calls the local-model status/prepare APIs
+    // itself — that lives entirely in the Local models section now.
+    await screen.findByDisplayValue('my-custom-checkpoint');
+    expect(localModelStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ProfileEditor missing API key warning', () => {
+  it('warns when a cloud provider has no saved or drafted key', () => {
+    render(<Harness profile={profileFor({ provider: 'openrouter', has_api_key: false })} />);
+    expect(screen.getByText(/No API key set for openrouter/i)).toBeInTheDocument();
+  });
+
+  it('does not warn once a key is already saved', () => {
+    render(<Harness profile={profileFor({ provider: 'openrouter', has_api_key: true })} />);
+    expect(screen.queryByText(/No API key set/i)).not.toBeInTheDocument();
+  });
+
+  it('never warns for a local provider, which needs no key', () => {
+    render(
+      <Harness
+        task="asr"
+        profile={profileFor({ provider: 'local-whisper', model: 'small', has_api_key: false })}
+      />,
+    );
+    expect(screen.queryByText(/No API key set/i)).not.toBeInTheDocument();
   });
 });

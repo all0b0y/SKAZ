@@ -21,6 +21,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from ..activity import record_attempt
 from . import ProviderError, ProviderNotConfigured, describe_http_error, describe_transport_error
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -280,6 +281,7 @@ def _log(
     if usage:
         record["usage"] = usage
     logger.log(logging.INFO if outcome == "ok" else logging.WARNING, "%s", json.dumps(record))
+    record_attempt(record)
 
 
 _OPENAI_TOKEN_FIELDS = {
@@ -378,8 +380,8 @@ def build_chat(
 ) -> ChatGateway:
     if not model:
         raise ProviderNotConfigured("No model is configured for this task. Pick one in settings.")
-    if provider == "local-whisper":
-        raise ProviderNotConfigured("local-whisper transcribes speech and cannot answer questions.")
+    if provider in ("local-whisper", "local-gigachat-mlx"):
+        raise ProviderNotConfigured(f"{provider} accepts audio and cannot answer text-only questions.")
     if not api_key:
         raise ProviderNotConfigured(f"No API key stored for provider '{provider}'.")
     if provider == "anthropic":

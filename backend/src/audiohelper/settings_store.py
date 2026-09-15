@@ -7,7 +7,8 @@ import json
 from pydantic import BaseModel
 
 from .db import Database
-from .schemas import Provider, SettingsUpdate, Task
+from .languages import UsedLanguages
+from .schemas import NativeRecordingMode, Provider, SettingsUpdate, Task
 
 
 class StoredProfile(BaseModel):
@@ -17,12 +18,19 @@ class StoredProfile(BaseModel):
 
 
 class StoredSettings(BaseModel):
+    used_languages: UsedLanguages | None = None
+    native_recording_mode: NativeRecordingMode = "transcription"
+    translation_target_language: str = "ru"
     asr: StoredProfile
     agent: StoredProfile
     notes: StoredProfile
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
+    #: Explicit opt-in for the experimental contextual local mode. It is the only
+    #: user-facing way to enable local live finality and the local speech gate;
+    #: it stays false for settings documents written before this field existed.
+    contextual_local_enabled: bool = False
 
     def profile(self, task: Task) -> StoredProfile:
         return getattr(self, task)  # type: ignore[no-any-return]
@@ -42,15 +50,47 @@ class SettingsStore:
         self._db = db
 
     def load(self) -> StoredSettings:
+        settings, _revision = self.load_asr_snapshot()
+        return settings
+
+    def load_asr_snapshot(self) -> tuple[StoredSettings, int]:
+        """Read settings and their ASR generation under the same DB lock."""
         with self._db.read() as connection:
             row = connection.execute("SELECT doc FROM app_settings WHERE id = 1").fetchone()
-        if row is None:
-            return DEFAULT_SETTINGS.model_copy(deep=True)
-        return StoredSettings.model_validate(json.loads(row["doc"]))
+            revision_row = connection.execute(
+                "SELECT revision FROM settings_revisions WHERE scope = 'asr'"
+            ).fetchone()
+        settings = (
+            DEFAULT_SETTINGS.model_copy(deep=True)
+            if row is None
+            else StoredSettings.model_validate(json.loads(row["doc"]))
+        )
+        return settings, int(revision_row["revision"]) if revision_row is not None else 0
 
     def save(self, settings: StoredSettings) -> None:
         doc = json.dumps(settings.model_dump(), ensure_ascii=False)
         with self._db.write() as connection:
+            current_row = connection.execute("SELECT doc FROM app_settings WHERE id = 1").fetchone()
+            current = (
+                DEFAULT_SETTINGS
+                if current_row is None
+                else StoredSettings.model_validate(json.loads(current_row["doc"]))
+            )
+            if (
+                current.asr != settings.asr
+                or current.transcript_language != settings.transcript_language
+                # The contextual opt-in changes decoder behaviour (finality and the
+                # speech gate), and toggling it off and on again returns the effective
+                # booleans to equal values. Only a monotonic generation can keep a
+                # decode started under the withdrawn configuration from committing.
+                or current.contextual_local_enabled != settings.contextual_local_enabled
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO settings_revisions(scope, revision) VALUES ('asr', 1)
+                    ON CONFLICT(scope) DO UPDATE SET revision = revision + 1
+                    """
+                )
             connection.execute(
                 "INSERT INTO app_settings(id, doc) VALUES (1, ?)"
                 " ON CONFLICT(id) DO UPDATE SET doc = excluded.doc",
@@ -68,7 +108,15 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         profile = merged.profile(task)
         changes = patch.model_dump(exclude_unset=True, exclude={"api_key"})
         setattr(merged, task, profile.model_copy(update=changes))
-    for field in ("transcript_language", "output_language", "cloud_consent"):
+    for field in (
+        "used_languages",
+        "native_recording_mode",
+        "translation_target_language",
+        "transcript_language",
+        "output_language",
+        "cloud_consent",
+        "contextual_local_enabled",
+    ):
         value = getattr(update, field)
         if value is not None:
             setattr(merged, field, value)

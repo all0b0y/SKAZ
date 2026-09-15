@@ -21,6 +21,11 @@ from typing import Any
 
 import httpx
 
+from .local_models import (
+    GIGACHAT_MODEL_ID,
+    GIGACHAT_PROVIDER,
+    LOCAL_WHISPER_REPOSITORIES,
+)
 from .secrets import SecretStore
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
@@ -31,17 +36,7 @@ OPENROUTER_ASR_MODELS_URL = f"{OPENROUTER_MODELS_URL}?output_modalities=transcri
 RECOMMENDED_OPENROUTER_ASR = "qwen/qwen3-asr-1.7b"
 
 #: faster-whisper checkpoint names; weights are downloaded only on explicit user action.
-LOCAL_WHISPER_MODELS: tuple[str, ...] = (
-    "tiny",
-    "base",
-    "small",
-    "medium",
-    "large-v2",
-    "large-v3",
-    "large-v3-turbo",
-    "distil-small.en",
-    "distil-large-v3",
-)
+LOCAL_WHISPER_MODELS: tuple[str, ...] = tuple(LOCAL_WHISPER_REPOSITORIES)
 
 #: OpenAI models served by the dedicated /v1/audio/transcriptions endpoint.
 #: This is the documented endpoint contract, the one exception to "declared metadata only";
@@ -124,6 +119,18 @@ class ProviderCatalogs:
                     output_modalities=("transcription",),
                 )
                 for name in LOCAL_WHISPER_MODELS
+            ]
+        if provider == GIGACHAT_PROVIDER:
+            if task not in (None, "asr"):
+                return []
+            return [
+                CatalogEntry(
+                    id=GIGACHAT_MODEL_ID,
+                    name="GigaChat Audio MLX (BF16)",
+                    input_modalities=("audio",),
+                    output_modalities=("text",),
+                    max_output_tokens=512,
+                )
             ]
         if provider == "openai-compatible":
             raise CatalogUnavailable(
