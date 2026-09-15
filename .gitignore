@@ -20,3 +20,4 @@ playwright-report/
 test-results/
 *.log
 .impeccable/review/
+:memory:.ses
