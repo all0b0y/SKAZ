@@ -3,11 +3,14 @@ import type { NativeOpened } from '../api/nativeLive';
 import type { AudioChunk } from './uploadQueue';
 import type { PersistedAudioAck } from './persistenceQueue';
 
-/** Renderer-side sample clock. Raw bytes remain in PersistenceQueue until a durable ACK. */
+/** Renderer-side sample clock. Raw bytes remain in PersistenceQueue until a validated transport receipt. */
 export class NativeAudioWriter {
   private rate: number | null = null;
+  private audioRetained = true;
   private sequence = 0;
   private samples = 0;
+  private sequenceOffset = 0;
+  private clockInitialized = false;
   private connected = false;
   private failed = false;
   private paused = false;
@@ -21,6 +24,7 @@ export class NativeAudioWriter {
     private readonly api: ApiClient,
     readonly sessionId: string,
     private readonly onOpened?: (opened: NativeOpened) => void,
+    private readonly continueExisting = false,
   ) {}
 
   disconnect(): void { this.connected = false; this.failed = true; }
@@ -33,6 +37,11 @@ export class NativeAudioWriter {
     }
     this.rate = rate;
     this.opening = this.api.openNative(this.sessionId, rate).then((opened) => {
+      if (this.continueExisting && !this.clockInitialized && opened.sample_rate === rate) {
+        this.sequence = opened.next_sequence;
+        this.samples = opened.saved_samples;
+        this.sequenceOffset = opened.next_sequence;
+      }
       // Only the last attempted block may have committed without its ACK arriving.
       const lostAck = this.attempted && opened.next_sequence === this.sequence + 1
         && opened.saved_samples === this.samples + (this.attempted.wav.byteLength - 44) / 2;
@@ -42,6 +51,8 @@ export class NativeAudioWriter {
         throw new Error('Native recording clock differs from retained audio; no bytes were discarded.');
       }
       this.recovered = lostAck ? this.sequence : null;
+      this.audioRetained = opened.audio_retained !== false;
+      this.clockInitialized = true;
       this.connected = true;
       this.failed = false;
       this.paused = false;
@@ -52,7 +63,7 @@ export class NativeAudioWriter {
   }
 
   async store(chunk: AudioChunk): Promise<PersistedAudioAck> {
-    if (!this.connected || this.failed || this.finishing || chunk.sequence !== this.sequence) {
+    if (!this.connected || this.failed || this.finishing || chunk.sequence + this.sequenceOffset !== this.sequence) {
       throw new Error('Native audio stream is not ready; retained audio requires explicit retry.');
     }
     const header = new DataView(chunk.wav);
@@ -63,7 +74,7 @@ export class NativeAudioWriter {
       throw new Error('Invalid captured PCM WAV.');
     }
     const count = (chunk.wav.byteLength - 44) / 2;
-    let duplicate = this.recovered === chunk.sequence;
+    let duplicate = this.recovered === this.sequence;
     if (duplicate && this.attempted) {
       const previous = new Uint8Array(this.attempted.wav);
       if (previous.length !== chunk.wav.byteLength || !new Uint8Array(chunk.wav).every((value, index) => value === previous[index])) {
@@ -74,7 +85,7 @@ export class NativeAudioWriter {
     try {
       if (!duplicate) {
         const ack = await this.api.sendNativeAudio(this.sessionId, {
-          sequence: chunk.sequence, startSample: this.samples,
+          sequence: this.sequence, startSample: this.samples,
         }, chunk.wav.slice(44));
         if (ack.sequence !== this.sequence || ack.saved_samples !== this.samples + count) {
           throw new Error('Native saved clock does not match submitted audio.');
@@ -86,7 +97,8 @@ export class NativeAudioWriter {
       this.attempted = null;
       this.recovered = null;
       return { sequence: chunk.sequence, start_ms: chunk.startMs, end_ms: chunk.endMs,
-        status: 'pending', available: true, duplicate, source_kind: 'original_captured_wav' };
+        status: 'pending', available: this.audioRetained, duplicate,
+        source_kind: this.audioRetained ? 'original_captured_wav' : 'transient_pcm' };
     } catch (error) {
       this.disconnect();
       throw error;

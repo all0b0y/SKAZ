@@ -112,3 +112,13 @@ describe('PersistenceQueue durable FIFO', () => {
     expect(queue.retainedRawCount()).toBe(0);
   });
 });
+
+it('drains accepted transient PCM without requiring an audio file', async () => {
+  const store = vi.fn(async (value: AudioChunk) => ({ sequence: value.sequence,
+    start_ms: value.startMs, end_ms: value.endMs, status: 'pending' as const,
+    available: false, duplicate: false, source_kind: 'transient_pcm' as const }));
+  const queue = new PersistenceQueue({ store });
+  queue.enqueue(chunk(0));
+  expect(await queue.drain()).toBe(true);
+  expect(queue.getState().completed).toBe(1);
+});

@@ -67,6 +67,12 @@ export interface BridgeApi {
   ): Promise<JsonResponse<T>>;
   /** Fetch stored audio (WAV) for playback. */
   fetchAudio(sessionId: string, sequence: number): Promise<BinaryResponse>;
+  /** Tail of the desktop app log file (no session content is written there). */
+  readLogs?(): Promise<string>;
+  /** Reveal the log directory in the OS file manager. */
+  openLogsFolder?(): Promise<boolean>;
+  /** Native folder chooser; returns a candidate only, never writes preferences. */
+  chooseStorageRoot?(): Promise<string | null>;
   /** Current backend lifecycle phase. */
   getBackendStatus(): Promise<BackendStatus>;
   /** Subscribe to backend lifecycle changes. Returns an unsubscribe fn. */

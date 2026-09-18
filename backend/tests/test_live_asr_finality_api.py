@@ -496,8 +496,7 @@ async def test_added_audio_commits_repeat_words_with_sources_and_hides_tail_from
     )
     configured = await finality_client.put(
         "/settings",
-        json={
-            "agent": {"provider": "openrouter", "model": "local/test-agent", "api_key": "test-key"},
+        json={"provider_keys": {"openrouter": "test-key"}, "agent": {"provider": "openrouter", "model": "local/test-agent"},
             "cloud_consent": True,
         },
     )

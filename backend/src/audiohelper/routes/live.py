@@ -107,7 +107,9 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             nonlocal connection
             connection = await disk_call(
                 runtime.live_store.open, session_id, sample_rate=config.sample_rate, model=DEFAULT_MODEL,
-                recording_mode=settings.native_recording_mode,
+                recording_mode=("transcription" if not runtime.live_store.retain_audio
+                                and settings.native_recording_mode == "audio_only"
+                                else settings.native_recording_mode),
                 translation_target_language=settings.translation_target_language,
                 used_languages=(tuple(settings.used_languages)
                                 if settings.used_languages is not None else None),
@@ -129,6 +131,7 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             "type": "stream.opened", "connection_id": connection.id,
             "sample_rate": config.sample_rate, "saved_samples": saved_samples,
             "next_sequence": connection.next_sequence, "transcription": stream.state,
+            **({"audio_retained": False} if not runtime.live_store.retain_audio else {}),
         })
         failure = asyncio.create_task(stream.wait_failure())
         while True:
@@ -164,6 +167,7 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             await asyncio.gather(failure, return_exceptions=True)
             complete = await stream.finish()
             await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
+            await disk_call(runtime.session_files.project, session_id)
             settled = True
             completed_owner = runtime.native_tasks.pop(session_id)
             runtime.native_streams.pop(session_id, None)

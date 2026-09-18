@@ -38,6 +38,7 @@ export interface NativeSnapshot {
   sample_rate: number;
   saved_samples: number;
   next_sequence: number;
+  audio_retained?: boolean;
   recording_mode?: NativeRecordingMode;
   translation_target_language?: string;
   used_languages?: string[] | null;
@@ -65,6 +66,7 @@ export interface NativeAudioMeta {
 }
 
 export interface NativeOpened {
+  audio_retained?: boolean;
   connection_id: string;
   sample_rate: number;
   saved_samples: number;

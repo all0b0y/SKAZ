@@ -4,7 +4,7 @@ import type { BridgeApi } from '../api/bridge';
 import { encodeWavPcm16Mono } from './wav';
 import { NativeAudioWriter } from './nativeWriter';
 
-function fixture() {
+function fixture(retainAudio = true) {
   let samples = 0;
   let sequence = 0;
   let loseAck = false;
@@ -12,7 +12,7 @@ function fixture() {
   const bridge: BridgeApi = {
     ...window.audiohelper,
     openNative: vi.fn<BridgeApi['openNative']>(async (_id, rate) => ({ ok: true, status: 200, data: {
-      connection_id: 'fixture', sample_rate: rate, saved_samples: samples, next_sequence: sequence, transcription: 'unavailable',
+      audio_retained: retainAudio, connection_id: 'fixture', sample_rate: rate, saved_samples: samples, next_sequence: sequence, transcription: 'unavailable',
     } })),
     sendNativeAudio: vi.fn<BridgeApi['sendNativeAudio']>(async (_id, meta, pcm) => {
       sent.push(meta.sequence);
@@ -32,6 +32,23 @@ const chunk = (sequence: number) => ({ sequence, startMs: sequence * 100, endMs:
   wav: encodeWavPcm16Mono(new Float32Array(1600).fill(0.25), 16000) });
 
 describe('native writer at the renderer bridge boundary', () => {
+  it('appends to an explicitly reopened recording without resetting its clock, including ACK recovery', async () => {
+    const f = fixture();
+    await f.writer.open(16000);
+    await f.writer.store(chunk(0));
+    await f.writer.finish('stop');
+    const reopened = new NativeAudioWriter(new ApiClient(f.bridge), 'session', undefined, true);
+    await reopened.open(16000);
+    f.loseAck();
+    await expect(reopened.store(chunk(0))).rejects.toThrow('ack lost');
+    await reopened.open();
+    expect((await reopened.store(chunk(0))).duplicate).toBe(true);
+    await reopened.store(chunk(1));
+    await reopened.finish('stop');
+    expect(f.sent).toEqual([0, 1, 2]);
+    expect(f.bridge.sendNativeAudio).toHaveBeenLastCalledWith('session', { sequence: 2, startSample: 3200 }, expect.any(ArrayBuffer));
+  });
+
   it('continues sample clock across pause and resume and finishes once', async () => {
     const f = fixture();
     await f.writer.open(16000);
@@ -63,4 +80,11 @@ describe('native writer at the renderer bridge boundary', () => {
     expect(f.sent).toEqual([0, 1]);
     await f.writer.finish('stop');
   });
+});
+
+it('reports transport acceptance without claiming a saved audio source', async () => {
+  const f = fixture(false);
+  await f.writer.open(16000);
+  expect(await f.writer.store(chunk(0))).toMatchObject({ available: false, source_kind: 'transient_pcm' });
+  await f.writer.finish('stop');
 });

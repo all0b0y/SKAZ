@@ -102,6 +102,7 @@ class NativeConnection {
     if (this.phase === 'failed') throw failure();
     if (typeof message.connection_id !== 'string' || message.sample_rate !== this.rate
       || !integer(message.saved_samples) || !integer(message.next_sequence)
+      || (message.audio_retained !== undefined && typeof message.audio_retained !== 'boolean')
       || !['connecting', 'unavailable', 'disabled'].includes(String(message.transcription))) {
       this.fail(); throw failure();
     }
@@ -110,6 +111,7 @@ class NativeConnection {
       connection_id: message.connection_id, sample_rate: this.rate,
       saved_samples: message.saved_samples, next_sequence: message.next_sequence,
       transcription: message.transcription as NativeOpened['transcription'],
+      ...(message.audio_retained === false ? { audio_retained: false } : {}),
     };
   }
 

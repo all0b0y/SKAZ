@@ -7,7 +7,7 @@ export interface PersistedAudioAck {
   status: 'pending' | 'failed' | 'done';
   available: boolean;
   duplicate: boolean;
-  source_kind: 'original_captured_wav';
+  source_kind: 'original_captured_wav' | 'transient_pcm';
 }
 
 export interface PersistenceFailure {
@@ -54,14 +54,14 @@ function validateAck(chunk: AudioChunk, ack: PersistedAudioAck): void {
     ack.sequence !== chunk.sequence ||
     ack.start_ms !== chunk.startMs ||
     ack.end_ms !== chunk.endMs ||
-    ack.available !== true ||
-    ack.source_kind !== 'original_captured_wav'
+    !((ack.source_kind === 'original_captured_wav' && ack.available === true)
+      || (ack.source_kind === 'transient_pcm' && ack.available === false))
   ) {
-    throw new Error(`Invalid local storage ACK for sequence ${chunk.sequence}`);
+    throw new Error(`Invalid audio delivery ACK for sequence ${chunk.sequence}`);
   }
 }
 
-/** Bounded raw-WAV FIFO. Bytes leave this queue only after the backend ACKs durable storage. */
+/** Bounded raw-WAV FIFO. Bytes leave after a validated backend receipt; transient PCM is not archived. */
 export class PersistenceQueue {
   private readonly items: QueueItem[] = [];
   private current: QueueItem | null = null;

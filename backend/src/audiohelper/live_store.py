@@ -44,9 +44,18 @@ def _now() -> str:
 
 
 class LiveStore:
-    def __init__(self, db: Database, audio_dir: Path) -> None:
+    def __init__(
+        self, db: Database, audio_dir: Path, *, storage: Any = None, retain_audio: bool = True,
+    ) -> None:
         self.db = db
         self.audio_dir = audio_dir
+        self.storage = storage
+        self.retain_audio = retain_audio
+        # One receipt per session supports uncertain-ACK reconciliation without PCM.
+        with self.db.write() as connection:
+            connection.execute("CREATE TABLE IF NOT EXISTS native_transport_receipts ("
+                               "session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,"
+                               "sequence INTEGER,start_sample INTEGER,end_sample INTEGER,digest TEXT)")
 
     def open(
         self, session_id: str, *, sample_rate: int, model: str,
@@ -58,6 +67,8 @@ class LiveStore:
         if recording_mode not in ("transcription", "translation", "audio_only"):
             raise LiveConflict("Invalid recording mode.")
         with self.db.write() as connection:
+            if self.retain_audio and self.storage is not None:
+                self.storage.guard()
             if connection.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone() is None:
                 raise LiveConflict("Session does not exist.")
             recording = connection.execute(
@@ -85,6 +96,8 @@ class LiveStore:
                 translation_target_language = recording["translation_target_language"]
                 used_languages = (tuple(json.loads(recording["used_languages_json"]))
                                   if recording["used_languages_json"] is not None else None)
+            if not self.retain_audio and recording_mode == "audio_only":
+                raise LiveConflict("Audio-only recording is disabled while audio retention is disabled.")
             if connection.execute(
                 "SELECT 1 FROM asr_connections WHERE session_id=? AND status='active'", (session_id,)
             ).fetchone():
@@ -120,12 +133,16 @@ class LiveStore:
         with self.db.write() as connection:
             row = self._active(connection, identity)
             rate = row["sample_rate"]
+            if self.retain_audio and self.storage is not None:
+                self.storage.guard()
             replay_floor = row["start_sample"] if replay_start_sample is None else replay_start_sample
             if type(replay_floor) is not int or not 0 <= replay_floor <= row["start_sample"]:
                 raise LiveConflict("Invalid local transport replay boundary.")
             count = len(pcm) // 2
             if count > rate // 2:
                 raise LiveConflict("An audio block must not exceed 500 milliseconds.")
+            if not self.retain_audio:
+                return self._accept_transient(connection, row, sequence, start_sample, pcm, replay_floor)
             body = WavAudio(rate, pcm).to_wav_bytes()
             digest = hashlib.sha256(body).hexdigest()
             previous = connection.execute(
@@ -144,7 +161,8 @@ class LiveStore:
             if sequence != row["next_sequence"] or start_sample != row["saved_samples"]:
                 raise LiveConflict("Audio must be contiguous and ordered.")
             session_id = row["session_id"]
-            path = self.audio_dir / session_id / f"{sequence:06d}.wav"
+            path = (self.storage.audio_path(session_id, sequence) if self.storage is not None
+                    else self.audio_dir / session_id / f"{sequence:06d}.wav")
             write_audio_file(path, body)
             end_sample = start_sample + count
             start_ms, end_ms = start_sample * 1000 // rate, end_sample * 1000 // rate
@@ -163,6 +181,37 @@ class LiveStore:
             )
             connection.execute("UPDATE sessions SET duration_ms=? WHERE id=?", (end_ms, session_id))
             return True
+
+    @staticmethod
+    def _accept_transient(
+        connection: sqlite3.Connection, row: sqlite3.Row, sequence: int,
+        start_sample: int, pcm: bytes, replay_floor: int,
+    ) -> bool:
+        end_sample = start_sample + len(pcm) // 2
+        digest = hashlib.sha256(pcm).hexdigest()
+        previous = connection.execute(
+            "SELECT * FROM native_transport_receipts WHERE session_id=?", (row["session_id"],)
+        ).fetchone()
+        if previous is not None and previous["sequence"] == sequence:
+            if (previous["start_sample"] != start_sample or previous["end_sample"] != end_sample
+                    or previous["digest"] != digest or start_sample < replay_floor):
+                raise LiveConflict("Conflicting transport replay.")
+            return False
+        if sequence != row["next_sequence"] or start_sample != row["saved_samples"]:
+            raise LiveConflict("Audio must be contiguous and ordered.")
+        connection.execute(
+            "INSERT OR REPLACE INTO native_transport_receipts VALUES (?,?,?,?,?)",
+            (row["session_id"], sequence, start_sample, end_sample, digest),
+        )
+        # saved_samples is the legacy protocol name for the accepted transport clock.
+        # No audio file, chunk, or audio source claim is created in this mode.
+        connection.execute(
+            "UPDATE native_recordings SET saved_samples=?,next_sequence=? WHERE session_id=?",
+            (end_sample, sequence + 1, row["session_id"]),
+        )
+        connection.execute("UPDATE sessions SET duration_ms=? WHERE id=?",
+                           (end_sample * 1000 // row["sample_rate"], row["session_id"]))
+        return True
 
     def save_event(self, identity: str, *, ordinal: int, event: SonioxEvent) -> list[str]:
         if type(ordinal) is not int or ordinal < 0:
@@ -214,10 +263,10 @@ class LiveStore:
                     "SELECT b.*,c.sha256 FROM native_audio_blocks b JOIN chunks c USING(session_id,sequence) "
                     "WHERE b.session_id=? AND b.end_sample>? AND b.start_sample<? ORDER BY b.sequence",
                     (row["session_id"], absolute_start, absolute_end),
-                ).fetchall()
+                ).fetchall() if self.retain_audio else []
                 covered = sum(min(absolute_end, b["end_sample"]) - max(absolute_start, b["start_sample"])
                               for b in blocks)
-                if covered != absolute_end - absolute_start:
+                if self.retain_audio and covered != absolute_end - absolute_start:
                     raise LiveConflict("Transcript source audio is incomplete.")
                 segment_id = uuid.uuid5(uuid.UUID(identity), str(ordinal)).hex
                 languages = {token.language for token in event.final_tokens if token.language}
@@ -225,7 +274,8 @@ class LiveStore:
                 connection.execute(
                     "INSERT INTO segments(id,session_id,sequence,start_ms,end_ms,text,language,created_at) "
                     "VALUES (?,?,?,?,?,?,?,?)",
-                    (segment_id, row["session_id"], blocks[0]["sequence"], absolute_start * 1000 // rate,
+                    (segment_id, row["session_id"], (blocks[0]["sequence"] if blocks else -1),
+                     absolute_start * 1000 // rate,
                      absolute_end * 1000 // rate, text, language, _now()),
                 )
                 for block in blocks:
@@ -302,7 +352,8 @@ class LiveStore:
             originals = read_tokens(connection, session_id)
             translations = read_tokens(connection, session_id, translation=True)
             stream = read_tokens(connection, session_id, stream=True)
-            return {**recording, "used_languages": json.loads(languages_json) if languages_json else None,
+            return {**recording, "audio_retained": self.retain_audio,
+                    "used_languages": json.loads(languages_json) if languages_json else None,
                     "connections": [dict(item) for item in connections], "gaps": gaps,
                     "final_tokens": originals,
                     "final_stream_tokens": stream,
