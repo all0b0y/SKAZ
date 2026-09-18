@@ -999,34 +999,56 @@
   flex-direction: column;
   min-height: 0;
 }
-.notes__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5) var(--space-3);
-}
-.notes__title {
-  font-size: var(--text-lg);
-}
-.notes__meta {
-  font-size: var(--text-xs);
-  color: var(--ink-faint);
-  margin-top: 2px;
-}
 .notes__error {
   margin: 0 var(--space-5) var(--space-3);
   color: var(--live);
   font-size: var(--text-sm);
 }
+/* Actionable notice (missing model): a line of text plus the one control that
+   fixes it, never a dead warning the user cannot act on. */
+.notes__notice {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: var(--space-3) var(--space-5) 0;
+  padding: 9px 12px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--paper-sunken);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.notes__notice-action {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
 .notes__body {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
-  padding: 0 var(--space-5) var(--space-6);
+  padding: 0 var(--space-5) var(--space-4);
 }
+/* The editor is a document surface, so it takes the pane: a narrow column with
+   a stray save label under it read as a broken input rather than a page. */
 .notes__content-wrap {
   position: relative;
-  max-width: 68ch;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
 }
 .notes__content {
   font-family: var(--font-read);
@@ -1115,33 +1137,69 @@
   text-decoration: underline dotted var(--accent);
   text-underline-offset: 3px;
 }
-.notes__selection-toolbar {
-  position: absolute;
-  z-index: 5;
+/* The old passage beside the written one, before anything is stored. Window-wide
+   on purpose: the notes pane is one column of three, and two columns of prose
+   inside it would be too narrow to compare. */
+.rewrite-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
   display: flex;
   align-items: center;
-  gap: 2px;
-  transform: translateY(-100%);
-  padding: 4px;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgb(0 0 0 / 28%);
+}
+.rewrite {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(1040px, 100%);
+  max-height: 100%;
+  padding: var(--space-5);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--paper);
+  box-shadow: var(--shadow-2);
+}
+.rewrite__head h2 { margin: 0; font-size: var(--text-md, 16px); }
+.rewrite__head p { margin: 4px 0 0; color: var(--ink-faint); font-size: var(--text-xs); }
+.rewrite__panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  min-height: 0;
+  overflow: auto;
+}
+.rewrite__pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: var(--space-4);
   border: 1px solid var(--edge);
   border-radius: var(--radius-sm);
-  background: var(--paper-raised);
-  box-shadow: var(--shadow-2);
-  font-family: var(--font-ui);
+  background: var(--paper-sunken);
 }
-.notes__selection-toolbar button {
-  border: none;
-  border-radius: 6px;
-  padding: 6px 9px;
-  background: transparent;
-  color: var(--ink-soft);
+.rewrite__pane--on,
+.rewrite__pane--new { border-color: var(--ink-faint); background: var(--paper); }
+.rewrite__pane h3 {
+  margin: 0;
+  color: var(--ink-faint);
   font-size: var(--text-xs);
-  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
-.notes__selection-toolbar button:hover {
-  background: var(--accent-quiet);
+.rewrite__text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
   color: var(--ink);
 }
+.rewrite__error { margin: 0; color: var(--live); font-size: var(--text-xs); }
+.rewrite__actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
+
 .notes__sources {
   margin-top: var(--space-5);
   padding-top: var(--space-4);
@@ -1925,12 +1983,21 @@
   color: var(--ink);
   font-size: var(--text-sm);
   text-align: left;
+  /* A provider catalog is hundreds of rows; rendering every one of them made
+     hover and click lag badly. Rows outside the scroll viewport are skipped
+     entirely, with a reserved height so the scrollbar stays honest. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
 }
+/* The list sits on --paper and --paper-raised is pure white in the light
+   theme, so the old hover tint was invisible. Hover now uses the same accent
+   tint as the selected row; the selection keeps a stronger step of that same
+   tint so "under the cursor" and "chosen" stay tellable apart. */
 .model-list__row:hover:not(:disabled) {
-  background: var(--paper-raised);
+  background: var(--accent-wash);
 }
 .model-list__row--active {
-  background: var(--accent-wash);
+  background: var(--accent-quiet);
 }
 .model-list__row:disabled {
   color: var(--ink-faint);
@@ -2259,4 +2326,692 @@
   .session {
     justify-content: center;
   }
+}
+
+/* ── First-run language gate ─────────────────────────────────────────────── */
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+.onboarding__card {
+  width: min(520px, calc(100vw - 2 * var(--space-6)));
+  max-height: min(640px, calc(100vh - 2 * var(--space-6)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 18%);
+}
+.onboarding__card h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.onboarding__lead {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.onboarding__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.onboarding__quick-btn {
+  padding: 5px 12px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--surface, transparent);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.onboarding__quick-btn:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.onboarding__search {
+  padding: 7px 10px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+}
+.onboarding__list {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 2px var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+}
+.onboarding__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  cursor: pointer;
+}
+.onboarding__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ── Settings → Logs ─────────────────────────────────────────────────────── */
+.logs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.logs__bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.logs__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+.logs__output {
+  max-height: 420px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink-soft);
+  background: var(--surface, transparent);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Model assignment: fixed (non-editable) provider row ─────────────────── */
+.profile--fixed .profile__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.profile__fixed-value {
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.onboarding__quick-btn--on {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* ── Notes: tabs, editor, picker ───────────────────────────────────────────── */
+
+.note-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--edge);
+  background: var(--paper);
+}
+/* Shrinks and scrolls, but never grows: growing would push the "+" away from
+   the last tab and park it in the middle of empty space. */
+.note-tabs__strip {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.note-tabs__strip::-webkit-scrollbar { display: none; }
+
+.note-tab {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 10px;
+  max-width: 220px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: var(--ink-faint);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.note-tab:hover { background: var(--paper-sunken); }
+.note-tab--on {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--edge);
+  box-shadow: inset 0 2px 0 var(--ink);
+}
+.note-tab__label {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.note-tab__close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+.note-tab:hover .note-tab__close,
+.note-tab--on .note-tab__close { opacity: 1; }
+.note-tab__close:hover { background: var(--edge); color: var(--ink); }
+/* The save state as a dot inside the tab, left of the name: it is glanceable
+   from the document itself, where the eye already is, instead of a line of prose
+   parked under the editor or a dot at the far end of the strip. */
+.note-tab__save {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  opacity: 0.45;
+  transition: background var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+}
+.note-tab__save[data-status='dirty'],
+.note-tab__save[data-status='saving'] { opacity: 1; background: var(--ink-faint); }
+.note-tab__save[data-status='error'] { opacity: 1; background: var(--live); }
+
+.note-tabs__add {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin: 5px 0;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.note-tabs__add:hover { background: var(--paper-sunken); color: var(--ink); }
+
+.note-tabs__menu-anchor { position: relative; display: flex; }
+
+/* Anchored to the viewport at the pointer, not to its owner: both places that
+   raise one — a tab in the horizontally scrolling strip, a selection in the
+   scrolling editor — sit in boxes that clip, and an absolutely positioned menu
+   inside them gets cut away. */
+.context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 220px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+}
+.context-menu > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.context-menu > button:hover:not(:disabled) { background: var(--paper-sunken); }
+.context-menu > button:disabled { color: var(--ink-faint); cursor: not-allowed; }
+.context-menu > button small { color: var(--ink-faint); font-size: 11px; }
+
+.note-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 260px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+}
+.note-menu > button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.note-menu > button:hover:not(:disabled) { background: var(--paper-sunken); }
+.note-menu > button:disabled { color: var(--ink-faint); cursor: not-allowed; }
+.note-menu > button small { color: var(--ink-faint); font-size: 11px; }
+
+.note-menu__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px 6px;
+  border-top: 1px solid var(--edge);
+  margin-top: 3px;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.note-detail { display: flex; gap: 3px; }
+.note-detail__step {
+  flex: 1;
+  padding: 5px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.note-detail__step--on {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* A page, not an input: a bordered sheet that fills the pane, with the text
+   itself scrolling inside it and the save state resting in its corner. */
+.note-editor {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: var(--space-4) 0 0;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.note-editor:focus-within {
+  border-color: var(--edge-strong);
+  box-shadow: var(--shadow-2);
+}
+.note-editor__text {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  border: none;
+  outline: none;
+  resize: none;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-read);
+  font-size: var(--text-md);
+  line-height: 1.7;
+  tab-size: 2;
+}
+/* The rendered document. Same reading typography as the raw field so switching
+   between them does not jump the text around. */
+.note-editor__preview {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: var(--space-5);
+  overflow-y: auto;
+  cursor: text;
+  outline: none;
+}
+.note-editor__placeholder { color: var(--ink-faint); }
+/* The way into and out of editing, resting in the sheet's corner above the text.
+   It floats rather than sitting in a header strip: the pane already carries the
+   tab row, and a third horizontal band would push the document further down for
+   one button. Muted while reading so it does not compete with the text, full
+   strength while editing, where leaving must be obvious. */
+.note-editor__mode {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--ink-faint);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+/* Reachable before it is pointed at: hovering anywhere on the sheet brings it up,
+   but it is never invisible — a control only revealed on hover is a control the
+   user cannot find. */
+.note-editor:hover .note-editor__mode { opacity: 0.85; }
+.note-editor__mode:hover,
+.note-editor__mode:focus-visible {
+  opacity: 1;
+  color: var(--ink);
+  background: var(--paper-sunken);
+  border-color: var(--edge);
+}
+.note-editor__mode[data-editing] {
+  opacity: 1;
+  color: var(--ink);
+  background: var(--paper-sunken);
+  border-color: var(--edge);
+}
+/* The first line must not run under the button. */
+.note-editor__preview > :first-child,
+.note-editor__text { padding-right: 46px; }
+.note-editor__error {
+  margin: 0;
+  padding: 6px var(--space-5) 10px;
+  border-top: 1px solid var(--edge);
+  background: var(--paper-sunken);
+  color: var(--live);
+  font-size: 11px;
+}
+
+/* Two equal starting actions. Each is a column so a reason ("Нет транскрипции")
+   sits under its label instead of being crammed onto the same line and pushing
+   the text past the button's edge. The empty state's reading width is widened
+   here for the same reason: two buttons do not fit a 42ch prose column. */
+.notes__body .empty {
+  max-width: 480px;
+}
+.notes__start {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.notes__start-btn {
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 16px;
+  text-align: center;
+  white-space: normal;
+}
+.notes__start-btn small {
+  color: inherit;
+  opacity: 0.7;
+  font-size: var(--text-xs);
+  line-height: 1.3;
+}
+
+/* The inline rename field. Sized to the row it replaces so opening it does not
+   reflow the list or the tab strip around it. */
+.note-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--edge-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+}
+.note-title-input:focus { border-color: var(--ink); }
+
+/* The notes of this session, listed above the two start buttons. A plain list of
+   rows: the note's name on the left, when it was last touched on the right, and
+   deletion only on hover so the column does not read as a row of hazards.
+
+   The block is pushed off the tab strip on purpose: a list flush against the
+   border above it reads as part of the toolbar rather than as content. */
+.note-list-block {
+  width: 100%;
+  max-width: 480px;
+  margin: var(--space-5) auto var(--space-4);
+}
+.note-list {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.note-list__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+}
+.note-list__row:hover { background: var(--paper-sunken); }
+.note-list__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.note-list__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-list__meta { flex: none; color: var(--ink-faint); font-size: var(--text-xs); }
+.note-list__delete {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 5px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  opacity: 0;
+}
+.note-list__row:hover .note-list__delete,
+.note-list__delete:focus-visible { opacity: 1; }
+.note-list__delete:hover { background: var(--edge); color: var(--live); }
+
+/* The pager. Quiet by design: it is navigation between pages of five, not an
+   action, so it reads as a caption with two arrows rather than as buttons. */
+.note-list__pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--edge);
+}
+.note-list__page-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1;
+  cursor: pointer;
+}
+.note-list__page-btn:hover:not(:disabled) { background: var(--paper-sunken); color: var(--ink); }
+.note-list__page-btn:disabled { color: var(--edge-strong); cursor: default; }
+.note-list__page-count {
+  min-width: 6ch;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Under a list the buttons are a footer, not the centrepiece of an empty pane,
+   so they keep the list's width instead of spreading across the whole column. */
+.notes__start--compact {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* A generation with no document behind it yet — and the same box carrying the
+   reason when it failed, because only the tab knows which generation this was. */
+.note-pending {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  color: var(--ink-faint);
+  text-align: center;
+}
+.note-pending p { margin: 0; }
+.note-pending__spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--edge);
+  border-top-color: var(--ink-faint);
+  border-radius: 50%;
+  animation: note-pending-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .note-pending__spinner { animation-duration: 2.4s; }
+}
+@keyframes note-pending-spin { to { transform: rotate(360deg); } }
+.note-pending--failed p { color: var(--live); }
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: oklch(0% 0 0 / 0.4);
+  backdrop-filter: blur(2px);
+}
+.modal__card {
+  width: min(560px, 92vw);
+  max-height: 64vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+.note-picker__search {
+  padding: 13px 16px;
+  border: none;
+  border-bottom: 1px solid var(--edge);
+  outline: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+}
+.note-picker__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 5px;
+  list-style: none;
+  overflow-y: auto;
+}
+.note-picker__list button {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.note-picker__list button:hover { background: var(--paper-sunken); }
+.note-picker__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-picker__session { flex: none; color: var(--ink-faint); font-size: 11px; }
+.note-picker__empty { padding: 20px; color: var(--ink-faint); text-align: center; }
+.note-picker__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 9px 12px;
+  border-top: 1px solid var(--edge);
 }
