@@ -19,7 +19,7 @@ async def test_slow_response_cannot_outlive_whole_operation_budget(provider: str
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(slow)) as http:
         gateway = build_chat(
-            http=http, provider=provider, model="test", api_key="test", base_url=None, timeout=0.01
+            http=http, provider=provider, model="test", api_key="test", timeout=0.01
         )
         with pytest.raises(ProviderTimeout):
             await gateway.complete([ChatMessage("user", "question")], max_tokens=10)

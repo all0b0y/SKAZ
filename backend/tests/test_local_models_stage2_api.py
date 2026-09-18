@@ -76,7 +76,7 @@ async def test_gigachat_profile_needs_no_key_but_is_asr_only(client: httpx.Async
     )
 
     assert saved.status_code == 200
-    assert saved.json()["asr"]["has_api_key"] is False
+    assert saved.json()["provider_has_api_key"].get(GIGACHAT_PROVIDER) is None
     assert saved.json()["asr"]["verified"] is False
     assert rejected.status_code == 400
 
@@ -85,18 +85,16 @@ async def test_local_gigachat_rejects_api_key_material(
     client: httpx.AsyncClient,
     app: Any,
 ) -> None:
+    """A local provider owns no credential: provider_keys does not accept its name."""
     rejected = await client.put(
         "/settings",
         json={
-            "asr": {
-                "provider": GIGACHAT_PROVIDER,
-                "model": GIGACHAT_MODEL_ID,
-                "api_key": "synthetic-must-not-be-stored",
-            }
+            "provider_keys": {GIGACHAT_PROVIDER: "synthetic-must-not-be-stored"},
+            "asr": {"provider": GIGACHAT_PROVIDER, "model": GIGACHAT_MODEL_ID},
         },
     )
 
-    assert rejected.status_code == 400
+    assert rejected.status_code == 422
     assert "synthetic-must-not-be-stored" not in rejected.text
     assert app.state.runtime.secrets.get(GIGACHAT_PROVIDER) is None
 

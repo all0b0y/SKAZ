@@ -375,7 +375,6 @@ def build_chat(
     provider: str,
     model: str,
     api_key: str | None,
-    base_url: str | None,
     timeout: float,
 ) -> ChatGateway:
     if not model:
@@ -390,10 +389,6 @@ def build_chat(
         base = OPENROUTER_BASE_URL
     elif provider == "openai":
         base = OPENAI_BASE_URL
-    elif provider == "openai-compatible":
-        if not base_url:
-            raise ProviderNotConfigured("openai-compatible profiles require base_url.")
-        base = base_url
     else:
         raise ProviderNotConfigured(f"Provider '{provider}' has no chat adapter.")
     return OpenAICompatibleChat(

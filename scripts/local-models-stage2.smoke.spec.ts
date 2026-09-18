@@ -86,7 +86,10 @@ test.beforeAll(async () => {
 
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  await expect(page.locator('.status-pill')).toContainText(/backend ready/i, { timeout: 60_000 });
+  // The pill is a bare dot now: its phase lives in the accessible name, not in
+  // text content. Assert what the UI actually exposes to a screen reader.
+  await expect(page.locator('.status-pill'))
+    .toHaveAttribute('aria-label', /backend ready/i, { timeout: 60_000 });
   expect((await fs.stat(path.join(userDataDir, 'data', 'audiohelper.sqlite3'))).isFile()).toBe(true);
 
   const cacheStatus = await page.evaluate(() => window.audiohelper.request({

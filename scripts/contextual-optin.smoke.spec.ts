@@ -86,7 +86,10 @@ test.beforeAll(async () => {
 
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  await expect(page.locator('.status-pill')).toContainText(/backend ready/i, { timeout: 60_000 });
+  // The pill is a bare dot now: its phase lives in the accessible name, not in
+  // text content. Assert what the UI actually exposes to a screen reader.
+  await expect(page.locator('.status-pill'))
+    .toHaveAttribute('aria-label', /backend ready/i, { timeout: 60_000 });
 
   // The backend inherits the same isolated directory: its database must exist
   // under the temporary profile, never in the user's data directory.
@@ -205,7 +208,10 @@ test('restores a real persisted recovery status through Electron IPC without cap
 
   await page.reload();
   await page.waitForLoadState('domcontentloaded');
-  await expect(page.locator('.status-pill')).toContainText(/backend ready/i, { timeout: 60_000 });
+  // The pill is a bare dot now: its phase lives in the accessible name, not in
+  // text content. Assert what the UI actually exposes to a screen reader.
+  await expect(page.locator('.status-pill'))
+    .toHaveAttribute('aria-label', /backend ready/i, { timeout: 60_000 });
   const progress = page.getByLabel('Contextual transcription progress');
   await expect(progress).toContainText(/processing stalled: finality_blocked/i, { timeout: 15_000 });
 

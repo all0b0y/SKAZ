@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsPanel } from './SettingsPanel';
 import { useStore } from '../../state/store';
 import type { Settings, SettingsUpdate } from '../../api/types';
 
-// The experimental contextual local mode has no process-level switch a user can
-// reach, so the settings drawer is the explicit opt-in seam: off by default,
-// never sent unless the user touched it, and never enabled by merely opening it.
+// Transcription is fixed to Soniox and the experimental contextual-local
+// controls are gone, so these tests pin what the drawer still offers: a
+// Soniox statement with no model picker, a language picker for answers and
+// notes, and a Logs section in place of Local models.
 
 const settings = (over: Partial<Settings> = {}): Settings => ({
   asr: { provider: 'local-whisper', model: 'small' },
@@ -43,68 +44,117 @@ beforeEach(() => {
   });
 });
 
-const toggle = () =>
-  screen.getByRole('checkbox', { name: /experimental contextual local mode/i });
-
 /** Sections are tabbed now; switch to the one a test needs before querying it. */
 const goToSection = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
   await user.click(screen.getByRole('button', { name: label }));
 };
 
 
-describe('SettingsPanel contextual local opt-in', () => {
-  it('is off by default and is not sent when the user does not touch it', async () => {
+describe('SettingsPanel transcription provider (fixed to Soniox)', () => {
+  it('states Soniox without offering a model or base_url to pick', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'Transcription');
+
+    expect(screen.getByText('Transcription (ASR)')).toBeInTheDocument();
+    expect(screen.getByText('Soniox')).toBeInTheDocument();
+
+    // ASR has no picker at all, and no other task's catalog is mounted here.
+    expect(screen.queryByRole('listbox', { name: 'Model' })).toBeNull();
+  });
+
+  // One catalog per section: mounting all three at once put ~900 rows in the
+  // DOM and made the picker unusable, so each task owns its own section.
+  it('mounts exactly one model catalog per section', async () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
 
-    expect(toggle()).not.toBeChecked();
+    await goToSection(user, 'Assistant');
+    await waitFor(() => {
+      expect(screen.getAllByRole('listbox', { name: 'Model' })).toHaveLength(1);
+    });
 
+    await goToSection(user, 'Notes');
+    await waitFor(() => {
+      expect(screen.getAllByRole('listbox', { name: 'Model' })).toHaveLength(1);
+    });
+  });
+
+  it('points at API keys when no Soniox key is stored yet', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'Transcription');
+    expect(screen.getByText(/Ключ не задан/i)).toBeInTheDocument();
+  });
+
+  it('reports a stored Soniox key instead of asking for one', async () => {
+    useStore.setState({ settings: settings({ provider_has_api_key: { soniox: true } }) });
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'Transcription');
+    expect(screen.getByText(/Ключ сохранён/i)).toBeInTheDocument();
+  });
+
+  it('never sends an asr profile change, because there is nothing to change', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
     await user.click(screen.getByRole('button', { name: /save changes/i }));
+    expect(saveSettings.mock.calls[0]![0]).not.toHaveProperty('asr');
+  });
+});
 
-    expect(saveSettings).toHaveBeenCalledTimes(1);
+describe('SettingsPanel removed experimental controls', () => {
+  it('no longer offers the contextual local opt-in', () => {
+    render(<SettingsPanel onClose={() => {}} />);
+    expect(screen.queryByRole('checkbox', { name: /experimental contextual local mode/i })).toBeNull();
+  });
+
+  it('no longer offers a per-recording transcription mode picker', () => {
+    render(<SettingsPanel onClose={() => {}} />);
+    expect(screen.queryByRole('combobox', { name: /transcription mode for new recording/i })).toBeNull();
+  });
+
+  it('never sends contextual_local_enabled on save', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
     expect(saveSettings.mock.calls[0]![0]).not.toHaveProperty('contextual_local_enabled');
   });
+});
 
-  it('sends the explicit opt-in only after the user enables it', async () => {
-    const user = userEvent.setup();
+describe('SettingsPanel answer & notes language', () => {
+  it('is a picker over supported languages, not a free-text field', async () => {
+    useStore.setState({ settings: settings({ supported_languages: ['ru', 'en', 'de'] }) });
     render(<SettingsPanel onClose={() => {}} />);
 
-    await user.click(toggle());
-    expect(toggle()).toBeChecked();
-    await user.click(screen.getByRole('button', { name: /save changes/i }));
-
-    expect(saveSettings).toHaveBeenCalledWith({
-      contextual_local_enabled: true,
-    });
+    const select = screen.getByLabelText(/Answer & notes language/i);
+    expect(select.tagName).toBe('SELECT');
+    expect(screen.getByRole('option', { name: 'Немецкий' })).toBeInTheDocument();
   });
 
-  it('reflects the persisted value and can turn the mode back off', async () => {
-    useStore.setState({ settings: settings({ contextual_local_enabled: true, cloud_consent: true }) });
+  it('sends the chosen language on save', async () => {
+    useStore.setState({ settings: settings({ supported_languages: ['ru', 'en', 'de'] }) });
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
 
-    expect(toggle()).toBeChecked();
-
-    await user.click(toggle());
+    await user.selectOptions(screen.getByLabelText(/Answer & notes language/i), 'de');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
-    expect(saveSettings).toHaveBeenCalledWith({ contextual_local_enabled: false });
+    expect(saveSettings).toHaveBeenCalledWith({ output_language: 'de' });
   });
 
-  it('names what the opt-in turns on instead of promising quality', async () => {
-    const user = userEvent.setup();
+  it('keeps a persisted value that is no longer in the supported list', () => {
+    useStore.setState({ settings: settings({ output_language: 'eo', supported_languages: ['ru', 'en'] }) });
     render(<SettingsPanel onClose={() => {}} />);
-    await goToSection(user, 'Model assignment');
+    expect((screen.getByLabelText(/Answer & notes language/i) as HTMLSelectElement).value).toBe('eo');
+  });
+});
 
-    // Let all three async catalog effects settle inside Testing Library's act.
-    await waitFor(() => {
-      expect(screen.getAllByRole('listbox', { name: 'Model' })).toHaveLength(3);
-    });
-
-    await goToSection(user, 'System');
-    const hint = screen.getByText(/local live finality and the local speech gate/i);
-    expect(hint).toBeInTheDocument();
-    expect(hint).toHaveTextContent(/local-whisper/i);
+describe('SettingsPanel sections', () => {
+  it('offers Logs and no longer offers Local models', () => {
+    render(<SettingsPanel onClose={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Local models' })).toBeNull();
   });
 });
 
@@ -137,42 +187,48 @@ describe('SettingsPanel device picker (moved from the recorder bar)', () => {
 });
 
 describe('SettingsPanel API keys section', () => {
-  it('shows only cloud providers actually used by a task, not the full catalog', async () => {
+  it('lists every cloud provider, assigned or not, and no local one', async () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'API keys');
-    // asr -> local-whisper (no key needed, not listed), agent & notes -> openrouter.
+    // A key belongs to the provider, so it can be stored before any assignment.
     expect(screen.getByRole('heading', { name: 'openrouter' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'openai' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'anthropic' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'local-whisper' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'openai' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'anthropic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'local-gigachat-mlx' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'openai-compatible' })).not.toBeInTheDocument();
   });
 
-  it('collates one key entered once into every profile that shares that provider, on save', async () => {
+  it('saves a key under its provider, not copied into each task profile', async () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'API keys');
 
-    // agent and notes both use openrouter; asr uses the local provider and has no key field.
-    await user.type(screen.getByLabelText('API key'), 'sk-test');
+    // agent and notes both use openrouter, yet the credential is written once.
+    const [openrouterKey] = screen.getAllByLabelText('API key');
+    await user.type(openrouterKey!, 'sk-test');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
-    expect(saveSettings).toHaveBeenCalledWith({
-      agent: { api_key: 'sk-test' },
-      notes: { api_key: 'sk-test' },
-    });
+    expect(saveSettings).toHaveBeenCalledWith({ provider_keys: { openrouter: 'sk-test' } });
   });
 
-  it('never renders a key field for the local provider', async () => {
+  it('stores a key for a provider no task uses yet', async () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'API keys');
-    // Only one non-local provider (openrouter) is in play, so exactly one API key field exists.
-    expect(screen.getAllByLabelText('API key')).toHaveLength(1);
+
+    // Default assignment is local-whisper + openrouter; anthropic is unassigned.
+    const anthropicCard = screen.getByRole('heading', { name: 'anthropic' }).closest('section');
+    const anthropicKey = within(anthropicCard as HTMLElement).getByLabelText('API key');
+    await user.type(anthropicKey, 'ant-test');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    // No task was reassigned just to hold the credential.
+    expect(saveSettings).toHaveBeenCalledWith({ provider_keys: { anthropic: 'ant-test' } });
   });
 
-  it('shows nothing to configure when every assigned task uses a local provider', async () => {
+  it('shows one key field per cloud provider and none for local ones', async () => {
     useStore.setState({
       settings: settings({
         asr: { provider: 'local-whisper', model: 'small' },
@@ -183,8 +239,8 @@ describe('SettingsPanel API keys section', () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'API keys');
-    expect(screen.getByText(/no cloud providers are assigned yet/i)).toBeInTheDocument();
-    expect(screen.queryAllByLabelText('API key')).toHaveLength(0);
+    expect(screen.getAllByLabelText('API key')).toHaveLength(3);
+    expect(screen.getAllByText(/not assigned to any task yet/i)).toHaveLength(3);
   });
 });
 
@@ -192,33 +248,5 @@ describe('SettingsPanel wordmark', () => {
   it('shows a quiet SKAZ wordmark below all sections', () => {
     render(<SettingsPanel onClose={() => {}} />);
     expect(screen.getByText('SKAZ')).toBeInTheDocument();
-  });
-});
-
-describe('SettingsPanel transcription mode picker (moved from the recorder bar)', () => {
-  it('requires an explicit pre-recording contextual choice and clearly disables it without capability', async () => {
-    const choose = vi.fn((mode) => useStore.setState({ nextRecordingMode: mode }));
-    useStore.setState({
-      setNextRecordingMode: choose,
-      liveCapabilities: {
-        mode: 'contextual_local', capable: false,
-        requirements: { local_profile_selected: true, contextual_local_enabled: false, live_finality_enabled: false, local_speech_gate_enabled: false },
-        detail: 'Enable both experimental flags.',
-      },
-    });
-    const user = userEvent.setup();
-    render(<SettingsPanel onClose={() => {}} />);
-    await user.selectOptions(
-      screen.getByRole('combobox', { name: /transcription mode for new recording/i }),
-      'contextual_local',
-    );
-    expect(choose).toHaveBeenCalledWith('contextual_local');
-    expect(screen.getByText(/Enable both experimental flags.*new recording session/i)).toBeInTheDocument();
-  });
-
-  it('locks the mode picker while a recording is in progress', () => {
-    useStore.setState({ recorderState: 'recording' });
-    render(<SettingsPanel onClose={() => {}} />);
-    expect(screen.getByRole('combobox', { name: /transcription mode for new recording/i })).toBeDisabled();
   });
 });

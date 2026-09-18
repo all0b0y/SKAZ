@@ -35,7 +35,6 @@ const catalog = (provider: string): ModelInfo[] => {
 const profileFor = (overrides: Partial<Profile> = {}): Profile => ({
   provider: 'openrouter',
   model: '',
-  has_api_key: false,
   ...overrides,
 });
 
@@ -45,10 +44,12 @@ const profileFor = (overrides: Partial<Profile> = {}): Profile => ({
 function Harness({
   task = 'agent',
   profile,
+  hasProviderKey = false,
   onDraft,
 }: {
   task?: TaskKind;
   profile: Profile;
+  hasProviderKey?: boolean;
   onDraft?: (update: ProfileUpdate) => void;
 }) {
   const [draft, setDraft] = useState<ProfileUpdate>({});
@@ -59,6 +60,7 @@ function Harness({
       description="Answers questions about the recording."
       profile={profile}
       draft={draft}
+      hasProviderKey={hasProviderKey}
       onChange={(update) => {
         setDraft(update);
         onDraft?.(update);
@@ -88,22 +90,20 @@ const selectModelOption = async (user: ReturnType<typeof userEvent.setup>, name:
 };
 
 describe('ProfileEditor provider switch', () => {
-  // The key/base_url fields themselves moved to the Providers section
-  // (see ProviderCredentials.test.tsx); this only covers what stays here —
-  // switching provider must still reset the draft's model and clear any
-  // stale api_key/base_url slot so a later Providers-section write never
-  // lands under the wrong provider.
-  it('resets model and clears the credential slots in the draft on provider switch', async () => {
+  // Credentials live in the API keys section and belong to the provider
+  // (see ProviderCredentials.test.tsx), so a switch here only has to drop the
+  // model: a model id is meaningless under a different provider's catalog.
+  it('resets the model on provider switch and carries no credential', async () => {
     const user = userEvent.setup();
     const onDraft = vi.fn();
     render(
       <Harness
-        profile={profileFor({ provider: 'openai-compatible', base_url: 'https://old.example/v1', model: 'old-model' })}
+        profile={profileFor({ provider: 'anthropic', model: 'old-model' })}
         onDraft={onDraft}
       />,
     );
     await selectProviderTab(user, 'OpenAI');
-    expect(onDraft).toHaveBeenLastCalledWith({ provider: 'openai', model: '', base_url: '', api_key: undefined });
+    expect(onDraft).toHaveBeenLastCalledWith({ provider: 'openai', model: '' });
   });
 });
 
@@ -290,7 +290,7 @@ describe('ProfileEditor text-output filtering', () => {
 
   it('does not text-filter the ASR picker', async () => {
     // ASR compatibility is about audio input, not text output; leave it to the ASR path.
-    render(<Harness task="asr" profile={{ provider: 'openrouter', model: '', has_api_key: false }} />);
+    render(<Harness task="asr" profile={{ provider: 'openrouter', model: '' }} />);
     expect(await screen.findByRole('option', { name: /Gemini Vision/ })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Flux Image/ })).toBeInTheDocument();
   });
@@ -311,7 +311,7 @@ describe('ProfileEditor never touches local model preparation on its own', () =>
       prepareLocalModel: vi.fn(),
     });
 
-    render(<Harness task="asr" profile={{ provider: 'local-whisper', model: 'my-custom-checkpoint', has_api_key: false }} />);
+    render(<Harness task="asr" profile={{ provider: 'local-whisper', model: 'my-custom-checkpoint' }} />);
 
     // A non-catalog id is not a known checkpoint: the picker falls back to the
     // custom text input (no catalog options), which is the signal the catalog
@@ -324,13 +324,13 @@ describe('ProfileEditor never touches local model preparation on its own', () =>
 });
 
 describe('ProfileEditor missing API key warning', () => {
-  it('warns when a cloud provider has no saved or drafted key', () => {
-    render(<Harness profile={profileFor({ provider: 'openrouter', has_api_key: false })} />);
+  it('warns when the assigned cloud provider has no key', () => {
+    render(<Harness profile={profileFor({ provider: 'openrouter' })} hasProviderKey={false} />);
     expect(screen.getByText(/No API key set for openrouter/i)).toBeInTheDocument();
   });
 
-  it('does not warn once a key is already saved', () => {
-    render(<Harness profile={profileFor({ provider: 'openrouter', has_api_key: true })} />);
+  it('does not warn once the provider holds a key', () => {
+    render(<Harness profile={profileFor({ provider: 'openrouter' })} hasProviderKey />);
     expect(screen.queryByText(/No API key set/i)).not.toBeInTheDocument();
   });
 
@@ -338,7 +338,8 @@ describe('ProfileEditor missing API key warning', () => {
     render(
       <Harness
         task="asr"
-        profile={profileFor({ provider: 'local-whisper', model: 'small', has_api_key: false })}
+        profile={profileFor({ provider: 'local-whisper', model: 'small' })}
+        hasProviderKey={false}
       />,
     );
     expect(screen.queryByText(/No API key set/i)).not.toBeInTheDocument();

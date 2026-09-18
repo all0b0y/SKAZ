@@ -5,10 +5,12 @@ import { Button } from '../ui/Button';
 import { Icon, type IconName } from '../ui/Icon';
 import { ProfileEditor } from './ProfileEditor';
 import { ProviderCredentials } from './ProviderCredentials';
-import { LocalModelsBrowser } from './LocalModelsBrowser';
+import { LogsViewer } from './LogsViewer';
+import { StorageRootPanel } from './StorageRootPanel';
 import { SonioxCredentials } from './SonioxCredentials';
 import { UsedLanguages, languageName } from './UsedLanguages';
-import type { NativeRecordingMode, Profile, ProfileUpdate, ProviderName, SettingsUpdate, TaskKind } from '../../api/types';
+import { CLOUD_PROVIDERS } from './providers';
+import type { CloudProviderName, NativeRecordingMode, Profile, ProfileUpdate, ProviderName, SettingsUpdate, TaskKind } from '../../api/types';
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -22,13 +24,19 @@ const THEMES: { value: ThemeMode; label: string }[] = [
 
 const TASKS: TaskKind[] = ['asr', 'agent', 'notes'];
 
-type SectionId = 'system' | 'models' | 'api-keys' | 'local-models';
+type SectionId = 'system' | 'asr' | 'agent' | 'notes' | 'api-keys' | 'logs' | 'files';
 
+// Each model-assignment task is its own section so only ONE model catalog is
+// ever mounted: all three at once put ~900 interactive rows in the DOM, which
+// made hover and click in the picker unusable (measured, not guessed).
 const SECTIONS: { id: SectionId; label: string; icon: IconName }[] = [
   { id: 'system', label: 'System', icon: 'settings' },
-  { id: 'models', label: 'Model assignment', icon: 'notes' },
+  { id: 'asr', label: 'Transcription', icon: 'transcript' },
+  { id: 'agent', label: 'Assistant', icon: 'notes' },
+  { id: 'notes', label: 'Notes', icon: 'notes' },
   { id: 'api-keys', label: 'API keys', icon: 'sliders' },
-  { id: 'local-models', label: 'Local models', icon: 'transcript' },
+  { id: 'logs', label: 'Logs', icon: 'transcript' },
+  { id: 'files', label: 'Files', icon: 'transcript' },
 ];
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
@@ -42,9 +50,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const enumerateDevices = useStore((s) => s.enumerateDevices);
   const selectDevice = useStore((s) => s.selectDevice);
   const recorderState = useStore((s) => s.recorderState);
-  const recordingMode = useStore((s) => s.nextRecordingMode);
-  const setNextRecordingMode = useStore((s) => s.setNextRecordingMode);
-  const liveCapabilities = useStore((s) => s.liveCapabilities);
 
   const capturing = ['recording', 'paused', 'processing'].includes(recorderState);
 
@@ -53,7 +58,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   }, [enumerateDevices]);
 
 
-  const [sonioxKey, setSonioxKey] = useState<string | null>(null);
+
+  // Pending provider keys, keyed by provider: '' means "delete this key on save".
+  const [providerKeys, setProviderKeys] = useState<Partial<Record<CloudProviderName, string>>>({});
   const [cloudConsent, setCloudConsent] = useState<boolean | null>(null);
   const [asr, setAsr] = useState<ProfileUpdate>({});
   const [agent, setAgent] = useState<ProfileUpdate>({});
@@ -62,9 +69,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [nativeMode, setNativeMode] = useState<NativeRecordingMode | null>(null);
   const [translationTarget, setTranslationTarget] = useState<string | null>(null);
   const [outputLanguage, setOutputLanguage] = useState<string | null>(null);
-  // null means "untouched": an unopened or merely inspected drawer never sends
-  // the experimental opt-in, so the mode can only be enabled deliberately.
-  const [contextualLocal, setContextualLocal] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -82,34 +86,23 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     );
   }
 
-  // Providers section: fold the three per-task profiles down to "which
-  // provider does each task effectively use right now" (draft-aware), so a
-  // key typed once can be copied into every profile that shares a provider.
-  // The backend contract is unchanged — buildUpdate still sends three profiles.
+  // API keys are provider-scoped, so the section lists every cloud provider
+  // unconditionally. The per-task drafts below only carry provider/model.
   const draftFor: Record<TaskKind, ProfileUpdate> = { asr, agent, notes };
-  const setDraftFor: Record<TaskKind, (update: ProfileUpdate) => void> = {
-    asr: setAsr,
-    agent: setAgent,
-    notes: setNotes,
-  };
   const profileFor: Record<TaskKind, Profile> = { asr: settings.asr, agent: settings.agent, notes: settings.notes };
 
-  const patchDraft = (task: TaskKind, patch: Partial<ProfileUpdate>) => {
-    setDraftFor[task]({ ...draftFor[task], ...patch });
+  const changeProviderKey = (provider: CloudProviderName, value: string) => {
+    setProviderKeys((current) => ({ ...current, [provider]: value }));
   };
-  const applyKeyToTasks = (tasks: TaskKind[], value: string) => {
-    tasks.forEach((task) => patchDraft(task, { api_key: value }));
-  };
-  const applyBaseUrlToTasks = (tasks: TaskKind[], value: string) => {
-    tasks.forEach((task) => patchDraft(task, { base_url: value }));
+  // A key exists for a provider when one is stored, unless the current draft
+  // clears it; a typed draft key counts as present before it is saved.
+  const providerHasKey = (provider: ProviderName): boolean => {
+    const pending = providerKeys[provider as CloudProviderName];
+    if (pending !== undefined) return pending.trim().length > 0;
+    return settings.provider_has_api_key?.[provider as CloudProviderName] === true;
   };
 
   const effectiveProvider = (task: TaskKind): ProviderName => draftFor[task].provider ?? profileFor[task].provider;
-  const usedProviders: ProviderName[] = [];
-  TASKS.forEach((task) => {
-    const provider = effectiveProvider(task);
-    if (!usedProviders.includes(provider)) usedProviders.push(provider);
-  });
   const tasksForProvider = (provider: ProviderName): TaskKind[] => TASKS.filter((t) => effectiveProvider(t) === provider);
 
   const buildUpdate = (): SettingsUpdate => {
@@ -121,9 +114,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     if (nativeMode !== null) update.native_recording_mode = nativeMode;
     if (translationTarget !== null) update.translation_target_language = translationTarget;
     if (outputLanguage !== null) update.output_language = outputLanguage;
-    if (sonioxKey !== null) update.soniox_api_key = sonioxKey;
+
+    if (Object.keys(providerKeys).length) update.provider_keys = providerKeys;
     if (cloudConsent !== null) update.cloud_consent = cloudConsent;
-    if (contextualLocal !== null) update.contextual_local_enabled = contextualLocal;
     return update;
   };
 
@@ -133,7 +126,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     setSaved(false);
     try {
       await saveSettings(buildUpdate());
-      setSonioxKey(null);
+
+      setProviderKeys({});
       setCloudConsent(null);
       setAsr({});
       setAgent({});
@@ -142,7 +136,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       setNativeMode(null);
       setTranslationTarget(null);
       setOutputLanguage(null);
-      setContextualLocal(null);
       setSaved(true);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -150,9 +143,6 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
       setSaving(false);
     }
   };
-
-  const contextualLocalValue = contextualLocal ?? settings.contextual_local_enabled;
-  const asrProvider = asr.provider ?? settings.asr.provider;
 
   return (
     <div className="drawer" role="dialog" aria-modal="true" aria-label="Settings">
@@ -242,12 +232,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     onChange={setUsedLanguages} disabled={saving} />
                   <div className="field">
                     <label htmlFor="native-recording-mode">Режим новой записи</label>
-                    <select id="native-recording-mode" value={nativeMode ?? settings.native_recording_mode ?? 'transcription'}
+                    <select id="native-recording-mode" value={(nativeMode ?? settings.native_recording_mode) === 'audio_only' ? 'transcription' : (nativeMode ?? settings.native_recording_mode ?? 'transcription')}
                       disabled={saving || capturing}
                       onChange={(event) => setNativeMode(event.target.value as NativeRecordingMode)}>
                       <option value="transcription">Транскрипция</option>
                       <option value="translation">Транскрипция и перевод</option>
-                      <option value="audio_only">Только аудио</option>
                     </select>
                     <span className="field__hint">Применяется после сохранения к новой записи. Режим существующей записи не меняется.</span>
                   </div>
@@ -260,90 +249,82 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         ...(settings.supported_languages ?? [])])).map((code) =>
                         <option key={code} value={code}>{languageName(code)}</option>)}
                     </select>
-                    <span className="field__hint">Soniox показывает перевод вместо оригинала. Оригинал можно раскрыть под репликой.</span>
+                    <span className="field__hint">
+                      Речь на любом из выбранных языков переводится в этот язык. Soniox показывает
+                      перевод вместо оригинала; оригинал можно раскрыть под репликой.
+                    </span>
                   </div>}
-                  {(nativeMode ?? settings.native_recording_mode) === 'audio_only' &&
-                    <p className="field__hint">Сохраняется только аудио. Распознавание после записи пока не подключено.</p>}
+                  <p className="field__hint">Сохраняются транскрипция и таймкоды. Аудио используется для распознавания и не сохраняется.</p>
                   <div className="field">
                     <label htmlFor="output-lang">Answer &amp; notes language</label>
-                    <input
-                      id="output-lang"
-                      type="text"
-                      value={outputLanguage ?? settings.output_language}
-                      onChange={(e) => setOutputLanguage(e.target.value)}
-                    />
-                  </div>
-                </section>
-
-                <section className="settings-group">
-                  <label className="consent">
-                    <input
-                      type="checkbox"
-                      checked={contextualLocalValue}
-                      onChange={(e) => setContextualLocal(e.target.checked)}
-                    />
-                    <span>
-                      <strong>Experimental contextual local mode</strong>
-                      <span className="field__hint">
-                        Turns on local live finality and the local speech gate for new contextual
-                        recordings with a local-whisper profile. Off by default; it changes nothing
-                        for legacy or cloud recordings, and it is not a quality claim.
-                      </span>
-                    </span>
-                  </label>
-                  {contextualLocalValue && asrProvider !== 'local-whisper' && (
-                    <p className="profile__note profile__note--warn">
-                      Contextual local recording also needs a local-whisper transcription profile;
-                      the current ASR profile is “{asrProvider}”.
-                    </p>
-                  )}
-                  <div className="field">
-                    <label htmlFor="recording-mode">Transcription mode for the next recording</label>
                     <select
-                      id="recording-mode"
-                      aria-label="Transcription mode for new recording"
-                      value={recordingMode}
-                      onChange={(event) => setNextRecordingMode(event.currentTarget.value as 'legacy' | 'contextual_local')}
-                      disabled={capturing}
+                      id="output-lang"
+                      value={outputLanguage ?? settings.output_language}
+                      disabled={saving}
+                      onChange={(e) => setOutputLanguage(e.target.value)}
                     >
-                      <option value="legacy">Legacy / cloud-compatible</option>
-                      <option value="contextual_local">Experimental contextual local</option>
+                      {Array.from(new Set([
+                        outputLanguage ?? settings.output_language,
+                        ...(settings.supported_languages ?? []),
+                      ])).map((code) => (
+                        <option key={code} value={code}>{languageName(code)}</option>
+                      ))}
                     </select>
-                    {!capturing && recordingMode === 'contextual_local' && (
-                      <p className={liveCapabilities?.capable ? 'profile__note' : 'profile__note profile__note--warn'}>
-                        {liveCapabilities?.detail ?? 'Checking contextual local capability…'} This choice applies only to a new recording session.
-                      </p>
-                    )}
+                    <span className="field__hint">
+                      Язык ответов ассистента и конспектов. Не зависит от языка речи —
+                      можно слушать на одном языке, а конспект получать на другом.
+                    </span>
                   </div>
                 </section>
               </section>
             )}
 
-            {activeSection === 'models' && (
+            {activeSection === 'asr' && (
               <section className="settings-section">
-                <h3 className="settings-section__title">Model assignment</h3>
-                <ProfileEditor
-                  task="asr"
-                  label="Transcription (ASR)"
-                  description="Turns speech into timestamped text. Not a plain text model."
-                  profile={settings.asr}
-                  draft={asr}
-                  onChange={setAsr}
-                />
+                <h3 className="settings-section__title">Transcription</h3>
+                <div className="profile profile--fixed">
+                  <div className="profile__head">
+                    <div>
+                      <strong>Transcription (ASR)</strong>
+                      <p className="field__hint">Turns speech into timestamped text. Not a plain text model.</p>
+                    </div>
+                    <span className="profile__fixed-value">Soniox</span>
+                  </div>
+                  <p className="field__hint">
+                    Живая транскрипция идёт через Soniox — выбор модели и адреса здесь не применяется.
+                    {settings.provider_has_api_key?.soniox === true
+                      ? ' Ключ сохранён.'
+                      : ' Ключ не задан — добавьте его в разделе API keys.'}
+                  </p>
+                </div>
+              </section>
+            )}
+
+            {activeSection === 'agent' && (
+              <section className="settings-section">
+                <h3 className="settings-section__title">Assistant</h3>
                 <ProfileEditor
                   task="agent"
                   label="Assistant"
                   description="Answers your questions about the recording."
                   profile={settings.agent}
                   draft={agent}
+                  hasProviderKey={providerHasKey(effectiveProvider('agent'))}
                   onChange={setAgent}
                 />
+              </section>
+            )}
+
+            {activeSection === 'notes' && (
+              <section className="settings-section">
+                <h3 className="settings-section__title">Notes</h3>
                 <ProfileEditor
                   task="notes"
                   label="Notes"
                   description="Summarizes the session after you stop recording."
                   profile={settings.notes}
                   draft={notes}
+                  hasProviderKey={providerHasKey(effectiveProvider('notes'))}
                   onChange={setNotes}
                 />
               </section>
@@ -353,9 +334,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <section className="settings-section">
                 <h3 className="settings-section__title">API keys</h3>
                 <SonioxCredentials
-                  hasKey={settings.soniox_has_api_key === true}
-                  value={sonioxKey}
-                  onChange={setSonioxKey}
+                  hasKey={settings.provider_has_api_key?.soniox === true}
+                  value={providerKeys.soniox ?? null}
+                  onChange={(value) => changeProviderKey('soniox', value)}
                   disabled={saving}
                 />
                 <label className="consent">
@@ -375,35 +356,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </span>
                 </label>
                 <p className="settings-section__hint">
-                  One key per provider, applied to every task assigned to it in Model assignment.
-                  Local providers need no key and are not listed here.
+                  One key per provider, shared by every task assigned to it in Model assignment.
+                  A key can be stored before the provider is assigned. Local providers need no key.
                 </p>
-                {usedProviders.filter((p) => p !== 'local-whisper' && p !== 'local-gigachat-mlx').length === 0 ? (
-                  <p className="profile__note">
-                    No cloud providers are assigned yet. Pick one in Model assignment to add its key here.
-                  </p>
-                ) : (
-                  usedProviders
-                    .filter((p) => p !== 'local-whisper' && p !== 'local-gigachat-mlx')
-                    .map((provider) => (
-                      <ProviderCredentials
-                        key={provider}
-                        provider={provider}
-                        tasks={tasksForProvider(provider)}
-                        profiles={profileFor}
-                        drafts={draftFor}
-                        onApplyKey={applyKeyToTasks}
-                        onChangeBaseUrl={applyBaseUrlToTasks}
-                      />
-                    ))
-                )}
+                {CLOUD_PROVIDERS.map((provider) => (
+                  <ProviderCredentials
+                    key={provider}
+                    provider={provider}
+                    tasks={tasksForProvider(provider)}
+                    hasStoredKey={settings.provider_has_api_key?.[provider] === true}
+                    draftKey={providerKeys[provider]}
+                    onChangeKey={changeProviderKey}
+                  />
+                ))}
               </section>
             )}
 
-            {activeSection === 'local-models' && (
+            {activeSection === 'files' && <StorageRootPanel capturing={capturing} />}
+
+            {activeSection === 'logs' && (
               <section className="settings-section">
-                <h3 className="settings-section__title">Local models</h3>
-                <LocalModelsBrowser />
+                <h3 className="settings-section__title">Logs</h3>
+                <LogsViewer />
               </section>
             )}
           </div>
@@ -413,7 +387,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           {saveError && <span className="profile__note profile__note--warn">{saveError}</span>}
           {saved && !saveError && <span className="profile__note profile__note--ok"><Icon name="check" size={13} /> Saved</span>}
           <Button variant="ghost" onClick={onClose}>Close</Button>
-          <Button variant="primary" onClick={() => void save()} disabled={saving || usedLanguages?.length === 0}>
+          <Button variant="primary" onClick={() => void save()} disabled={activeSection === 'files' || saving || usedLanguages?.length === 0}>
             {saving ? 'Saving…' : 'Save changes'}
           </Button>
         </footer>

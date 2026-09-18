@@ -99,7 +99,7 @@ def openrouter_chat(
     http: httpx.AsyncClient, *, timeout: float = 5.0, model: str = AGENT_MODEL
 ) -> ChatGateway:
     return build_chat(
-        http=http, provider="openrouter", model=model, api_key=API_KEY, base_url=None, timeout=timeout
+        http=http, provider="openrouter", model=model, api_key=API_KEY, timeout=timeout
     )
 
 
@@ -109,7 +109,6 @@ def anthropic_chat(http: httpx.AsyncClient, *, timeout: float = 5.0) -> ChatGate
         provider="anthropic",
         model=ANTHROPIC_MODEL,
         api_key=API_KEY,
-        base_url=None,
         timeout=timeout,
     )
 
@@ -631,8 +630,7 @@ async def test_anthropic_output_tokens_are_logged_as_numbers_only(
 async def prepared_session(client: httpx.AsyncClient, outbound: FakeHttp) -> str:
     configured = await client.put(
         "/settings",
-        json={
-            "asr": {"provider": "openrouter", "model": ASR_MODEL, "api_key": "sk-test"},
+        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": ASR_MODEL},
             "agent": {"provider": "openrouter", "model": AGENT_MODEL},
             "notes": {"provider": "openrouter", "model": AGENT_MODEL},
             "cloud_consent": True,

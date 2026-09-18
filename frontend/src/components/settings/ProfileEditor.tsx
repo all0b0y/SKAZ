@@ -18,6 +18,8 @@ interface ProfileEditorProps {
   description: string;
   profile: Profile;
   draft: ProfileUpdate;
+  /** Whether a key exists for the currently selected provider (stored or pending). */
+  hasProviderKey: boolean;
   onChange: (update: ProfileUpdate) => void;
 }
 
@@ -27,6 +29,7 @@ export function ProfileEditor({
   description,
   profile,
   draft,
+  hasProviderKey,
   onChange,
 }: ProfileEditorProps) {
   const loadModels = useStore((s) => s.loadModels);
@@ -118,19 +121,16 @@ export function ProfileEditor({
   // managed independently in the Local models section (see
   // LocalModelsBrowser) — not tied to whichever checkpoint is picked here.
 
-  // The key itself lives in the API keys section, but its absence is this
-  // card's problem: a cloud provider assigned here with no key set anywhere
-  // (draft or already-saved) will fail every real request. Say so plainly
-  // instead of letting the user discover it only when a call errors out.
-  // A draft key of '' (cleared in this session) counts as missing too.
-  const hasResolvedKey = draft.api_key !== undefined ? draft.api_key.trim().length > 0 : profile.has_api_key;
-  const missingKey = needsKey(provider) && !hasResolvedKey;
+  // The key itself belongs to the provider and is edited in the API keys
+  // section, but its absence is this card's problem: a cloud provider assigned
+  // here with no key will fail every real request. Say so plainly instead of
+  // letting the user discover it only when a call errors out.
+  const missingKey = needsKey(provider) && !hasProviderKey;
 
   const selectProvider = (next: ProviderName) => {
     if (next === provider) return;
     setCustom(false);
-    // Credentials belong to a provider, never carry an unsaved key across.
-    onChange({ ...draft, provider: next, model: '', api_key: undefined, base_url: '' });
+    onChange({ ...draft, provider: next, model: '' });
   };
 
   return (
