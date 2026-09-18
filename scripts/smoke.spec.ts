@@ -55,8 +55,10 @@ test('exposes the secure preload bridge and hides the token', async () => {
 test('surfaces the backend lifecycle honestly (ready or truthful error)', async () => {
   const pill = page.locator('.status-pill');
   await expect(pill).toBeVisible();
-  // Either the backend became ready, or the gate shows a truthful error — but
-  // the app never claims readiness without a real health check.
-  const text = (await pill.textContent())?.toLowerCase() ?? '';
-  expect(text).toMatch(/backend (ready|error)|starting backend/);
+  // The pill renders as a bare coloured dot; the phase is carried by its
+  // accessible name and tooltip, not by visible text. Either the backend became
+  // ready, or the gate names a truthful error — but the app never claims
+  // readiness without a real health check.
+  const label = (await pill.getAttribute('aria-label'))?.toLowerCase() ?? '';
+  expect(label).toMatch(/backend (ready|error|stopped)|starting backend/);
 });

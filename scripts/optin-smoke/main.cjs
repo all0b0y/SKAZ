@@ -29,11 +29,16 @@ if (!requested) {
     fs.mkdirSync(sessionTarget, { recursive: true });
     app.setPath('userData', target);
     app.setPath('sessionData', sessionTarget);
+    // Root-selection smokes must never offer the user's real Documents folder.
+    const documentsTarget = path.join(target, 'Documents');
+    fs.mkdirSync(documentsTarget, { recursive: true });
+    app.setPath('documents', documentsTarget);
     const actualUserData = fs.realpathSync(app.getPath('userData'));
     const actualSessionData = fs.realpathSync(app.getPath('sessionData'));
     if (
       actualUserData !== target
       || actualSessionData !== fs.realpathSync(sessionTarget)
+      || fs.realpathSync(app.getPath('documents')) !== fs.realpathSync(documentsTarget)
     ) {
       refuse('Electron profile paths did not match the requested isolated paths');
     } else {

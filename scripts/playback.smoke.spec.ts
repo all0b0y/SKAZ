@@ -7,7 +7,9 @@ import path from 'node:path';
 const root = path.resolve(__dirname, '..');
 
 test('plays persisted synthetic PCM through authenticated backend, preload, Blob, and real decoder', async () => {
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'audiohelper-playback-smoke-'));
+  // Resolve the symlinked private prefix on macOS: audio writes open every path
+  // segment with O_NOFOLLOW, so an unresolved /var/... temp dir is refused.
+  const temp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'audiohelper-playback-smoke-')));
   const rendererDir = path.join(temp, 'renderer');
   const sanitize = (value: string) => value
     .replaceAll(root, '<root>')

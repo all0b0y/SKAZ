@@ -9,7 +9,7 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./frontend/src/test/setup.ts'],
-    include: ['frontend/src/**/*.{test,spec}.{ts,tsx}'],
+    include: ['frontend/src/**/*.{test,spec}.{ts,tsx}', 'electron/**/*.{test,spec}.ts'],
     exclude: ['node_modules', 'dist', 'scripts/smoke.spec.ts'],
     coverage: {
       provider: 'v8',

@@ -11,6 +11,7 @@ async function launch(directory: string) {
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
       AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory,
+      AUDIOHELPER_SESSION_FILES_ROOT: path.join(directory, 'session-files'),
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
       AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
     },
@@ -27,7 +28,7 @@ async function launch(directory: string) {
 // Browser capture boundary fixture only. Production recorder/store/preload/main/backend are unchanged.
 // No physical microphone, real speech, provider credentials, model loading or external API.
 for (const outcome of ['acknowledged', 'quit-timeout', 'pause-timeout'] as const) {
-test(`capture ${outcome}: quit protects in-flight PCM and preserves received audio after restart`, async () => {
+test(`capture ${outcome}: quit protects in-flight PCM and keeps the session clock after restart`, async () => {
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'audiohelper-quit-smoke-')));
   let active: ElectronApplication | null = null;
   try {
@@ -90,7 +91,7 @@ test(`capture ${outcome}: quit protects in-flight PCM and preserves received aud
     if (outcome === 'pause-timeout') {
       await page.getByRole('button', { name: 'Pause', exact: true }).click();
       await expect(page.getByText(/capture completeness is unknown/)).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Record', exact: true })).toBeEnabled();
+      await expect(page.getByRole('button', { name: 'Continue recording', exact: true })).toBeEnabled();
     }
     const closed = app.waitForEvent('close');
     await app.evaluate(({ app }) => { setImmediate(() => app.quit()); });
@@ -119,23 +120,71 @@ test(`capture ${outcome}: quit protects in-flight PCM and preserves received aud
     await closed;
     active = null;
 
+    const transcriptPath = path.join(directory, 'session-files', 'Ungrouped', id, 'Transcript.md');
+    expect(await fs.readFile(transcriptPath, 'utf8')).toContain('No stable transcript');
+
     const second = await launch(directory);
     active = second.app;
     const result = await second.page.evaluate(async (sessionId) => {
       const detail = await window.audiohelper.request({ method: 'GET', path: `/sessions/${sessionId}` });
+      // Transcript-only policy: the received PCM advances the session clock but
+      // is never archived, so the manifest stays empty and playback refuses.
       const manifest = await window.audiohelper.request<{ chunks: Array<{ sequence: number }> }>({ method: 'GET', path: `/sessions/${sessionId}/audio` });
       if (!manifest.ok) throw new Error('audio manifest unavailable');
-      const samples: number[] = [];
-      for (const chunk of manifest.data.chunks) {
-        const audio = await window.audiohelper.fetchAudio(sessionId, chunk.sequence);
-        if (!audio.ok) throw new Error('tail was not saved');
-        const view = new DataView(audio.data);
-        for (let offset = 44; offset < audio.data.byteLength; offset += 2) samples.push(view.getInt16(offset, true));
-      }
-      return { detail, samples };
+      const audio = await window.audiohelper.fetchAudio(sessionId, 0);
+      return { detail, sequences: manifest.data.chunks.map((chunk) => chunk.sequence),
+        playback: { ok: audio.ok, status: audio.ok ? 200 : audio.status } };
     }, id);
     expect(result.detail).toMatchObject({ ok: true, data: { session: { status: 'stopped', duration_ms: 101 } } });
-    expect(result.samples).toEqual([...Array<number>(1600).fill(32767), ...Array<number>(16).fill(-32768)]);
+    expect(result.sequences).toEqual([]);
+    expect(result.playback).toEqual({ ok: false, status: 404 });
+    expect(await fs.readdir(path.join(directory, 'data', 'audio')).catch(() => [])).toEqual([]);
+    if (outcome === 'acknowledged') {
+      // Reopen through the actual UI/store/writer, not a direct openNative call.
+      await second.page.evaluate(() => {
+        const fixture = { emit: () => {} };
+        Object.assign(window, { continueFixture: fixture });
+        const track = { stop() {}, addEventListener() {} };
+        Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+          enumerateDevices: async () => [],
+          getUserMedia: async () => ({ getTracks: () => [track], getAudioTracks: () => [track] }),
+        } });
+        class Context {
+          sampleRate = 16000;
+          state = 'running';
+          audioWorklet = { addModule: async () => {} };
+          createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+          async close() { this.state = 'closed'; }
+        }
+        class Worklet {
+          port = {
+            onmessage: null as null | ((event: { data: Float32Array | { type: string; id: number } }) => void),
+            postMessage: (message: { type: string; id: number }) => { this.port.onmessage?.({ data: message }); },
+            close() {},
+          };
+          disconnect() {}
+          constructor() { fixture.emit = () => this.port.onmessage?.({ data: new Float32Array(1600).fill(0.5) }); }
+        }
+        Object.assign(window, { AudioContext: Context, AudioWorkletNode: Worklet });
+      });
+      await second.page.getByRole('button', { name: 'Continue recording', exact: true }).click();
+      await expect(second.page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+      await second.page.evaluate(() => (window as unknown as { continueFixture: { emit: () => void } }).continueFixture.emit());
+      await second.page.getByRole('button', { name: 'Pause', exact: true }).click();
+      await expect(second.page.getByRole('button', { name: 'Resume', exact: true })).toBeEnabled();
+      const continued = await second.page.evaluate(async (sid) => ({
+        sessions: await window.audiohelper.request({ method: 'GET', path: '/sessions' }),
+        snapshot: await window.audiohelper.request({ method: 'GET', path: `/sessions/${sid}/live` }),
+        original: await window.audiohelper.fetchAudio(sid, 0).then((audio) => ({ ok: audio.ok, status: audio.ok ? 200 : audio.status })),
+        appended: await window.audiohelper.fetchAudio(sid, 2).then((audio) => ({ ok: audio.ok, status: audio.ok ? 200 : audio.status })),
+      }), id);
+      expect(continued.sessions).toMatchObject({ ok: true, data: { sessions: [{ id }] } });
+      // The restored sample clock proves the earlier capture was accounted for
+      // even though neither the original nor the appended block was archived.
+      expect(continued.snapshot).toMatchObject({ ok: true, data: { saved_samples: 3216, next_sequence: 3, audio_retained: false } });
+      expect(continued.original).toEqual({ ok: false, status: 404 });
+      expect(continued.appended).toEqual({ ok: false, status: 404 });
+    }
   } finally {
     if (active) {
       await active.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; }).catch(() => {});

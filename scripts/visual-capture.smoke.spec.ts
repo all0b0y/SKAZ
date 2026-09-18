@@ -35,6 +35,18 @@ test('capture every surface', async () => {
   await page.waitForTimeout(9000);
   await page.screenshot({ path: path.join(shots, '01-boot.png') });
 
+  // A fresh profile has no spoken languages, so the first-run modal covers the
+  // shell. Answer it the way a user would, then carry on capturing.
+  const onboarding = page.locator('.onboarding');
+  if (await onboarding.count()) {
+    const quick = page.getByRole('button', { name: 'Русский + English' });
+    if (await quick.count()) {
+      await quick.click();
+      await page.getByRole('button', { name: /продолжить/i }).click();
+      await page.waitForTimeout(1500);
+    }
+  }
+
   // Force the shell past the gate and seed realistic data, so the layout can be
   // judged with content rather than empty states only.
   await page.evaluate(() => {
@@ -85,5 +97,36 @@ test('capture every surface', async () => {
       await page.waitForTimeout(700);
       await page.screenshot({ path: path.join(shots, '07-model-assignment.png') });
     }
+
+    const logsSection = page.getByRole('button', { name: 'Logs' });
+    if (await logsSection.count()) {
+      await logsSection.click();
+      await page.waitForTimeout(700);
+      await page.screenshot({ path: path.join(shots, '08-logs.png') });
+    }
+
+    const systemSection = page.getByRole('button', { name: 'System' });
+    if (await systemSection.count()) {
+      await systemSection.click();
+      await page.waitForTimeout(700);
+      await page.screenshot({ path: path.join(shots, '09-system.png'), fullPage: true });
+    }
   }
+});
+
+// The first-run modal only renders when the backend answered and no spoken
+// languages are stored, so it gets its own launch with a clean profile.
+test('capture the first-run language modal', async () => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-onboard-'));
+  const fresh = await electron.launch({
+    args: [mainEntry, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+    cwd: root,
+    env: { ...process.env, NODE_ENV: 'production', SKAZ_SHOT_USER_DATA: userData },
+  });
+  const freshPage = await fresh.firstWindow();
+  await freshPage.waitForLoadState('domcontentloaded');
+  await freshPage.setViewportSize({ width: 1280, height: 820 });
+  await freshPage.waitForTimeout(12000);
+  await freshPage.screenshot({ path: path.join(shots, '10-first-run.png') });
+  await fresh.close();
 });
