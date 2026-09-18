@@ -113,7 +113,7 @@ def secrets() -> MemorySecretStore:
 
 @pytest.fixture
 def config(tmp_path: Path) -> AppConfig:
-    return AppConfig(token=TOKEN, data_dir=tmp_path / "data", request_timeout_s=5.0)
+    return AppConfig(token=TOKEN, data_dir=tmp_path / "data", request_timeout_s=5.0, retain_native_audio=True)
 
 
 @pytest.fixture

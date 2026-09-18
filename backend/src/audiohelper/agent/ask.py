@@ -191,7 +191,6 @@ def _gateway(runtime: Runtime) -> ChatGateway:
         provider=profile.provider,
         model=profile.model,
         api_key=runtime.api_key(profile.provider),
-        base_url=profile.base_url,
         timeout=runtime.config.request_timeout_s,
     )
 

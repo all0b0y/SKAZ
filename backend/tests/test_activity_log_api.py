@@ -176,8 +176,7 @@ def answering(payload: dict[str, Any]) -> Handler:
 async def configure(client: httpx.AsyncClient) -> None:
     response = await client.put(
         "/settings",
-        json={
-            "asr": {"provider": "openrouter", "model": ASR_MODEL, "api_key": API_KEY},
+        json={"provider_keys": {"openrouter": API_KEY}, "asr": {"provider": "openrouter", "model": ASR_MODEL},
             "agent": {"provider": "openrouter", "model": AGENT_MODEL},
             "notes": {"provider": "openrouter", "model": AGENT_MODEL},
             "cloud_consent": True,
@@ -568,15 +567,13 @@ async def test_concurrent_installations_keep_independent_logs(
         assert entry["sequence"] == 1
 
 
-@pytest.mark.parametrize("provider", ["openai", "openai-compatible"])
-async def test_other_asr_adapters_also_reject_error_payloads_without_leaking(
-    client: httpx.AsyncClient, outbound: FakeHttp, provider: str
+async def test_the_openai_asr_adapter_also_rejects_error_payloads_without_leaking(
+    client: httpx.AsyncClient, outbound: FakeHttp
 ) -> None:
+    provider = "openai"
     configured = await client.put("/settings", json={
-        "asr": {
-            "provider": provider, "model": "whisper-1", "api_key": API_KEY,
-            "base_url": "http://127.0.0.1:1234/v1" if provider == "openai-compatible" else None,
-        },
+        "provider_keys": {provider: API_KEY},
+        "asr": {"provider": provider, "model": "whisper-1"},
         "cloud_consent": True,
     })
     assert configured.status_code == 200
