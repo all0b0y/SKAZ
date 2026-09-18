@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="icon/icon2.png" alt="SKAZ icon" width="128" height="128">
+
 # 🗣️ SKAZ
 
 **A desktop companion for lectures and meetings that listens, transcribes, translates and takes notes — grounded in what was actually said.**
