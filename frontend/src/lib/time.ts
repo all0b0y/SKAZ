@@ -8,6 +8,11 @@ export const DEFAULT_WINDOW_MINUTES: WindowPreset = 5;
 
 const pad2 = (n: number): string => n.toString().padStart(2, '0');
 
+/** Local wall-clock title; stable date/minute format regardless of OS locale. */
+export function defaultSessionTitle(date = new Date()): string {
+  return `${pad2(date.getDate())}.${pad2(date.getMonth() + 1)}.${date.getFullYear()}, ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
 /** Format milliseconds as mm:ss, or h:mm:ss once past an hour. */
 export function formatTimecode(ms: number): string {
   const totalSeconds = Math.floor(Math.max(0, ms) / 1000);

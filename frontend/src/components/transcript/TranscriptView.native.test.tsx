@@ -163,8 +163,9 @@ describe('native transcript read model', () => {
     expect(turns[1]).toHaveTextContent('Спикер 2Yes.');
     expect(turns[2]).toHaveTextContent('Спикер 1And now');
     expect(within(list).queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.queryByText('Soniox: transcribing')).not.toBeVisible();
-    expect(screen.queryByText('Draft — not used for answers or notes.')).not.toBeVisible();
+    expect(screen.queryByText('Soniox: transcribing')).not.toBeInTheDocument();
+    expect(screen.queryByText('Draft — not used for answers or notes.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Diagnostic audio' })).not.toBeInTheDocument();
     tailSpeaker = '2';
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(within(list).getAllByRole('listitem')).toHaveLength(4);

@@ -240,7 +240,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
 
   return (
     <div className={clsx('transcript-layout', cleanNative && 'transcript-layout--native')}>
-      {activeSessionId && (
+      {!cleanNative && activeSessionId && (
         <div className="transcript__diagnostics">
           <button
             type="button"
@@ -274,7 +274,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
         </div> : native.snapshot?.recording_mode === 'audio_only' ? null : native.snapshot?.transcription === 'unavailable' ? (
           <span role="alert">Сбой распознавания. Soniox недоступен.</span>
         ) : native.snapshot?.gaps.length ? (
-          <span role="status">Часть сохранённого аудио не распознана.</span>
+          <span role="status">В транскрипции есть пропуски.</span>
         ) : recorderState === 'processing' ? <span role="status">Завершаем обработку…</span> : null}
       </div>}
       <div className="transcript" ref={scrollRef} onScroll={(event) => {
