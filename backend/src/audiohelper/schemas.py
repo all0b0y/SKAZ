@@ -14,9 +14,12 @@ Provider = Literal[
     "openai",
     "openrouter",
     "anthropic",
-    "openai-compatible",
 ]
 LocalProvider = Literal["local-whisper", "local-gigachat-mlx"]
+CloudProvider = Literal["openai", "openrouter", "anthropic", "soniox"]
+#: Cloud providers that own an API key. The key belongs to the provider, not to a
+#: task profile: two tasks on the same provider share one credential.
+CLOUD_PROVIDERS: tuple[str, ...] = ("openai", "openrouter", "anthropic", "soniox")
 Task = Literal["asr", "agent", "notes"]
 SessionStatus = Literal["recording", "paused", "stopped"]
 SessionMode = Literal["legacy", "contextual_local"]
@@ -29,12 +32,14 @@ AsrContract = Literal["dedicated", "legacy"]
 
 
 class Profile(BaseModel):
-    """Sanitised model profile. Never carries an API key."""
+    """Sanitised model profile. Never carries an API key.
+
+    Key presence is not a profile fact: it lives in ``Settings.provider_has_api_key``,
+    keyed by provider, because one credential serves every task on that provider.
+    """
 
     provider: Provider
     model: str
-    base_url: str | None = None
-    has_api_key: bool = False
     #: True only after this installation completed a successful call with this provider+model.
     verified: bool = False
     verification_note: str | None = None
@@ -45,8 +50,6 @@ class ProfileUpdate(BaseModel):
 
     provider: Provider | None = None
     model: str | None = None
-    base_url: str | None = None
-    api_key: str | None = None
 
 
 class Settings(BaseModel):
@@ -55,7 +58,9 @@ class Settings(BaseModel):
     # Preferences for the next native recording, not a running session's config.
     native_recording_mode: NativeRecordingMode = "transcription"
     translation_target_language: str = "ru"
-    soniox_has_api_key: bool = False
+
+    #: Key presence per cloud provider, independent of which task uses it.
+    provider_has_api_key: dict[str, bool] = Field(default_factory=dict)
     asr: Profile
     agent: Profile
     notes: Profile
@@ -77,8 +82,12 @@ class SettingsUpdate(BaseModel):
         pattern=r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
     )
 
-    # None/omitted preserves the credential; an empty string explicitly deletes.
-    soniox_api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
+
+    #: Provider-scoped API keys, the only way to write a model provider credential.
+    #: An omitted provider keeps its stored key; an empty string deletes it.
+    provider_keys: dict[CloudProvider, SecretStr] | None = Field(
+        default=None, exclude=True, repr=False
+    )
 
     asr: ProfileUpdate | None = None
     agent: ProfileUpdate | None = None
@@ -254,6 +263,15 @@ class Citation(BaseModel):
     start_ms: int
     end_ms: int
     text: str
+    #: Where this citation points as a unit of speech: one monologue and a token
+    #: range inside it. The monologue's displayed number is worked out against the
+    #: current transcript, never stored, so an edit elsewhere cannot silently move
+    #: what a note claims to rest on. Absent on citations made before monologues
+    #: existed, which then resolve by ``segment_id`` alone.
+    monologue_id: str | None = None
+    start_token_id: str | None = None
+    end_token_id: str | None = None
+    speaker: int | None = None
 
 
 class Message(BaseModel):
@@ -265,8 +283,17 @@ class Message(BaseModel):
 
 
 class Note(BaseModel):
+    id: str = ""
+    revision: int = 1
+    source_revision: int | None = None
+    stale: bool = True
     content: str
+    # The note's own name, independent of its text: renaming never rewrites the
+    # document. Empty means the UI falls back to the document's first line.
+    title: str = ""
     created_at: str
+    # Last accepted write, which is what the notes list is ordered by.
+    updated_at: str = ""
     model: str
     citations: list[Citation] = Field(default_factory=list)
 
@@ -276,6 +303,7 @@ class SessionDetail(BaseModel):
     segments: list[Segment]
     messages: list[Message]
     notes: Note | None = None
+    notes_list: list[Note] = Field(default_factory=list)
 
 
 class DeleteResponse(BaseModel):
@@ -565,3 +593,73 @@ class NotesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     language: str | None = None
+    replace_note_id: str | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
+    #: How dense the notes should be. Affects only how much is written, never how
+    #: firmly it must rest on the transcript.
+    detail: Literal["brief", "normal", "detailed"] = "normal"
+
+    @model_validator(mode="after")
+    def replacement_requires_revision(self) -> NotesRequest:
+        if (self.replace_note_id is None) != (self.expected_revision is None):
+            raise ValueError("Replacement requires both note id and expected revision.")
+        return self
+
+
+class NoteRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=1)
+
+
+class EditNoteRequest(NoteRevisionRequest):
+    """Either the document or its name, or both.
+
+    Both are optional because renaming and editing are separate acts: a rename
+    carries no content, and a text edit must not clear the name.
+    """
+    content: str | None = Field(default=None, max_length=200_000)
+    title: str | None = Field(default=None, max_length=400)
+
+
+class NoteVersion(BaseModel):
+    id: str
+    expires_at: float
+    note: Note
+
+
+class RewritePassageRequest(NoteRevisionRequest):
+    """Rewrite exactly ``content[start:end]`` of a note.
+
+    The span is character offsets into the note's stored content, and the revision
+    they were read from travels with them: offsets into a document that has since
+    changed point at different text, so the pair is checked rather than trusted.
+    """
+
+    start: int = Field(ge=0)
+    end: int = Field(ge=1)
+    language: str | None = None
+    detail: Literal["brief", "normal", "detailed"] = "normal"
+
+    @model_validator(mode="after")
+    def span_is_forward(self) -> RewritePassageRequest:
+        if self.end <= self.start:
+            raise ValueError("The selection must end after it starts.")
+        return self
+
+
+class RewritePreview(BaseModel):
+    """A written replacement waiting for the user's decision. Nothing is stored yet."""
+
+    id: str
+    note_id: str
+    revision: int
+    start: int
+    end: int
+    original: str
+    replacement: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class ApplyRewriteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    preview_id: str
