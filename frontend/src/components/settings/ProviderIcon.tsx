@@ -19,7 +19,6 @@ export const PROVIDER_LABELS: Record<ProviderName, string> = {
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
   anthropic: 'Anthropic',
-  'openai-compatible': 'OpenAI-compatible',
   'claude-code': 'Claude Code',
 };
 

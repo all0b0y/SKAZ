@@ -25,7 +25,7 @@ async def test_asr_transport_error_never_exposes_exception_text(
         gateway: Transcriber
         if adapter == "openai":
             gateway = OpenAITranscriber(
-                http, model="whisper-1", api_key="test", base_url=None, provider="openai", timeout=1
+                http, model="whisper-1", api_key="test", provider="openai", timeout=1
             )
         elif adapter == "dedicated":
             gateway = OpenRouterTranscriber(http, model="test", api_key="test", timeout=1)

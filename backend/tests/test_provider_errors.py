@@ -72,7 +72,6 @@ def openrouter_chat(http: httpx.AsyncClient) -> ChatGateway:
         provider="openrouter",
         model=AGENT_MODEL,
         api_key="sk-test",
-        base_url=None,
         timeout=5.0,
     )
 
@@ -83,7 +82,6 @@ def anthropic_chat(http: httpx.AsyncClient) -> ChatGateway:
         provider="anthropic",
         model="claude-test",
         api_key="sk-test",
-        base_url=None,
         timeout=5.0,
     )
 
@@ -303,8 +301,7 @@ async def test_valid_anthropic_blocks_still_produce_an_answer(
 async def prepared_session(client: httpx.AsyncClient, outbound: FakeHttp) -> str:
     configured = await client.put(
         "/settings",
-        json={
-            "asr": {"provider": "openrouter", "model": ASR_MODEL, "api_key": "sk-test"},
+        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": ASR_MODEL},
             "agent": {"provider": "openrouter", "model": AGENT_MODEL},
             "notes": {"provider": "openrouter", "model": AGENT_MODEL},
             "cloud_consent": True,

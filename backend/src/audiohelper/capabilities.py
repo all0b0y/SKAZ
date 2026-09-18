@@ -17,7 +17,7 @@ from .local_models import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
 from .schemas import Profile, Task
 from .settings_store import StoredProfile
 
-CHAT_PROVIDERS = ("openai", "openrouter", "anthropic", "openai-compatible")
+CHAT_PROVIDERS = ("openai", "openrouter", "anthropic")
 
 
 class IncompatibleProfile(ValueError):
@@ -60,12 +60,6 @@ async def _validate_asr(profile: StoredProfile, catalogs: ProviderCatalogs) -> N
                 f"Supported: {', '.join(OPENAI_TRANSCRIPTION_MODELS)}."
             )
         return
-    if provider == "openai-compatible":
-        if not profile.base_url:
-            raise IncompatibleProfile(
-                "openai-compatible ASR requires base_url of the transcriptions endpoint."
-            )
-        return
     try:
         await catalogs.openrouter_asr_kind(profile.model)
     except CatalogUnavailable as error:
@@ -83,8 +77,6 @@ async def _validate_chat(task: Task, profile: StoredProfile, catalogs: ProviderC
         raise IncompatibleProfile(
             f"'{profile.model}' uses the transcription endpoint and cannot be used for {task}."
         )
-    if profile.provider == "openai-compatible" and not profile.base_url:
-        raise IncompatibleProfile("openai-compatible profiles require base_url.")
     if profile.provider != "openrouter":
         return
     try:
@@ -106,18 +98,17 @@ def describe(
     task: Task,
     profile: StoredProfile,
     *,
-    has_api_key: bool,
     verification: str | None,
     asr_kind: str | None = None,
 ) -> Profile:
-    """Build the sanitised API view of a stored profile."""
+    """Build the sanitised API view of a stored profile.
+
+    Key presence is deliberately absent: it is reported once per provider in
+    ``Settings.provider_has_api_key``, not repeated per task.
+    """
     return Profile(
         provider=profile.provider,
         model=profile.model,
-        base_url=profile.base_url,
-        has_api_key=(
-            has_api_key if profile.provider not in ("local-whisper", GIGACHAT_PROVIDER) else False
-        ),
         verified=verification is not None,
         verification_note=(
             verification if verification is not None else _pending_note(task, profile, asr_kind)
@@ -148,6 +139,4 @@ def _pending_note(task: Task, profile: StoredProfile, asr_kind: str | None) -> s
         return "Dedicated OpenRouter speech-to-text endpoint. No successful transcription recorded yet."
     if task == "asr" and profile.provider == "openai":
         return "OpenAI /v1/audio/transcriptions model. No successful transcription recorded yet."
-    if task == "asr":
-        return "Custom transcription endpoint. No successful transcription recorded yet."
     return "No successful request recorded yet."

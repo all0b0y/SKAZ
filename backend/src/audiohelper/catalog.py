@@ -132,10 +132,6 @@ class ProviderCatalogs:
                     max_output_tokens=512,
                 )
             ]
-        if provider == "openai-compatible":
-            raise CatalogUnavailable(
-                "openai-compatible endpoints have no discovery contract; enter the model id manually."
-            )
         if provider == "openrouter" and task == "asr":
             return await self._openrouter_asr_entries()
         # Only OpenRouter has a task-specific discovery URL; other catalogs are one list.

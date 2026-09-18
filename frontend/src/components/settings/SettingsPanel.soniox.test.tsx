@@ -33,7 +33,11 @@ beforeEach(async () => {
           translation_target_language: update.translation_target_language ?? saved.translation_target_language,
           used_languages: update.used_languages ?? saved.used_languages,
           cloud_consent: update.cloud_consent ?? saved.cloud_consent,
-          ...('soniox_api_key' in update ? { soniox_has_api_key: Boolean(update.soniox_api_key) } : {}),
+          provider_has_api_key: {
+            ...saved.provider_has_api_key,
+            ...(update.provider_keys?.soniox !== undefined
+              ? { soniox: Boolean(update.provider_keys.soniox) } : {}),
+          },
         };
       }
       return { ok: true, status: 200, data: saved as T };
@@ -127,7 +131,7 @@ describe('Soniox credentials and explicit consent', () => {
     expect(writes()).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await screen.findByText(/No Soniox key stored/);
-    expect(writes()[2]?.body).toEqual({ soniox_api_key: '' });
+    expect(writes()[2]?.body).toEqual({ provider_keys: { soniox: '' } });
   });
 
   it('saves a masked Soniox key without changing ASR profiles or granting cloud consent', async () => {
@@ -139,7 +143,7 @@ describe('Soniox credentials and explicit consent', () => {
     await user.type(input, 'soniox-fixture-only');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await screen.findByText(/Soniox key stored/i);
-    expect(writes().map((r) => r.body)).toEqual([{ soniox_api_key: 'soniox-fixture-only' }]);
+    expect(writes().map((r) => r.body)).toEqual([{ provider_keys: { soniox: 'soniox-fixture-only' } }]);
     expect(input).toHaveValue('');
     expect(localStorage.getItem('soniox_api_key')).toBeNull();
     expect(sessionStorage.getItem('soniox_api_key')).toBeNull();

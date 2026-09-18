@@ -13,7 +13,7 @@ class ProviderError(RuntimeError):
     """The provider was called and did not return a usable answer."""
 
 
-CLOUD_PROVIDERS = frozenset({"openai", "openrouter", "anthropic", "openai-compatible"})
+CLOUD_PROVIDERS = frozenset({"openai", "openrouter", "anthropic"})
 
 
 def require_cloud_consent(provider: str, cloud_consent: bool, material: str) -> None:

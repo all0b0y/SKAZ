@@ -3,7 +3,7 @@
 Three real contracts, no fallbacks between them:
 
 * ``local-whisper`` — faster-whisper on this machine (optional dependency).
-* ``openai`` / ``openai-compatible`` — the dedicated /v1/audio/transcriptions endpoint.
+* ``openai`` — the dedicated /v1/audio/transcriptions endpoint.
 * ``openrouter`` — the dedicated /audio/transcriptions JSON endpoint. The old
   audio-input chat contract remains available only for a manually selected legacy
   model and can never establish ASR verification.
@@ -108,7 +108,7 @@ class Transcriber(Protocol):
 
 
 class OpenAITranscriber:
-    """OpenAI (or an openai-compatible server) /audio/transcriptions."""
+    """OpenAI /audio/transcriptions."""
 
     can_verify_asr = True
 
@@ -118,7 +118,6 @@ class OpenAITranscriber:
         *,
         model: str,
         api_key: str,
-        base_url: str | None,
         provider: str,
         timeout: float,
     ) -> None:
@@ -126,12 +125,12 @@ class OpenAITranscriber:
         self.model = model
         self.provider = provider
         self._api_key = api_key
-        self._base = (base_url or OPENAI_BASE_URL).rstrip("/")
+        self._base = OPENAI_BASE_URL.rstrip("/")
         self._timeout = timeout
 
     @observed_transcription
     async def transcribe(self, audio: WavAudio, *, language: str | None) -> list[TranscriptPiece]:
-        verbose = self.model == "whisper-1" or self.provider == "openai-compatible"
+        verbose = self.model == "whisper-1"
         data = {"model": self.model, "response_format": "verbose_json" if verbose else "json"}
         if language and language != "auto":
             data["language"] = language
@@ -1037,7 +1036,6 @@ def build_transcriber(
     provider: str,
     model: str,
     api_key: str | None,
-    base_url: str | None,
     timeout: float,
     allow_download: bool,
     speech_gate_enabled: bool = False,
@@ -1072,17 +1070,6 @@ def build_transcriber(
         if model not in OPENAI_TRANSCRIPTION_MODELS:
             raise ProviderNotConfigured(f"'{model}' is not an OpenAI transcription model.")
         return OpenAITranscriber(
-            http, model=model, api_key=api_key, base_url=None, provider="openai", timeout=timeout
-        )
-    if provider == "openai-compatible":
-        if not base_url:
-            raise ProviderNotConfigured("openai-compatible ASR requires base_url.")
-        return OpenAITranscriber(
-            http,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            provider="openai-compatible",
-            timeout=timeout,
+            http, model=model, api_key=api_key, provider="openai", timeout=timeout
         )
     raise ProviderNotConfigured(f"Provider '{provider}' has no speech-to-text adapter.")
