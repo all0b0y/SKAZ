@@ -7,7 +7,29 @@ import {
 } from '../../../electron/ipcPolicy';
 
 describe('Electron IPC policy', () => {
+  it('allows only GET and PUT of the root preference, not arbitrary file access', () => {
+    for (const method of ['GET', 'PUT']) {
+      expect(validateBridgeRequest({ method, path: '/storage/root' })).toBeNull();
+    }
+    for (const method of ['POST', 'DELETE', 'PATCH']) {
+      expect(validateBridgeRequest({ method, path: '/storage/root' })).not.toBeNull();
+    }
+    expect(validateBridgeRequest({ method: 'GET', path: '/storage/root/file' })).not.toBeNull();
+  });
+  it('allows only session-scoped file status and explicit projection, never filesystem operations', () => {
+    for (const method of ['GET', 'POST']) {
+      expect(validateBridgeRequest({ method, path: '/sessions/a/files' })).toBeNull();
+    }
+    for (const method of ['PATCH', 'PUT', 'DELETE']) {
+      expect(validateBridgeRequest({ method, path: '/sessions/a/files' })).toMatch(/not allowed/i);
+    }
+    for (const path of ['/files', '/sessions/a/files/delete', '/sessions/a/files/../../settings']) {
+      expect(validateBridgeRequest({ method: 'POST', path })).not.toBeNull();
+    }
+  });
   it('opens only http and https external links', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/files/preserve' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/files/preserve' })).not.toBeNull();
     expect(isAllowedExternalUrl('https://example.com/help')).toBe(true);
     expect(isAllowedExternalUrl('http://example.com/help')).toBe(true);
     expect(isAllowedExternalUrl('file:///etc/passwd')).toBe(false);
@@ -28,6 +50,35 @@ describe('Electron IPC policy', () => {
     expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/asr/live/scheduler' })).toBeNull();
     expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/live/advance', body: { through_sequence: 3 } })).toBeNull();
     expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/live/update', body: {} })).toMatch(/not allowed/i);
+  });
+
+  // Regression: the renderer calls these four routes (NotesPanel "create note",
+  // TranscriptView fragment load/edit/accept). They were missing from the
+  // allow-list, so note creation failed and the live transcript stayed empty.
+  it('allows note creation and the live fragment routes the renderer actually calls', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/notes/empty' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/asr/fragments' })).toBeNull();
+    expect(
+      validateBridgeRequest({ method: 'PUT', path: '/sessions/a/asr/fragments/f1/text', body: { text: 'x' } }),
+    ).toBeNull();
+    expect(
+      validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/fragments/f1/accept', body: {} }),
+    ).toBeNull();
+    // Neighbouring shapes stay closed.
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/notes/empty' })).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/notes/n1/text' })).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/asr/fragments/f1' })).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/fragments' })).toMatch(/not allowed/i);
+  });
+
+  it('allows soft deletion of one note and nothing adjacent', () => {
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/notes/n1' })).toBeNull();
+    // Deleting every note of a session is not an action the renderer may take.
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/notes' })).toMatch(/not allowed/i);
+    expect(
+      validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/notes/n1/history' }),
+    ).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'PUT', path: '/sessions/a/notes/n1' })).toMatch(/not allowed/i);
   });
 
   it('bounds JSON bodies and audio upload metadata/body size', () => {
