@@ -67,6 +67,7 @@ export function RecorderBar() {
   const queue = useStore((s) => s.queue);
   const transcription = useStore((s) => s.transcription);
   const detail = useStore((s) => s.detail);
+  const session = useStore((s) => s.sessions.find((item) => item.id === s.activeSessionId));
   const recorderError = useStore((s) => s.recorderError);
   const pendingSessionStatus = useStore((s) => s.pendingSessionStatus);
   const recordingMode = useStore((s) => s.nextRecordingMode);
@@ -86,6 +87,7 @@ export function RecorderBar() {
   const transcriptionFailed = transcription.failed.length + transcription.diskFailed;
   const transcriptionPending = transcription.pending + transcription.deferred;
   const contextualDisabled = recordingMode === 'contextual_local' && !liveCapabilities?.capable;
+  const hasRecording = Boolean(session && (session.duration_ms > 0 || (detail?.segments.length ?? 0) > 0));
 
 
   // Honest transcription progress: the only real numbers on hand are how
@@ -113,13 +115,13 @@ export function RecorderBar() {
             {!capturing && (
               <Button
                 variant="live"
-                icon="mic"
+                icon={hasRecording ? 'play' : 'mic'}
                 iconFilled
                 disabled={contextualDisabled}
                 title={contextualDisabled ? liveCapabilities?.detail ?? undefined : undefined}
-                onClick={() => void start()}
+                onClick={() => void (hasRecording ? resume() : start())}
               >
-                Record
+                {hasRecording ? 'Continue recording' : 'Record'}
               </Button>
             )}
             {state === 'processing' && (
@@ -175,7 +177,7 @@ export function RecorderBar() {
           <div className="recorder__feed">
             {queue.overflow && (
               <span className="pill pill--warn">
-                <Icon name="warning" size={13} /> Capture stopped · unsaved audio protected for retry
+                <Icon name="warning" size={13} /> Capture stopped · buffered audio retained for retry
               </span>
             )}
             {failedCount > 0 && (

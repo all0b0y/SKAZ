@@ -30,6 +30,8 @@ beforeEach(() => {
       diskFailed: 0, blockedByConsent: false, lastError: null,
     },
     detail: null,
+    sessions: [],
+    activeSessionId: null,
     recorderError: null,
     pendingSessionStatus: null,
     pendingSessionStatusSessionId: null,
@@ -44,6 +46,17 @@ beforeEach(() => {
 });
 
 describe('RecorderBar', () => {
+  it('offers continuation, not a new Record action, for a reopened recording', async () => {
+    const resume = vi.fn();
+    useStore.setState({
+      activeSessionId: 'recorded', recorderState: 'stopped', resumeRecording: resume,
+      sessions: [{ id: 'recorded', title: 'Recorded', created_at: '', status: 'stopped', duration_ms: 1000, mode: 'legacy' }],
+    });
+    render(<RecorderBar />);
+    expect(screen.queryByRole('button', { name: 'Record' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Continue recording' }));
+    expect(resume).toHaveBeenCalledOnce();
+  });
   it('disables Record when the chosen contextual mode is not capable', () => {
     useStore.setState({
       nextRecordingMode: 'contextual_local',
@@ -85,7 +98,7 @@ describe('RecorderBar', () => {
       }),
     });
     render(<RecorderBar />);
-    expect(screen.getByText(/Capture stopped.*unsaved audio protected/i)).toBeInTheDocument();
+    expect(screen.getByText(/Capture stopped.*buffered audio retained/i)).toBeInTheDocument();
     expect(screen.queryByText(/dropped/i)).not.toBeInTheDocument();
   });
 
