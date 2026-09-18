@@ -46,6 +46,8 @@ class AppConfig:
     request_timeout_s: float = 90.0
     #: Outbound HTTP timeout for transcription calls.
     asr_timeout_s: float = 120.0
+    #: Native capture retains transcripts only; archival code remains available for explicit tests.
+    retain_native_audio: bool = False
     #: How many audio chunks may wait for transcription per session before the API pushes back.
     max_pending_chunks: int = 8
     max_chunk_seconds: float = 30.0
@@ -71,6 +73,9 @@ class AppConfig:
     #: Optional application-owned Hugging Face cache. None preserves the existing
     #: shared cache so already-prepared Whisper checkpoints keep working.
     local_model_cache_dir: Path | None = None
+    #: Explicit read-only override; otherwise use the opt-in persisted preference.
+    session_files_root: Path | None = None
+    documents_dir: Path = field(default_factory=lambda: Path.home() / "Documents")
 
     @property
     def audio_dir(self) -> Path:
@@ -95,6 +100,14 @@ class AppConfig:
             token=token,
             data_dir=data_dir,
             port=port,
+            documents_dir=Path(os.environ.get(
+                "AUDIOHELPER_DOCUMENTS_DIR", str(Path.home() / "Documents"),
+            )),
+            session_files_root=(
+                Path(value).expanduser()
+                if (value := os.environ.get("AUDIOHELPER_SESSION_FILES_ROOT", "").strip())
+                else None
+            ),
             extra_allowed_origins=origins,
             local_speech_gate=_boolean_env("AUDIOHELPER_LOCAL_SPEECH_GATE"),
             live_finality_enabled=_boolean_env("AUDIOHELPER_LIVE_FINALITY"),

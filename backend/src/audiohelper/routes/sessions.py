@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-import shutil
+
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
+from .. import note_store
 from .. import repository as repo
 from ..audio import InvalidAudio
 from ..gateways import ProviderError, ProviderNotConfigured
@@ -20,6 +21,7 @@ from ..live_scheduler import LiveSchedulerBusy, LiveSchedulerConflict, LiveSched
 from ..live_store import LiveConflict
 from ..native_io import disk_call, drain_on_cancel
 from ..schemas import (
+    AcceptLiveAsrFragmentRequest,
     AsrPreviewRequest,
     AsrPreviewResponse,
     AudioManifestChunk,
@@ -28,7 +30,6 @@ from ..schemas import (
     CreateSessionRequest,
     DeleteResponse,
     EditLiveAsrFragmentRequest,
-    AcceptLiveAsrFragmentRequest,
     LiveAsrAdvanceRequest,
     LiveAsrAdvanceResponse,
     LiveAsrDraftResponse,
@@ -42,6 +43,7 @@ from ..schemas import (
     SessionsResponse,
     StoredAudioResponse,
 )
+from ..session_files import FileDeletionBlocked
 from ..window_asr import (
     PreviewBusy,
     PreviewDecodeFailed,
@@ -122,9 +124,28 @@ def list_sessions(runtime: RuntimeDep) -> SessionsResponse:
 
 @router.post("")
 def create_session(payload: CreateSessionRequest, runtime: RuntimeDep) -> Session:
-    return repo.create_session(
-        runtime.db, payload.title.strip() or "Untitled session", mode=payload.mode
-    )
+    return runtime.storage.create(payload.title.strip() or "Untitled session", payload.mode)
+
+
+@router.get("/{session_id}/files")
+def session_files_status(session_id: str, runtime: RuntimeDep) -> dict[str, Any]:
+    _require_session(runtime, session_id)
+    return runtime.session_files.status(session_id)
+
+
+@router.post("/{session_id}/files")
+def project_session_files(session_id: str, runtime: RuntimeDep) -> dict[str, Any]:
+    _require_session(runtime, session_id)
+    return runtime.session_files.project(session_id)
+
+
+@router.post("/{session_id}/files/preserve")
+def preserve_session_files(session_id: str, runtime: RuntimeDep) -> dict[str, Any]:
+    _require_session(runtime, session_id)
+    try:
+        return runtime.session_files.preserve(session_id)
+    except FileDeletionBlocked as error:
+        raise HTTPException(status_code=409, detail="File preservation needs attention.") from error
 
 
 def _guard_contextual_writer(runtime: RuntimeDep, session: Session) -> None:
@@ -145,6 +166,7 @@ def read_session(session_id: str, runtime: RuntimeDep) -> SessionDetail:
         segments=repo.list_segments(runtime.db, session_id),
         messages=repo.list_messages(runtime.db, session_id),
         notes=repo.latest_note(runtime.db, session_id),
+        notes_list=note_store.list_notes(runtime.db, session_id),
     )
 
 
@@ -335,6 +357,8 @@ async def patch_session(session_id: str, payload: PatchSessionRequest, runtime: 
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' does not exist.")
     if updated.mode == "contextual_local" and payload.status == "stopped":
         runtime.live_scheduler.source_ended(session_id)
+    if payload.status in ("stopped", "paused"):
+        await disk_call(runtime.session_files.project, session_id)
     return updated
 
 
@@ -344,8 +368,18 @@ async def delete_session(session_id: str, runtime: RuntimeDep) -> DeleteResponse
         await runtime.stop_native(session_id)
         try:
             await disk_call(_require_session, runtime, session_id)
-            await disk_call(repo.delete_session, runtime.db, session_id)
-            await disk_call(shutil.rmtree, runtime.config.audio_dir / session_id, ignore_errors=True)
+            try:
+                if runtime.storage.enabled():
+                    await disk_call(runtime.storage.delete, session_id)
+                else:
+                    await disk_call(runtime.session_files.delete_session, session_id)
+            except FileDeletionBlocked as error:
+                raise HTTPException(status_code=409, detail=(
+                    "Session was not deleted: Markdown files need attention. "
+                    "Preserve external/conflict/recovery files outside the session folder "
+                    "and retry. If the files root changed, restore the previous root first."
+                )) from error
+
         finally:
             runtime.native_closing.discard(session_id)
 
@@ -455,6 +489,9 @@ async def read_audio(session_id: str, sequence: int, runtime: RuntimeDep) -> Res
     if chunk is None:
         raise HTTPException(status_code=404, detail=f"No audio stored for sequence {sequence}.")
     path = Path(chunk.path)
+    if runtime.storage.enabled():
+        return Response(content=await disk_call(runtime.storage.read_audio, session_id, sequence),
+                        media_type="audio/wav")
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Audio file for sequence {sequence} is missing on disk.")
     return Response(

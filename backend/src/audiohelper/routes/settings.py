@@ -33,19 +33,12 @@ async def update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Setti
 async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Settings:
     current = runtime.settings_store.load()
     merged = apply_update(current, payload)
-    key_updates: dict[str, str] = {}
-    for task in TASKS:
-        patch = getattr(payload, task)
-        if patch is not None and patch.api_key is not None:
-            provider = merged.profile(task).provider
-            if provider in ("local-whisper", "local-gigachat-mlx"):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Local ASR providers do not accept API keys.",
-                )
-            if provider in key_updates and key_updates[provider] != patch.api_key:
-                raise HTTPException(status_code=400, detail="Conflicting API keys for the same provider.")
-            key_updates[provider] = patch.api_key
+    # Keys are provider-scoped: a credential is written for a provider regardless of
+    # which task (if any) currently uses it, so a key can be saved ahead of assignment.
+    key_updates: dict[str, str] = {
+        provider: secret.get_secret_value()
+        for provider, secret in (payload.provider_keys or {}).items()
+    }
     catalogs = runtime.catalogs
     if key_updates:
         # Request-local credentials: validate with the proposed key without changing
@@ -63,30 +56,22 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
             await validate_profile(task, merged.profile(task), catalogs)
         except IncompatibleProfile as error:
             raise HTTPException(status_code=400, detail=f"{task}: {error}") from error
-    # Keys are stored outside the database and only after the profile itself is valid.
-    for task in TASKS:
-        patch = getattr(payload, task)
-        if patch is not None and patch.api_key is not None:
-            provider = merged.profile(task).provider
-            if patch.api_key:
-                runtime.secrets.set(provider, patch.api_key)
-            else:
-                runtime.secrets.delete(provider)
     async def save_and_revoke() -> None:
         remove_soniox = False
-        if payload.soniox_api_key is not None:
-            key = payload.soniox_api_key.get_secret_value()
-            remove_soniox = not key
-            try:
-                if key:
-                    await disk_call(runtime.secrets.set, "soniox", key)
-                else:
-                    await disk_call(runtime.secrets.delete, "soniox")
-            except Exception:
-                raise HTTPException(
-                    status_code=503, detail="Could not update the Soniox key in secure storage."
-                ) from None
         try:
+            # All credential writes are off-loop and cancellation-drained. Once
+            # Soniox is deleted, a later provider/DB failure must still revoke it.
+            for provider, value in key_updates.items():
+                try:
+                    if value:
+                        await disk_call(runtime.secrets.set, provider, value)
+                    else:
+                        await disk_call(runtime.secrets.delete, provider)
+                        remove_soniox = remove_soniox or provider == "soniox"
+                except Exception:
+                    raise HTTPException(
+                        status_code=503, detail="Could not update the provider key in secure storage."
+                    ) from None
             await disk_call(runtime.settings_store.save, merged)
         finally:
             # Key removal must close cloud work even if the subsequent DB write fails.

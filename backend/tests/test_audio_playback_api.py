@@ -54,13 +54,13 @@ async def transcribe_chunk(
 
 
 async def configure_openai(client: httpx.AsyncClient, *, consent: bool, with_key: bool) -> None:
-    profile: dict[str, str] = {"provider": "openai", "model": "gpt-4o-transcribe"}
+    payload: dict[str, object] = {
+        "asr": {"provider": "openai", "model": "gpt-4o-transcribe"},
+        "cloud_consent": consent,
+    }
     if with_key:
-        profile["api_key"] = "sk-test"
-    response = await client.put(
-        "/settings",
-        json={"asr": profile, "cloud_consent": consent},
-    )
+        payload["provider_keys"] = {"openai": "sk-test"}
+    response = await client.put("/settings", json=payload)
     assert response.status_code == 200, response.text
 
 

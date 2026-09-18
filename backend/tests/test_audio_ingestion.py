@@ -34,8 +34,7 @@ async def session(client: httpx.AsyncClient, outbound: FakeHttp) -> str:
     """A recording session configured for the verified OpenRouter audio-input model."""
     response = await client.put(
         "/settings",
-        json={
-            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite", "api_key": "sk-test"},
+        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "cloud_consent": True,
         },
     )
@@ -68,8 +67,7 @@ def stub_transcript(outbound: FakeHttp, text: str = "Hello from the lecture.") -
 async def configure_dedicated(client: httpx.AsyncClient) -> str:
     response = await client.put(
         "/settings",
-        json={
-            "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b", "api_key": "sk-test"},
+        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
             "cloud_consent": True,
         },
     )
@@ -396,8 +394,7 @@ async def test_cloud_upload_requires_consent(client: httpx.AsyncClient, outbound
     stub_transcript(outbound)
     await client.put(
         "/settings",
-        json={
-            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite", "api_key": "sk-test"},
+        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "cloud_consent": False,
         },
     )

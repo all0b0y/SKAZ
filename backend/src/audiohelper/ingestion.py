@@ -201,7 +201,6 @@ class IngestionService:
             provider=profile.provider,
             model=profile.model,
             api_key=self._runtime.api_key(profile.provider),
-            base_url=profile.base_url,
             timeout=self._runtime.config.asr_timeout_s,
             allow_download=self._runtime.allow_model_download,
             # Legacy per-chunk path: the process-level flag only. The contextual
@@ -235,27 +234,34 @@ class IngestionService:
         audio = parse_wav(body, max_seconds=self._runtime.config.max_chunk_seconds)
         digest = hashlib.sha256(body).hexdigest()
         async with self._storage_locks[session_id]:
-            with self._runtime.db.read() as connection:
-                if connection.execute(
-                    "SELECT 1 FROM native_recordings WHERE session_id=?", (session_id,)
-                ).fetchone():
-                    raise ChunkConflict("Native recordings only accept their ordered PCM stream.")
-            existing = self._check_existing(session_id, sequence, digest, start_ms, end_ms)
-            duplicate = existing is not None
-            if existing is not None:
-                path = Path(existing.path)
-                if not path.is_file():
-                    self._store_audio(path, body)
-                record = existing
-            else:
-                winner = self._claim(session_id, sequence, start_ms, end_ms, digest, body)
-                duplicate = winner is not None
-                claimed = winner or repo.get_chunk(self._runtime.db, session_id, sequence)
-                if claimed is None:  # defensive: the successful claim must be readable immediately
-                    raise OSError("Stored audio metadata could not be read back.")
-                record = claimed
-            repo.extend_duration(self._runtime.db, session_id, end_ms)
+            with self._runtime.db.read():
+                self._runtime.storage.guard()
+                record, duplicate = self._persist_locked(session_id, sequence, digest, start_ms, end_ms, body)
         return PersistedAudio(audio=audio, record=record, duplicate=duplicate)
+
+    def _persist_locked(self, session_id: str, sequence: int, digest: str, start_ms: int,
+                        end_ms: int, body: bytes) -> tuple[repo.ChunkRecord, bool]:
+        with self._runtime.db.read() as connection:
+            if connection.execute(
+                "SELECT 1 FROM native_recordings WHERE session_id=?", (session_id,)
+            ).fetchone():
+                raise ChunkConflict("Native recordings only accept their ordered PCM stream.")
+        existing = self._check_existing(session_id, sequence, digest, start_ms, end_ms)
+        duplicate = existing is not None
+        if existing is not None:
+            path = Path(existing.path)
+            if not path.is_file():
+                self._store_audio(path, body)
+            record = existing
+        else:
+            winner = self._claim(session_id, sequence, start_ms, end_ms, digest, body)
+            duplicate = winner is not None
+            claimed = winner or repo.get_chunk(self._runtime.db, session_id, sequence)
+            if claimed is None:
+                raise OSError("Stored audio metadata could not be read back.")
+            record = claimed
+        repo.extend_duration(self._runtime.db, session_id, end_ms)
+        return record, duplicate
 
     def _claim(
         self, session_id: str, sequence: int, start_ms: int, end_ms: int, digest: str, body: bytes
@@ -266,7 +272,7 @@ class IngestionService:
         sequence can never both write to the same file: the loser never touches disk
         and is validated against the winner's stored digest and timeline metadata.
         """
-        path = self._runtime.config.audio_dir / session_id / f"{sequence:06d}.wav"
+        path = self._runtime.storage.audio_path(session_id, sequence)
         record = repo.ChunkRecord(
             session_id=session_id,
             sequence=sequence,

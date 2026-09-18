@@ -6,6 +6,8 @@ import dataclasses
 
 import pytest
 
+from audiohelper import monologue_context as mctx
+from audiohelper import monologues as mono
 from audiohelper import repository as repo
 from audiohelper.agent import context as ctx
 from audiohelper.agent import notes
@@ -323,35 +325,35 @@ def _resolved_ids(built: ctx.TranscriptContext) -> dict[str, list[str]]:
     return {key: [segment.id for segment in members] for key, members in built.references.items()}
 
 
-def test_a_passage_label_resolves_to_the_same_segments_after_batching() -> None:
-    """Map steps must number passages exactly as one pass over the whole session does.
+def test_a_monologue_label_resolves_to_the_same_speech_after_batching() -> None:
+    """Map steps must number monologues exactly as one pass over the whole session does.
 
-    A batch that cut a passage in half would shift every later ``[P<n>]``, so a label
-    cited by a partial summary would resolve to the wrong segments in the saved note.
+    A batch that cut a monologue in half would shift every later ``[P<n>]``, so a label
+    cited by a partial summary would resolve to different speech in the saved note.
     """
     segments = _run((0, 1000), (1000, 2000), (60_000, 61_000), (61_000, 62_000))
-    batches = notes._batches(segments, budget_chars=80)
+    monologues = mono.build([
+        mono.Token(id=segment.id, text=segment.text + " ", start_ms=segment.start_ms,
+                   end_ms=segment.end_ms, speaker=None, segment_id=segment.id)
+        for segment in segments
+    ])
+    batches = notes._batches(monologues, budget_chars=80)
     assert len(batches) > 1, "the budget must actually force several map steps"
-    assert [[segment.id for segment in passage] for batch in batches for passage in batch] == [
-        [segment.id for segment in passage] for passage in ctx.group_passages(segments)
-    ], "batching must not split or drop a passage"
+    assert [m.id for batch in batches for m in batch] == [m.id for m in monologues], (
+        "batching must not split, reorder or drop a monologue"
+    )
 
-    # The same offsets the map steps advance, applied to the same builder.
-    segment_offset = 0
-    passage_offset = 0
+    # The same offset the map steps advance, applied to the same builder.
+    offset = 0
     per_batch: dict[str, list[str]] = {}
     for batch in batches:
-        block = ctx.build(
-            [segment for passage in batch for segment in passage],
-            budget_chars=10_000,
-            keep="earliest",
-            label_offset=segment_offset,
-            unit="passage",
-            passage_offset=passage_offset,
-        )
-        per_batch.update(_resolved_ids(block))
-        segment_offset += sum(len(passage) for passage in batch)
-        passage_offset += len(batch)
+        block = mctx.build(batch, budget_chars=10_000, offset=offset)
+        per_batch.update({
+            key: [token.id for token in value.tokens] for key, value in block.references.items()
+        })
+        offset += len(batch)
 
-    whole = ctx.build(segments, budget_chars=10_000, keep="earliest", unit="passage")
-    assert per_batch == _resolved_ids(whole)
+    whole = mctx.build(monologues, budget_chars=10_000)
+    assert per_batch == {
+        key: [token.id for token in value.tokens] for key, value in whole.references.items()
+    }

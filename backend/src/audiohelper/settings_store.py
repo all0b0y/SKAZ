@@ -14,7 +14,6 @@ from .schemas import NativeRecordingMode, Provider, SettingsUpdate, Task
 class StoredProfile(BaseModel):
     provider: Provider
     model: str
-    base_url: str | None = None
 
 
 class StoredSettings(BaseModel):
@@ -44,6 +43,24 @@ DEFAULT_SETTINGS = StoredSettings(
 
 TASKS: tuple[Task, ...] = ("asr", "agent", "notes")
 
+#: Providers removed from the product. A settings document written before their
+#: removal must not crash the backend on load: the profile falls back to its
+#: default provider with an empty model, so the user is asked to pick one again.
+_RETIRED_PROVIDERS = frozenset({"openai-compatible"})
+
+
+def _normalise(doc: dict[str, object]) -> dict[str, object]:
+    """Drop retired providers and fields from a stored settings document."""
+    for task in TASKS:
+        profile = doc.get(task)
+        if not isinstance(profile, dict):
+            continue
+        profile.pop("base_url", None)
+        if profile.get("provider") in _RETIRED_PROVIDERS:
+            profile["provider"] = DEFAULT_SETTINGS.profile(task).provider
+            profile["model"] = ""
+    return doc
+
 
 class SettingsStore:
     def __init__(self, db: Database) -> None:
@@ -63,7 +80,7 @@ class SettingsStore:
         settings = (
             DEFAULT_SETTINGS.model_copy(deep=True)
             if row is None
-            else StoredSettings.model_validate(json.loads(row["doc"]))
+            else StoredSettings.model_validate(_normalise(json.loads(row["doc"])))
         )
         return settings, int(revision_row["revision"]) if revision_row is not None else 0
 
@@ -74,7 +91,7 @@ class SettingsStore:
             current = (
                 DEFAULT_SETTINGS
                 if current_row is None
-                else StoredSettings.model_validate(json.loads(current_row["doc"]))
+                else StoredSettings.model_validate(_normalise(json.loads(current_row["doc"])))
             )
             if (
                 current.asr != settings.asr
@@ -106,7 +123,7 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         if patch is None:
             continue
         profile = merged.profile(task)
-        changes = patch.model_dump(exclude_unset=True, exclude={"api_key"})
+        changes = patch.model_dump(exclude_unset=True)
         setattr(merged, task, profile.model_copy(update=changes))
     for field in (
         "used_languages",

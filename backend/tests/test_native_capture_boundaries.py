@@ -86,7 +86,7 @@ def test_revoking_consent_closes_provider_but_keeps_local_capture(
                             await asyncio.sleep(0)
                 http.portal.call(wait_sent)
             response = http.put("/settings", headers=AUTH, json=(
-                {"soniox_api_key": ""} if remove_key else {"cloud_consent": False}
+                {"provider_keys": {"soniox": ""}} if remove_key else {"cloud_consent": False}
             ))
             assert response.status_code == 200
             assert cancelled.is_set() if connecting else socket.closed

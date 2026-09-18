@@ -93,6 +93,41 @@ def test_old_settings_document_gets_defaults_without_losing_existing_values(
     assert outbound.requests == []
 
 
+def test_a_retired_provider_in_a_stored_profile_does_not_break_startup(
+    config: AppConfig, outbound: FakeHttp,
+) -> None:
+    """A profile saved on a since-removed provider falls back instead of crashing.
+
+    The user is asked to pick a model again rather than being locked out of settings.
+    """
+    config.data_dir.mkdir(parents=True)
+    with sqlite3.connect(config.db_path) as db:
+        db.execute("CREATE TABLE app_settings (id INTEGER PRIMARY KEY, doc TEXT NOT NULL)")
+        db.execute("INSERT INTO app_settings VALUES (1, ?)", (json.dumps({
+            "asr": {"provider": "local-whisper", "model": "small"},
+            "agent": {
+                "provider": "openai-compatible",
+                "model": "local/model-a",
+                "base_url": "http://127.0.0.1:1234/v1",
+            },
+            "notes": {"provider": "openrouter", "model": ""},
+            "transcript_language": "auto", "output_language": "ru", "cloud_consent": False,
+        }),))
+    application = create_app(
+        config, secret_store=MemorySecretStore(), http_client=outbound.client(),
+    )
+    with TestClient(application, base_url="http://127.0.0.1", headers={
+        "Authorization": f"Bearer {TOKEN}",
+    }) as http:
+        settings = http.get("/settings").json()
+        assert settings["agent"]["provider"] == "openrouter"
+        assert settings["agent"]["model"] == ""
+        assert "base_url" not in settings["agent"]
+        # Untouched profiles keep their stored values.
+        assert settings["asr"]["provider"] == "local-whisper"
+    assert outbound.requests == []
+
+
 async def test_changing_mode_keeps_the_last_target_language(client: httpx.AsyncClient) -> None:
     response = await client.put("/settings", json={
         "native_recording_mode": "translation", "translation_target_language": "pt-BR",

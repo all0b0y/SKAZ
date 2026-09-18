@@ -41,10 +41,12 @@ async def test_default_settings_shape(client: httpx.AsyncClient) -> None:
     assert body["agent"] == {
         "provider": "openrouter",
         "model": "",
-        "base_url": None,
-        "has_api_key": False,
         "verified": False,
         "verification_note": "Model is not configured.",
+    }
+    # Key presence is provider-scoped, never a profile field.
+    assert body["provider_has_api_key"] == {
+        "openai": False, "openrouter": False, "anthropic": False, "soniox": False,
     }
     assert body["notes"]["provider"] == "openrouter"
     assert body["transcript_language"] == "auto"
@@ -70,19 +72,15 @@ async def test_partial_profile_update_keeps_untouched_fields(client: httpx.Async
     await client.put(
         "/settings",
         json={
-            "notes": {
-                "provider": "openai-compatible",
-                "model": "local/model-a",
-                "base_url": "http://127.0.0.1:1234/v1",
-                "api_key": "secret-value",
-            }
+            "provider_keys": {"anthropic": "secret-value"},
+            "notes": {"provider": "anthropic", "model": "claude-sonnet-4-5"},
         },
     )
-    body = (await client.put("/settings", json={"notes": {"model": "local/model-b"}})).json()
-    assert body["notes"]["provider"] == "openai-compatible"
-    assert body["notes"]["base_url"] == "http://127.0.0.1:1234/v1"
-    assert body["notes"]["model"] == "local/model-b"
-    assert body["notes"]["has_api_key"] is True
+    body = (await client.put("/settings", json={"notes": {"model": "claude-opus-4-1"}})).json()
+    assert body["notes"]["provider"] == "anthropic"
+    assert body["notes"]["model"] == "claude-opus-4-1"
+    # The key survives a profile edit because it belongs to the provider.
+    assert body["provider_has_api_key"]["anthropic"] is True
 
 
 async def test_api_key_is_stored_in_secret_store_and_never_returned(
@@ -90,18 +88,16 @@ async def test_api_key_is_stored_in_secret_store_and_never_returned(
 ) -> None:
     response = await client.put(
         "/settings",
-        json={
-            "agent": {
+        json={"provider_keys": {"openrouter": "sk-live"}, "agent": {
                 "provider": "openrouter",
-                "model": "qwen/qwen3-30b-a3b-instruct-2507",
-                "api_key": "sk-live",
+                "model": "qwen/qwen3-30b-a3b-instruct-2507"
             }
         },
     )
     assert response.status_code == 200
     assert "sk-live" not in response.text
     assert "api_key" not in response.json()["agent"]
-    assert response.json()["agent"]["has_api_key"] is True
+    assert response.json()["provider_has_api_key"]["openrouter"] is True
     assert secrets.get("openrouter") == "sk-live"
     assert "sk-live" not in (await client.get("/settings")).text
 
