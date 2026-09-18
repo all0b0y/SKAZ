@@ -1,6 +1,7 @@
 import { create } from 'zustand';
+import { defaultSessionTitle } from '../lib/time';
 import { ApiClient, ApiError } from '../api/client';
-import type { BackendStatus } from '../api/bridge';
+import type { BackendStatus, BridgeApi } from '../api/bridge';
 import type {
   AskResponse,
   ChatScope,
@@ -16,6 +17,7 @@ import type {
   Message,
   ModelInfo,
   Note,
+  NoteDetail,
   Segment,
   Session,
   SessionDetail,
@@ -57,6 +59,7 @@ interface DetailCache {
   segments: Segment[];
   messages: Message[];
   notes: Note | null;
+  notes_list?: Note[];
 }
 
 const emptyQueueState: PersistenceQueueState = {
@@ -184,7 +187,21 @@ export interface AppState {
   setAskContext: (context: AskContext | null) => void;
   setWindowMinutes: (minutes: WindowPreset) => void;
 
-  generateNotes: () => Promise<void>;
+  /** Generation always produces a new note; it never overwrites open text. */
+  generateNotes: (detail?: NoteDetail) => Promise<Note | null>;
+  createEmptyNote: () => Promise<Note | null>;
+  /** Rename without touching the document; a blank name is refused by the caller. */
+  renameNote: (note: Note, title: string) => Promise<Note | null>;
+  /** Soft deletion: the note leaves the list but its row waits for the trash. */
+  deleteNote: (noteId: string) => Promise<boolean>;
+  /**
+   * Re-read the stored transcript of the active session.
+   *
+   * Finals can land after Stop, and nothing else refreshes `detail.segments`
+   * while the user sits on the Notes tab — without this, generation stays
+   * disabled with "Нет транскрипции" over a session that has one.
+   */
+  refreshTranscriptSource: () => Promise<void>;
 
   setTheme: (theme: ThemeMode) => void;
 }
@@ -214,8 +231,16 @@ interface SessionStatusIntent {
   status: SessionStatus;
 }
 
+// The bridge object is fixed for the life of a real window, but it is rebound
+// between tests. Caching the client without checking identity would keep calling
+// a bridge the window no longer has — silently, and only in tests, which is the
+// worst place for a stale reference to hide.
+let clientBridge: BridgeApi | null = null;
 const getClient = (): ApiClient => {
-  if (!client) client = new ApiClient(window.audiohelper);
+  if (!client || clientBridge !== window.audiohelper) {
+    client = new ApiClient(window.audiohelper);
+    clientBridge = window.audiohelper;
+  }
   return client;
 };
 
@@ -478,7 +503,7 @@ export const useStore = create<AppState>((set, get) => {
   newSession: async (title) => {
     if (get().quitRequested) return;
     if (['recording', 'paused', 'processing'].includes(get().recorderState)) return;
-    const name = title?.trim() || new Date().toLocaleString();
+    const name = title?.trim() || defaultSessionTitle();
     const mode = get().nextRecordingMode;
     if (mode === 'contextual_local' && !get().liveCapabilities?.capable) {
       set({ recorderError: get().liveCapabilities?.detail ?? 'Contextual local recording capability is unavailable.' });
@@ -521,7 +546,7 @@ export const useStore = create<AppState>((set, get) => {
       const detail: SessionDetail = await getClient().getSession(id);
       if (get().activeSessionId !== id || generation !== liveSelectionGeneration) return;
       set({
-        detail: { segments: detail.segments, messages: detail.messages, notes: detail.notes },
+        detail: { segments: detail.segments, messages: detail.messages, notes: detail.notes, notes_list: detail.notes_list },
         detailLoading: false,
       });
       if (detail.session.mode === 'contextual_local') void get().refreshContextualLive(id);
@@ -775,22 +800,16 @@ export const useStore = create<AppState>((set, get) => {
     set({ recorderState: 'processing', recorderError: null, meter: idleMeterSnapshot() });
 
     let { activeSessionId } = get();
-    const selected = get().sessions.find((item) => item.id === activeSessionId);
-    const selectedHasAudio = Boolean(
-      selected?.status === 'stopped' &&
-        (selected.duration_ms > 0 || (get().detail?.segments.length ?? 0) > 0),
-    );
-    const selectedModeMismatch = Boolean(selected && selected.mode !== recordingMode);
-    if (!activeSessionId || selectedHasAudio || selectedModeMismatch) {
+    if (!activeSessionId) {
       // newSession is intentionally guarded while processing, so create the
       // recording session directly within this lifecycle transaction.
-      const name = new Date().toLocaleString();
+      const name = defaultSessionTitle();
       try {
         const session = await getClient().createSession(name, recordingMode);
         set((s) => ({ sessions: [session, ...s.sessions], activeSessionId: session.id, languageMarks: [] }));
         const created = await getClient().getSession(session.id);
         set({
-          detail: { segments: created.segments, messages: created.messages, notes: created.notes },
+          detail: { segments: created.segments, messages: created.messages, notes: created.notes, notes_list: created.notes_list },
         });
         activeSessionId = session.id;
       } catch (err) {
@@ -806,7 +825,11 @@ export const useStore = create<AppState>((set, get) => {
     recordingSessionId = sessionId;
     nativeFailureCleanup?.();
     let transportOpened = false;
-    const writer = new NativeAudioWriter(getClient(), sessionId, () => { transportOpened = true; });
+    let elapsedOffsetMs = 0;
+    const writer = new NativeAudioWriter(getClient(), sessionId, (opened) => {
+      if (!transportOpened) elapsedOffsetMs = opened.saved_samples * 1000 / opened.sample_rate;
+      transportOpened = true;
+    }, true);
     nativeWriter = writer;
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
@@ -816,12 +839,24 @@ export const useStore = create<AppState>((set, get) => {
     });
 
     persistenceQueue = new PersistenceQueue({
-      store: (chunk) => writer.store(chunk),
-      maxPending: 8, // 800ms plus two protected capture-tail slots; no ASR backfill.
+      store: async (chunk) => {
+        const result = await writer.store(chunk);
+        // A durable append invalidates existing notes immediately, even if the
+        // Notes tab is hidden. Reopening reads authoritative backend revisions.
+        set((state) => state.activeSessionId !== sessionId || !state.detail ? {} : {
+          detail: {
+            ...state.detail,
+            notes: state.detail.notes ? { ...state.detail.notes, stale: true } : null,
+            notes_list: state.detail.notes_list?.map((note) => ({ ...note, stale: true })),
+          },
+        });
+        return result;
+      },
+      maxPending: 64, // Bounded 6.4s transport buffer absorbs brief backend stalls.
       maxAttempts: 1, // An uncertain durable ACK requires explicit clock reconciliation.
       onChange: (queueState) => set({ queue: queueState }),
       onBlocked: () => {
-        set({ recorderError: 'Local audio storage is blocked. Capture stopped; unsaved audio is protected for explicit retry.' });
+        set({ recorderError: 'Audio delivery is interrupted. Capture stopped; buffered audio is retained for explicit retry.' });
         void get().stopRecording();
       },
     });
@@ -890,7 +925,8 @@ export const useStore = create<AppState>((set, get) => {
       ) return;
       void get().enumerateDevices();
       if (elapsedTimer) clearInterval(elapsedTimer);
-      elapsedTimer = setInterval(() => set({ elapsedMs: recorder?.elapsedMs() ?? 0 }), 250);
+      set({ elapsedMs: elapsedOffsetMs });
+      elapsedTimer = setInterval(() => set({ elapsedMs: elapsedOffsetMs + (recorder?.elapsedMs() ?? 0) }), 250);
     } catch (err) {
       const activeRecorder = recorder;
       if (activeRecorder && activeRecorder.state !== 'idle' && activeRecorder.state !== 'stopped') {
@@ -947,6 +983,10 @@ export const useStore = create<AppState>((set, get) => {
 
   resumeRecording: async () => {
     if (get().quitRequested) return;
+    if (['idle', 'stopped'].includes(get().recorderState) && get().activeSessionId) {
+      await get().startRecording();
+      return;
+    }
     if (get().recorderState !== 'paused') return;
     const activeRecorder = recorder;
     const sessionId = recordingSessionId;
@@ -1092,20 +1132,121 @@ export const useStore = create<AppState>((set, get) => {
   setAskContext: (context) => set({ askContext: context }),
   setWindowMinutes: (minutes) => set({ windowMinutes: minutes }),
 
-  generateNotes: async () => {
+  generateNotes: async (detail) => {
     const id = get().activeSessionId;
-    if (!id) return;
+    if (!id) return null;
     set({ notesGenerating: true, notesError: null });
     try {
-      const notes = await getClient().generateNotes(id, get().settings?.output_language);
-      if (get().activeSessionId !== id) return;
+      const notes = await getClient().generateNotes(id, get().settings?.output_language, detail);
+      if (get().activeSessionId !== id) return null;
       set((s) => ({
-        detail: s.detail ? { ...s.detail, notes } : s.detail,
+        detail: s.detail ? { ...s.detail, notes,
+          notes_list: [notes, ...(s.detail.notes_list ?? []).filter((n) => n.id !== notes.id)],
+        } : s.detail,
         notesGenerating: false,
       }));
+      return notes;
     } catch (err) {
-      if (get().activeSessionId !== id) return;
+      if (get().activeSessionId !== id) return null;
       set({ notesGenerating: false, notesError: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  },
+
+  // An empty note is a real stored document from the moment it is created, so the
+  // first thing the user types is already covered by autosave — there is no
+  // in-memory-only draft that a crash could take with it.
+  createEmptyNote: async () => {
+    const id = get().activeSessionId;
+    if (!id) return null;
+    set({ notesError: null });
+    try {
+      const note = await getClient().createEmptyNote(id);
+      if (get().activeSessionId !== id) return null;
+      set((s) => ({
+        detail: s.detail ? { ...s.detail, notes: note,
+          notes_list: [note, ...(s.detail.notes_list ?? [])],
+        } : s.detail,
+      }));
+      return note;
+    } catch (err) {
+      if (get().activeSessionId !== id) return null;
+      set({ notesError: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  },
+
+  /**
+   * Rename a note without sending its text.
+   *
+   * The name is its own field, so a rename issued while the editor has unsaved
+   * text cannot carry a stale copy of the document back to the server.
+   */
+  renameNote: async (note, title) => {
+    const id = get().activeSessionId;
+    if (!id || !note.id) return null;
+    try {
+      const renamed = await getClient().renameNote(id, note, title);
+      if (get().activeSessionId !== id) return null;
+      set((s) => ({
+        detail: s.detail ? {
+          ...s.detail,
+          notes: s.detail.notes?.id === renamed.id ? renamed : s.detail.notes,
+          notes_list: (s.detail.notes_list ?? []).map((n) => (n.id === renamed.id ? renamed : n)),
+        } : s.detail,
+      }));
+      return renamed;
+    } catch (err) {
+      if (get().activeSessionId !== id) return null;
+      set({ notesError: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  },
+
+  /** Soft deletion: it leaves the list, the row waits for the trash. */
+  deleteNote: async (noteId) => {
+    const id = get().activeSessionId;
+    if (!id) return false;
+    try {
+      await getClient().deleteNote(id, noteId);
+      if (get().activeSessionId !== id) return true;
+      set((s) => ({
+        detail: s.detail ? {
+          ...s.detail,
+          notes: s.detail.notes?.id === noteId ? null : s.detail.notes,
+          notes_list: (s.detail.notes_list ?? []).filter((n) => n.id !== noteId),
+        } : s.detail,
+      }));
+      return true;
+    } catch (err) {
+      if (get().activeSessionId !== id) return false;
+      set({ notesError: err instanceof Error ? err.message : String(err) });
+      return false;
+    }
+  },
+
+  // A transcript read, nothing else: it never starts ASR and never touches the
+  // notes it feeds. Finals that arrived after Stop become visible to the Notes
+  // tab this way instead of only after the user switches sessions.
+  //
+  // The notes of the response are deliberately dropped. This read races every
+  // local rename, edit and deletion the panel has just applied, and taking its
+  // note list would roll them back to whatever the server answered first.
+  refreshTranscriptSource: async () => {
+    const id = get().activeSessionId;
+    if (!id) return;
+    try {
+      const detail = await getClient().getSession(id);
+      if (get().activeSessionId !== id) return;
+      // A response without a segment array is not a transcript: writing it would
+      // put `undefined` where the panel iterates and take the whole pane down.
+      if (!Array.isArray(detail?.segments)) return;
+      set((s) => ({
+        detail: s.detail ? { ...s.detail, segments: detail.segments } : s.detail,
+      }));
+    } catch {
+      // A failed read leaves the previous transcript in place: the panel keeps
+      // showing what it legitimately had rather than claiming it disappeared.
     }
   },
 

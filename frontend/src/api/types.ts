@@ -9,15 +9,41 @@ export type ProviderName =
   | 'openai'
   | 'openrouter'
   | 'anthropic'
-  | 'openai-compatible'
   | 'claude-code';
 
 export type TaskKind = 'asr' | 'agent' | 'notes';
 export type LocalProviderName = 'local-whisper' | 'local-gigachat-mlx';
+export type CloudProviderName = 'openrouter' | 'openai' | 'anthropic' | 'soniox';
 
 export type SessionStatus = 'recording' | 'paused' | 'stopped';
 export type SessionMode = 'legacy' | 'contextual_local';
 export type NativeRecordingMode = 'transcription' | 'translation' | 'audio_only';
+
+export interface StorageRootView {
+  root: string | null;
+  suggested_root: string;
+  managed: boolean;
+  change_locked: boolean;
+  mode: 'markdown_projection';
+}
+
+export interface SessionFileEntry {
+  name: string;
+  path: string;
+  state: 'written' | 'unchanged' | 'conflict' | 'conflict_recovered' | 'recovery_required';
+}
+
+/** Last persisted projection result, not a live filesystem audit or audio status. */
+export interface SessionFilesStatus {
+  state: 'disabled' | 'pending' | 'ready' | 'conflict' | 'error' | 'missing';
+  directory?: string;
+  files: SessionFileEntry[];
+  conflicts?: SessionFileEntry[];
+  source_version?: string;
+  preserved_directories?: string[];
+  preservation_pending?: boolean;
+  error?: string;
+}
 
 /** Optional PATCH /sessions/{id} lifecycle controls. Omission preserves legacy flushing. */
 export interface SessionStatusOptions {
@@ -30,8 +56,6 @@ export type ChatScope = 'auto' | 'recent' | 'all' | 'beginning' | 'search';
 export interface Profile {
   provider: ProviderName;
   model: string;
-  base_url?: string;
-  has_api_key?: boolean;
 }
 
 export interface Settings {
@@ -40,8 +64,9 @@ export interface Settings {
   /** Stored next-recording preferences; capture wiring is a separate contract. */
   native_recording_mode?: NativeRecordingMode;
   translation_target_language?: string;
-  /** Presence only; the backend never returns the Soniox credential. */
-  soniox_has_api_key?: boolean;
+
+  /** Key presence per cloud provider; a key belongs to the provider, not to a task. */
+  provider_has_api_key?: Partial<Record<CloudProviderName, boolean>>;
   asr: Profile;
   agent: Profile;
   notes: Profile;
@@ -52,20 +77,19 @@ export interface Settings {
   contextual_local_enabled: boolean;
 }
 
-/** Partial update body for PUT /settings. api_key is write-only. */
+/** Partial update body for PUT /settings. Credentials never live in a profile. */
 export interface ProfileUpdate {
   provider?: ProviderName;
   model?: string;
-  base_url?: string;
-  api_key?: string;
 }
 
 export interface SettingsUpdate {
   used_languages?: string[];
   native_recording_mode?: NativeRecordingMode;
   translation_target_language?: string;
-  /** Omitted preserves; empty string removes. Never persist in renderer storage. */
-  soniox_api_key?: string;
+
+  /** Write-only provider keys. Omitted provider preserves; empty string removes. */
+  provider_keys?: Partial<Record<CloudProviderName, string>>;
   asr?: ProfileUpdate;
   agent?: ProfileUpdate;
   notes?: ProfileUpdate;
@@ -308,6 +332,16 @@ export interface Citation {
   start_ms: number;
   end_ms: number;
   text: string;
+  /**
+   * Where this citation points as a unit of speech: one monologue and a token range
+   * inside it. The monologue's displayed number is worked out against the current
+   * transcript, never stored, so an edit elsewhere cannot silently move what a note
+   * claims to rest on. Absent on citations made before monologues existed.
+   */
+  monologue_id?: string | null;
+  start_token_id?: string | null;
+  end_token_id?: string | null;
+  speaker?: number | null;
 }
 
 export interface Message {
@@ -319,9 +353,37 @@ export interface Message {
 }
 
 export interface Note {
+  id?: string;
+  revision?: number;
+  source_revision?: number | null;
+  stale?: boolean;
   content: string;
+  /** The note's own name. Empty means: fall back to the document's first line. */
+  title?: string;
   created_at: string;
+  /** Last accepted write — what the notes list is ordered by. */
+  updated_at?: string;
   model: string;
+  citations: Citation[];
+}
+
+/** How dense generated notes should be. Density only — never how firmly they rest on speech. */
+export type NoteDetail = 'brief' | 'normal' | 'detailed';
+
+/**
+ * A written replacement for one passage, waiting for the user's decision.
+ *
+ * Nothing is stored until it is applied: the point of the preview is that a
+ * rewrite can be read beside the original and refused.
+ */
+export interface RewritePreview {
+  id: string;
+  note_id: string;
+  revision: number;
+  start: number;
+  end: number;
+  original: string;
+  replacement: string;
   citations: Citation[];
 }
 
@@ -330,6 +392,7 @@ export interface SessionDetail {
   segments: Segment[];
   messages: Message[];
   notes: Note | null;
+  notes_list?: Note[];
 }
 
 export interface AudioIngestResponse {

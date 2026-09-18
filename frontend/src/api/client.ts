@@ -21,13 +21,17 @@ import type {
   LiveAsrSchedulerStatus,
   ModelsResponse,
   Note,
+  NoteDetail,
+  RewritePreview,
   Session,
   SessionDetail,
+  SessionFilesStatus,
   SessionStatus,
   SessionMode,
   SessionStatusOptions,
   Settings,
   SettingsUpdate,
+  StorageRootView,
   TaskKind,
 } from './types';
 
@@ -40,6 +44,13 @@ export class ApiError extends Error {
   }
 }
 
+export interface StorageLayout {
+  enabled: boolean;
+  revision: number;
+  data: import('../lib/sessionGroups').SessionGroups;
+  pending: { kind: string; phase: string } | null;
+}
+
 function unwrap<T>(res: JsonResponse<T>): T {
   if (!res.ok) throw new ApiError(res.status, res.detail);
   return res.data;
@@ -49,6 +60,28 @@ function unwrap<T>(res: JsonResponse<T>): T {
 // contract (snake_case wire shapes) and throw ApiError on any non-2xx.
 export class ApiClient {
   constructor(private readonly bridge: BridgeApi) {}
+
+  getStorageLayout(): Promise<StorageLayout> {
+    return this.bridge.request<StorageLayout>({ method: 'GET', path: '/storage/layout' }).then(unwrap);
+  }
+
+  enableStorageLayout(): Promise<StorageLayout> {
+    return this.bridge.request<StorageLayout>({ method: 'POST', path: '/storage/layout' }).then(unwrap);
+  }
+
+  recoverStorage(): Promise<StorageLayout> {
+    return this.bridge.request<StorageLayout>({ method: 'POST', path: '/storage/recover' }).then(unwrap);
+  }
+
+  moveStorageRoot(root: string, expectedRoot: string): Promise<StorageLayout> {
+    return this.bridge.request<StorageLayout>({ method: 'POST', path: '/storage/move-root',
+      body: { root, expected_root: expectedRoot } }).then(unwrap);
+  }
+
+  updateStorageGroups(data: import('../lib/sessionGroups').SessionGroups, revision: number): Promise<StorageLayout> {
+    return this.bridge.request<StorageLayout>({ method: 'PUT', path: '/storage/groups',
+      body: { data, expected_revision: revision } }).then(unwrap);
+  }
 
   openNative(sessionId: string, sampleRate: number): Promise<NativeOpened> {
     return this.bridge.openNative(sessionId, sampleRate).then(unwrap);
@@ -69,6 +102,16 @@ export class ApiClient {
   getNativeSnapshot(sessionId: string): Promise<NativeSnapshot> {
     return this.bridge.request<NativeSnapshot>({
       method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live`,
+    }).then(unwrap);
+  }
+
+  getStorageRoot(): Promise<StorageRootView> {
+    return this.bridge.request<StorageRootView>({ method: 'GET', path: '/storage/root' }).then(unwrap);
+  }
+
+  updateStorageRoot(root: string | null, expectedRoot: string | null): Promise<StorageRootView> {
+    return this.bridge.request<StorageRootView>({
+      method: 'PUT', path: '/storage/root', body: { root, expected_root: expectedRoot },
     }).then(unwrap);
   }
 
@@ -189,6 +232,24 @@ export class ApiClient {
       .then(unwrap);
   }
 
+  getSessionFiles(id: string): Promise<SessionFilesStatus> {
+    return this.bridge.request<SessionFilesStatus>({
+      method: 'GET', path: `/sessions/${encodeURIComponent(id)}/files`,
+    }).then(unwrap);
+  }
+
+  projectSessionFiles(id: string): Promise<SessionFilesStatus> {
+    return this.bridge.request<SessionFilesStatus>({
+      method: 'POST', path: `/sessions/${encodeURIComponent(id)}/files`,
+    }).then(unwrap);
+  }
+
+  preserveSessionFiles(id: string): Promise<SessionFilesStatus> {
+    return this.bridge.request<SessionFilesStatus>({
+      method: 'POST', path: `/sessions/${encodeURIComponent(id)}/files/preserve`,
+    }).then(unwrap);
+  }
+
   setSessionStatus(id: string, status: SessionStatus, options: SessionStatusOptions = {}): Promise<Session> {
     const body: { status: SessionStatus } & SessionStatusOptions = { status, ...options };
     return this.bridge
@@ -244,8 +305,50 @@ export class ApiClient {
       .then(unwrap);
   }
 
-  generateNotes(sessionId: string, language?: string): Promise<Note> {
-    const body = language ? { language } : {};
+  editNote(sessionId: string, note: Note, content: string): Promise<Note> {
+    return this.bridge.request<Note>({ method: 'PATCH',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes/${encodeURIComponent(note.id!)}`,
+      body: { content, expected_revision: note.revision },
+    }).then(unwrap);
+  }
+
+  /**
+   * Rename without touching the document — the Obsidian model.
+   *
+   * The body carries no `content`, so a rename can never race an in-flight edit
+   * into overwriting the text with a stale copy held by the tab strip.
+   */
+  renameNote(sessionId: string, note: Note, title: string): Promise<Note> {
+    return this.bridge.request<Note>({ method: 'PATCH',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes/${encodeURIComponent(note.id!)}`,
+      body: { title, expected_revision: note.revision },
+    }).then(unwrap);
+  }
+
+  /** Soft deletion: the row waits for the trash, so a mistaken click is recoverable. */
+  deleteNote(sessionId: string, noteId: string): Promise<{ deleted: boolean }> {
+    return this.bridge.request<{ deleted: boolean }>({ method: 'DELETE',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes/${encodeURIComponent(noteId)}`,
+    }).then(unwrap);
+  }
+
+  /** A blank document, stored at once so autosave has something to write into. */
+  createEmptyNote(sessionId: string): Promise<Note> {
+    return this.bridge.request<Note>({ method: 'POST',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes/empty`,
+    }).then(unwrap);
+  }
+
+  /** Every note of one session, for the "open existing" picker. */
+  listNotes(sessionId: string): Promise<{ notes: Note[] }> {
+    return this.bridge.request<{ notes: Note[] }>({ method: 'GET',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes`,
+    }).then(unwrap);
+  }
+
+  /** Generation never replaces existing text: a new note always opens in a new tab. */
+  generateNotes(sessionId: string, language?: string, detail?: NoteDetail): Promise<Note> {
+    const body = { ...(language ? { language } : {}), ...(detail ? { detail } : {}) };
     return this.bridge
       .request<Note>({
         method: 'POST',
@@ -253,6 +356,31 @@ export class ApiClient {
         body,
       })
       .then(unwrap);
+  }
+
+  /**
+   * Write a replacement for one selected passage, storing nothing.
+   *
+   * The span is character offsets into the note's stored Markdown, and the
+   * revision they were read from travels with them: offsets into a document that
+   * has since changed point at different text, so the backend checks the pair
+   * rather than trusting it.
+   */
+  rewritePassage(
+    sessionId: string, note: Note, start: number, end: number, detail?: NoteDetail,
+  ): Promise<RewritePreview> {
+    return this.bridge.request<RewritePreview>({ method: 'POST',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes/${encodeURIComponent(note.id!)}/rewrite`,
+      body: { start, end, expected_revision: note.revision, ...(detail ? { detail } : {}) },
+    }).then(unwrap);
+  }
+
+  /** Put an accepted replacement into the note, as one whole new revision. */
+  applyRewrite(sessionId: string, noteId: string, previewId: string): Promise<Note> {
+    return this.bridge.request<Note>({ method: 'POST',
+      path: `/sessions/${encodeURIComponent(sessionId)}/notes/${encodeURIComponent(noteId)}/rewrite/apply`,
+      body: { preview_id: previewId },
+    }).then(unwrap);
   }
 
   async fetchAudio(sessionId: string, sequence: number): Promise<ArrayBuffer> {

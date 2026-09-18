@@ -23,6 +23,16 @@ function fakeBridge(handler: (req: BridgeRequest) => JsonResponse<unknown>): {
 }
 
 describe('ApiClient request mapping', () => {
+  it('reads file status and explicitly retries without a root, file body or model request', async () => {
+    const { bridge, requests } = fakeBridge(() => ({ ok: true, status: 200, data: { state: 'pending', files: [] } }));
+    const api = new ApiClient(bridge);
+    expect(await api.getSessionFiles('session / one')).toEqual({ state: 'pending', files: [] });
+    await api.projectSessionFiles('session / one');
+    expect(requests).toEqual([
+      { method: 'GET', path: '/sessions/session%20%2F%20one/files' },
+      { method: 'POST', path: '/sessions/session%20%2F%20one/files' },
+    ]);
+  });
   it('uses the narrow native bridge for PCM and propagates durable-save failures', async () => {
     const { bridge } = fakeBridge(() => ({ ok: true, status: 200, data: null }));
     bridge.openNative = vi.fn<BridgeApi['openNative']>(async () => ({ ok: true, status: 200, data: {
@@ -215,11 +225,17 @@ describe('ApiClient request mapping', () => {
     });
   });
 
-  it('sends settings updates as PUT with the partial body (api_key write-only)', async () => {
+  it('sends settings updates as PUT with the partial body (provider keys write-only)', async () => {
     const { bridge, requests } = fakeBridge((req) => ({ ok: true, status: 200, data: req.body }));
-    await new ApiClient(bridge).updateSettings({ agent: { provider: 'openrouter', api_key: 'secret' } });
+    await new ApiClient(bridge).updateSettings({
+      agent: { provider: 'openrouter' },
+      provider_keys: { openrouter: 'secret' },
+    });
     expect(requests[0]!.method).toBe('PUT');
-    expect(requests[0]!.body).toEqual({ agent: { provider: 'openrouter', api_key: 'secret' } });
+    expect(requests[0]!.body).toEqual({
+      agent: { provider: 'openrouter' },
+      provider_keys: { openrouter: 'secret' },
+    });
   });
 
   it('sends native recording preferences without changing consent or model assignments', async () => {
