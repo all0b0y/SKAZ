@@ -43,6 +43,15 @@ const api: BridgeApi = {
   fetchAudio(sessionId: string, sequence: number): Promise<BinaryResponse> {
     return ipcRenderer.invoke(CHANNELS.fetchAudio, sessionId, sequence) as Promise<BinaryResponse>;
   },
+  readLogs(): Promise<string> {
+    return ipcRenderer.invoke(CHANNELS.readLogs) as Promise<string>;
+  },
+  openLogsFolder(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.openLogsFolder) as Promise<boolean>;
+  },
+  chooseStorageRoot(): Promise<string | null> {
+    return ipcRenderer.invoke(CHANNELS.chooseStorageRoot) as Promise<string | null>;
+  },
   getBackendStatus(): Promise<BackendStatus> {
     return ipcRenderer.invoke(CHANNELS.status) as Promise<BackendStatus>;
   },

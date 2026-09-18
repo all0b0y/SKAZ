@@ -1,4 +1,5 @@
-import { ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { mkdirSync } from 'node:fs';
 import { CHANNELS } from './channels';
 import { NativeLiveClient } from './nativeLive';
 import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeLive';
@@ -79,6 +80,40 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.status, (event) => {
     if (!senderTrusted(event)) return { phase: 'error', detail: 'untrusted sender' };
     return manager.getStatus();
+  });
+
+  let choosingRoot = false;
+  ipcMain.handle(CHANNELS.chooseStorageRoot, async (event): Promise<string | null> => {
+    if (!senderTrusted(event) || choosingRoot) return null;
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) return null;
+    choosingRoot = true;
+    try {
+      const result = await dialog.showOpenDialog(owner, {
+        title: 'Choose Markdown root', defaultPath: app.getPath('documents'),
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    } catch {
+      throw new Error('Folder chooser unavailable.');
+    } finally {
+      choosingRoot = false;
+    }
+  });
+
+  // Read-only tail of the app log. No session content reaches this file, so
+  // exposing it to the renderer adds no new disclosure surface.
+  ipcMain.handle(CHANNELS.readLogs, (event) => {
+    if (!senderTrusted(event)) return '';
+    return manager.getLog().read();
+  });
+
+  ipcMain.handle(CHANNELS.openLogsFolder, async (event) => {
+    if (!senderTrusted(event)) return false;
+    const log = manager.getLog();
+    mkdirSync(log.directory, { recursive: true });
+    await shell.openPath(log.directory);
+    return true;
   });
 
   ipcMain.handle(CHANNELS.request, async (event, req: BridgeRequest): Promise<JsonResponse<unknown>> => {

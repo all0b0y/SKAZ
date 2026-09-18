@@ -4,6 +4,8 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { BackendStatus } from '../frontend/src/api/bridge';
+import { AppLog } from './logFile';
+import { app } from 'electron';
 
 // Owns the lifecycle of the Python backend subprocess: pick a free loopback
 // port, mint a per-run bearer token, spawn the process, poll GET /health until
@@ -53,11 +55,18 @@ export class BackendManager {
   private readonly repoRoot: string;
   private readonly dataDir: string;
   private readonly onStatus?: StatusListener;
+  private readonly log: AppLog;
 
   constructor(options: BackendManagerOptions) {
     this.repoRoot = options.repoRoot;
     this.dataDir = options.dataDir;
     this.onStatus = options.onStatus;
+    this.log = new AppLog(options.dataDir);
+  }
+
+  /** Exposed so IPC can read the same file this manager writes. */
+  getLog(): AppLog {
+    return this.log;
   }
 
   getStatus(): BackendStatus {
@@ -70,6 +79,13 @@ export class BackendManager {
 
   private setStatus(status: BackendStatus): void {
     this.status = status;
+    // Lifecycle transitions are the most useful diagnostic in the log: they
+    // explain a stuck splash screen without exposing any session content.
+    this.log.write(
+      status.phase === 'error' ? 'ERROR' : 'INFO',
+      'app',
+      `backend ${status.phase}${status.detail ? `: ${status.detail}` : ''}`,
+    );
     this.onStatus?.(status);
   }
 
@@ -126,14 +142,21 @@ export class BackendManager {
         ...process.env,
         AUDIOHELPER_TOKEN: token,
         AUDIOHELPER_DATA_DIR: this.dataDir,
+        AUDIOHELPER_DOCUMENTS_DIR: app.getPath('documents'),
         PYTHONUNBUFFERED: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     this.child = child;
 
-    child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[backend] ${d}`));
-    child.stderr?.on('data', (d: Buffer) => process.stderr.write(`[backend] ${d}`));
+    child.stdout?.on('data', (d: Buffer) => {
+      process.stdout.write(`[backend] ${d}`);
+      this.log.writeBackendChunk(d.toString('utf8'), 'stdout');
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      process.stderr.write(`[backend] ${d}`);
+      this.log.writeBackendChunk(d.toString('utf8'), 'stderr');
+    });
 
     const abort = new AbortController();
     let exited = false;
