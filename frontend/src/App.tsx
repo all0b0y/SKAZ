@@ -3,6 +3,8 @@ import { clsx } from 'clsx';
 import { useStore } from './state/store';
 import { useTheme } from './hooks/useTheme';
 import { SessionList } from './components/sessions/SessionList';
+import { BackendStatusDot } from './components/sessions/BackendStatusDot';
+import { LanguageOnboarding } from './components/onboarding/LanguageOnboarding';
 import { RecorderBar } from './components/recorder/RecorderBar';
 import { TranscriptView } from './components/transcript/TranscriptView';
 import { NotesPanel } from './components/notes/NotesPanel';
@@ -10,39 +12,9 @@ import { AssistantPanel } from './components/assistant/AssistantPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { SearchPalette } from './components/search/SearchPalette';
 import { Icon } from './components/ui/Icon';
-import { InlineEditableText } from './components/ui/InlineEditableText';
-import { formatTimecode } from './lib/time';
 import type { Citation } from './api/types';
 
 type CenterTab = 'transcript' | 'notes';
-
-function TitlebarSession() {
-  const activeId = useStore((s) => s.activeSessionId);
-  const sessions = useStore((s) => s.sessions);
-  const renameSession = useStore((s) => s.renameSession);
-  const session = sessions.find((s) => s.id === activeId);
-  if (!session) return null;
-
-  const created = new Date(session.created_at);
-  const dateLabel = Number.isNaN(created.getTime())
-    ? null
-    : created.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  const durationLabel = session.duration_ms > 0 ? formatTimecode(session.duration_ms) : null;
-  const metaLabel = [dateLabel, durationLabel].filter(Boolean).join(' · ');
-
-  return (
-    <div className="titlebar__session">
-      <InlineEditableText
-        value={session.title}
-        onCommit={(title) => void renameSession(session.id, title)}
-        className="titlebar__session-name"
-        inputClassName="titlebar__session-rename"
-        ariaLabel="Session name"
-      />
-      {metaLabel && <span className="titlebar__session-meta tabular">{metaLabel}</span>}
-    </div>
-  );
-}
 
 function BackendGate() {
   const backend = useStore((s) => s.backend);
@@ -77,6 +49,7 @@ export default function App() {
   const theme = useStore((s) => s.theme);
   const ready = useStore((s) => s.ready);
   const activeId = useStore((s) => s.activeSessionId);
+  const settings = useStore((s) => s.settings);
   const [tab, setTab] = useState<CenterTab>('transcript');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -109,7 +82,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="titlebar">
-        <TitlebarSession />
+        <BackendStatusDot />
       </header>
 
       <main className="workspace">
@@ -142,10 +115,12 @@ export default function App() {
             ) : tab === 'transcript' ? (
               <TranscriptView focusSegmentId={focusSegmentId} />
             ) : (
-              <NotesPanel onCite={onCite} />
+              <NotesPanel onCite={onCite} onOpenSettings={() => setSettingsOpen(true)} />
             )}
           </div>
-          <RecorderBar />
+          <div className="center__footer">
+            <RecorderBar />
+          </div>
         </section>
 
         <AssistantPanel onCite={onCite} />
@@ -154,6 +129,8 @@ export default function App() {
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} onCite={onCite} />
       {!ready && <BackendGate />}
+      {/* Only once the backend answered: the language list comes from it. */}
+      {ready && settings && !settings.used_languages?.length && <LanguageOnboarding />}
     </div>
   );
 }
