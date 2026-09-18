@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
+from . import note_store
 from .db import Database
 from .schemas import (
     AudioChunkStatus,
@@ -1528,35 +1529,33 @@ def list_messages(db: Database, session_id: str) -> list[Message]:
     ]
 
 
-def add_note(db: Database, session_id: str, content: str, model: str, citations: list[Citation]) -> Note:
-    note = Note(content=content, created_at=_now(), model=model, citations=citations)
+def add_note(
+    db: Database, session_id: str, content: str, model: str, citations: list[Citation],
+    source_revision: int | None = None,
+) -> Note:
+    note = Note(id=_new_id(), content=content, created_at=_now(), model=model, citations=citations,
+                source_revision=source_revision)
+    note.updated_at = note.created_at
     with db.write() as connection:
+        note.stale = source_revision != note_store.source_revision(connection, session_id)
         connection.execute(
-            "INSERT INTO notes(id, session_id, content, created_at, model, citations)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO notes(id, session_id, content, created_at, model, citations, source_revision,"
+            " title, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                _new_id(),
+                note.id,
                 session_id,
                 note.content,
                 note.created_at,
                 note.model,
                 json.dumps([c.model_dump() for c in citations], ensure_ascii=False),
+                source_revision,
+                note.title,
+                note.updated_at,
             ),
         )
     return note
 
 
 def latest_note(db: Database, session_id: str) -> Note | None:
-    with db.read() as connection:
-        row = connection.execute(
-            "SELECT * FROM notes WHERE session_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
-            (session_id,),
-        ).fetchone()
-    if row is None:
-        return None
-    return Note(
-        content=row["content"],
-        created_at=row["created_at"],
-        model=row["model"],
-        citations=[Citation.model_validate(item) for item in json.loads(row["citations"])],
-    )
+    return note_store.latest(db, session_id)

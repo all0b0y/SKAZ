@@ -87,7 +87,68 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 CREATE INDEX IF NOT EXISTS notes_by_session ON notes(session_id, created_at);
 
+CREATE TABLE IF NOT EXISTS note_history (
+    id         TEXT PRIMARY KEY,
+    note_id    TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    snapshot   TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS note_history_expiry ON note_history(expires_at);
+
+-- File output is a recoverable projection, never the primary recording store.
+CREATE TABLE IF NOT EXISTS file_projections (
+    root TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    digest TEXT NOT NULL,
+    PRIMARY KEY (root, session_id, name)
+);
+CREATE TABLE IF NOT EXISTS session_file_status (
+    root TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    doc TEXT NOT NULL,
+    PRIMARY KEY (root, session_id)
+);
+
+-- Intent precedes a non-destructive directory rename; never auto-delete archives.
+CREATE TABLE IF NOT EXISTS file_preservations (
+    id TEXT PRIMARY KEY,
+    root TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    directory TEXT NOT NULL,
+    device INTEGER NOT NULL,
+    inode INTEGER NOT NULL,
+    phase TEXT NOT NULL CHECK (phase IN ('pending', 'preserved'))
+);
+
+CREATE TABLE IF NOT EXISTS storage_root (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    root TEXT
+);
+
 CREATE TABLE IF NOT EXISTS app_settings (
+    id  INTEGER PRIMARY KEY CHECK (id = 1),
+    doc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS physical_storage (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    revision INTEGER NOT NULL,
+    doc TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_locations (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    device INTEGER,
+    inode INTEGER
+);
+CREATE TABLE IF NOT EXISTS storage_directories (
+    path TEXT PRIMARY KEY,
+    device INTEGER NOT NULL,
+    inode INTEGER NOT NULL
+);
+-- No FK: retain audio ownership after primary DB deletion until cleanup finishes.
+CREATE TABLE IF NOT EXISTS storage_operations (
     id  INTEGER PRIMARY KEY CHECK (id = 1),
     doc TEXT NOT NULL
 );
@@ -150,7 +211,9 @@ CREATE TABLE IF NOT EXISTS live_asr_fragments (
     config_revision      INTEGER NOT NULL CHECK (config_revision >= 0),
     protected            INTEGER NOT NULL DEFAULT 0 CHECK (protected IN (0, 1)),
     completion_provenance TEXT CHECK (
-        completion_provenance IS NULL OR completion_provenance IN ('live_agreement', 'source_ended_final_pass', 'ordinary_recovery')
+        completion_provenance IS NULL OR completion_provenance IN (
+            'live_agreement', 'source_ended_final_pass', 'ordinary_recovery'
+        )
     ),
     segment_id           TEXT REFERENCES segments(id) ON DELETE RESTRICT,
     accepted_at          TEXT,
@@ -202,6 +265,42 @@ class Database:
             self._connection.execute("PRAGMA foreign_keys=ON")
             self._connection.executescript(SCHEMA)
             self._migrate_session_mode()
+            columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(notes)")}
+            if "revision" not in columns:
+                self._connection.execute("ALTER TABLE notes ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+            if "source_revision" not in columns:
+                self._connection.execute("ALTER TABLE notes ADD COLUMN source_revision INTEGER")
+            # A note's name is its own field, not the first line of its text: renaming
+            # must never rewrite the document, and editing must never rename it.
+            if "title" not in columns:
+                self._connection.execute("ALTER TABLE notes ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            # The list is ordered by what the user last touched. Created order would
+            # leave a note just edited at the bottom, which reads as a dead list.
+            if "updated_at" not in columns:
+                self._connection.execute("ALTER TABLE notes ADD COLUMN updated_at TEXT")
+                self._connection.execute("UPDATE notes SET updated_at=created_at WHERE updated_at IS NULL")
+            # Deletion is soft: the row waits here for the trash screen instead of
+            # being destroyed, so a mistaken click stays recoverable.
+            if "deleted_at" not in columns:
+                self._connection.execute("ALTER TABLE notes ADD COLUMN deleted_at TEXT")
+            session_columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(sessions)")}
+            if "source_revision" not in session_columns:
+                self._connection.execute(
+                    "ALTER TABLE sessions ADD COLUMN source_revision INTEGER NOT NULL DEFAULT 0"
+                )
+            # Source counters commit/roll back with durable audio and stable text.
+            for table in ("chunks", "segments"):
+                for action, owner in (("INSERT", "NEW"), ("UPDATE", "NEW"), ("DELETE", "OLD")):
+                    event = action
+                    if action == "UPDATE":
+                        fields = "text,start_ms,end_ms,language" if table == "segments" else "sha256"
+                        event = f"UPDATE OF {fields}"
+                    self._connection.execute(
+                        f"CREATE TRIGGER IF NOT EXISTS note_source_{table}_{action.lower()} "
+                        f"AFTER {event} ON {table} BEGIN "
+                        "UPDATE sessions SET source_revision=source_revision+1 "
+                        f"WHERE id={owner}.session_id; END"
+                    )
             self._migrate_live_asr_finality()
             migrate_native_live(self._connection)
             self._connection.commit()
