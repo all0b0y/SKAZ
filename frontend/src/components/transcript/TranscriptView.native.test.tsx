@@ -71,7 +71,8 @@ describe('native transcript read model', () => {
     expect(turns[1]?.querySelector('p')).toHaveTextContent('Ja');
     expect(turns[2]?.querySelector('p')).toHaveTextContent('Nochmals');
     expect(turns[3]).toHaveTextContent('Перевод без точной привязки к репликеUncertain');
-    expect(within(list).getByText('Hello')).not.toBeVisible();
+    // Tokens of one segment now share a node, so the original reads as one run.
+    expect(within(list).getByText('Hello jaThanks')).not.toBeVisible();
     expect(within(list).getAllByText('Uncertain')).toHaveLength(1);
   });
 

@@ -11,6 +11,49 @@ interface Turn {
   display?: NativeTranslationToken[];
 }
 
+/** Consecutive tokens that share one provenance, rendered as a single node. */
+interface Run {
+  key: string;
+  text: string;
+  /** Present only for confirmed text; the replaceable tail owns no segment. */
+  segmentId: string | null;
+}
+
+/**
+ * Collapses neighbouring tokens into runs so the DOM holds one node per
+ * segment instead of one per word. A real 60-minute recording rendered 33 478
+ * spans and re-rendered them on every one-second poll (docs/BASELINE-PROFILE.md).
+ *
+ * Tokens merge only when they share a `segment_id`, so every citation target
+ * stays individually addressable and two segments never fuse. Tokens without
+ * one — the replaceable tail and translation output, neither of which is a
+ * citation target — merge with their like neighbours but never with confirmed
+ * text, so a redrawn tail cannot rewrite a saved segment's node.
+ */
+function runs(tokens: Array<NativeTranscriptToken | NativeTranslationToken>): Run[] {
+  const collapsed: Run[] = [];
+  for (const token of tokens) {
+    const segmentId = 'segment_id' in token ? token.segment_id : null;
+    const previous = collapsed.at(-1);
+    if (previous && previous.segmentId === segmentId) {
+      previous.text += token.text;
+      continue;
+    }
+    collapsed.push({ key: token.id, text: token.text, segmentId });
+  }
+  return collapsed;
+}
+
+function TranscriptRuns({ tokens, focusSegmentId }: {
+  tokens: Array<NativeTranscriptToken | NativeTranslationToken>;
+  focusSegmentId: string | null;
+}) {
+  return <>{runs(tokens).map((run) => <span key={run.key}
+    data-source-id={run.segmentId ?? undefined}
+    className={run.segmentId !== null && run.segmentId === focusSegmentId ? 'segment--focused' : undefined}
+  >{run.text}</span>)}</>;
+}
+
 function project(snapshot: NativeSnapshot, segments: Segment[]): Turn[] {
   const tokens = [...(snapshot.final_tokens ?? [])];
   const represented = new Set(tokens.map((token) => token.segment_id));
@@ -103,22 +146,23 @@ export function NativeMonologues({ snapshot, segments, focusSegmentId }: {
       <span className="native-monologue__speaker">
         {turn.speaker !== null ? `Спикер ${turn.speaker}` : index === 0 && turn.connection !== 'archive' ? 'Спикер 1' : 'Спикер'}
       </span>
-      {translation && <p className="native-monologue__text">{turn.display?.map((token) =>
-        <span key={token.id}>{token.text}</span>)}</p>}
+      {translation && <p className="native-monologue__text">
+        <TranscriptRuns tokens={turn.display ?? []} focusSegmentId={focusSegmentId} />
+      </p>}
       {translation ? <details className="native-monologue__original">
         <summary>Показать оригинал</summary>
-        <p className="native-monologue__text">{turn.tokens.map((token) => <span key={token.id}
-          data-source-id={token.segment_id ?? undefined}
-          className={token.segment_id && token.segment_id === focusSegmentId ? 'segment--focused' : undefined}
-        >{token.text}</span>)}</p>
-      </details> : <p className="native-monologue__text">{turn.tokens.map((token) => <span key={token.id}
-        data-source-id={token.segment_id ?? undefined}
-        className={token.segment_id && token.segment_id === focusSegmentId ? 'segment--focused' : undefined}
-      >{token.text}</span>)}</p>}
+        <p className="native-monologue__text">
+          <TranscriptRuns tokens={turn.tokens} focusSegmentId={focusSegmentId} />
+        </p>
+      </details> : <p className="native-monologue__text">
+        <TranscriptRuns tokens={turn.tokens} focusSegmentId={focusSegmentId} />
+      </p>}
     </li>)}
     {translation && unassigned.length > 0 && <li className="native-monologue">
       <span className="native-monologue__speaker">Перевод без точной привязки к реплике</span>
-      <p className="native-monologue__text">{unassigned.map((token) => <span key={token.id}>{token.text}</span>)}</p>
+      <p className="native-monologue__text">
+        <TranscriptRuns tokens={unassigned} focusSegmentId={focusSegmentId} />
+      </p>
     </li>}
   </ol>;
 }
