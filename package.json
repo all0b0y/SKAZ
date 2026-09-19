@@ -13,7 +13,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke": "electron-vite build && playwright test",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "icon": "python3 scripts/make-icon.py",
+    "build:backend": "backend/.venv/bin/pyinstaller --noconfirm --clean --distpath backend/dist --workpath backend/build/pyinstaller backend/skaz-backend.spec",
+    "dist:mac": "npm run icon && npm run build:backend && npm run build && electron-builder --mac dmg --config electron-builder.yml"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -37,6 +40,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.2.0",
+    "electron-builder": "^26.0.12",
     "electron-vite": "^4.0.1",
     "jsdom": "^25.0.1",
     "playwright": "^1.63.0",

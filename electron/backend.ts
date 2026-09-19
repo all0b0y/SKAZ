@@ -90,8 +90,14 @@ export class BackendManager {
   }
 
   private resolveSpawn(port: number): { command: string; args: string[] } {
-    // Prefer an existing backend virtualenv; fall back to `uv run` per
-    // docs/API.md. Both run `python -m audiohelper --port N` from repo root.
+    // Packaged app: the backend is a frozen binary inside the bundle's
+    // Resources, because an installed .app has neither the repo nor uv.
+    const bundled = path.join(process.resourcesPath ?? '', 'backend', 'skaz-backend');
+    if (app.isPackaged && existsSync(bundled)) {
+      return { command: bundled, args: ['--port', String(port)] };
+    }
+    // Development: prefer an existing backend virtualenv; fall back to `uv run`
+    // per docs/API.md. Both run `python -m audiohelper --port N` from repo root.
     const venvPython = path.join(this.repoRoot, 'backend', '.venv', 'bin', 'python');
     if (existsSync(venvPython)) {
       return { command: venvPython, args: ['-m', 'audiohelper', '--port', String(port)] };
@@ -136,8 +142,13 @@ export class BackendManager {
     const handle: BackendHandle = { port, token };
 
     const { command, args } = this.resolveSpawn(port);
+    // In a packaged app `repoRoot` points inside app.asar, which is a virtual
+    // archive rather than a real directory: spawning with it as cwd fails
+    // before the child ever runs. The frozen backend resolves everything from
+    // env vars, so the user's home is a safe, always-present working directory.
+    const cwd = app.isPackaged ? app.getPath('home') : this.repoRoot;
     const child = spawn(command, args, {
-      cwd: this.repoRoot,
+      cwd,
       env: {
         ...process.env,
         AUDIOHELPER_TOKEN: token,

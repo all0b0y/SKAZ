@@ -23,6 +23,8 @@ const thisDir =
 const REPO_ROOT = isDev ? process.cwd() : path.resolve(thisDir, '..', '..');
 const PRELOAD = path.join(thisDir, '..', 'preload', 'preload.js');
 const RENDERER_HTML = path.join(thisDir, '..', 'renderer', 'index.html');
+// Only meaningful unpackaged: a packaged .app takes its icon from the bundle's
+// .icns, and the repo-relative PNG does not exist inside the bundle.
 const APP_ICON = path.join(REPO_ROOT, 'icon', 'icon.png');
 
 // Exact renderer identity for trust checks. Parsed-equality, never prefix match.
@@ -142,7 +144,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    icon: APP_ICON,
+    icon: app.isPackaged ? undefined : APP_ICON,
     backgroundColor: '#ffffff',
     show: false,
     titleBarStyle: 'hiddenInset',
@@ -191,7 +193,7 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   hardenSession();
-  if (process.platform === 'darwin') app.dock?.setIcon(APP_ICON);
+  if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(APP_ICON);
   // macOS gates microphone access at the OS level, on top of Chromium's own
   // permission handler. Without this call TCC never shows its dialog, the
   // renderer's getUserMedia fails, and device labels stay empty so the picker

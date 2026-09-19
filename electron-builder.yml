@@ -1,0 +1,68 @@
+# electron-builder configuration for the SKAZ desktop app.
+#
+# Build with:  npm run dist:mac
+# Output:      release/SKAZ-<version>-<arch>.dmg
+#
+# The app is NOT an Electron-named shell: productName drives the bundle name,
+# the Dock/menu-bar title and the userData folder. The Python backend is shipped
+# as a frozen binary under Contents/Resources/backend (see backend/skaz-backend.spec).
+
+appId: com.all0b0y.skaz
+productName: SKAZ
+copyright: Copyright © 2026 all0b0y
+
+directories:
+  buildResources: build
+  output: release
+
+# Only the built renderer/main/preload go inside the asar. Source, tests, docs,
+# the Python virtualenv and the PyInstaller work directory stay out.
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+# The frozen backend must stay OUTSIDE the asar: it is executed, not required.
+extraResources:
+  - from: backend/dist/skaz-backend
+    to: backend
+    filter:
+      - '**/*'
+
+asar: true
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  # Hardened runtime + entitlements: required for microphone access and for the
+  # frozen Python child process to launch under a signed bundle.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    # macOS refuses microphone access outright without a usage description.
+    NSMicrophoneUsageDescription: SKAZ records lectures and meetings you start, to transcribe them on your machine.
+    NSSpeechRecognitionUsageDescription: SKAZ transcribes the audio you record.
+    # The UI provides its own title bar treatment.
+    NSHighResolutionCapable: true
+
+dmg:
+  title: SKAZ ${version}
+  icon: build/icon.icns
+  # The familiar "drag the app onto Applications" installer window.
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 400
