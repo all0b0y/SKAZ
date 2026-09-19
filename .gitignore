@@ -19,5 +19,24 @@ test_audio/
 playwright-report/
 test-results/
 *.log
-.impeccable/review/
 :memory:.ses
+
+# AI-assistant scaffolding. These are per-developer tooling, not product source:
+# skill packs, agent definitions and harness caches differ per machine and per
+# assistant, and a checked-in copy silently overrides another developer's setup.
+.agents/
+.claude/
+.codex/
+.cursor/
+.cursorrules
+.aider*
+.opencode/
+.windsurf/
+.continue/
+.hermes/
+.impeccable/
+.skills/
+skills-lock.json
+CLAUDE.md
+GEMINI.md
+.github/copilot-instructions.md
