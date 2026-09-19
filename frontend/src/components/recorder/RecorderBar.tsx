@@ -3,7 +3,7 @@ import { useStore } from '../../state/store';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { formatTimecode } from '../../lib/time';
-import { FLOOR_DBFS, type MeterSnapshot } from '../../audio/meter';
+import { FLOOR_DBFS } from '../../audio/meter';
 
 
 /** How many rounded bars the running waveform keeps on screen (~4s of history). */
@@ -18,7 +18,14 @@ const WAVE_BARS = 34;
 // Note on honesty: audio/meter.ts always reports vad 'unavailable' — there is
 // no real speech detection in the project. These bars are loudness history and
 // nothing more; no bar colour or height claims that someone was speaking.
-function LevelWave({ meter, active }: { meter: MeterSnapshot; active: boolean }) {
+//
+// Owns its own `meter` subscription instead of receiving it as a prop from
+// RecorderBar: the level updates up to 10x/second (Задача 6,
+// docs/PERFORMANCE-PLAN.md Срез 2), and reading it at RecorderBar's top level
+// re-ran the whole component — buttons, feed alerts, progress bar — on every
+// tick even though only these bars change.
+export function LevelWave({ active }: { active: boolean }) {
+  const meter = useStore((s) => s.meter);
   const [bars, setBars] = useState<number[]>(() => Array<number>(WAVE_BARS).fill(0));
   const normalized = active
     ? Math.min(1, Math.max(0, (meter.dbfs - FLOOR_DBFS) / -FLOOR_DBFS))
@@ -60,13 +67,90 @@ function LevelWave({ meter, active }: { meter: MeterSnapshot; active: boolean })
   );
 }
 
+// Owns its own `elapsedMs` subscription instead of receiving it as a prop:
+// the store ticks it every 250ms while recording (Задача 6,
+// docs/PERFORMANCE-PLAN.md Срез 2), and reading it at RecorderBar's top level
+// re-ran the whole component on every tick even though only this label
+// changes. `live` is passed in — it derives from `recorderState`, which
+// changes rarely, so it does not reintroduce the same cost.
+function RecorderClock({ live }: { live: boolean }) {
+  const elapsedMs = useStore((s) => s.elapsedMs);
+  return (
+    <span className="recorder__time tabular" data-live={live} aria-live="off">
+      {formatTimecode(elapsedMs)}
+    </span>
+  );
+}
+
+// Owns its own `meter` subscription for the same reason as LevelWave: these
+// three badges are the only part of the status row that needs the meter, and
+// it changes up to 10x/second while recording.
+function MeterBadges({ live }: { live: boolean }) {
+  const meter = useStore((s) => s.meter);
+  if (!live) return null;
+  return (
+    <>
+      {meter.clipping && <span className="recorder__badge">Clipping risk</span>}
+      {meter.sustainedLow && (
+        <span className="recorder__badge">We can barely hear you — check your microphone</span>
+      )}
+      {meter.vad === 'unavailable' && <span className="recorder__badge">Speech detection unavailable</span>}
+    </>
+  );
+}
+
+// Owns its own `elapsedMs` subscription for the same reason as RecorderClock:
+// the progress ratio is the only other consumer of the 250ms tick.
+function RecorderProgress({
+  capturing,
+  transcribedThroughMs,
+  transcriptionBacklog,
+}: {
+  capturing: boolean;
+  transcribedThroughMs: number;
+  transcriptionBacklog: boolean;
+}) {
+  const elapsedMs = useStore((s) => s.elapsedMs);
+  // Honest transcription progress: the only real numbers on hand are how
+  // much of the recording timeline has a finished segment (transcribedThroughMs,
+  // real backend output) and how long the recording actually is (elapsedMs,
+  // the recorder's own clock). No duration is invented for chunks still
+  // pending — when we cannot compute a true ratio, the bar either shows an
+  // indeterminate "working" state (if there is a real backlog) or stays
+  // empty. It never fabricates a number to look like a duration-based
+  // percentage.
+  const hasDurationSignal = capturing && elapsedMs > 0;
+  const progressRatio = hasDurationSignal
+    ? Math.min(1, transcribedThroughMs / elapsedMs)
+    : null;
+  const progressIndeterminate = progressRatio === null && transcriptionBacklog;
+  return (
+    <div
+      className="recorder__progress"
+      role="progressbar"
+      aria-label="Transcription progress"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={progressRatio !== null ? Math.round(progressRatio * 100) : undefined}
+      data-indeterminate={progressIndeterminate}
+    >
+      <div
+        className="recorder__progress-fill"
+        style={progressRatio !== null ? { width: `${Math.round(progressRatio * 100)}%` } : undefined}
+      />
+    </div>
+  );
+}
+
 export function RecorderBar() {
   const state = useStore((s) => s.recorderState);
-  const elapsedMs = useStore((s) => s.elapsedMs);
-  const meter = useStore((s) => s.meter);
   const queue = useStore((s) => s.queue);
   const transcription = useStore((s) => s.transcription);
-  const detail = useStore((s) => s.detail);
+  // Only the segments, not the whole `detail`: a durable audio save rebuilds
+  // that object ~10x/second to flag notes stale (see TranscriptView), and
+  // subscribing to it here would re-run every button/badge/progress render
+  // on the same cadence.
+  const detailSegments = useStore((s) => s.detail?.segments);
   const session = useStore((s) => s.sessions.find((item) => item.id === s.activeSessionId));
   const recorderError = useStore((s) => s.recorderError);
   const pendingSessionStatus = useStore((s) => s.pendingSessionStatus);
@@ -87,26 +171,18 @@ export function RecorderBar() {
   const transcriptionFailed = transcription.failed.length + transcription.diskFailed;
   const transcriptionPending = transcription.pending + transcription.deferred;
   const contextualDisabled = recordingMode === 'contextual_local' && !liveCapabilities?.capable;
-  const hasRecording = Boolean(session && (session.duration_ms > 0 || (detail?.segments.length ?? 0) > 0));
+  const hasRecording = Boolean(session && (session.duration_ms > 0 || (detailSegments?.length ?? 0) > 0));
 
-
-  // Honest transcription progress: the only real numbers on hand are how
-  // much of the recording timeline has a finished segment (detail.segments,
-  // whose end_ms is real backend output) and how long the recording actually
-  // is (elapsedMs, the recorder's own clock). No duration is invented for
-  // chunks still pending — when we cannot compute a true ratio, the bar
-  // either shows an indeterminate "working" state (if there is a real
-  // backlog) or stays empty (if the queue is empty). It never fabricates a
-  // number to look like a duration-based percentage.
-  const transcribedThroughMs = detail?.segments.length
-    ? detail.segments.reduce((max, seg) => Math.max(max, seg.end_ms), 0)
+  // Honest transcription progress: the real number on hand is how much of
+  // the recording timeline has a finished segment (detailSegments, whose
+  // end_ms is real backend output). No duration is invented for chunks still
+  // pending. The elapsed-time half of the ratio lives in RecorderProgress,
+  // which owns the 250ms `elapsedMs` tick on its own so this component does
+  // not re-render on every tick.
+  const transcribedThroughMs = detailSegments?.length
+    ? detailSegments.reduce((max, seg) => Math.max(max, seg.end_ms), 0)
     : 0;
-  const hasDurationSignal = capturing && elapsedMs > 0;
-  const progressRatio = hasDurationSignal
-    ? Math.min(1, transcribedThroughMs / elapsedMs)
-    : null;
   const transcriptionBacklog = transcriptionPending > 0 || queue.pending > 0;
-  const progressIndeterminate = progressRatio === null && transcriptionBacklog;
 
   return (
     <div className="recorder">
@@ -147,26 +223,12 @@ export function RecorderBar() {
         </div>
 
         <div className="recorder__status">
-          <span
-            className="recorder__time tabular"
-            data-live={state === 'recording'}
-            aria-live="off"
-          >
-            {formatTimecode(elapsedMs)}
-          </span>
-          <LevelWave meter={meter} active={state === 'recording'} />
+          <RecorderClock live={state === 'recording'} />
+          <LevelWave active={state === 'recording'} />
           {state === 'recording' && <span className="recorder__badge recorder__badge--live">Live</span>}
           {state === 'paused' && <span className="recorder__badge">Paused</span>}
           {state === 'processing' && <span className="recorder__badge">Flushing audio…</span>}
-          {state === 'recording' && meter.clipping && (
-            <span className="recorder__badge">Clipping risk</span>
-          )}
-          {state === 'recording' && meter.sustainedLow && (
-            <span className="recorder__badge">We can barely hear you — check your microphone</span>
-          )}
-          {state === 'recording' && meter.vad === 'unavailable' && (
-            <span className="recorder__badge">Speech detection unavailable</span>
-          )}
+          <MeterBadges live={state === 'recording'} />
         </div>
 
 
@@ -223,20 +285,11 @@ export function RecorderBar() {
         )}
       </div>
 
-      <div
-        className="recorder__progress"
-        role="progressbar"
-        aria-label="Transcription progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={progressRatio !== null ? Math.round(progressRatio * 100) : undefined}
-        data-indeterminate={progressIndeterminate}
-      >
-        <div
-          className="recorder__progress-fill"
-          style={progressRatio !== null ? { width: `${Math.round(progressRatio * 100)}%` } : undefined}
-        />
-      </div>
+      <RecorderProgress
+        capturing={capturing}
+        transcribedThroughMs={transcribedThroughMs}
+        transcriptionBacklog={transcriptionBacklog}
+      />
     </div>
   );
 }
