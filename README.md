@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="icon/icon2.png" alt="SKAZ icon" width="128" height="128">
+<img src="icon/icon.png" alt="SKAZ icon" width="128" height="128">
 
 # 🗣️ SKAZ
 
