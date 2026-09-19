@@ -39,13 +39,17 @@ const CSP =
 let mainWindow: BrowserWindow | null = null;
 let nativeClient: NativeLiveClient | null = null;
 
+// SKAZ owns its own store under the product-named userData directory. It is
+// created on first run; nothing is inherited from any earlier install.
+const DATA_DIR = path.join(app.getPath('userData'), 'data');
+
 // Latest capture snapshot reported by the renderer (validated). Consulted on
 // close/quit so unsent audio is never dropped without a warning.
 let captureState: CaptureProtectionState = { recorderState: 'idle', pending: 0, failed: 0 };
 
 const manager = new BackendManager({
   repoRoot: REPO_ROOT,
-  dataDir: path.join(app.getPath('userData'), 'data'),
+  dataDir: DATA_DIR,
   onStatus: (status: BackendStatus) => {
     mainWindow?.webContents.send(CHANNELS.statusEvent, status);
   },

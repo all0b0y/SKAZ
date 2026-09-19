@@ -1,9 +1,9 @@
 {
-  "name": "audiohelper",
-  "version": "0.0.0",
+  "name": "skaz",
+  "version": "0.1.0",
   "private": true,
   "description": "Desktop assistant that listens along, transcribes with timestamps, answers about the moment, and keeps notes.",
-  "author": "all0b0y <bykov220033@gmail.com>",
+  "author": "all0b0y",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",

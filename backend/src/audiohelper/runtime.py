@@ -11,7 +11,7 @@ from .activity import ActivityLog
 from .agent.note_rewrite import PendingRewrites
 from .capabilities import describe
 from .catalog import ProviderCatalogs
-from .config import AppConfig
+from .config import AppConfig, adopt_legacy_database
 from .db import Database
 from .gateways.asr import LocalModelPreparations
 from .ingestion import IngestionService
@@ -39,6 +39,9 @@ class Runtime:
     ) -> None:
         config.data_dir.mkdir(parents=True, exist_ok=True)
         config.audio_dir.mkdir(parents=True, exist_ok=True)
+        # Must run before the database is opened, or SQLite creates an empty
+        # skaz.sqlite3 beside the pre-rename file and the install looks wiped.
+        adopt_legacy_database(config)
         self.config = config
         self.activity_log = ActivityLog(config.activity_log_capacity)
         self.db = Database(config.db_path)

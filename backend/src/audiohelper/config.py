@@ -6,7 +6,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_DATA_DIR = Path.home() / ".audiohelper"
+DEFAULT_DATA_DIR = Path.home() / ".skaz"
+#: Data folder written before the product was renamed; adopted on first start.
+LEGACY_DATA_DIR = Path.home() / ".audiohelper"
+LEGACY_DB_NAME = "audiohelper.sqlite3"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
 
@@ -83,7 +86,7 @@ class AppConfig:
 
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "audiohelper.sqlite3"
+        return self.data_dir / "skaz.sqlite3"
 
     @classmethod
     def from_env(cls, port: int) -> AppConfig:
@@ -120,3 +123,24 @@ class AppConfig:
                 else None
             ),
         )
+
+
+def adopt_legacy_database(config: AppConfig) -> None:
+    """Rename a pre-rename database to the product-named file, once.
+
+    A data folder written by an earlier build holds ``audiohelper.sqlite3``.
+    Without this the backend would create a second, empty ``skaz.sqlite3``
+    beside it and the installation would look wiped. The ``-wal``/``-shm``
+    sidecars move too: a WAL left behind holds committed transactions.
+
+    Never overwrites an existing database, so a repeated call cannot replace
+    newer data with an older file.
+    """
+    target = config.db_path
+    legacy = config.data_dir / LEGACY_DB_NAME
+    if target.exists() or not legacy.exists():
+        return
+    for suffix in ("", "-wal", "-shm"):
+        source = legacy.with_name(legacy.name + suffix)
+        if source.exists():
+            source.rename(target.with_name(target.name + suffix))
