@@ -141,15 +141,22 @@ def test_recording_config_survives_pause_restart_and_reaches_provider(
             assert snapshot["recording_mode"] == mode
             assert snapshot["used_languages"] == ["ru", "en"]
             assert snapshot["translation_target_language"] == "de"
-            assert [t["text"] for t in snapshot["final_tokens"]] == ["Hello"] * (index + 1)
+            # The live response carries the flat original list only for a
+            # transcription recording; translation UI reads the projection.
+            durable = app.state.runtime.live_store.snapshot(sid)
+            assert [t["text"] for t in durable["final_tokens"]] == ["Hello"] * (index + 1)
             expected = ["Hallo"] * (index + 1) if mode == "translation" else []
-            assert [t["text"] for t in snapshot["final_translation_tokens"]] == expected
-            assert all("start_sample" not in t for t in snapshot["final_translation_tokens"])
+            assert [t["text"] for t in durable["final_translation_tokens"]] == expected
+            assert all("start_sample" not in t for t in durable["final_translation_tokens"])
             expected_stream = ["Hello", "Hallo"] if mode == "translation" else ["Hello"]
-            assert [t["text"] for t in snapshot["final_stream_tokens"]] == expected_stream * (index + 1)
-            assert [t["speaker_number"] for t in snapshot["final_stream_tokens"]] == (
+            assert [t["text"] for t in durable["final_stream_tokens"]] == expected_stream * (index + 1)
+            assert [t["speaker_number"] for t in durable["final_stream_tokens"]] == (
                 [1, 1, 2, 2][:2 * (index + 1)] if mode == "translation" else [1, 2][:index + 1]
             )
+            if mode == "translation":
+                assert [t["text"] for t in snapshot["final_translation_tokens"]] == expected
+            else:
+                assert [t["text"] for t in snapshot["final_tokens"]] == ["Hello"] * (index + 1)
             detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
             assert [s["text"] for s in detail["segments"]] == ["Hello"] * (index + 1)
     assert len(configs) == 2

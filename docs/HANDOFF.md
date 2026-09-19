@@ -1,5 +1,74 @@
 # HANDOFF — SKAZ (AudioHelper)
 
+## ASTRA: рост нагрузки при длительной транскрипции — Задача 1 (профиль) + Срез 1 правка 1
+
+### Что сделано и проверено
+- **Исходный профиль снят** — `docs/BASELINE-PROFILE.md`. Установленная сборка
+  `/Applications/SKAZ.app` (12:32) соответствует `aa54b26` = HEAD, дерево было
+  чистым. Замеры на копии реальной базы пользователя
+  (`/tmp/skaz_probe.sqlite3`); рабочая база не изменялась. «Минута M»
+  эмулируется усечением append-only `native_asr_events` + token/stream/
+  translation таблиц.
+- **Цена одного цикла живого опроса (опрос раз в секунду):** 10 мин ~132 ms ·
+  30 мин ~383 ms · 60 мин ~776 ms при payload 5,7 / 17,3 / 34,5 MiB. Рост
+  линеен; на 120-й минуте ожидается ~69 MiB и ~1,5 с на цикл при периоде 1 с.
+  Согласуется с наблюдавшимся 40% → 118% CPU и вылетом.
+- **План с матрицей приоритетов** — `docs/PERFORMANCE-PLAN.md`: 7 правок,
+  5 срезов, нумерация задач ТЗ сохранена, порядок выведен из измерений.
+- **Срез 1 правка 1 выполнена.** `routes/sessions.py::_live_view` +
+  `_LIVE_INTERNAL_FIELDS` / `_LIVE_TRANSLATION_FIELDS`: живой роут
+  `GET /sessions/{id}/live` больше не отдаёт `final_stream_tokens`,
+  `final_translation_projection`, `partial_stream_tokens` (не читает ни
+  `frontend/src`, ни `electron` — проверено grep без тестов); в режиме
+  транскрипции отсекаются переводные поля, в режиме перевода — дублирующий
+  плоский `final_tokens`. `LiveStore.snapshot()` НЕ менялся: форма хранения,
+  диагностика и replay-проверки прежние.
+- **Измеренный результат:** translation 60 мин 34,59 → 16,53 MiB (−52%),
+  parse+IPC 274 → 137 ms; transcription 25,80 → 6,75 MiB (−74%),
+  parse+IPC 233 → 90 ms.
+
+### Команды и результаты
+- `backend/.venv/bin/python -m pytest -q -p no:randomly` → **936 passed**,
+  2 dependency warnings.
+- `npx vitest run` → **565 passed / 63 files**.
+- `npm run typecheck` → exit 0. `npm run build` → exit 0.
+- Ruff по изменённым файлам: 1 замечание import-order в `routes/sessions.py`.
+  Проверено через `git stash`: **существовало до правок**, новых не внесено.
+  mypy падает на `numpy/__init__.pyi` (Type statement, требует ≥3.12) —
+  тоже предсущее, к правке отношения не имеет.
+
+### Файлы
+- Новые: `docs/BASELINE-PROFILE.md`, `docs/PERFORMANCE-PLAN.md`,
+  `backend/tests/test_native_live_response_shape.py` (3 теста, включая сторож
+  `LIVE_RESPONSE_ALLOWED` против попадания нового тяжёлого поля в посекундный
+  путь), `frontend/src/components/transcript/nativeMonologues.bench.test.tsx`.
+- Изменены: `backend/src/audiohelper/routes/sessions.py`,
+  `backend/tests/test_native_translation_order_api.py`,
+  `backend/tests/test_native_recording_config.py` (последние два переведены на
+  проверку инвариантов порядка через `live_store.snapshot()` — они про
+  durable-хранилище, а не про форму живого ответа).
+
+### Незавершённое и честные ограничения
+- RED→GREEN соблюдён: 3 новых теста падали на исходном коде по ожидаемой
+  причине, затем прошли.
+- `nativeMonologues.bench.test.tsx` читает пути из `/tmp/skaz_baseline/` — **в
+  CI работать не будет**. Решение (оставить как локальный бенчмарк/удалить/
+  переселить фикстуры) с пользователем не согласовано.
+- React-замеры сделаны в jsdom — верхняя граница, не Chromium.
+- Требование Задачи 1 «сравнить открыта транскрипция / открыты заметки / окно
+  свёрнуто» **не выполнено**: нужен повторный длительный прогон на живом
+  приложении.
+- Живая трассировка Chrome DevTools не снималась; разбивка script/layout/GC не
+  измерялась.
+- Реальные API/микрофон не запускались. commit/push не выполнялись.
+
+### Ближайший шаг
+Срез 1 правка 2 — `NativeMonologues`: один `<span>` на сегмент вместо span на
+токен (ожидается 33 272 → ~1 600 DOM-узлов) с сохранением `data-source-id`,
+подсветки фокуса, переходов по источнику, таймкодов и принадлежности спикеру.
+Затем правка 3 — размонтирование диагностики при закрытой панели, не оборвав
+воспроизведение.
+
 ## ASTRA: восстановление утраченного редизайна из истории Hermes
 - Причина установлена по фактическим вызовам: сессия `20260915_233604_25976c`, message12752 → tool result12753 (exit0) выполнила `git checkout --` для AssistantPanel.tsx, SessionList.tsx, Icon.tsx, app.css, tokens.css. Это ошибочный широкий откат после просьбы отменить текущие изменения; объяснение через неизвестного sibling не подтверждено. Message12781 также откатил AssistantPanel.test.tsx.
 - Исходники восстановлены из read_file snapshots и успешных exact-match patches текущего профиля state.db (read-only). `.runtime/recovery/manifest.json` содержит SHA256; scripts extract.py/reconstruct.py и restoration.diff сохраняют происхождение. app.css: snapshot12345+12362, затем10успешных CSS/token patches; exact49793→51177bytes и финальные прочитанные диапазоны совпали. tokens snapshot12521+patch12677; AssistantPanel snapshot12637; SessionList snapshot12610; Icon snapshot12620. App snapshot10475+12500 с совпадающим перекрытием/5885bytes уже идентичен рабочему App.tsx — его не меняли.

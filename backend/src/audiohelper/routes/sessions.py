@@ -65,9 +65,37 @@ async def read_native_live(session_id: str, runtime: RuntimeDep) -> dict[str, An
         snapshot = await disk_call(runtime.live_store.snapshot, session_id)
         stream = runtime.native_streams.get(session_id)
         snapshot["transcription"] = stream.state if stream is not None else "inactive"
-        return snapshot
+        return _live_view(snapshot)
     except LiveConflict as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+# Derived views the live client never reads. They are recomputed on every poll
+# and dominated the response: at minute 60 of a real recording
+# `final_stream_tokens` alone was 10.5 MiB of a 34.5 MiB payload, and the whole
+# translation half is dead weight in a transcription recording
+# (docs/BASELINE-PROFILE.md). The durable tables and LiveStore.snapshot() keep
+# producing them for diagnostics and replay checks; only this per-second
+# response drops them.
+_LIVE_INTERNAL_FIELDS = (
+    "final_stream_tokens", "final_translation_projection", "partial_stream_tokens",
+)
+_LIVE_TRANSLATION_FIELDS = (
+    "live_translation_projection", "final_translation_tokens", "partial_translation_tokens",
+)
+
+
+def _live_view(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Trim the live response to what a client actually renders."""
+    view = {key: value for key, value in snapshot.items() if key not in _LIVE_INTERNAL_FIELDS}
+    if view.get("recording_mode") == "translation":
+        # Translation UI reads the projection; the flat original list is the
+        # same tokens a second time.
+        view.pop("final_tokens", None)
+    else:
+        for field in _LIVE_TRANSLATION_FIELDS:
+            view.pop(field, None)
+    return view
 
 
 def _live_response(payload: LiveAsrDraftResponse) -> JSONResponse:

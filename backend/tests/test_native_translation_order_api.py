@@ -73,7 +73,12 @@ def test_mixed_translation_order_and_status_survive_restart(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["transcription_complete"] is True
         snapshot = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
-        stream = snapshot["final_stream_tokens"]
+        # Mixed provider order is a durable storage invariant; the live HTTP
+        # response deliberately omits these derived views (they were half the
+        # per-second payload — see docs/BASELINE-PROFILE.md), so assert them
+        # against the store the response is built from.
+        durable = app.state.runtime.live_store.snapshot(sid)
+        stream = durable["final_stream_tokens"]
         assert [t["text"] for t in stream] == [
             "Good", " morning", "Guten Morgen", "Ja", "Thanks", "Vielen", " Dank",
         ]
@@ -82,13 +87,17 @@ def test_mixed_translation_order_and_status_survive_restart(
         ]
         assert [t["speaker_number"] for t in stream] == [1, 1, 1, 2, 1, 1, 1]
         assert [t["id"] for t in stream if t["translation_status"] != "translation"] == [
-            t["id"] for t in snapshot["final_tokens"]
+            t["id"] for t in durable["final_tokens"]
         ]
         for token in stream:
             if token["translation_status"] == "translation":
                 assert not {"start_ms", "end_ms", "start_sample", "end_sample", "segment_id"} & token.keys()
-        assert snapshot["partial_stream_tokens"] == []
-        projection = snapshot["final_translation_projection"]
+        assert durable["partial_stream_tokens"] == []
+        # What the client actually renders still carries the same turns.
+        assert [t["text"] for t in snapshot["live_translation_projection"]["original_tokens"]] == [
+            "Good", " morning", "Ja", "Thanks",
+        ]
+        projection = durable["final_translation_projection"]
         turns = projection["monologues"]
         assert [turn["speaker_number"] for turn in turns] == [1, 2, 1]
         assert [turn["original_token_ids"] for turn in turns] == [
@@ -103,6 +112,7 @@ def test_mixed_translation_order_and_status_survive_restart(
         assert "".join(s["text"] for s in detail["segments"]) == "Good morningJaThanks"
     app = create_app(config, secret_store=secrets, http_client=outbound.client())
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["final_stream_tokens"] == stream
-        restored = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
+        assert http.get(f"/sessions/{sid}/live", headers=AUTH).status_code == 200
+        restored = app.state.runtime.live_store.snapshot(sid)
+        assert restored["final_stream_tokens"] == stream
         assert restored["final_translation_projection"] == projection
