@@ -8,7 +8,7 @@ dependencies = [
     "uvicorn>=0.32",
     "pydantic>=2.9",
     "httpx>=0.27",
-    "keyring>=25.4",
+    "cryptography>=43",
     "websockets>=15.0,<16",
 ]
 
@@ -54,7 +54,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [[tool.mypy.overrides]]
 # Optional local-ASR extras are not installed in the default dev environment.
-module = ["faster_whisper.*", "numpy.*", "keyring.*"]
+module = ["faster_whisper.*", "numpy.*"]
 ignore_missing_imports = true
 
 [tool.mypy]

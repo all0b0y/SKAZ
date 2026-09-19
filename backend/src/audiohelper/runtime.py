@@ -22,7 +22,7 @@ from .live_store import LiveStore
 from .managed_storage import ManagedStorage
 from .native_stream import NativeStream
 from .schemas import CLOUD_PROVIDERS, Settings, Task
-from .secrets import KeyringSecretStore, SecretStore
+from .secrets import FileSecretStore, SecretStore
 from .session_files import SessionFiles
 from .settings_store import TASKS, SettingsStore, StoredSettings
 from .verifications import note
@@ -54,7 +54,9 @@ class Runtime:
         self.live_store = LiveStore(self.db, config.audio_dir, storage=self.storage,
                                     retain_audio=config.retain_native_audio)
         self.live_store.recover_interrupted()
-        self.secrets: SecretStore = secret_store or KeyringSecretStore()
+        # Keys live beside the app's own data, not in the OS keychain: see
+        # secrets.py for why a keychain item cannot work in the shipped bundle.
+        self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
         self.http = http_client or httpx.AsyncClient(timeout=config.request_timeout_s)
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)

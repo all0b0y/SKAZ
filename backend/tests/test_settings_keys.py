@@ -1,6 +1,8 @@
 """Settings key regressions; only synthetic keys and injected stores/transports."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 
@@ -25,23 +27,22 @@ async def test_a_provider_key_storage_failure_is_sanitized(
     assert (await client.get("/settings")).json()["provider_has_api_key"]["openai"] is False
 
 
-def test_keychain_items_are_scoped_per_provider() -> None:
-    """One granted keychain item must not expose every provider's credential."""
+def test_stored_keys_are_scoped_per_provider() -> None:
+    """One provider's label must not stand for every provider's credential."""
     names = {p: secrets_module.service_name(p) for p in ("openai", "anthropic", "openrouter")}
     assert len(set(names.values())) == 3
     assert all(name.startswith(f"{secrets_module.SERVICE_NAME}:") for name in names.values())
 
 
-def test_environment_keys_are_ignored_unless_explicitly_allowed() -> None:
+def test_environment_keys_are_ignored_unless_explicitly_allowed(tmp_path: Path) -> None:
     """A normal desktop run must not pick a credential out of the ambient environment."""
     env = {"OPENAI_API_KEY": "env-fixture-only"}
-    store = secrets_module.KeyringSecretStore(env=env)
+    store = secrets_module.FileSecretStore(tmp_path / "secrets", env=env)
     assert secrets_module.env_fallback_enabled(env) is False
-    # keyring is not reachable in this unit context; the fallback decision is the subject.
+    assert store.get("openai") is None
     assert secrets_module.env_fallback_enabled(
         {**env, secrets_module.ENV_FALLBACK_FLAG: "1"}
     ) is True
-    assert store._env is env  # noqa: SLF001 - the store must read the injected env, not os.environ
 
 
 async def test_soniox_key_is_write_only_and_independent_of_legacy_asr(
