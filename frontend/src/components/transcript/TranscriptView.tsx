@@ -43,6 +43,24 @@ interface TranscriptViewProps {
   focusSegmentId: string | null;
 }
 
+/**
+ * Owns the audio-queue subscription so the transcript does not.
+ *
+ * Capture emits a chunk every 100 ms and the persistence queue reports state
+ * several times per chunk, so this text changes ~40x/second. Subscribing to it
+ * from TranscriptView made every audio save re-render — and re-project — the
+ * whole transcript (ТЗ, Задача 2; docs/BASELINE-PROFILE.md).
+ */
+function LiveQueueStatus() {
+  const pending = useStore((s) => s.queue.pending);
+  return (
+    <p className="transcript__live" aria-live="polite">
+      <span className="transcript__pulse" aria-hidden />
+      {pending > 0 ? `Transcribing ${pending} chunk${pending > 1 ? 's' : ''}…` : 'Listening…'}
+    </p>
+  );
+}
+
 interface FragmentEdit {
   fragmentId: string;
   text: string;
@@ -90,11 +108,13 @@ function LanguageMarkRow({ mark }: { mark: LanguageMark }) {
 }
 
 export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
-  const detail = useStore((s) => s.detail);
+  // Only the segments, not the whole `detail`: a durable audio save rebuilds
+  // that object ~10x/second to flag notes stale, and subscribing to it made
+  // every saved chunk re-project the transcript (ТЗ, Задача 2).
+  const detailSegments = useStore((s) => s.detail?.segments);
   const loading = useStore((s) => s.detailLoading);
   const error = useStore((s) => s.detailError);
   const recorderState = useStore((s) => s.recorderState);
-  const queue = useStore((s) => s.queue);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const sessions = useStore((s) => s.sessions);
   const draft = useStore((s) => s.liveDraft);
@@ -136,7 +156,14 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
 
   const contextual = sessions.find((session) => session.id === activeSessionId)?.mode === 'contextual_local';
   const native = useNativeTranscript(contextual ? null : activeSessionId, ['recording', 'processing'].includes(recorderState));
-  const segments = (native.segments ?? detail?.segments ?? []).filter((segment) => segment.text.trim().length > 0);
+  // Memoised: a fresh array on every render would defeat NativeMonologues'
+  // own projection memo, so unrelated re-renders would re-project the
+  // transcript even when no word changed.
+  const nativeSegments = native.segments;
+  const segments = useMemo(
+    () => (nativeSegments ?? detailSegments ?? []).filter((segment) => segment.text.trim().length > 0),
+    [nativeSegments, detailSegments],
+  );
   const cleanNative = native.snapshot?.final_tokens !== undefined || native.snapshot?.recording_mode === 'translation';
   const hasDraftText = fragments.length === 0 && Boolean(draft?.text.trim());
   const sourceTrusted = sourceIntegrity?.trusted ?? true;
@@ -570,12 +597,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
           </button>
         )}
         {contextual && liveError && <p className="transcript__error" role="alert">{liveError}</p>}
-        {live && !cleanNative && (
-          <p className="transcript__live" aria-live="polite">
-            <span className="transcript__pulse" aria-hidden />
-            {queue.pending > 0 ? `Transcribing ${queue.pending} chunk${queue.pending > 1 ? 's' : ''}…` : 'Listening…'}
-          </p>
-        )}
+        {live && !cleanNative && <LiveQueueStatus />}
       </div>
       {cleanNative && !followSpeech && <button type="button" className="transcript__follow" onClick={() => {
         setDismissedFocus(focusSegmentId);
