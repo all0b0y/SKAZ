@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../../state/store';
 import { clsx } from 'clsx';
+import type { AudioFileChoice } from '../../api/bridge';
+import { ImportDialog } from '../imports/ImportDialog';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { SessionNavigator } from './SessionNavigator';
@@ -16,6 +18,7 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
 
   const [collapsed, setCollapsed] = useState(false);
   const [creationError, setCreationError] = useState('');
+  const [importFile, setImportFile] = useState<AudioFileChoice | null>(null);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -48,6 +51,18 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
           </button>
           <Button
             variant="quiet"
+            icon="upload"
+            onClick={() => {
+              setCreationError('');
+              void window.audiohelper.chooseAudioFile()
+                .then((chosen) => { if (chosen) setImportFile(chosen); })
+                .catch((err: unknown) => setCreationError(err instanceof Error ? err.message : String(err)));
+            }}
+            aria-label="Импортировать аудио"
+            title="Импортировать аудиофайл"
+          />
+          <Button
+            variant="quiet"
             icon="plus"
             onClick={() => { setCreationError(''); void newSession().catch((err: unknown) => setCreationError(err instanceof Error ? err.message : String(err))); }}
             disabled={isCapturing}
@@ -78,6 +93,17 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
           <Icon name="settings" size={16} />
         </button>
       </div>
+
+      {importFile && (
+        <ImportDialog
+          file={importFile}
+          onClose={() => setImportFile(null)}
+          onCreated={(created) => {
+            setImportFile(null);
+            window.dispatchEvent(new CustomEvent('skaz-import-started', { detail: created }));
+          }}
+        />
+      )}
     </section>
   );
 }

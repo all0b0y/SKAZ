@@ -106,6 +106,38 @@ _NATIVE_LANGUAGES_V6 = (
 )
 
 
+#: Imported files reuse every live transcript table so monologues, note anchors,
+#: Ask and the Markdown projection work unchanged. ``origin`` is what keeps the
+#: two apart: an import has no PCM of its own and no sample clock from a device,
+#: so its ``sample_rate`` is a time unit (16 samples per millisecond), never a
+#: property of the source file.
+_NATIVE_ASYNC_IMPORT_V7 = (
+    "ALTER TABLE native_recordings ADD COLUMN origin TEXT NOT NULL DEFAULT 'live' "
+    "CHECK(origin IN ('live','import'))",
+    """CREATE TABLE native_imports (
+        session_id TEXT PRIMARY KEY REFERENCES native_recordings(session_id) ON DELETE CASCADE,
+        source_path TEXT NOT NULL,
+        source_name TEXT NOT NULL,
+        source_bytes INTEGER NOT NULL CHECK(source_bytes > 0),
+        source_mtime_ns INTEGER NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        declared_duration_ms INTEGER CHECK(declared_duration_ms IS NULL OR declared_duration_ms > 0),
+        audio_duration_ms INTEGER CHECK(audio_duration_ms IS NULL OR audio_duration_ms >= 0),
+        model TEXT NOT NULL,
+        translate INTEGER NOT NULL CHECK(translate IN (0,1)),
+        status TEXT NOT NULL CHECK(status IN
+            ('queued','uploading','processing','completed','failed','cancelled')),
+        provider_file_id TEXT,
+        transcription_id TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        settled_at TEXT
+    )""",
+    "CREATE INDEX native_imports_unsettled ON native_imports(status) "
+    "WHERE status NOT IN ('completed','failed','cancelled')",
+)
+
+
 def migrate_native_live(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
     for name, statements in (
@@ -114,6 +146,7 @@ def migrate_native_live(connection: sqlite3.Connection) -> None:
         ("native_recording_config_v4", _NATIVE_RECORDING_CONFIG_V4),
         ("native_stream_order_v5", _NATIVE_STREAM_ORDER_V5),
         ("native_languages_v6", _NATIVE_LANGUAGES_V6),
+        ("native_async_import_v7", _NATIVE_ASYNC_IMPORT_V7),
     ):
         if connection.execute("SELECT 1 FROM schema_migrations WHERE name=?", (name,)).fetchone():
             continue

@@ -17,6 +17,7 @@ export type IconName =
   | 'send'
   | 'trash'
   | 'retry'
+  | 'upload'
   | 'chevron'
   | 'dot'
   | 'warning'
@@ -40,6 +41,7 @@ const PATHS: Record<IconName, string> = {
   send: 'M4 12l16-8-6 16-3-6-7-2Z',
   trash: 'M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13',
   retry: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v5h-5',
+  upload: 'M12 16V4M8 8l4-4 4 4M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
   chevron: 'M9 6l6 6-6 6',
   dot: 'M12 12m-4 0a4 4 0 1 0 8 0 4 4 0 1 0-8 0',
   warning: 'M12 3l9 16H3zM12 10v4M12 17h.01',

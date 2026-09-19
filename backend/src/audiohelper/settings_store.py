@@ -26,6 +26,10 @@ class StoredSettings(BaseModel):
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
+    #: Estimated import cost, in US dollars, above which the dialog asks a second
+    #: time. None disables the warning; 0 warns for every import. The estimate is
+    #: our own arithmetic on the file's duration, never a quote from the provider.
+    import_cost_warning_usd: float | None = 0.30
     #: Explicit opt-in for the experimental contextual local mode. It is the only
     #: user-facing way to enable local live finality and the local speech gate;
     #: it stays false for settings documents written before this field existed.
@@ -137,4 +141,10 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         value = getattr(update, field)
         if value is not None:
             setattr(merged, field, value)
+    # The threshold is nullable, so "clear it" needs its own flag: a bare None
+    # means "unchanged" for every other field and must keep meaning that here.
+    if update.clear_import_cost_warning:
+        merged.import_cost_warning_usd = None
+    elif update.import_cost_warning_usd is not None:
+        merged.import_cost_warning_usd = update.import_cost_warning_usd
     return merged

@@ -88,6 +88,12 @@ class LiveStore:
                 )
                 start_sample, next_sequence = 0, 0
             else:
+                if recording["origin"] == "import":
+                    # An imported file and a microphone share no time axis, and the
+                    # provider numbers speakers independently per job: appending live
+                    # speech here would produce timestamps and speaker labels that
+                    # point at nothing. A new session is the honest answer.
+                    raise LiveConflict("An imported recording cannot be continued with a microphone.")
                 if recording["sample_rate"] != sample_rate:
                     raise LiveConflict("Sample rate cannot change within a recording.")
                 start_sample = recording["saved_samples"]

@@ -14,6 +14,7 @@ const statusLabel = { recording: 'Recording', paused: 'Paused', stopped: 'Saved'
 
 export function SessionNavigator() {
   const sessions = useStore((s) => s.sessions);
+  const imports = useStore((s) => s.imports);
   const activeId = useStore((s) => s.activeSessionId);
   const recorderState = useStore((s) => s.recorderState);
   const selectSession = useStore((s) => s.selectSession);
@@ -180,7 +181,7 @@ export function SessionNavigator() {
           <button className="session__select" aria-current={session.id === activeId} disabled={isCapturing && session.id !== activeId}
             onClick={() => void selectSession(session.id)} title={session.title}>
             <span className="session__marker" aria-hidden="true"><span className={clsx('session__dot', `session__dot--${session.status}`)} /></span>
-            <span className="session__body"><span className="session__name">{stripTags(session.title)}</span><span className="session__meta tabular">{statusLabel[session.status]}</span></span>
+            <span className="session__body"><span className="session__name">{stripTags(session.title)}</span><span className="session__meta tabular">{imports[session.id] ? 'Импорт…' : statusLabel[session.status]}</span></span>
           </button>
           <button className="session__more" aria-label={`Actions for ${session.title}`} title="Session actions" aria-haspopup="menu" aria-expanded={menu?.kind === 'session' && menu.id === session.id}
             onClick={(e) => setMenu({ kind: 'session', id: session.id, anchor: e.currentTarget.getBoundingClientRect() })}><Icon name="more" size={16} /></button>

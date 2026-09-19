@@ -73,6 +73,8 @@ export interface Settings {
   transcript_language: string; // "auto" or a language code
   output_language: string;
   cloud_consent: boolean;
+  /** Warn when an import's estimated cost exceeds this many US dollars; null disables. */
+  import_cost_warning_usd?: number | null;
   /** Explicit opt-in for the experimental contextual local mode; off by default. */
   contextual_local_enabled: boolean;
 }
@@ -96,8 +98,56 @@ export interface SettingsUpdate {
   transcript_language?: string;
   output_language?: string;
   cloud_consent?: boolean;
+  import_cost_warning_usd?: number;
+  /** Explicit flag, because a bare null means "unchanged" for every other field. */
+  clear_import_cost_warning?: boolean;
   /** Omitted keeps the stored value: enabling is always an explicit user action. */
   contextual_local_enabled?: boolean;
+}
+
+/** An import in flight or settled. Mirrors backend ImportView. */
+export type ImportStatus =
+  | 'queued' | 'uploading' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+export interface ImportSourceView {
+  name: string;
+  path: string;
+  size_bytes: number;
+  /** False once the file moved or changed; the transcript stays usable regardless. */
+  available: boolean;
+}
+
+export interface ImportView {
+  session_id: string;
+  status: ImportStatus;
+  source: ImportSourceView;
+  translate: boolean;
+  model: string;
+  declared_duration_ms?: number | null;
+  /** What the provider billed. Only known once processing started. */
+  audio_duration_ms?: number | null;
+  error?: string | null;
+  created_at: string;
+  settled_at?: string | null;
+}
+
+export interface ImportCapabilities {
+  supported_extensions: string[];
+  max_duration_ms: number;
+  rate_per_hour_usd: number;
+  translation_rate_per_hour_usd: number;
+  warn_above_usd: number | null;
+  cloud_consent: boolean;
+  has_api_key: boolean;
+  active_imports: number;
+  max_concurrent_imports: number;
+  destination: string;
+  markdown_enabled: boolean;
+}
+
+export interface ImportCreated {
+  session: Session;
+  import_state: ImportView;
 }
 
 export interface ModelInfo {

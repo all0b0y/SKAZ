@@ -1,0 +1,54 @@
+.import-dialog { display: grid; gap: var(--space-4); min-width: 22rem; max-width: 30rem; }
+
+.import-dialog__file {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.import-dialog__field { display: grid; gap: var(--space-2); }
+.import-dialog__field > span { font-size: var(--text-sm); color: var(--ink-soft); }
+
+.import-dialog__modes {
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  margin: 0;
+  min-width: 0;
+}
+.import-dialog__modes legend { font-size: var(--text-sm); color: var(--ink-soft); padding: 0 var(--space-2); }
+.import-dialog__modes label { display: flex; align-items: center; gap: var(--space-2); }
+
+.import-dialog__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.import-dialog__facts dt { color: var(--ink-faint); }
+.import-dialog__facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+
+.import-dialog__note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+
+.import-dialog__error,
+.import-dialog__warning {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+}
+.import-dialog__error { color: var(--danger, var(--warning)); border: 1px solid currentColor; }
+.import-dialog__warning { color: var(--warning); border: 1px solid currentColor; }
+
+.import-dialog__actions { display: flex; justify-content: flex-end; gap: var(--space-2); }

@@ -5,6 +5,7 @@ import { useTheme } from './hooks/useTheme';
 import { SessionList } from './components/sessions/SessionList';
 import { BackendStatusDot } from './components/sessions/BackendStatusDot';
 import { LanguageOnboarding } from './components/onboarding/LanguageOnboarding';
+import { ImportPanel } from './components/imports/ImportPanel';
 import { RecorderBar } from './components/recorder/RecorderBar';
 import { TranscriptView } from './components/transcript/TranscriptView';
 import { NotesPanel } from './components/notes/NotesPanel';
@@ -50,6 +51,11 @@ export default function App() {
   const ready = useStore((s) => s.ready);
   const activeId = useStore((s) => s.activeSessionId);
   const settings = useStore((s) => s.settings);
+  const imports = useStore((s) => s.imports);
+  const trackImport = useStore((s) => s.trackImport);
+  const selectSession = useStore((s) => s.selectSession);
+  const refreshSessions = useStore((s) => s.refreshSessions);
+  const activeImport = activeId ? imports[activeId] : undefined;
   const [tab, setTab] = useState<CenterTab>('transcript');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -60,6 +66,22 @@ export default function App() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  useEffect(() => {
+    // A new import (fresh or retried) becomes the visible session immediately,
+    // so the user lands on its state instead of an empty transcript.
+    const onStarted = (event: Event) => {
+      const created = (event as CustomEvent).detail as
+        | { session: { id: string }; import_state: import('./api/types').ImportView }
+        | undefined;
+      if (!created) return;
+      trackImport(created.import_state);
+      void refreshSessions();
+      void selectSession(created.session.id);
+    };
+    window.addEventListener('skaz-import-started', onStarted);
+    return () => window.removeEventListener('skaz-import-started', onStarted);
+  }, [trackImport, refreshSessions, selectSession]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -112,6 +134,17 @@ export default function App() {
               <div className="panel__center">
                 <p className="loading">Select or start a session.</p>
               </div>
+            ) : activeImport ? (
+              // An unfinished import owns the main area: there is no transcript
+              // to show yet, and the cancel action has to live somewhere real.
+              <ImportPanel
+                sessionId={activeId}
+                onSettled={(state) => {
+                  trackImport(state);
+                  if (state.status === 'completed') void selectSession(state.session_id);
+                }}
+                onDeleted={() => { void refreshSessions(); }}
+              />
             ) : tab === 'transcript' ? (
               <TranscriptView focusSegmentId={focusSegmentId} />
             ) : (

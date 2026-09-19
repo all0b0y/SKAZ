@@ -52,6 +52,24 @@ describe('Electron IPC policy', () => {
     expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/live/update', body: {} })).toMatch(/not allowed/i);
   });
 
+  it('allows every import route the dialog and panel call', () => {
+    // Regression guard: the bridge allow-list is the one place where a missing
+    // route makes the whole feature fail silently at runtime.
+    expect(validateBridgeRequest({ method: 'GET', path: '/imports' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/imports/active' })).toBeNull();
+    expect(validateBridgeRequest({
+      method: 'POST', path: '/imports', body: { path: '/a/b.m4a', title: 'x', translate: false },
+    })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/imports/s1' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/imports/s1/cancel' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/imports/s1/retry' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/imports/s1' })).toBeNull();
+    // Neighbouring shapes stay closed.
+    expect(validateBridgeRequest({ method: 'PUT', path: '/imports/s1' })).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'POST', path: '/imports/s1/start' })).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'GET', path: '/imports/s1/../settings' })).toMatch(/path/i);
+  });
+
   // Regression: the renderer calls these four routes (NotesPanel "create note",
   // TranscriptView fragment load/edit/accept). They were missing from the
   // allow-list, so note creation failed and the live transcript stayed empty.

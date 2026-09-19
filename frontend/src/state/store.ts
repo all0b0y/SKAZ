@@ -14,6 +14,7 @@ import type {
   LiveAsrResumeCompatibility,
   LiveAsrSchedulerStatus,
   LiveAsrSourceIntegrity,
+  ImportView,
   Message,
   ModelInfo,
   Note,
@@ -112,6 +113,9 @@ export interface AppState {
   recorderError: string | null;
   nextRecordingMode: SessionMode;
   liveCapabilities: LiveAsrCapabilities | null;
+  /** Imports that are not yet settled, keyed by session id. Drives the session
+   * row status and the main area, so an import is visible without opening it. */
+  imports: Record<string, ImportView>;
   liveDraft: LiveAsrDraft | null;
   liveFragments: LiveAsrFragment[];
   liveSourceIntegrity: LiveAsrSourceIntegrity | null;
@@ -166,6 +170,8 @@ export interface AppState {
     rangeFingerprint: string,
   ) => Promise<void>;
 
+  refreshImports: () => Promise<void>;
+  trackImport: (state: ImportView) => void;
   refreshSessions: () => Promise<void>;
   newSession: (title?: string) => Promise<void>;
   selectSession: (id: string) => Promise<void>;
@@ -383,6 +389,7 @@ export const useStore = create<AppState>((set, get) => {
   recorderError: null,
   nextRecordingMode: 'legacy',
   liveCapabilities: null,
+  imports: {},
   liveDraft: null,
   liveFragments: [],
   liveSourceIntegrity: null,
@@ -413,12 +420,14 @@ export const useStore = create<AppState>((set, get) => {
         void get().refreshSettings();
         void get().refreshSessions();
         void get().refreshLiveCapabilities();
+        void get().refreshImports();
       }
     });
     if (get().backend.phase === 'ready') {
       set({ ready: true });
       await Promise.all([
         get().refreshSettings(), get().refreshSessions(), get().refreshLiveCapabilities(),
+        get().refreshImports(),
       ]);
     }
   },
@@ -485,6 +494,26 @@ export const useStore = create<AppState>((set, get) => {
       const last = state.languageMarks[state.languageMarks.length - 1];
       if (last && last.language === language) return {};
       return { languageMarks: [...state.languageMarks, { atMs, language }] };
+    });
+  },
+
+  refreshImports: async () => {
+    try {
+      const active = await getClient().getActiveImports();
+      set({ imports: Object.fromEntries(active.map((item) => [item.session_id, item])) });
+    } catch {
+      // A failed listing must not erase what we already know about in-flight
+      // imports; the per-session poller keeps each one honest on its own.
+    }
+  },
+
+  trackImport: (state) => {
+    set((s) => {
+      const next = { ...s.imports };
+      // Settled imports leave the map: the session then behaves like any other.
+      if (state.status === 'completed' || state.status === 'cancelled') delete next[state.session_id];
+      else next[state.session_id] = state;
+      return { imports: next };
     });
   },
 

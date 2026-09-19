@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS } from './channels';
 import type {
+  AudioFileChoice,
   AudioUploadMeta,
   BackendStatus,
   BinaryResponse,
@@ -51,6 +52,9 @@ const api: BridgeApi = {
   },
   chooseStorageRoot(): Promise<string | null> {
     return ipcRenderer.invoke(CHANNELS.chooseStorageRoot) as Promise<string | null>;
+  },
+  chooseAudioFile(): Promise<AudioFileChoice | null> {
+    return ipcRenderer.invoke(CHANNELS.chooseAudioFile) as Promise<AudioFileChoice | null>;
   },
   getBackendStatus(): Promise<BackendStatus> {
     return ipcRenderer.invoke(CHANNELS.status) as Promise<BackendStatus>;

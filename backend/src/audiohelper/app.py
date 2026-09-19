@@ -17,7 +17,7 @@ from .config import AppConfig
 from .managed_storage import StorageConflict
 from .native_io import disk_call
 from .note_store import prune_history
-from .routes import agent, asr, health, live, logs, models, sessions, settings, storage
+from .routes import agent, asr, health, imports, live, logs, models, sessions, settings, storage
 from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
@@ -45,11 +45,15 @@ def create_app(
         cleanup = asyncio.create_task(clean_note_history())
         try:
             await disk_call(runtime.session_files.reconcile)
+            # Imports outlive the process that started them: a paid job keeps
+            # running at the provider, so re-attach instead of abandoning it.
+            runtime.imports.resume()
             yield
         finally:
             cleanup.cancel()
             with suppress(asyncio.CancelledError):
                 await cleanup
+            await runtime.imports.close()
             await runtime.stop_native()
             await runtime.http.aclose()
             runtime.close()
@@ -89,6 +93,7 @@ def create_app(
     app.include_router(storage.router, dependencies=protected)
     app.include_router(asr.router, dependencies=protected)
     app.include_router(sessions.router, dependencies=protected)
+    app.include_router(imports.router, dependencies=protected)
     app.include_router(agent.router, dependencies=protected)
     app.include_router(models.router, dependencies=protected)
     app.include_router(logs.router, dependencies=protected)

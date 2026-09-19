@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from .languages import SUPPORTED_LANGUAGES, UsedLanguages
 
+#: Fixed provider ceiling for one imported file (300 minutes).
+MAX_IMPORT_DURATION_MS = 300 * 60 * 1000
+
 Provider = Literal[
     "local-whisper",
     "local-gigachat-mlx",
@@ -67,6 +70,8 @@ class Settings(BaseModel):
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
+    #: Warn when an import's estimated cost exceeds this many US dollars.
+    import_cost_warning_usd: float | None = 0.30
     #: Explicit opt-in for the experimental contextual local mode; off by default.
     contextual_local_enabled: bool = False
 
@@ -95,6 +100,9 @@ class SettingsUpdate(BaseModel):
     transcript_language: str | None = None
     output_language: str | None = None
     cloud_consent: bool | None = None
+    #: Explicit null clears the warning; omitted keeps the stored threshold.
+    import_cost_warning_usd: float | None = Field(default=None, ge=0, le=1000)
+    clear_import_cost_warning: bool = False
     #: Omitted keeps the stored value: enabling is always an explicit user action.
     contextual_local_enabled: bool | None = None
 
@@ -308,6 +316,72 @@ class SessionDetail(BaseModel):
 
 class DeleteResponse(BaseModel):
     deleted: bool = True
+
+
+ImportStatusValue = Literal["queued", "uploading", "processing", "completed", "failed", "cancelled"]
+
+
+class ImportSourceView(BaseModel):
+    """Identity of the user's own file. The app never copies or moves it."""
+
+    name: str
+    path: str
+    size_bytes: int
+    #: False once the file has moved, been replaced, or shrunk since the import.
+    available: bool
+
+
+class ImportView(BaseModel):
+    session_id: str
+    status: ImportStatusValue
+    source: ImportSourceView
+    translate: bool
+    model: str
+    #: Read from the file's metadata before upload; may be absent for odd containers.
+    declared_duration_ms: int | None = None
+    #: What the provider actually billed. Only known once processing has begun.
+    audio_duration_ms: int | None = None
+    error: str | None = None
+    created_at: str
+    settled_at: str | None = None
+
+
+class CreateImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=4096)
+    title: str = Field(min_length=1, max_length=200)
+    translate: bool = False
+    declared_duration_ms: int | None = Field(default=None, gt=0, le=MAX_IMPORT_DURATION_MS)
+
+
+class ImportCreatedResponse(BaseModel):
+    session: Session
+    import_state: ImportView
+
+
+class ImportsResponse(BaseModel):
+    imports: list[ImportView]
+
+
+class ImportCapabilities(BaseModel):
+    """What the UI needs to open the dialog honestly, before anything is charged."""
+
+    #: Container extensions the provider documents for automatic detection.
+    supported_extensions: list[str]
+    max_duration_ms: int
+    #: Advertised provider rates, in US dollars per hour of audio.
+    rate_per_hour_usd: float
+    translation_rate_per_hour_usd: float
+    #: Warn above this estimate; null means the user turned the warning off.
+    warn_above_usd: float | None
+    cloud_consent: bool
+    has_api_key: bool
+    active_imports: int
+    max_concurrent_imports: int
+    #: Where a finished import will be written, in words the user can check.
+    destination: str
+    markdown_enabled: bool
 
 
 class AudioResponse(BaseModel):

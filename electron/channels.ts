@@ -16,6 +16,7 @@ export const CHANNELS = {
   readLogs: 'app:read-logs',
   openLogsFolder: 'app:open-logs-folder',
   chooseStorageRoot: 'app:choose-storage-root',
+  chooseAudioFile: 'app:choose-audio-file',
   captureState: 'app:capture-state',
   prepareQuit: 'app:prepare-quit',
   quitPrepared: 'app:quit-prepared',

@@ -30,6 +30,21 @@ export interface AudioUploadMeta {
   endMs: number;
 }
 
+/** Containers Soniox documents for automatic format detection on file input. */
+export const AUDIO_EXTENSIONS = [
+  'aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm',
+] as const;
+
+/** A file the user picked for import. Only the identity crosses IPC: the audio
+ * itself is read by the backend from this path, never streamed through the
+ * renderer. ``url`` exists so the renderer can read the duration from the
+ * container metadata and price the import honestly before anything is sent. */
+export interface AudioFileChoice {
+  path: string;
+  name: string;
+  url: string;
+}
+
 export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped';
 
 export interface BackendStatus {
@@ -67,6 +82,8 @@ export interface BridgeApi {
   ): Promise<JsonResponse<T>>;
   /** Fetch stored audio (WAV) for playback. */
   fetchAudio(sessionId: string, sequence: number): Promise<BinaryResponse>;
+  /** Native picker for one audio file to import. Null when cancelled. */
+  chooseAudioFile(): Promise<AudioFileChoice | null>;
   /** Tail of the desktop app log file (no session content is written there). */
   readLogs?(): Promise<string>;
   /** Reveal the log directory in the OS file manager. */

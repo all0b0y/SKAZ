@@ -19,6 +19,9 @@ import type {
   LiveAsrFragment,
   LiveAsrResponse,
   LiveAsrSchedulerStatus,
+  ImportCapabilities,
+  ImportCreated,
+  ImportView,
   ModelsResponse,
   Note,
   NoteDetail,
@@ -175,6 +178,53 @@ export class ApiClient {
     return this.bridge
       .request<Session>({ method: 'POST', path: '/sessions', body: { title, mode } })
       .then(unwrap);
+  }
+
+  getImportCapabilities(): Promise<ImportCapabilities> {
+    return this.bridge.request<ImportCapabilities>({ method: 'GET', path: '/imports' }).then(unwrap);
+  }
+
+  getActiveImports(): Promise<ImportView[]> {
+    return this.bridge
+      .request<{ imports: ImportView[] }>({ method: 'GET', path: '/imports/active' })
+      .then(unwrap)
+      .then((body) => body.imports);
+  }
+
+  /** The only charged call in this family: creates the session and the job. */
+  createImport(body: {
+    path: string;
+    title: string;
+    translate: boolean;
+    declared_duration_ms?: number | null;
+  }): Promise<ImportCreated> {
+    return this.bridge.request<ImportCreated>({ method: 'POST', path: '/imports', body }).then(unwrap);
+  }
+
+  getImport(sessionId: string): Promise<ImportView> {
+    return this.bridge
+      .request<ImportView>({ method: 'GET', path: `/imports/${sessionId}` })
+      .then(unwrap);
+  }
+
+  cancelImport(sessionId: string): Promise<ImportView> {
+    return this.bridge
+      .request<ImportView>({ method: 'POST', path: `/imports/${sessionId}/cancel` })
+      .then(unwrap);
+  }
+
+  /** Starts a new paid job in a new session; the failed one is left intact. */
+  retryImport(sessionId: string): Promise<ImportCreated> {
+    return this.bridge
+      .request<ImportCreated>({ method: 'POST', path: `/imports/${sessionId}/retry` })
+      .then(unwrap);
+  }
+
+  deleteImport(sessionId: string): Promise<void> {
+    return this.bridge
+      .request<{ deleted: boolean }>({ method: 'DELETE', path: `/imports/${sessionId}` })
+      .then(unwrap)
+      .then(() => undefined);
   }
 
   getLiveAsrCapabilities(): Promise<LiveAsrCapabilities> {

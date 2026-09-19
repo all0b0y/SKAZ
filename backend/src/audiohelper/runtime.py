@@ -14,6 +14,7 @@ from .catalog import ProviderCatalogs
 from .config import AppConfig, adopt_legacy_database
 from .db import Database
 from .gateways.asr import LocalModelPreparations
+from .import_service import ImportService
 from .ingestion import IngestionService
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -61,6 +62,9 @@ class Runtime:
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
         self.ingestion = IngestionService(self)
+        #: File imports. Resumption is started by the app lifespan, not here: a
+        #: constructor must not create tasks on a loop it does not own.
+        self.imports = ImportService(self)
         #: Written-but-unapplied note passages, held until the user compares them.
         self.note_rewrites = PendingRewrites()
         self.window_asr = WindowAsrPreview(self)
@@ -137,6 +141,7 @@ class Runtime:
             transcript_language=settings.transcript_language,
             output_language=settings.output_language,
             cloud_consent=settings.cloud_consent,
+            import_cost_warning_usd=settings.import_cost_warning_usd,
             contextual_local_enabled=settings.contextual_local_enabled,
         )
 

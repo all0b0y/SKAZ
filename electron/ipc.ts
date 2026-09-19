@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { mkdirSync } from 'node:fs';
+import { basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { CHANNELS } from './channels';
 import { NativeLiveClient } from './nativeLive';
 import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeLive';
@@ -7,12 +9,14 @@ import type { BackendManager } from './backend';
 import { audioUploadPath, validateAudioUpload, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import type {
+  AudioFileChoice,
   AudioUploadMeta,
   BinaryResponse,
   BridgeRequest,
   HttpMethod,
   JsonResponse,
 } from '../frontend/src/api/bridge';
+import { AUDIO_EXTENSIONS } from '../frontend/src/api/bridge';
 
 // Registers the request-scoped IPC handlers. Every call is proxied to the
 // loopback backend with the per-run bearer token attached here in main, so the
@@ -98,6 +102,32 @@ export function registerIpc(
       throw new Error('Folder chooser unavailable.');
     } finally {
       choosingRoot = false;
+    }
+  });
+
+  let choosingAudio = false;
+  ipcMain.handle(CHANNELS.chooseAudioFile, async (event): Promise<AudioFileChoice | null> => {
+    if (!senderTrusted(event) || choosingAudio) return null;
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) return null;
+    choosingAudio = true;
+    try {
+      const result = await dialog.showOpenDialog(owner, {
+        title: 'Выберите аудиофайл',
+        defaultPath: app.getPath('downloads'),
+        // One file per import: each import is one priced confirmation.
+        properties: ['openFile'],
+        filters: [{ name: 'Аудио', extensions: [...AUDIO_EXTENSIONS] }],
+      });
+      const chosen = result.canceled ? null : result.filePaths[0] ?? null;
+      if (!chosen) return null;
+      // The renderer needs a playable URL only to read the duration from the
+      // container metadata; the bytes themselves are never sent through IPC.
+      return { path: chosen, name: basename(chosen), url: pathToFileURL(chosen).href };
+    } catch {
+      throw new Error('Файловый диалог недоступен.');
+    } finally {
+      choosingAudio = false;
     }
   });
 
