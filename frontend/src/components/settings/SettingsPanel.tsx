@@ -55,6 +55,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   useEffect(() => {
     void enumerateDevices();
+    // Plugging in a headset or USB mic while Settings is open must update the
+    // list; without this the user sees a stale set until the panel is reopened.
+    const refresh = () => void enumerateDevices();
+    navigator.mediaDevices?.addEventListener?.('devicechange', refresh);
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refresh);
   }, [enumerateDevices]);
 
 

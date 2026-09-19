@@ -83,4 +83,22 @@ describe('media permission check handler trust', () => {
   it('still allows when the subtype is absent (pre-check), preserving real mic capability', () => {
     expect(isTrustedMediaCheck(chk({ mediaType: undefined }), EXPECTED_ORIGIN)).toBe(true);
   });
+
+  /**
+   * Regression: Chromium passes the file origin as 'file:///' (three slashes),
+   * while the expected origin is derived as 'file://'. `new URL(...).origin` is
+   * the string "null" for file URLs, so the fallback comparison never matched
+   * either and every check was denied. Capture still worked — the request
+   * handler matches on the full URL — but Chromium hides device labels without
+   * a granted check, so the picker could only render "Microphone 1".
+   */
+  it('allows the file origin exactly as Chromium spells it', () => {
+    expect(isTrustedMediaCheck(chk({ requestingOrigin: 'file:///' }), 'file://')).toBe(true);
+    expect(isTrustedMediaCheck(chk({ requestingOrigin: 'file://' }), 'file://')).toBe(true);
+  });
+
+  it('does not let the file-origin allowance widen to other schemes', () => {
+    expect(isTrustedMediaCheck(chk({ requestingOrigin: 'file:///' }), 'http://localhost:5273')).toBe(false);
+    expect(isTrustedMediaCheck(chk({ requestingOrigin: 'https://evil.test' }), 'file://')).toBe(false);
+  });
 });

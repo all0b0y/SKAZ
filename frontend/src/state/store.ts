@@ -28,6 +28,7 @@ import type {
   TaskKind,
 } from '../api/types';
 import { AudioRecorder, type RecordedChunk, type RecorderState } from '../audio/recorder';
+import { browserDiscovery, listInputDevices } from '../audio/devices';
 import { SignalMeter, idleMeterSnapshot, type MeterSnapshot } from '../audio/meter';
 import { PersistenceQueue, type PersistenceQueueState } from '../audio/persistenceQueue';
 import { NativeAudioWriter } from '../audio/nativeWriter';
@@ -592,9 +593,9 @@ export const useStore = create<AppState>((set, get) => {
 
   enumerateDevices: async () => {
     try {
-      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(
-        (d) => d.kind === 'audioinput',
-      );
+      // Labels stay hidden until the microphone grant exists, so this may
+      // prompt once on macOS; without it the picker shows "Microphone 1".
+      const devices = await listInputDevices(browserDiscovery);
       set((s) => ({
         devices,
         selectedDeviceId: s.selectedDeviceId ?? devices[0]?.deviceId ?? null,

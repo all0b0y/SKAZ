@@ -38,7 +38,15 @@ function urlMatches(actual: string | undefined, expected: string): boolean {
 
 function originMatches(actual: string | undefined, expected: string): boolean {
   if (!actual) return false;
-  if (actual === expected) return true; // covers file:// where URL.origin is unreliable
+  if (actual === expected) return true;
+  // The file scheme is opaque: `new URL('file:///x').origin` is the string
+  // "null", so the parsed comparison below can never match it. Chromium spells
+  // the renderer's origin 'file:///' while `expected` is derived as 'file://';
+  // treat those as the same origin, and only for the file scheme. Getting this
+  // wrong denies every permission CHECK — capture still works (the request
+  // handler matches the full URL) but Chromium then hides device labels, so the
+  // picker can only show "Microphone 1".
+  if (expected === 'file://') return actual === 'file://' || actual === 'file:///';
   try {
     return new URL(actual).origin === expected;
   } catch {

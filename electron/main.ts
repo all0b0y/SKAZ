@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BackendManager } from './backend';
@@ -192,6 +192,15 @@ function createWindow(): void {
 app.whenReady().then(() => {
   hardenSession();
   if (process.platform === 'darwin') app.dock?.setIcon(APP_ICON);
+  // macOS gates microphone access at the OS level, on top of Chromium's own
+  // permission handler. Without this call TCC never shows its dialog, the
+  // renderer's getUserMedia fails, and device labels stay empty so the picker
+  // can only show "Microphone 1". Asking while already granted is a no-op.
+  if (process.platform === 'darwin') {
+    systemPreferences.askForMediaAccess('microphone').catch((err: unknown) => {
+      console.error('[main] microphone access request failed:', err instanceof Error ? err.message : err);
+    });
+  }
   nativeClient = registerIpc(manager, () => mainWindow?.webContents.id ?? null, (failure) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send(CHANNELS.nativeFailure, failure);
