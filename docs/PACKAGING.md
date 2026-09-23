@@ -98,8 +98,8 @@ that created it, and an app signed with a development certificate cannot own a
 stable item — the packaged backend logged `KeyringLocked` and keys silently failed
 to persist across restarts.
 
-`FileSecretStore` (backend/src/audiohelper/secrets.py) stores them the way Hermes
-stores its own vault: a Fernet-encrypted `secrets.json.enc` inside the app's data
+`FileSecretStore` (backend/src/audiohelper/secrets.py) stores them as a
+Fernet-encrypted `secrets.json.enc` inside the app's data
 directory, with the key beside it in `secrets.key` (file `0600`, directory `0700`).
 The whole provider map is one encrypted blob, so provider names are not readable
 either, and writes go through a temp file + `os.replace` so a crash cannot leave a

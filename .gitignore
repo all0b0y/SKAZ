@@ -21,6 +21,12 @@ test-results/
 *.log
 :memory:.ses
 
+# Local-only working material: internal specs, plans, handoffs, experiments and
+# agent instructions. Public documentation lives in README*.md and docs/.
+.dev/
+AGENTS.md
+.env.local
+
 # AI-assistant scaffolding. These are per-developer tooling, not product source:
 # skill packs, agent definitions and harness caches differ per machine and per
 # assistant, and a checked-in copy silently overrides another developer's setup.

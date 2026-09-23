@@ -1,215 +1,150 @@
 <div align="center">
 
-<img src="icon/icon.png" alt="SKAZ icon" width="128" height="128">
+<img src="icon/icon.png" alt="SKAZ" width="120" height="120">
 
-# 🗣️ SKAZ
+# SKAZ
 
-**A desktop companion for lectures and meetings that listens, transcribes, translates and takes notes — grounded in what was actually said.**
+**Your second pair of ears for lectures and meetings.**
 
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)](#)
-[![Stack](https://img.shields.io/badge/stack-Electron%20%2B%20React%20%2B%20Python-blue)](#)
-[![Status](https://img.shields.io/badge/status-active%20development-orange)](#)
+SKAZ listens along with you, writes a live transcript, translates on the fly,<br>
+answers questions about what was just said and keeps notes — every answer backed by the recording itself.
 
-**[English](#english)** · **[Русский](#русский)**
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple&logoColor=white)](#getting-started)
+[![Electron](https://img.shields.io/badge/Electron-React%20%2B%20TypeScript-47848F?logo=electron&logoColor=white)](#how-it-works)
+[![Python](https://img.shields.io/badge/backend-Python%203.11%2B-3776AB?logo=python&logoColor=white)](#how-it-works)
+[![Status](https://img.shields.io/badge/status-early%20development-orange)](#project-status)
+
+**English** &nbsp;·&nbsp;
+[Русский](docs/i18n/README.ru.md) &nbsp;·&nbsp;
+[Español](docs/i18n/README.es.md) &nbsp;·&nbsp;
+[Deutsch](docs/i18n/README.de.md) &nbsp;·&nbsp;
+[简体中文](docs/i18n/README.zh-CN.md)
 
 </div>
 
 ---
 
-<a id="english"></a>
+## Why SKAZ
 
-## English
+You drift off for two minutes in a lecture, and the speaker is already somewhere else.
+A colleague says your name in a meeting, and you have no idea what the question was.
+Recording everything and rewatching it later does not help *now*.
 
-> Codename of the repository and internal paths is `AudioHelper`; the actual product name is **SKAZ**.
+SKAZ is built for that moment. It runs on your Mac next to the conversation and keeps
+a searchable, timestamped record of what was said, so you can ask **"what did I just
+miss?"** and get an answer in seconds — with links back to the exact words.
 
-SKAZ is a desktop assistant for lectures and meetings: it listens to a selected microphone,
-produces a live transcript, and helps you understand what is happening *right now* —
-without ever inventing what wasn't said.
+The one rule SKAZ never breaks: **it does not invent what was not said.** If the
+recording does not contain the answer, it tells you so, and anything the model adds
+from general knowledge is kept apart from what the speakers actually said.
 
-**Status:** active development. Requirements and architecture are agreed, part of the
-feature set is implemented and covered by local tests. The app is **not** release-ready
-and has **not** yet been accepted on real speech / paid APIs. There is no end-user
-launch command yet.
+## Features
 
-### ✨ What's already implemented and locally verified
-- **Live ASR on Soniox** — a continuous monologue feed (A/B/A by speaker), no
-  timestamps/status noise in the main stream, diagnostics tucked away on demand.
-- **Language selection & speech-to-speech translation** with the original always
-  revealable.
-- **Three recording modes per session** — transcription / translation / audio-only,
-  locked in on first open and never silently changed afterwards.
-- **Independent notes** — create/edit, 30-day history & restore, staleness detection
-  tied to the source, monologues as the unit of citation.
-- **Provider-scoped API keys** stored in the OS Keychain (per provider, not per profile/task).
-- **Optional (off by default) Markdown session projection** — conflict-safe publishing,
-  startup crash recovery, ownership-aware delete, explicit preservation of conflicting
-  folders, and a configurable Markdown root (Settings → Files).
-- **Backend activity log** and a live backend-status indicator in the UI.
-- White/graphite UI redesign.
+**🎙️ Live transcript**
+Streaming speech recognition from the microphone you choose. Speech is grouped into
+monologues by speaker (A → B → A), so the transcript reads like a conversation, not
+a wall of words.
 
-Exact commands and test results for every slice live in [docs/HANDOFF.md](docs/HANDOFF.md);
-a short rollup is in [docs/STATUS.md](docs/STATUS.md).
+**🌍 Live translation**
+Pick the languages you expect and get a translation next to the speech as it happens.
+The original is always one click away.
 
-### 🧭 Planned features (not implemented yet / not finished)
+**💬 Ask about the recording**
+Ask during the session or after it: *"What did I miss?"*, *"What was the definition
+of X?"*, *"What did we decide about the budget?"*. Search one session, a group of
+sessions or your whole library. Answers cite their sources as footnotes that jump to
+the transcript.
 
-**Notes editor**
-- Tabbed frontend notes editor (spec stage 2 — tests green, Electron smoke still failing
-  due to disabled native audio + UI redesign).
-- Trash & multi-select for sessions (stage 3).
-- Export notes as monologues (stage 4).
-- Collapsible assistant sources block (spec decision 14/15) — untouched so far.
+**📝 Notes that stay grounded**
+Generate structured notes from the transcript. Every point is tied to the speech it
+came from, and SKAZ flags notes that fell behind a transcript that kept growing.
+Edit them in an Obsidian-style Markdown editor with tabs.
 
-**File-backed sessions & storage**
-- Physical session groups wired into backend navigation; deleting a group moves
-  sessions to Ungrouped.
-- Physical audio layout inside sessions, safe group/session/root moves, multi-root
-  lifecycle.
-- Full DB + audio delete/recovery lifecycle (today only Markdown has a recovery path;
-  audio does not).
-- `Documents/SKAZ` as a default folder — currently only suggested, never auto-enabled;
-  needs a full integration/security pass before it can be turned on.
-- Resilience against concurrent writes to the same inode, hostile same-user renames,
-  multi-process access and power loss — not guaranteed yet.
+**📂 Your library, as plain files**
+Organise sessions into groups and mirror them to a folder of your choice as readable
+Markdown, so they work with your own tools — Obsidian, git, Finder search.
 
-**CLI & external agents**
-- CLI adapters (Claude Code / Codex-style) for an independent Assistant/Notes choice,
-  with official auth and explicit install consent.
-- A tightly scoped CLI-agent sandbox: session/group only, no audio, no shell, no
-  arbitrary disk writes or network.
+**📥 Import recordings**
+Drop in an existing audio file and get the same transcript, questions and notes as
+for a live session.
 
-**ASR / audio**
-- Translation completeness & recovery.
-- Audio-only post-processing.
-- Manual speaker editing with undo (speaker revisions).
-- Bounded live snapshots instead of a full snapshot on every poll (needed for long
-  sessions).
-- Correct quit/sleep handling with measured audio loss.
-- Open decision: bring back `retain_native_audio` or rewrite the smoke tests for the
-  no-audio-retention policy.
+**🧩 Bring your own models**
+Choose the model for each job independently: transcription, assistant, notes and
+search. Supported providers include Soniox (speech), OpenRouter, OpenAI and Anthropic.
+There is no silent fallback: if a model cannot do the job, SKAZ says so.
 
-**Security & quality**
-- Bind the Keychain ACL to the signed app bundle instead of the Python interpreter
-  (currently another process of the same OS user can read the keys without a prompt).
-- Outstanding Ruff/mypy debt in files untouched by recent slices (full Python quality
-  gates aren't green yet).
-- Legacy cleanup after migrations (e.g. fully removing unused experimental config fields).
+## Privacy by design
 
-The always-current next step and exact open edits live at the top of
-[docs/HANDOFF.md](docs/HANDOFF.md).
+- **No audio archive.** Audio is streamed to speech recognition and discarded; SKAZ
+  keeps the text, not the recording.
+- **Local first.** Transcripts, notes and chats stay on your Mac. Text leaves the
+  machine only when you send it to a provider you have configured.
+- **Keys stay on the device.** Provider API keys are stored encrypted in the app's
+  data folder with owner-only permissions — never in the repository, logs or the UI.
+- **Closed backend.** The Python backend listens on loopback only and requires a
+  fresh random token on every launch.
+- **Speech is data, not commands.** Text heard in the room is never treated as an
+  instruction to the assistant.
 
-### 📚 Documentation
-| Doc | Purpose |
+## How it works
+
+```
+ Microphone ──► Electron main ──► Python backend ──► Speech recognition (Soniox)
+                     │                  │
+                     │                  ├──► SQLite + Markdown library
+                     ▼                  └──► Language models (assistant, notes)
+              React interface
+```
+
+| Layer | Technology | Responsibility |
+|---|---|---|
+| Desktop shell | Electron | Window, microphone permissions, secure IPC, backend lifecycle |
+| Interface | React + TypeScript, Zustand, CodeMirror 6 | Recorder, transcript, assistant, notes, settings |
+| Backend | Python 3.11+, FastAPI, SQLite | Audio streaming, recognition, library, assistant, notes |
+
+## Getting started
+
+> SKAZ is in early development and targets **macOS on Apple Silicon**. Other
+> platforms have not been tested.
+
+**Requirements:** Node.js 20.19+, Python 3.11+, [uv](https://docs.astral.sh/uv/),
+and an API key for at least one supported provider.
+
+```bash
+# 1. Install dependencies
+npm install
+uv sync --project backend
+
+# 2. Run the app in development mode
+npm run dev
+```
+
+On first launch, open **Settings → API keys**, add your provider keys, then pick the
+languages you speak and press **Record**.
+
+### Useful commands
+
+| Command | What it does |
 |---|---|
-| [docs/PRODUCT.md](docs/PRODUCT.md) | Requirements & acceptance criteria |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture |
-| [docs/PROVIDERS.md](docs/PROVIDERS.md) | Providers & their constraints |
-| [docs/QUALITY.md](docs/QUALITY.md) | Quality/test boundaries |
-| [docs/STATUS.md](docs/STATUS.md) | Current state (short) |
-| [docs/HANDOFF.md](docs/HANDOFF.md) | Full slice-by-slice history |
-| [IDEA.md](IDEA.md) | Original idea (source of truth, not to be edited) |
+| `npm run dev` | Start the app with hot reload |
+| `npm test` | Frontend unit tests (Vitest) |
+| `npm run typecheck` | TypeScript checks |
+| `uv run --project backend pytest` | Backend tests |
+| `npm run dist:mac` | Build `SKAZ.app` and a DMG installer — see [Packaging](docs/PACKAGING.md) |
 
-### 🧱 Stack
-macOS-first · Electron + React (renderer) · a separate Python backend process.
-Other OSes are unsupported until independently verified.
+## Project status
 
----
+SKAZ is a working prototype under active development. Live transcription, translation,
+the assistant, notes, session groups and import already work locally. Still ahead:
 
-<a id="русский"></a>
+- [ ] Notarized, signed release builds
+- [ ] Assistant that reads across the library step by step
+- [ ] Manual speaker editing
+- [ ] Hardened handling of sleep, quit and network loss during long sessions
 
-## Русский
+Expect rough edges and breaking changes until the first release.
 
-> Кодовое имя репозитория и внутренних путей — `AudioHelper`; фактическое название
-> продукта — **SKAZ**.
+## Name
 
-SKAZ — desktop-помощник для лекций и встреч: слушает выбранный микрофон, ведёт
-живую транскрипцию и помогает понять, что происходит *сейчас* — не придумывая
-того, чего не было сказано.
-
-**Статус:** активная разработка. Требования и архитектура согласованы, часть
-функций реализована и покрыта локальными тестами. Приложение **ещё не готово**
-к релизу и **не проходило** приёмку на реальной речи и платных API. Команды
-запуска для конечного пользователя пока нет.
-
-### ✨ Что уже реализовано и проверено локально
-- **Live-ASR на Soniox** — непрерывная лента монологов (A/B/A по спикерам), без
-  служебных таймкодов/статусов в основном потоке, диагностика скрыта по умолчанию.
-- **Выбор языков записи и перевод** speech-to-speech с возможностью раскрыть оригинал.
-- **Три режима записи на сессию** — транскрипция / перевод / только аудио,
-  фиксируются при первом открытии и не меняются задним числом.
-- **Независимые заметки (Notes)** — создание/правка, история 30 дней и restore,
-  детекция устаревания относительно источника, монологи как единица цитирования.
-- **Ключи провайдеров** хранятся в Keychain на уровне провайдера, а не профиля/задачи.
-- **Опциональная (выключена по умолчанию) файловая проекция сессий в Markdown** —
-  conflict-safe публикация, восстановление после сбоя при старте, ownership-aware
-  удаление, явное сохранение конфликтных папок и выбор корня Markdown
-  (Settings → Files).
-- **Журнал активности бэкенда** (Logs) и индикатор статуса бэкенда в интерфейсе.
-- Белый/графитовый UI-редизайн.
-
-Точные команды и результаты тестов по каждому срезу — в [docs/HANDOFF.md](docs/HANDOFF.md),
-краткая сводка — в [docs/STATUS.md](docs/STATUS.md).
-
-### 🧭 Планируемые функции (ещё не реализованы или не завершены)
-
-**Редактор заметок**
-- Фронтенд-редактор заметок с вкладками (этап 2 спеки — тесты зелёные, но
-  electron-smoke ещё падает из-за отключения native-аудио и UI-редизайна).
-- Корзина и множественный выбор сессий (этап 3).
-- Экспорт заметок монологами (этап 4).
-- Свёрнутый блок источников у ассистента (решение 14/15 спеки) — не тронут.
-
-**Файловые сессии и хранилище**
-- Физические группы сессий и их связь с backend-навигацией; удаление группы с
-  переносом сессий в Ungrouped.
-- Физический layout аудио внутри сессий, безопасные перемещения групп/сессий/корней,
-  multi-root lifecycle.
-- Полный жизненный цикл удаления/восстановления БД и аудио (сейчас recovery
-  покрывает только Markdown, аудио — нет).
-- `Documents/SKAZ` как каталог по умолчанию — пока только предложение, не включено;
-  требует полной интеграционной и security-проверки перед включением.
-- Устойчивость к конкурентной записи в тот же inode, враждебным переименованиям
-  тем же пользователем, multi-process доступу и потере питания — пока не
-  гарантируется.
-
-**CLI и внешние агенты**
-- CLI-адаптеры (в духе Claude Code / Codex) для независимого выбора Assistant/Notes
-  с официальной авторизацией и явным согласием на установку.
-- Технически ограниченный scope для CLI-агента: доступ только к сессии/группе,
-  без аудио, shell-команд, произвольной записи на диск и произвольной сети.
-
-**ASR / аудио**
-- Полнота и восстановление перевода (translation completeness/recovery).
-- Постобработка аудио для режима audio-only.
-- Ручное редактирование спикеров с undo (speaker revisions).
-- Ограниченные по размеру снапшоты живой сессии вместо полного снапшота на
-  каждый poll — нужно для длинных сессий.
-- Корректная обработка quit/sleep с измерением потери аудио.
-- Открытое решение: вернуть `retain_native_audio` или переписать smoke-тесты
-  под политику без сохранения аудио.
-
-**Безопасность и качество**
-- Привязка Keychain ACL к подписанному бандлу приложения, а не к интерпретатору
-  Python (сейчас чужой процесс того же пользователя может прочитать ключи без
-  запроса).
-- Долги по Ruff/mypy в файлах, не затронутых последними срезами (полные
-  Python quality gates ещё не зелёные целиком).
-- Legacy-очистка после миграций (например, полный снос неиспользуемых
-  экспериментальных полей конфигурации).
-
-Актуальный ближайший шаг и точные незавершённые правки — всегда в верхней части
-[docs/HANDOFF.md](docs/HANDOFF.md).
-
-### 📚 Документация
-| Документ | Назначение |
-|---|---|
-| [docs/PRODUCT.md](docs/PRODUCT.md) | Требования и критерии приёмки |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Архитектура системы |
-| [docs/PROVIDERS.md](docs/PROVIDERS.md) | Провайдеры и их ограничения |
-| [docs/QUALITY.md](docs/QUALITY.md) | Границы проверки качества |
-| [docs/STATUS.md](docs/STATUS.md) | Текущее состояние (кратко) |
-| [docs/HANDOFF.md](docs/HANDOFF.md) | Полная история срезов |
-| [IDEA.md](IDEA.md) | Исходная идея (источник истины, не редактируется) |
-
-### 🧱 Стек
-Первый целевой runtime — macOS · Electron + React (renderer) · отдельный
-Python-процесс бэкенда. Другие ОС не поддерживаются до отдельной проверки.
+*Skaz* (сказ) is a Russian word for a spoken story — a narrative told in the voice of
+the one who speaks it. The repository keeps its original working name, `AudioHelper`.
