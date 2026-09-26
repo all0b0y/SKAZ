@@ -4,130 +4,114 @@
 
 # SKAZ
 
-**课堂与会议中的第二双耳朵。**
+![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
+![Alpha](https://img.shields.io/badge/status-alpha-orange)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](../../LICENSE)
 
-SKAZ 与你一起聆听，实时转写、即时翻译，<br>
-回答关于刚刚内容的问题并自动做笔记——每个回答都以录音本身为依据。
-
-[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple&logoColor=white)](#快速开始)
-[![Electron](https://img.shields.io/badge/Electron-React%20%2B%20TypeScript-47848F?logo=electron&logoColor=white)](#工作原理)
-[![Python](https://img.shields.io/badge/backend-Python%203.11%2B-3776AB?logo=python&logoColor=white)](#工作原理)
-[![Status](https://img.shields.io/badge/status-early%20development-orange)](#项目状态)
-
-[English](../../README.md) &nbsp;·&nbsp;
-[Русский](README.ru.md) &nbsp;·&nbsp;
-[Español](README.es.md) &nbsp;·&nbsp;
-[Deutsch](README.de.md) &nbsp;·&nbsp;
-**简体中文**
+[English](../../README.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Deutsch](README.de.md) · **简体中文**
 
 </div>
 
----
+**课堂与会议中的第二双耳朵。**
 
-## 为什么需要 SKAZ
+SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助你找回错过的内容，
+并将提问、笔记与原始转写放在一起。
 
-上课走神两分钟，老师已经讲到了下一个话题；开会时有人叫到你的名字，你却没听清问题。
-把一切录下来事后再看，解决不了*当下*的问题。
+> **Alpha / 抢先体验。** 可能存在错误和不兼容的变更，包括数据格式变化。
+> 请备份重要的导出文件。目前面向 Apple Silicon Mac；Windows、Linux 和 Intel Mac
+> 尚未验证。应用界面目前仅提供英语。
 
-SKAZ 正是为这一刻而生。它在你的 Mac 上随对话运行，记录带时间戳、可搜索的发言内容。
-你可以随时问 **"我刚才错过了什么？"**，几秒内得到回答，并附有指向原话的链接。
+## 界面预览
 
-SKAZ 绝不打破的一条原则：**不编造没有说过的内容。** 如果录音中没有答案，它会直接告诉你；
-模型根据常识补充的内容，会与发言者实际说过的话明确区分开。
+![SKAZ 转写与助手](../images/transcript.png)
+*按说话人整理的转写，旁边是提问、回答及来源链接。*
+
+![SKAZ 笔记编辑器](../images/notes.png)
+*会话聊天旁的可编辑 Markdown 笔记。*
+
+这些是运行中的应用截图，而非设计稿。转写、回答和笔记均为专门编写的演示数据，
+不是真实语音识别或 AI 生成结果。独立演示配置未设置 API 密钥，因此录音控件会显示设置提示。
+
+## 为什么使用 SKAZ
+
+一时没跟上？直接询问错过了什么，不必翻找整段录音。阅读转写、查看回答的来源，
+再将有用的内容整理为笔记。AI 可能出错：来源链接有助于核对，但不保证回答正确。
 
 ## 功能
 
-**🎙️ 实时转写**
-从你选择的麦克风进行流式语音识别。语音按说话人分组为段落（A → B → A），
-读起来像一段对话，而不是一堵文字墙。
+- **实时转写与翻译：** 使用 Soniox 识别语音，按说话人分组，翻译时仍可查看原文。
+- **麦克风与系统音频：** 选择麦克风，也可包含 Mac 播放的声音。
+  系统音频采集需要 macOS 14.2+ 及系统授权。
+- **基于上下文提问：** 查询单个会话或更大的资料库范围，通过时间戳引用返回转写。
+- **可编辑笔记：** 生成笔记，在标签页中编辑 Markdown，并导出文件。
+- **本地资料库：** 将会话分组，也可将文本同步输出到指定文件夹，供 Obsidian 等工具使用。
+- **媒体导入（实验性）：** 支持本地音频、视频及 YouTube 导入流程。
+  仅处理你有权使用的材料；可用性及支持格式可能不同。
+- **独立选择模型：** 分别配置 Assistant 和 Notes，使用 Codex 账号登录，
+  或 OpenAI、Anthropic、OpenRouter 的 API 配置。实时语音由 Soniox 处理，而非文本模型。
 
-**🌍 实时翻译**
-选择预期的语言，译文会随讲话同步出现在原文旁边，原文随时一键可见。
+## 安装与首次启动
 
-**💬 针对录音提问**
-在会话中或结束后提问：*"我错过了什么？"*、*"X 是怎么定义的？"*、*"预算最后怎么定的？"*。
-可在单个会话、一个分组或整个资料库中搜索。回答以脚注标注出处，点击即可跳转到转写原文。
+**计划中的官方下载渠道是 [GitHub Releases](https://github.com/4IPE/SKAZ/releases)。**
+目前尚未发布版本，该页面还没有可下载安装包。如需体验当前代码，
+请参阅[开发环境设置](../../CONTRIBUTING.md)。
 
-**📝 有据可查的笔记**
-根据转写生成结构化笔记。每个要点都关联到其来源语段；当录音继续而笔记落后时，SKAZ 会提示。
-在类似 Obsidian 的多标签 Markdown 编辑器中编辑。
+面向 Apple Silicon Mac 的 DMG 发布后，打开它，将 SKAZ 拖入 Applications，再启动应用。
+请遵循该版本的安装与签名说明。不要假定 alpha 构建已完成 Apple 公证，
+也不要全局关闭 macOS 的安全保护。
 
-**📂 以普通文件保存的资料库**
-将会话整理到分组中，并以可读的 Markdown 同步到你指定的文件夹——可配合 Obsidian、git
-或访达搜索使用。
+首次启动时：
 
-**📥 导入录音**
-导入已有的音频文件，获得与实时会话相同的转写、问答和笔记。
+1. 选择预计会听到的语言。
+2. 打开 **Settings → API keys**，填入 Soniox 密钥，同意云端处理并保存。
+3. 在 **Settings → Transcription** 中选择转写或翻译模式，以及翻译目标语言。
+4. 分别配置 **Assistant** 和 **Notes**。使用 Codex 时，先安装官方
+   [Codex CLI](https://developers.openai.com/codex/cli/)，再通过 SKAZ 的 Codex 设置登录；
+   SKAZ 不会自动安装 CLI。也可配置 API 提供商的密钥和模型。
+   服务商的账号资格、限额及收费规则仍然适用。
+5. 创建会话，选择音频来源，授予所需的 macOS 权限，点击 **Record**。
+   按需暂停或停止，打开 **Notes** 整理转写笔记。
 
-**🧩 自选模型**
-为每项任务单独选择模型：转写、助手、笔记和搜索。支持 Soniox（语音）、OpenRouter、
-OpenAI 和 Anthropic。不会悄悄替换：如果模型无法胜任，SKAZ 会明确告诉你。
+录制他人声音前，请取得必要的同意。Soniox 和文本模型服务有各自的价格，MIT 许可不包含这些服务的用量。
 
-## 隐私优先
+## 隐私与数据
 
-- **不保存音频。** 音频流式发送给语音识别后即被丢弃；SKAZ 保存的是文字，而不是录音。
-- **本地优先。** 转写、笔记和对话都保存在你的 Mac 上，文本只会发送给你自己配置的服务商。
-- **密钥留在本机。** API 密钥加密保存在应用数据目录中，仅所有者可读。
-- **封闭的后端。** Python 后端只监听本地回环地址，每次启动都需要新的随机令牌。
-- **语音是数据，不是指令。** 现场听到的内容绝不会被当作给助手的指令。
+- 转写、笔记和聊天保存在本机。不提供用于回放的永久实时音频存档；
+  处理或恢复过程中可能使用临时音频。
+- 获得同意后，音频会发送给 Soniox 识别。Assistant 和 Notes 会将上下文发送给
+  所选服务。服务商的数据保留与训练政策适用：**本地存储不等于离线处理**。
+- API 密钥保存在本地加密文件中，加密密钥存放在旁边。主要保护边界是文件权限，
+  无法防御以同一用户身份运行的其他进程。也请保护好导出文件和备份。
+- Python 后端仅监听 loopback，每次启动使用新令牌。
+  限制及当前漏洞报告渠道状态见 [Security](../../SECURITY.md)。
 
 ## 工作原理
 
-```
- 麦克风 ──► Electron main ──► Python 后端 ──► 语音识别 (Soniox)
-                 │                 │
-                 │                 ├──► SQLite + Markdown 资料库
-                 ▼                 └──► 语言模型（助手、笔记）
-            React 界面
-```
-
-| 层 | 技术 | 职责 |
-|---|---|---|
-| 桌面外壳 | Electron | 窗口、麦克风权限、安全 IPC、后端生命周期 |
-| 界面 | React + TypeScript、Zustand、CodeMirror 6 | 录音、转写、助手、笔记、设置 |
-| 后端 | Python 3.11+、FastAPI、SQLite | 音频流、识别、资料库、助手、笔记 |
-
-## 快速开始
-
-> SKAZ 仍处于早期开发阶段，目标平台为 **Apple Silicon 上的 macOS**，其他平台尚未测试。
-
-**环境要求：** Node.js 20.19+、Python 3.11+、[uv](https://docs.astral.sh/uv/)，
-以及至少一个受支持服务商的 API 密钥。
-
-```bash
-# 1. 安装依赖
-npm install
-uv sync --project backend
-
-# 2. 以开发模式运行
-npm run dev
+```text
+麦克风 / 系统音频 / 媒体 → Electron → Python → Soniox
+                              ↓         ↓
+                          React UI   本地资料库
+                                        ↕
+                              Assistant / Notes 服务商
 ```
 
-首次启动时，打开 **Settings → API keys** 添加密钥，选择你使用的语言，然后点击 **Record**。
-
-### 常用命令
-
-| 命令 | 作用 |
+| 层级 | 技术 |
 |---|---|
-| `npm run dev` | 以热重载方式启动应用 |
-| `npm test` | 前端单元测试（Vitest） |
-| `npm run typecheck` | TypeScript 类型检查 |
-| `uv run --project backend pytest` | 后端测试 |
-| `npm run dist:mac` | 构建 `SKAZ.app` 和 DMG 安装包——见 [Packaging](../PACKAGING.md) |
+| 桌面应用 | Electron |
+| 界面 | React、TypeScript、CodeMirror |
+| 本地后端 | Python、FastAPI、SQLite |
 
-## 项目状态
+## 开发与项目状态
 
-SKAZ 是一个正在积极开发的可用原型。实时转写、翻译、助手、笔记、会话分组和导入已可在本地使用。
-接下来：
+[Contributing](../../CONTRIBUTING.md) 介绍环境设置、测试和 PR；
+[Packaging](../PACKAGING.md) 介绍安装包构建。版本变更将记录在
+[GitHub Releases](https://github.com/4IPE/SKAZ/releases)，不另设 changelog。
+小修复可直接提交 PR；大型改动请先讨论。
 
-- [ ] 签名并公证的正式版本
-- [ ] 能逐步阅读整个资料库的助手
-- [ ] 手动编辑说话人
-- [ ] 长时间会话中对睡眠、退出和断网的可靠处理
+当前重点包括发布签名与公证、长会话的可靠恢复，以及更多真实场景验证。
+实验性媒体导入和网页搜索不代表已达到生产可用标准；Codex 原生网页搜索目前禁用。
 
-在首个正式版本发布前，可能存在不完善之处和不兼容的变更。
+[社区行为规范](../../CODE_OF_CONDUCT.md) · [安全政策](../../SECURITY.md) · [MIT 许可](../../LICENSE)
 
-## 名称由来
-
-*Skaz*（сказ）是俄语词，指以讲述者本人口吻进行的口头叙事。仓库仍沿用最初的工作名称
-`AudioHelper`。
+*Skaz*（сказ）是俄语中指口头叙事的词。项目最初的工作名称为 AudioHelper。
+Copyright © 2026 all0b0y.
