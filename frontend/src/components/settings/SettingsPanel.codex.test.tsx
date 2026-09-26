@@ -6,6 +6,7 @@ import { useStore } from '../../state/store';
 import { stopCodexPolling, stopLoginWatch, useCodex } from '../../state/codex';
 import { fakeCodex, type FakeCodex } from '../../test/codexFake';
 import type { CodexSettings } from '../../api/codex';
+import type { BridgeRequest, JsonResponse } from '../../api/bridge';
 import type { Settings, SettingsUpdate } from '../../api/types';
 
 // Codex as the first provider tab of Assistant and of Notes, against the
@@ -232,9 +233,9 @@ describe('Codex inside Assistant and Notes settings', () => {
     await user.click(tabs('Assistant')[0]!);
     await user.click(screen.getByRole('checkbox', { name: /I understand the terms/ }));
     await user.click(screen.getByRole('button', { name: 'Sign in with ChatGPT' }));
-    const request = fake.bridge.request as ReturnType<typeof vi.fn>;
+    const request = fake.bridge.request as ReturnType<typeof vi.fn<(req: BridgeRequest) => Promise<JsonResponse<unknown>>>>;
     const real = request.getMockImplementation()!;
-    request.mockImplementation(async (req: { path: string }) => (req.path === '/codex/state'
+    request.mockImplementation(async (req: BridgeRequest) => (req.path === '/codex/state'
       ? { ok: false, status: 503, detail: 'backend busy' } : real(req)));
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not get the sign-in result');
@@ -267,9 +268,9 @@ describe('Codex inside Assistant and Notes settings', () => {
   it('keeps the Codex draft when saving it fails', async () => {
     const user = userEvent.setup();
     await start();
-    const request = fake.bridge.request as ReturnType<typeof vi.fn>;
+    const request = fake.bridge.request as ReturnType<typeof vi.fn<(req: BridgeRequest) => Promise<JsonResponse<unknown>>>>;
     const real = request.getMockImplementation()!;
-    request.mockImplementation(async (req: { path: string; method: string }) => (req.method === 'PUT' && req.path === '/codex/settings'
+    request.mockImplementation(async (req: BridgeRequest) => (req.method === 'PUT' && req.path === '/codex/settings'
       ? { ok: false, status: 409, detail: 'Codex settings rejected' } : real(req)));
     await user.click(tabs('Assistant')[0]!);
     await save(user);

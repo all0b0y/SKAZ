@@ -6,7 +6,7 @@ import type { BridgeRequest, JsonResponse } from '../../api/bridge';
 let Panel: typeof import('./StorageRootPanel')['StorageRootPanel'];
 let requests: BridgeRequest[];
 let current: { root: string | null; suggested_root: string; managed: boolean; change_locked: boolean; mode: string };
-let choose: ReturnType<typeof vi.fn>;
+let choose: ReturnType<typeof vi.fn<() => Promise<string | null>>>;
 let handler: (req: BridgeRequest) => Promise<JsonResponse<unknown>>;
 
 beforeEach(async () => {

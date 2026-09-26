@@ -9,7 +9,7 @@ import { encodeWavPcm16Mono } from '../../audio/wav';
 const syntheticPcmWav = () => encodeWavPcm16Mono(new Float32Array([0, 0.25, -0.25, 0]), 8_000);
 
 const bridge = window.audiohelper as unknown as Omit<BridgeApi, 'request' | 'fetchAudio' | 'uploadAudio'> & {
-  request: ReturnType<typeof vi.fn>;
+  request: ReturnType<typeof vi.fn<(req: BridgeRequest) => Promise<JsonResponse<unknown>>>>;
   fetchAudio: ReturnType<typeof vi.fn>;
   uploadAudio: ReturnType<typeof vi.fn>;
 };
