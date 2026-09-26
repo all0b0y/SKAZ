@@ -143,6 +143,16 @@ class TransportReceipt(DocumentModel):
     digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
+class ImportProvenance(DocumentModel):
+    """Portable, completed import; no local paths, temp files or provider handles."""
+    kind: Literal["local", "youtube"]
+    name: Annotated[str, Field(min_length=1, max_length=500)]
+    url: str | None = None
+    video_id: str | None = None
+    model: str
+    duration_ms: Counter
+
+
 class NativeRecording(DocumentModel):
     sample_rate: Annotated[int, Field(ge=8000, le=48000)]
     saved_samples: Counter
@@ -150,7 +160,8 @@ class NativeRecording(DocumentModel):
     recording_mode: Literal["transcription", "translation", "audio_only"]
     translation_target_language: str
     used_languages: list[str] | None
-    origin: Literal["live"]
+    origin: Literal["live", "import"]
+    import_source: ImportProvenance | None = None
     connections: list[NativeConnection]
     receipt: TransportReceipt | None
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { BridgeRequest, JsonResponse } from '../../api/bridge';
@@ -42,7 +42,7 @@ beforeEach(async () => {
       if (req.method === 'POST' && req.path.endsWith('/retry')) {
         return {
           ok: true, status: 201,
-          data: { session: { id: 's2' }, import_state: view({ session_id: 's2', status: 'queued' }) } as T,
+          data: { session: { id: 's1' }, import_state: view({ session_id: 's1', status: 'queued' }) } as T,
         };
       }
       if (req.method === 'DELETE') return { ok: true, status: 200, data: { deleted: true } as T };
@@ -58,18 +58,28 @@ it('shows the provider status and elapsed time, never an invented percentage', a
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
   expect(await screen.findByText('Provider is processing')).toBeVisible();
-  expect(screen.getByText('lecture.m4a')).toBeVisible();
-  expect(screen.getByText('1 h 00 min')).toBeVisible();
-  expect(screen.getByText('Transcription only')).toBeVisible();
-  // Soniox reports queued/processing/completed and nothing else.
+  // The name, not the path (UI-CLEANUP §4).
+  expect(screen.getByRole('heading', { name: 'lecture.m4a' })).toBeVisible();
+  expect(screen.queryByText('/Users/me/Downloads/lecture.m4a')).toBeNull();
+  // One status line: status · elapsed · duration · mode.
+  const line = screen.getByText('Provider is processing').closest('p')!;
+  expect(line).toHaveTextContent('1 h 00 min');
+  expect(line).toHaveTextContent('Transcription');
+  expect(line).toHaveTextContent(/0:0\d/);
+  // Soniox reports queued/processing/completed and nothing else: no percentage.
   expect(screen.queryByRole('progressbar')).toBeNull();
-  expect(screen.getByText(/The provider does not report an exact percentage/)).toBeVisible();
+  expect(document.body.textContent).not.toMatch(/\d+ ?%/);
 });
 
-it('tells the user the app may be closed while the provider works', async () => {
+it('keeps caveats out of the running card: they appear where they matter', async () => {
+  const user = userEvent.setup();
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
-
-  expect(await screen.findByText(/You can close the app/)).toBeVisible();
+  await screen.findByText('Provider is processing');
+  expect(screen.queryByText(/may not stop provider charges/)).toBeNull();
+  expect(screen.queryByText(/switch sessions/)).toBeNull();
+  // The charge caveat is part of the cancel confirmation.
+  await user.click(screen.getByRole('button', { name: 'Cancel import' }));
+  expect(screen.getByRole('dialog', { name: 'Cancel import?' })).toHaveTextContent(/may not stop provider charges/);
 });
 
 it('cancels an in-flight import and reports the settled state upward', async () => {
@@ -77,6 +87,9 @@ it('cancels an in-flight import and reports the settled state upward', async () 
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
   await user.click(await screen.findByRole('button', { name: 'Cancel import' }));
+  // Nothing is cancelled until confirmed.
+  expect(requests.some((r) => r.method === 'POST')).toBe(false);
+  await user.click(within(screen.getByRole('dialog', { name: 'Cancel import?' })).getByRole('button', { name: 'Cancel import' }));
 
   await waitFor(() => expect(onSettled).toHaveBeenCalledWith(
     expect.objectContaining({ status: 'cancelled' }),
@@ -96,14 +109,15 @@ it('keeps the provider reason on failure and offers retry or delete, never auto-
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
   expect(await screen.findByRole('alert')).toHaveTextContent('audio_decode_failed');
-  expect(screen.getByRole('button', { name: /Retry \(new paid run\)/ })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Delete session' })).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'Cancel import' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeVisible();
+  // The paid-retry caveat sits under Retry, only here.
+  expect(screen.getByText(/a new paid transcription is created/)).toBeVisible();
   // Nothing was retried on its own: a new job costs money and needs a click.
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
 });
 
-it('retry announces the new session instead of silently replacing this one', async () => {
+it('retry announces the resumed session', async () => {
   const user = userEvent.setup();
   states = [view({ status: 'failed', error: 'bad file' })];
   const started = vi.fn();
@@ -121,7 +135,7 @@ it('deleting a settled import reports it upward', async () => {
   states = [view({ status: 'failed', error: 'bad file' })];
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  await user.click(await screen.findByRole('button', { name: 'Delete session' }));
+  await user.click(await screen.findByRole('button', { name: 'Delete' }));
 
   await waitFor(() => expect(onDeleted).toHaveBeenCalled());
   expect(requests.some((r) => r.method === 'DELETE' && r.path === '/imports/s1')).toBe(true);
@@ -134,7 +148,7 @@ it('reports a missing source file without pretending the transcript is broken', 
   })];
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  expect(await screen.findByText(/Not available at its previous path/)).toBeVisible();
+  expect(await screen.findByText(/not available at its previous path/)).toBeVisible();
   expect(screen.getByText(/notes keep working/)).toBeVisible();
 });
 

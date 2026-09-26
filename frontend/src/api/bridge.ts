@@ -91,6 +91,7 @@ export interface BridgeApi {
   ): Promise<JsonResponse<T>>;
   /** Native picker for one audio file to import. Null when cancelled. */
   chooseAudioFile(): Promise<AudioFileChoice | null>;
+  droppedMediaFile?(file: File): AudioFileChoice | null;
   /**
    * Hand one note to the macOS share sheet as a `.md` file, opened at the given
    * point of the window. The text is written to a private temporary file only for

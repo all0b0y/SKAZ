@@ -84,6 +84,12 @@ export default function App() {
   const selectSession = useStore((s) => s.selectSession);
   const refreshSessions = useStore((s) => s.refreshSessions);
   const activeImport = activeId ? imports[activeId] : undefined;
+  const importsRunning = Object.values(imports).some((s) => ['queued', 'downloading', 'preparing', 'uploading', 'processing'].includes(s.status));
+  useEffect(() => {
+    if (!importsRunning) return;
+    const timer = setInterval(() => { void useStore.getState().refreshImports(); }, 2000);
+    return () => clearInterval(timer);
+  }, [importsRunning]);
   const [tab, setTab] = useState<CenterTab>('transcript');
   const [settingsOpen, setSettingsOpen] = useState<false | SectionId>(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -220,7 +226,7 @@ export default function App() {
                   trackImport(state);
                   if (state.status === 'completed') void selectSession(state.session_id);
                 }}
-                onDeleted={() => { void refreshSessions(); }}
+                onDeleted={() => { useStore.setState({ activeSessionId: null }); void useStore.getState().refreshImports(); void refreshSessions(); }}
               />
             ) : tab === 'transcript' ? (
               <TranscriptView key={activeId} focusSegmentId={focusSegmentId} />

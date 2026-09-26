@@ -28,6 +28,10 @@ extraResources:
     to: backend
     filter:
       - '**/*'
+  - from: backend/.runtime/media-tools
+    to: media-tools
+    filter:
+      - '**/*'
 
 asar: true
 

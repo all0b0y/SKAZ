@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import { clsx } from 'clsx';
 import { ApiClient } from '../../api/client';
 import type { AudioFileChoice } from '../../api/bridge';
-import type { ImportCapabilities, ImportCreated } from '../../api/types';
+import type { ImportCapabilities, ImportCreated, ImportPreview } from '../../api/types';
 import { Button } from '../ui/Button';
 import { SessionDialog } from '../sessions/SessionOverlays';
 import './importDialog.css';
-
-interface Props {
-  file: AudioFileChoice;
-  onClose: () => void;
-  onCreated: (created: ImportCreated) => void;
-}
 
 /** Duration read from the container metadata, in ms, or null when unreadable. */
 export async function readDuration(url: string): Promise<number | null> {
@@ -51,15 +46,35 @@ function formatCost(value: number): string {
   return `$${value < 0.01 ? value.toFixed(3) : value.toFixed(2)}`;
 }
 
-export function ImportDialog({ file, onClose, onCreated }: Props) {
+export interface ImportDetailsProps {
+  file: AudioFileChoice;
+  preview?: ImportPreview;
+  onOpenExisting?: (id: string) => void;
+  onOpenSettings?: () => void;
+  onClose: () => void;
+  onCreated: (created: ImportCreated) => void;
+  onBusyChange?: (busy: boolean) => void;
+}
+
+/**
+ * The second step of an import, once the source is known
+ * (.dev/docs/UI-CLEANUP-IMPORT-TRANSCRIPT-SPEC.md §5): the session name, the mode
+ * as a two-way switch, one summary line, one fine-print line, and at most one
+ * warning line — no coloured boxes. Behaviour is unchanged: nothing is sent
+ * until Transcribe, a price over the threshold needs a second click, and a
+ * duplicate needs an explicit choice.
+ */
+export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, onClose, onCreated, onBusyChange }: ImportDetailsProps) {
   const [caps, setCaps] = useState<ImportCapabilities | null>(null);
   const [capsError, setCapsError] = useState('');
-  const [title, setTitle] = useState(() => file.name.replace(/\.[^.]+$/, ''));
+  const [title, setTitle] = useState(() => preview?.title ?? file.name.replace(/\.[^.]+$/, ''));
   const [translate, setTranslate] = useState(false);
-  const [duration, setDuration] = useState<number | null | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
+  const [duration, setDuration] = useState<number | null | undefined>(preview?.duration_ms);
+  const [busy, setBusyState] = useState(false);
   const [error, setError] = useState('');
   const [confirmedExpensive, setConfirmedExpensive] = useState(false);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
+  const setBusy = (value: boolean) => { setBusyState(value); onBusyChange?.(value); };
 
   useEffect(() => {
     let alive = true;
@@ -68,7 +83,7 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
       .catch((err: unknown) => {
         if (alive) setCapsError(err instanceof Error ? err.message : String(err));
       });
-    void readDuration(file.url).then((value) => { if (alive) setDuration(value); });
+    if (!preview) void readDuration(file.url).then((value) => { if (alive) setDuration(value); });
     return () => { alive = false; };
   }, [file.url]);
 
@@ -82,6 +97,7 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
   const tooLong = caps != null && duration != null && duration > caps.max_duration_ms;
   const blocked = caps != null && (!caps.cloud_consent || !caps.has_api_key);
   const queued = caps != null && caps.active_imports >= caps.max_concurrent_imports;
+  const duplicate = !!preview?.existing_session_ids.length;
   const expensive =
     caps?.warn_above_usd != null && estimate != null && estimate > caps.warn_above_usd
     && !tooLong && !blocked;
@@ -96,7 +112,7 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
     setError('');
     void new ApiClient(window.audiohelper)
       .createImport({
-        path: file.path,
+        ...(preview ? { source: preview.source, allow_duplicate: allowDuplicate } : { path: file.path }),
         title: title.trim() || file.name,
         translate,
         declared_duration_ms: duration ?? null,
@@ -108,107 +124,96 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
       });
   };
 
+  // The one blocking reason, most fundamental first; fixable ones link to Settings.
+  const blocker: { text: string; settings: boolean } | null =
+    caps && !caps.cloud_consent
+      ? { text: 'Import sends the audio file to Soniox. Turn on cloud processing in Settings → API keys.', settings: true }
+      : caps && !caps.has_api_key
+        ? { text: 'No Soniox key is saved. Add it in Settings → API keys.', settings: true }
+        : tooLong
+          ? { text: `The file is longer than ${formatDuration(caps!.max_duration_ms)} — the provider does not accept it.`, settings: false }
+          : null;
+
   return (
-    <SessionDialog title="Import audio file" onClose={onClose} busy={busy}>
-      <div className="import-dialog">
-        <p className="import-dialog__file" title={file.path}>{file.name}</p>
+    <div className="import-dialog__details">
+      <label className="import-dialog__field">
+        <span>Session name</span>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} disabled={busy} />
+      </label>
 
-        <label className="import-dialog__field">
-          <span>Session name</span>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={200}
-            disabled={busy}
-          />
-        </label>
+      <div className="import-dialog__switch" role="radiogroup" aria-label="What to do">
+        {([[false, 'Transcription', 'Transcription only'], [true, '+ Translation', 'Transcription and translation']] as const)
+          .map(([value, label, name]) => (
+            <button key={label} type="button" role="radio" aria-checked={translate === value} aria-label={name} disabled={busy}
+              className={clsx('import-dialog__switch-option', translate === value && 'import-dialog__switch-option--on')}
+              onClick={() => setTranslate(value)}>
+              {label}
+            </button>
+          ))}
+      </div>
 
-        <fieldset className="import-dialog__modes" disabled={busy}>
-          <legend>What to do</legend>
-          <label>
-            <input
-              type="radio"
-              name="import-mode"
-              checked={!translate}
-              onChange={() => setTranslate(false)}
-            />
-            <span>Transcription only</span>
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="import-mode"
-              checked={translate}
-              onChange={() => setTranslate(true)}
-            />
-            <span>Transcription and translation</span>
-          </label>
-        </fieldset>
+      <p className="import-dialog__summary">
+        <span>{duration === undefined ? 'reading…' : duration === null ? 'could not be read from the file' : formatDuration(duration)}</span>
+        <span aria-hidden="true"> · </span>
+        <span>
+          {estimate != null && rate != null
+            ? `≈ ${formatCost(estimate)}`
+            : rate != null
+              ? `≈ $${rate.toFixed(2)} per audio hour — the exact amount is shown after processing`
+              : '—'}
+        </span>
+        <span aria-hidden="true"> · </span>
+        <span>Saved to <span>{caps ? caps.destination : '—'}</span></span>
+      </p>
 
-        <dl className="import-dialog__facts">
-          <dt>Duration</dt>
-          <dd>
-            {duration === undefined
-              ? 'reading…'
-              : duration === null
-                ? 'could not be read from the file'
-                : formatDuration(duration)}
-          </dd>
-          <dt>Estimated cost</dt>
-          <dd>
-            {estimate != null && rate != null
-              ? `≈ ${formatCost(estimate)} (at $${rate.toFixed(2)} per audio hour)`
-              : rate != null
-                ? `≈ $${rate.toFixed(2)} per audio hour — the exact amount is shown after processing`
-                : '—'}
-          </dd>
-          <dt>Saved to</dt>
-          <dd>{caps ? caps.destination : '—'}</dd>
-        </dl>
+      <p className="import-dialog__note">
+        An estimate, not a bill{rate != null && estimate != null ? ` ($${rate.toFixed(2)} per audio hour)` : ''}: the provider
+        charges by its own tokens. The original file stays where it is; temporary audio is deleted afterwards.
+      </p>
 
-        <p className="import-dialog__note">
-          An estimate, not a bill: the provider charges by its own tokens. The original file
-          stays where it is; the app does not copy it.
+      {blocker && (
+        <p role="alert" className="import-dialog__line">
+          {blocker.text}
+          {blocker.settings && onOpenSettings && (
+            <> <button type="button" className="import-dialog__link" onClick={onOpenSettings}>Open settings</button></>
+          )}
         </p>
+      )}
+      {queued && !blocked && (
+        <p className="import-dialog__line">Another import is active. Open it to continue or cancel.</p>
+      )}
+      {capsError && <p role="alert" className="import-dialog__line">{capsError}</p>}
+      {error && <p role="alert" className="import-dialog__line">{error}</p>}
 
-        {tooLong && (
-          <p role="alert" className="import-dialog__error">
-            The file is longer than {formatDuration(caps!.max_duration_ms)} — the provider does not accept it.
-          </p>
-        )}
-        {caps && !caps.cloud_consent && (
-          <p role="alert" className="import-dialog__error">
-            Import sends the audio file to Soniox. Turn on cloud processing
-            in Settings → API keys.
-          </p>
-        )}
-        {caps && caps.cloud_consent && !caps.has_api_key && (
-          <p role="alert" className="import-dialog__error">
-            No Soniox key is saved. Add it in Settings → API keys.
-          </p>
-        )}
-        {queued && !blocked && (
-          <p className="import-dialog__warning">
-            {caps!.active_imports} import(s) already running — this one will be queued.
-          </p>
-        )}
-        {expensive && (
-          <p role="alert" className="import-dialog__warning">
-            This costs more than your threshold of {formatCost(caps!.warn_above_usd!)}.
-            {confirmedExpensive
-              ? ` Press again to continue for ≈ ${formatCost(estimate!)}.`
-              : ` Continue for ≈ ${formatCost(estimate!)}?`}
-          </p>
-        )}
-        {capsError && <p role="alert" className="import-dialog__error">{capsError}</p>}
-        {error && <p role="alert" className="import-dialog__error">{error}</p>}
-
+      <div className="import-dialog__footer">
+        <div className="import-dialog__caption">
+          {duplicate && (
+            <>
+              <span>This video already has a session.</span>{' '}
+              <button type="button" className="import-dialog__link" onClick={() => onOpenExisting?.(preview!.existing_session_ids[0]!)}>
+                Open existing
+              </button>
+              <label className="import-dialog__check">
+                <input type="checkbox" checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} />
+                Transcribe again (new paid run)
+              </label>
+            </>
+          )}
+          {expensive && (
+            <span role="alert">
+              This costs more than your threshold of {formatCost(caps!.warn_above_usd!)}.
+              {confirmedExpensive
+                ? ` Press again to continue for ≈ ${formatCost(estimate!)}.`
+                : ` Continue for ≈ ${formatCost(estimate!)}?`}
+            </span>
+          )}
+        </div>
         <div className="import-dialog__actions">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button
             variant="primary"
             onClick={submit}
-            disabled={busy || caps == null || blocked || tooLong || title.trim().length === 0}
+            disabled={busy || caps == null || blocked || tooLong || queued || title.trim().length === 0 || (duplicate && !allowDuplicate)}
           >
             {/* The label only changes once the warning has been shown and
                 acknowledged; renaming it up front would make the first click
@@ -216,6 +221,19 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
             {expensive && confirmedExpensive ? 'Transcribe anyway' : 'Transcribe'}
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** The details step on its own, for a source already chosen outside the dialog. */
+export function ImportDialog(props: Omit<ImportDetailsProps, 'onBusyChange'>) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <SessionDialog title="Import media" onClose={props.onClose} busy={busy}>
+      <div className="import-dialog">
+        <p className="import-dialog__file" title={props.file.path}>{props.file.name}</p>
+        <ImportDetails {...props} onBusyChange={setBusy} />
       </div>
     </SessionDialog>
   );

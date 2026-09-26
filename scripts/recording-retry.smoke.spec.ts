@@ -85,7 +85,8 @@ test('Record waits for a Soniox key and consent, then warns on every failed atte
     for (const attempt of ['1', '2']) {
       await expect(record).toBeEnabled();
       await record.click();
-      await expect(warning).toContainText(/Transcription (is unavailable|failed)/);
+      await expect(page.getByRole('status').filter({ hasText: /Reconnecting to Soniox.*Attempt [23]\/3/ })).toBeVisible();
+      await expect(warning).toContainText(/Transcription (is unavailable|failed)/, { timeout: 15000 });
       await expect(record).toBeEnabled();
       await expect(page.locator('html')).toHaveAttribute('data-capture-attempts', attempt);
       await page.getByRole('button', { name: 'Dismiss error' }).click();
@@ -95,7 +96,7 @@ test('Record waits for a Soniox key and consent, then warns on every failed atte
     await expect(page.locator('.session__name')).toHaveCount(2);
     await expect(warning).toHaveCount(0);
     await record.click();
-    await expect(warning).toContainText(/Transcription (is unavailable|failed)/);
+    await expect(warning).toContainText(/Transcription (is unavailable|failed)/, { timeout: 15000 });
     await expect(record).toBeEnabled();
     await expect(page.locator('html')).toHaveAttribute('data-capture-attempts', '3');
     const sessions = await page.evaluate(() => window.audiohelper.request<{ sessions: Array<{ status: string }> }>({

@@ -70,7 +70,7 @@ def test_network_stall_never_blocks_audio_ack_and_stop_is_incomplete(
             assert end_cancelled.is_set()
 
 
-def test_explicit_network_retry_uses_current_clock_and_retains_gap(
+def test_explicit_auth_retry_uses_current_clock_and_retains_gap(
     app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first, second = ProviderSocket(), ProviderSocket()
@@ -99,7 +99,7 @@ def test_explicit_network_retry_uses_current_clock_and_retains_gap(
                             "confidence": 0.99, "is_final": True, "language": "en"}],
                 "final_audio_proc_ms": 100, "total_audio_proc_ms": 100,
             }))
-            http.portal.call(first.responses.put, json.dumps({"error_code": 503}))
+            http.portal.call(first.responses.put, json.dumps({"error_code": 401}))
             # Wait for the fake remote to close, with a test-side deadline.
             async def wait_closed() -> None:
                 async with asyncio.timeout(1):

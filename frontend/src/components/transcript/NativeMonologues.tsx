@@ -3,6 +3,9 @@ import type { NativeSnapshot, NativeTranscriptToken, NativeTranslationToken } fr
 import type { Segment } from '../../api/types';
 import './nativeMonologues.css';
 
+import { mediaSourceLink } from '../../lib/mediaSourceLink';
+import { formatTimecode } from '../../lib/time';
+
 interface Turn {
   id: string;
   connection: string;
@@ -118,8 +121,8 @@ function translatedTurns(snapshot: NativeSnapshot, segments: Segment[]): Turn[] 
   return turns.sort((a, b) => (a.startSample ?? a.tokens[0]?.start_sample ?? 0) - (b.startSample ?? b.tokens[0]?.start_sample ?? 0));
 }
 
-export function NativeMonologues({ snapshot, segments, focusSegmentId }: {
-  snapshot: NativeSnapshot; segments: Segment[]; focusSegmentId: string | null;
+export function NativeMonologues({ snapshot, segments, focusSegmentId, videoId }: {
+  snapshot: NativeSnapshot; segments: Segment[]; focusSegmentId: string | null; videoId?: string | null;
 }) {
   const translation = snapshot.recording_mode === 'translation';
   const turns = useMemo(() => translation ? translatedTurns(snapshot, segments) : project(snapshot, segments),
@@ -149,6 +152,11 @@ export function NativeMonologues({ snapshot, segments, focusSegmentId }: {
       <span className="native-monologue__speaker">
         {turn.speaker !== null ? `Speaker ${turn.speaker}` : index === 0 && turn.connection !== 'archive' ? 'Speaker 1' : 'Speaker'}
       </span>
+      {mediaSourceLink(videoId, (turn.startSample ?? turn.tokens[0]?.start_sample ?? 0) / snapshot.sample_rate * 1000) &&
+        <a className="transcript__source-link tabular" target="_blank" rel="noreferrer"
+          href={mediaSourceLink(videoId, (turn.startSample ?? turn.tokens[0]?.start_sample ?? 0) / snapshot.sample_rate * 1000)!}>
+          {formatTimecode((turn.startSample ?? turn.tokens[0]?.start_sample ?? 0) / snapshot.sample_rate * 1000)}
+        </a>}
       {translation && <p className="native-monologue__text">
         <TranscriptRuns tokens={turn.display ?? []} focusSegmentId={focusSegmentId} />
       </p>}

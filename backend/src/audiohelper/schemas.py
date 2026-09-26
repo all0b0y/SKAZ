@@ -358,7 +358,10 @@ class BulkDeleteSessionsResponse(BaseModel):
     failed: list[BulkDeleteFailure]
 
 
-ImportStatusValue = Literal["queued", "uploading", "processing", "completed", "failed", "cancelled"]
+ImportStatusValue = Literal[
+    "queued", "uploading", "processing", "completed", "failed", "cancelled",
+    "interrupted", "downloading", "preparing",
+]
 
 
 class ImportSourceView(BaseModel):
@@ -369,6 +372,9 @@ class ImportSourceView(BaseModel):
     size_bytes: int
     #: False once the file has moved, been replaced, or shrunk since the import.
     available: bool
+    kind: Literal["local", "youtube"] = "local"
+    url: str | None = None
+    video_id: str | None = None
 
 
 class ImportView(BaseModel):
@@ -386,13 +392,49 @@ class ImportView(BaseModel):
     settled_at: str | None = None
 
 
+class MediaSourceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["local", "youtube"]
+    path: str | None = Field(default=None, min_length=1, max_length=4096)
+    url: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def one_source(self) -> MediaSourceRequest:
+        if self.kind == "local" and (not self.path or self.url is not None):
+            raise ValueError("Choose one local file.")
+        if self.kind == "youtube" and (not self.url or self.path is not None):
+            raise ValueError("Enter one YouTube link.")
+        return self
+
+
+class PreviewImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: MediaSourceRequest
+
+
+class ImportPreview(BaseModel):
+    title: str
+    duration_ms: int
+    source: MediaSourceRequest
+    existing_session_ids: list[str] = Field(default_factory=list)
+
+
 class CreateImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    path: str = Field(min_length=1, max_length=4096)
+    path: str | None = Field(default=None, min_length=1, max_length=4096)
+    source: MediaSourceRequest | None = None
+    allow_duplicate: bool = False
     title: str = Field(min_length=1, max_length=200)
     translate: bool = False
     declared_duration_ms: int | None = Field(default=None, gt=0, le=MAX_IMPORT_DURATION_MS)
+
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> CreateImportRequest:
+        if (self.path is None) == (self.source is None):
+            raise ValueError("Choose exactly one source.")
+        return self
 
 
 class ImportCreatedResponse(BaseModel):

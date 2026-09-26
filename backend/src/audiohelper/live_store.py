@@ -241,6 +241,32 @@ class LiveStore:
             persist_tokens(connection, row, ordinal, event, ids[0] if ids else None)
             return ids
 
+    def reconnect(self, identity: str) -> LiveConnection:
+        """Rotate at the durably confirmed boundary; transport clock never rewinds."""
+        with self.db.write() as connection:
+            row = self._active(connection, identity)
+            recording = connection.execute(
+                "SELECT * FROM native_recordings WHERE session_id=?", (row["session_id"],),
+            ).fetchone()
+            anchor = row["final_sample"]
+            connection.execute(
+                "UPDATE asr_connections SET status='finished',end_sample=?,processed_sample=?,"
+                "draft_json='[]',translation_draft_json='[]',stream_draft_json='[]' WHERE id=?",
+                (anchor, anchor, identity),
+            )
+            new_id = uuid.uuid4().hex
+            connection.execute(
+                "INSERT INTO asr_connections(id,session_id,start_sample,model,status,final_sample,"
+                "processed_sample) VALUES (?,?,?,?,'active',?,?)",
+                (new_id, row["session_id"], anchor, row["model"], anchor, anchor),
+            )
+            languages = recording["used_languages_json"]
+            return LiveConnection(
+                new_id, row["session_id"], anchor, row["sample_rate"], row["next_sequence"],
+                recording["recording_mode"], recording["translation_target_language"],
+                tuple(json.loads(languages)) if languages is not None else None,
+            )
+
     def close(self, identity: str, *, finished: bool) -> None:
         with self.db.write() as connection:
             row = connection.execute(

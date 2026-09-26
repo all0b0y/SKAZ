@@ -53,6 +53,14 @@ beforeEach(async () => {
 const writes = () => requests.filter((r) => r.method === 'PUT' && r.path === '/settings');
 
 describe('Soniox credentials and explicit consent', () => {
+  it('explains transient audio and the recording requirements without promising a local archive', async () => {
+    render(<SettingsPanel onClose={() => {}} initialSection="api-keys" />);
+    expect(await screen.findByText(/Audio is used for recognition and is not stored/)).toBeInTheDocument();
+    expect(screen.getByText(/Recording requires a Soniox key and cloud consent/)).toBeInTheDocument();
+    expect(screen.getByText(/Disabling this stops live transcription and recording/)).toBeInTheDocument();
+    expect(screen.queryByText(/Audio is saved locally|Recording remains local|not local audio recording/)).not.toBeInTheDocument();
+  });
+
   it('saves translation and its target for new recordings without granting consent', async () => {
     const user = userEvent.setup();
     const view = render(<SettingsPanel onClose={() => {}} />);

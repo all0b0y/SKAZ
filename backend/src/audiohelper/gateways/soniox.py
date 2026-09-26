@@ -34,6 +34,10 @@ Marker = Literal["end", "fin"]
 class SonioxGatewayError(RuntimeError):
     """A sanitized connection, provider, or protocol failure."""
 
+    def __init__(self, message: str = "Soniox protocol failure", *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
 
 class SonioxProtocolError(SonioxGatewayError):
     """The provider returned a message outside the documented contract."""
@@ -206,7 +210,11 @@ class SonioxGateway:
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            raise SonioxGatewayError("Soniox connection could not be established.") from error
+            status = getattr(getattr(error, "response", None), "status_code", None)
+            retryable = status is None or status in (408, 429, 500, 502, 503, 504)
+            raise SonioxGatewayError(
+                "Soniox connection could not be established.", retryable=retryable,
+            ) from error
 
         settings: dict[str, object] = {
             "api_key": self._api_key,
@@ -232,7 +240,9 @@ class SonioxGateway:
             raise
         except Exception as error:
             await _close_socket(socket)
-            raise SonioxGatewayError("Soniox session configuration could not be sent.") from error
+            raise SonioxGatewayError(
+                "Soniox session configuration could not be sent.", retryable=True,
+            ) from error
         return SonioxSession(socket, self.config)
 
 
@@ -241,6 +251,7 @@ class SonioxSession:
 
     def __init__(self, socket: WebSocketTransport, config: SonioxConfig) -> None:
         self._socket = socket
+        self.failure_retryable = True
         self._config = config
         self._events: asyncio.Queue[SonioxEvent | None] = asyncio.Queue(
             # One reserved slot lets stream termination be signaled without
@@ -265,7 +276,8 @@ class SonioxSession:
     async def send_audio(self, frame: bytes) -> None:
         """Send one finite, whole-sample PCM16 mono binary frame."""
         if self._sent_end or self._closed or self._completion.done():
-            raise SonioxGatewayError("Soniox session is no longer accepting audio.")
+            raise SonioxGatewayError("Soniox session is no longer accepting audio.",
+                                     retryable=self.failure_retryable)
         if not isinstance(frame, bytes):
             raise TypeError("audio frame must be bytes")
         if not frame:
@@ -280,7 +292,9 @@ class SonioxSession:
             raise
         except Exception as error:
             await self._fail("Soniox connection ended while sending audio.")
-            raise SonioxGatewayError("Soniox connection ended while sending audio.") from error
+            raise SonioxGatewayError(
+                "Soniox connection ended while sending audio.", retryable=True,
+            ) from error
 
     async def events(self) -> AsyncIterator[SonioxEvent]:
         """Yield provider events to exactly one consumer until the stream ends."""
@@ -352,8 +366,10 @@ class SonioxSession:
         except asyncio.CancelledError:
             raise
         except SonioxProtocolError:
+            self.failure_retryable = False
             self._set_completion(self._incomplete("Soniox returned an invalid protocol message."))
         except _SonioxProviderResponse as error:
+            self.failure_retryable = error.retryable
             self._set_completion(self._incomplete(error.safe_message))
         except Exception:
             self._set_completion(self._incomplete("Soniox connection ended before finished confirmation."))
@@ -473,8 +489,9 @@ class SonioxSession:
 
 
 class _SonioxProviderResponse(Exception):
-    def __init__(self, safe_message: str) -> None:
+    def __init__(self, safe_message: str, *, retryable: bool) -> None:
         super().__init__(safe_message)
+        self.retryable = retryable
         self.safe_message = safe_message
 
 
@@ -489,7 +506,13 @@ def _provider_response(payload: dict[str, Any]) -> _SonioxProviderResponse:
         details.append(error_type)
     if request_id is not None:
         details.append(f"request {request_id}")
-    return _SonioxProviderResponse(f"Soniox request failed ({', '.join(details)}).")
+    return _SonioxProviderResponse(
+        f"Soniox request failed ({', '.join(details)}).",
+        retryable=code in (408, 429, 500, 502, 503, 504)
+        and error_type not in ("authentication_error", "permission_denied", "invalid_request",
+                               "organization_balance_exhausted", "organization_monthly_budget_exhausted",
+                               "project_monthly_budget_exhausted"),
+    )
 
 
 def _safe_error_value(value: object) -> str | None:

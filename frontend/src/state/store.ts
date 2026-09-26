@@ -414,7 +414,9 @@ export const useStore = create<AppState>((set, get) => {
           pendingSessionStatusSessionId: state.pendingSessionStatusSessionId === sessionId
             ? null
             : state.pendingSessionStatusSessionId,
-          recorderError: options.clearErrorOnSuccess ? null : state.recorderError,
+          recorderError: writer?.transcriptionIncomplete
+            ? state.recorderError ?? 'Some audio could not be transcribed. The unconfirmed audio was cleared from memory; confirmed text was preserved.'
+            : options.clearErrorOnSuccess ? null : state.recorderError,
         }));
         acknowledged = true;
       } catch (error) {
@@ -672,6 +674,10 @@ export const useStore = create<AppState>((set, get) => {
         detail: { segments: detail.segments, messages: detail.messages, notes: detail.notes, notes_list: detail.notes_list, has_transcript: detail.has_transcript },
         detailLoading: false,
       });
+      if (detail.session.origin === 'import') {
+        const imported = await getClient().getImport(id);
+        get().trackImport(imported);
+      }
       if (detail.session.mode === 'contextual_local') void get().refreshContextualLive(id);
     } catch (err) {
       if (get().activeSessionId !== id) return;
@@ -862,6 +868,10 @@ export const useStore = create<AppState>((set, get) => {
 
   startRecording: async (options = {}) => {
     if (get().quitRequested) return;
+    if (Object.values(get().imports).some((s) => ['queued', 'downloading', 'preparing', 'uploading', 'processing'].includes(s.status))) {
+      set({ recorderError: 'Finish or cancel the media import before recording.' });
+      return;
+    }
     if (get().sessions.find((session) => session.id === get().activeSessionId)?.origin === 'import') {
       set({ recorderError: IMPORT_RECORDING_MESSAGE });
       return;
@@ -928,7 +938,7 @@ export const useStore = create<AppState>((set, get) => {
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
       if (failure.code === 'transcription_failed') {
-        set({ recorderError: 'Transcription failed. Recording stopped. Try recording again.' });
+        set({ recorderError: 'Transcription failed. Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.' });
         if (!stopRequested) void get().stopRecording();
         return;
       }
@@ -1103,6 +1113,10 @@ export const useStore = create<AppState>((set, get) => {
 
   resumeRecording: async (options = {}) => {
     if (get().quitRequested) return;
+    if (Object.values(get().imports).some((s) => ['queued', 'downloading', 'preparing', 'uploading', 'processing'].includes(s.status))) {
+      set({ recorderError: 'Finish or cancel the media import before recording.' });
+      return;
+    }
     if (get().sessions.find((session) => session.id === get().activeSessionId)?.origin === 'import') {
       set({ recorderError: IMPORT_RECORDING_MESSAGE });
       return;

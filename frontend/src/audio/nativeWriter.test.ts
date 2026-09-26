@@ -54,7 +54,9 @@ describe('native writer at the renderer bridge boundary', () => {
     await f.writer.open(16000);
     await f.writer.store(chunk(0));
     await f.writer.finish('pause');
+    expect(f.writer.transcriptionIncomplete).toBe(true);
     await f.writer.open(16000);
+    expect(f.writer.transcriptionIncomplete).toBe(false);
     await f.writer.store(chunk(1));
     await Promise.all([f.writer.finish('stop'), f.writer.finish('stop')]);
     expect(f.bridge.sendNativeAudio).toHaveBeenLastCalledWith('session', { sequence: 1, startSample: 1600 }, expect.any(ArrayBuffer));

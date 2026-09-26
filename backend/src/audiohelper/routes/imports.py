@@ -12,11 +12,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+from .. import media_tools
 from .. import repository as repo
 from ..gateways import ProviderNotConfigured
-from ..gateways.soniox_async import SUPPORTED_EXTENSIONS
+from ..gateways.soniox_async import SUPPORTED_EXTENSIONS, SonioxAsyncError
 from ..import_service import MAX_CONCURRENT_IMPORTS, ImportRejected, ImportRequest
 from ..import_store import ImportConflict, ImportRecord
+from ..media_source import InvalidMediaSource, youtube_source
 from ..native_io import disk_call
 from ..schemas import (
     MAX_IMPORT_DURATION_MS,
@@ -24,9 +26,11 @@ from ..schemas import (
     DeleteResponse,
     ImportCapabilities,
     ImportCreatedResponse,
+    ImportPreview,
     ImportSourceView,
     ImportsResponse,
     ImportView,
+    PreviewImportRequest,
 )
 from .deps import RuntimeDep
 from .sessions import delete_session
@@ -63,14 +67,33 @@ async def read_capabilities(runtime: RuntimeDep) -> ImportCapabilities:
 
 @router.get("/active")
 async def list_active(runtime: RuntimeDep) -> ImportsResponse:
-    records = await disk_call(runtime.imports.store.unsettled)
+    records = await disk_call(runtime.imports.store.pending)
     return ImportsResponse(imports=[_view(record) for record in records])
+
+
+@router.post("/preview")
+async def preview_import(payload: PreviewImportRequest, runtime: RuntimeDep) -> ImportPreview:
+    try:
+        source = payload.source
+        matches: list[str] = []
+        if source.kind == "youtube":
+            youtube = youtube_source(source.url or "")
+            info = await media_tools.youtube_metadata(youtube.url)
+            source = source.model_copy(update={"url": youtube.url})
+            matches = await disk_call(runtime.imports.store.matching_video, youtube.video_id)
+        else:
+            info = await media_tools.local_metadata(Path(source.path or ""))
+        return ImportPreview(title=info["title"], duration_ms=info["duration_ms"],
+                             source=source, existing_session_ids=matches)
+    except (InvalidMediaSource, media_tools.MediaError, OSError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @router.post("", status_code=201)
 async def create_import(payload: CreateImportRequest, runtime: RuntimeDep) -> ImportCreatedResponse:
-    path = Path(payload.path)
-    _validate_candidate(path)
+    path = Path(payload.path or (payload.source.path if payload.source else None) or "")
+    if payload.path:
+        _validate_candidate(path)
     session = await disk_call(repo.create_session, runtime.db, payload.title.strip())
     # The session exists only to hold the import; a rejected import takes it away
     # again rather than leaving an empty shell in the navigator.
@@ -78,10 +101,14 @@ async def create_import(payload: CreateImportRequest, runtime: RuntimeDep) -> Im
         record = await runtime.imports.start(ImportRequest(
             session_id=session.id, path=path, translate=payload.translate,
             declared_duration_ms=payload.declared_duration_ms,
+            url=payload.source.url if payload.source else None,
+            prepare_media=payload.source is not None,
+            allow_duplicate=payload.allow_duplicate,
         ))
-    except (ImportRejected, ImportConflict) as error:
+    except (ImportRejected, ImportConflict, InvalidMediaSource, media_tools.MediaError, OSError) as error:
         await disk_call(repo.delete_session, runtime.db, session.id)
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        status = 409 if isinstance(error, ImportConflict) else 400
+        raise HTTPException(status_code=status, detail=str(error)) from error
     except ProviderNotConfigured as error:
         await disk_call(repo.delete_session, runtime.db, session.id)
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -101,6 +128,8 @@ async def read_import(session_id: str, runtime: RuntimeDep) -> ImportView:
 async def cancel_import(session_id: str, runtime: RuntimeDep) -> ImportView:
     try:
         record = await runtime.imports.cancel(session_id)
+        if record.status == "cancelled":
+            await delete_session(session_id, runtime)
     except ImportConflict as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return _view(record)
@@ -108,38 +137,15 @@ async def cancel_import(session_id: str, runtime: RuntimeDep) -> ImportView:
 
 @router.post("/{session_id}/retry", status_code=201)
 async def retry_import(session_id: str, runtime: RuntimeDep) -> ImportCreatedResponse:
-    """Start a new paid job for a failed import, in a new session.
-
-    The failed session is kept: it carries the provider's reason, and deleting it
-    silently would hide what went wrong. Retrying is a fresh charge, which is why
-    it is a separate explicit request rather than an automatic recovery.
-    """
-    record = await disk_call(runtime.imports.store.get, session_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="This session is not an import.")
-    if record.status not in ("failed", "cancelled"):
-        raise HTTPException(
-            status_code=409, detail="Only a failed or cancelled import can be retried."
-        )
-    path = Path(record.source.path)
-    _validate_candidate(path)
-    original = await disk_call(repo.get_session, runtime.db, session_id)
-    session = await disk_call(
-        repo.create_session, runtime.db, (original.title if original else record.source.name),
-    )
+    """Reconcile and resume the same session, never blindly create a new paid job."""
     try:
-        retried = await runtime.imports.start(ImportRequest(
-            session_id=session.id, path=path, translate=record.translate,
-            declared_duration_ms=record.declared_duration_ms,
-        ))
-    except (ImportRejected, ImportConflict) as error:
-        await disk_call(repo.delete_session, runtime.db, session.id)
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    except ProviderNotConfigured as error:
-        await disk_call(repo.delete_session, runtime.db, session.id)
+        record = await runtime.imports.retry(session_id)
+    except (ImportConflict, ProviderNotConfigured, SonioxAsyncError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    refreshed = await disk_call(repo.get_session, runtime.db, session.id)
-    return ImportCreatedResponse(session=refreshed or session, import_state=_view(retried))
+    session = await disk_call(repo.get_session, runtime.db, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return ImportCreatedResponse(session=session, import_state=_view(record))
 
 
 @router.delete("/{session_id}")
@@ -173,6 +179,7 @@ def _view(record: ImportRecord) -> ImportView:
             path=record.source.path,
             size_bytes=record.source.size_bytes,
             available=_source_available(record),
+            kind=record.source.kind, url=record.source.url, video_id=record.source.video_id,
         ),
         translate=record.translate,
         model=record.model,
@@ -191,6 +198,8 @@ def _source_available(record: ImportRecord) -> bool:
     "plausibly the same file" and nothing stronger. A user who needs certainty
     can ask for a verification, which is a separate, explicit action.
     """
+    if record.source.kind == "youtube":
+        return False
     path = Path(record.source.path)
     try:
         stat = path.stat()

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from '../../state/store';
 import type { Session } from '../../api/types';
@@ -8,6 +8,8 @@ import { Icon } from '../ui/Icon';
 import { SessionDialog, SessionMenu, type SessionMenuItem } from './SessionOverlays';
 import { useSessionGroups } from './useSessionGroups';
 import { useEdgeFade } from '../../hooks/useOverflowEdges';
+import { ApiClient } from '../../api/client';
+import { mediaSourceLink } from '../../lib/mediaSourceLink';
 import './sessionNavigator.css';
 
 // `moveSessions` marks a group created from Move to group: the new group and the
@@ -207,6 +209,19 @@ export function SessionNavigator() {
     } catch (err) { setFormError(err instanceof Error ? err.message : String(err)); }
     finally { setBusy(false); }
   };
+  // The original of a session imported from YouTube, for "Open original" in its
+  // menu (UI-CLEANUP §1: no longer a strip over the transcript).
+  const [originalLink, setOriginalLink] = useState<{ id: string; url: string | null } | null>(null);
+  const menuSessionId = menu?.kind === 'session' ? menu.id : null;
+  const menuImported = menuSessionId ? sessions.find((s) => s.id === menuSessionId)?.origin === 'import' : false;
+  useEffect(() => {
+    if (!menuSessionId || !menuImported) return undefined;
+    let current = true;
+    void new ApiClient(window.audiohelper).getImport(menuSessionId)
+      .then((value) => { if (current) setOriginalLink({ id: menuSessionId, url: mediaSourceLink(value.source.video_id) }); })
+      .catch(() => undefined);
+    return () => { current = false; };
+  }, [menuSessionId, menuImported]);
   const menuItems = (): SessionMenuItem[] => {
     if (!menu) return [];
     if (menu.kind === 'group') return [
@@ -223,7 +238,11 @@ export function SessionNavigator() {
           action: () => open({ kind: 'delete-sessions', ids }) },
       ];
     }
+    const original = originalLink?.id === menu.id ? originalLink.url : null;
     return [
+      // A safe https YouTube URL only (mediaSourceLink); window.open goes through
+      // main's setWindowOpenHandler, which hands http(s) to the OS browser.
+      ...(original ? [{ label: 'Open original', action: () => { window.open(original, '_blank', 'noreferrer'); } }] : []),
       { label: 'Rename', action: () => open({ kind: 'rename', id: menu.id }) },
       { label: 'Move to group…', action: () => open({ kind: 'move', ids: [menu.id] }) },
       ...(data.membership[menu.id] ? [{ label: 'Remove from group', action: () => safely(() => move([menu.id], null)) }] : []),

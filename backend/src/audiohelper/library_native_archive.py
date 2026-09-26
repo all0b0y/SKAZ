@@ -16,6 +16,15 @@ def capture_native(db: sqlite3.Connection, session_id: str) -> dict[str, Any] | 
     recording.pop("session_id")
     languages = recording.pop("used_languages_json")
     recording["used_languages"] = json.loads(languages) if languages is not None else None
+    if recording["origin"] == "import":
+        source = db.execute("SELECT * FROM native_imports WHERE session_id=?", (session_id,)).fetchone()
+        if source is None or source["status"] != "completed":
+            raise ValueError("Only completed imports can be archived")
+        recording["import_source"] = {
+            "kind": source["source_kind"], "name": source["source_name"],
+            "url": source["source_url"], "video_id": source["video_id"],
+            "model": source["model"], "duration_ms": source["audio_duration_ms"] or 0,
+        }
     recording["connections"] = []
     for row in db.execute("SELECT * FROM asr_connections WHERE session_id=? ORDER BY rowid", (session_id,)):
         item = dict(row)
@@ -60,6 +69,17 @@ def restore_native(db: sqlite3.Connection, session_id: str, native: NativeRecord
          native.translation_target_language,
          encode(native.used_languages) if native.used_languages is not None else None, native.origin),
     )
+    if native.import_source is not None:
+        source = native.import_source
+        # Recovered transcripts never resume paid work, nor trust a machine-specific file path.
+        db.execute(
+            "INSERT INTO native_imports(session_id,source_path,source_name,source_bytes,source_mtime_ns,"
+            "source_sha256,model,translate,status,created_at,settled_at,source_kind,source_url,video_id,"
+            "audio_duration_ms,declared_duration_ms) "
+            "VALUES (?,'',?,0,0,'',?,?,'completed',datetime('now'),datetime('now'),?,?,?,?,?)",
+            (session_id, source.name, source.model, int(native.recording_mode == "translation"),
+             source.kind, source.url, source.video_id, source.duration_ms, source.duration_ms),
+        )
     for connection in native.connections:
         body = connection.model_dump(exclude_unset=True)
         db.execute(

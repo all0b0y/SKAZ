@@ -39,7 +39,7 @@ class ProviderSocket:
         self.closed = True
 
 
-def test_provider_failure_warns_once_and_allows_explicit_retry(
+def test_auth_failure_warns_once_and_allows_explicit_retry(
     app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     attempts = 0
@@ -49,7 +49,9 @@ def test_provider_failure_warns_once_and_allows_explicit_retry(
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise OSError("provider unavailable")
+            denied = ProviderSocket()
+            await denied.responses.put(json.dumps({"error_code": 401}))
+            return denied
         return socket
 
     monkeypatch.setattr(soniox, "connect", connect)
@@ -120,7 +122,7 @@ def test_native_ws_forwards_once_and_persists_final_before_stop(
 
 
 @pytest.mark.parametrize("mode", ["transcription", "translation"])
-def test_connect_delay_does_not_block_storage_or_backfill_audio(
+def test_connect_delay_retains_audio_without_blocking_storage(
     app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
     mode: str,
 ) -> None:
@@ -175,14 +177,14 @@ def test_connect_delay_does_not_block_storage_or_backfill_audio(
             ws.send_bytes(packet(1, 1600))
             assert ws.receive_json()["saved_samples"] == 3200
             ws.send_json({"type": "end"})
-            assert ws.receive_json()["transcription_complete"] is False
-        assert socket.audio == [packet(1, 1600)[20:]]
+            assert ws.receive_json()["transcription_complete"] is True
+        assert b"".join(socket.audio) == packet(0, 0)[20:] + packet(1, 1600)[20:]
         detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
-        assert [(s["start_ms"], s["end_ms"]) for s in detail["segments"]] == [(100, 200)]
+        assert [(s["start_ms"], s["end_ms"]) for s in detail["segments"]] == [(0, 200)]
         snapshot = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
-        assert snapshot["connections"][0]["status"] == "incomplete"
-        assert snapshot["connections"][1]["start_sample"] == 1600
-        assert snapshot["gaps"] == [{"start_sample": 0, "end_sample": 1600}]
+        assert len(snapshot["connections"]) == 1
+        assert snapshot["connections"][0]["status"] == "finished"
+        assert snapshot["gaps"] == []
         assert snapshot["transcription"] == "inactive"
         assert snapshot["recording_mode"] == mode
         assert snapshot["translation_target_language"] == "de"

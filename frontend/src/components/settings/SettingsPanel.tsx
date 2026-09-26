@@ -497,8 +497,8 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
                     <strong>Allow cloud processing</strong>
                     <span className="field__hint">
                       Sends audio to Soniox and requested text to configured cloud models; provider charges apply.
-                      Saving with this disabled ends live transcription, not local audio recording.
-                      Old recordings are never uploaded automatically.
+                      Disabling this stops live transcription and recording after Save.
+                      Saved transcripts and notes are kept; there is no stored audio to upload later.
                     </span>
                   </span>
                 </label>

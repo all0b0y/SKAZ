@@ -16,7 +16,8 @@
     "preview": "electron-vite preview",
     "icon": "python3 scripts/make-icon.py",
     "build:backend": "backend/.venv/bin/pyinstaller --noconfirm --clean --distpath backend/dist --workpath backend/build/pyinstaller backend/skaz-backend.spec",
-    "dist:mac": "npm run icon && npm run build:backend && npm run build && electron-builder --mac --config electron-builder.yml"
+    "build:media": "backend/.venv/bin/python scripts/prepare-media-tools.py",
+    "dist:mac": "npm run icon && npm run build:media && npm run build:backend && npm run build && electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

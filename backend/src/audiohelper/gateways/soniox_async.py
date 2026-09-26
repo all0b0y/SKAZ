@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -159,6 +160,17 @@ class SonioxAsyncGateway:
             filename=_text(payload.get("filename"), maximum=512),
             size=_non_negative_int(payload.get("size")),
         )
+
+    async def upload_path(self, path: Path) -> UploadedFile:
+        """Multipart upload with a bounded file reader, not a whole-file bytes allocation."""
+        with path.open("rb") as handle:
+            response = await self._call(
+                "POST", "/files", files={"file": (path.name, handle, "application/octet-stream")},
+            )
+        payload = _object(response)
+        return UploadedFile(id=_identifier(payload.get("id")),
+                            filename=_text(payload.get("filename"), maximum=512),
+                            size=_non_negative_int(payload.get("size")))
 
     async def create(self, *, file_id: str, request: AsyncRequest) -> TranscriptionJob:
         response = await self._call(

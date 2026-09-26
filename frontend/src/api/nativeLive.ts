@@ -45,7 +45,7 @@ export interface NativeSnapshot {
   recording_mode?: NativeRecordingMode;
   translation_target_language?: string;
   used_languages?: string[] | null;
-  transcription: 'connecting' | 'streaming' | 'unavailable' | 'inactive' | 'disabled';
+  transcription: 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive' | 'disabled';
   final_tokens?: NativeTranscriptToken[];
   live_translation_projection?: NativeTranslationProjection;
   final_translation_tokens?: NativeTranslationToken[];

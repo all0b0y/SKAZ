@@ -98,6 +98,8 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
         if (runtime.native_shutdown or session_id in runtime.native_closing
                 or session_id in runtime.native_tasks):
             raise LiveConflict("Session is closing.")
+        if runtime.imports.active:
+            raise LiveConflict("Finish or cancel the media import before recording.")
         task = asyncio.current_task()
         assert task is not None
         # Reserve ownership before the first disk await (including open).

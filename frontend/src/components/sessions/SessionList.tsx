@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store';
-import type { AudioFileChoice } from '../../api/bridge';
-import { ImportDialog } from '../imports/ImportDialog';
+import { MediaImportDialog } from '../imports/MediaImportDialog';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
 import { SessionNavigator } from './SessionNavigator';
@@ -16,7 +15,10 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
   const newSession = useStore((s) => s.newSession);
 
   const [creationError, setCreationError] = useState('');
-  const [importFile, setImportFile] = useState<AudioFileChoice | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const imports = useStore((s) => s.imports);
+  const selectSession = useStore((s) => s.selectSession);
+  const activeImport = Object.values(imports).find((s) => ['queued', 'downloading', 'preparing', 'uploading', 'processing'].includes(s.status));
 
   const isCapturing =
     recorderState === 'recording' || recorderState === 'paused' || recorderState === 'processing';
@@ -31,12 +33,12 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
             icon="upload"
             onClick={() => {
               setCreationError('');
-              void window.audiohelper.chooseAudioFile()
-                .then((chosen) => { if (chosen) setImportFile(chosen); })
-                .catch((err: unknown) => setCreationError(err instanceof Error ? err.message : String(err)));
+              if (activeImport) { void selectSession(activeImport.session_id); return; }
+              if (isCapturing) { setCreationError('Stop recording before importing media.'); return; }
+              setImportOpen(true);
             }}
             aria-label="Import audio"
-            title="Import an audio file"
+            title="Import media"
           />
           <Button
             variant="quiet"
@@ -71,12 +73,13 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
         </button>
       </div>
 
-      {importFile && (
-        <ImportDialog
-          file={importFile}
-          onClose={() => setImportFile(null)}
+      {importOpen && (
+        <MediaImportDialog
+          onClose={() => setImportOpen(false)}
+          onOpenExisting={(id) => { setImportOpen(false); void selectSession(id); }}
+          onOpenSettings={() => { setImportOpen(false); onOpenSettings(); }}
           onCreated={(created) => {
-            setImportFile(null);
+            setImportOpen(false);
             window.dispatchEvent(new CustomEvent('skaz-import-started', { detail: created }));
           }}
         />

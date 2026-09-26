@@ -1,9 +1,6 @@
 .transcript-layout--native { position: relative; }
 /* Part navigation restores reading positions explicitly. */
 .transcript-layout--native .transcript { overflow-anchor: none; }
-.native-part-source:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
-.native-part-time { margin: 16px 24px 0; opacity: 0.55; font-size: 12px; font-variant-numeric: tabular-nums; }
-.native-part-source { margin: 0 24px; color: inherit; background: none; border: 0; text-decoration: underline; cursor: pointer; }
 .native-monologues {
   list-style: none;
   margin: 0;
@@ -11,13 +8,6 @@
 }
 
 .native-monologue + .native-monologue { margin-top: 32px; }
-.native-transcript-notice {
-  height: 44px;
-  flex-shrink: 0;
-  padding: 8px 24px;
-  overflow: auto;
-  font-size: 12px;
-}
 /* A floating pill centred at the foot of the transcript column. */
 .transcript__follow {
   position: absolute;
@@ -29,11 +19,13 @@
   gap: 8px;
   max-width: calc(100% - 32px);
   padding: 7px 16px 7px 12px;
-  border: 1px solid var(--edge);
+  /* A solid, contrasting pill: over white transcript text a white pill read as
+     transparent (UI-CLEANUP §2). --ink/--paper swap in the dark theme. */
+  border: 1px solid var(--ink);
   border-radius: 999px;
-  background: var(--paper-raised);
-  box-shadow: var(--shadow-2);
-  color: var(--ink);
+  background: var(--ink);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.28), 0 1px 3px rgb(0 0 0 / 0.2);
+  color: var(--paper);
   font: inherit;
   font-size: var(--text-sm);
   font-weight: 500;
@@ -45,12 +37,10 @@
     color var(--dur-fast) var(--ease);
 }
 .transcript__follow > span:last-child { overflow: hidden; text-overflow: ellipsis; }
-.transcript__follow svg { flex: none; color: var(--ink-soft); }
+.transcript__follow svg { flex: none; color: currentColor; }
 .transcript__follow:hover {
-  border-color: var(--edge-strong);
-  background: color-mix(in srgb, var(--accent-quiet) 100%, var(--paper-raised));
+  background: color-mix(in srgb, var(--ink) 86%, var(--paper));
 }
-.transcript__follow:hover svg { color: var(--ink); }
 .transcript__follow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Live speech keeps coming in below the reader. */
 .transcript__follow-live {

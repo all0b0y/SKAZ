@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { clsx } from 'clsx';
+import { RecoveryStatus } from './RecoveryStatus';
 import { useStore } from '../../state/store';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
@@ -9,6 +10,7 @@ import { IMPORT_RECORDING_MESSAGE } from '../../lib/recordingEligibility';
 import { SETUP_HINTS, transcriptionSetupIssue } from '../../lib/transcriptionSetup';
 import { TranscriptionSetupNotice } from './TranscriptionSetupNotice';
 import { RecorderSources } from './RecorderSources';
+import { useTranscriptIssue } from '../../state/transcriptIssue';
 
 
 /** How many rounded bars the running waveform keeps on screen (~4s of history). */
@@ -189,6 +191,9 @@ export function RecorderBar() {
   const retry = useStore((s) => s.retryFailedUploads);
   const retrySessionStatus = useStore((s) => s.retrySessionStatus);
   const systemAudioIssue = useStore((s) => s.systemAudioIssue);
+  // A critical transcript problem of THIS session (UI-CLEANUP §1).
+  const activeSessionId = useStore((s) => s.activeSessionId);
+  const transcriptIssue = useTranscriptIssue((s) => (s.issue && s.issue.sessionId === activeSessionId ? s.issue : null));
 
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [done, setDone] = useState(false);
@@ -208,10 +213,15 @@ export function RecorderBar() {
 
   // A protected local save is a storage failure even when nothing else wrote an
   // error: it must stay visible with its retry, never disappear with the pills.
-  const errorMessage = recorderError
+  const recordingProblem = recorderError
     ?? (queue.overflow ? 'Capture stopped · buffered audio retained for retry'
       : failedCount > 0 ? `${failedCount} local save${failedCount > 1 ? 's' : ''} failed` : null);
-  const errorActions: CapsuleAction[] = pendingSessionStatus
+  // Recording problems win: they risk losing audio; a transcript problem only
+  // hides text that is already stored.
+  const errorMessage = recordingProblem ?? transcriptIssue?.message ?? null;
+  const errorActions: CapsuleAction[] = recordingProblem === null
+    ? (transcriptIssue?.action ? [{ label: transcriptIssue.action.label, run: transcriptIssue.action.run }] : [])
+    : pendingSessionStatus
     ? [{ label: `Retry ${pendingSessionStatus === 'stopped' ? 'stop' : pendingSessionStatus === 'paused' ? 'pause' : 'recording'} confirmation`, run: () => { void retrySessionStatus(); } }]
     : failedCount > 0 || queue.overflow ? [{ label: 'Retry saving', run: retry }]
       // System audio refused at start/resume: nothing was recorded, offer both ways on.
@@ -253,6 +263,7 @@ export function RecorderBar() {
     <div className={clsx('recorder', imported && 'recorder--imported')}>
       {imported && <p id="import-recording-explanation">{IMPORT_RECORDING_MESSAGE}</p>}
       {!imported && !capturing && <TranscriptionSetupNotice />}
+      <RecoveryStatus sessionId={session?.id} active={state === 'recording'} />
       <div className={clsx('capsule', showError && 'capsule--error')} data-state={view}>
         <span className="visually-hidden" role="status">
           {view === 'recording' ? 'Recording' : view === 'paused' ? 'Paused' : ''}

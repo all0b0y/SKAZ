@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { CHANNELS } from './channels';
 import { systemAudioSupported } from './systemAudio';
 import type {
@@ -53,6 +53,11 @@ const api: BridgeApi = {
   },
   chooseAudioFile(): Promise<AudioFileChoice | null> {
     return ipcRenderer.invoke(CHANNELS.chooseAudioFile) as Promise<AudioFileChoice | null>;
+  },
+  droppedMediaFile(file: File): AudioFileChoice | null {
+    const path = webUtils.getPathForFile(file);
+    // Sandboxed preloads cannot import Node path/url. Metadata is read by the backend.
+    return path ? { path, name: file.name, url: '' } : null;
   },
   shareNote(note: SharedNote): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.shareNote, note) as Promise<boolean>;

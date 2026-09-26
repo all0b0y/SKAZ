@@ -13,7 +13,7 @@ export function SonioxCredentials({ hasKey, value, onChange, disabled }: SonioxC
     <section className="profile provider-card" aria-label="Soniox credentials">
       <header className="profile__head">
         <h4>Soniox</h4>
-        <p>Live transcription. Audio is saved locally even when transcription is unavailable.</p>
+        <p>Live transcription. Audio is used for recognition and is not stored.</p>
       </header>
       <div className="field">
         <label htmlFor="soniox-api-key">Soniox API key</label>
@@ -32,7 +32,7 @@ export function SonioxCredentials({ hasKey, value, onChange, disabled }: SonioxC
           {value === '' ? 'Soniox key will be removed on Save.' : value !== null
             ? 'Soniox key replacement pending Save.' : hasKey
               ? 'Soniox key stored. Not verified by a real API request.'
-              : 'No Soniox key stored. Recording remains local without transcription.'}
+              : 'No Soniox key stored. Recording requires a Soniox key and cloud consent.'}
         </p>
         <p className="field__hint">
           Write-only secure backend storage. Saving a key does not grant cloud consent or run a paid check.

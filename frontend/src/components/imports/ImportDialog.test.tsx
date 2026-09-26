@@ -93,9 +93,9 @@ it('prices transcription and translation from the advertised rates', async () =>
   const user = userEvent.setup();
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByText(/≈ \$0\.10/)).toBeVisible();
-  await user.click(screen.getByLabelText('Transcription and translation'));
-  expect(await screen.findByText(/≈ \$0\.15/)).toBeVisible();
+  expect(await screen.findByText('≈ $0.10')).toBeVisible();
+  await user.click(screen.getByRole('radio', { name: 'Transcription and translation' }));
+  expect(await screen.findByText('≈ $0.15')).toBeVisible();
 });
 
 it('says the estimate is an estimate and where the result lands', async () => {
@@ -138,7 +138,7 @@ it('re-arms the confirmation when the price changes under the user', async () =>
   await screen.findByRole('button', { name: 'Transcribe anyway' });
 
   // Switching to translation makes it more expensive: the confirmation must reset.
-  await user.click(screen.getByLabelText('Transcription and translation'));
+  await user.click(screen.getByRole('radio', { name: 'Transcription and translation' }));
   expect(await screen.findByRole('button', { name: 'Transcribe' })).toBeVisible();
   expect(requests.some((r) => r.method === 'POST')).toBe(false);
 });
@@ -168,12 +168,12 @@ it('refuses a file longer than the provider limit', async () => {
   expect(screen.getByRole('button', { name: 'Transcribe' })).toBeDisabled();
 });
 
-it('warns that a fourth import will queue', async () => {
+it('refuses another import instead of creating a queue', async () => {
   caps = { ...defaults(), active_imports: 3 };
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByText(/will be queued/)).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Transcribe' })).toBeEnabled();
+  expect(await screen.findByText(/Another import is active/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Transcribe' })).toBeDisabled();
 });
 
 it('shows the real Markdown destination when the projection is on', async () => {
@@ -181,4 +181,33 @@ it('shows the real Markdown destination when the projection is on', async () => 
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
   expect(await screen.findByText('/Users/me/Documents/SKAZ')).toBeVisible();
+});
+
+it('shows one blocking reason as a single line with a way into Settings (UI-CLEANUP §5)', async () => {
+  const user = userEvent.setup();
+  caps = { ...defaults(), cloud_consent: false, has_api_key: false };
+  const openSettings = vi.fn();
+  render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} onOpenSettings={openSettings} />);
+
+  const alerts = await screen.findAllByRole('alert');
+  // The most fundamental reason only, not one box per problem.
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toHaveTextContent(/sends the audio file to Soniox/);
+  await user.click(screen.getByRole('button', { name: 'Open settings' }));
+  expect(openSettings).toHaveBeenCalled();
+  expect(requests.some((r) => r.method === 'POST')).toBe(false);
+});
+
+it('keeps the duplicate choice explicit next to Transcribe', async () => {
+  const user = userEvent.setup();
+  const preview = { title: 'Lecture', duration_ms: 60_000, source: { kind: 'youtube' as const, url: 'https://youtu.be/abcdefghijk' }, existing_session_ids: ['old'] };
+  const openExisting = vi.fn();
+  render(<Dialog file={{ path: '', url: '', name: 'Lecture' }} preview={preview} onClose={vi.fn()} onCreated={created} onOpenExisting={openExisting} />);
+
+  const transcribe = await screen.findByRole('button', { name: 'Transcribe' });
+  expect(transcribe).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Open existing' }));
+  expect(openExisting).toHaveBeenCalledWith('old');
+  await user.click(screen.getByRole('checkbox', { name: /Transcribe again/ }));
+  expect(transcribe).toBeEnabled();
 });

@@ -565,7 +565,9 @@ describe('native Record lifecycle', () => {
     expect(saved).toBe(1600);
     expect(bridge.sendNativeAudio).toHaveBeenCalledTimes(2);
     expect(useStore.getState().queue.failed).toEqual([]);
-    expect(useStore.getState().recorderError).toBeNull();
+    // Storage retry succeeded, but the provider's final ACK still reports
+    // incomplete transcription. Do not silently hide that separate warning.
+    expect(useStore.getState().recorderError).toContain('Some audio could not be transcribed');
   });
 
   it('reopens on Resume without resetting the sample clock', async () => {

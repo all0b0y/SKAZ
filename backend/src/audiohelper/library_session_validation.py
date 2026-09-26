@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .library_session_schema import NativeConnection, NativeToken, SessionDocument
+from .media_source import youtube_source
 
 
 def _require(condition: bool) -> None:
@@ -33,6 +34,18 @@ def validate_document(document: SessionDocument) -> None:
     if native is None:
         _require(not any(r.origin == "soniox" for s in document.segments for r in s.revisions))
         return
+    _require((native.origin == "import") == (native.import_source is not None))
+    if native.import_source is not None:
+        source = native.import_source
+        _require(source.duration_ms == document.session.duration_ms)
+        if source.kind == "youtube":
+            _require(source.url is not None)
+            parsed = youtube_source(source.url or "")
+            _require(parsed.video_id == source.video_id and parsed.url == source.url)
+        else:
+            _require(source.url is None and source.video_id is None)
+        _require(native.receipt is None and native.next_sequence == 0)
+        _require(all(c.status == "finished" for c in native.connections))
     _require(document.session.mode == "legacy")
     _require(len({c.id for c in native.connections}) == len(native.connections))
     _require(document.session.duration_ms == native.saved_samples * 1000 // native.sample_rate)

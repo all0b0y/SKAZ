@@ -119,9 +119,20 @@ export interface SettingsUpdate {
 
 /** An import in flight or settled. Mirrors backend ImportView. */
 export type ImportStatus =
-  | 'queued' | 'uploading' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  | 'queued' | 'downloading' | 'preparing' | 'interrupted' | 'uploading' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+export type MediaSource = { kind: 'youtube'; url: string } | { kind: 'local'; path: string };
+export interface ImportPreview {
+  title: string;
+  duration_ms: number;
+  source: MediaSource;
+  existing_session_ids: string[];
+}
 
 export interface ImportSourceView {
+  kind?: 'local' | 'youtube';
+  url?: string | null;
+  video_id?: string | null;
   name: string;
   path: string;
   size_bytes: number;

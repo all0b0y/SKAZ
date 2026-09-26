@@ -7,12 +7,16 @@ import { formatTimecode } from '../../lib/time';
 import type { Segment } from '../../api/types';
 import { useNativeTranscript } from './useNativeTranscript';
 import { peekTranscript, type ReadingPlace } from './transcriptCache';
+import { ApiClient } from '../../api/client';
+import { mediaSourceLink } from '../../lib/mediaSourceLink';
 import { NativeMonologues } from './NativeMonologues';
+import { useTranscriptIssue } from '../../state/transcriptIssue';
 import type { NativeSnapshot } from '../../api/nativeLive';
 import { useEdgeFade } from '../../hooks/useOverflowEdges';
 
 const SONIOX_STATUS: Record<NativeSnapshot['transcription'], string> = {
   connecting: 'Soniox: connecting',
+  reconnecting: 'Soniox: reconnecting',
   streaming: 'Soniox: transcribing',
   unavailable: 'Soniox: transcription unavailable — audio is still saved locally',
   inactive: 'Soniox: not active',
@@ -182,10 +186,35 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
   });
   const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
 
+  const [videoId, setVideoId] = useState<string | null>(null);
+  const imported = sessions.find((session) => session.id === activeSessionId)?.origin === 'import';
+  useEffect(() => {
+    let current = true;
+    setVideoId(null);
+    if (imported && activeSessionId) void new ApiClient(window.audiohelper).getImport(activeSessionId)
+      .then((value) => { if (current) setVideoId(value.source.video_id ?? null); }).catch(() => undefined);
+    return () => { current = false; };
+  }, [activeSessionId, imported]);
   const contextual = sessions.find((session) => session.id === activeSessionId)?.mode === 'contextual_local';
   const native = useNativeTranscript(contextual ? null : activeSessionId,
     ['recording', 'processing'].includes(recorderState), followSpeech,
     dismissedFocus === focusSegmentId ? null : focusSegmentId);
+
+  // Critical transcript problems go to the recorder capsule as one line with
+  // their action; the transcript itself carries no notice strip (UI-CLEANUP §1).
+  const reportIssue = useTranscriptIssue((s) => s.report);
+  const unavailable = native.snapshot?.recording_mode !== 'audio_only' && native.snapshot?.transcription === 'unavailable';
+  const retryRef = useRef(native.retry);
+  retryRef.current = native.retry;
+  useEffect(() => {
+    if (!activeSessionId) { reportIssue(null); return undefined; }
+    reportIssue(native.error
+      ? { sessionId: activeSessionId, message: native.error, action: { label: 'Retry', run: () => retryRef.current() } }
+      : unavailable ? { sessionId: activeSessionId, message: 'Recognition failed. Soniox is unavailable.', action: null }
+        : null);
+    return undefined;
+  }, [activeSessionId, native.error, unavailable, reportIssue]);
+  useEffect(() => () => reportIssue(null), [reportIssue]);
   /** Per-part reading places live in the transcript cache so a return restores them. */
   const fallbackPlaces = useRef(new Map<string, ReadingPlace>());
   const readingPlaces = () => peekTranscript(activeSessionId)?.places ?? fallbackPlaces.current;
@@ -203,7 +232,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
     }
     container.scrollTop = place.top;
   };
-  const loadPart = (direction: 'older' | 'newer', beginning = false) => {
+  const loadPart = (direction: 'older' | 'newer') => {
     if (native.busy) return;
     const container = scrollRef.current;
     if (container && native.part) readingPlaces().set(native.part.id, readingPlace(container));
@@ -211,7 +240,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
     navigationUntil.current = Date.now() + 450;
     setFollowSpeech(false);
     setDismissedFocus(focusSegmentId);
-    if (beginning) native.startOfTranslation(); else native[direction]();
+    native[direction]();
   };
   const scrollAcrossPart = (delta: number) => {
     const container = scrollRef.current;
@@ -335,13 +364,6 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
 
   return (
     <div className={clsx('transcript-layout', cleanNative && 'transcript-layout--native')}>
-      {(cleanNative || native.error) && <div className="native-transcript-notice">
-        {native.error ? <span role="alert">{native.error}{' '}
-          <button type="button" className="btn btn--ghost" onClick={native.retry}>Retry</button></span>
-          : native.snapshot?.recording_mode === 'audio_only' ? null : native.snapshot?.transcription === 'unavailable' ? (
-          <span role="alert">Recognition failed. Soniox is unavailable.</span>
-        ) : recorderState === 'processing' ? <span role="status">Finishing processing…</span> : null}
-      </div>}
       <div className="transcript" ref={scrollRef} tabIndex={cleanNative ? 0 : undefined}
         onWheel={event => scrollAcrossPart(event.deltaY)}
         onKeyDown={event => {
@@ -360,11 +382,6 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
         if (Date.now() < navigationUntil.current) return;
         setFollowSpeech(!native.hasNewer && element.scrollHeight - element.clientHeight - element.scrollTop < 48);
       }}>
-        {native.part?.translationStartPart !== null && native.part?.translationStartPart !== undefined &&
-          <button type="button" className="native-part-source" onClick={() => loadPart('older', true)}>Beginning and translation above</button>}
-        {native.part && native.snapshot && <p className="native-part-time" aria-label="Time of the expanded part">
-          {formatTimecode(native.part.start / native.snapshot.sample_rate * 1000)} — {formatTimecode(native.part.end / native.snapshot.sample_rate * 1000)}
-        </p>}
 
         {opening ? (
           showLoader ? <div className="panel__center"><TranscriptLoading /></div> : null
@@ -373,7 +390,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
             <EmptyState icon="warning" title="Couldn’t load the transcript" hint={error} />
           </div>
         ) : cleanNative && native.snapshot && hasWords(native.snapshot) ? (
-          <NativeMonologues key={`${native.snapshot.session_id}:${native.part?.id ?? 'live'}`} snapshot={native.snapshot} segments={segments} focusSegmentId={dismissedFocus === focusSegmentId ? null : focusSegmentId} />
+          <NativeMonologues key={`${native.snapshot.session_id}:${native.part?.id ?? 'live'}`} snapshot={native.snapshot} segments={segments} videoId={videoId} focusSegmentId={dismissedFocus === focusSegmentId ? null : focusSegmentId} />
         ) : !contextual && capturing && segments.length === 0 ? (
           <WaitingForWords snapshot={native.snapshot} />
         ) : segments.length === 0 && (!contextual || (!hasDraftText && fragments.length === 0)) ? (
@@ -447,7 +464,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
                 }}
               >
                 <div className="segment__audio-actions">
-                  <span className="segment__time tabular">{formatTimecode(item.segment.start_ms)}</span>
+                  <span className="segment__time tabular">{mediaSourceLink(videoId, item.segment.start_ms) ? <a href={mediaSourceLink(videoId, item.segment.start_ms)!} target="_blank" rel="noreferrer">{formatTimecode(item.segment.start_ms)}</a> : formatTimecode(item.segment.start_ms)}</span>
                 </div>
                 <p className="segment__text">
                   {item.segment.text}

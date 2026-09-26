@@ -126,11 +126,11 @@ export function registerIpc(
     choosingAudio = true;
     try {
       const result = await dialog.showOpenDialog(owner, {
-        title: 'Choose an audio file',
+        title: 'Choose an audio or video file',
         defaultPath: app.getPath('downloads'),
         // One file per import: each import is one priced confirmation.
         properties: ['openFile'],
-        filters: [{ name: 'Audio', extensions: [...AUDIO_EXTENSIONS] }],
+        filters: [{ name: 'Audio and video', extensions: [...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v'] }],
       });
       const chosen = result.canceled ? null : result.filePaths[0] ?? null;
       if (!chosen) return null;

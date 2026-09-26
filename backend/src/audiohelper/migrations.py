@@ -162,6 +162,26 @@ def migrate_native_live(connection: sqlite3.Connection) -> None:
             "REFERENCES asr_connections(id) ON DELETE CASCADE,id TEXT NOT NULL,target TEXT NOT NULL,"
             "PRIMARY KEY(connection_id,id))",
         )),
+        ("media_import_recovery_v10", (
+            "ALTER TABLE native_imports RENAME TO native_imports_v7",
+            "DROP INDEX native_imports_unsettled",
+            # Rebuild the CHECK constraint, preserving every old import column.
+            _NATIVE_ASYNC_IMPORT_V7[1].replace(
+                "'completed','failed','cancelled'",
+                "'completed','failed','cancelled','interrupted','downloading','preparing'",
+            ).replace("source_bytes > 0", "source_bytes >= 0"),
+            "INSERT INTO native_imports SELECT * FROM native_imports_v7",
+            "DROP TABLE native_imports_v7",
+            _NATIVE_ASYNC_IMPORT_V7[2],
+            "ALTER TABLE native_imports ADD COLUMN submission_pending INTEGER NOT NULL DEFAULT 0",
+        )),
+        ("media_sources_v11", (
+            "ALTER TABLE native_imports ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'local'",
+            "ALTER TABLE native_imports ADD COLUMN source_url TEXT",
+            "ALTER TABLE native_imports ADD COLUMN video_id TEXT",
+            "ALTER TABLE native_imports ADD COLUMN prepare_media INTEGER NOT NULL DEFAULT 0",
+            "CREATE INDEX native_imports_video ON native_imports(video_id)",
+        )),
     ):
         if connection.execute("SELECT 1 FROM schema_migrations WHERE name=?", (name,)).fetchone():
             continue

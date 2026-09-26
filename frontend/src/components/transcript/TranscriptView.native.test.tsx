@@ -11,6 +11,7 @@ import type { BridgeRequest } from '../../api/bridge';
  */
 let TranscriptView: (typeof import('./TranscriptView'))['TranscriptView'];
 let useStore: (typeof import('../../state/store'))['useStore'];
+let RecorderBar: (typeof import('../recorder/RecorderBar'))['RecorderBar'];
 let calls: BridgeRequest[];
 /** null: the recording does not exist yet (404). Otherwise the stored words. */
 let words: string[] | null;
@@ -57,7 +58,14 @@ beforeEach(async () => {
   useStore.setState({ activeSessionId: 'native', recorderState: 'recording', sessions: [],
     detail: { segments: [], messages: [], notes: null }, detailLoading: false, detailError: null });
   TranscriptView = (await import('./TranscriptView')).TranscriptView;
+  RecorderBar = (await import('../recorder/RecorderBar')).RecorderBar;
 });
+
+/**
+ * Critical transcript problems are shown in the recorder capsule, not in a strip
+ * over the text (.dev/docs/UI-CLEANUP-IMPORT-TRANSCRIPT-SPEC.md §1).
+ */
+const withRecorder = () => (<><TranscriptView focusSegmentId={null} /><RecorderBar /></>);
 afterEach(() => { vi.useRealTimers(); });
 
 const eventReads = () => calls.filter((c) => c.path === '/sessions/native/live/events').length;
@@ -95,11 +103,15 @@ describe('transcript screen states', () => {
     expect(screen.queryByRole('list', { name: 'Transcript' })).not.toBeInTheDocument();
   });
 
-  it('shows the recording as soon as words exist, with the unavailable notice when Soniox fails', async () => {
+  it('shows the recording as soon as words exist, with the unavailable notice in the recorder when Soniox fails', async () => {
     transcription = 'unavailable';
-    render(<TranscriptView focusSegmentId={null} />);
+    const { container } = render(withRecorder());
     expect(await screen.findByText('Confirmed text.')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Recognition failed. Soniox is unavailable.');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Recognition failed. Soniox is unavailable.');
+    expect(alert.closest('.capsule')).not.toBeNull();
+    // No strip over the transcript.
+    expect(container.querySelector('.transcript-layout')!.contains(alert)).toBe(false);
   });
 
   it('shows the logo for a stopped session that never recorded, and stops polling', async () => {
@@ -115,14 +127,15 @@ describe('transcript screen states', () => {
     expect(eventReads()).toBe(reads);
   });
 
-  it('keeps shown text on a failed read and offers Retry, which reloads', async () => {
+  it('keeps shown text on a failed read and offers Retry in the recorder, which reloads', async () => {
     vi.useFakeTimers();
-    render(<TranscriptView focusSegmentId={null} />);
+    render(withRecorder());
     await act(async () => {});
     expect(screen.getByText('Confirmed text.')).toBeInTheDocument();
     failReads = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1100); });
     expect(screen.getByRole('alert')).toHaveTextContent(/Could not refresh the transcript/);
+    expect(screen.getByRole('alert').closest('.capsule')).not.toBeNull();
     expect(screen.getByText('Confirmed text.')).toBeInTheDocument();
     failReads = false;
     words = ['Confirmed text.', ' More.'];

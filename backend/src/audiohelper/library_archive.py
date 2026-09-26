@@ -74,11 +74,15 @@ class SessionArchive:
             row = connection.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
             if row is None:
                 raise ArchiveRefused("Session does not exist.")
+            imported = connection.execute(
+                "SELECT status FROM native_imports WHERE session_id=?", (session_id,),
+            ).fetchone()
+            if imported is not None and imported["status"] != "completed":
+                raise ArchiveRefused("Finish or cancel this import before exporting the session.")
             # Refuse instead of quietly omitting storage we cannot yet round-trip.
             for table in (
                 "chunks",
                 "live_asr_drafts",
-                "native_imports",
                 "live_asr_finality",
                 "live_asr_fragments",
                 "file_preservations",

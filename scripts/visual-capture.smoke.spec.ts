@@ -1,33 +1,28 @@
-import { test, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { test, type ElectronApplication, type Page } from '@playwright/test';
+import { launchIsolatedSmoke } from './isolatedSmoke';
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 
 // Parent-only visual capture: launches the built shell and screenshots each
 // surface of the redesign so a human can judge it. Asserts nothing.
 
 const root = path.resolve(__dirname, '..');
-const mainEntry = path.join(root, 'dist', 'main', 'main.js');
 const shots = path.join(root, '.runtime', 'shots');
 
 let app: ElectronApplication;
 let page: Page;
+let close: (() => Promise<void>) | undefined;
 
 test.beforeAll(async () => {
   fs.mkdirSync(shots, { recursive: true });
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-shot-'));
-  app = await electron.launch({
-    args: [mainEntry, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
-    cwd: root,
-    env: { ...process.env, NODE_ENV: 'production', SKAZ_SHOT_USER_DATA: userData },
-  });
+  ({ app, close } = await launchIsolatedSmoke('skaz-shot-'));
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 1280, height: 820 });
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await close?.();
 });
 
 test('capture every surface', async () => {
@@ -105,7 +100,7 @@ test('capture every surface', async () => {
       await page.screenshot({ path: path.join(shots, '08-logs.png') });
     }
 
-    const systemSection = page.getByRole('button', { name: 'System' });
+    const systemSection = page.getByRole('group', { name: 'App', exact: true }).getByRole('button', { name: 'System', exact: true });
     if (await systemSection.count()) {
       await systemSection.click();
       await page.waitForTimeout(700);
@@ -117,16 +112,14 @@ test('capture every surface', async () => {
 // The first-run modal only renders when the backend answered and no spoken
 // languages are stored, so it gets its own launch with a clean profile.
 test('capture the first-run language modal', async () => {
-  const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-onboard-'));
-  const fresh = await electron.launch({
-    args: [mainEntry, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
-    cwd: root,
-    env: { ...process.env, NODE_ENV: 'production', SKAZ_SHOT_USER_DATA: userData },
-  });
-  const freshPage = await fresh.firstWindow();
-  await freshPage.waitForLoadState('domcontentloaded');
-  await freshPage.setViewportSize({ width: 1280, height: 820 });
-  await freshPage.waitForTimeout(12000);
-  await freshPage.screenshot({ path: path.join(shots, '10-first-run.png') });
-  await fresh.close();
+  const fresh = await launchIsolatedSmoke('skaz-onboard-');
+  try {
+    const freshPage = await fresh.app.firstWindow();
+    await freshPage.waitForLoadState('domcontentloaded');
+    await freshPage.setViewportSize({ width: 1280, height: 820 });
+    await freshPage.waitForTimeout(12000);
+    await freshPage.screenshot({ path: path.join(shots, '10-first-run.png') });
+  } finally {
+    await fresh.close();
+  }
 });

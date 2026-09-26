@@ -114,6 +114,19 @@ async def read_native_events(
         raise HTTPException(status_code=413, detail=str(error)) from error
 
 
+@router.get("/{session_id}/live/status")
+async def read_native_status(session_id: str, runtime: RuntimeDep) -> dict[str, Any]:
+    await disk_call(_require_session, runtime, session_id)
+    stream = runtime.native_streams.get(session_id)
+    return {
+        "state": stream.state if stream is not None else "inactive",
+        "attempt": stream.recovery.attempt if stream is not None else 0,
+        "max_attempts": 3,
+        "buffered_audio_ms": (stream.buffer.size_bytes * 500 // stream.connection.sample_rate
+                              if stream is not None else 0),
+    }
+
+
 @router.get("/{session_id}/live")
 async def read_native_live(session_id: str, runtime: RuntimeDep) -> dict[str, Any]:
     await disk_call(_require_session, runtime, session_id)

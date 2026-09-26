@@ -2,7 +2,7 @@ import { expect, test, _electron as electron } from '@playwright/test';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { NativeSnapshot } from '../frontend/src/api/nativeLive';
+import type { NativeEventPage } from '../frontend/src/api/nativeEventPages';
 import type { BridgeRequest } from '../frontend/src/api/bridge';
 
 const root = path.resolve(__dirname, '..');
@@ -26,19 +26,28 @@ test('translation is primary and original is collapsed in the built Electron ren
     const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
     const original = { id: 'o1', connection_id: 'c1', segment_id: 's1', speaker_number: 1,
       text: 'We will discuss the results tomorrow.', start_sample: 0, end_sample: 16000 };
-    const snapshot: NativeSnapshot = {
-      session_id: 'translation-fixture', sample_rate: 16000, saved_samples: 16000, next_sequence: 1,
-      recording_mode: 'translation', transcription: 'inactive', gaps: [], final_tokens: [original],
-      connections: [], live_translation_projection: {
-        original_tokens: [original],
-        translation_tokens: [{ id: 't1', connection_id: 'c1', speaker_number: 1, text: 'Мы обсудим результаты завтра.' }],
-        monologues: [{ id: 'o1', connection_id: 'c1', speaker_number: 1, original_token_ids: ['o1'],
-          translation_token_ids: ['t1'], passthrough_token_ids: [], display_token_ids: ['t1'] }],
-        unassigned_translation_token_ids: [], order_unavailable_connection_ids: [],
-      },
+    const owner = { id: 'o1', connection_id: 'c1', speaker_number: 1, start_sample: 0 };
+    const eventPage: NativeEventPage = {
+      protocol: 1, session_id: 'translation-fixture', sample_rate: 16000, saved_samples: 16000,
+      recording_mode: 'translation', translation_target_language: 'ru', transcription: 'inactive',
+      connection: { id: 'c1', start_sample: 0, end_sample: 16000, status: 'finished',
+        final_sample: 16000, processed_sample: 16000 },
+      through: 0, next_before: 0, next_after: 0, has_older: false, has_newer: false,
+      previous_connection_id: null, next_connection_id: null, tail: null,
+      events: [{ ordinal: 0, segment_ids: ['s1'], originals_available: true, originals: [original],
+        translations: [{ id: 't1', connection_id: 'c1', speaker_number: 1, text: 'Мы обсудим результаты завтра.' }],
+        order: [{ id: 'o1', translation_status: 'original' }, { id: 't1', translation_status: 'translation' }],
+        projection: { owners: { o1: owner }, translations: { t1: 'g1' }, passthrough: [] },
+      }],
+      projection: { available: true, groups: { g1: owner }, tail_groups: {}, tail: null },
     };
     await app.evaluate(({ ipcMain }, fixture) => {
-      const session = { id: fixture.snapshot.session_id, title: 'Translation UI fixture', mode: 'legacy',
+      // Every session route the renderer asks for and the fixture does not know.
+      // When the transcript endpoint moves again, the test names the new path
+      // instead of failing later as "translation not found".
+      const unhandled: string[] = [];
+      (globalThis as { unhandledFixturePaths?: string[] }).unhandledFixturePaths = unhandled;
+      const session = { id: fixture.eventPage.session_id, title: 'Translation UI fixture', mode: 'legacy',
         status: 'stopped', duration_ms: 1000, created_at: '2026-01-01T00:00:00Z' };
       ipcMain.removeHandler('backend:request');
       ipcMain.handle('backend:request', (_event, req: BridgeRequest) => {
@@ -46,12 +55,21 @@ test('translation is primary and original is collapsed in the built Electron ren
         const data = req.path === '/sessions' ? { sessions: [session] }
           : req.path === `/sessions/${session.id}` ? { session, segments: [{ id: 's1', start_ms: 0, end_ms: 1000,
             text: 'We will discuss the results tomorrow.' }], messages: [], notes: null }
-          : req.path === `/sessions/${session.id}/live` ? fixture.snapshot : undefined;
+          : req.path === `/sessions/${session.id}/live/events` ? {
+            ...fixture.eventPage,
+            events: req.query?.after !== undefined && Number(req.query.after) >= fixture.eventPage.through
+              ? [] : fixture.eventPage.events,
+          } : undefined;
+        if (!data && req.path.startsWith(`/sessions/${session.id}`)) unhandled.push(`${req.method} ${req.path}`);
         return data ? { ok: true, status: 200, data } : { ok: false, status: 404, detail: 'UI fixture only' };
       });
-    }, { settings, snapshot });
+    }, { settings, eventPage });
+    const unhandled = () => app.evaluate(() => (globalThis as { unhandledFixturePaths?: string[] }).unhandledFixturePaths ?? []);
     await page.reload();
     const list = page.getByRole('list', { name: 'Transcript' });
+    await expect(list).toBeVisible({ timeout: 15_000 }).catch(async (error: unknown) => {
+        throw new Error(`${String(error)}\nunanswered fixture routes: ${JSON.stringify(await unhandled())}`);
+      });
     await expect(list.getByText('Мы обсудим результаты завтра.', { exact: true })).toBeVisible();
     await expect(list.getByText(original.text, { exact: true })).not.toBeVisible();
     await page.screenshot({ path: path.join(root, '.runtime/soniox-migration/translation-primary.png') });
@@ -59,7 +77,11 @@ test('translation is primary and original is collapsed in the built Electron ren
     await expect(list.getByText(original.text, { exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(root, '.runtime/soniox-migration/translation-original.png') });
     await page.reload();
-    await expect(page.getByRole('list', { name: 'Transcription' }).getByText(original.text, { exact: true })).not.toBeVisible();
+    await expect(list.getByText('Мы обсудим результаты завтра.', { exact: true })).toBeVisible();
+    await expect(list.getByText(original.text, { exact: true })).not.toBeVisible();
+    await expect(list.getByText('Show original', { exact: true })).toBeVisible();
+    // The transcript was read only through routes the fixture answers.
+    expect((await unhandled()).filter((route) => route.includes('/live')), 'transcript routes the fixture does not serve').toEqual([]);
   } finally {
     await app.close();
     await fs.rm(directory, { recursive: true, force: true });

@@ -1,46 +1,101 @@
+/* The import card (UI-CLEANUP §4): one card centred in the column, the same
+   shape for every state. Sized by the column, never widening it. */
 .import-panel {
+  flex: 1;
+  min-width: 0;
   display: grid;
-  gap: var(--space-4);
-  align-content: start;
-  padding: var(--space-6);
-  max-width: 34rem;
+  place-items: center;
+  padding: var(--space-5);
+  overflow-y: auto;
 }
 
-.import-panel__status { margin: 0; font-size: var(--text-lg); font-family: var(--font-display); }
+.import-card {
+  box-sizing: border-box;
+  width: min(440px, 100%);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  background: var(--paper-raised);
+  box-shadow: var(--shadow-1);
+}
 
-.import-panel__file {
+.import-card__head { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.import-card__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  background: var(--paper-sunken);
+  color: var(--ink-soft);
+}
+.import-card__title {
   margin: 0;
-  font-family: var(--font-mono);
+  min-width: 0;
+  font-size: var(--text-md, 16px);
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-card__line {
+  margin: 0;
   font-size: var(--text-sm);
   color: var(--ink-soft);
   overflow-wrap: anywhere;
 }
+.import-card__status { font-weight: 600; color: var(--ink); }
+.import-card--failed .import-card__status,
+.import-card--interrupted .import-card__status { color: var(--live); }
 
-.import-panel__facts {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-2) var(--space-4);
+/* Indeterminate: the provider reports no percentage. */
+.import-card__progress {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--paper-sunken);
+}
+.import-card__progress > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: 3px;
+  background: var(--ink-soft);
+  animation: import-card-run 1.4s var(--ease) infinite;
+}
+@keyframes import-card-run {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(290%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .import-card__progress > span { animation: none; width: 100%; opacity: 0.35; }
+}
+
+.import-card__error {
   margin: 0;
   font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--live);
+  overflow-wrap: anywhere;
 }
-.import-panel__facts dt { color: var(--ink-faint); }
-.import-panel__facts dd { margin: 0; overflow-wrap: anywhere; }
-
-.import-panel__note {
+.import-card__hint {
   margin: 0;
   font-size: var(--text-xs);
+  line-height: 1.5;
   color: var(--ink-faint);
-  line-height: 1.5;
 }
+.import-card__hint--end { text-align: right; }
 
-.import-panel__error {
-  margin: 0;
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  color: var(--danger, var(--warning));
-  border: 1px solid currentColor;
-  border-radius: var(--radius);
-  padding: var(--space-2) var(--space-3);
+.import-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
-
-.import-panel__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

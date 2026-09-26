@@ -23,6 +23,8 @@ import type {
   ImportCapabilities,
   ImportCreated,
   ImportView,
+  ImportPreview,
+  MediaSource,
   ModelsResponse,
   Note,
   NoteDetail,
@@ -199,8 +201,14 @@ export class ApiClient {
   }
 
   /** The only charged call in this family: creates the session and the job. */
+  previewImport(source: MediaSource): Promise<ImportPreview> {
+    return this.bridge.request<ImportPreview>({ method: 'POST', path: '/imports/preview', body: { source } }).then(unwrap);
+  }
+
   createImport(body: {
-    path: string;
+    path?: string;
+    source?: MediaSource;
+    allow_duplicate?: boolean;
     title: string;
     translate: boolean;
     declared_duration_ms?: number | null;

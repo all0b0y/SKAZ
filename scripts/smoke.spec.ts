@@ -1,33 +1,20 @@
-import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import path from 'node:path';
+import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
+import { launchIsolatedSmoke } from './isolatedSmoke';
+import type {} from '../frontend/src/api/bridge';
 
-// Desktop smoke: launches the packaged main process against the built renderer,
-// with a fake audio device so mic capture can run in automation. It verifies the
-// real shell renders and that the backend lifecycle surfaces honestly (ready, or
-// a truthful error) — it never asserts fake transcription success.
-
-const root = path.resolve(__dirname, '..');
-const mainEntry = path.join(root, 'dist', 'main', 'main.js');
-
+// Real built shell, isolated profile and backend; no microphone or provider calls.
 let app: ElectronApplication;
 let page: Page;
+let close: (() => Promise<void>) | undefined;
 
 test.beforeAll(async () => {
-  app = await electron.launch({
-    args: [
-      mainEntry,
-      '--use-fake-device-for-media-stream',
-      '--use-fake-ui-for-media-stream',
-    ],
-    cwd: root,
-    env: { ...process.env, NODE_ENV: 'production' },
-  });
+  ({ app, close } = await launchIsolatedSmoke('skaz-shell-smoke-'));
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await close?.();
 });
 
 test('renders the SKAZ shell', async () => {
@@ -50,6 +37,20 @@ test('exposes the secure preload bridge and hides the token', async () => {
   expect(shape.methods).toContain('request');
   expect(shape.methods).toContain('uploadAudio');
   expect(shape.leaks).toBe(false);
+});
+
+test('API keys explains transient audio in the real built window', async ({}, testInfo) => {
+  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+    { timeout: 60_000 }).toBe('ready');
+  await page.getByRole('button', { name: 'Russian + English', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'API keys', exact: true }).click();
+  await expect(page.getByText('Live transcription. Audio is used for recognition and is not stored.')).toBeVisible();
+  await expect(page.getByText(/Recording requires a Soniox key and cloud consent/)).toBeVisible();
+  await expect(page.getByText(/Disabling this stops live transcription and recording/)).toBeVisible();
+  await expect(page.getByText(/Audio is saved locally|Recording remains local|not local audio recording/)).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('audio-storage-copy.png') });
 });
 
 test('surfaces the backend lifecycle honestly (ready or truthful error)', async () => {

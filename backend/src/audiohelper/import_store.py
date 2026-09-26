@@ -43,9 +43,12 @@ from .native_tokens import persist_tokens
 #: never accumulates rounding drift. It is not the file's real sample rate.
 IMPORT_SAMPLE_RATE = 16_000
 
-ImportStatus = Literal["queued", "uploading", "processing", "completed", "failed", "cancelled"]
+ImportStatus = Literal[
+    "queued", "uploading", "processing", "completed", "failed", "cancelled",
+    "interrupted", "downloading", "preparing",
+]
 #: Statuses a restart must pick back up rather than leave stranded.
-UNSETTLED: tuple[ImportStatus, ...] = ("queued", "uploading", "processing")
+UNSETTLED: tuple[ImportStatus, ...] = ("queued", "downloading", "preparing", "uploading", "processing")
 
 #: Digest of an unreadable source is impossible, but an import must still record
 #: which file it came from; this marks an identity we could not compute.
@@ -65,6 +68,10 @@ class ImportSource:
     size_bytes: int
     mtime_ns: int
     sha256: str
+    kind: Literal["local", "youtube"] = "local"
+    url: str | None = None
+    video_id: str | None = None
+    prepare_media: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,7 @@ class ImportRecord:
     error: str | None
     created_at: str
     settled_at: str | None
+    submission_pending: bool = False
 
 
 def _now() -> str:
@@ -106,7 +114,7 @@ class ImportStore:
         declared_duration_ms: int | None,
     ) -> ImportRecord:
         """Claim the session for an import. The session must have no recording yet."""
-        if source.size_bytes <= 0:
+        if source.size_bytes <= 0 and source.kind != "youtube":
             raise ImportConflict("The source file is empty.")
         with self.db.write() as connection:
             if connection.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone() is None:
@@ -138,7 +146,22 @@ class ImportStore:
                 (session_id, source.path, source.name, source.size_bytes, source.mtime_ns,
                  source.sha256, declared_duration_ms, model, int(translate), _now()),
             )
+            connection.execute(
+                "UPDATE native_imports SET source_kind=?,source_url=?,video_id=?,prepare_media=? "
+                "WHERE session_id=?",
+                (source.kind, source.url, source.video_id, int(source.prepare_media), session_id),
+            )
             return _record(self._row(connection, session_id))
+
+    def matching_video(self, video_id: str) -> list[str]:
+        with self.db.read() as connection:
+            return [row[0] for row in connection.execute(
+                "SELECT session_id FROM native_imports WHERE video_id=? ORDER BY created_at DESC",
+                (video_id,),
+            )]
+
+    def stage(self, session_id: str, status: ImportStatus) -> ImportRecord:
+        return self._transition(session_id, status, allowed=UNSETTLED)
 
     def get(self, session_id: str) -> ImportRecord | None:
         with self.db.read() as connection:
@@ -156,8 +179,64 @@ class ImportStore:
             ).fetchall()
         return [_record(row) for row in rows]
 
+    def pending(self) -> list[ImportRecord]:
+        """Unfinished imports, including ones waiting for an explicit decision."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM native_imports WHERE status NOT IN ('completed','cancelled') "
+                "ORDER BY created_at"
+            ).fetchall()
+        return [_record(row) for row in rows]
+
+    def interrupt(self) -> None:
+        """Recover durable state without contacting a provider or spawning work."""
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE native_imports SET status='interrupted' "
+                "WHERE status IN ('queued','uploading','processing','downloading','preparing')"
+            )
+
+    def retry(self, session_id: str) -> ImportRecord:
+        record = self.get(session_id)
+        if record is None:
+            raise ImportConflict("This session is not an import.")
+        if record.submission_pending and record.transcription_id is None:
+            raise ImportConflict(
+                "The previous submission may have been charged, but its job ID was not received. "
+                "Check Soniox before starting a new paid import."
+            )
+        return self._transition(
+            session_id, "processing" if record.transcription_id else "queued",
+            allowed=("failed", "interrupted"), assignments={"error": None, "settled_at": None},
+        )
+
+    def reset_failed_job(self, session_id: str) -> None:
+        """Caller has confirmed the provider's terminal error during explicit Retry."""
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE native_imports SET transcription_id=NULL,provider_file_id=NULL,submission_pending=0 "
+                "WHERE session_id=? AND status IN ('failed','interrupted')", (session_id,),
+            )
+
+    def recognition_settings(self, session_id: str) -> tuple[str, tuple[str, ...] | None]:
+        with self.db.read() as connection:
+            row = connection.execute(
+                "SELECT translation_target_language,used_languages_json FROM native_recordings "
+                "WHERE session_id=?", (session_id,),
+            ).fetchone()
+        if row is None:
+            raise ImportConflict("Import recording is missing.")
+        languages = json.loads(row["used_languages_json"]) if row["used_languages_json"] is not None else None
+        return row["translation_target_language"], tuple(languages) if languages is not None else None
+
+    def mark_submitting(self, session_id: str) -> ImportRecord:
+        return self._transition(
+            session_id, "uploading", allowed=("uploading",),
+            assignments={"submission_pending": 1},
+        )
+
     def mark_uploading(self, session_id: str) -> ImportRecord:
-        return self._transition(session_id, "uploading", allowed=("queued", "uploading"))
+        return self._transition(session_id, "uploading", allowed=UNSETTLED)
 
     def mark_uploaded(self, session_id: str, *, provider_file_id: str) -> ImportRecord:
         return self._transition(
@@ -169,18 +248,18 @@ class ImportStore:
         """Record the job id. Written before the first poll so a crash cannot lose it."""
         return self._transition(
             session_id, "processing", allowed=("queued", "uploading", "processing"),
-            assignments={"transcription_id": transcription_id},
+            assignments={"transcription_id": transcription_id, "submission_pending": 0},
         )
 
     def mark_failed(self, session_id: str, *, error: str) -> ImportRecord:
         return self._transition(
-            session_id, "failed", allowed=("queued", "uploading", "processing"),
+            session_id, "failed", allowed=UNSETTLED,
             assignments={"error": error[:500]}, settle=True,
         )
 
     def mark_cancelled(self, session_id: str) -> ImportRecord:
         return self._transition(
-            session_id, "cancelled", allowed=("queued", "uploading", "processing"), settle=True,
+            session_id, "cancelled", allowed=(*UNSETTLED, "failed", "interrupted"), settle=True,
         )
 
     def _transition(
@@ -374,6 +453,8 @@ def _record(row: sqlite3.Row) -> ImportRecord:
         source=ImportSource(
             path=row["source_path"], name=row["source_name"], size_bytes=row["source_bytes"],
             mtime_ns=row["source_mtime_ns"], sha256=row["source_sha256"],
+            kind=row["source_kind"], url=row["source_url"], video_id=row["video_id"],
+            prepare_media=bool(row["prepare_media"]),
         ),
         declared_duration_ms=row["declared_duration_ms"],
         audio_duration_ms=row["audio_duration_ms"],
@@ -385,4 +466,5 @@ def _record(row: sqlite3.Row) -> ImportRecord:
         error=row["error"],
         created_at=row["created_at"],
         settled_at=row["settled_at"],
+        submission_pending=bool(row["submission_pending"]),
     )
