@@ -58,14 +58,11 @@ in Notizen fest. KI kann Fehler machen: Quellenlinks erleichtern die Prüfung, g
 
 ## Installation und erster Start
 
-**Der vorgesehene Downloadkanal ist [GitHub Releases](https://github.com/4IPE/SKAZ/releases).**
-Es gibt noch keine veröffentlichten Releases und dort noch kein fertiges Installationspaket.
-Um den aktuellen Code auszuprobieren, nutze die [Entwicklungsanleitung](../../CONTRIBUTING.md).
-
-Sobald ein DMG für macOS auf Apple Silicon veröffentlicht wird, öffne es, ziehe SKAZ
-nach Applications und starte die App. Beachte die Installations- und Signaturhinweise
-des jeweiligen Releases. Alpha-Builds sind nicht zwangsläufig notarisiert; schalte
-die Schutzmechanismen von macOS nicht systemweit aus.
+Lade das neueste DMG von [GitHub Releases](https://github.com/4IPE/SKAZ/releases/latest)
+herunter (Apple Silicon, macOS 13 oder neuer), öffne es, ziehe SKAZ nach Applications und
+starte die App. Alpha-Builds sind noch nicht notarisiert: Folge beim ersten Start den Schritten
+in den Release-Notes (**Privacy & Security → Open Anyway**). Schalte die Schutzmechanismen von
+macOS nicht systemweit aus. Den aktuellen Code startest du über die [Entwicklungsanleitung](../../CONTRIBUTING.md).
 
 Beim ersten Start:
 

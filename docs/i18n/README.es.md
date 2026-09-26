@@ -59,14 +59,11 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
 
 ## Instalación y primer inicio
 
-**El canal previsto de descarga es [GitHub Releases](https://github.com/4IPE/SKAZ/releases).**
-Todavía no hay versiones publicadas ni instaladores disponibles allí. Para probar
-el código actual, consulta la [configuración de desarrollo](../../CONTRIBUTING.md).
-
-Cuando se publique un DMG para macOS con Apple Silicon, ábrelo, arrastra SKAZ a
-Applications e inicia la aplicación. Sigue las notas de instalación y firma de esa
-versión. No presupongas que las versiones alpha están notarizadas; no desactives
-globalmente las protecciones de macOS.
+Descarga el DMG más reciente desde [GitHub Releases](https://github.com/4IPE/SKAZ/releases/latest)
+(Apple Silicon, macOS 13 o posterior), ábrelo, arrastra SKAZ a Applications e iníciala.
+Las versiones alpha aún no están notarizadas: en el primer inicio sigue los pasos de las
+notas de la versión (**Privacy & Security → Open Anyway**). No desactives globalmente las
+protecciones de macOS. Para ejecutar el código actual, consulta la [configuración de desarrollo](../../CONTRIBUTING.md).
 
 En el primer inicio:
 

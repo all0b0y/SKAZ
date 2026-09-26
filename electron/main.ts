@@ -11,6 +11,7 @@ import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from '.
 import { isTrustedFrame, validateCaptureState, validateCodexActivity } from './ipcSender';
 import { QuitController } from './quitController';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
+import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
@@ -225,7 +226,54 @@ function createWindow(): void {
   });
 }
 
+/**
+ * A copy started from the DMG or Downloads is a second SKAZ in Launchpad and
+ * Spotlight. Offer to move it into /Applications before anything else runs;
+ * on success Electron relaunches the moved copy and this process exits.
+ */
+function offerMoveToApplications(): boolean {
+  const userData = app.getPath('userData');
+  if (!shouldOfferMoveToApplications({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    isInApplicationsFolder: app.isInApplicationsFolder(),
+    declinedForever: readDeclinedForever(userData),
+    customUserData: app.commandLine.hasSwitch('user-data-dir'),
+  })) return false;
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    message: 'Move SKAZ to the Applications folder?',
+    detail: 'SKAZ is running from outside Applications, so macOS may show it twice in Launchpad. '
+      + 'Moving it keeps a single SKAZ.',
+    buttons: ['Move to Applications', 'Not Now', "Don't Ask Again"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (choice === 2) writeDeclinedForever(userData);
+  if (choice !== 0) return false;
+  try {
+    return app.moveToApplicationsFolder();
+  } catch (err) {
+    dialog.showErrorBox('Could not move SKAZ', err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
+// One SKAZ at a time: a second launch focuses the existing window instead of
+// starting a second app and a second backend on the same data.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 app.whenReady().then(() => {
+  if (offerMoveToApplications()) return;
   hardenSession();
   if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(APP_ICON);
   // macOS gates microphone access at the OS level, on top of Chromium's own

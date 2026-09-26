@@ -63,6 +63,20 @@ Dock icon.
 Re-run `npm run icon` after changing the artwork; `build/icon.icns` is generated,
 not hand-maintained.
 
+## One app, one icon
+
+The backend and media tools are plain executables inside `SKAZ.app`, not app
+bundles, so macOS never lists them as separate applications. The Electron helper
+bundles under `Contents/Frameworks` are marked `LSUIElement` and stay hidden.
+
+A second SKAZ icon in Launchpad comes from a second **copy** of `SKAZ.app`, most
+often one launched straight from the mounted DMG. `electron/installLocation.ts`
+handles that: a packaged app started outside `/Applications` offers once to move
+itself there (`app.moveToApplicationsFolder`), and `requestSingleInstanceLock`
+makes a second launch focus the existing window instead of starting another app
+and backend. The offer is skipped when launched with `--user-data-dir`, so release
+checks and smoke tests never see it.
+
 ## The rename and user data
 
 `productName: SKAZ` renames the bundle, the Dock/menu title **and** the Electron

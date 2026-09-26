@@ -5,7 +5,7 @@
 SKAZ is **alpha / early access**. Security fixes target only the latest published
 release; older releases do not receive separate backports. Update before reporting
 an issue that may already be fixed. Development snapshots have no separate support
-commitment. No releases are currently published; the policy applies when releases begin.
+commitment.
 
 ## Reporting a vulnerability
 
