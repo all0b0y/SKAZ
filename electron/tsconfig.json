@@ -15,8 +15,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"],
-    "baseUrl": ".."
+    "types": ["node"]
   },
   "include": ["./**/*.ts", "../frontend/src/api/bridge.ts"]
 }
