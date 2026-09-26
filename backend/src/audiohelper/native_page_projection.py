@@ -13,7 +13,7 @@ from typing import Any
 
 from .db import Database
 from .live_store import LiveConflict
-from .native_event_pages import MAX_PAGE_BYTES, EventPageTooLarge, _size, read_event_page
+from .native_event_pages import HARD_PAGE_BYTES, MAX_PAGE_BYTES, EventPageTooLarge, _size, read_event_page
 
 
 def advance(
@@ -250,5 +250,8 @@ def read_projected_page(db: Database, session_id: str, **query: Any) -> dict[str
         # Ownership metadata counts against the same wire bound as the text.
         limit = query.get("limit", 64)
         if limit <= 1:
+            # A single event is indivisible: served alone up to the hard ceiling.
+            if _size(page) <= HARD_PAGE_BYTES - 128:
+                return page
             raise EventPageTooLarge("Projected event exceeds the event-page byte limit.")
         query["limit"] = max(1, limit // 2)

@@ -7,9 +7,33 @@ import { formatTimecode } from '../../lib/time';
 import type { Segment } from '../../api/types';
 import { useNativeTranscript } from './useNativeTranscript';
 import { peekTranscript, type ReadingPlace } from './transcriptCache';
-import { NativeTranscriptStatus } from './NativeTranscriptStatus';
 import { NativeMonologues } from './NativeMonologues';
+import type { NativeSnapshot } from '../../api/nativeLive';
 import { useEdgeFade } from '../../hooks/useOverflowEdges';
+
+const SONIOX_STATUS: Record<NativeSnapshot['transcription'], string> = {
+  connecting: 'Soniox: connecting',
+  streaming: 'Soniox: transcribing',
+  unavailable: 'Soniox: transcription unavailable — audio is still saved locally',
+  inactive: 'Soniox: not active',
+  disabled: 'Audio-only recording — transcription is disabled',
+};
+
+/** Whether a native snapshot holds any text to read (confirmed, tail or translation). */
+const hasWords = (snapshot: NativeSnapshot): boolean =>
+  (snapshot.final_tokens?.length ?? 0) > 0 || (snapshot.final_translation_tokens?.length ?? 0) > 0;
+
+/** Capturing, but no word has arrived yet: one static state, no pulse, no
+ * second screen. The recording may not even exist on the server yet. */
+function WaitingForWords({ snapshot }: { snapshot: NativeSnapshot | null }) {
+  const status = snapshot?.recording_mode === 'audio_only' ? SONIOX_STATUS.disabled
+    : SONIOX_STATUS[snapshot?.transcription ?? 'connecting'];
+  return (
+    <div className="panel__center">
+      <EmptyState icon="transcript" title="Recording — waiting for first words" hint={status} />
+    </div>
+  );
+}
 
 /** The plain-text SKAZ wordmark shown when a session has no transcript yet
  * and nothing is currently recording. Text only — no icon, no image. */
@@ -61,7 +85,8 @@ interface TranscriptViewProps {
 }
 
 /**
- * Owns the audio-queue subscription so the transcript does not.
+ * Owns the audio-queue subscription so the transcript does not — used only by
+ * the experimental contextual mode, which has no Soniox stream to report.
  *
  * Capture emits a chunk every 100 ms and the persistence queue reports state
  * several times per chunk, so this text changes ~40x/second. Subscribing to it
@@ -244,7 +269,10 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
   // Opening a saved session: the detail read or the first native page is still in
   // flight. During capture the transcript is being written, not opened.
   const capturing = ['recording', 'paused', 'processing'].includes(recorderState);
-  const opening = loading || (!capturing && !contextual && native.initializing);
+  // Capture never shows the opening loader: the static waiting state covers it,
+  // so starting a recording cannot flicker loader → logo → text.
+  const opening = capturing && !contextual ? false
+    : loading || (!capturing && !contextual && native.initializing);
   const showLoader = useDelayedFlag(opening, LOADER_DELAY_MS);
   useEffect(() => {
     if (!activeSessionId || !contextual) return undefined;
@@ -307,8 +335,9 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
 
   return (
     <div className={clsx('transcript-layout', cleanNative && 'transcript-layout--native')}>
-      {cleanNative && <div className="native-transcript-notice">
-        {native.error ? <span role="alert">{native.error}</span>
+      {(cleanNative || native.error) && <div className="native-transcript-notice">
+        {native.error ? <span role="alert">{native.error}{' '}
+          <button type="button" className="btn btn--ghost" onClick={native.retry}>Retry</button></span>
           : native.snapshot?.recording_mode === 'audio_only' ? null : native.snapshot?.transcription === 'unavailable' ? (
           <span role="alert">Recognition failed. Soniox is unavailable.</span>
         ) : recorderState === 'processing' ? <span role="status">Finishing processing…</span> : null}
@@ -336,7 +365,6 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
         {native.part && native.snapshot && <p className="native-part-time" aria-label="Time of the expanded part">
           {formatTimecode(native.part.start / native.snapshot.sample_rate * 1000)} — {formatTimecode(native.part.end / native.snapshot.sample_rate * 1000)}
         </p>}
-        {!cleanNative && <NativeTranscriptStatus snapshot={native.snapshot} error={native.error} finalizing={recorderState === 'processing'} onRetry={native.retry} />}
 
         {opening ? (
           showLoader ? <div className="panel__center"><TranscriptLoading /></div> : null
@@ -344,15 +372,17 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
           <div className="panel__center">
             <EmptyState icon="warning" title="Couldn’t load the transcript" hint={error} />
           </div>
-        ) : cleanNative && native.snapshot ? (
-          <NativeMonologues key={`${native.snapshot.session_id}:${native.part?.id ?? 'legacy'}`} snapshot={native.snapshot} segments={segments} focusSegmentId={dismissedFocus === focusSegmentId ? null : focusSegmentId} />
+        ) : cleanNative && native.snapshot && hasWords(native.snapshot) ? (
+          <NativeMonologues key={`${native.snapshot.session_id}:${native.part?.id ?? 'live'}`} snapshot={native.snapshot} segments={segments} focusSegmentId={dismissedFocus === focusSegmentId ? null : focusSegmentId} />
+        ) : !contextual && capturing && segments.length === 0 ? (
+          <WaitingForWords snapshot={native.snapshot} />
         ) : segments.length === 0 && (!contextual || (!hasDraftText && fragments.length === 0)) ? (
           <div className="panel__center">
-            {live ? (
+            {contextual && live ? (
               <EmptyState
                 icon="transcript"
-                title={native.snapshot ? "No confirmed transcript yet" : "Listening…"}
-                hint={native.snapshot ? "Recording and transcription have separate statuses above." : "Words appear here moments after they are spoken."}
+                title="Listening…"
+                hint="Words appear here moments after they are spoken."
               />
             ) : (
               <TranscriptEmptyLogo />
@@ -582,7 +612,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
           </p>
         )}
         {contextual && liveError && <p className="transcript__error" role="alert">{liveError}</p>}
-        {live && !cleanNative && <LiveQueueStatus />}
+        {live && contextual && <LiveQueueStatus />}
       </div>
       {cleanNative && !followSpeech && <button type="button" className="transcript__follow" onClick={() => {
         if (native.windowed) native.latest();

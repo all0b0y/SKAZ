@@ -5,7 +5,6 @@ import type { NativeSnapshot } from '../../api/nativeLive';
 import type { Segment } from '../../api/types';
 import type { NativePart } from './nativeParts';
 import { forgetTranscript, openTranscript, peekTranscript, type TranscriptEntry } from './transcriptCache';
-import { useLegacyNativeTranscript } from './useLegacyNativeTranscript';
 
 interface NativeRead {
   sessionId: string | null;
@@ -38,12 +37,13 @@ const cachedRead = (sessionId: string | null): NativeRead | null => {
 /** Cache transport history, consume deltas, mount one whole reading part.
  * This bounds DOM duration, NOT total renderer RAM: the history of the current
  * and the previous session is retained (transcriptCache) so a return is instant.
+ *
+ * There is exactly one read path. A 404 before any page means the recording is
+ * not created yet — a capture that just started, or a session that never
+ * recorded. It is "nothing yet": polled while capturing, never another screen.
  */
 export function useNativeTranscript(sessionId: string | null, polling: boolean, follow = true, focusId: string | null = null) {
   const [version, setVersion] = useState(0);
-  const [legacy, setLegacy] = useState<string | null>(null);
-  const [oversized, setOversized] = useState(false);
-  const legacyRead = useLegacyNativeTranscript(legacy === sessionId ? sessionId : null, polling, oversized);
   const [read, setRead] = useState<NativeRead>(() => cachedRead(sessionId) ?? empty(sessionId));
   const followRef = useRef(follow);
   const pollingRef = useRef(polling);
@@ -59,11 +59,9 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
     let selected = selectedIndex(entry);
     let cancelled = false;
     let busy = false;
-    let legacyMode = false;
     let needsPoll = true;
     let pending: { action: Action; source?: string } | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setLegacy(null); setOversized(false);
     setRead(cachedRead(sessionId) ?? empty(sessionId));
     const publish = () => {
       entry.selectedPartId = parts[selected]?.id ?? null;
@@ -89,7 +87,7 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
       }
     };
     const load = async (action: Action, source?: string) => {
-      if (cancelled || legacyMode) return;
+      if (cancelled) return;
       if (busy) { pending = { action, source }; return; }
       if (['older', 'newer', 'focus', 'translation'].includes(action)) {
         if (action === 'focus') {
@@ -108,22 +106,26 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
       // A cached history resumes like a poll: old events are append-only, so only
       // the delta after the last known event is read.
       const resuming = action === 'init' && entry.ready;
+      // Nothing merged yet (first open, or the recording did not exist a moment
+      // ago): the next read is the first page again, whatever the action.
+      // `transcription` is null only before any page — O(1), unlike snapshot().
+      const first = cache.transcription === null;
       try {
-        if (action === 'init' && !resuming) {
+        if (first) {
           await request({}, 'newer');
           await drain('older');
         } else await request(cache.query('newer') ?? {}, 'newer');
         await drain('newer');
         if (cancelled) return;
         entry.ready = true;
-        if ((action === 'poll' || resuming) && cache.revision === entry.publishedRevision) {
+        if (!first && (action === 'poll' || resuming) && cache.revision === entry.publishedRevision) {
           const transcription = parts.at(-1)?.snapshot.transcription;
           needsPoll = transcription !== 'inactive' && transcription !== 'disabled';
           return;
         }
         const transcription = cache.transcription;
         needsPoll = transcription !== 'inactive' && transcription !== 'disabled';
-        if (action !== 'poll' || followRef.current) {
+        if (action !== 'poll' || followRef.current || first) {
           const oldId = parts[selected]?.id;
           parts = cache.parts();
           selected = action === 'latest' || followRef.current || !oldId ? Math.max(0, parts.length - 1)
@@ -134,12 +136,12 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
         }
       } catch (error) {
         if (cancelled) return;
-        if (error instanceof ApiError && error.status === 413) {
+        if (error instanceof ApiError && error.status === 404 && cache.transcription === null) {
+          // Not created yet. Keep polling only while capturing (pollingRef);
+          // a session that never recorded simply has no transcript.
           forgetTranscript(sessionId);
-          setOversized(true); setLegacy(sessionId); legacyMode = true;
-        } else if (error instanceof ApiError && error.status === 404 && !cache.snapshot()) {
-          forgetTranscript(sessionId);
-          setLegacy(sessionId); legacyMode = true;
+          needsPoll = false;
+          setRead({ ...empty(sessionId), busy: false });
         } else setRead(previous => ({ ...previous, busy: false,
           error: 'Could not refresh the transcript. The text shown is kept; try again.' }));
       } finally {
@@ -148,7 +150,7 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
           const next = pending; pending = null; void load(next.action, next.source);
           if (busy) return;
         }
-        if (!cancelled && !legacyMode) {
+        if (!cancelled) {
           const tick = () => {
             if (followRef.current && (pollingRef.current || needsPoll)) void load('poll');
             else timer = setTimeout(tick, 1000);
@@ -162,17 +164,15 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
     return () => { cancelled = true; clearTimeout(timer); actions.current = () => {}; };
   }, [sessionId, version]);
 
-  useEffect(() => { if (focusId && legacy !== sessionId) actions.current('focus', focusId); }, [focusId, sessionId, legacy, version]);
+  useEffect(() => { if (focusId) actions.current('focus', focusId); }, [focusId, sessionId, version]);
   const current = read.sessionId === sessionId ? read : empty(sessionId);
-  const old = legacy === sessionId && sessionId !== null;
-  // The first page of this session has not arrived yet: nothing to show, but not
-  // "no transcript" either. Legacy fallback and errors end this state.
-  const initializing = !old && sessionId !== null && current.snapshot === null && current.error === null
+  // The first answer for this session has not arrived yet: nothing to show, but
+  // not "no transcript" either. A page, a 404 or an error ends this state.
+  const initializing = sessionId !== null && current.snapshot === null && current.error === null
     && (current.busy || read.sessionId !== sessionId);
-  return { ...current, ...(old ? legacyRead : {}), initializing,
-    error: old ? legacyRead.error : current.error,
-    windowed: !old && current.snapshot !== null,
-    retry: old ? legacyRead.retry : () => { if (sessionId) forgetTranscript(sessionId); setVersion(v => v + 1); },
+  return { ...current, initializing,
+    windowed: current.snapshot !== null,
+    retry: () => { if (sessionId) forgetTranscript(sessionId); setVersion(v => v + 1); },
     older: () => actions.current('older'), newer: () => actions.current('newer'),
     startOfTranslation: () => actions.current('translation'), latest: () => actions.current('latest') };
 }

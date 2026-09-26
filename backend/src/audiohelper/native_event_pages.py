@@ -7,12 +7,17 @@ from typing import Any
 from .db import Database
 from .live_store import LiveConflict
 
+#: Normal page budget: pages stop adding events once they reach it.
 MAX_PAGE_BYTES = 256 * 1024
+#: Hard ceiling. One indivisible event (or live tail) above the normal budget is
+#: legitimate data — e.g. a long unpunctuated utterance — and is served alone on
+#: its own page rather than refused; only above this is the read an error.
+HARD_PAGE_BYTES = 4 * 1024 * 1024
 MAX_STORED_FIELD_CHARS = 1024 * 1024
 
 
 class EventPageTooLarge(ValueError):
-    """An indivisible event/tail exceeds the bounded transport envelope."""
+    """An indivisible event/tail exceeds even the hard transport ceiling."""
 
 
 def _size(value: Any) -> int:
@@ -79,7 +84,7 @@ def read_event_page(
         # Reserve the tail and fixed metadata before accepting any event. A
         # lagging page withholds the tail, but must leave room to catch up.
         used_bytes = 8192 + _size(tail)
-        if used_bytes > MAX_PAGE_BYTES:
+        if used_bytes > HARD_PAGE_BYTES:
             raise EventPageTooLarge("Live tail exceeds the event-page byte limit.")
         events: list[dict[str, Any]] = []
         if row:
@@ -116,7 +121,12 @@ def read_event_page(
                 if used_bytes + size > MAX_PAGE_BYTES:
                     if events:
                         break
-                    raise EventPageTooLarge("Stored event exceeds the event-page byte limit.")
+                    # First event of the page: served alone if under the hard ceiling.
+                    if used_bytes + size > HARD_PAGE_BYTES:
+                        raise EventPageTooLarge("Stored event exceeds the event-page byte limit.")
+                    events.append(payload)
+                    used_bytes += size
+                    break
                 events.append(payload)
                 used_bytes += size
         if reverse:

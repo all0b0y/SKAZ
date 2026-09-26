@@ -133,7 +133,34 @@ async def test_page_byte_limit_never_silently_truncates_an_event(
     reverse = (await client.get(url, params={"connection_id": cid})).json()
     assert [row["ordinal"] for row in reverse["events"]] == [1, 2]
     store.save_event(cid, ordinal=3, event=event("x" * 270_000))
-    oversized = await client.get(url, params={"connection_id": cid, "after": 2})
+    # Above the normal budget but indivisible: served alone, never refused or cut.
+    alone = await client.get(url, params={"connection_id": cid, "after": 2})
+    assert alone.status_code == 200
+    single = alone.json()
+    assert [row["ordinal"] for row in single["events"]] == [3]
+    assert len(single["events"][0]["originals"][0]["text"]) == 270_000
+    assert single["has_newer"] is False
+    # The projected path the UI actually reads serves it the same way.
+    projected = await client.get(url, params={"connection_id": cid, "after": 2, "project": True})
+    assert projected.status_code == 200
+    assert [row["ordinal"] for row in projected.json()["events"]] == [3]
+    # A following small event is not glued onto the oversized page.
+    store.save_event(cid, ordinal=4, event=event("tail"))
+    after_big = (await client.get(url, params={"connection_id": cid, "after": 2})).json()
+    assert [row["ordinal"] for row in after_big["events"]] == [3]
+    assert after_big["has_newer"] is True
+
+
+async def test_event_above_the_hard_ceiling_is_an_explicit_error(
+    client: httpx.AsyncClient, app: Any, monkeypatch: Any,
+) -> None:
+    from audiohelper import native_event_pages
+    monkeypatch.setattr(native_event_pages, "HARD_PAGE_BYTES", 300 * 1024)
+    sid, cid = await recording(client, app)
+    store = app.state.runtime.live_store
+    store.save_event(cid, ordinal=0, event=event("x" * 400_000))
+    url = f"/sessions/{sid}/live/events"
+    oversized = await client.get(url, params={"connection_id": cid, "after": -1})
     assert oversized.status_code == 413
     assert "x" * 100 not in oversized.text
 

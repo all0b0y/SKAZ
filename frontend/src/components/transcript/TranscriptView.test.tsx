@@ -131,10 +131,11 @@ describe('TranscriptView', () => {
     expect(screen.getByRole('heading', { name: 'SKAZ AGENT' })).toBeInTheDocument();
   });
 
-  it('shows the "Listening…" empty state instead of the logo while actively recording', async () => {
+  it('shows the static "waiting for first words" state instead of the logo while actively recording', async () => {
     useStore.setState({ recorderState: 'recording' });
     render(<TranscriptView focusSegmentId={null} />);
-    expect(await screen.findByText('Listening…', { selector: '.empty__title' })).toBeInTheDocument();
+    expect(await screen.findByText('Recording — waiting for first words', { selector: '.empty__title' })).toBeInTheDocument();
+    expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'SKAZ AGENT' })).not.toBeInTheDocument();
   });
 
