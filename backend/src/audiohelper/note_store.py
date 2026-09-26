@@ -1,18 +1,15 @@
-"""Independent notes with optimistic edits and database-only expiring history."""
+"""Current notes with optimistic edits and explicit permanent deletion."""
 from __future__ import annotations
 
 import json
 import re
 import sqlite3
-import time
 import unicodedata
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from .db import Database
-from .schemas import Citation, Note, NoteVersion
+from .schemas import Citation, Note
 
-HISTORY_SECONDS = 30 * 24 * 60 * 60
 # None denotes unknown historical provenance; manual edits retain it verbatim.
 KEEP_SOURCE_REVISION = -1
 TITLE_LIMIT = 120
@@ -72,9 +69,15 @@ def _note(row: sqlite3.Row, current_revision: int) -> Note:
     )
 
 
+def visible_clause(connection: sqlite3.Connection) -> str:
+    """Old deleted rows stay untouched and invisible; new databases have no trash."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(notes)")}
+    return " AND deleted_at IS NULL" if "deleted_at" in columns else ""
+
+
 def _get(connection: sqlite3.Connection, session_id: str, note_id: str) -> Note:
     row = connection.execute(
-        "SELECT * FROM notes WHERE id=? AND session_id=? AND deleted_at IS NULL", (note_id, session_id),
+        "SELECT * FROM notes WHERE id=? AND session_id=?" + visible_clause(connection), (note_id, session_id),
     ).fetchone()
     if row is None:
         raise NoteMissing("This note does not exist in the session.")
@@ -85,7 +88,7 @@ def list_notes(db: Database, session_id: str) -> list[Note]:
     with db.read() as connection:
         current = source_revision(connection, session_id)
         return [_note(row, current) for row in connection.execute(
-            "SELECT * FROM notes WHERE session_id=? AND deleted_at IS NULL "
+            "SELECT * FROM notes WHERE session_id=?" + visible_clause(connection) + " "
             "ORDER BY COALESCE(updated_at, created_at) DESC, rowid DESC", (session_id,),
         )]
 
@@ -93,26 +96,18 @@ def list_notes(db: Database, session_id: str) -> list[Note]:
 def latest(db: Database, session_id: str) -> Note | None:
     with db.read() as connection:
         row = connection.execute(
-            "SELECT * FROM notes WHERE session_id=? AND deleted_at IS NULL "
+            "SELECT * FROM notes WHERE session_id=?" + visible_clause(connection) + " "
             "ORDER BY COALESCE(updated_at, created_at) DESC, rowid DESC LIMIT 1",
             (session_id,),
         ).fetchone()
         return None if row is None else _note(row, source_revision(connection, session_id))
 
 
-def soft_delete(db: Database, session_id: str, note_id: str) -> None:
-    """Hide a note without destroying it.
-
-    The row stays for the future trash screen, so a mistaken click is recoverable;
-    every read path filters on ``deleted_at``, which is why an already deleted note
-    reports as missing rather than as a second successful deletion.
-    """
+def delete(db: Database, session_id: str, note_id: str) -> None:
+    """Permanently remove only the requested note after verifying ownership."""
     with db.write() as connection:
         _get(connection, session_id, note_id)
-        connection.execute(
-            "UPDATE notes SET deleted_at=? WHERE id=? AND session_id=?",
-            (_now(), note_id, session_id),
-        )
+        connection.execute("DELETE FROM notes WHERE id=? AND session_id=?", (note_id, session_id))
 
 
 def check_revision(db: Database, session_id: str, note_id: str, expected: int | None) -> Note:
@@ -123,26 +118,6 @@ def check_revision(db: Database, session_id: str, note_id: str, expected: int | 
         return note
 
 
-def prune_history(db: Database) -> None:
-    with db.write() as connection:
-        connection.execute("DELETE FROM note_history WHERE expires_at<=?", (time.time(),))
-
-
-def history(db: Database, session_id: str, note_id: str) -> list[NoteVersion]:
-    prune_history(db)
-    with db.read() as connection:
-        _get(connection, session_id, note_id)
-        return [
-            NoteVersion(
-                id=row["id"], expires_at=row["expires_at"],
-                note=Note.model_validate_json(row["snapshot"]),
-            )
-            for row in connection.execute(
-                "SELECT * FROM note_history WHERE note_id=? ORDER BY expires_at DESC, rowid DESC", (note_id,),
-            )
-        ]
-
-
 def _replace(
     connection: sqlite3.Connection, session_id: str, note_id: str, expected: int | None,
     content: str | None, model: str | None, citations: list[Citation] | None,
@@ -151,12 +126,6 @@ def _replace(
     previous = _get(connection, session_id, note_id)
     if previous.revision != expected:
         raise NoteConflict("The note changed. Reload it before replacing or editing.")
-    now = time.time()
-    connection.execute("DELETE FROM note_history WHERE expires_at<=?", (now,))
-    connection.execute(
-        "INSERT INTO note_history(id,note_id,snapshot,expires_at) VALUES (?,?,?,?)",
-        (uuid4().hex, note_id, previous.model_dump_json(), now + HISTORY_SECONDS),
-    )
     note = previous.model_copy(update={
         "content": previous.content if content is None else content,
         "title": previous.title if title is None else title,
@@ -189,19 +158,3 @@ def replace(
             connection, session_id, note_id, expected, content, model, citations,
             generated_revision, title,
         )
-
-
-def restore(db: Database, session_id: str, note_id: str, version_id: str, expected: int) -> Note:
-    prune_history(db)
-    with db.write() as connection:
-        _get(connection, session_id, note_id)
-        row = connection.execute(
-            "SELECT snapshot FROM note_history WHERE id=? AND note_id=? AND expires_at>?",
-            (version_id, note_id, time.time()),
-        ).fetchone()
-        if row is None:
-            raise NoteMissing("This version expired or does not exist.")
-        previous = Note.model_validate_json(row["snapshot"])
-        return _replace(connection, session_id, note_id, expected,
-                        previous.content, previous.model, previous.citations,
-                        previous.source_revision, previous.title)

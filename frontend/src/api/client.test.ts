@@ -13,7 +13,7 @@ function fakeBridge(handler: (req: BridgeRequest) => JsonResponse<unknown>): {
       return handler(req) as JsonResponse<never>;
     }),
     uploadAudio: vi.fn(async () => ({ ok: true as const, status: 200, data: { duplicate: false, segments: [] } })),
-    storeAudio: vi.fn(async () => ({ ok: true as const, status: 201, data: { sequence: 0, duplicate: false } })),
+    bufferAudio: vi.fn(async () => ({ ok: true as const, status: 201, data: { sequence: 0, duplicate: false } })),
     fetchAudio: vi.fn(async () => ({ ok: true as const, status: 200, data: new ArrayBuffer(4) })),
     getBackendStatus: vi.fn(async () => ({ phase: 'ready' as const })),
     onBackendStatus: vi.fn(() => () => undefined),
@@ -23,6 +23,22 @@ function fakeBridge(handler: (req: BridgeRequest) => JsonResponse<unknown>): {
 }
 
 describe('ApiClient request mapping', () => {
+  it('reads bounded native deltas with a connection-bound cursor', async () => {
+    const { bridge, requests } = fakeBridge(() => ({ ok: true, status: 200, data: { protocol: 1, events: [] } }));
+    const api = new ApiClient(bridge);
+    await api.getNativeEventPage('session / one', { connection_id: 'epoch', after: 7, limit: 64 });
+    await api.getNativeEventPage('session / one', { connection_id: 'epoch', before: 4 });
+    await api.getNativeEventPage('session / one');
+    expect(requests).toEqual([
+      { method: 'GET', path: '/sessions/session%20%2F%20one/live/events', query: { connection_id: 'epoch', after: 7, limit: 64 } },
+      { method: 'GET', path: '/sessions/session%20%2F%20one/live/events', query: { connection_id: 'epoch', before: 4 } },
+      { method: 'GET', path: '/sessions/session%20%2F%20one/live/events', query: {} },
+    ]);
+    const failed = fakeBridge(() => ({ ok: false, status: 409, detail: 'Cursor conflict' }));
+    await expect(new ApiClient(failed.bridge).getNativeEventPage('a', { connection_id: 'epoch', after: 1 }))
+      .rejects.toMatchObject({ status: 409 });
+    expect(failed.requests).toHaveLength(1); // Never silently replace history with a latest snapshot.
+  });
   it('reads file status and explicitly retries without a root, file body or model request', async () => {
     const { bridge, requests } = fakeBridge(() => ({ ok: true, status: 200, data: { state: 'pending', files: [] } }));
     const api = new ApiClient(bridge);
@@ -95,40 +111,13 @@ describe('ApiClient request mapping', () => {
   it('uses the narrow binary bridge for persistence-only storage', async () => {
     const { bridge } = fakeBridge(() => ({ ok: true, status: 200, data: null }));
     const wav = new Uint8Array([82, 73, 70, 70, 0, 0]).buffer;
-    await new ApiClient(bridge).storeAudio('s1', { sequence: 3, startMs: 20, endMs: 30 }, wav);
-    expect(bridge.storeAudio).toHaveBeenCalledWith('s1', { sequence: 3, startMs: 20, endMs: 30 }, wav);
+    await new ApiClient(bridge).bufferAudio('s1', { sequence: 3, startMs: 20, endMs: 30 }, wav);
+    expect(bridge.bufferAudio).toHaveBeenCalledWith('s1', { sequence: 3, startMs: 20, endMs: 30 }, wav);
     expect(bridge.uploadAudio).not.toHaveBeenCalled();
   });
-  it('maps the paginated audio manifest to the exact authenticated bridge route', async () => {
-    const { bridge, requests } = fakeBridge(() => ({
-      ok: true,
-      status: 200,
-      data: { chunks: [], next_after_sequence: null },
-    }));
-
-    await new ApiClient(bridge).getAudioManifestPage('session / one', 12, 200);
-
-    expect(requests).toEqual([{
-      method: 'GET',
-      path: '/sessions/session%20%2F%20one/audio',
-      query: { after_sequence: 12, limit: 200 },
-    }]);
-  });
-
-  it('omits the exclusive cursor on the first audio manifest page', async () => {
-    const { bridge, requests } = fakeBridge(() => ({
-      ok: true,
-      status: 200,
-      data: { chunks: [], next_after_sequence: null },
-    }));
-
-    await new ApiClient(bridge).getAudioManifestPage('s1', undefined, 100);
-
-    expect(requests[0]).toEqual({
-      method: 'GET',
-      path: '/sessions/s1/audio',
-      query: { limit: 100 },
-    });
+  it('does not expose audio playback or archive manifests', () => {
+    expect(ApiClient.prototype).not.toHaveProperty('fetchAudio');
+    expect(ApiClient.prototype).not.toHaveProperty('getAudioManifestPage');
   });
 
   it('lists sessions from the {sessions:[]} envelope', async () => {
@@ -211,17 +200,17 @@ describe('ApiClient request mapping', () => {
     ]);
   });
 
-  it('encodes ask requests with window and scope', async () => {
+  it('encodes ask requests with library scope and local group snapshot', async () => {
     const { bridge, requests } = fakeBridge(() => ({
       ok: true,
       status: 200,
       data: { answer: 'x', citations: [], context: { start_ms: 0, end_ms: 1, scope: 'recent' }, model: 'm' },
     }));
-    await new ApiClient(bridge).ask('s1', { question: 'what did I miss', window_minutes: 5, scope: 'recent' });
+    await new ApiClient(bridge).ask('s1', { question: 'what did I miss', search_scope: 'group', group_session_ids: ['s1', 's2'] });
     expect(requests[0]).toMatchObject({
       method: 'POST',
       path: '/sessions/s1/ask',
-      body: { question: 'what did I miss', window_minutes: 5, scope: 'recent' },
+      body: { question: 'what did I miss', search_scope: 'group', group_session_ids: ['s1', 's2'] },
     });
   });
 
@@ -288,7 +277,7 @@ describe('ApiClient error handling', () => {
     const bridge: BridgeApi = {
       request: vi.fn(),
       uploadAudio: vi.fn(async () => ({ ok: false, status: 409, detail: 'sequence reuse' })),
-      storeAudio: vi.fn(),
+      bufferAudio: vi.fn(),
       fetchAudio: vi.fn(),
       getBackendStatus: vi.fn(),
       onBackendStatus: vi.fn(),

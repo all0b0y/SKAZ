@@ -36,7 +36,7 @@ export function NoteTitleInput({ value, onCommit, onCancel }: Props) {
     <input
       ref={field}
       className="note-title-input"
-      aria-label="Название конспекта"
+      aria-label="Notes title"
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}

@@ -38,6 +38,11 @@ mac:
     - target: dmg
       arch:
         - arm64
+    # Classic Installer package (installs to /Applications); unsigned — needs a
+    # Developer ID Installer certificate for distribution.
+    - target: pkg
+      arch:
+        - arm64
   # Hardened runtime + entitlements: required for microphone access and for the
   # frozen Python child process to launch under a signed bundle.
   hardenedRuntime: true
@@ -48,6 +53,8 @@ mac:
     # macOS refuses microphone access outright without a usage description.
     NSMicrophoneUsageDescription: SKAZ records lectures and meetings you start, to transcribe them on your machine.
     NSSpeechRecognitionUsageDescription: SKAZ transcribes the audio you record.
+    # macOS 14.2+ asks for this before system audio (other apps' sound) can be recorded.
+    NSAudioCaptureUsageDescription: SKAZ records your computer's sound, such as the other side of a call, when you turn on system audio.
     # The UI provides its own title bar treatment.
     NSHighResolutionCapable: true
 

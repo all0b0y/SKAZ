@@ -630,7 +630,9 @@ async def test_anthropic_output_tokens_are_logged_as_numbers_only(
 async def prepared_session(client: httpx.AsyncClient, outbound: FakeHttp) -> str:
     configured = await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": ASR_MODEL},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": ASR_MODEL},
             "agent": {"provider": "openrouter", "model": AGENT_MODEL},
             "notes": {"provider": "openrouter", "model": AGENT_MODEL},
             "cloud_consent": True,

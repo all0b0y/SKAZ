@@ -1,6 +1,13 @@
 .rail__group-tools { display: flex; align-items: center; justify-content: space-between; padding: 0 12px 4px 16px; color: var(--ink-soft); font-size: var(--text-xs); }
 .session-navigation-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .rail .rail__chips { max-height: 32vh; flex-shrink: 0; overflow-y: auto; padding-top: 4px; padding-bottom: 12px; }
+.rail__chips-tabs { display: contents; }
+/* New group reads as an empty slot for one more group, not as a panel command:
+   dashed outline, no count, quieter ink. The header plus stays New session. */
+.rail .chip--new { border-style: dashed; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.rail .chip--new:hover, .rail .chip--new:focus-visible { border-style: dashed; border-color: var(--ink-soft); color: var(--ink); background: var(--accent-wash); }
+.session-dialog__destinations .session-dialog__new-group { display: flex; align-items: center; gap: 6px; margin-top: 4px; border-style: dashed; background: transparent; color: var(--ink-soft); }
+.session-dialog__destinations .session-dialog__new-group:not(:disabled):hover { color: var(--ink); }
 .rail .chip { min-height: 30px; max-width: 100%; flex-shrink: 0; transition: transform var(--dur) var(--ease), background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
 .rail .chip[draggable] { cursor: grab; }
 .chip__label, .chip__tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -40,4 +47,25 @@
 .session-dialog__destinations button:disabled { color: var(--ink-soft); background: var(--paper-sunken); }
 .session-dialog__destinations span { color: var(--ink-soft); }
 @media (hover: none) { .session__more { opacity: 1; } }
+/* Multi-select: checkboxes only exist while a selection does; the action bar sits
+   above the rail footer, inside the rail column. */
+.session__check { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.rail .session--picked { background: var(--accent-wash); border-color: var(--edge-strong); }
+.session__select[aria-disabled='true'] { cursor: not-allowed; }
+.rail__selection { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-shrink: 0; margin: 0 var(--space-2) var(--space-2); padding: 6px 6px 6px 12px; border: 1px solid var(--edge-strong); border-radius: var(--radius); background: var(--paper-raised); box-shadow: var(--shadow-1); font-size: var(--text-sm); }
+.rail__selection-count { flex: 1 0 calc(100% - 40px); color: var(--ink); white-space: nowrap; }
+/* The rail is narrow: row 1 is "N selected ✕", row 2 the two actions side by side. */
+.rail__selection-clear { order: 1; }
+.rail__selection-btn { order: 2; flex: 1 1 0; }
+.rail__selection-error { order: -1; }
+.rail__selection-btn { padding: 5px 10px; min-height: 28px; border: 1px solid var(--edge); border-radius: var(--radius-sm); background: var(--paper); color: var(--ink); font-size: var(--text-sm); }
+.rail__selection-btn:hover:not(:disabled) { background: var(--accent-wash); }
+.rail__selection-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.rail__selection-btn--danger { color: var(--live); border-color: color-mix(in oklch, var(--live) 45%, var(--edge)); }
+.rail__selection-btn--danger:hover:not(:disabled) { background: var(--live-quiet); }
+.rail__selection-clear { display: grid; place-items: center; width: 28px; height: 28px; flex: none; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-soft); }
+.rail__selection-clear:hover { background: var(--paper); color: var(--ink); }
+.rail__selection-error { flex-basis: 100%; margin: 0 0 4px; color: var(--live); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.session-dialog__names { margin: 0 0 12px; padding-left: 18px; color: var(--ink-soft); font-size: var(--text-sm); }
+.session-dialog__names li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .rail .chip, .session__more { transition: none; } .rail .chip--drop { transform: none; } }

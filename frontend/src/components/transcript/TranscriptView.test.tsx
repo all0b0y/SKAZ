@@ -8,17 +8,6 @@ import { encodeWavPcm16Mono } from '../../audio/wav';
 
 const syntheticPcmWav = () => encodeWavPcm16Mono(new Float32Array([0, 0.25, -0.25, 0]), 8_000);
 
-/**
- * Diagnostics are collapsed by default now (an investigation tool, not daily
- * reading). Tests that assert on the player's contents open it first.
- */
-const openDiagnostics = async () => {
-  const toggle = screen.queryByRole('button', { name: /diagnostic audio/i });
-  if (toggle && toggle.getAttribute('aria-expanded') === 'false') {
-    await userEvent.click(toggle);
-  }
-};
-
 const bridge = window.audiohelper as unknown as Omit<BridgeApi, 'request' | 'fetchAudio' | 'uploadAudio'> & {
   request: ReturnType<typeof vi.fn>;
   fetchAudio: ReturnType<typeof vi.fn>;
@@ -97,7 +86,7 @@ beforeEach(() => {
   });
 });
 
-describe('TranscriptView diagnostic audio seam', () => {
+describe('TranscriptView', () => {
   it('renders final prefix and unstable draft as one flow, but isolates whole-window conflict', async () => {
     useStore.setState({
       sessions: [{ id: 'session-a', title: 'A', created_at: 'now', status: 'stopped', duration_ms: 1_000, mode: 'contextual_local' }],
@@ -127,14 +116,6 @@ describe('TranscriptView diagnostic audio seam', () => {
     view.unmount();
   });
 
-  it('keeps the diagnostic player visible for an audio-only session', async () => {
-    render(<TranscriptView focusSegmentId={null} />);
-    await openDiagnostics();
-    expect(await screen.findByRole('region', { name: /diagnostic audio/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'SKAZ AGENT' })).toBeInTheDocument();
-    expect(screen.getByText(/Chunk 41/)).toBeInTheDocument();
-  });
-
   it('does not render an empty transcript card when a blank segment reaches the UI', async () => {
     useStore.setState({
       detail: {
@@ -144,17 +125,17 @@ describe('TranscriptView diagnostic audio seam', () => {
     });
 
     const view = render(<TranscriptView focusSegmentId={null} />);
-    await openDiagnostics();
-    await screen.findByRole('region', { name: /diagnostic audio/i });
+    await screen.findByRole('heading', { name: 'SKAZ AGENT' });
 
     expect(view.container.querySelectorAll('.segment')).toHaveLength(0);
     expect(screen.getByRole('heading', { name: 'SKAZ AGENT' })).toBeInTheDocument();
   });
 
-  it('shows the "Listening…" empty state instead of the logo while actively recording', async () => {
+  it('shows the static "waiting for first words" state instead of the logo while actively recording', async () => {
     useStore.setState({ recorderState: 'recording' });
     render(<TranscriptView focusSegmentId={null} />);
-    expect(await screen.findByText('Listening…', { selector: '.empty__title' })).toBeInTheDocument();
+    expect(await screen.findByText('Recording — waiting for first words', { selector: '.empty__title' })).toBeInTheDocument();
+    expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'SKAZ AGENT' })).not.toBeInTheDocument();
   });
 
@@ -182,8 +163,8 @@ describe('TranscriptView diagnostic audio seam', () => {
 
     expect(await screen.findByText('historical text')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(/source audio is not trusted/i);
-    expect(screen.getByRole('button', { name: /Draft sources/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Resume contextual processing/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Draft sources/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Resume contextual processing/i })).not.toBeInTheDocument();
   });
 
   it('labels bounded source continuity as unverified without claiming a known gap', async () => {
@@ -211,20 +192,11 @@ describe('TranscriptView diagnostic audio seam', () => {
     expect(screen.queryByText(/source gap detected/i)).not.toBeInTheDocument();
   });
 
-  it('offers explicit contextual recovery during capture but hides it once processing is healthy', async () => {
-    const user = userEvent.setup();
+  it('shows a stalled contextual task without offering replay of discarded audio', async () => {
     useStore.setState({
       sessions: [{ id: 'session-a', title: 'A', created_at: 'now', status: 'recording', duration_ms: 1_000, mode: 'contextual_local' }],
       recorderState: 'recording',
       queue: { ...useStore.getState().queue, pending: 2 },
-      liveCapabilities: {
-        mode: 'contextual_local', capable: true,
-        requirements: { local_profile_selected: true, contextual_local_enabled: true, live_finality_enabled: true, local_speech_gate_enabled: true },
-        detail: 'available',
-      },
-      liveResumeCompatibility: {
-        status: 'compatible', can_resume: true, requires_redecode: false,
-      },
       liveScheduler: {
         capable: true, accepted_count: 1, status: 'stalled', captured_target_sequence: 41,
         processed_window: { first_sequence: 41, last_sequence: 41, start_ms: 0, end_ms: 1_000 },
@@ -232,68 +204,14 @@ describe('TranscriptView diagnostic audio seam', () => {
         recovery_required: true, available_audio_processed: false,
       },
     });
-    bridge.request = vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
-      if (req.method === 'GET' && req.path === '/sessions/session-a/audio') {
-        return {
-          ok: true, status: 200,
-          data: {
-            chunks: [{
-              sequence: 41, start_ms: 0, end_ms: 1_000, status: 'done', available: true,
-              segment_ids: [], source_kind: 'original_captured_wav',
-            }],
-            next_after_sequence: null,
-          },
-        };
-      }
-      if (req.method === 'GET' && req.path === '/sessions/session-a/asr/live') {
-        return {
-          ok: true, status: 200,
-          data: {
-            draft: null,
-            resume_compatibility: useStore.getState().liveResumeCompatibility,
-          },
-        };
-      }
-      if (req.method === 'GET' && req.path === '/sessions/session-a/asr/live/scheduler') {
-        return { ok: true, status: 200, data: useStore.getState().liveScheduler };
-      }
-      if (req.method === 'GET' && req.path === '/sessions/session-a') {
-        return {
-          ok: true, status: 200,
-          data: {
-            session: useStore.getState().sessions[0],
-            segments: [], messages: [], notes: null,
-          },
-        };
-      }
-      if (req.method === 'POST' && req.path === '/sessions/session-a/asr/live/advance') {
-        return {
-          ok: true, status: 202,
-          data: {
-            accepted: true,
-            scheduler: {
-              capable: true, accepted_count: 2, status: 'running', captured_target_sequence: 41,
-              processed_window: { first_sequence: 41, last_sequence: 41, start_ms: 0, end_ms: 1_000 },
-              stable_frontier_ms: 500, lag_ms: 500, block_reason: null,
-              recovery_required: false, available_audio_processed: false,
-            },
-          },
-        };
-      }
-      throw new Error(`unexpected request ${req.method} ${req.path}`);
-    });
-
     render(<TranscriptView focusSegmentId={null} />);
-
-    const resume = await screen.findByRole('button', { name: /resume contextual processing/i });
-    expect(resume).toBeEnabled();
-    await user.click(resume);
-    await vi.waitFor(() => expect(bridge.request).toHaveBeenCalledWith({
-      method: 'POST', path: '/sessions/session-a/asr/live/advance', body: { through_sequence: 41 },
-    }));
+    expect(await screen.findByText('Processing stalled: decoder_failed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resume contextual processing/i })).not.toBeInTheDocument();
     expect(useStore.getState().recorderState).toBe('recording');
     expect(useStore.getState().queue.pending).toBe(2);
-    await vi.waitFor(() => expect(screen.queryByRole('button', { name: /resume contextual processing/i })).not.toBeInTheDocument());
+    expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST', path: '/sessions/session-a/asr/live/advance',
+    }));
   });
 
   it('persists an absolute-range fragment edit and keeps dirty text across polling', async () => {
@@ -429,90 +347,6 @@ describe('TranscriptView diagnostic audio seam', () => {
     });
   });
 
-  it('highlights the segment whose range contains the live playback position, and moves the highlight as time advances', async () => {
-    const audio = document.createElement('audio');
-    Object.defineProperty(audio, 'readyState', { configurable: true, value: 1 });
-    vi.spyOn(audio, 'play').mockResolvedValue();
-    vi.spyOn(audio, 'pause').mockImplementation(() => undefined);
-    vi.stubGlobal('Audio', vi.fn(() => audio));
-    useStore.setState({
-      detail: {
-        segments: [
-          { id: 'seg-a', start_ms: 0, end_ms: 500, text: 'first half' },
-          { id: 'seg-b', start_ms: 500, end_ms: 1_000, text: 'second half' },
-        ],
-        messages: [], notes: null,
-      },
-    });
-
-    render(<TranscriptView focusSegmentId={null} />);
-    await screen.findByText(/Chunk 41/);
-    await openDiagnostics();
-    await act(async () => { screen.getByRole('button', { name: /play full recording/i }).click(); });
-
-    const rows = () => Array.from(document.querySelectorAll('.segment'));
-    expect(rows()[0]).toHaveClass('segment--playing');
-    expect(rows()[1]).not.toHaveClass('segment--playing');
-
-    await act(async () => {
-      audio.currentTime = 0.7;
-      audio.dispatchEvent(new Event('timeupdate'));
-    });
-
-    expect(rows()[0]).not.toHaveClass('segment--playing');
-    expect(rows()[1]).toHaveClass('segment--playing');
-  });
-
-  it('does not highlight any segment once playback pauses', async () => {
-    const audio = document.createElement('audio');
-    Object.defineProperty(audio, 'readyState', { configurable: true, value: 1 });
-    vi.spyOn(audio, 'play').mockResolvedValue();
-    vi.spyOn(audio, 'pause').mockImplementation(() => undefined);
-    vi.stubGlobal('Audio', vi.fn(() => audio));
-    useStore.setState({
-      detail: {
-        segments: [{ id: 'seg-a', start_ms: 0, end_ms: 500, text: 'first half' }],
-        messages: [], notes: null,
-      },
-    });
-
-    render(<TranscriptView focusSegmentId={null} />);
-    await screen.findByText(/Chunk 41/);
-    await openDiagnostics();
-    await act(async () => { screen.getByRole('button', { name: /play full recording/i }).click(); });
-    expect(document.querySelector('.segment')).toHaveClass('segment--playing');
-
-    await act(async () => { screen.getByRole('button', { name: /pause/i }).click(); });
-    expect(document.querySelector('.segment')).not.toHaveClass('segment--playing');
-  });
-
-  it('citation focus never starts playback; an explicit timestamp click uses the real linked chunk', async () => {
-    const user = userEvent.setup();
-    useStore.setState({
-      detail: {
-        segments: [{ id: 'segment-real', start_ms: 300, end_ms: 800, text: 'synthetic text' }],
-        messages: [], notes: null,
-      },
-    });
-    const view = render(<TranscriptView focusSegmentId={null} />);
-    await screen.findByText(/Chunk 41/);
-    view.rerender(<TranscriptView focusSegmentId="segment-real" />);
-    expect(bridge.fetchAudio).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole('button', { name: /Play source chunk/i }));
-    expect(bridge.fetchAudio).toHaveBeenCalledWith('session-a', 41);
-    expect(bridge.uploadAudio).not.toHaveBeenCalled();
-    expect(bridge.request.mock.calls.filter(([request]) => request.path === '/sessions/session-a/audio')).toHaveLength(1);
-    expect(bridge.request.mock.calls.every(([request]) => request.method === 'GET')).toBe(true);
-  });
-
-  it('keeps audio available when transcript loading fails', async () => {
-    act(() => useStore.setState({ detailError: 'ASR transcript unavailable' }));
-    render(<TranscriptView focusSegmentId={null} />);
-    expect(await screen.findByText(/Chunk 41/)).toBeInTheDocument();
-    expect(screen.getByText(/Couldn’t load the transcript/i)).toBeInTheDocument();
-  });
-
   it('renders a permanent language-switch marker at the right point in the timeline and it survives further updates', async () => {
     useStore.setState({
       detail: {
@@ -526,8 +360,9 @@ describe('TranscriptView diagnostic audio seam', () => {
     });
 
     render(<TranscriptView focusSegmentId={null} />);
-    await openDiagnostics();
-    await screen.findByRole('region', { name: /diagnostic audio/i });
+    await screen.findByText('Before the switch');
+    expect(screen.queryByRole('button', { name: /diagnostic audio/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /With context/i })).not.toBeInTheDocument();
 
     expect(screen.getByText(/── EN from 00:41 ──/)).toBeInTheDocument();
 

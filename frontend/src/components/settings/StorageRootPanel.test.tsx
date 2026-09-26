@@ -32,13 +32,13 @@ beforeEach(async () => {
 it('reads only on mount and saves the selected folder only after confirmation, with readback', async () => {
   const user = userEvent.setup();
   render(<Panel capturing={false} />);
-  expect(await screen.findByText('Markdown-проекция выключена.')).toBeVisible();
-  expect(screen.getByText(/сюда сохраняется только Markdown/)).toBeVisible();
-  await user.click(screen.getByRole('button', { name: 'Выбрать папку…' }));
+  expect(await screen.findByText('Markdown projection is off.')).toBeVisible();
+  expect(screen.getByText(/only Markdown is saved here/)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
   expect(screen.getByText('/fixture/chosen')).toBeVisible();
   expect(requests.filter((r) => r.path === '/storage/root')).toEqual([{ method: 'GET', path: '/storage/root' }]);
-  await user.click(screen.getByRole('button', { name: 'Подтвердить корень Markdown' }));
-  expect(await screen.findByText('Корень Markdown сохранён.')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Confirm Markdown root' }));
+  expect(await screen.findByText('Markdown root saved.')).toBeVisible();
   expect(requests.filter((r) => r.path === '/storage/root')).toEqual([
     { method: 'GET', path: '/storage/root' },
     { method: 'PUT', path: '/storage/root', body: { root: '/fixture/chosen', expected_root: null } },
@@ -50,11 +50,11 @@ it('cancels the native chooser and the suggested root without any write', async 
   const user = userEvent.setup();
   choose.mockResolvedValue(null);
   render(<Panel capturing={false} />);
-  await screen.findByText('Markdown-проекция выключена.');
-  await user.click(screen.getByRole('button', { name: 'Выбрать папку…' }));
-  expect(screen.queryByRole('button', { name: 'Подтвердить корень Markdown' })).not.toBeInTheDocument();
-  await user.click(screen.getByRole('button', { name: 'Использовать Documents/SKAZ' }));
-  await user.click(screen.getByRole('button', { name: 'Отмена' }));
+  await screen.findByText('Markdown projection is off.');
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
+  expect(screen.queryByRole('button', { name: 'Confirm Markdown root' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Use Documents/SKAZ' }));
+  await user.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
 });
 
@@ -68,13 +68,13 @@ it('requires read-only reconciliation after an unknown PUT outcome and hides raw
     return { ok: true, status: 200, data: { ...current } };
   };
   render(<Panel capturing={false} />);
-  await screen.findByText('Markdown-проекция выключена.');
-  await user.click(screen.getByRole('button', { name: 'Выбрать папку…' }));
-  await user.click(screen.getByRole('button', { name: 'Подтвердить корень Markdown' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('Сохранение не подтверждено');
+  await screen.findByText('Markdown projection is off.');
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm Markdown root' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Saving was not confirmed');
   expect(screen.queryByText(/secret-path/)).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Выбрать папку…' })).toBeDisabled();
-  await user.click(screen.getByRole('button', { name: 'Проверить текущий корень' }));
+  expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeDisabled();
+  await user.click(screen.getByRole('button', { name: 'Check current root' }));
   expect(await screen.findByText('/fixture/chosen')).toBeVisible();
   expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(1);
 });
@@ -83,9 +83,9 @@ it.each(['used', 'managed', 'capturing'])('disables selection when %s', async (r
   current.change_locked = reason !== 'capturing';
   current.managed = reason === 'managed';
   render(<Panel capturing={reason === 'capturing'} />);
-  await screen.findByText('Markdown-проекция выключена.');
-  expect(screen.getByRole('button', { name: 'Выбрать папку…' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'Использовать Documents/SKAZ' })).toBeDisabled();
+  await screen.findByText('Markdown projection is off.');
+  expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Use Documents/SKAZ' })).toBeDisabled();
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
 });
 
@@ -94,12 +94,12 @@ it('ignores a chooser result after leaving the panel', async () => {
   let resolve!: (value: string) => void;
   choose.mockReturnValue(new Promise<string>((r) => { resolve = r; }));
   const first = render(<Panel capturing={false} />);
-  await screen.findByText('Markdown-проекция выключена.');
-  await user.click(screen.getByRole('button', { name: 'Выбрать папку…' }));
+  await screen.findByText('Markdown projection is off.');
+  await user.click(screen.getByRole('button', { name: 'Choose folder…' }));
   first.unmount();
   render(<Panel capturing={false} />);
   resolve('/fixture/stale');
-  await waitFor(() => expect(screen.getByText('Markdown-проекция выключена.')).toBeVisible());
+  await waitFor(() => expect(screen.getByText('Markdown projection is off.')).toBeVisible());
   expect(screen.queryByText('/fixture/stale')).not.toBeInTheDocument();
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
 });

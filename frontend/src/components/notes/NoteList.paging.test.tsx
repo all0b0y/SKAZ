@@ -31,7 +31,7 @@ const renderList = (notes: Note[]) => {
   return { onOpen };
 };
 
-const rowTitles = () => within(screen.getByRole('list', { name: 'Конспекты сессии' }))
+const rowTitles = () => within(screen.getByRole('list', { name: 'Session notes' }))
   .getAllByRole('listitem')
   .map((row) => row.textContent ?? '');
 
@@ -44,7 +44,7 @@ describe('note list paging', () => {
     renderList(many(NOTES_PER_PAGE));
     expect(rowTitles()).toHaveLength(NOTES_PER_PAGE);
     // A single page has nothing to page through; the controls would be dead weight.
-    expect(screen.queryByRole('navigation', { name: 'Страницы конспектов' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Notes pages' })).not.toBeInTheDocument();
   });
 
   it('splits a longer list into pages and moves between them', async () => {
@@ -53,21 +53,21 @@ describe('note list paging', () => {
 
     expect(rowTitles()).toHaveLength(NOTES_PER_PAGE);
     expect(rowTitles()[0]).toContain('Конспект 1');
-    const pager = screen.getByRole('navigation', { name: 'Страницы конспектов' });
-    expect(pager).toHaveTextContent('1 из 3');
+    const pager = screen.getByRole('navigation', { name: 'Notes pages' });
+    expect(pager).toHaveTextContent('1 of 3');
     // Nowhere to go back from the first page.
-    expect(within(pager).getByRole('button', { name: 'Предыдущая страница' })).toBeDisabled();
+    expect(within(pager).getByRole('button', { name: 'Previous page' })).toBeDisabled();
 
-    await user.click(within(pager).getByRole('button', { name: 'Следующая страница' }));
+    await user.click(within(pager).getByRole('button', { name: 'Next page' }));
     expect(rowTitles()[0]).toContain('Конспект 6');
-    expect(screen.getByRole('navigation', { name: 'Страницы конспектов' })).toHaveTextContent('2 из 3');
+    expect(screen.getByRole('navigation', { name: 'Notes pages' })).toHaveTextContent('2 of 3');
 
-    await user.click(screen.getByRole('button', { name: 'Следующая страница' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
     // The last page is the remainder, not a padded five.
     expect(rowTitles()).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Следующая страница' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: 'Предыдущая страница' }));
+    await user.click(screen.getByRole('button', { name: 'Previous page' }));
     expect(rowTitles()[0]).toContain('Конспект 6');
   });
 
@@ -79,14 +79,14 @@ describe('note list paging', () => {
     // an empty list with no indication of why.
     rerender(<NoteList notes={many(5)} onOpen={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()} />);
     expect(rowTitles()).toHaveLength(5);
-    expect(screen.queryByRole('navigation', { name: 'Страницы конспектов' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Notes pages' })).not.toBeInTheDocument();
   });
 
   it('opens the note that was clicked on a later page, not its neighbour', async () => {
     const user = userEvent.setup();
     const { onOpen } = renderList(many(7));
-    await user.click(screen.getByRole('button', { name: 'Следующая страница' }));
-    await user.click(screen.getByRole('button', { name: 'Открыть Конспект 7' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.click(screen.getByRole('button', { name: 'Open Конспект 7' }));
     // The open is deferred to let a double click cancel it.
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(onOpen).toHaveBeenCalledTimes(1);

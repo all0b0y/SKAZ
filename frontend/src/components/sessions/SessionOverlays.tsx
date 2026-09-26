@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { claimOpenMenu } from '../../lib/openMenu';
+import { usePanePlacement } from '../../hooks/usePanePlacement';
 
 export function SessionDialog({ title, children, onClose, busy = false }: {
   title: string; children: ReactNode; onClose: () => void; busy?: boolean;
@@ -45,10 +46,16 @@ export function SessionDialog({ title, children, onClose, busy = false }: {
 }
 
 export interface SessionMenuItem { label: string; action: () => void; disabled?: boolean; destructive?: boolean }
-export function SessionMenu({ label, anchor, items, onClose }: {
-  label: string; anchor: DOMRect; items: SessionMenuItem[]; onClose: () => void;
+/**
+ * `anchor` is the trigger's rect; `owner` an element inside the rail, so the
+ * menu stays inside the sessions column (.dev/docs/PANES-SPEC.md §1) and opens
+ * leftwards/upwards at its edge instead of spilling over the transcript.
+ */
+export function SessionMenu({ label, anchor, owner, items, onClose }: {
+  label: string; anchor: DOMRect; owner?: RefObject<Element>; items: SessionMenuItem[]; onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  usePanePlacement(ref, () => anchor, { align: 'end', boundsFrom: owner }, [anchor]);
   const listening = useRef(false);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -81,7 +88,6 @@ export function SessionMenu({ label, anchor, items, onClose }: {
     };
   }, []);
   return createPortal(<div ref={ref} className="session-menu" role="menu" aria-label={label}
-    style={{ left: Math.max(8, Math.min(anchor.right - 228, window.innerWidth - 236)), top: Math.max(8, Math.min(anchor.bottom + 5, window.innerHeight - items.length * 38 - 24)) }}
     onBlur={(e) => { if (listening.current && !e.currentTarget.contains(e.relatedTarget)) onClose(); }}
     onKeyDown={(e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }

@@ -58,7 +58,7 @@ async def store(
     end_ms: int,
 ) -> None:
     response = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": sequence, "start_ms": start_ms, "end_ms": end_ms},
         content=body,
         headers={"Content-Type": "audio/wav"},
@@ -163,8 +163,8 @@ async def test_two_stored_chunks_are_one_decode_with_exact_multi_source_provenan
         ],
     }
     assert outbound.requests == []
-    for sequence, original in before.items():
-        assert (await client.get(f"/sessions/{session_id}/audio/{sequence}")).content == original
+    for sequence in before:
+        assert (await client.get(f"/sessions/{session_id}/audio/{sequence}")).status_code == 404
     assert app.state.runtime.settings_store.load().asr.model == "small"
 
 
@@ -282,7 +282,7 @@ async def test_timeline_and_pcm_mismatch_rejected_before_decode(
 
 
 async def test_missing_corrupt_and_digest_mismatch_rejected_before_decode(
-    client: httpx.AsyncClient, config: Any, monkeypatch: pytest.MonkeyPatch
+    client: httpx.AsyncClient, app: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await use_local_profile(client)
     engine = RecordingEngine()
@@ -296,11 +296,11 @@ async def test_missing_corrupt_and_digest_mismatch_rejected_before_decode(
         session_id = await create_session(client, f"source-{sequence}")
         body = make_wav(1.0)
         await store(client, session_id, sequence, body, start_ms=0, end_ms=1000)
-        path = config.audio_dir / session_id / f"{sequence:06d}.wav"
+        audio = app.state.runtime.ingestion.audio
         if replacement is None:
-            path.unlink()
+            audio.discard(session_id)
         else:
-            path.write_bytes(replacement)
+            audio.put(session_id, sequence, replacement)
         response = await client.post(
             f"/sessions/{session_id}/asr/preview",
             json={"first_sequence": sequence, "last_sequence": sequence},

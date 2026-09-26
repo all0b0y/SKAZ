@@ -4,147 +4,128 @@
 
 # SKAZ
 
-**Un segundo par de oídos para clases y reuniones.**
+![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
+![Alpha](https://img.shields.io/badge/status-alpha-orange)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](../../LICENSE)
 
-SKAZ escucha contigo, transcribe en directo, traduce al vuelo,<br>
-responde preguntas sobre lo que se acaba de decir y toma notas — cada respuesta respaldada por la propia grabación.
-
-[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111111?logo=apple&logoColor=white)](#primeros-pasos)
-[![Electron](https://img.shields.io/badge/Electron-React%20%2B%20TypeScript-47848F?logo=electron&logoColor=white)](#cómo-funciona)
-[![Python](https://img.shields.io/badge/backend-Python%203.11%2B-3776AB?logo=python&logoColor=white)](#cómo-funciona)
-[![Status](https://img.shields.io/badge/status-early%20development-orange)](#estado-del-proyecto)
-
-[English](../../README.md) &nbsp;·&nbsp;
-[Русский](README.ru.md) &nbsp;·&nbsp;
-**Español** &nbsp;·&nbsp;
-[Deutsch](README.de.md) &nbsp;·&nbsp;
-[简体中文](README.zh-CN.md)
+[English](../../README.md) · [Русский](README.ru.md) · **Español** · [Deutsch](README.de.md) · [简体中文](README.zh-CN.md)
 
 </div>
 
----
+**Un segundo par de oídos para clases y reuniones.**
 
-## Por qué SKAZ
+SKAZ es una aplicación de escritorio para macOS que convierte la voz en una
+transcripción legible, te ayuda a recuperar el hilo y reúne preguntas y notas junto a sus fuentes.
 
-Te distraes dos minutos en clase y el ponente ya está en otro tema. En una reunión
-alguien dice tu nombre y no sabes cuál era la pregunta. Grabarlo todo y verlo después
-no ayuda *ahora*.
+> **Alpha / acceso anticipado.** Puede haber errores y cambios incompatibles, incluso
+> en el formato de los datos. Guarda copias de las exportaciones importantes. La plataforma
+> actual es macOS con Apple Silicon; Windows, Linux y los Mac Intel no están verificados.
+> La interfaz está disponible únicamente en inglés.
 
-SKAZ está hecho para ese momento. Funciona en tu Mac junto a la conversación y guarda
-un registro con marcas de tiempo y búsqueda de lo que se dijo, para que puedas
-preguntar **«¿qué me acabo de perder?»** y obtener la respuesta en segundos, con
-enlaces a las palabras exactas.
+## Así se ve
 
-La regla que SKAZ nunca rompe: **no inventa lo que no se dijo.** Si la grabación no
-contiene la respuesta, te lo dice, y lo que el modelo aporta de conocimiento general
-se mantiene separado de lo que realmente dijeron los participantes.
+![Transcripción y asistente de SKAZ](../images/transcript.png)
+*Texto agrupado por hablante, con una pregunta, una respuesta y un enlace a su fuente.*
+
+![Editor de notas de SKAZ](../images/notes.png)
+*Notas Markdown editables junto al chat de la sesión.*
+
+Son capturas de la aplicación en ejecución, no maquetas. La transcripción, la respuesta
+y las notas se escribieron para esta demostración: no son resultados de reconocimiento
+de voz ni de IA. El perfil de demostración no tiene claves API, por lo que muestra un
+aviso de configuración para grabar.
+
+## Para qué sirve
+
+¿Has perdido el hilo? Pregunta qué te has perdido en lugar de revisar toda una grabación.
+Lee la transcripción, sigue las referencias de las respuestas y guarda lo útil como notas.
+La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no garantizan su exactitud.
 
 ## Funciones
 
-**🎙️ Transcripción en directo**
-Reconocimiento de voz en streaming desde el micrófono que elijas. El habla se agrupa
-en monólogos por hablante (A → B → A), así que se lee como una conversación.
+- **Transcripción y traducción en directo:** reconocimiento con Soniox, texto agrupado
+  por hablante y acceso al original al usar la traducción.
+- **Micrófono y audio del sistema:** selecciona un micrófono y, si quieres, incluye
+  el sonido del Mac. El audio del sistema requiere macOS 14.2+ y permiso del sistema.
+- **Preguntas con contexto:** consulta una sesión o un ámbito más amplio de la biblioteca;
+  las referencias con marcas de tiempo te llevan a la transcripción.
+- **Notas editables:** genera notas, edita Markdown en pestañas y expórtalo.
+- **Biblioteca local:** organiza sesiones en grupos y guarda opcionalmente una copia
+  de los textos en una carpeta para herramientas como Obsidian.
+- **Importación de medios (experimental):** audio y vídeo locales y contenido de YouTube.
+  Procesa solo material que tengas autorización para usar; la disponibilidad y los formatos varían.
+- **Modelos independientes:** configura Assistant y Notes por separado mediante una
+  cuenta Codex o perfiles API de OpenAI, Anthropic y OpenRouter. Soniox se encarga de la voz en directo.
 
-**🌍 Traducción en directo**
-Elige los idiomas previstos y la traducción aparece junto al habla mientras ocurre.
-El original está siempre a un clic.
+## Instalación y primer inicio
 
-**💬 Pregunta sobre la grabación**
-Durante la sesión o después: *«¿Qué me perdí?»*, *«¿Cómo se definió X?»*, *«¿Qué se
-decidió sobre el presupuesto?»*. Busca en una sesión, en un grupo o en toda la
-biblioteca. Las respuestas citan sus fuentes con notas que llevan a la transcripción.
+**El canal previsto de descarga es [GitHub Releases](https://github.com/4IPE/SKAZ/releases).**
+Todavía no hay versiones publicadas ni instaladores disponibles allí. Para probar
+el código actual, consulta la [configuración de desarrollo](../../CONTRIBUTING.md).
 
-**📝 Notas fieles a la fuente**
-Genera notas estructuradas a partir de la transcripción. Cada punto está ligado al
-fragmento de habla del que procede, y SKAZ avisa cuando unas notas se quedan atrás.
-Edítalas en un editor Markdown con pestañas al estilo de Obsidian.
+Cuando se publique un DMG para macOS con Apple Silicon, ábrelo, arrastra SKAZ a
+Applications e inicia la aplicación. Sigue las notas de instalación y firma de esa
+versión. No presupongas que las versiones alpha están notarizadas; no desactives
+globalmente las protecciones de macOS.
 
-**📂 Tu biblioteca, en archivos normales**
-Organiza las sesiones en grupos y refléjalas en la carpeta que quieras como Markdown
-legible — para Obsidian, git o la búsqueda de Finder.
+En el primer inicio:
 
-**📥 Importa grabaciones**
-Añade un archivo de audio existente y obtén la misma transcripción, preguntas y notas
-que en una sesión en directo.
+1. Elige los idiomas que esperas escuchar.
+2. Abre **Settings → API keys**, añade tu clave Soniox, autoriza el procesamiento en la nube y guarda.
+3. En **Settings → Transcription**, elige transcripción o traducción y el idioma de destino.
+4. Configura **Assistant** y **Notes** por separado. Para Codex, instala el
+   [Codex CLI oficial](https://developers.openai.com/codex/cli/) e inicia sesión desde
+   los ajustes Codex de SKAZ; no se instala automáticamente. Como alternativa,
+   configura una clave y un modelo de un proveedor API. Se aplican sus requisitos,
+   límites y tarifas.
+5. Crea una sesión, selecciona las fuentes de audio, concede los permisos de macOS
+   correspondientes y pulsa **Record**. Pausa o detén la grabación cuando lo necesites;
+   abre **Notes** para trabajar con las notas de la transcripción.
 
-**🧩 Usa tus propios modelos**
-Elige el modelo para cada tarea por separado: transcripción, asistente, notas y
-búsqueda. Proveedores compatibles: Soniox (voz), OpenRouter, OpenAI y Anthropic. Sin
-sustituciones silenciosas: si un modelo no sirve para la tarea, SKAZ lo indica.
+Obtén el consentimiento necesario antes de grabar a otras personas. Soniox y los
+servicios de modelos de texto tienen sus propias tarifas; la licencia MIT no incluye su uso.
 
-## Privacidad desde el diseño
+## Privacidad y datos
 
-- **Sin archivo de audio.** El audio se envía al reconocimiento y se descarta; SKAZ
-  guarda el texto, no la grabación.
-- **Todo en local.** Transcripciones, notas y chats se quedan en tu Mac. El texto solo
-  sale hacia el proveedor que tú hayas configurado.
-- **Claves en el dispositivo.** Las claves de API se guardan cifradas en la carpeta de
-  datos de la app, con permisos solo para el propietario.
-- **Backend cerrado.** El backend en Python solo escucha en loopback y exige un token
-  aleatorio nuevo en cada arranque.
-- **La voz son datos, no órdenes.** Lo que se oye en la sala nunca se trata como una
-  instrucción para el asistente.
+- Las transcripciones, notas y chats se guardan localmente. No hay un archivo permanente
+  del audio en directo para reproducirlo; puede usarse audio temporal para procesamiento o recuperación.
+- Con tu consentimiento, el audio se envía a Soniox. Assistant y Notes envían contexto
+  al servicio seleccionado. Se aplican sus políticas de conservación y entrenamiento:
+  **almacenamiento local no significa procesamiento sin conexión**.
+- Las claves API se guardan en un archivo cifrado, junto a su clave de cifrado. La
+  protección principal son los permisos de archivo, no una barrera frente a procesos
+  ejecutados como tu usuario. Protege también las exportaciones y copias de seguridad.
+- El backend Python solo escucha en loopback y utiliza un token nuevo en cada inicio.
+  Consulta [Security](../../SECURITY.md) para conocer los límites y el estado del canal de avisos.
 
 ## Cómo funciona
 
-```
- Micrófono ──► Electron main ──► Backend Python ──► Reconocimiento de voz (Soniox)
-                    │                  │
-                    │                  ├──► SQLite + biblioteca Markdown
-                    ▼                  └──► Modelos de lenguaje (asistente, notas)
-             Interfaz React
-```
-
-| Capa | Tecnología | Responsabilidad |
-|---|---|---|
-| Aplicación de escritorio | Electron | Ventana, permisos de micrófono, IPC seguro, ciclo de vida del backend |
-| Interfaz | React + TypeScript, Zustand, CodeMirror 6 | Grabación, transcripción, asistente, notas, ajustes |
-| Backend | Python 3.11+, FastAPI, SQLite | Audio en streaming, reconocimiento, biblioteca, asistente, notas |
-
-## Primeros pasos
-
-> SKAZ está en una fase temprana y se dirige a **macOS con Apple Silicon**. Otras
-> plataformas no se han probado.
-
-**Requisitos:** Node.js 20.19+, Python 3.11+, [uv](https://docs.astral.sh/uv/) y una
-clave de API de al menos un proveedor compatible.
-
-```bash
-# 1. Instalar dependencias
-npm install
-uv sync --project backend
-
-# 2. Ejecutar la app en modo desarrollo
-npm run dev
+```text
+Micrófono / audio del sistema / medios → Electron → Python → Soniox
+                                           ↓         ↓
+                                       React UI   Biblioteca local
+                                                     ↕
+                                          Proveedor Assistant / Notes
 ```
 
-En el primer arranque abre **Settings → API keys**, añade tus claves, elige los
-idiomas que hablas y pulsa **Record**.
-
-### Comandos útiles
-
-| Comando | Qué hace |
+| Capa | Tecnología |
 |---|---|
-| `npm run dev` | Inicia la app con recarga en caliente |
-| `npm test` | Tests unitarios del frontend (Vitest) |
-| `npm run typecheck` | Comprobación de tipos de TypeScript |
-| `uv run --project backend pytest` | Tests del backend |
-| `npm run dist:mac` | Genera `SKAZ.app` y un instalador DMG — ver [Packaging](../PACKAGING.md) |
+| Escritorio | Electron |
+| Interfaz | React, TypeScript, CodeMirror |
+| Backend local | Python, FastAPI, SQLite |
 
-## Estado del proyecto
+## Desarrollo y estado del proyecto
 
-SKAZ es un prototipo funcional en desarrollo activo. La transcripción en directo, la
-traducción, el asistente, las notas, los grupos de sesiones y la importación ya
-funcionan en local. Pendiente:
+[Contributing](../../CONTRIBUTING.md) explica la configuración, las pruebas y los PR;
+[Packaging](../PACKAGING.md), la creación de instaladores. El historial de cambios estará en
+[GitHub Releases](https://github.com/4IPE/SKAZ/releases), sin un changelog separado.
+Los arreglos pequeños pueden enviarse directamente; los cambios grandes se discuten primero.
 
-- [ ] Versiones firmadas y notarizadas
-- [ ] Un asistente que recorra la biblioteca paso a paso
-- [ ] Edición manual de hablantes
-- [ ] Manejo robusto de suspensión, cierre y pérdida de red en sesiones largas
+Las prioridades incluyen la firma y notarización de versiones, la recuperación fiable
+de sesiones largas y la validación en situaciones reales. La importación y la búsqueda
+web experimentales no implican disponibilidad para producción; la búsqueda web nativa de Codex está desactivada.
 
-Hasta la primera versión puede haber asperezas y cambios incompatibles.
+[Normas de convivencia](../../CODE_OF_CONDUCT.md) · [Seguridad](../../SECURITY.md) · [Licencia MIT](../../LICENSE)
 
-## El nombre
-
-*Skaz* (сказ) es una palabra rusa para un relato oral, contado con la voz de quien lo
-narra. El repositorio conserva su nombre de trabajo original, `AudioHelper`.
+*Skaz* (сказ) es una palabra rusa que designa una narración oral.
+El nombre de trabajo original era AudioHelper. Copyright © 2026 all0b0y.

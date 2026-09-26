@@ -75,4 +75,4 @@ def test_native_append_replay_other_session_and_restart(
     with TestClient(reopened, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         notes = http.get(f"/sessions/{sid}/notes", headers=AUTH).json()["notes"]
         assert notes == [{**note, "stale": True}]
-        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).content[44:] == packet(0, 0)[20:]
+        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404

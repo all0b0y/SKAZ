@@ -26,6 +26,17 @@ class IncompatibleProfile(ValueError):
 
 async def validate_profile(task: Task, profile: StoredProfile, catalogs: ProviderCatalogs) -> None:
     """Raise :class:`IncompatibleProfile` when the profile cannot serve ``task``."""
+    if task == "embedding":
+        if profile.provider != "openrouter":
+            raise IncompatibleProfile("Embeddings currently require OpenRouter.")
+        if profile.model:
+            try:
+                entry = await catalogs.find("openrouter", profile.model, "embedding")
+            except CatalogUnavailable as error:
+                raise IncompatibleProfile("Embedding catalog unavailable; cannot validate model.") from error
+            if entry is None or "embeddings" not in entry.output_modalities:
+                raise IncompatibleProfile("Choose a model from the OpenRouter embeddings catalog.")
+        return
     if not profile.model:
         return  # unconfigured profile; nothing to check yet
     if task == "asr":

@@ -128,7 +128,7 @@ async def _store(
     start = sequence * 5_000 if start_ms is None else start_ms
     end = start + 5_000 if end_ms is None else end_ms
     response = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": sequence, "start_ms": start, "end_ms": end},
         content=make_wav((end - start) / 1000, frequency=220 + sequence),
         headers={"Content-Type": "audio/wav"},

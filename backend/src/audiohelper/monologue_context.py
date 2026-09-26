@@ -40,8 +40,8 @@ class MonologueContext:
     references: dict[str, mono.Monologue] = field(default_factory=dict)
     truncated: bool = False
 
-    def citations_for(self, answer: str) -> list[Citation]:
-        return citations_from(self.references, answer)
+    def citations_for(self, answer: str, *, labelled: bool = False) -> list[Citation]:
+        return citations_from(self.references, answer, labelled=labelled)
 
 
 def build(monologues: list[mono.Monologue], *, budget_chars: int, offset: int = 0) -> MonologueContext:
@@ -79,21 +79,35 @@ def build(monologues: list[mono.Monologue], *, budget_chars: int, offset: int = 
     )
 
 
-def citations_from(references: dict[str, mono.Monologue], answer: str) -> list[Citation]:
+def citations_from(
+    references: dict[str, mono.Monologue], answer: str, *, labelled: bool = False,
+) -> list[Citation]:
     """Citations for every known label cited in ``answer``, in first-use order.
 
     A label the context never issued is dropped rather than repaired, so a model
     cannot invent a source by naming one. The whole monologue is cited: the model
     was shown it as one unit and said nothing about which part of it it used, and
     narrowing on its behalf would fabricate precision.
+
+    ``labelled`` records on each citation the labels that named it, so an answer
+    that keeps its labels in the text can place each source where it was cited.
     """
     cited: dict[str, Citation] = {}
     for block in LABEL_PATTERN.findall(answer):
         for key in _labels_in_block(block):
             monologue = references.get(key)
-            if monologue is None or monologue.id in cited or len(cited) >= MAX_CITATIONS:
+            if monologue is None:
                 continue
-            cited[monologue.id] = citation_for(monologue, monologue.tokens)
+            if monologue.id in cited:
+                if labelled and key not in cited[monologue.id].labels:
+                    cited[monologue.id].labels.append(key)
+                continue
+            if len(cited) >= MAX_CITATIONS:
+                continue
+            citation = citation_for(monologue, monologue.tokens)
+            if labelled:
+                citation.labels.append(key)
+            cited[monologue.id] = citation
     return list(cited.values())
 
 
@@ -121,7 +135,12 @@ def unresolved(references: dict[str, mono.Monologue], answer: str) -> list[str]:
     resting on nothing, and reading ``[П1]`` as ``[P1]`` would invent the grounding.
     Both are reported so the caller can discard the generated text instead.
     """
-    known = set(references)
+    return unresolved_labels(set(references), answer)
+
+
+def unresolved_labels(known: set[str], answer: str) -> list[str]:
+    """:func:`unresolved` against a bare label set, for callers that issue labels
+    themselves (the Codex transcript tool numbers monologues as it hands them out)."""
     reported: list[str] = []
     for token in CITATION_SHAPED_PATTERN.findall(answer):
         if token in reported:

@@ -1,16 +1,15 @@
-"""Session lifecycle, audio ingestion and stored-audio playback."""
+"""Session lifecycle and transient ASR input. Audio is never archived."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import note_store
+from .. import note_store, transcript_monologues
 from .. import repository as repo
 from ..audio import InvalidAudio
 from ..gateways import ProviderError, ProviderNotConfigured
@@ -19,14 +18,18 @@ from ..live_asr import LiveDraftBusy, LiveDraftConflict, LiveDraftMissing, LiveD
 from ..live_fragments import LiveFragmentConflict, LiveFragmentMissing
 from ..live_scheduler import LiveSchedulerBusy, LiveSchedulerConflict, LiveSchedulerUnavailable
 from ..live_store import LiveConflict
+from ..native_event_pages import EventCursorConflict, EventPageTooLarge, read_event_page
 from ..native_io import disk_call, drain_on_cancel
+from ..native_page_projection import read_projected_page
 from ..schemas import (
     AcceptLiveAsrFragmentRequest,
     AsrPreviewRequest,
     AsrPreviewResponse,
-    AudioManifestChunk,
-    AudioManifestResponse,
     AudioResponse,
+    BufferedAudioResponse,
+    BulkDeleteFailure,
+    BulkDeleteSessionsRequest,
+    BulkDeleteSessionsResponse,
     CreateSessionRequest,
     DeleteResponse,
     EditLiveAsrFragmentRequest,
@@ -41,7 +44,6 @@ from ..schemas import (
     Session,
     SessionDetail,
     SessionsResponse,
-    StoredAudioResponse,
 )
 from ..session_files import FileDeletionBlocked
 from ..window_asr import (
@@ -54,8 +56,62 @@ from ..window_asr import (
 )
 from .deps import RuntimeDep
 
+if TYPE_CHECKING:
+    from ..runtime import Runtime
+
 router = APIRouter(prefix="/sessions")
 logger = logging.getLogger(__name__)
+
+
+@router.get("/{session_id}/live/events")
+async def read_native_events(
+    session_id: str, runtime: RuntimeDep,
+    connection_id: str | None = Query(default=None, min_length=1, max_length=128),
+    after: int | None = Query(default=None, ge=-1),
+    before: int | None = Query(default=None, ge=0),
+    limit: int = Query(default=64, ge=1, le=128),
+    project: bool = False,
+    segment_id: str | None = Query(default=None, min_length=1, max_length=128),
+) -> dict[str, Any]:
+    if after is not None and before is not None:
+        raise HTTPException(status_code=422, detail="Use either after or before, not both.")
+    if connection_id is None and (after is not None or before is not None):
+        raise HTTPException(status_code=422, detail="A cursor requires its connection_id epoch.")
+    if segment_id is not None and (
+        not project or connection_id is not None or after is not None or before is not None
+    ):
+        raise HTTPException(status_code=422, detail="A source locator requires project=true and no cursor.")
+    try:
+        if project:
+            page = await disk_call(
+                read_projected_page,
+                runtime.db,
+                session_id,
+                connection_id=connection_id,
+                after=after,
+                before=before,
+                limit=limit,
+                **({"segment_id": segment_id} if segment_id else {}),
+            )
+        else:
+            page = await disk_call(
+                read_event_page,
+                runtime.db,
+                session_id,
+                connection_id=connection_id,
+                after=after,
+                before=before,
+                limit=limit,
+            )
+        stream = runtime.native_streams.get(session_id)
+        page["transcription"] = stream.state if stream is not None else "inactive"
+        return page
+    except LiveConflict as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except EventCursorConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except EventPageTooLarge as error:
+        raise HTTPException(status_code=413, detail=str(error)) from error
 
 
 @router.get("/{session_id}/live")
@@ -138,13 +194,6 @@ async def _read_audio_body(
     return bytes(body)
 
 
-def _audio_is_available(path: str) -> bool:
-    try:
-        return Path(path).is_file()
-    except OSError:
-        return False
-
-
 @router.get("")
 def list_sessions(runtime: RuntimeDep) -> SessionsResponse:
     return SessionsResponse(sessions=repo.list_sessions(runtime.db))
@@ -187,11 +236,17 @@ def _guard_contextual_writer(runtime: RuntimeDep, session: Session) -> None:
 
 
 @router.get("/{session_id}")
-def read_session(session_id: str, runtime: RuntimeDep) -> SessionDetail:
+def read_session(session_id: str, runtime: RuntimeDep, native_window: bool = False) -> SessionDetail:
     session = _require_session(runtime, session_id)
+    with runtime.db.read() as connection:
+        native = native_window and connection.execute(
+            "SELECT 1 FROM native_recordings WHERE session_id=?", (session_id,),
+        ).fetchone() is not None
+        has_transcript = transcript_monologues.has_transcript(connection, session_id)
     return SessionDetail(
+        has_transcript=has_transcript,
         session=session,
-        segments=repo.list_segments(runtime.db, session_id),
+        segments=[] if native else repo.list_segments(runtime.db, session_id),
         messages=repo.list_messages(runtime.db, session_id),
         notes=repo.latest_note(runtime.db, session_id),
         notes_list=note_store.list_notes(runtime.db, session_id),
@@ -386,14 +441,40 @@ async def patch_session(session_id: str, payload: PatchSessionRequest, runtime: 
     if updated.mode == "contextual_local" and payload.status == "stopped":
         runtime.live_scheduler.source_ended(session_id)
     if payload.status in ("stopped", "paused"):
+        if not (updated.mode == "contextual_local" and payload.status == "stopped"):
+            runtime.ingestion.audio.discard(session_id)
         await disk_call(runtime.session_files.project, session_id)
     return updated
 
 
 @router.delete("/{session_id}")
 async def delete_session(session_id: str, runtime: RuntimeDep) -> DeleteResponse:
+    await _delete_session(session_id, runtime)
+    return DeleteResponse(deleted=True)
+
+
+@router.post("/delete")
+async def delete_sessions(
+    payload: BulkDeleteSessionsRequest, runtime: RuntimeDep,
+) -> BulkDeleteSessionsResponse:
+    """Deletes each id through the single-session path; one failure never stops the rest."""
+    deleted: list[str] = []
+    failed: list[BulkDeleteFailure] = []
+    for session_id in dict.fromkeys(payload.ids):
+        try:
+            await _delete_session(session_id, runtime)
+        except HTTPException as error:
+            failed.append(BulkDeleteFailure(id=session_id, reason=str(error.detail)))
+        else:
+            deleted.append(session_id)
+    return BulkDeleteSessionsResponse(deleted=deleted, failed=failed)
+
+
+async def _delete_session(session_id: str, runtime: Runtime) -> None:
     async def remove() -> None:
+        await runtime.imports.prepare_delete(session_id)
         await runtime.stop_native(session_id)
+        runtime.ingestion.audio.discard(session_id)
         try:
             await disk_call(_require_session, runtime, session_id)
             try:
@@ -411,8 +492,22 @@ async def delete_session(session_id: str, runtime: RuntimeDep) -> DeleteResponse
         finally:
             runtime.native_closing.discard(session_id)
 
-    await drain_on_cancel(remove())
-    return DeleteResponse(deleted=True)
+    async def guarded_remove() -> None:
+        async with runtime.codex.source_change(session_id):
+            await remove()
+
+    # Concurrent callers join the same deletion, including its source revocation.
+    # A later, separate request still gets the usual missing-session response.
+    pending = runtime.session_deletions.get(session_id)
+    if pending is None:
+        pending = asyncio.create_task(guarded_remove())
+        runtime.session_deletions[session_id] = pending
+        pending.add_done_callback(lambda _task: runtime.session_deletions.pop(session_id, None))
+
+    async def join() -> None:
+        await asyncio.shield(pending)
+
+    await drain_on_cancel(join())
 
 
 @router.post("/{session_id}/audio")
@@ -429,7 +524,7 @@ async def upload_audio(
         raise HTTPException(
             status_code=409,
             detail=(
-                "Contextual local sessions accept persistence-only audio and scheduler advance, "
+                "Contextual local sessions accept transient live audio and scheduler advance, "
                 "not legacy ASR upload."
             ),
         )
@@ -453,11 +548,11 @@ async def upload_audio(
     except ProviderError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except OSError as error:
-        raise HTTPException(status_code=500, detail="Audio could not be stored locally.") from error
+        raise HTTPException(status_code=500, detail="Audio input receipt could not be committed.") from error
 
 
-@router.post("/{session_id}/audio/store", status_code=201)
-async def store_audio(
+@router.post("/{session_id}/audio/buffer", status_code=201)
+async def buffer_audio(
     session_id: str,
     request: Request,
     response: Response,
@@ -465,65 +560,17 @@ async def store_audio(
     sequence: int = Query(ge=0),
     start_ms: int = Query(ge=0),
     end_ms: int = Query(ge=0),
-) -> StoredAudioResponse:
+) -> BufferedAudioResponse:
     _require_session(runtime, session_id)
     body = await _read_audio_body(request, runtime, start_ms=start_ms, end_ms=end_ms)
     try:
-        stored = await runtime.ingestion.store(session_id, sequence, start_ms, end_ms, body)
+        stored = await runtime.ingestion.buffer(session_id, sequence, start_ms, end_ms, body)
     except InvalidAudio as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ChunkConflict as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OSError as error:
-        raise HTTPException(status_code=500, detail="Audio could not be stored locally.") from error
+        raise HTTPException(status_code=500, detail="Audio input receipt could not be committed.") from error
     if stored.duplicate:
         response.status_code = 200
     return stored
-
-
-@router.get("/{session_id}/audio")
-async def read_audio_manifest(
-    session_id: str,
-    runtime: RuntimeDep,
-    after_sequence: int | None = Query(default=None, ge=0),
-    limit: int = Query(default=100, ge=1, le=200),
-) -> AudioManifestResponse:
-    _require_session(runtime, session_id)
-    page = repo.chunk_manifest_page(
-        runtime.db, session_id, after_sequence=after_sequence, limit=limit + 1
-    )
-    has_more = len(page) > limit
-    visible = page[:limit]
-    return AudioManifestResponse(
-        chunks=[
-            AudioManifestChunk(
-                sequence=chunk.sequence,
-                start_ms=chunk.start_ms,
-                end_ms=chunk.end_ms,
-                status=chunk.status,
-                available=_audio_is_available(chunk.path),
-                segment_ids=chunk.segment_ids,
-            )
-            for chunk in visible
-        ],
-        next_after_sequence=visible[-1].sequence if has_more else None,
-    )
-
-
-@router.get("/{session_id}/audio/{sequence}")
-async def read_audio(session_id: str, sequence: int, runtime: RuntimeDep) -> Response:
-    _require_session(runtime, session_id)
-    chunk = repo.get_chunk(runtime.db, session_id, sequence)
-    if chunk is None:
-        raise HTTPException(status_code=404, detail=f"No audio stored for sequence {sequence}.")
-    path = Path(chunk.path)
-    if runtime.storage.enabled():
-        return Response(content=await disk_call(runtime.storage.read_audio, session_id, sequence),
-                        media_type="audio/wav")
-    if not path.exists():
-        raise HTTPException(status_code=404, detail=f"Audio file for sequence {sequence} is missing on disk.")
-    return Response(
-        content=path.read_bytes(),
-        media_type="audio/wav",
-        headers={"Content-Disposition": f'inline; filename="{session_id}-{sequence:06d}.wav"'},
-    )

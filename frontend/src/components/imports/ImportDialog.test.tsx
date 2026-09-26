@@ -23,7 +23,7 @@ function defaults(): ImportCapabilities {
     has_api_key: true,
     active_imports: 0,
     max_concurrent_imports: 3,
-    destination: 'Внутреннее хранилище приложения (экспорт в папку не включён)',
+    destination: 'App internal storage (export to a folder is off)',
     markdown_enabled: false,
   };
 }
@@ -79,9 +79,9 @@ it('prefills the title from the file name and sends the read duration', async ()
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
   expect(await screen.findByDisplayValue('lecture')).toBeVisible();
-  expect(await screen.findByText('1 ч 00 мин')).toBeVisible();
+  expect(await screen.findByText('1 h 00 min')).toBeVisible();
 
-  await user.click(screen.getByRole('button', { name: 'Транскрибировать' }));
+  await user.click(screen.getByRole('button', { name: 'Transcribe' }));
   await waitFor(() => expect(created).toHaveBeenCalled());
   expect(requests.filter((r) => r.method === 'POST')).toEqual([{
     method: 'POST', path: '/imports',
@@ -94,23 +94,23 @@ it('prices transcription and translation from the advertised rates', async () =>
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
   expect(await screen.findByText(/≈ \$0\.10/)).toBeVisible();
-  await user.click(screen.getByLabelText('Транскрипция и перевод'));
+  await user.click(screen.getByLabelText('Transcription and translation'));
   expect(await screen.findByText(/≈ \$0\.15/)).toBeVisible();
 });
 
 it('says the estimate is an estimate and where the result lands', async () => {
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByText(/Оценка, а не счёт/)).toBeVisible();
-  expect(screen.getByText(/экспорт в папку не включён/)).toBeVisible();
+  expect(await screen.findByText(/An estimate, not a bill/)).toBeVisible();
+  expect(screen.getByText(/export to a folder is off/)).toBeVisible();
 });
 
 it('falls back to the rate alone when the duration cannot be read', async () => {
   duration = null;
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByText('не удалось прочитать из файла')).toBeVisible();
-  expect(screen.getByText(/точную сумму покажем после обработки/)).toBeVisible();
+  expect(await screen.findByText('could not be read from the file')).toBeVisible();
+  expect(screen.getByText(/the exact amount is shown after processing/)).toBeVisible();
 });
 
 it('requires a second click above the cost threshold and sends nothing on the first', async () => {
@@ -118,13 +118,13 @@ it('requires a second click above the cost threshold and sends nothing on the fi
   duration = 4 * 3_600_000; // four hours ≈ $0.40, over the $0.30 threshold
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  await screen.findByText('4 ч 00 мин');
+  await screen.findByText('4 h 00 min');
   // The price warning is visible before any click; the button still reads normally.
-  expect(await screen.findByRole('alert')).toHaveTextContent(/дороже вашего порога \$0\.30/);
-  await user.click(screen.getByRole('button', { name: 'Транскрибировать' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent(/more than your threshold of \$0\.30/);
+  await user.click(screen.getByRole('button', { name: 'Transcribe' }));
 
   expect(requests.some((r) => r.method === 'POST')).toBe(false);
-  await user.click(screen.getByRole('button', { name: 'Всё равно транскрибировать' }));
+  await user.click(screen.getByRole('button', { name: 'Transcribe anyway' }));
   await waitFor(() => expect(created).toHaveBeenCalled());
 });
 
@@ -133,13 +133,13 @@ it('re-arms the confirmation when the price changes under the user', async () =>
   duration = 4 * 3_600_000;
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  await screen.findByText('4 ч 00 мин');
-  await user.click(screen.getByRole('button', { name: 'Транскрибировать' }));
-  await screen.findByRole('button', { name: 'Всё равно транскрибировать' });
+  await screen.findByText('4 h 00 min');
+  await user.click(screen.getByRole('button', { name: 'Transcribe' }));
+  await screen.findByRole('button', { name: 'Transcribe anyway' });
 
   // Switching to translation makes it more expensive: the confirmation must reset.
-  await user.click(screen.getByLabelText('Транскрипция и перевод'));
-  expect(await screen.findByRole('button', { name: 'Транскрибировать' })).toBeVisible();
+  await user.click(screen.getByLabelText('Transcription and translation'));
+  expect(await screen.findByRole('button', { name: 'Transcribe' })).toBeVisible();
   expect(requests.some((r) => r.method === 'POST')).toBe(false);
 });
 
@@ -147,15 +147,15 @@ it('explains missing cloud consent instead of silently disabling itself', async 
   caps = { ...defaults(), cloud_consent: false };
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByRole('alert')).toHaveTextContent(/отправляет аудиофайл в Soniox/);
-  expect(screen.getByRole('button', { name: 'Транскрибировать' })).toBeDisabled();
+  expect(await screen.findByRole('alert')).toHaveTextContent(/sends the audio file to Soniox/);
+  expect(screen.getByRole('button', { name: 'Transcribe' })).toBeDisabled();
 });
 
 it('explains a missing API key', async () => {
   caps = { ...defaults(), has_api_key: false };
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByRole('alert')).toHaveTextContent(/ключ Soniox/);
+  expect(await screen.findByRole('alert')).toHaveTextContent(/Soniox key/);
 });
 
 it('refuses a file longer than the provider limit', async () => {
@@ -164,16 +164,16 @@ it('refuses a file longer than the provider limit', async () => {
 
   const alerts = await screen.findAllByRole('alert');
   expect(alerts).toHaveLength(1);
-  expect(alerts[0]).toHaveTextContent(/провайдер такие не принимает/);
-  expect(screen.getByRole('button', { name: 'Транскрибировать' })).toBeDisabled();
+  expect(alerts[0]).toHaveTextContent(/the provider does not accept it/);
+  expect(screen.getByRole('button', { name: 'Transcribe' })).toBeDisabled();
 });
 
 it('warns that a fourth import will queue', async () => {
   caps = { ...defaults(), active_imports: 3 };
   render(<Dialog file={FILE} onClose={vi.fn()} onCreated={created} />);
 
-  expect(await screen.findByText(/встанет в очередь/)).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Транскрибировать' })).toBeEnabled();
+  expect(await screen.findByText(/will be queued/)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Transcribe' })).toBeEnabled();
 });
 
 it('shows the real Markdown destination when the projection is on', async () => {

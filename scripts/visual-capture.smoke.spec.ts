@@ -39,10 +39,10 @@ test('capture every surface', async () => {
   // shell. Answer it the way a user would, then carry on capturing.
   const onboarding = page.locator('.onboarding');
   if (await onboarding.count()) {
-    const quick = page.getByRole('button', { name: 'Русский + English' });
+    const quick = page.getByRole('button', { name: 'Russian + English' });
     if (await quick.count()) {
       await quick.click();
-      await page.getByRole('button', { name: /продолжить/i }).click();
+      await page.getByRole('button', { name: /continue/i }).click();
       await page.waitForTimeout(1500);
     }
   }

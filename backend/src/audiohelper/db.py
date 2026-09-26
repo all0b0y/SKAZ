@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     mode        TEXT NOT NULL DEFAULT 'legacy' CHECK (mode IN ('legacy', 'contextual_local'))
 );
 
+-- A recovery index must know the lost-ACK receipt before constructing LiveStore.
+CREATE TABLE IF NOT EXISTS native_transport_receipts (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    sequence INTEGER, start_sample INTEGER, end_sample INTEGER, digest TEXT
+);
+
 CREATE TABLE IF NOT EXISTS chunks (
     session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     sequence    INTEGER NOT NULL,
@@ -86,14 +92,6 @@ CREATE TABLE IF NOT EXISTS notes (
     citations  TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS notes_by_session ON notes(session_id, created_at);
-
-CREATE TABLE IF NOT EXISTS note_history (
-    id         TEXT PRIMARY KEY,
-    note_id    TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    snapshot   TEXT NOT NULL,
-    expires_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS note_history_expiry ON note_history(expires_at);
 
 -- File output is a recoverable projection, never the primary recording store.
 CREATE TABLE IF NOT EXISTS file_projections (
@@ -279,10 +277,7 @@ class Database:
             if "updated_at" not in columns:
                 self._connection.execute("ALTER TABLE notes ADD COLUMN updated_at TEXT")
                 self._connection.execute("UPDATE notes SET updated_at=created_at WHERE updated_at IS NULL")
-            # Deletion is soft: the row waits here for the trash screen instead of
-            # being destroyed, so a mistaken click stays recoverable.
-            if "deleted_at" not in columns:
-                self._connection.execute("ALTER TABLE notes ADD COLUMN deleted_at TEXT")
+            # Legacy history/deleted rows are deliberately left untouched.
             session_columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(sessions)")}
             if "source_revision" not in session_columns:
                 self._connection.execute(
@@ -347,6 +342,35 @@ class Database:
     def read(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
             yield self._connection
+
+    @contextmanager
+    def snapshot_read(self) -> Iterator[sqlite3.Connection]:
+        """Pin a committed WAL revision, then release the application lock.
+
+        The reader must be short-lived: it does not block WAL writers, but holds
+        back checkpoint reclamation. File-backed WAL only; never silently fall
+        back to holding the recording lock for a full corpus copy.
+        """
+        source: sqlite3.Connection | None = None
+        try:
+            with self._lock:
+                if self._connection.in_transaction:
+                    raise ValueError("Cannot snapshot inside a write transaction")
+                filename = self._connection.execute("PRAGMA database_list").fetchone()["file"]
+                if not filename:
+                    raise ValueError("Snapshot requires a file-backed WAL database")
+                source = sqlite3.connect(Path(filename).as_uri() + "?mode=ro", uri=True, timeout=0.1)
+                source.row_factory = sqlite3.Row
+                source.execute("PRAGMA query_only=ON")
+                if source.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                    raise ValueError("Snapshot requires a file-backed WAL database")
+                source.execute("BEGIN")
+                # BEGIN alone is deferred: touch a table to pin before releasing the lock.
+                source.execute("SELECT rowid FROM sessions LIMIT 1").fetchone()
+            yield source
+        finally:
+            if source is not None:
+                source.close()
 
     def close(self) -> None:
         with self._lock:

@@ -34,6 +34,9 @@ export default defineConfig({
     build: {
       outDir: resolve(__dirname, 'dist/renderer'),
       emptyOutDir: true,
+      // electron-vite leaves the renderer unminified by default; the shipped
+      // bundle was 1.66 MB of readable source parsed on every window load.
+      minify: true,
       rollupOptions: {
         input: resolve(__dirname, 'frontend/index.html'),
       },

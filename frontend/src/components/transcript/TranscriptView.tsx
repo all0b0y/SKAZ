@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useStore, type LanguageMark } from '../../state/store';
 import { EmptyState } from '../ui/EmptyState';
@@ -6,24 +6,34 @@ import { Icon } from '../ui/Icon';
 import { formatTimecode } from '../../lib/time';
 import type { Segment } from '../../api/types';
 import { useNativeTranscript } from './useNativeTranscript';
-import { NativeTranscriptStatus } from './NativeTranscriptStatus';
+import { peekTranscript, type ReadingPlace } from './transcriptCache';
 import { NativeMonologues } from './NativeMonologues';
-import {
-  DiagnosticAudioPlayer,
-  type AudioPlaybackPosition,
-  type DiagnosticAudioPlayerHandle,
-} from '../audio/DiagnosticAudioPlayer';
+import type { NativeSnapshot } from '../../api/nativeLive';
+import { useEdgeFade } from '../../hooks/useOverflowEdges';
 
-/** How long an autoscroll suppresses itself after the user scrolls by hand. */
-const MANUAL_SCROLL_QUIET_MS = 4_000;
-/** How long a programmatic scroll is allowed to run before its own 'scroll'
- * events stop being treated as "the user just scrolled". */
-const AUTO_SCROLL_SETTLE_MS = 700;
+const SONIOX_STATUS: Record<NativeSnapshot['transcription'], string> = {
+  connecting: 'Soniox: connecting',
+  streaming: 'Soniox: transcribing',
+  unavailable: 'Soniox: transcription unavailable — audio is still saved locally',
+  inactive: 'Soniox: not active',
+  disabled: 'Audio-only recording — transcription is disabled',
+};
 
-const prefersReducedMotion = (): boolean => (
-  typeof window !== 'undefined'
-  && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-);
+/** Whether a native snapshot holds any text to read (confirmed, tail or translation). */
+const hasWords = (snapshot: NativeSnapshot): boolean =>
+  (snapshot.final_tokens?.length ?? 0) > 0 || (snapshot.final_translation_tokens?.length ?? 0) > 0;
+
+/** Capturing, but no word has arrived yet: one static state, no pulse, no
+ * second screen. The recording may not even exist on the server yet. */
+function WaitingForWords({ snapshot }: { snapshot: NativeSnapshot | null }) {
+  const status = snapshot?.recording_mode === 'audio_only' ? SONIOX_STATUS.disabled
+    : SONIOX_STATUS[snapshot?.transcription ?? 'connecting'];
+  return (
+    <div className="panel__center">
+      <EmptyState icon="transcript" title="Recording — waiting for first words" hint={status} />
+    </div>
+  );
+}
 
 /** The plain-text SKAZ wordmark shown when a session has no transcript yet
  * and nothing is currently recording. Text only — no icon, no image. */
@@ -39,12 +49,44 @@ function TranscriptEmptyLogo() {
   );
 }
 
+/** Delay after which a still-running load earns the animated loader: shorter
+ * opens finish before anything is drawn, so a fast switch never flickers. */
+const LOADER_DELAY_MS = 300;
+
+function useDelayedFlag(active: boolean, delayMs: number): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!active) { setShown(false); return undefined; }
+    const timer = setTimeout(() => setShown(true), delayMs);
+    return () => clearTimeout(timer);
+  }, [active, delayMs]);
+  return active && shown;
+}
+
+/** Opening a saved session: the SKAZ wordmark inside a slowly turning arc.
+ * Reduced motion swaps the rotation for a gentle pulse (CSS only). */
+function TranscriptLoading() {
+  return (
+    <div className="transcript-loading" role="status" aria-label="Loading transcript">
+      <div className="transcript-loading__ring" aria-hidden="true">
+        <svg className="transcript-loading__arc" viewBox="0 0 120 120">
+          <circle className="transcript-loading__track" cx="60" cy="60" r="54" />
+          <circle className="transcript-loading__sweep" cx="60" cy="60" r="54" pathLength="100" />
+        </svg>
+        <span className="transcript-loading__mark">SKAZ</span>
+      </div>
+      <p className="transcript-loading__hint" aria-hidden="true">Opening transcript…</p>
+    </div>
+  );
+}
+
 interface TranscriptViewProps {
   focusSegmentId: string | null;
 }
 
 /**
- * Owns the audio-queue subscription so the transcript does not.
+ * Owns the audio-queue subscription so the transcript does not — used only by
+ * the experimental contextual mode, which has no Soniox stream to report.
  *
  * Capture emits a chunk every 100 ms and the persistence queue reports state
  * several times per chunk, so this text changes ~40x/second. Subscribing to it
@@ -124,38 +166,95 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
   const resumeCompatibility = useStore((s) => s.liveResumeCompatibility);
   const scheduler = useStore((s) => s.liveScheduler);
   const liveError = useStore((s) => s.liveError);
-  const capabilities = useStore((s) => s.liveCapabilities);
   const refreshContextualLive = useStore((s) => s.refreshContextualLive);
-  const resumeContextualProcessing = useStore((s) => s.resumeContextualProcessing);
   const editLiveFragment = useStore((s) => s.editLiveFragment);
   const acceptLiveFragment = useStore((s) => s.acceptLiveFragment);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Top/bottom fade where transcript is scrolled away (PANES-SPEC §5).
+  useEdgeFade(scrollRef);
   const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
-  const playerRef = useRef<DiagnosticAudioPlayerHandle>(null);
   const [fragmentEdit, setFragmentEdit] = useState<FragmentEdit | null>(null);
   const [savingFragmentId, setSavingFragmentId] = useState<string | null>(null);
   const [acceptingFragmentId, setAcceptingFragmentId] = useState<string | null>(null);
-  // Diagnostics are an investigation tool, not daily reading — collapsed by
-  // default so the transcript gets the room.
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [followSpeech, setFollowSpeech] = useState(true);
-  const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
-  const [playbackPosition, setPlaybackPosition] = useState<AudioPlaybackPosition>({
-    timelineMs: 0,
-    playing: false,
+  const [followSpeech, setFollowSpeech] = useState(() => {
+    const cached = peekTranscript(activeSessionId);
+    return cached?.ready ? cached.follow : true;
   });
-  // Distinguishes a user-initiated scroll from the karaoke autoscroll's own
-  // 'scroll' events, and gives the user a quiet window after they scroll by
-  // hand before autoscroll resumes fighting them for control.
-  const manualScrollUntilRef = useRef(0);
-  const autoScrollingRef = useRef(false);
-
-  const onPlaybackPosition = useCallback((position: AudioPlaybackPosition) => {
-    setPlaybackPosition(position);
-  }, []);
+  const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
 
   const contextual = sessions.find((session) => session.id === activeSessionId)?.mode === 'contextual_local';
-  const native = useNativeTranscript(contextual ? null : activeSessionId, ['recording', 'processing'].includes(recorderState));
+  const native = useNativeTranscript(contextual ? null : activeSessionId,
+    ['recording', 'processing'].includes(recorderState), followSpeech,
+    dismissedFocus === focusSegmentId ? null : focusSegmentId);
+  /** Per-part reading places live in the transcript cache so a return restores them. */
+  const fallbackPlaces = useRef(new Map<string, ReadingPlace>());
+  const readingPlaces = () => peekTranscript(activeSessionId)?.places ?? fallbackPlaces.current;
+  const partDirection = useRef<'older' | 'newer' | null>(null);
+  const navigationUntil = useRef(0);
+  const touchY = useRef<number | null>(null);
+  const readingPlace = (container: HTMLElement): ReadingPlace => ({
+    top: container.scrollTop,
+    open: new Set(Array.from(container.querySelectorAll('details[open] [data-native-anchor]'))
+      .map(node => (node as HTMLElement).dataset.nativeAnchor!)),
+  });
+  const restorePlace = (container: HTMLElement, place: ReadingPlace) => {
+    for (const node of container.querySelectorAll<HTMLElement>('details [data-native-anchor]')) {
+      if (place.open.has(node.dataset.nativeAnchor!)) node.closest('details')!.open = true;
+    }
+    container.scrollTop = place.top;
+  };
+  const loadPart = (direction: 'older' | 'newer', beginning = false) => {
+    if (native.busy) return;
+    const container = scrollRef.current;
+    if (container && native.part) readingPlaces().set(native.part.id, readingPlace(container));
+    partDirection.current = direction;
+    navigationUntil.current = Date.now() + 450;
+    setFollowSpeech(false);
+    setDismissedFocus(focusSegmentId);
+    if (beginning) native.startOfTranslation(); else native[direction]();
+  };
+  const scrollAcrossPart = (delta: number) => {
+    const container = scrollRef.current;
+    if (!native.windowed || !container || Date.now() < navigationUntil.current) return;
+    if (delta < 0 && container.scrollTop <= 2 && native.hasOlder) loadPart('older');
+    else if (delta > 0 && container.scrollHeight - container.clientHeight - container.scrollTop <= 2 && native.hasNewer) loadPart('newer');
+  };
+  // Leaving the transcript (Notes tab, another session) remembers where the
+  // reader stood; a return from the cache shows the end while following speech,
+  // otherwise the same part at the same place.
+  const partId = useRef<string | null>(null);
+  partId.current = native.part?.id ?? null;
+  useEffect(() => {
+    const entry = peekTranscript(activeSessionId);
+    if (entry) entry.follow = followSpeech;
+  }, [activeSessionId, followSpeech, native.part?.id]);
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    const id = partId.current;
+    if (container && id) {
+      const place = readingPlaces().get(id);
+      if (followSpeech) container.scrollTop = container.scrollHeight;
+      else if (place) restorePlace(container, place);
+    }
+    return () => {
+      const current = partId.current;
+      const entry = peekTranscript(activeSessionId);
+      if (container && current && entry?.parts.some(part => part.id === current)) {
+        entry.places.set(current, readingPlace(container));
+      }
+    };
+    // Mount/unmount only: part navigation restores places below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId]);
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !native.part || !partDirection.current) return;
+    const position = readingPlaces().get(native.part.id);
+    if (position) restorePlace(container, position);
+    else container.scrollTop = partDirection.current === 'older'
+      ? Math.max(0, container.scrollHeight - container.clientHeight - 48) : 48;
+    partDirection.current = null;
+  }, [native.part?.id]);
   // Memoised: a fresh array on every render would defeat NativeMonologues'
   // own projection memo, so unrelated re-renders would re-project the
   // transcript even when no word changed.
@@ -166,55 +265,15 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
   );
   const cleanNative = native.snapshot?.final_tokens !== undefined || native.snapshot?.recording_mode === 'translation';
   const hasDraftText = fragments.length === 0 && Boolean(draft?.text.trim());
-  const sourceTrusted = sourceIntegrity?.trusted ?? true;
   const live = recorderState === 'recording';
-  const contextualRecoveryNeeded = Boolean(
-    liveError || scheduler?.recovery_required || scheduler?.status === 'stalled',
-  );
-
-  // DiagnosticAudioPlayer reports timelineMs on the same recording timeline
-  // as Segment.start_ms/end_ms (see ChunkPlaybackController), whether it is
-  // playing one chunk, a segment-with-context, or the full recording — so a
-  // direct range comparison is exact, not an approximation across
-  // mismatched clocks. Only lit while audio is actually sounding.
-  const activeSegmentId = useMemo(() => {
-    if (!playbackPosition.playing) return null;
-    const ms = playbackPosition.timelineMs;
-    return segments.find((segment) => ms >= segment.start_ms && ms < segment.end_ms)?.id ?? null;
-  }, [playbackPosition, segments]);
-
-  // Track manual scrolling on the transcript pane so karaoke autoscroll
-  // backs off instead of fighting the reader. Our own programmatic scrolls
-  // are excluded via autoScrollingRef so they don't arm this guard.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return undefined;
-    const onScroll = () => {
-      if (autoScrollingRef.current) return;
-      manualScrollUntilRef.current = Date.now() + MANUAL_SCROLL_QUIET_MS;
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
-
-  // Karaoke autoscroll: bring the sounding segment into view, but only when
-  // it is not already visible and the reader has not just scrolled by hand.
-  useEffect(() => {
-    if (!activeSegmentId) return undefined;
-    if (Date.now() < manualScrollUntilRef.current) return undefined;
-    const row = rowRefs.current.get(activeSegmentId);
-    const container = scrollRef.current;
-    if (!row || !container) return undefined;
-    const rowRect = row.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
-    const alreadyVisible = rowRect.top >= containerRect.top && rowRect.bottom <= containerRect.bottom;
-    if (alreadyVisible) return undefined;
-    autoScrollingRef.current = true;
-    row.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
-    const settle = setTimeout(() => { autoScrollingRef.current = false; }, AUTO_SCROLL_SETTLE_MS);
-    return () => clearTimeout(settle);
-  }, [activeSegmentId]);
-
+  // Opening a saved session: the detail read or the first native page is still in
+  // flight. During capture the transcript is being written, not opened.
+  const capturing = ['recording', 'paused', 'processing'].includes(recorderState);
+  // Capture never shows the opening loader: the static waiting state covers it,
+  // so starting a recording cannot flicker loader → logo → text.
+  const opening = capturing && !contextual ? false
+    : loading || (!capturing && !contextual && native.initializing);
+  const showLoader = useDelayedFlag(opening, LOADER_DELAY_MS);
   useEffect(() => {
     if (!activeSessionId || !contextual) return undefined;
     let cancelled = false;
@@ -244,8 +303,17 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
     }
   }, [segments.length, live, cleanNative]);
 
-  useEffect(() => { setFollowSpeech(true); }, [activeSessionId]);
+  // A new session starts following speech; the mount keeps the cached choice.
+  const followSession = useRef(activeSessionId);
+  useEffect(() => {
+    if (followSession.current === activeSessionId) return;
+    followSession.current = activeSessionId;
+    setFollowSpeech(true);
+  }, [activeSessionId]);
   useEffect(() => { if (focusSegmentId) setFollowSpeech(false); }, [focusSegmentId]);
+  // A finished jump forgets that it was dismissed, so citing the same fragment
+  // again is a new jump rather than one already waved away.
+  useEffect(() => { if (!focusSegmentId) setDismissedFocus(null); }, [focusSegmentId]);
   useEffect(() => {
     if (cleanNative && live && followSpeech && (!focusSegmentId || dismissedFocus === focusSegmentId) && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -267,65 +335,54 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
 
   return (
     <div className={clsx('transcript-layout', cleanNative && 'transcript-layout--native')}>
-      {!cleanNative && activeSessionId && (
-        <div className="transcript__diagnostics">
-          <button
-            type="button"
-            className="transcript__diag-toggle"
-            onClick={() => setDiagnosticsOpen((open) => !open)}
-            aria-expanded={diagnosticsOpen}
-            aria-controls="diagnostic-audio-panel"
-            title={diagnosticsOpen ? 'Hide diagnostic audio' : 'Show diagnostic audio'}
-          >
-            <Icon name="sliders" size={15} />
-            Diagnostic audio
-          </button>
-          {/* Kept mounted while hidden: the player owns playback state and the
-              karaoke position feed, so unmounting it would stop audio and drop
-              the highlight the moment the panel is collapsed. */}
-          <div id="diagnostic-audio-panel" hidden={!diagnosticsOpen}>
-            {cleanNative && <NativeTranscriptStatus snapshot={native.snapshot} error={null} finalizing={recorderState === 'processing'} onRetry={native.retry} />}
-            <DiagnosticAudioPlayer
-              ref={playerRef}
-              sessionId={activeSessionId}
-              segments={segments}
-              recording={live}
-              onPlaybackPosition={onPlaybackPosition}
-            />
-          </div>
-        </div>
-      )}
-      {cleanNative && <div className="native-transcript-notice">
-        {native.error ? <div role="alert"><span>{native.error}</span>{' '}
-          <button type="button" onClick={native.retry}>Обновить текст</button>
-        </div> : native.snapshot?.recording_mode === 'audio_only' ? null : native.snapshot?.transcription === 'unavailable' ? (
-          <span role="alert">Сбой распознавания. Soniox недоступен.</span>
-        ) : native.snapshot?.gaps.length ? (
-          <span role="status">В транскрипции есть пропуски.</span>
-        ) : recorderState === 'processing' ? <span role="status">Завершаем обработку…</span> : null}
+      {(cleanNative || native.error) && <div className="native-transcript-notice">
+        {native.error ? <span role="alert">{native.error}{' '}
+          <button type="button" className="btn btn--ghost" onClick={native.retry}>Retry</button></span>
+          : native.snapshot?.recording_mode === 'audio_only' ? null : native.snapshot?.transcription === 'unavailable' ? (
+          <span role="alert">Recognition failed. Soniox is unavailable.</span>
+        ) : recorderState === 'processing' ? <span role="status">Finishing processing…</span> : null}
       </div>}
-      <div className="transcript" ref={scrollRef} onScroll={(event) => {
+      <div className="transcript" ref={scrollRef} tabIndex={cleanNative ? 0 : undefined}
+        onWheel={event => scrollAcrossPart(event.deltaY)}
+        onKeyDown={event => {
+          if (event.target !== event.currentTarget) return;
+          if (['ArrowUp', 'PageUp'].includes(event.key)) scrollAcrossPart(-1);
+          else if (['ArrowDown', 'PageDown'].includes(event.key)) scrollAcrossPart(1);
+        }}
+        onTouchStart={event => { touchY.current = event.touches[0]?.clientY ?? null; }}
+        onTouchMove={event => {
+          const next = event.touches[0]?.clientY;
+          if (touchY.current !== null && next !== undefined) scrollAcrossPart(touchY.current - next);
+          touchY.current = next ?? null;
+        }} onScroll={(event) => {
         if (!cleanNative) return;
         const element = event.currentTarget;
-        setFollowSpeech(element.scrollHeight - element.clientHeight - element.scrollTop < 48);
+        if (Date.now() < navigationUntil.current) return;
+        setFollowSpeech(!native.hasNewer && element.scrollHeight - element.clientHeight - element.scrollTop < 48);
       }}>
-        {!cleanNative && <NativeTranscriptStatus snapshot={native.snapshot} error={native.error} finalizing={recorderState === 'processing'} onRetry={native.retry} />}
+        {native.part?.translationStartPart !== null && native.part?.translationStartPart !== undefined &&
+          <button type="button" className="native-part-source" onClick={() => loadPart('older', true)}>Beginning and translation above</button>}
+        {native.part && native.snapshot && <p className="native-part-time" aria-label="Time of the expanded part">
+          {formatTimecode(native.part.start / native.snapshot.sample_rate * 1000)} — {formatTimecode(native.part.end / native.snapshot.sample_rate * 1000)}
+        </p>}
 
-        {loading ? (
-          <div className="panel__center"><p className="loading">Loading transcript…</p></div>
+        {opening ? (
+          showLoader ? <div className="panel__center"><TranscriptLoading /></div> : null
         ) : error ? (
           <div className="panel__center">
             <EmptyState icon="warning" title="Couldn’t load the transcript" hint={error} />
           </div>
-        ) : cleanNative && native.snapshot ? (
-          <NativeMonologues key={native.snapshot.session_id} snapshot={native.snapshot} segments={segments} focusSegmentId={focusSegmentId} />
+        ) : cleanNative && native.snapshot && hasWords(native.snapshot) ? (
+          <NativeMonologues key={`${native.snapshot.session_id}:${native.part?.id ?? 'live'}`} snapshot={native.snapshot} segments={segments} focusSegmentId={dismissedFocus === focusSegmentId ? null : focusSegmentId} />
+        ) : !contextual && capturing && segments.length === 0 ? (
+          <WaitingForWords snapshot={native.snapshot} />
         ) : segments.length === 0 && (!contextual || (!hasDraftText && fragments.length === 0)) ? (
           <div className="panel__center">
-            {live ? (
+            {contextual && live ? (
               <EmptyState
                 icon="transcript"
-                title={native.snapshot ? "No confirmed transcript yet" : "Listening…"}
-                hint={native.snapshot ? "Recording and transcription have separate statuses above." : "Words appear here moments after they are spoken."}
+                title="Listening…"
+                hint="Words appear here moments after they are spoken."
               />
             ) : (
               <TranscriptEmptyLogo />
@@ -352,34 +409,20 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
                     className={clsx(
                       'transcript__final-fragment',
                       focusSegmentId === item.segment.id && 'segment--focused',
-                      activeSegmentId === item.segment.id && 'segment--playing',
                     )}
                     ref={(element) => {
                       if (element) rowRefs.current.set(item.segment.id, element);
                       else rowRefs.current.delete(item.segment.id);
                     }}
                   >
-                    <button
-                      type="button"
-                      className="transcript__source-link tabular"
-                      onClick={() => { void playerRef.current?.playSegment(item.segment.id, false); }}
-                      aria-label={`Play source at ${formatTimecode(item.segment.start_ms)}`}
-                    >
+                    <span className="transcript__source-link tabular">
                       {formatTimecode(item.segment.start_ms)}
-                    </button>{' '}
+                    </span>{' '}
                     {item.segment.text}{' '}
                   </span>
                 ))}
                 {hasDraftText && draft && draft.text_scope !== 'whole_window' && (
                   <span className="transcript__draft-inline" aria-label="Revisable transcript draft">
-                    <button
-                      type="button"
-                      className="transcript__source-link"
-                      disabled={!sourceTrusted}
-                      onClick={() => { void playerRef.current?.playSequences(draft.sources.map((source) => source.sequence)); }}
-                    >
-                      Draft sources
-                    </button>{' '}
                     <span className="transcript__draft-text">{draft.text}</span>
                   </span>
                 )}
@@ -397,7 +440,6 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
                 className={clsx(
                   'segment',
                   focusSegmentId === item.segment.id && 'segment--focused',
-                  activeSegmentId === item.segment.id && 'segment--playing',
                 )}
                 ref={(el) => {
                   if (el) rowRefs.current.set(item.segment.id, el);
@@ -405,21 +447,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
                 }}
               >
                 <div className="segment__audio-actions">
-                  <button
-                    type="button"
-                    className="segment__time tabular"
-                    onClick={() => { void playerRef.current?.playSegment(item.segment.id, false); }}
-                    aria-label={`Play source chunk at ${formatTimecode(item.segment.start_ms)}`}
-                  >
-                    {formatTimecode(item.segment.start_ms)}
-                  </button>
-                  <button
-                    type="button"
-                    className="segment__context"
-                    onClick={() => { void playerRef.current?.playSegment(item.segment.id, true); }}
-                  >
-                    With context
-                  </button>
+                  <span className="segment__time tabular">{formatTimecode(item.segment.start_ms)}</span>
                 </div>
                 <p className="segment__text">
                   {item.segment.text}
@@ -544,9 +572,6 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
           <div className="transcript__conflict" role="alert">
             <strong>Draft conflicts with the stable prefix; it is shown separately.</strong>
             <p className="transcript__draft-text">{draft.text}</p>
-            <button type="button" disabled={!sourceTrusted} onClick={() => { void playerRef.current?.playSequences(draft.sources.map((source) => source.sequence)); }}>
-              Play draft sources
-            </button>
           </div>
         )}
         {contextual && sourceIntegrity && !sourceIntegrity.trusted && (
@@ -586,24 +611,19 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
             Revisable draft text is excluded from Q&A, citations, and notes until it becomes final.
           </p>
         )}
-        {contextual && (recorderState !== 'recording' || contextualRecoveryNeeded) && (
-          <button
-            type="button"
-            className="transcript__resume"
-            disabled={!capabilities?.capable || resumeCompatibility?.can_resume === false}
-            onClick={() => { void resumeContextualProcessing(); }}
-          >
-            Resume contextual processing
-          </button>
-        )}
         {contextual && liveError && <p className="transcript__error" role="alert">{liveError}</p>}
-        {live && !cleanNative && <LiveQueueStatus />}
+        {live && contextual && <LiveQueueStatus />}
       </div>
       {cleanNative && !followSpeech && <button type="button" className="transcript__follow" onClick={() => {
+        if (native.windowed) native.latest();
         setDismissedFocus(focusSegmentId);
         setFollowSpeech(true);
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }}>К текущей речи</button>}
+      }}>
+        {live && <span className="transcript__follow-live" aria-hidden="true" />}
+        <Icon name="arrow-down" size={15} />
+        <span>Jump to live</span>
+      </button>}
     </div>
   );
 }

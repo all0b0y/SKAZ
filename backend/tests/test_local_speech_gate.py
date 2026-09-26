@@ -288,7 +288,7 @@ async def test_disabled_gate_preserves_existing_decoder_path(
     assert kwargs["language"] is None
 
 
-async def test_gated_silence_keeps_original_audio_playable_without_segment(
+async def test_gated_silence_has_no_segment_or_audio_playback(
     config: AppConfig,
     outbound: FakeHttp,
     monkeypatch: pytest.MonkeyPatch,
@@ -326,6 +326,5 @@ async def test_gated_silence_keeps_original_audio_playable_without_segment(
     assert uploaded.status_code == 200, uploaded.text
     assert uploaded.json()["segments"] == []
     assert detail.json()["segments"] == []
-    assert playback.status_code == 200
-    assert playback.content == body
+    assert playback.status_code == 404
     assert decoder.calls == []

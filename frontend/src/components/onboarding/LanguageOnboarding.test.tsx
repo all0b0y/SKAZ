@@ -35,20 +35,20 @@ beforeEach(() => {
 describe('LanguageOnboarding', () => {
   it('cannot be confirmed until at least one language is chosen', async () => {
     render(<LanguageOnboarding />);
-    expect(screen.getByRole('button', { name: /продолжить/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled();
   });
 
   it('offers no dismiss control, because an empty list blocks recording', () => {
     render(<LanguageOnboarding />);
-    expect(screen.queryByRole('button', { name: /закрыть|позже|отмена|close/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /close|later|cancel|закрыть/i })).toBeNull();
   });
 
   it('saves exactly the languages the user ticked', async () => {
     const user = userEvent.setup();
     render(<LanguageOnboarding />);
 
-    await user.click(screen.getByRole('checkbox', { name: /немецкий/i }));
-    await user.click(screen.getByRole('button', { name: /продолжить/i }));
+    await user.click(screen.getByRole('checkbox', { name: /german/i }));
+    await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(saveSettings).toHaveBeenCalledWith({ used_languages: ['de'] });
   });
@@ -57,8 +57,8 @@ describe('LanguageOnboarding', () => {
     const user = userEvent.setup();
     render(<LanguageOnboarding />);
 
-    await user.click(screen.getByRole('button', { name: 'Русский + English' }));
-    await user.click(screen.getByRole('button', { name: /продолжить/i }));
+    await user.click(screen.getByRole('button', { name: 'Russian + English' }));
+    await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(saveSettings).toHaveBeenCalledWith({ used_languages: ['ru', 'en'] });
   });
@@ -67,13 +67,13 @@ describe('LanguageOnboarding', () => {
     useStore.setState({ settings: settings({ supported_languages: ['sq', 'af', 'ru'] }) });
     render(<LanguageOnboarding />);
     const shown = screen.getAllByRole('checkbox').map((box) => box.closest('label')!.textContent);
-    expect(shown).toEqual(['Албанский', 'Африкаанс', 'Русский']);
+    expect(shown).toEqual(['Afrikaans', 'Albanian', 'Russian']);
   });
 
   it('marks the quick pick that matches the current selection', async () => {
     const user = userEvent.setup();
     render(<LanguageOnboarding />);
-    const pick = screen.getByRole('button', { name: 'Русский + English' });
+    const pick = screen.getByRole('button', { name: 'Russian + English' });
     expect(pick).toHaveAttribute('aria-pressed', 'false');
     await user.click(pick);
     expect(pick).toHaveAttribute('aria-pressed', 'true');
@@ -83,10 +83,10 @@ describe('LanguageOnboarding', () => {
     const user = userEvent.setup();
     render(<LanguageOnboarding />);
 
-    await user.type(screen.getByRole('searchbox', { name: /поиск языка/i }), 'англ');
+    await user.type(screen.getByRole('searchbox', { name: /search languages/i }), 'engl');
 
-    expect(screen.getByRole('checkbox', { name: /английский/i })).toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: /немецкий/i })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /english/i })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /german/i })).toBeNull();
   });
 
   it('surfaces a save failure instead of closing silently', async () => {
@@ -94,9 +94,40 @@ describe('LanguageOnboarding', () => {
     const user = userEvent.setup();
     render(<LanguageOnboarding />);
 
-    await user.click(screen.getByRole('checkbox', { name: /русский/i }));
-    await user.click(screen.getByRole('button', { name: /продолжить/i }));
+    await user.click(screen.getByRole('checkbox', { name: /russian/i }));
+    await user.click(screen.getByRole('button', { name: /continue/i }));
 
     expect(await screen.findByText(/backend unreachable/i)).toBeInTheDocument();
+  });
+
+  it('takes focus on open and keeps Tab inside the dialog', async () => {
+    const user = userEvent.setup();
+    render(<><button type="button">Behind the dialog</button><LanguageOnboarding /></>);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    for (let i = 0; i < 12; i++) {
+      await user.tab();
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    }
+    await user.tab({ shift: true });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it('finds a language by its English name or its own name', async () => {
+    const user = userEvent.setup();
+    render(<LanguageOnboarding />);
+    const search = screen.getByRole('searchbox', { name: /search languages/i });
+    await user.type(search, 'german');
+    expect(screen.getByRole('checkbox', { name: /german/i })).toBeInTheDocument();
+    await user.clear(search);
+    await user.type(search, 'français');
+    expect(screen.getByRole('checkbox', { name: /french/i })).toBeInTheDocument();
+  });
+
+  it('says so when nothing matches', async () => {
+    const user = userEvent.setup();
+    render(<LanguageOnboarding />);
+    await user.type(screen.getByRole('searchbox', { name: /search languages/i }), 'zzzz');
+    expect(screen.getByText('Nothing found.')).toBeVisible();
   });
 });

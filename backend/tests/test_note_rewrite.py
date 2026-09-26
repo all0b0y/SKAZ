@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
 
 from tests.conftest import FakeHttp
-from tests.test_notes_api import CATALOG, add_at, add_contiguous, session, stub_notes  # noqa: F401
+from tests.test_notes_api import CATALOG, add_at, add_contiguous, stub_notes
+from tests.test_notes_api import session as session
 
 #: The point the tests rewrite, and the speech it rests on. They share their words
 #: on purpose: a passage is sourced by the same text match the panel uses to decide
@@ -40,7 +42,7 @@ async def _far(
 
 async def _note_over_two_monologues(
     client: httpx.AsyncClient, outbound: FakeHttp, session: str,
-) -> dict:
+) -> dict[str, Any]:
     """A session of two separated monologues, with a note carrying a point on each."""
     await add_contiguous(client, outbound, session, 0, FIRST_SPEECH)
     await _far(client, outbound, session, 1, SECOND_SPEECH)

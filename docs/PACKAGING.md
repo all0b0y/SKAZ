@@ -10,17 +10,23 @@ only ever sees the `.dmg`.
 npm run dist:mac
 ```
 
-Result: `release/SKAZ-<version>-arm64.dmg` — the familiar installer window where
-the app is dragged onto `Applications`.
+Result:
 
-`dist:mac` chains four steps, each runnable on its own:
+- `release/SKAZ-<version>-arm64.dmg` — the familiar installer window where the app
+  is dragged onto `Applications`.
+- `release/SKAZ-<version>-arm64.pkg` — a classic macOS Installer package that
+  installs `SKAZ.app` into `/Applications`. It is unsigned (no Developer ID
+  Installer certificate here), so Gatekeeper warns on other Macs.
+
+`dist:mac` chains five steps, each runnable on its own:
 
 | Step | Command | Produces |
 |---|---|---|
 | 1. Icon | `npm run icon` | `build/icon.icns`, `build/icon.png` |
-| 2. Backend | `npm run build:backend` | `backend/dist/skaz-backend/` |
-| 3. Renderer/main/preload | `npm run build` | `dist/` |
-| 4. Bundle + DMG | `electron-builder --mac dmg` | `release/*.dmg` |
+| 2. Media tools | `npm run build:media` | `backend/.runtime/media-tools/` |
+| 3. Backend | `npm run build:backend` | `backend/dist/skaz-backend/` |
+| 4. Renderer/main/preload | `npm run build` | `dist/` |
+| 5. Bundle + DMG + PKG | `electron-builder --mac --config electron-builder.yml` | `release/*.dmg`, `release/*.pkg` |
 
 Prerequisites: `npm install`, a populated `backend/.venv` (with `pyinstaller`
 installed into it: `uv pip install --python backend/.venv/bin/python pyinstaller`),
@@ -84,8 +90,9 @@ The only identity on this machine is an **Apple Development** certificate, which
 not a Developer ID and cannot be used for distribution. Consequences:
 
 - On this Mac the app runs.
-- On another Mac Gatekeeper will refuse the first launch; the user has to
-  right-click → Open, or run `xattr -dr com.apple.quarantine /Applications/SKAZ.app`.
+- On another Mac Gatekeeper may block the first launch. Check the origin and the
+  release signing notes before using macOS's app-specific Open Anyway option, if
+  available. Do not disable system-wide protection or blindly remove quarantine.
 
 Proper distribution needs a **Developer ID Application** certificate plus
 notarization (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` in the
@@ -107,9 +114,9 @@ half-written vault.
 
 This works identically in the repo and inside the signed bundle, and keys survive
 restarts with no certificate involved. The trade-off, stated plainly: the key sits
-next to the ciphertext, so the real boundary is file permissions. It protects keys
-in backups, synced folders and stray copies — **not** against another process
-already running as your user.
+next to the ciphertext, so the real boundary is file permissions. It does **not**
+protect against another process running as your user, or a backup or synced copy
+containing both files. Protect the data directory and its backups accordingly.
 
 ## Local ASR is deliberately not shipped
 

@@ -6,6 +6,7 @@ import type { PersistedAudioAck } from './persistenceQueue';
 /** Renderer-side sample clock. Raw bytes remain in PersistenceQueue until a validated transport receipt. */
 export class NativeAudioWriter {
   private rate: number | null = null;
+  transcriptionAvailable = false;
   private audioRetained = true;
   private sequence = 0;
   private samples = 0;
@@ -51,6 +52,7 @@ export class NativeAudioWriter {
         throw new Error('Native recording clock differs from retained audio; no bytes were discarded.');
       }
       this.recovered = lostAck ? this.sequence : null;
+      this.transcriptionAvailable = opened.transcription === 'connecting';
       this.audioRetained = opened.audio_retained !== false;
       this.clockInitialized = true;
       this.connected = true;

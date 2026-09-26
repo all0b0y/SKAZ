@@ -1,7 +1,22 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { Button } from '../ui/Button';
-import { languageName } from '../settings/UsedLanguages';
+import { byShownName, languageName } from '../settings/UsedLanguages';
+import { useModalFocus } from '../../hooks/useModalFocus';
+
+const russianNames = new Intl.DisplayNames(['ru'], { type: 'language' });
+
+/** Every name a person may type for a language: English (shown), the language's
+ *  own name and Russian ("german", "deutsch", "немецкий"), plus the code. */
+function searchNames(code: string): string[] {
+  let own = '';
+  try {
+    own = new Intl.DisplayNames([code], { type: 'language' }).of(code) ?? '';
+  } catch {
+    // An unknown locale tag simply has no native name.
+  }
+  return [languageName(code), russianNames.of(code) ?? '', own, code].map((n) => n.toLocaleLowerCase());
+}
 
 // First-run language gate.
 //
@@ -11,9 +26,9 @@ import { languageName } from '../settings/UsedLanguages';
 // deliberately not dismissable: any exit path would lead back to that failure.
 
 const QUICK_PICKS: { label: string; codes: string[] }[] = [
-  { label: 'Русский', codes: ['ru'] },
+  { label: 'Russian', codes: ['ru'] },
   { label: 'English', codes: ['en'] },
-  { label: 'Русский + English', codes: ['ru', 'en'] },
+  { label: 'Russian + English', codes: ['ru', 'en'] },
 ];
 
 export function LanguageOnboarding() {
@@ -24,20 +39,17 @@ export function LanguageOnboarding() {
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef);
 
   const supported = settings?.supported_languages ?? [];
   // Sorted by the name actually shown, not by ISO code: a list that reads
   // "Африкаанс, Албанский, Баскский" looks unsorted to the person reading it.
-  const sorted = useMemo(
-    () => [...supported].sort((a, b) => languageName(a).localeCompare(languageName(b), 'ru')),
-    [supported],
-  );
+  const sorted = useMemo(() => byShownName(supported), [supported]);
   const matches = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase('ru');
+    const needle = query.trim().toLocaleLowerCase();
     if (!needle) return sorted;
-    return sorted.filter(
-      (code) => languageName(code).toLocaleLowerCase('ru').includes(needle) || code.includes(needle),
-    );
+    return sorted.filter((code) => searchNames(code).some((name) => name.includes(needle)));
   }, [sorted, query]);
 
   const samePick = (codes: string[]): boolean =>
@@ -63,12 +75,12 @@ export function LanguageOnboarding() {
   };
 
   return (
-    <div className="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <div ref={dialogRef} className="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title" tabIndex={-1}>
       <div className="onboarding__card">
-        <h2 id="onboarding-title">На каких языках вы говорите?</h2>
+        <h2 id="onboarding-title">Which languages do you speak?</h2>
         <p className="onboarding__lead">
-          Выберите языки, которые будут звучать в ваших записях. Распознавание ограничится ими.
-          Это можно изменить позже в настройках.
+          Choose the languages spoken in your recordings. Recognition is limited to them.
+          You can change this later in Settings.
         </p>
 
         <div className="onboarding__quick">
@@ -90,15 +102,15 @@ export function LanguageOnboarding() {
         <input
           type="search"
           className="onboarding__search"
-          placeholder="Поиск языка"
-          aria-label="Поиск языка"
+          placeholder="Search languages"
+          aria-label="Search languages"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
 
-        <div className="onboarding__list" role="group" aria-label="Используемые языки">
+        <div className="onboarding__list" role="group" aria-label="Languages in use">
           {matches.length === 0 ? (
-            <p className="profile__note">Ничего не найдено.</p>
+            <p className="profile__note">Nothing found.</p>
           ) : (
             matches.map((code) => (
               <label key={code} className="onboarding__option">
@@ -118,10 +130,10 @@ export function LanguageOnboarding() {
 
         <footer className="onboarding__foot">
           <span className="field__hint">
-            {selected.length ? `Выбрано: ${selected.map(languageName).join(', ')}` : 'Выберите хотя бы один язык.'}
+            {selected.length ? `Selected: ${selected.map(languageName).join(', ')}` : 'Choose at least one language.'}
           </span>
           <Button variant="primary" onClick={() => void confirm()} disabled={saving || selected.length === 0}>
-            {saving ? 'Сохранение…' : 'Продолжить'}
+            {saving ? 'Saving…' : 'Continue'}
           </Button>
         </footer>
       </div>

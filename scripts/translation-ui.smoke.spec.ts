@@ -22,6 +22,7 @@ test('translation is primary and original is collapsed in the built Electron ren
   try {
     const page = await app.firstWindow();
     await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await page.evaluate(() => window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
     const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
     const original = { id: 'o1', connection_id: 'c1', segment_id: 's1', speaker_number: 1,
       text: 'We will discuss the results tomorrow.', start_sample: 0, end_sample: 16000 };
@@ -50,15 +51,15 @@ test('translation is primary and original is collapsed in the built Electron ren
       });
     }, { settings, snapshot });
     await page.reload();
-    const list = page.getByRole('list', { name: 'Транскрипция' });
+    const list = page.getByRole('list', { name: 'Transcript' });
     await expect(list.getByText('Мы обсудим результаты завтра.', { exact: true })).toBeVisible();
     await expect(list.getByText(original.text, { exact: true })).not.toBeVisible();
     await page.screenshot({ path: path.join(root, '.runtime/soniox-migration/translation-primary.png') });
-    await list.getByText('Показать оригинал', { exact: true }).click();
+    await list.getByText('Show original', { exact: true }).click();
     await expect(list.getByText(original.text, { exact: true })).toBeVisible();
     await page.screenshot({ path: path.join(root, '.runtime/soniox-migration/translation-original.png') });
     await page.reload();
-    await expect(page.getByRole('list', { name: 'Транскрипция' }).getByText(original.text, { exact: true })).not.toBeVisible();
+    await expect(page.getByRole('list', { name: 'Transcription' }).getByText(original.text, { exact: true })).not.toBeVisible();
   } finally {
     await app.close();
     await fs.rm(directory, { recursive: true, force: true });

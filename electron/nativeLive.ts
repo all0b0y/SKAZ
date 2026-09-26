@@ -69,6 +69,12 @@ class NativeConnection {
         this.fail(value.code);
         return;
       }
+      if (value.type === 'transcription.failed') {
+        // ASR has stopped, but the local stream must still drain and acknowledge
+        // Stop. Terminating it here would turn a warning into a sticky save error.
+        this.onFailure({ sessionId: this.sessionId, code: 'transcription_failed' });
+        return;
+      }
       const pending = this.waiter;
       if (!pending || value.type !== pending.type) throw failure();
       clearTimeout(pending.timer);

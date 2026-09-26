@@ -273,7 +273,10 @@ def _token(value: Any) -> AsyncToken:
         or not 0 <= confidence <= 1
     ):
         raise SonioxAsyncProtocolError
-    status = payload.get("translation_status", "none")
+    status: Any = payload.get("translation_status")
+    # Soniox emits explicit null for untranslated async tokens as well as omission.
+    if status is None:
+        status = "none"
     if status not in ("none", "original", "translation"):
         raise SonioxAsyncProtocolError
     return AsyncToken(

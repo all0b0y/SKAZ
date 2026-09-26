@@ -71,8 +71,6 @@ beforeEach(() => {
       dbfs: FLOOR_DBFS,
       peakDbfs: FLOOR_DBFS,
       clipping: false,
-      sustainedLow: false,
-      vad: 'unavailable',
     },
     queue: {
       pending: 0,
@@ -110,10 +108,10 @@ beforeEach(() => {
     pendingSessionStatusSessionId: null,
     asking: false,
     askError: null,
-    notesGenerating: false,
+    noteGenerations: {},
     notesError: null,
   });
-  Object.assign(window.audiohelper, { storeAudio: vi.fn(async (_sessionId: string, meta: { sequence: number; startMs: number; endMs: number }) => ({
+  Object.assign(window.audiohelper, { bufferAudio: vi.fn(async (_sessionId: string, meta: { sequence: number; startMs: number; endMs: number }) => ({
     ok: true,
     status: 201,
     data: {
@@ -129,7 +127,7 @@ beforeEach(() => {
     ok: true,
     status: 200,
     data: { duplicate: true, segments: [] },
-  })), fetchAudio: vi.fn(async () => ({ ok: true, status: 200, data: new ArrayBuffer(4) })) });
+  })) });
 });
 
 describe('async session isolation', () => {
@@ -213,207 +211,8 @@ describe('async session isolation', () => {
     await vi.waitFor(() => expect(useStore.getState().liveError).toMatch(/scheduler status temporarily unavailable/i));
   });
 
-  it('explicit resume retries a notifier that previously failed', async () => {
-    const contextSession = { ...session('resume-after-failure'), mode: 'contextual_local' as const };
-    let attempts = 0;
-    bridge.request = vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
-      if (req.method === 'GET' && req.path === '/sessions/resume-after-failure/audio') {
-        return {
-          ok: true,
-          status: 200,
-          data: {
-            chunks: [{ sequence: 7, start_ms: 0, end_ms: 1_000, status: 'pending', available: true, segment_ids: [], source_kind: 'original_captured_wav' }],
-            next_after_sequence: null,
-          },
-        };
-      }
-      if (req.method === 'POST' && req.path === '/sessions/resume-after-failure/asr/live/advance') {
-        attempts += 1;
-        if (attempts === 1) return { ok: false, status: 502, detail: 'decoder failed once' };
-        return {
-          ok: true,
-          status: 202,
-          data: {
-            accepted: true,
-            scheduler: {
-              capable: true, accepted_count: 1, status: 'scheduled', captured_target_sequence: 7,
-              processed_window: null, stable_frontier_ms: 0, lag_ms: 1_000, block_reason: null,
-            },
-          },
-        };
-      }
-      throw new Error(`unexpected ${req.method} ${req.path}`);
-    });
-    useStore.setState({
-      sessions: [contextSession],
-      activeSessionId: contextSession.id,
-      liveCapabilities: {
-        mode: 'contextual_local', capable: true,
-        requirements: { local_profile_selected: true, contextual_local_enabled: true, live_finality_enabled: true, local_speech_gate_enabled: true },
-        detail: 'available',
-      },
-    });
-
-    await useStore.getState().resumeContextualProcessing();
-    await vi.waitFor(() => expect(useStore.getState().liveError).toMatch(/decoder failed once/i));
-    await useStore.getState().resumeContextualProcessing();
-
-    await vi.waitFor(() => expect(attempts).toBe(2));
-    expect(useStore.getState().liveError).toBeNull();
-  });
-
-  it('keeps manifest failures visible and rejects repeated cursors without advancing', async () => {
-    const contextSession = { ...session('bad-manifest'), mode: 'contextual_local' as const };
-    let manifestAttempt = 0;
-    bridge.request = vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
-      if (req.method === 'GET' && req.path === '/sessions/bad-manifest/audio') {
-        manifestAttempt += 1;
-        if (manifestAttempt === 1) {
-          return { ok: false, status: 503, detail: 'manifest unavailable' };
-        }
-        return {
-          ok: true,
-          status: 200,
-          data: {
-            chunks: [{ sequence: 0, start_ms: 0, end_ms: 1_000, status: 'pending', available: true, segment_ids: [], source_kind: 'original_captured_wav' }],
-            next_after_sequence: 0,
-          },
-        };
-      }
-      throw new Error(`unexpected ${req.method} ${req.path}`);
-    });
-    useStore.setState({
-      sessions: [contextSession], activeSessionId: contextSession.id,
-      liveCapabilities: {
-        mode: 'contextual_local', capable: true,
-        requirements: { local_profile_selected: true, contextual_local_enabled: true, live_finality_enabled: true, local_speech_gate_enabled: true },
-        detail: 'available',
-      },
-    });
-
-    await useStore.getState().resumeContextualProcessing();
-    expect(useStore.getState().liveError).toMatch(/manifest unavailable/i);
-    await useStore.getState().resumeContextualProcessing();
-    expect(useStore.getState().liveError).toMatch(/repeated cursor/i);
-    expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST' }));
-  });
-
-  it('drops a stale manifest walk before it can replace the selected session notifier', async () => {
-    const first = { ...session('context-a'), mode: 'contextual_local' as const };
-    const second = { ...session('context-b'), mode: 'contextual_local' as const };
-    let resolveFirstManifest!: (value: JsonResponse<unknown>) => void;
-    let resolveSecondAdvance!: (value: JsonResponse<unknown>) => void;
-    bridge.request = vi.fn((req: BridgeRequest): Promise<JsonResponse<unknown>> => {
-      if (req.method === 'GET' && req.path === '/sessions/context-a/audio') {
-        return new Promise((resolve) => { resolveFirstManifest = resolve; });
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context-b') {
-        return Promise.resolve({ ok: true, status: 200, data: { session: second, segments: [], messages: [], notes: null } });
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context-b/audio') {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          data: {
-            chunks: [{ sequence: 8, start_ms: 0, end_ms: 1_000, status: 'pending', available: true, segment_ids: [], source_kind: 'original_captured_wav' }],
-            next_after_sequence: null,
-          },
-        });
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context-b/asr/live') {
-        return Promise.resolve({ ok: true, status: 200, data: { draft: null } });
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context-b/asr/live/scheduler') {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          data: { capable: true, accepted_count: 0, status: 'idle', captured_target_sequence: null, processed_window: null, stable_frontier_ms: 0, lag_ms: null, block_reason: null },
-        });
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context-b/asr/fragments') {
-        return Promise.resolve({ ok: true, status: 200, data: { fragments: [] } });
-      }
-      if (req.method === 'POST' && req.path === '/sessions/context-b/asr/live/advance') {
-        return new Promise((resolve) => { resolveSecondAdvance = resolve; });
-      }
-      if (req.method === 'POST' && req.path === '/sessions/context-a/asr/live/advance') {
-        return Promise.resolve({
-          ok: true,
-          status: 202,
-          data: { accepted: true, scheduler: { capable: true, accepted_count: 1, status: 'scheduled', captured_target_sequence: 4, processed_window: null, stable_frontier_ms: 0, lag_ms: 1_000, block_reason: null } },
-        });
-      }
-      throw new Error(`unexpected ${req.method} ${req.path}`);
-    });
-    useStore.setState({
-      sessions: [first, second],
-      activeSessionId: first.id,
-      liveCapabilities: {
-        mode: 'contextual_local', capable: true,
-        requirements: { local_profile_selected: true, contextual_local_enabled: true, live_finality_enabled: true, local_speech_gate_enabled: true },
-        detail: 'available',
-      },
-    });
-
-    const staleResume = useStore.getState().resumeContextualProcessing();
-    await vi.waitFor(() => expect(resolveFirstManifest).toBeTypeOf('function'));
-    await useStore.getState().selectSession(second.id);
-    const currentResume = useStore.getState().resumeContextualProcessing();
-    await vi.waitFor(() => expect(resolveSecondAdvance).toBeTypeOf('function'));
-    resolveFirstManifest({
-      ok: true,
-      status: 200,
-      data: {
-        chunks: [{ sequence: 4, start_ms: 0, end_ms: 1_000, status: 'pending', available: true, segment_ids: [], source_kind: 'original_captured_wav' }],
-        next_after_sequence: null,
-      },
-    });
-    await staleResume;
-    await currentResume;
-
-    expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({
-      method: 'POST', path: '/sessions/context-a/asr/live/advance',
-    }));
-    expect(bridge.request.mock.calls.filter(([req]) => (
-      req.method === 'POST' && req.path === '/sessions/context-b/asr/live/advance'
-    ))).toHaveLength(1);
-    resolveSecondAdvance({
-      ok: true,
-      status: 202,
-      data: { accepted: true, scheduler: { capable: true, accepted_count: 1, status: 'scheduled', captured_target_sequence: 8, processed_window: null, stable_frontier_ms: 0, lag_ms: 1_000, block_reason: null } },
-    });
-  });
-
-  it('reopens contextual state with GET only and advances only after explicit resume', async () => {
-    const contextSession = { ...session('context'), mode: 'contextual_local' as const };
-    bridge.request = vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
-      if (req.method === 'GET' && req.path === '/sessions/context') {
-        return { ok: true, status: 200, data: { session: contextSession, segments: [], messages: [], notes: null } };
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context/audio') {
-        return { ok: true, status: 200, data: { chunks: [{ sequence: 5, start_ms: 0, end_ms: 10, status: 'pending', available: true, segment_ids: [], source_kind: 'original_captured_wav' }], next_after_sequence: null } };
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context/asr/live') {
-        return { ok: true, status: 200, data: { draft: null } };
-      }
-      if (req.method === 'GET' && req.path === '/sessions/context/asr/live/scheduler') {
-        return { ok: true, status: 200, data: { capable: true, accepted_count: 0, status: 'idle', captured_target_sequence: null, processed_window: null, stable_frontier_ms: 0, lag_ms: null, block_reason: null } };
-      }
-      if (req.method === 'POST' && req.path === '/sessions/context/asr/live/advance') {
-        return { ok: true, status: 202, data: { accepted: true, scheduler: { capable: true, accepted_count: 1, status: 'scheduled', captured_target_sequence: 5, processed_window: null, stable_frontier_ms: 0, lag_ms: 10, block_reason: null } } };
-      }
-      throw new Error(`unexpected ${req.method} ${req.path}`);
-    });
-    useStore.setState({
-      sessions: [contextSession],
-      liveCapabilities: { mode: 'contextual_local', capable: true, requirements: { local_profile_selected: true, contextual_local_enabled: true, live_finality_enabled: true, local_speech_gate_enabled: true }, detail: 'available' },
-    });
-    await useStore.getState().selectSession('context');
-    await vi.waitFor(() => expect(bridge.request).toHaveBeenCalledWith({ method: 'GET', path: '/sessions/context/asr/live' }));
-    expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST' }));
-    await useStore.getState().resumeContextualProcessing();
-    await vi.waitFor(() => expect(bridge.request).toHaveBeenCalledWith({ method: 'POST', path: '/sessions/context/asr/live/advance', body: { through_sequence: 5 } }));
-    expect(window.audiohelper.uploadAudio).not.toHaveBeenCalled();
+  it('never exposes resumption from archived audio', () => {
+    expect(useStore.getState()).not.toHaveProperty('resumeContextualProcessing');
   });
 
   it('drops a stale contextual snapshot after the selected session changes', async () => {
@@ -498,7 +297,7 @@ describe('async session isolation', () => {
       throw new Error(`unexpected ${req.method} ${req.path}`);
     });
     await useStore.getState().selectSession('restored');
-    expect(window.audiohelper.fetchAudio).not.toHaveBeenCalled();
+    expect(window.audiohelper).not.toHaveProperty('fetchAudio');
     expect(window.audiohelper.uploadAudio).not.toHaveBeenCalled();
     expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST' }));
     expect(useStore.getState().detail?.segments).toEqual([]);
@@ -512,6 +311,7 @@ describe('async session isolation', () => {
     });
     useStore.setState({ activeSessionId: 'a', detail: { segments: [], messages: [], notes: null } });
     const request = useStore.getState().ask('What happened?');
+    await vi.waitFor(() => expect(resolveAsk).toBeTypeOf('function'));
     useStore.setState({ activeSessionId: 'b', detail: { segments: [], messages: [], notes: null } });
     resolveAsk({
       ok: true,
@@ -522,7 +322,7 @@ describe('async session isolation', () => {
     expect(useStore.getState().detail?.messages).toEqual([]);
   });
 
-  it('resets the chat scope to auto when switching to a different session', async () => {
+  it('resets the chat scope to session when switching to a different session', async () => {
     bridge.request = vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
       if (req.method === 'GET' && req.path === '/sessions/scope-a') {
         return { ok: true, status: 200, data: { session: session('scope-a'), segments: [], messages: [], notes: null } };
@@ -541,15 +341,15 @@ describe('async session isolation', () => {
     useStore.setState({ sessions: [session('scope-a'), session('scope-b')] });
 
     await useStore.getState().selectSession('scope-a');
-    useStore.setState({ chatScope: 'search', windowMinutes: 10 });
+    useStore.setState({ chatScope: 'all' });
 
     // Reselecting the same session must not disturb a scope the user just set.
     await useStore.getState().selectSession('scope-a');
-    expect(useStore.getState().chatScope).toBe('search');
+    expect(useStore.getState().chatScope).toBe('all');
 
     // Switching to a different session resets to auto.
     await useStore.getState().selectSession('scope-b');
-    expect(useStore.getState().chatScope).toBe('auto');
+    expect(useStore.getState().chatScope).toBe('session');
   });
 
   it('never installs generated notes into another selected session', async () => {

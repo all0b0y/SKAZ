@@ -8,12 +8,12 @@ import './importPanel.css';
 const POLL_MS = 1500;
 
 const STATUS_LABEL: Record<ImportView['status'], string> = {
-  queued: 'В очереди',
-  uploading: 'Отправляем файл',
-  processing: 'Провайдер обрабатывает',
-  completed: 'Готово',
-  failed: 'Не удалось',
-  cancelled: 'Отменено',
+  queued: 'Queued',
+  uploading: 'Uploading file',
+  processing: 'Provider is processing',
+  completed: 'Done',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
 };
 
 function elapsed(fromIso: string, now: number): string {
@@ -73,7 +73,7 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
   }, [sessionId]);
 
   if (!state) {
-    return <section className="import-panel" aria-busy="true"><p>Загружаем состояние импорта…</p></section>;
+    return <section className="import-panel" aria-busy="true"><p>Loading import status…</p></section>;
   }
 
   const running = state.status === 'queued' || state.status === 'uploading' || state.status === 'processing';
@@ -109,22 +109,22 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
       <p className="import-panel__file" title={state.source.path}>{state.source.name}</p>
 
       <dl className="import-panel__facts">
-        {duration != null && (<><dt>Длительность</dt><dd>{formatDuration(duration)}</dd></>)}
-        <dt>Режим</dt>
-        <dd>{state.translate ? 'Транскрипция и перевод' : 'Только транскрипция'}</dd>
-        {running && (<><dt>Прошло</dt><dd>{elapsed(state.created_at, now)}</dd></>)}
+        {duration != null && (<><dt>Duration</dt><dd>{formatDuration(duration)}</dd></>)}
+        <dt>Mode</dt>
+        <dd>{state.translate ? 'Transcription and translation' : 'Transcription only'}</dd>
+        {running && (<><dt>Elapsed</dt><dd>{elapsed(state.created_at, now)}</dd></>)}
         {!state.source.available && (
           <>
-            <dt>Исходный файл</dt>
-            <dd>Недоступен по прежнему пути — расшифровка и заметки продолжают работать</dd>
+            <dt>Original file</dt>
+            <dd>Not available at its previous path — the transcript and notes keep working</dd>
           </>
         )}
       </dl>
 
       {running && (
         <p className="import-panel__note">
-          Работа идёт на стороне провайдера. Приложение можно закрыть — импорт продолжится
-          и подхватится при следующем запуске. Точного процента провайдер не сообщает.
+          The provider is doing the work. You can close the app — the import continues
+          and is picked up on the next launch. The provider does not report an exact percentage.
         </p>
       )}
       {state.status === 'failed' && state.error && (
@@ -132,22 +132,22 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
       )}
       {state.status === 'cancelled' && (
         <p className="import-panel__note">
-          Импорт отменён. Уже обработанная часть аудио могла быть тарифицирована провайдером.
+          Import cancelled. The provider may have charged for the audio already processed.
         </p>
       )}
       {error && <p role="alert" className="import-panel__error">{error}</p>}
 
       <div className="import-panel__actions">
         {running && (
-          <Button variant="danger" onClick={cancel} disabled={busy}>Отменить импорт</Button>
+          <Button variant="danger" onClick={cancel} disabled={busy}>Cancel import</Button>
         )}
         {(state.status === 'failed' || state.status === 'cancelled') && (
           <>
             <Button variant="primary" icon="retry" onClick={retry} disabled={busy}>
-              Повторить (новый платный запуск)
+              Retry (new paid run)
             </Button>
             <Button variant="ghost" icon="trash" onClick={remove} disabled={busy}>
-              Удалить сессию
+              Delete session
             </Button>
           </>
         )}

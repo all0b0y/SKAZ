@@ -86,7 +86,7 @@ describe('ProviderCredentials — a key belongs to the provider', () => {
       />,
     );
     expect(screen.getByLabelText('API key')).toHaveAttribute('placeholder', '•••••••• stored');
-    expect(screen.getByText(/key stored securely for openrouter/i)).toBeInTheDocument();
+    expect(screen.getByText(/key stored securely for/i)).toHaveTextContent('Key stored securely for OpenRouter (write-only)');
   });
 
   it('treats a cleared draft as a pending removal, not as a stored key', () => {

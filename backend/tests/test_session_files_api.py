@@ -28,7 +28,7 @@ from tests.test_native_soniox_ws import ProviderSocket
 
 @pytest.fixture
 def config(tmp_path: Path) -> AppConfig:
-    return replace(AppConfig(token="test-token", data_dir=tmp_path / "data", retain_native_audio=True),
+    return replace(AppConfig(token="test-token", data_dir=tmp_path / "data"),
                    session_files_root=tmp_path / "files")
 
 
@@ -70,7 +70,7 @@ async def seed_note(client: httpx.AsyncClient, outbound: FakeHttp) -> tuple[str,
     return sid, str(note.json()["id"])
 
 
-async def test_independent_notes_edit_restore_and_external_conflict(
+async def test_independent_notes_edit_and_external_conflict(
     client: httpx.AsyncClient, config: AppConfig, outbound: FakeHttp,
 ) -> None:
     sid, nid = await seed_note(client, outbound)
@@ -93,13 +93,10 @@ async def test_independent_notes_edit_restore_and_external_conflict(
     path = f"/sessions/{sid}/notes/{nid}"
     (await client.patch(path, json={"expected_revision": 1, "content": "Edited"})).raise_for_status()
     assert "Edited" in note_file.read_text()
-    versions = (await client.get(path + "/history")).json()["versions"]
-    (await client.post(path + f"/history/{versions[0]['id']}/restore",
-                       json={"expected_revision": 2})).raise_for_status()
-    assert "First note" in note_file.read_text()
+    assert (await client.get(path + "/history")).status_code == 404
     assert list(directory.glob("*history*")) == []
     note_file.write_text("External author's changes", encoding="utf-8")
-    response = await client.patch(path, json={"expected_revision": 3, "content": "New app text"})
+    response = await client.patch(path, json={"expected_revision": 2, "content": "New app text"})
     assert response.status_code == 200, response.text
     assert note_file.read_text() == "External author's changes"
     status = (await client.get(f"/sessions/{sid}/files")).json()
@@ -320,7 +317,7 @@ def test_native_pause_waits_for_tail_and_restart_keeps_manifest(
         assert http.get(f"/sessions/{sid}/files", headers=AUTH).json()["state"] == "ready"
         result = http.post(f"/sessions/{sid}/files", headers=AUTH).json()
         assert result["files"][0]["state"] == "unchanged"
-        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).content[44:] == packet(0, 0)[20:]
+        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404
         target.write_text("External after restart")
         result = http.post(f"/sessions/{sid}/files", headers=AUTH).json()
         assert result["state"] == "conflict"

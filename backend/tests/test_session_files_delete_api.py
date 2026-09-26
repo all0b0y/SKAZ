@@ -67,14 +67,14 @@ async def test_delete_refuses_unowned_files_and_keeps_audio_notes_and_manifest(
         else:
             canonical.mkdir()
     before = sorted(p.name for p in directory.iterdir())
-    audio = (await client.get(f"/sessions/{sid}/audio/0")).content
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
     response = await client.delete(f"/sessions/{sid}")
     assert response.status_code == 409, response.text
     assert str(config.data_dir) not in response.text
     assert sorted(p.name for p in directory.iterdir()) == before
     assert outside.read_text() == "External bytes"
     assert (await client.get(f"/sessions/{sid}")).json()["notes_list"][0]["id"] == nid
-    assert (await client.get(f"/sessions/{sid}/audio/0")).content == audio
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
     # Resolve only the test-owned obstacle; unchanged canonical is still owned.
     for path in directory.iterdir():
         if path.name not in ("Transcript.md", f"Note-{nid}.md"):
@@ -109,7 +109,8 @@ async def test_missing_file_during_cleanup_does_not_drop_primary_data(
         response = await client.delete(f"/sessions/{sid}")
     assert response.status_code == 409, response.text
     assert (await client.get(f"/sessions/{sid}")).status_code == 200
-    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 200
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
+    assert (await client.get(f"/sessions/{sid}")).json()["notes_list"]
     assert external.read_text() == "Must survive"
 
 
@@ -260,7 +261,7 @@ async def test_directory_cleanup_boundary_preserves_external_data(
     assert config.session_files_root is not None
     parent = config.session_files_root / "Ungrouped"
     directory = parent / sid
-    audio = (await client.get(f"/sessions/{sid}/audio/0")).content
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
     original = os.rmdir
     reached = False
 
@@ -299,7 +300,7 @@ async def test_directory_cleanup_boundary_preserves_external_data(
     assert response.status_code == 409, response.text
     assert "Private path" not in response.text
     assert (await client.get(f"/sessions/{sid}")).json()["notes_list"][0]["id"] == nid
-    assert (await client.get(f"/sessions/{sid}/audio/0")).content == audio
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
     if obstacle in ("late_file", "session_swap"):
         assert (directory / "personal.txt").read_text() == "Keep late bytes"
         (directory / "personal.txt").unlink()

@@ -66,7 +66,7 @@ export function NoteList({ notes, onOpen, onRename, onDelete }: Props) {
 
   return (
     <div className="note-list-block">
-      <ul className="note-list" aria-label="Конспекты сессии">
+      <ul className="note-list" aria-label="Session notes">
         {visible.map((note) => {
           const name = noteName(note);
           return (
@@ -84,7 +84,7 @@ export function NoteList({ notes, onOpen, onRename, onDelete }: Props) {
                 <button
                   type="button"
                   className="note-list__open"
-                  aria-label={`Открыть ${name}`}
+                  aria-label={`Open ${name}`}
                   onClick={() => {
                     cancelPendingOpen();
                     pendingOpen.current = window.setTimeout(() => {
@@ -104,8 +104,8 @@ export function NoteList({ notes, onOpen, onRename, onDelete }: Props) {
               <button
                 type="button"
                 className="note-list__delete"
-                aria-label={`Удалить ${name}`}
-                title="Удалить конспект"
+                aria-label={`Delete ${name}`}
+                title="Delete notes"
                 onClick={() => {
                   cancelPendingOpen();
                   onDelete(note);
@@ -121,11 +121,11 @@ export function NoteList({ notes, onOpen, onRename, onDelete }: Props) {
       {/* One page has nothing to page through, so the controls stay away rather
           than sitting there permanently disabled. */}
       {pages > 1 && (
-        <nav className="note-list__pager" aria-label="Страницы конспектов">
+        <nav className="note-list__pager" aria-label="Notes pages">
           <button
             type="button"
             className="note-list__page-btn"
-            aria-label="Предыдущая страница"
+            aria-label="Previous page"
             disabled={current === 0}
             onClick={() => {
               cancelPendingOpen();
@@ -134,11 +134,11 @@ export function NoteList({ notes, onOpen, onRename, onDelete }: Props) {
           >
             ‹
           </button>
-          <span className="note-list__page-count">{current + 1} из {pages}</span>
+          <span className="note-list__page-count">{current + 1} of {pages}</span>
           <button
             type="button"
             className="note-list__page-btn"
-            aria-label="Следующая страница"
+            aria-label="Next page"
             disabled={current >= pages - 1}
             onClick={() => {
               cancelPendingOpen();
@@ -159,9 +159,9 @@ function editedAt(note: Note): string {
   const moment = new Date(stamp);
   if (Number.isNaN(moment.getTime())) return '';
   const minutes = Math.floor((Date.now() - moment.getTime()) / 60_000);
-  if (minutes < 1) return 'только что';
-  if (minutes < 60) return `${minutes} мин назад`;
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ч назад`;
-  return moment.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  if (hours < 24) return `${hours} h ago`;
+  return moment.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }

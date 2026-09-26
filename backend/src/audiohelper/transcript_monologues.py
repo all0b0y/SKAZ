@@ -40,6 +40,32 @@ def tokens_for(
     return [_from_segment(segment) for segment in segments if segment.text.strip()]
 
 
+# Python's str.strip() whitespace for the characters speech text can carry.
+_BLANK = "' ' || char(9, 10, 11, 12, 13)"
+
+
+def has_transcript(connection: sqlite3.Connection, session_id: str) -> bool:
+    """Whether :func:`tokens_for` would yield any speech, without loading it.
+
+    Same source as the notes generator: final original-language tokens, or
+    segments. Drafts and translation never count — a gate that opens on them
+    would let generation start and then fail with nothing to summarise.
+    """
+    token = connection.execute(
+        "SELECT 1 FROM native_token_events e JOIN asr_connections c ON c.id=e.connection_id, "
+        f"json_each(e.tokens_json) t WHERE c.session_id=? "
+        f"AND trim(COALESCE(json_extract(t.value,'$.text'),''), {_BLANK})<>'' LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    if token is not None:
+        return True
+    segment = connection.execute(
+        f"SELECT 1 FROM segments WHERE session_id=? AND trim(text, {_BLANK})<>'' LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    return segment is not None
+
+
 def build_monologues(
     connection: sqlite3.Connection, session_id: str, segments: list[Segment]
 ) -> list[mono.Monologue]:

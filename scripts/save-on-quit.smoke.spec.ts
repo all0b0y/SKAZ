@@ -14,6 +14,10 @@ async function launch(directory: string) {
       AUDIOHELPER_SESSION_FILES_ROOT: path.join(directory, 'session-files'),
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
       AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      // Record requires a Soniox key and cloud consent; the stored key is a
+      // placeholder and this fixture answers the stream protocol offline, so
+      // no provider request is ever made (scripts/fake-soniox).
+      PYTHONPATH: path.join(root, 'scripts', 'fake-soniox'), AUDIOHELPER_SMOKE_FAKE_SONIOX: 'accept',
     },
   });
   const paths = await app.evaluate(({ app }) => ({ user: app.getPath('userData'), session: app.getPath('sessionData') }));
@@ -26,7 +30,7 @@ async function launch(directory: string) {
 }
 
 // Browser capture boundary fixture only. Production recorder/store/preload/main/backend are unchanged.
-// No physical microphone, real speech, provider credentials, model loading or external API.
+// No physical microphone, real speech, real provider credentials, model loading or external API.
 for (const outcome of ['acknowledged', 'quit-timeout', 'pause-timeout'] as const) {
 test(`capture ${outcome}: quit protects in-flight PCM and keeps the session clock after restart`, async () => {
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'audiohelper-quit-smoke-')));
@@ -37,7 +41,8 @@ test(`capture ${outcome}: quit protects in-flight PCM and keeps the session cloc
     const { app, page } = first;
     const settings = await page.evaluate(() => window.audiohelper.request({
       method: 'PUT', path: '/settings', body: {
-        asr: { provider: 'openai', model: 'whisper-1' }, cloud_consent: false,
+        asr: { provider: 'openai', model: 'whisper-1' }, cloud_consent: true,
+        provider_keys: { soniox: 'smoke-fixture-key' },
         used_languages: ['ru', 'en'],
       },
     }));
@@ -128,16 +133,13 @@ test(`capture ${outcome}: quit protects in-flight PCM and keeps the session cloc
     const result = await second.page.evaluate(async (sessionId) => {
       const detail = await window.audiohelper.request({ method: 'GET', path: `/sessions/${sessionId}` });
       // Transcript-only policy: the received PCM advances the session clock but
-      // is never archived, so the manifest stays empty and playback refuses.
-      const manifest = await window.audiohelper.request<{ chunks: Array<{ sequence: number }> }>({ method: 'GET', path: `/sessions/${sessionId}/audio` });
-      if (!manifest.ok) throw new Error('audio manifest unavailable');
-      const audio = await window.audiohelper.fetchAudio(sessionId, 0);
-      return { detail, sequences: manifest.data.chunks.map((chunk) => chunk.sequence),
-        playback: { ok: audio.ok, status: audio.ok ? 200 : audio.status } };
+      // is never archived, and the stored-audio read routes no longer exist.
+      const manifest = await window.audiohelper.request({ method: 'GET', path: `/sessions/${sessionId}/audio` });
+      return { detail, manifest: { ok: manifest.ok }, playbackBridge: 'fetchAudio' in window.audiohelper };
     }, id);
     expect(result.detail).toMatchObject({ ok: true, data: { session: { status: 'stopped', duration_ms: 101 } } });
-    expect(result.sequences).toEqual([]);
-    expect(result.playback).toEqual({ ok: false, status: 404 });
+    expect(result.manifest).toEqual({ ok: false });
+    expect(result.playbackBridge).toBe(false);
     expect(await fs.readdir(path.join(directory, 'data', 'audio')).catch(() => [])).toEqual([]);
     if (outcome === 'acknowledged') {
       // Reopen through the actual UI/store/writer, not a direct openNative call.
@@ -175,15 +177,11 @@ test(`capture ${outcome}: quit protects in-flight PCM and keeps the session cloc
       const continued = await second.page.evaluate(async (sid) => ({
         sessions: await window.audiohelper.request({ method: 'GET', path: '/sessions' }),
         snapshot: await window.audiohelper.request({ method: 'GET', path: `/sessions/${sid}/live` }),
-        original: await window.audiohelper.fetchAudio(sid, 0).then((audio) => ({ ok: audio.ok, status: audio.ok ? 200 : audio.status })),
-        appended: await window.audiohelper.fetchAudio(sid, 2).then((audio) => ({ ok: audio.ok, status: audio.ok ? 200 : audio.status })),
       }), id);
       expect(continued.sessions).toMatchObject({ ok: true, data: { sessions: [{ id }] } });
       // The restored sample clock proves the earlier capture was accounted for
       // even though neither the original nor the appended block was archived.
       expect(continued.snapshot).toMatchObject({ ok: true, data: { saved_samples: 3216, next_sequence: 3, audio_retained: false } });
-      expect(continued.original).toEqual({ ok: false, status: 404 });
-      expect(continued.appended).toEqual({ ok: false, status: 404 });
     }
   } finally {
     if (active) {

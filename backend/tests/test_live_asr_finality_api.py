@@ -184,14 +184,16 @@ async def store(
     *,
     start_ms: int,
     end_ms: int,
+    duplicate: bool = False,
 ) -> None:
     response = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": sequence, "start_ms": start_ms, "end_ms": end_ms},
         content=body,
         headers={"Content-Type": "audio/wav"},
     )
-    assert response.status_code == 201, response.text
+    assert response.status_code == (200 if duplicate else 201), response.text
+    assert response.json()["duplicate"] is duplicate
 
 
 async def update(
@@ -292,8 +294,8 @@ async def test_contextual_final_on_legacy_session_blocks_upload_retry_and_defaul
     detail = (await finality_client.get(f"/sessions/{session_id}")).json()
     assert detail["session"]["mode"] == "legacy"
     assert detail["segments"][0]["id"] == final_id
-    assert (await finality_client.get(f"/sessions/{session_id}/audio/0")).content == first
-    assert (await finality_client.get(f"/sessions/{session_id}/audio/1")).content == second
+    assert (await finality_client.get(f"/sessions/{session_id}/audio/0")).status_code == 404
+    assert (await finality_client.get(f"/sessions/{session_id}/audio/1")).status_code == 404
 
 
 async def test_legacy_final_blocks_contextual_update_before_decoder_and_preserves_source(
@@ -323,7 +325,7 @@ async def test_legacy_final_blocks_contextual_update_before_decoder_and_preserve
     )
     assert engine.context_calls == 0
     assert final_storage_snapshot(finality_app, session_id) == before
-    assert (await finality_client.get(f"/sessions/{session_id}/audio/0")).content == legacy_audio
+    assert (await finality_client.get(f"/sessions/{session_id}/audio/0")).status_code == 404
 
 
 @pytest.mark.parametrize("delayed_writer", ["contextual", "legacy"])
@@ -378,9 +380,9 @@ async def test_opposite_writer_race_commits_only_the_transaction_winner(
         assert len(rows["sources"]) == 1
         assert rows["sources"][0][0] == rows["segments"][0][0]
         assert rows["chunks"][-1] == (2, "pending", None)
-    assert (await finality_client.get(f"/sessions/{session_id}/audio/0")).content == first
-    assert (await finality_client.get(f"/sessions/{session_id}/audio/1")).content == second
-    assert (await finality_client.get(f"/sessions/{session_id}/audio/2")).content == legacy_audio
+    assert (await finality_client.get(f"/sessions/{session_id}/audio/0")).status_code == 404
+    assert (await finality_client.get(f"/sessions/{session_id}/audio/1")).status_code == 404
+    assert (await finality_client.get(f"/sessions/{session_id}/audio/2")).status_code == 404
 
 
 async def test_default_off_keeps_live_draft_and_preview_read_only(
@@ -471,15 +473,10 @@ async def test_added_audio_commits_repeat_words_with_sources_and_hides_tail_from
 
     detail = (await finality_client.get(f"/sessions/{session_id}")).json()
     assert detail["segments"] == [finalized]
-    manifest = (await finality_client.get(f"/sessions/{session_id}/audio")).json()["chunks"]
-    assert [chunk["segment_ids"] for chunk in manifest] == [
-        [finalized["id"]],
-        [finalized["id"]],
-        [],
-    ]
-    for sequence, original in enumerate(bodies):
-        assert (await finality_client.get(f"/sessions/{session_id}/audio/{sequence}")).content == original
-        assert (finality_config.audio_dir / session_id / f"{sequence:06d}.wav").read_bytes() == original
+    assert (await finality_client.get(f"/sessions/{session_id}/audio")).status_code == 405
+    for sequence, _original in enumerate(bodies):
+        assert (await finality_client.get(f"/sessions/{session_id}/audio/{sequence}")).status_code == 404
+        assert not (finality_config.audio_dir / session_id / f"{sequence:06d}.wav").exists()
 
     outbound.json_route(
         "GET",
@@ -496,7 +493,9 @@ async def test_added_audio_commits_repeat_words_with_sources_and_hides_tail_from
     )
     configured = await finality_client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "test-key"}, "agent": {"provider": "openrouter", "model": "local/test-agent"},
+        json={
+            "provider_keys": {"openrouter": "test-key"},
+            "agent": {"provider": "openrouter", "model": "local/test-agent"},
             "cloud_consent": True,
         },
     )
@@ -697,8 +696,9 @@ async def test_failed_final_transaction_restores_draft_frontier_fts_and_manifest
     assert failed.status_code == 500
     assert (await finality_client.get(f"/sessions/{session_id}/asr/live")).json() == before
     assert (await finality_client.get(f"/sessions/{session_id}")).json()["segments"] == []
-    manifest = (await finality_client.get(f"/sessions/{session_id}/audio")).json()["chunks"]
-    assert [chunk["segment_ids"] for chunk in manifest] == [[], []]
+    assert (await finality_client.get(f"/sessions/{session_id}/audio")).status_code == 405
+    with finality_app.state.runtime.db.read() as connection:
+        assert connection.execute("SELECT count(*) FROM segment_sources").fetchone()[0] == 0
     with finality_app.state.runtime.db.read() as connection:
         assert connection.execute("SELECT count(*) FROM segments_fts").fetchone()[0] == 0
 
@@ -872,6 +872,12 @@ async def test_restart_preserves_frontier_and_exact_retry_does_not_refinalize(
             headers=headers,
         ) as client:
             restored = await client.get(f"/sessions/{session_id}/asr/live")
+            assert restored.json()["source_integrity"]["status"] == "missing"
+            blocked = await update(client, session_id, 0, 1, 1)
+            assert blocked.status_code == 404
+            # Explicit resupply, not recovery from an audio archive.
+            await store(client, session_id, 0, make_wav(0.75), start_ms=0, end_ms=750, duplicate=True)
+            await store(client, session_id, 1, make_wav(0.75), start_ms=750, end_ms=1500, duplicate=True)
             repeated = await update(client, session_id, 0, 1, 1)
             detail = await client.get(f"/sessions/{session_id}")
         assert restored.status_code == repeated.status_code == detail.status_code == 200
@@ -935,6 +941,10 @@ async def test_restart_policy_changes_never_reuse_idempotency_or_duplicate_final
     )
 
     async def changed_guard(client: httpx.AsyncClient) -> dict[str, Any]:
+        missing = (await client.get(f"/sessions/{session_id}/asr/live")).json()
+        assert missing["resume_compatibility"]["status"] == "source_unavailable"
+        await store(client, session_id, 0, make_wav(0.75), start_ms=0, end_ms=750, duplicate=True)
+        await store(client, session_id, 1, make_wav(0.75), start_ms=750, end_ms=1500, duplicate=True)
         historical = await client.get(f"/sessions/{session_id}/asr/live")
         assert historical.status_code == 200, historical.text
         assert historical.json()["resume_compatibility"]["status"] == "config_changed"
@@ -952,6 +962,10 @@ async def test_restart_policy_changes_never_reuse_idempotency_or_duplicate_final
     disabled = AppConfig(token=TOKEN, data_dir=data_dir, request_timeout_s=5.0)
 
     async def turn_off(client: httpx.AsyncClient) -> dict[str, Any]:
+        missing = (await client.get(f"/sessions/{session_id}/asr/live")).json()
+        assert missing["resume_compatibility"]["status"] == "source_unavailable"
+        await store(client, session_id, 0, make_wav(0.75), start_ms=0, end_ms=750, duplicate=True)
+        await store(client, session_id, 1, make_wav(0.75), start_ms=750, end_ms=1500, duplicate=True)
         historical = await client.get(f"/sessions/{session_id}/asr/live")
         assert historical.status_code == 200, historical.text
         assert historical.json()["resume_compatibility"]["status"] == "config_changed"
@@ -971,6 +985,10 @@ async def test_restart_policy_changes_never_reuse_idempotency_or_duplicate_final
     assert engine.calls == 4
 
     async def turn_on(client: httpx.AsyncClient) -> dict[str, Any]:
+        missing = (await client.get(f"/sessions/{session_id}/asr/live")).json()
+        assert missing["resume_compatibility"]["status"] == "source_unavailable"
+        await store(client, session_id, 0, make_wav(0.75), start_ms=0, end_ms=750, duplicate=True)
+        await store(client, session_id, 1, make_wav(0.75), start_ms=750, end_ms=1500, duplicate=True)
         historical = await client.get(f"/sessions/{session_id}/asr/live")
         assert historical.status_code == 200, historical.text
         assert historical.json()["resume_compatibility"]["status"] == "config_changed"
@@ -1328,6 +1346,14 @@ async def test_unambiguous_split_word_rollover_restores_and_advances_after_resta
             headers=headers,
         ) as client:
             restored = await client.get(f"/sessions/{session_id}/asr/live")
+            assert restored.json()["source_integrity"]["status"] == "missing"
+            blocked = await update(client, session_id, 2, 5, 3)
+            assert blocked.status_code == 404
+            for sequence in range(2, 6):
+                await store(
+                    client, session_id, sequence, make_wav(5.0, frequency=500 + sequence),
+                    start_ms=sequence * 5_000, end_ms=(sequence + 1) * 5_000, duplicate=True,
+                )
             progressed = await update(client, session_id, 2, 5, 3)
             detail = await client.get(f"/sessions/{session_id}")
         assert restored.status_code == progressed.status_code == 200

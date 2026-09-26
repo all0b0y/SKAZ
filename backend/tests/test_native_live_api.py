@@ -20,7 +20,7 @@ async def test_native_snapshot_and_legacy_upload_isolation(client: httpx.AsyncCl
     denied = await client.get(f"/sessions/{session_id}/live", headers={"Authorization": ""})
     assert denied.status_code == 401
     legacy = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": 1, "start_ms": 100, "end_ms": 200},
         content=make_wav(.1), headers={"Content-Type": "audio/wav"},
     )

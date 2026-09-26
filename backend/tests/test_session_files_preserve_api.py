@@ -34,7 +34,7 @@ async def test_preserve_all_versions_restores_app_files_and_keeps_archive_after_
     recovery = f"Transcript.recovery-{'a' * 32}.md"
     (directory / recovery).write_text("Unfinished editor version")
     (directory / "personal.txt").write_text("Unrelated file")
-    audio = (await client.get(f"/sessions/{sid}/audio/0")).content
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
     calls = len(outbound.requests)
     response = await client.post(f"/sessions/{sid}/files/preserve")
     assert response.status_code == 200, response.text
@@ -48,7 +48,7 @@ async def test_preserve_all_versions_restores_app_files_and_keeps_archive_after_
     assert (archive / "personal.txt").read_text() == "Unrelated file"
     assert (directory / "Transcript.md").read_bytes() == original
     assert (directory / f"Note-{nid}.md").is_file()
-    assert (await client.get(f"/sessions/{sid}/audio/0")).content == audio
+    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
     assert len(outbound.requests) == calls
     repeated = (await client.post(f"/sessions/{sid}/files/preserve")).json()
     assert repeated["state"] == "ready"

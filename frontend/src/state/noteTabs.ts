@@ -112,7 +112,7 @@ export function titleFromContent(content: string): string {
  * strip, the list and the picker can never disagree about a note's name.
  */
 export function noteName(note: { title?: string; content: string }): string {
-  return note.title?.trim() || titleFromContent(note.content) || 'Без названия';
+  return note.title?.trim() || titleFromContent(note.content) || 'Untitled';
 }
 
 /**
@@ -127,25 +127,29 @@ export function sanitiseTitle(raw: string): string {
   return cleaned.replace(/[ .]+$/, '').trim().slice(0, 120).trim();
 }
 
+/**
+ * Validate one persisted tab set rather than trusting it: a hand-edited or
+ * half-written entry must not render a tab that points nowhere.
+ */
+function validTabs(value: unknown): TabsState {
+  if (typeof value !== 'object' || value === null) return emptyTabs;
+  const { tabs, activeTabId } = value as Partial<TabsState>;
+  if (!Array.isArray(tabs)) return emptyTabs;
+  const valid = tabs.filter((tab): tab is NoteTab =>
+    typeof tab === 'object' && tab !== null
+    && typeof (tab as NoteTab).id === 'string'
+    && typeof (tab as NoteTab).sessionId === 'string'
+    && typeof (tab as NoteTab).title === 'string'
+    && ((tab as NoteTab).noteId === null || typeof (tab as NoteTab).noteId === 'string'),
+  ).slice(-MAX_TABS);
+  const active = valid.some((tab) => tab.id === activeTabId) ? activeTabId! : (valid.at(-1)?.id ?? null);
+  return { tabs: valid, activeTabId: active };
+}
+
 export function loadTabs(storage: Pick<Storage, 'getItem'> = localStorage): TabsState {
   try {
     const raw = storage.getItem(STORAGE_KEY);
-    if (!raw) return emptyTabs;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return emptyTabs;
-    const { tabs, activeTabId } = parsed as Partial<TabsState>;
-    if (!Array.isArray(tabs)) return emptyTabs;
-    // Persisted state is validated rather than trusted: a hand-edited or
-    // half-written entry must not render a tab that points nowhere.
-    const valid = tabs.filter((tab): tab is NoteTab =>
-      typeof tab === 'object' && tab !== null
-      && typeof (tab as NoteTab).id === 'string'
-      && typeof (tab as NoteTab).sessionId === 'string'
-      && typeof (tab as NoteTab).title === 'string'
-      && ((tab as NoteTab).noteId === null || typeof (tab as NoteTab).noteId === 'string'),
-    ).slice(-MAX_TABS);
-    const active = valid.some((tab) => tab.id === activeTabId) ? activeTabId! : (valid.at(-1)?.id ?? null);
-    return { tabs: valid, activeTabId: active };
+    return raw ? validTabs(JSON.parse(raw)) : emptyTabs;
   } catch {
     return emptyTabs;
   }
@@ -157,5 +161,60 @@ export function saveTabs(state: TabsState, storage: Pick<Storage, 'setItem'> = l
   } catch {
     // A full or blocked storage must never take the editor down with it: the
     // tabs simply do not survive the next restart.
+  }
+}
+
+/** Open tabs of every session, keyed by session id (docs/NOTES-POLISH-SPEC.md §3). */
+export type SessionTabs = Record<string, TabsState>;
+
+const SESSION_STORAGE_KEY = 'audiohelper.noteTabsBySession';
+
+/**
+ * Split one tab set into a set per session.
+ *
+ * The strip used to be shared by every session; its tabs are not thrown away on
+ * upgrade but handed to the session each one belongs to, keeping the focused
+ * tab focused where it lands.
+ */
+export function splitBySession(state: TabsState): SessionTabs {
+  const result: SessionTabs = {};
+  for (const tab of state.tabs) {
+    const own = result[tab.sessionId] ?? emptyTabs;
+    result[tab.sessionId] = { tabs: [...own.tabs, tab], activeTabId: own.activeTabId };
+  }
+  for (const [sessionId, own] of Object.entries(result)) {
+    const active = own.tabs.some((tab) => tab.id === state.activeTabId)
+      ? state.activeTabId
+      : (own.tabs.at(-1)?.id ?? null);
+    result[sessionId] = { ...own, activeTabId: active };
+  }
+  return result;
+}
+
+export function loadSessionTabs(storage: Pick<Storage, 'getItem'> = localStorage): SessionTabs {
+  try {
+    const raw = storage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return splitBySession(loadTabs(storage));
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const result: SessionTabs = {};
+    for (const [sessionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const own = validTabs(value);
+      // A tab filed under the wrong session would show another lecture's note.
+      const tabs = own.tabs.filter((tab) => tab.sessionId === sessionId);
+      if (tabs.length) result[sessionId] = validTabs({ tabs, activeTabId: own.activeTabId });
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export function saveSessionTabs(state: SessionTabs, storage: Pick<Storage, 'setItem'> = localStorage): void {
+  try {
+    const kept = Object.fromEntries(Object.entries(state).filter(([, own]) => own.tabs.length > 0));
+    storage.setItem(SESSION_STORAGE_KEY, JSON.stringify(kept));
+  } catch {
+    // Same as saveTabs: losing tabs across a restart is acceptable, a crash is not.
   }
 }

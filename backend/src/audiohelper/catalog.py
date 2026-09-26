@@ -29,6 +29,7 @@ from .local_models import (
 from .secrets import SecretStore
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_EMBEDDING_MODELS_URL = "https://openrouter.ai/api/v1/embeddings/models"
 OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
 ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -110,6 +111,8 @@ class ProviderCatalogs:
         self._memory: dict[str, tuple[float, list[CatalogEntry]]] = {}
 
     async def entries(self, provider: str, task: str | None = None) -> list[CatalogEntry]:
+        if task == "embedding":
+            return await self._cached(provider, task) if provider == "openrouter" else []
         if provider == "local-whisper":
             return [
                 CatalogEntry(
@@ -227,6 +230,8 @@ class ProviderCatalogs:
         if provider == "openrouter":
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             url = OPENROUTER_ASR_MODELS_URL if task == "asr" else OPENROUTER_MODELS_URL
+            if task == "embedding":
+                url = OPENROUTER_EMBEDDING_MODELS_URL
             payload = await self._get_json(url, headers)
             entries = [
                 entry

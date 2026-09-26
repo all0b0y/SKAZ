@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotesPanel } from './NotesPanel';
 import { useStore } from '../../state/store';
 import type { Citation, Note } from '../../api/types';
+import { selectText } from '../../test/noteEditor';
 
 /**
  * The menu over the document: one right click, every action on the passage.
@@ -44,7 +45,7 @@ const seed = (stored: Note) => {
       segments: [transcript], messages: [], notes: stored, notes_list: [stored],
     } as never,
     recorderState: 'stopped',
-    notesGenerating: false,
+    noteGenerations: {},
     notesError: null,
     askContext: null,
     settings: { notes: { model: 'test-model' } } as never,
@@ -54,31 +55,22 @@ const seed = (stored: Note) => {
 let sent: Array<{ method?: string; path: string; body?: unknown }>;
 let preview: Record<string, unknown>;
 
-/** jsdom reports nothing useful about a real Selection; drive the same contract. */
-const selectInside = (text: string) => {
-  const target = screen.getByText(new RegExp(text.slice(0, 20)));
-  vi.spyOn(window, 'getSelection').mockReturnValue({
-    toString: () => text,
-    rangeCount: 1,
-    anchorNode: target.firstChild ?? target,
-  } as unknown as Selection);
-  return target;
-};
-
-/** Right click the document with `text` selected, and return the menu. */
+/** Select `text` in the editor and right click it, the way a user raises the menu. */
 const menuOver = async (user: ReturnType<typeof userEvent.setup>, text: string) => {
-  const target = selectInside(text);
-  await user.pointer({ keys: '[MouseRight]', target });
-  return screen.findByRole('menu', { name: 'Действия с фрагментом' });
+  const doc = screen.getByLabelText('Notes');
+  selectText(doc, text);
+  await user.pointer({ keys: '[MouseRight]', target: doc });
+  return screen.findByRole('menu', { name: 'Passage actions' });
 };
 
 const openNote = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole('button', { name: 'Открыть Конспект' }));
-  await screen.findByLabelText('Конспект');
+  await user.click(screen.getByRole('button', { name: 'Open Конспект' }));
+  await screen.findByLabelText('Notes');
 };
 
 beforeEach(() => {
   localStorage.clear();
+  useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
   sent = [];
   preview = {
@@ -113,7 +105,7 @@ describe('the menu over a passage', () => {
     const menu = await menuOver(user, CITED);
 
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent?.trim()))
-      .toEqual(['Показать в транскрипции', 'Ask', 'Перегенерировать', 'Копировать', 'Вставить']);
+      .toEqual(['Show in transcript', 'Ask', 'Regenerate', 'Copy', 'Paste']);
     // The floating toolbar is gone: it was never dismissible and sat at a corner.
     expect(screen.queryByRole('toolbar', { name: 'Selection actions' })).not.toBeInTheDocument();
   });
@@ -124,13 +116,13 @@ describe('the menu over a passage', () => {
     await openNote(user);
     const menu = await menuOver(user, MINE);
 
-    const jump = within(menu).getByRole('menuitem', { name: /Показать в транскрипции/ });
-    const rewrite = within(menu).getByRole('menuitem', { name: /Перегенерировать/ });
+    const jump = within(menu).getByRole('menuitem', { name: /Show in transcript/ });
+    const rewrite = within(menu).getByRole('menuitem', { name: /Regenerate/ });
     expect(jump).toBeDisabled();
     expect(rewrite).toBeDisabled();
-    expect(rewrite).toHaveTextContent('Источник не найден');
+    expect(rewrite).toHaveTextContent('Source not found');
     // Copy and Ask never depend on the recording.
-    expect(within(menu).getByRole('menuitem', { name: /Копировать/ })).toBeEnabled();
+    expect(within(menu).getByRole('menuitem', { name: /Copy/ })).toBeEnabled();
     expect(within(menu).getByRole('menuitem', { name: /^Ask/ })).toBeEnabled();
   });
 
@@ -141,7 +133,7 @@ describe('the menu over a passage', () => {
     await openNote(user);
     const menu = await menuOver(user, CITED);
 
-    await user.click(within(menu).getByRole('menuitem', { name: 'Показать в транскрипции' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Show in transcript' }));
     expect(onCite).toHaveBeenCalledWith(citation);
     await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
   });
@@ -177,7 +169,7 @@ describe('regenerating a passage', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await openNote(user);
     const menu = await menuOver(user, CITED);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Перегенерировать' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Regenerate' }));
 
     await waitFor(() => expect(sent.some((req) => req.path.endsWith('/rewrite'))).toBe(true));
     const request = sent.find((req) => req.path.endsWith('/rewrite'))!;
@@ -193,11 +185,11 @@ describe('regenerating a passage', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await openNote(user);
     const menu = await menuOver(user, CITED);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Перегенерировать' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Regenerate' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'Сравнение фрагмента' });
-    expect(within(dialog).getByLabelText('Текущий фрагмент')).toHaveTextContent(CITED);
-    expect(within(dialog).getByLabelText('Новый фрагмент'))
+    const dialog = await screen.findByRole('dialog', { name: 'Passage comparison' });
+    expect(within(dialog).getByLabelText('Current passage')).toHaveTextContent(CITED);
+    expect(within(dialog).getByLabelText('New passage'))
       .toHaveTextContent(`${CITED}, и это важно`);
     expect(sent.some((req) => req.path.endsWith('/rewrite/apply'))).toBe(false);
   });
@@ -207,10 +199,10 @@ describe('regenerating a passage', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await openNote(user);
     const menu = await menuOver(user, CITED);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Перегенерировать' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Сравнение фрагмента' });
+    await user.click(within(menu).getByRole('menuitem', { name: 'Regenerate' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Passage comparison' });
 
-    await user.click(within(dialog).getByRole('button', { name: 'Отмена' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(sent.some((req) => req.path.endsWith('/rewrite/apply'))).toBe(false);
     expect(useStore.getState().detail!.notes!.content).toBe(note().content);
@@ -221,10 +213,10 @@ describe('regenerating a passage', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await openNote(user);
     const menu = await menuOver(user, CITED);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Перегенерировать' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Сравнение фрагмента' });
+    await user.click(within(menu).getByRole('menuitem', { name: 'Regenerate' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Passage comparison' });
 
-    await user.click(within(dialog).getByRole('button', { name: 'Применить' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }));
     await waitFor(() => expect(sent.some((req) => req.path.endsWith('/rewrite/apply'))).toBe(true));
     const apply = sent.find((req) => req.path.endsWith('/rewrite/apply'))!;
     expect(apply.body).toEqual({ preview_id: 'preview-1' });

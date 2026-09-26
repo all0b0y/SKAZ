@@ -1,4 +1,4 @@
-"""Audio chunk intake: durable storage, ordered transcription, idempotent sequences.
+"""Transient audio intake: ordered transcription and idempotent sequence receipts.
 
 Ordering and back-pressure are per session: one chunk is transcribed at a time so
 segments land in timeline order, while question answering and note generation run
@@ -12,16 +12,15 @@ import hashlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import repository as repo
 from .audio import WavAudio, parse_wav
-from .audio_storage import write_audio_file
 from .gateways import ProviderError, ProviderNotConfigured, require_cloud_consent
 from .gateways.asr import Transcriber, build_transcriber
-from .schemas import AudioResponse, Segment, StoredAudioResponse
+from .schemas import AudioResponse, BufferedAudioResponse, Segment
 from .settings_store import StoredSettings
+from .transient_audio import TransientAudio
 
 if TYPE_CHECKING:  # pragma: no cover
     from .runtime import Runtime
@@ -54,6 +53,7 @@ def _piece_end(chunk_start_ms: int, chunk_end_ms: int, offset_ms: int, duration_
 class IngestionService:
     def __init__(self, runtime: Runtime) -> None:
         self._runtime = runtime
+        self.audio = TransientAudio()
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._storage_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._pending: dict[str, int] = defaultdict(int)
@@ -61,12 +61,12 @@ class IngestionService:
     def pending(self, session_id: str) -> int:
         return self._pending[session_id]
 
-    async def store(
+    async def buffer(
         self, session_id: str, sequence: int, start_ms: int, end_ms: int, body: bytes
-    ) -> StoredAudioResponse:
-        """Persist captured WAV bytes without constructing or waiting for ASR."""
+    ) -> BufferedAudioResponse:
+        """Buffer live WAV input briefly without constructing or waiting for ASR."""
         stored = await self._persist(session_id, sequence, start_ms, end_ms, body)
-        return StoredAudioResponse(
+        return BufferedAudioResponse(
             sequence=stored.record.sequence,
             start_ms=stored.record.start_ms,
             end_ms=stored.record.end_ms,
@@ -133,7 +133,8 @@ class IngestionService:
             for chunk in pending_chunks:
                 try:
                     audio = parse_wav(
-                        Path(chunk.path).read_bytes(), max_seconds=self._runtime.config.max_chunk_seconds
+                        self.audio.get(session_id, chunk.sequence),
+                        max_seconds=self._runtime.config.max_chunk_seconds,
                     )
                     await self._transcribe_chunk(
                         transcriber, session_id, chunk.sequence, chunk.start_ms, chunk.end_ms, audio
@@ -161,7 +162,7 @@ class IngestionService:
             else:
                 pieces = await transcriber.transcribe(audio, language=settings.transcript_language)
         except (ProviderError, ProviderNotConfigured) as error:
-            # The audio stays on disk with a failed marker so a later flush can retry it.
+            # Only the failure receipt is durable. Resubmission must supply audio again.
             repo.set_chunk_status(self._runtime.db, session_id, sequence, repo.CHUNK_FAILED, str(error))
             logger.warning("Transcription failed for %s/%s: %s", session_id, sequence, error)
             raise
@@ -249,9 +250,6 @@ class IngestionService:
         existing = self._check_existing(session_id, sequence, digest, start_ms, end_ms)
         duplicate = existing is not None
         if existing is not None:
-            path = Path(existing.path)
-            if not path.is_file():
-                self._store_audio(path, body)
             record = existing
         else:
             winner = self._claim(session_id, sequence, start_ms, end_ms, digest, body)
@@ -260,46 +258,33 @@ class IngestionService:
             if claimed is None:
                 raise OSError("Stored audio metadata could not be read back.")
             record = claimed
+        self.audio.put(session_id, sequence, body)
         repo.extend_duration(self._runtime.db, session_id, end_ms)
         return record, duplicate
 
     def _claim(
         self, session_id: str, sequence: int, start_ms: int, end_ms: int, digest: str, body: bytes
     ) -> repo.ChunkRecord | None:
-        """Take ownership of the sequence and persist its audio, or return the winner's record.
-
-        The row is claimed atomically first, so two concurrent uploads of the same
-        sequence can never both write to the same file: the loser never touches disk
-        and is validated against the winner's stored digest and timeline metadata.
-        """
-        path = self._runtime.storage.audio_path(session_id, sequence)
+        """Claim only sequence metadata, never create an audio file."""
         record = repo.ChunkRecord(
             session_id=session_id,
             sequence=sequence,
             start_ms=start_ms,
             end_ms=end_ms,
             sha256=digest,
-            path=str(path),
+            path="",
             status=repo.CHUNK_PENDING,
             error=None,
         )
         if repo.insert_chunk(self._runtime.db, record):
-            try:
-                self._store_audio(path, body)
-            except OSError:
-                repo.delete_pending_chunk_claim(self._runtime.db, session_id, sequence, digest)
-                raise
             return None
         existing = self._check_existing(session_id, sequence, digest, start_ms, end_ms)
         if existing is None:  # deleted between the failed insert and the re-read
             raise ChunkConflict(f"Sequence {sequence} could not be stored; retry with a new sequence number.")
         return existing
 
-    @staticmethod
-    def _store_audio(path: Path, body: bytes) -> None:
-        write_audio_file(path, body)
-
     def close(self) -> None:
+        self.audio.discard()
         self._locks.clear()
         self._storage_locks.clear()
         self._pending.clear()

@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useStore } from '../../state/store';
-import { clsx } from 'clsx';
 import type { AudioFileChoice } from '../../api/bridge';
 import { ImportDialog } from '../imports/ImportDialog';
 import { Button } from '../ui/Button';
@@ -16,39 +15,17 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
   const recorderState = useStore((s) => s.recorderState);
   const newSession = useStore((s) => s.newSession);
 
-  const [collapsed, setCollapsed] = useState(false);
   const [creationError, setCreationError] = useState('');
   const [importFile, setImportFile] = useState<AudioFileChoice | null>(null);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === '/') {
-        e.preventDefault();
-        setCollapsed((c) => !c);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   const isCapturing =
     recorderState === 'recording' || recorderState === 'paused' || recorderState === 'processing';
 
-
   return (
-    <section className={clsx('rail', collapsed && 'rail--collapsed')} aria-label="Sessions">
+    <section className="rail" aria-label="Sessions">
       <header className="rail__head">
-        {!collapsed && <h2 className="rail__title">Sessions</h2>}
+        <h2 className="rail__title">Sessions</h2>
         <div className="rail__head-actions">
-          <button
-            className="rail__collapse"
-            onClick={() => setCollapsed((c) => !c)}
-            aria-label={collapsed ? 'Expand sessions panel' : 'Collapse sessions panel'}
-            aria-pressed={collapsed}
-            title={`${collapsed ? 'Expand' : 'Collapse'} panel (⌘/)`}
-          >
-            <Icon name="chevron" size={14} className={clsx('rail__collapse-icon', collapsed && 'rail__collapse-icon--flipped')} />
-          </button>
           <Button
             variant="quiet"
             icon="upload"
@@ -58,8 +35,8 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
                 .then((chosen) => { if (chosen) setImportFile(chosen); })
                 .catch((err: unknown) => setCreationError(err instanceof Error ? err.message : String(err)));
             }}
-            aria-label="Импортировать аудио"
-            title="Импортировать аудиофайл"
+            aria-label="Import audio"
+            title="Import an audio file"
           />
           <Button
             variant="quiet"
@@ -73,9 +50,9 @@ export function SessionList({ onOpenSettings, onOpenSearch }: SessionListProps) 
       </header>
 
       {creationError && <p role="alert" className="rail__notice">{creationError}</p>}
-      {!collapsed && <SessionNavigator />}
+      <SessionNavigator />
 
-      <div className={clsx('rail__foot', collapsed && 'rail__foot--collapsed')}>
+      <div className="rail__foot">
         <button
           className="rail__foot-btn"
           onClick={onOpenSearch}

@@ -13,7 +13,7 @@ const capture = async (page: Page, filename: string) => {
   await page.screenshot({ path: path.join(shots, filename), animations: 'disabled' });
 };
 const createGroup = async (page: Page, name: string, tag = '') => {
-  await page.getByRole('button', { name: 'Create group', exact: true }).click();
+  await page.getByRole('button', { name: 'New group', exact: true }).click();
   await page.getByRole('textbox', { name: 'Group name', exact: true }).fill(name);
   if (tag) await page.getByRole('textbox', { name: 'Tag (optional)', exact: true }).fill(tag);
   await page.getByRole('button', { name: 'Create', exact: true }).click();
@@ -41,6 +41,16 @@ test('session groups, real drag, menus and restart persistence', async () => {
     let page = await app.firstWindow();
     page.on('pageerror', (error) => errors.push(error.message));
     await page.setViewportSize({ width: 1280, height: 820 });
+    // Isolated onboarding preference only (as panels.smoke): no credentials or consent.
+    await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+      { timeout: 60_000 }).toBe('ready');
+    await page.evaluate(async () => {
+      const response = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+      if (!response.ok) throw new Error('Fixture onboarding failed');
+    });
+    await page.reload();
+    await expect(page.locator('.onboarding')).toHaveCount(0);
+    await expect(page.locator('.gate')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.getByRole('button', { name: 'New session' })).toBeVisible();
     await page.getByRole('button', { name: 'New session' }).click();
     const row = page.getByRole('list', { name: 'Saved sessions' }).getByRole('listitem');
@@ -82,7 +92,7 @@ test('session groups, real drag, menus and restart persistence', async () => {
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('tab', { name: /Университет #универ 1/ })).toBeVisible();
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-    await page.getByRole('button', { name: 'Create group', exact: true }).click();
+    await page.getByRole('button', { name: 'New group', exact: true }).click();
     await page.getByRole('textbox', { name: 'Group name' }).fill('Новая группа');
     await capture(page, 'dark-dialog.png');
     await page.keyboard.press('Escape');
@@ -105,6 +115,37 @@ test('session groups, real drag, menus and restart persistence', async () => {
     await expect(page.locator('.session__name')).toHaveCount(1);
     await page.getByRole('button', { name: /^Actions for/ }).click();
     await page.getByRole('menuitem', { name: 'Delete session…' }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.locator('.session__name')).toHaveCount(0);
+    await page.reload(); await expect(page.getByText('No sessions yet. Start one to begin listening.')).toBeVisible();
+
+    // Bulk actions against the real backend: ⌘-click / ⌘A, move, one-confirmation delete.
+    for (const title of ['Раз', 'Два', 'Три']) {
+      await page.getByRole('button', { name: 'New session' }).click();
+      const newest = page.getByRole('list', { name: 'Saved sessions' }).getByRole('listitem')
+        .filter({ has: page.locator('.session__name', { hasText: /^\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/ }) });
+      await expect(newest).toHaveCount(1);
+      await newest.getByRole('button', { name: /^Actions for/ }).click();
+      await page.getByRole('menuitem', { name: 'Rename', exact: true }).click();
+      await page.getByRole('textbox', { name: 'Session name' }).fill(title);
+      await page.keyboard.press('Enter');
+      await expect(page.locator('.session__name', { hasText: title })).toHaveCount(1);
+    }
+    const list = page.getByRole('list', { name: 'Saved sessions' });
+    await list.getByRole('button', { name: /^Раз/ }).click({ modifiers: ['Meta'] });
+    await list.getByRole('button', { name: /^Три/ }).click({ modifiers: ['Meta'] });
+    const bar = page.getByRole('toolbar', { name: 'Selected sessions' });
+    await expect(bar).toContainText('2 selected');
+    await bar.getByRole('button', { name: 'Move…' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Работа' }).click();
+    await expect(page.getByRole('tab', { name: /Работа/ })).toContainText('2');
+    await list.getByRole('button', { name: /^Два/ }).click({ modifiers: ['Meta'] });
+    await page.keyboard.press('Meta+a');
+    await expect(bar).toContainText('3 selected');
+    await capture(page, 'bulk-selection.png');
+    await bar.getByRole('button', { name: 'Delete…' }).click();
+    await expect(page.getByRole('dialog', { name: 'Delete 3 sessions?' })).toContainText('Два');
+    await capture(page, 'bulk-delete-dialog.png');
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(page.locator('.session__name')).toHaveCount(0);
     await page.reload(); await expect(page.getByText('No sessions yet. Start one to begin listening.')).toBeVisible();

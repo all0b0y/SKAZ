@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, model_validator
 
 from .languages import SUPPORTED_LANGUAGES, UsedLanguages
 
@@ -23,10 +23,10 @@ CloudProvider = Literal["openai", "openrouter", "anthropic", "soniox"]
 #: Cloud providers that own an API key. The key belongs to the provider, not to a
 #: task profile: two tasks on the same provider share one credential.
 CLOUD_PROVIDERS: tuple[str, ...] = ("openai", "openrouter", "anthropic", "soniox")
-Task = Literal["asr", "agent", "notes"]
+Task = Literal["asr", "agent", "notes", "embedding"]
 SessionStatus = Literal["recording", "paused", "stopped"]
 SessionMode = Literal["legacy", "contextual_local"]
-NativeRecordingMode = Literal["transcription", "translation", "audio_only"]
+NativeRecordingMode = Literal["transcription", "translation"]
 Scope = Literal["auto", "recent", "all", "beginning", "search"]
 AudioSourceKind = Literal["original_captured_wav"]
 #: "dedicated" — a real speech-to-text endpoint. "legacy" — an audio-input chat
@@ -61,12 +61,17 @@ class Settings(BaseModel):
     # Preferences for the next native recording, not a running session's config.
     native_recording_mode: NativeRecordingMode = "transcription"
     translation_target_language: str = "ru"
+    #: Capture sources for the next recording. None = the system default microphone.
+    input_device_id: str | None = None
+    capture_system_audio: bool = False
 
     #: Key presence per cloud provider, independent of which task uses it.
     provider_has_api_key: dict[str, bool] = Field(default_factory=dict)
     asr: Profile
     agent: Profile
     notes: Profile
+    embedding: Profile
+    embedding_budget_usd: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False, strict=True)
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
@@ -86,6 +91,9 @@ class SettingsUpdate(BaseModel):
         default=None, min_length=2, max_length=32,
         pattern=r"^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$",
     )
+    #: Browser deviceId of the preferred microphone; "" resets to the system default.
+    input_device_id: str | None = Field(default=None, max_length=512)
+    capture_system_audio: StrictBool | None = None
 
 
     #: Provider-scoped API keys, the only way to write a model provider credential.
@@ -97,6 +105,8 @@ class SettingsUpdate(BaseModel):
     asr: ProfileUpdate | None = None
     agent: ProfileUpdate | None = None
     notes: ProfileUpdate | None = None
+    embedding: ProfileUpdate | None = None
+    embedding_budget_usd: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False, strict=True)
     transcript_language: str | None = None
     output_language: str | None = None
     cloud_consent: bool | None = None
@@ -210,6 +220,7 @@ class Session(BaseModel):
     status: SessionStatus
     duration_ms: int
     mode: SessionMode = "legacy"
+    origin: Literal["live", "import"] = "live"
 
 
 class SessionsResponse(BaseModel):
@@ -267,6 +278,8 @@ class Segment(BaseModel):
 
 
 class Citation(BaseModel):
+    session_id: str | None = None
+    session_title: str | None = None
     segment_id: str
     start_ms: int
     end_ms: int
@@ -280,6 +293,12 @@ class Citation(BaseModel):
     start_token_id: str | None = None
     end_token_id: str | None = None
     speaker: int | None = None
+    #: The prompt labels (``P3``) this citation resolved from, recorded only for an
+    #: assistant answer: its text keeps those labels, so the UI can put a footnote
+    #: exactly where the model cited. Labels are per-generation numbers and mean
+    #: nothing outside that one answer; notes never store them. Empty on answers
+    #: saved before this field existed, which then show their sources as a list.
+    labels: list[str] = Field(default_factory=list)
 
 
 class Message(BaseModel):
@@ -312,10 +331,31 @@ class SessionDetail(BaseModel):
     messages: list[Message]
     notes: Note | None = None
     notes_list: list[Note] = Field(default_factory=list)
+    # Computed on read from the notes generator's own source; `segments` is empty
+    # in the native summary, so it cannot answer "is there anything to summarise".
+    has_transcript: bool = False
 
 
 class DeleteResponse(BaseModel):
     deleted: bool = True
+
+
+class BulkDeleteSessionsRequest(BaseModel):
+    ids: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        min_length=1, max_length=1000,
+    )
+
+
+class BulkDeleteFailure(BaseModel):
+    id: str
+    reason: str
+
+
+class BulkDeleteSessionsResponse(BaseModel):
+    """Each id is deleted on its own; one failure never stops the others."""
+
+    deleted: list[str]
+    failed: list[BulkDeleteFailure]
 
 
 ImportStatusValue = Literal["queued", "uploading", "processing", "completed", "failed", "cancelled"]
@@ -392,7 +432,7 @@ class AudioResponse(BaseModel):
 
 
 AudioChunkStatus = Literal["pending", "failed", "done"]
-class StoredAudioResponse(BaseModel):
+class BufferedAudioResponse(BaseModel):
     sequence: int
     start_ms: int
     end_ms: int
@@ -640,6 +680,9 @@ class AcceptLiveAsrFragmentRequest(BaseModel):
 
 
 class AskRequest(BaseModel):
+    search_scope: Literal["session", "group", "all"] | None = None
+    # Snapshot of local-only navigation membership; managed storage ignores it.
+    group_session_ids: list[str] | None = Field(default=None, max_length=10000)
     model_config = ConfigDict(extra="forbid")
 
     question: str
@@ -647,13 +690,26 @@ class AskRequest(BaseModel):
     scope: Scope = "auto"
     language: str | None = None
 
+    @model_validator(mode="after")
+    def validate_search_scope(self) -> AskRequest:
+        if self.group_session_ids is not None and self.search_scope != "group":
+            raise ValueError("Group membership is only valid with group search scope.")
+        if self.search_scope is not None and {"scope", "window_minutes"} & self.model_fields_set:
+            raise ValueError("Do not combine library scope with legacy time controls.")
+        return self
+
 
 class AskContext(BaseModel):
+    search_scope: Literal["session", "group", "all"] | None = None
+    session_count: int = 1
     start_ms: int
     end_ms: int
     scope: str
     #: True when the transcript for the resolved scope did not fit the context budget.
     truncated: bool = False
+    retrieval: Literal["legacy", "hybrid", "monologues", "lexical"] = "legacy"
+    source_count: int = 0
+    selected_count: int = 0
 
 
 class AskResponse(BaseModel):
@@ -693,12 +749,6 @@ class EditNoteRequest(NoteRevisionRequest):
     """
     content: str | None = Field(default=None, max_length=200_000)
     title: str | None = Field(default=None, max_length=400)
-
-
-class NoteVersion(BaseModel):
-    id: str
-    expires_at: float
-    note: Note
 
 
 class RewritePassageRequest(NoteRevisionRequest):

@@ -7,6 +7,23 @@ import {
 } from '../../../electron/ipcPolicy';
 
 describe('Electron IPC policy', () => {
+  it('allows only search settings, pending read and explicit approval; no direct search endpoint', () => {
+    for (const [method, path] of [['GET', '/web-search/settings'], ['PUT', '/web-search/settings'],
+      ['GET', '/web-search/pending'], ['POST', '/web-search/requests/id/decision']] as const) {
+      expect(validateBridgeRequest({ method, path })).toBeNull();
+    }
+    for (const [method, path] of [['POST', '/web-search/search'], ['POST', '/web-search/pending'],
+      ['GET', '/web-search/requests/id/decision'], ['DELETE', '/web-search/settings']] as const) {
+      expect(validateBridgeRequest({ method, path })).not.toBeNull();
+    }
+  });
+  it('allows read-only native event pages, not adjacent or mutating routes', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events' })).toBeNull();
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(validateBridgeRequest({ method, path: '/sessions/a/live/events' })).not.toBeNull();
+    }
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events/raw' })).not.toBeNull();
+  });
   it('allows only GET and PUT of the root preference, not arbitrary file access', () => {
     for (const method of ['GET', 'PUT']) {
       expect(validateBridgeRequest({ method, path: '/storage/root' })).toBeNull();
@@ -43,7 +60,9 @@ describe('Electron IPC policy', () => {
     expect(validateBridgeRequest({ method: 'DELETE', path: '/settings' })).toMatch(/not allowed/i);
     expect(validateBridgeRequest({ method: 'GET', path: 'http://evil.test/settings' })).toMatch(/path/i);
     expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/%2e%2e/settings' })).toMatch(/path/i);
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/audio' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/audio' })).not.toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/audio/0' })).not.toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/notes/n/history' })).not.toBeNull();
     expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/audio', body: {} })).toBeNull();
     expect(validateBridgeRequest({ method: 'GET', path: '/asr/live/capabilities' })).toBeNull();
     expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/asr/live' })).toBeNull();
@@ -112,11 +131,11 @@ describe('Electron IPC policy', () => {
   });
 
   it('does not expose persistence-only POST through the generic JSON bridge', () => {
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/audio/store', body: {} })).toMatch(/not allowed/i);
+    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/audio/buffer', body: {} })).toMatch(/not allowed/i);
   });
 
   it('routes the narrow binary channels only to their exact POST targets', () => {
-    expect(audioUploadPath('session / one', 'store')).toBe('/sessions/session%20%2F%20one/audio/store');
+    expect(audioUploadPath('session / one', 'store')).toBe('/sessions/session%20%2F%20one/audio/buffer');
     expect(audioUploadPath('session / one', 'transcribe')).toBe('/sessions/session%20%2F%20one/audio');
   });
 
@@ -142,5 +161,25 @@ describe('Electron IPC policy', () => {
     expect(validateBridgeRequest({ method: 'POST', path: '/models/local/delete' })).toMatch(/not allowed/i);
     expect(validateBridgeRequest({ method: 'POST', path: '/models/local' })).toMatch(/not allowed/i);
     expect(validateBridgeRequest({ method: 'GET', path: '/models/local/status/../../health' })).toMatch(/path/i);
+  });
+
+  it('allows exactly the Codex contract routes, each with its own method', () => {
+    const allowed: [string, string][] = [
+      ['GET', '/codex/state'], ['POST', '/codex/chats'], ['GET', '/codex/chats/c1'],
+      ['PATCH', '/codex/chats/c1'], ['DELETE', '/codex/chats/c1'], ['POST', '/codex/chats/c1/messages'],
+      ['POST', '/codex/tasks/t1/stop'], ['POST', '/codex/tasks/t1/resume'],
+      ['POST', '/codex/sessions/s1/notes'], ['PUT', '/codex/settings'],
+      ['POST', '/codex/connection/check'], ['POST', '/codex/connection/login'],
+      ['POST', '/codex/connection/logout'], ['GET', '/codex/previews'],
+      ['POST', '/codex/previews/p1/apply'], ['POST', '/codex/previews/p1/discard'],
+    ];
+    for (const [method, path] of allowed) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
+    const rejected: [string, string][] = [
+      ['GET', '/codex/connection/login'], ['GET', '/codex/settings'], ['DELETE', '/codex/tasks/t1'],
+      ['POST', '/codex/tasks/t1/run'], ['POST', '/codex/shell'], ['GET', '/codex/credentials'],
+      ['POST', '/codex/chats/c1/messages/extra'], ['PUT', '/codex/previews/p1/apply'],
+      ['GET', '/codex/chats/c1/../../settings'],
+    ];
+    for (const [method, path] of rejected) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
   });
 });

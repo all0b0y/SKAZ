@@ -5,7 +5,7 @@ import { Button } from '../ui/Button';
 import { PhysicalStoragePanel } from './PhysicalStoragePanel';
 import './storageRootPanel.css';
 
-const unknownOutcome = 'Сохранение не подтверждено. Проверьте текущий корень перед повтором.';
+const unknownOutcome = 'Saving was not confirmed. Check the current root before retrying.';
 
 export function StorageRootPanel({ capturing }: { capturing: boolean }) {
   const [view, setView] = useState<StorageRootView | null>(null);
@@ -30,7 +30,7 @@ export function StorageRootPanel({ capturing }: { capturing: boolean }) {
     const scope = { alive: true };
     lifecycle.current = scope;
     void read().then((next) => { if (scope.alive) setView(next); }, () => {
-      if (scope.alive) setError('Не удалось прочитать корень Markdown.');
+      if (scope.alive) setError('Could not read the Markdown root.');
     });
     return () => { scope.alive = false; };
   }, []);
@@ -55,8 +55,8 @@ export function StorageRootPanel({ capturing }: { capturing: boolean }) {
         if (scope.alive) {
           setView(next); setCandidate(undefined);
           if (operation === 'save') {
-            if (next.root === candidate) setMessage('Корень Markdown сохранён.');
-            else setError('Корень изменился. Показана текущая настройка.');
+            if (next.root === candidate) setMessage('Markdown root saved.');
+            else setError('The root changed. Showing the current setting.');
           }
         }
         window.dispatchEvent(new Event('skaz-storage-root-changed'));
@@ -64,7 +64,7 @@ export function StorageRootPanel({ capturing }: { capturing: boolean }) {
     } catch {
       if (scope.alive) {
         if (operation !== 'choose') { setView(null); setCandidate(undefined); }
-        setError(operation === 'choose' ? 'Не удалось открыть выбор папки.' : unknownOutcome);
+        setError(operation === 'choose' ? 'Could not open the folder picker.' : unknownOutcome);
       }
     } finally {
       running.current = false;
@@ -73,39 +73,39 @@ export function StorageRootPanel({ capturing }: { capturing: boolean }) {
   };
 
   const disabled = busy || capturing || !view || view.change_locked;
-  return <><section className="settings-section storage-root" aria-label="Корень Markdown">
+  return <><section className="settings-section storage-root" aria-label="Markdown root">
     <h3 className="settings-section__title">Files</h3>
-    <p>Корень файлов. До отдельного включения физического режима ниже сюда сохраняется только Markdown.
-      База данных остаётся во внутреннем хранилище.</p>
+    <p>File root. Until physical mode below is enabled separately, only Markdown is saved here.
+      The database stays in internal storage.</p>
     {view && <>
-      <p>{view.root === null ? 'Markdown-проекция выключена.' : 'Текущий корень Markdown:'}</p>
+      <p>{view.root === null ? 'Markdown projection is off.' : 'Current Markdown root:'}</p>
       {view.root && <code className="storage-root__path">{view.root}</code>}
-      <p>Предлагаемый корень: <code className="storage-root__path">{view.suggested_root}</code></p>
+      <p>Suggested root: <code className="storage-root__path">{view.suggested_root}</code></p>
       {view.change_locked && <p role="status">{view.managed
-        ? 'Корень задан при запуске приложения; здесь его изменить нельзя.'
-        : 'Корень уже использован. Смена и отключение заблокированы до безопасного переноса.'}</p>}
+        ? 'The root was set when the app launched; it cannot be changed here.'
+        : 'The root is already in use. Changing or disabling it is blocked until a safe move.'}</p>}
     </>}
-    {capturing && <p>Остановите запись перед изменением корня.</p>}
+    {capturing && <p>Stop recording before changing the root.</p>}
     <div className="storage-root__actions">
-      <Button disabled={disabled} onClick={() => void run('choose')}>Выбрать папку…</Button>
+      <Button disabled={disabled} onClick={() => void run('choose')}>Choose folder…</Button>
       <Button disabled={disabled} onClick={() => { setCandidate(view!.suggested_root); setMessage(''); }}>
-        Использовать Documents/SKAZ
+        Use Documents/SKAZ
       </Button>
-      {view?.root && <Button disabled={disabled} onClick={() => setCandidate(null)}>Отключить проекцию</Button>}
+      {view?.root && <Button disabled={disabled} onClick={() => setCandidate(null)}>Turn off projection</Button>}
     </div>
     {candidate !== undefined && <fieldset disabled={disabled}>
-      <legend>{candidate === null ? 'Отключить Markdown-проекцию?' : 'Подтвердить выбранный корень?'}</legend>
+      <legend>{candidate === null ? 'Turn off Markdown projection?' : 'Confirm the chosen root?'}</legend>
       {candidate !== null && <code className="storage-root__path">{candidate}</code>}
-      <p>Это отдельное сохранение настройки. Файлы не переносятся и не импортируются.
-        После подтверждения Pause/Stop и правки Notes сохраняют Markdown в выбранный корень.
-        Уже существующий текст появится при явном повторе сохранения файлов или следующей правке.</p>
+      <p>This saves the setting on its own. Files are not moved or imported.
+        After confirming, Pause/Stop and Notes edits save Markdown to the chosen root.
+        Existing text appears when file saving is retried explicitly or on the next edit.</p>
       <div className="storage-root__actions">
-        <Button onClick={() => void run('save')}>Подтвердить корень Markdown</Button>
-        <Button onClick={() => setCandidate(undefined)}>Отмена</Button>
+        <Button onClick={() => void run('save')}>Confirm Markdown root</Button>
+        <Button onClick={() => setCandidate(undefined)}>Cancel</Button>
       </div>
     </fieldset>}
     {error && <p role="alert">{error}</p>}
     {message && <p role="status">{message}</p>}
-    <Button disabled={busy} onClick={() => void run('read')}>Проверить текущий корень</Button>
+    <Button disabled={busy} onClick={() => void run('read')}>Check current root</Button>
   </section><PhysicalStoragePanel capturing={capturing} /></>;
 }

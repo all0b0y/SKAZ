@@ -39,7 +39,9 @@ def _catalog(outbound: FakeHttp) -> None:
 async def session(client: httpx.AsyncClient, outbound: FakeHttp) -> str:
     response = await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "agent": {"provider": "openrouter", "model": "qwen/qwen3-30b-a3b-instruct-2507"},
             "notes": {"provider": "openrouter", "model": "qwen/qwen3.5-flash-02-23"},
             "cloud_consent": True,
@@ -89,7 +91,7 @@ def stub_notes(outbound: FakeHttp, content: str) -> None:
     )
 
 
-async def test_independent_notes_replace_edit_and_restore(
+async def test_independent_notes_replace_edit_without_history(
     client: httpx.AsyncClient, session: str, outbound: FakeHttp,
 ) -> None:
     await add(client, outbound, session, 0, "Определение термина.")
@@ -112,17 +114,18 @@ async def test_independent_notes_replace_edit_and_restore(
     listing = (await client.get(f"/sessions/{session}/notes")).json()["notes"]
     assert len(listing) == 2
     assert next(n for n in listing if n["id"] == second["id"])["content"] == second["content"]
-    history = (await client.get(path + "/history")).json()["versions"]
-    previous = next(v for v in history if v["note"]["content"] == "Мои правки")
-    restored = await client.post(path + f"/history/{previous['id']}/restore", json={"expected_revision": 3})
-    assert restored.status_code == 200, restored.text
-    assert restored.json()["content"] == "Мои правки"
-    stale = await client.patch(path, json={"content": "Lost update", "expected_revision": 3})
+    assert (await client.get(path + "/history")).status_code == 404
+    assert (
+        await client.post(path + "/history/old/restore", json={"expected_revision": 3})
+    ).status_code == 404
+    stale = await client.patch(path, json={"content": "Lost update", "expected_revision": 2})
     assert stale.status_code == 409
 
 
 async def test_recording_append_marks_notes_stale_without_rewriting_them(
-    client: httpx.AsyncClient, session: str, outbound: FakeHttp,
+    client: httpx.AsyncClient,
+    session: str,
+    outbound: FakeHttp,
 ) -> None:
     await add(client, outbound, session, 0, "Определение.")
     stub_notes(outbound, "- Итог [P1]")
@@ -131,7 +134,7 @@ async def test_recording_append_marks_notes_stale_without_rewriting_them(
     path = f"/sessions/{session}/notes/{first['id']}"
     # Durable audio alone invalidates coverage, even before any ASR result.
     stored = await client.post(
-        f"/sessions/{session}/audio/store",
+        f"/sessions/{session}/audio/buffer",
         params={"sequence": 1, "start_ms": 30_000, "end_ms": 60_000},
         content=make_wav(1.0, frequency=660), headers={"Content-Type": "audio/wav"},
     )
@@ -149,16 +152,9 @@ async def test_recording_append_marks_notes_stale_without_rewriting_them(
         "replace_note_id": first["id"], "expected_revision": 2,
     })).json()
     assert replaced["stale"] is False
-    versions = (await client.get(path + "/history")).json()["versions"]
-    original = next(v for v in versions if v["note"]["revision"] == 1)
-    restored = (await client.post(path + f"/history/{original['id']}/restore", json={
-        "expected_revision": 3,
-    })).json()
-    assert restored["stale"] is True
-    assert restored["content"] == first["content"]
     listing = (await client.get(f"/sessions/{session}/notes")).json()["notes"]
     assert len(listing) == 1
-    assert listing[0]["stale"] is True
+    assert listing[0]["stale"] is False
 
 
 @pytest.mark.parametrize("replace_existing", [False, True])
@@ -184,7 +180,7 @@ async def test_append_during_generation_keeps_original_source_revision(
         try:
             await asyncio.wait_for(entered.wait(), 2)
             stored = await client.post(
-                f"/sessions/{session}/audio/store",
+                f"/sessions/{session}/audio/buffer",
                 params={"sequence": 1, "start_ms": 30_000, "end_ms": 60_000},
                 content=make_wav(1.0), headers={"Content-Type": "audio/wav"},
             )
@@ -213,28 +209,6 @@ async def test_note_replacement_is_session_scoped_and_requires_revision(
         "content": "Must not overwrite", "expected_revision": 1,
     })
     assert foreign.status_code == 404
-
-
-async def test_history_expires_without_deleting_current_or_independent_notes(
-    client: httpx.AsyncClient, session: str, outbound: FakeHttp, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from audiohelper import note_store
-
-    await add(client, outbound, session, 0, "Термин.")
-    stub_notes(outbound, "- Определение [P1]")
-    first = (await client.post(f"/sessions/{session}/notes", json={})).json()
-    await client.post(f"/sessions/{session}/notes", json={})
-    path = f"/sessions/{session}/notes/{first['id']}"
-    await client.patch(path, json={"content": "Правки", "expected_revision": 1})
-    versions = (await client.get(path + "/history")).json()["versions"]
-    assert len(versions) == 1
-    monkeypatch.setattr(note_store.time, "time", lambda: versions[0]["expires_at"])
-    assert (await client.get(path + "/history")).json() == {"versions": []}
-    assert (await client.post(path + f"/history/{versions[0]['id']}/restore",
-                             json={"expected_revision": 2})).status_code == 404
-    notes = (await client.get(f"/sessions/{session}/notes")).json()["notes"]
-    assert len(notes) == 2
-    assert next(n for n in notes if n["id"] == first["id"])["content"] == "Правки"
 
 
 async def test_notes_are_written_from_the_transcript(
@@ -290,13 +264,15 @@ async def test_the_detail_control_changes_density_not_grounding(
         response = await client.post(f"/sessions/{session}/notes", json={"detail": detail})
         assert response.status_code == 200, response.text
         prompts[detail] = "\n".join(m["content"] for m in outbound.last_body["messages"])
-    assert "sparsely" in prompts["brief"]
-    assert "at most one point per monologue" in prompts["normal"]
-    assert "more than one point" in prompts["detailed"]
-    # Every level keeps the same grounding rules; the control is not a licence to invent.
+    # Legacy detail choices change phrasing, never coverage or a quota per speaker turn.
     for prompt in prompts.values():
         assert "Use only what the transcript says" in prompt
-        assert "never permission to say more" in prompt or "Never write a point that says more" in prompt
+        assert "self-contained" in prompt
+        assert "Infer whether" in prompt
+        assert "distinct examples" in prompt
+        assert "at most one point" not in prompt
+        assert "write sparsely" not in prompt
+        assert "Do not add timestamps" in prompt
 
 
 async def test_an_unknown_detail_level_is_rejected(
@@ -484,7 +460,9 @@ async def test_notes_for_unknown_session_is_404(client: httpx.AsyncClient) -> No
 async def test_unconfigured_notes_profile_is_reported(client: httpx.AsyncClient, outbound: FakeHttp) -> None:
     await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "cloud_consent": True,
         },
     )

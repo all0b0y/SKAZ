@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from audiohelper import repository as repo
-from audiohelper.audio import WavAudio
 from audiohelper.db import Database
 from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
 from audiohelper.live_store import LiveConflict, LiveStore
@@ -37,11 +36,11 @@ def test_old_database_without_mode_or_migration_table_keeps_segment_identity(tmp
             db.close()
 
 
-def test_audio_and_cross_block_final_survive_reopen_without_changing_ids(tmp_path: Path) -> None:
+def test_transport_clock_and_final_survive_reopen_without_audio(tmp_path: Path) -> None:
     path = tmp_path / "recording.sqlite"
     db = Database(path)
     session = repo.create_session(db, "Native")
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     connection = store.open(session.id, sample_rate=16000, model="stt-rt-v5")
     first = bytes([1, 0]) * 1600
     second = bytes([2, 0]) * 1600
@@ -63,13 +62,13 @@ def test_audio_and_cross_block_final_survive_reopen_without_changing_ids(tmp_pat
     assert len(segments) == 1
     assert segments[0].id == ids[0]
     assert segments[0].text == "Hello"
-    assert [source.sequence for source in segments[0].sources] == [0, 1]
+    assert segments[0].sources == []
     store.close(connection.id, finished=True)
     db.close()
 
     db = Database(path)
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         assert store.snapshot(session.id)["saved_samples"] == 3200
         assert store.snapshot(session.id)["final_tokens"] == token_snapshot
         assert store.snapshot(session.id)["speakers"] == [
@@ -77,8 +76,8 @@ def test_audio_and_cross_block_final_survive_reopen_without_changing_ids(tmp_pat
         ]
         assert repo.list_segments(db, session.id)[0].id == ids[0]
         chunk = repo.get_chunk(db, session.id, 0)
-        assert chunk is not None
-        assert Path(chunk.path).read_bytes() == WavAudio(16000, first).to_wav_bytes()
+        assert chunk is None
+        assert not (tmp_path / "audio").exists()
     finally:
         db.close()
 
@@ -87,7 +86,7 @@ def test_translation_is_durable_separate_and_idempotent_without_invented_sources
     path = tmp_path / "translation.sqlite"
     db = Database(path)
     session = repo.create_session(db, "Translated")
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     connection = store.open(session.id, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x00\x00" * 1600)
     source_event = SonioxEvent(
@@ -103,7 +102,7 @@ def test_translation_is_durable_separate_and_idempotent_without_invented_sources
     store.save_event(connection.id, ordinal=1, event=replacement)
     db.close()
     db = Database(path)
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     reopened_draft = store.snapshot(session.id)["partial_translation_tokens"]
     assert [item["text"] for item in reopened_draft] == ["Здравствуй"]
     event = SonioxEvent((), (), (), 100, 100, True, final_translation_tokens=(
@@ -129,7 +128,7 @@ def test_translation_is_durable_separate_and_idempotent_without_invented_sources
     db.close()
     db = Database(path)
     try:
-        reopened = LiveStore(db, tmp_path / "audio").snapshot(session.id)
+        reopened = LiveStore(db).snapshot(session.id)
         assert reopened["final_translation_tokens"] == translations
     finally:
         db.close()
@@ -139,7 +138,7 @@ def test_native_recording_rejects_old_transcript_writer_before_first_final(tmp_p
     db = Database(":memory:")
     try:
         session = repo.create_session(db, "Native")
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         store.open(session.id, sample_rate=16000, model="stt-rt-v5")
         with pytest.raises(repo.FinalWriterConflict):
             repo.replace_chunk_segments(db, session.id, 0, [])
@@ -151,7 +150,7 @@ def test_restart_preserves_draft_as_unconfirmed_and_marks_connection_incomplete(
     path = tmp_path / "restart.sqlite"
     db = Database(path)
     session = repo.create_session(db, "Interrupted")
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     first = store.open(session.id, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(first.id, sequence=0, start_sample=0, pcm=b"\x00\x00" * 1600)
     store.save_event(first.id, ordinal=0, event=SonioxEvent(
@@ -160,7 +159,7 @@ def test_restart_preserves_draft_as_unconfirmed_and_marks_connection_incomplete(
     db.close()
     db = Database(path)
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         store.recover_interrupted()
         snapshot = store.snapshot(session.id)
         assert snapshot["connections"][0]["status"] == "incomplete"
@@ -176,7 +175,7 @@ def test_packet_replay_order_resume_and_late_event_are_safe(tmp_path: Path) -> N
     db = Database(":memory:")
     try:
         session = repo.create_session(db, "Native")
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         first = store.open(session.id, sample_rate=16000, model="stt-rt-v5")
         pcm = b"\x01\x00" * 1600
         with pytest.raises(LiveConflict):

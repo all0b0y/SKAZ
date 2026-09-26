@@ -33,12 +33,12 @@ from .. import transcript_monologues as tmono
 from ..gateways import ProviderError, ProviderNotConfigured, require_cloud_consent
 from ..gateways.chat import ChatGateway, ChatMessage, build_chat
 from ..schemas import Citation, Note
+from .note_completion import complete_note
 from .notes import DETAIL_RULES, SYSTEM_RULES, Detail
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..runtime import Runtime
 
-MAX_REWRITE_TOKENS = 900
 #: Previews waiting for a decision. Small on purpose: a preview is a few seconds of
 #: the user's attention, not a document store, and an abandoned one must not pin
 #: generated text in memory indefinitely.
@@ -127,12 +127,13 @@ async def preview(
     settings = runtime.settings_store.load()
     gateway = _gateway(runtime)
     context = mctx.build(sources, budget_chars=_unbounded(sources))
-    labelled = await gateway.complete(
-        [
+    labelled = await complete_note(
+        gateway, [
             ChatMessage("system", SYSTEM_RULES),
-            ChatMessage("user", _prompt(original, context.text, language or settings.output_language, detail)),
+            ChatMessage(
+                "user", _prompt(original, context.text, language or settings.output_language, detail)
+            ),
         ],
-        max_tokens=MAX_REWRITE_TOKENS,
     )
 
     unresolved = mctx.unresolved(context.references, labelled)

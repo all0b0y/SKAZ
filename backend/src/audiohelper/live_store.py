@@ -1,4 +1,4 @@
-"""Durable native audio, ASR connections and append-only transcript identities.
+"""Durable transport clocks, ASR connections and append-only transcript identities.
 
 All changes for one packet/event share a SQLite transaction. Provider I/O belongs
 outside this module and never holds the database lock.
@@ -11,11 +11,8 @@ import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-from .audio import WavAudio
-from .audio_storage import write_audio_file
 from .db import Database
 from .gateways.soniox import SonioxConfig, SonioxEvent
 from .native_tokens import persist_tokens, read_tokens
@@ -44,18 +41,8 @@ def _now() -> str:
 
 
 class LiveStore:
-    def __init__(
-        self, db: Database, audio_dir: Path, *, storage: Any = None, retain_audio: bool = True,
-    ) -> None:
+    def __init__(self, db: Database) -> None:
         self.db = db
-        self.audio_dir = audio_dir
-        self.storage = storage
-        self.retain_audio = retain_audio
-        # One receipt per session supports uncertain-ACK reconciliation without PCM.
-        with self.db.write() as connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS native_transport_receipts ("
-                               "session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,"
-                               "sequence INTEGER,start_sample INTEGER,end_sample INTEGER,digest TEXT)")
 
     def open(
         self, session_id: str, *, sample_rate: int, model: str,
@@ -64,11 +51,9 @@ class LiveStore:
     ) -> LiveConnection:
         SonioxConfig(sample_rate=sample_rate, model=model,
                      translation_target_language=translation_target_language, used_languages=used_languages)
-        if recording_mode not in ("transcription", "translation", "audio_only"):
+        if recording_mode not in ("transcription", "translation"):
             raise LiveConflict("Invalid recording mode.")
         with self.db.write() as connection:
-            if self.retain_audio and self.storage is not None:
-                self.storage.guard()
             if connection.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone() is None:
                 raise LiveConflict("Session does not exist.")
             recording = connection.execute(
@@ -98,12 +83,14 @@ class LiveStore:
                     raise LiveConflict("Sample rate cannot change within a recording.")
                 start_sample = recording["saved_samples"]
                 next_sequence = recording["next_sequence"]
+                if recording["recording_mode"] == "audio_only":
+                    raise LiveConflict(
+                        "This legacy audio-only recording cannot be continued. Start a new transcription."
+                    )
                 recording_mode = recording["recording_mode"]
                 translation_target_language = recording["translation_target_language"]
                 used_languages = (tuple(json.loads(recording["used_languages_json"]))
                                   if recording["used_languages_json"] is not None else None)
-            if not self.retain_audio and recording_mode == "audio_only":
-                raise LiveConflict("Audio-only recording is disabled while audio retention is disabled.")
             if connection.execute(
                 "SELECT 1 FROM asr_connections WHERE session_id=? AND status='active'", (session_id,)
             ).fetchone():
@@ -131,7 +118,7 @@ class LiveStore:
         self, identity: str, *, sequence: int, start_sample: int, pcm: bytes,
         replay_start_sample: int | None = None,
     ) -> bool:
-        """Persist a bounded PCM block; return False for an identical replay."""
+        """Accept a bounded PCM block without saving it; deduplicate the last receipt."""
         if (type(sequence) is not int or type(start_sample) is not int
                 or sequence < 0 or start_sample < 0 or not isinstance(pcm, bytes)
                 or not pcm or len(pcm) % 2):
@@ -139,54 +126,13 @@ class LiveStore:
         with self.db.write() as connection:
             row = self._active(connection, identity)
             rate = row["sample_rate"]
-            if self.retain_audio and self.storage is not None:
-                self.storage.guard()
             replay_floor = row["start_sample"] if replay_start_sample is None else replay_start_sample
             if type(replay_floor) is not int or not 0 <= replay_floor <= row["start_sample"]:
                 raise LiveConflict("Invalid local transport replay boundary.")
             count = len(pcm) // 2
             if count > rate // 2:
                 raise LiveConflict("An audio block must not exceed 500 milliseconds.")
-            if not self.retain_audio:
-                return self._accept_transient(connection, row, sequence, start_sample, pcm, replay_floor)
-            body = WavAudio(rate, pcm).to_wav_bytes()
-            digest = hashlib.sha256(body).hexdigest()
-            previous = connection.execute(
-                "SELECT b.start_sample,b.end_sample,c.sha256,c.path FROM native_audio_blocks b "
-                "JOIN chunks c USING(session_id,sequence) WHERE b.session_id=? AND b.sequence=?",
-                (row["session_id"], sequence),
-            ).fetchone()
-            if previous is not None:
-                if (previous["start_sample"] != start_sample or previous["end_sample"] != start_sample + count
-                        or previous["sha256"] != digest or start_sample < replay_floor):
-                    raise LiveConflict("Conflicting audio replay.")
-                path = Path(previous["path"])
-                if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
-                    raise LiveConflict("Previously saved audio is missing or corrupt.")
-                return False
-            if sequence != row["next_sequence"] or start_sample != row["saved_samples"]:
-                raise LiveConflict("Audio must be contiguous and ordered.")
-            session_id = row["session_id"]
-            path = (self.storage.audio_path(session_id, sequence) if self.storage is not None
-                    else self.audio_dir / session_id / f"{sequence:06d}.wav")
-            write_audio_file(path, body)
-            end_sample = start_sample + count
-            start_ms, end_ms = start_sample * 1000 // rate, end_sample * 1000 // rate
-            # Integer millisecond display ranges may collapse for a tiny tail.
-            # The native sample clock and PCM payload remain exact; never pad or drop it.
-            connection.execute(
-                "INSERT INTO chunks(session_id,sequence,start_ms,end_ms,sha256,path,status,created_at) "
-                "VALUES (?,?,?,?,?,?,'pending',?)",
-                (session_id, sequence, start_ms, end_ms, digest, str(path), _now()),
-            )
-            connection.execute("INSERT INTO native_audio_blocks VALUES (?,?,?,?)",
-                               (session_id, sequence, start_sample, end_sample))
-            connection.execute(
-                "UPDATE native_recordings SET saved_samples=?,next_sequence=? WHERE session_id=?",
-                (end_sample, sequence + 1, session_id),
-            )
-            connection.execute("UPDATE sessions SET duration_ms=? WHERE id=?", (end_ms, session_id))
-            return True
+            return self._accept_transient(connection, row, sequence, start_sample, pcm, replay_floor)
 
     @staticmethod
     def _accept_transient(
@@ -215,7 +161,7 @@ class LiveStore:
             "UPDATE native_recordings SET saved_samples=?,next_sequence=? WHERE session_id=?",
             (end_sample, sequence + 1, row["session_id"]),
         )
-        connection.execute("UPDATE sessions SET duration_ms=? WHERE id=?",
+        connection.execute("UPDATE sessions SET duration_ms=?,source_revision=source_revision+1 WHERE id=?",
                            (end_sample * 1000 // row["sample_rate"], row["session_id"]))
         return True
 
@@ -265,32 +211,16 @@ class LiveStore:
                     raise LiveConflict("Transcript timestamps are outside processed audio.")
                 absolute_start = anchor + start_ms * rate // 1000
                 absolute_end = anchor + (end_ms * rate + 999) // 1000
-                blocks = connection.execute(
-                    "SELECT b.*,c.sha256 FROM native_audio_blocks b JOIN chunks c USING(session_id,sequence) "
-                    "WHERE b.session_id=? AND b.end_sample>? AND b.start_sample<? ORDER BY b.sequence",
-                    (row["session_id"], absolute_start, absolute_end),
-                ).fetchall() if self.retain_audio else []
-                covered = sum(min(absolute_end, b["end_sample"]) - max(absolute_start, b["start_sample"])
-                              for b in blocks)
-                if self.retain_audio and covered != absolute_end - absolute_start:
-                    raise LiveConflict("Transcript source audio is incomplete.")
                 segment_id = uuid.uuid5(uuid.UUID(identity), str(ordinal)).hex
                 languages = {token.language for token in event.final_tokens if token.language}
                 language = next(iter(languages)) if len(languages) == 1 else None
                 connection.execute(
                     "INSERT INTO segments(id,session_id,sequence,start_ms,end_ms,text,language,created_at) "
                     "VALUES (?,?,?,?,?,?,?,?)",
-                    (segment_id, row["session_id"], (blocks[0]["sequence"] if blocks else -1),
+                    (segment_id, row["session_id"], -1,
                      absolute_start * 1000 // rate,
                      absolute_end * 1000 // rate, text, language, _now()),
                 )
-                for block in blocks:
-                    connection.execute(
-                        "INSERT INTO segment_sources VALUES (?,?,?,?,?,?)",
-                        (segment_id, row["session_id"], block["sequence"],
-                         max(absolute_start, block["start_sample"]) - block["start_sample"],
-                         min(absolute_end, block["end_sample"]) - block["start_sample"], block["sha256"]),
-                    )
                 connection.execute("INSERT INTO segments_fts(segment_id,session_id,text) VALUES (?,?,?)",
                                    (segment_id, row["session_id"], text))
                 connection.execute("INSERT INTO transcript_revisions VALUES (?,1,?,'soniox')",
@@ -332,6 +262,10 @@ class LiveStore:
                 "SELECT saved_samples FROM native_recordings r WHERE r.session_id=asr_connections.session_id"
                 ") WHERE status='active'"
             )
+            # No capture survives a restart. A session still marked recording was
+            # interrupted (crash, force quit) or never started; it resumes as paused,
+            # the same state a recovered library session gets.
+            connection.execute("UPDATE sessions SET status='paused' WHERE status='recording'")
 
     def snapshot(self, session_id: str) -> dict[str, Any]:
         with self.db.read() as connection:
@@ -358,7 +292,7 @@ class LiveStore:
             originals = read_tokens(connection, session_id)
             translations = read_tokens(connection, session_id, translation=True)
             stream = read_tokens(connection, session_id, stream=True)
-            return {**recording, "audio_retained": self.retain_audio,
+            return {**recording, "audio_retained": False,
                     "used_languages": json.loads(languages_json) if languages_json else None,
                     "connections": [dict(item) for item in connections], "gaps": gaps,
                     "final_tokens": originals,

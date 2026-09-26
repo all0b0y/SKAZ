@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
 import threading
 from contextlib import suppress
@@ -23,9 +24,9 @@ import pytest
 from audiohelper import local_models
 from audiohelper.app import create_app
 from audiohelper.audio import parse_wav
-from audiohelper.catalog import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
 from audiohelper.gateways import ProviderError
 from audiohelper.gateways import asr as asr_gateway
+from audiohelper.local_models import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
 from audiohelper.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
@@ -779,7 +780,7 @@ async def test_partial_delete_failure_invalidates_ready_before_next_public_statu
             return object()
         raise FileNotFoundError("offline miss after partial deletion")
 
-    real_rmtree = local_models.shutil.rmtree
+    real_rmtree = shutil.rmtree
 
     def remove_repo_then_fail_on_locks(path: Path, *args: Any, **kwargs: Any) -> None:
         target = Path(path)
@@ -807,7 +808,7 @@ async def test_partial_delete_failure_invalidates_ready_before_next_public_statu
                 "/models/local/status",
                 params={"provider": "local-whisper", "model": "small"},
             )
-            monkeypatch.setattr(local_models.shutil, "rmtree", remove_repo_then_fail_on_locks)
+            monkeypatch.setattr(shutil, "rmtree", remove_repo_then_fail_on_locks)
             failed = await isolated_client.request(
                 "DELETE",
                 "/models/local",

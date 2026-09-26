@@ -37,7 +37,7 @@ beforeEach(() => {
     // SettingsPanel enumerates devices on mount; stub it so unrelated async
     // store updates don't fire outside act() during these UI unit tests.
     enumerateDevices: vi.fn(async () => undefined),
-    selectDevice: vi.fn(),
+    selectDevice: vi.fn(async () => undefined),
     nextRecordingMode: 'legacy',
     setNextRecordingMode: vi.fn((mode) => useStore.setState({ nextRecordingMode: mode })),
     liveCapabilities: null,
@@ -49,6 +49,56 @@ const goToSection = async (user: ReturnType<typeof userEvent.setup>, label: stri
   await user.click(screen.getByRole('button', { name: label }));
 };
 
+
+describe('Embedding model assignment', () => {
+  it('keeps the optional limit off and validates enabling it before saving', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'Embedding');
+    const toggle = screen.getByRole('checkbox', { name: 'Limit embedding cost per question' });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByLabelText('Embedding limit, USD')).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Embedding limit, USD'), '0.01');
+    expect(saveSettings).not.toHaveBeenCalled();
+    await goToSection(user, 'Assistant');
+    expect(screen.queryByLabelText('Embedding limit, USD')).not.toBeInTheDocument();
+    await goToSection(user, 'Embedding');
+    expect(screen.getByLabelText('Embedding limit, USD')).toHaveValue(0.01);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveSettings).toHaveBeenCalledWith({ embedding_budget_usd: 0.01 });
+  });
+
+  it('loads a saved limit and disables it explicitly with null', async () => {
+    const user = userEvent.setup();
+    useStore.setState({ settings: settings({ embedding_budget_usd: 0.02 }) });
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'Embedding');
+    expect(screen.getByLabelText('Embedding limit, USD')).toHaveValue(0.02);
+    await user.click(screen.getByRole('checkbox', { name: 'Limit embedding cost per question' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(saveSettings).toHaveBeenCalledWith({ embedding_budget_usd: null });
+  });
+
+  it('loads only embedding models and saves an independent draft with the shared key', async () => {
+    const user = userEvent.setup();
+    const loadModels = vi.fn(async () => [{ id: 'qwen/qwen3-embedding-8b', name: 'Qwen Embedding',
+      input_modalities: ['text'], output_modalities: ['embeddings'], verified: false }]);
+    useStore.setState({ loadModels, settings: settings({ provider_has_api_key: { openrouter: true } }) });
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'Embedding');
+    const option = await screen.findByRole('option', { name: /Qwen Embedding/ });
+    expect(option).not.toBeDisabled();
+    expect(loadModels).toHaveBeenCalledWith('openrouter', 'embedding');
+    expect(screen.getAllByRole('listbox', { name: 'Model' })).toHaveLength(1);
+    expect(screen.queryByText(/No API key set/)).toBeNull();
+    await user.click(option);
+    expect(saveSettings).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /Save changes/ }));
+    expect(saveSettings).toHaveBeenCalledWith({ embedding: { model: 'qwen/qwen3-embedding-8b' } });
+  });
+});
 
 describe('SettingsPanel transcription provider (fixed to Soniox)', () => {
   it('states Soniox without offering a model or base_url to pick', async () => {
@@ -84,7 +134,7 @@ describe('SettingsPanel transcription provider (fixed to Soniox)', () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'Transcription');
-    expect(screen.getByText(/Ключ не задан/i)).toBeInTheDocument();
+    expect(screen.getByText(/No key set/i)).toBeInTheDocument();
   });
 
   it('reports a stored Soniox key instead of asking for one', async () => {
@@ -92,7 +142,7 @@ describe('SettingsPanel transcription provider (fixed to Soniox)', () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'Transcription');
-    expect(screen.getByText(/Ключ сохранён/i)).toBeInTheDocument();
+    expect(screen.getByText(/Key saved/i)).toBeInTheDocument();
   });
 
   it('never sends an asr profile change, because there is nothing to change', async () => {
@@ -129,7 +179,7 @@ describe('SettingsPanel answer & notes language', () => {
 
     const select = screen.getByLabelText(/Answer & notes language/i);
     expect(select.tagName).toBe('SELECT');
-    expect(screen.getByRole('option', { name: 'Немецкий' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'German' })).toBeInTheDocument();
   });
 
   it('sends the chosen language on save', async () => {
@@ -141,6 +191,18 @@ describe('SettingsPanel answer & notes language', () => {
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     expect(saveSettings).toHaveBeenCalledWith({ output_language: 'de' });
+  });
+
+  it('lists languages by their shown name, like the first-run picker', () => {
+    useStore.setState({ settings: settings({ output_language: 'ru', supported_languages: ['af', 'sq', 'ar', 'ru'] }) });
+    render(<SettingsPanel onClose={() => {}} />);
+    const select = screen.getByLabelText(/Answer & notes language/i) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Afrikaans', 'Albanian', 'Arabic', 'Russian']);
+  });
+
+  it('says the theme applies at once, since it is not part of Save changes', () => {
+    render(<SettingsPanel onClose={() => {}} />);
+    expect(screen.getByText(/Applies immediately. Follows the system theme/)).toBeInTheDocument();
   });
 
   it('keeps a persisted value that is no longer in the supported list', () => {
@@ -160,7 +222,7 @@ describe('SettingsPanel sections', () => {
 
 describe('SettingsPanel device picker (moved from the recorder bar)', () => {
   it('lists enumerated microphones and forwards a selection', async () => {
-    const selectDevice = vi.fn();
+    const selectDevice = vi.fn(async () => undefined);
     useStore.setState({
       devices: [
         { deviceId: 'mic-1', label: 'Built-in Microphone' } as MediaDeviceInfo,
@@ -192,9 +254,9 @@ describe('SettingsPanel API keys section', () => {
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'API keys');
     // A key belongs to the provider, so it can be stored before any assignment.
-    expect(screen.getByRole('heading', { name: 'openrouter' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'openai' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'anthropic' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'OpenRouter' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'OpenAI' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Anthropic' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'local-whisper' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'local-gigachat-mlx' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'openai-compatible' })).not.toBeInTheDocument();
@@ -219,7 +281,7 @@ describe('SettingsPanel API keys section', () => {
     await goToSection(user, 'API keys');
 
     // Default assignment is local-whisper + openrouter; anthropic is unassigned.
-    const anthropicCard = screen.getByRole('heading', { name: 'anthropic' }).closest('section');
+    const anthropicCard = screen.getByRole('heading', { name: 'Anthropic' }).closest('section');
     const anthropicKey = within(anthropicCard as HTMLElement).getByLabelText('API key');
     await user.type(anthropicKey, 'ant-test');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
@@ -240,7 +302,8 @@ describe('SettingsPanel API keys section', () => {
     render(<SettingsPanel onClose={() => {}} />);
     await goToSection(user, 'API keys');
     expect(screen.getAllByLabelText('API key')).toHaveLength(3);
-    expect(screen.getAllByText(/not assigned to any task yet/i)).toHaveLength(3);
+    // The new unconfigured embedding profile already assigns OpenRouter.
+    expect(screen.getAllByText(/not assigned to any task yet/i)).toHaveLength(2);
   });
 });
 
@@ -248,5 +311,49 @@ describe('SettingsPanel wordmark', () => {
   it('shows a quiet SKAZ wordmark below all sections', () => {
     render(<SettingsPanel onClose={() => {}} />);
     expect(screen.getByText('SKAZ')).toBeInTheDocument();
+  });
+});
+
+describe('Settings navigation', () => {
+  it('groups sections under non-clickable headings and gives every section its own icon', () => {
+    render(<SettingsPanel onClose={() => {}} />);
+    const nav = screen.getByRole('navigation', { name: 'Settings sections' });
+    const groups = within(nav).getAllByRole('group');
+    expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Models', 'Access', 'App']);
+    expect(within(groups[0]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['Transcription', 'Assistant', 'Notes', 'Embedding']);
+    expect(within(groups[1]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['API keys', 'Web Search']);
+    expect(within(groups[2]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['System', 'Files', 'Logs']);
+    // Headings are text, not controls, and carry no icon.
+    for (const heading of nav.querySelectorAll('.settings-nav__heading')) {
+      expect(heading.closest('button')).toBeNull();
+      expect(heading.querySelector('svg')).toBeNull();
+    }
+    const shapes = within(nav).getAllByRole('button').map((b) => b.querySelector('svg path')?.getAttribute('d'));
+    expect(shapes.every(Boolean)).toBe(true);
+    expect(new Set(shapes).size).toBe(shapes.length);
+  });
+
+  it('opens directly on the section it was asked for', () => {
+    render(<SettingsPanel onClose={() => {}} initialSection="api-keys" />);
+    expect(screen.getByRole('button', { name: 'API keys' })).toHaveAttribute('aria-current', 'true');
+  });
+});
+
+describe('API key links', () => {
+  it('links every provider to its key page, opened outside the app', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPanel onClose={() => {}} />);
+    await goToSection(user, 'API keys');
+    const hrefs = screen.getAllByRole('link', { name: /Get a key/ }).map((a) => {
+      expect(a).toHaveAttribute('target', '_blank');
+      expect(a).toHaveAttribute('rel', expect.stringContaining('noopener'));
+      return a.getAttribute('href');
+    });
+    expect(hrefs).toEqual([
+      'https://console.soniox.com/',
+      'https://openrouter.ai/settings/keys',
+      'https://platform.openai.com/api-keys',
+      'https://platform.claude.com/settings/keys',
+    ]);
   });
 });

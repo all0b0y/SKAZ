@@ -1,5 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { claimOpenMenu } from '../../lib/openMenu';
+import { usePanePlacement } from '../../hooks/usePanePlacement';
+import { PanePortal } from './PanePortal';
 
 interface Props {
   /** Viewport coordinates of the click that opened the menu. */
@@ -10,36 +12,24 @@ interface Props {
   children: ReactNode;
 }
 
-/** Kept clear of the window edge so the last item is never cut off. */
-const MARGIN = 8;
-
 /**
  * A menu that opens where the pointer is, not where its owner sits.
  *
- * Both places that need one — a note tab and a selection inside the document —
- * live in boxes that scroll and clip (`overflow-x: auto` on the tab strip, the
- * scrolling editor). An absolutely positioned dropdown anchored inside them gets
- * rendered and then cut away, which is why this one is fixed to the viewport and
- * clamps itself against the window instead.
+ * Its owners live in boxes that scroll and clip (the tab strip, the scrolling
+ * editor, the chat list), so it is fixed rather than absolutely positioned — but
+ * it stays inside the column it was raised in (.dev/docs/PANES-SPEC.md §1): at
+ * the column edge it opens the other way, and in a column narrower than itself
+ * it shrinks and wraps instead of spilling over the neighbouring column.
  */
 export function ContextMenu({ x, y, label, onDismiss, children }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ top: y, left: x });
+  const marker = useRef<HTMLSpanElement>(null);
   // Read through a ref so claiming the window's one menu slot does not re-run
   // whenever the owner re-renders with a fresh callback.
   const onDismissRef = useRef(onDismiss);
   onDismissRef.current = onDismiss;
 
-  useLayoutEffect(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    const maxLeft = window.innerWidth - box.width - MARGIN;
-    const maxTop = window.innerHeight - box.height - MARGIN;
-    setPosition({
-      top: Math.max(MARGIN, Math.min(y, maxTop)),
-      left: Math.max(MARGIN, Math.min(x, maxLeft)),
-    });
-  }, [x, y]);
+  usePanePlacement(ref, () => ({ x, y }), { boundsFrom: marker }, [x, y]);
 
   useEffect(() => {
     const dismiss = () => onDismissRef.current();
@@ -69,15 +59,16 @@ export function ContextMenu({ x, y, label, onDismiss, children }: Props) {
   }, [onDismiss]);
 
   return (
-    <div
-      ref={ref}
-      className="context-menu"
-      role="menu"
-      aria-label={label}
-      style={{ top: position.top, left: position.left }}
-    >
-      {children}
-    </div>
+    <PanePortal markerRef={marker}>
+      <div
+        ref={ref}
+        className="context-menu"
+        role="menu"
+        aria-label={label}
+      >
+        {children}
+      </div>
+    </PanePortal>
   );
 }
 

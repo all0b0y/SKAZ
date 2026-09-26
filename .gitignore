@@ -52,3 +52,22 @@ GEMINI.md
 backend/build/
 build/icon.icns
 build/icon.png
+
+# Local credentials and application databases (never public fixtures).
+secrets.key
+secrets.json.enc
+auth.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-wal
+*.db-shm
+coverage/

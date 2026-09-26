@@ -12,7 +12,7 @@ export function PhysicalStoragePanel({ capturing }: { capturing: boolean }) {
     let alive = true;
     void new ApiClient(window.audiohelper).getStorageLayout().then((next) => {
       if (alive) setView(next);
-    }, () => { if (alive) setError('Не удалось прочитать файловый режим.'); });
+    }, () => { if (alive) setError('Could not read the file mode.'); });
     return () => { alive = false; };
   }, []);
   const run = async (action: 'read' | 'enable' | 'recover' | 'choose' | 'move') => {
@@ -34,40 +34,40 @@ export function PhysicalStoragePanel({ capturing }: { capturing: boolean }) {
       window.dispatchEvent(new Event('skaz-storage-root-changed'));
     } catch {
       setView(null); setMove(null);
-      setError('Операция не подтверждена. Проверьте состояние. Для включения нужен выбранный корень и пустой список сессий; существующие записи не удаляются автоматически.');
+      setError('The operation was not confirmed. Check the state. Enabling requires a chosen root and an empty session list; existing recordings are never deleted automatically.');
     } finally { setBusy(false); }
   };
-  return <section className="settings-section storage-root" aria-label="Физическое хранилище">
-    <h3 className="settings-section__title">Физические папки сессий</h3>
-    <p>Группы и сессии хранятся в выбранном корне. Оригинальное аудио — в audio/ внутри сессии.
-      База данных остаётся во внутреннем хранилище. «Все» — виртуальный список, Ungrouped — папка.</p>
-    {view?.enabled ? <p role="status">Файловый режим включён. Группы сохраняются в базе, а не в браузере.</p>
-      : <Button disabled={!view || busy || capturing} onClick={() => setConfirm(true)}>Включить файловый режим…</Button>}
+  return <section className="settings-section storage-root" aria-label="Physical storage">
+    <h3 className="settings-section__title">Physical session folders</h3>
+    <p>Groups and sessions are stored in the chosen root. Original audio goes to audio/ inside each session.
+      The database stays in internal storage. “All” is a virtual list; Ungrouped is a folder.</p>
+    {view?.enabled ? <p role="status">File mode is on. Groups are saved in the database, not in the browser.</p>
+      : <Button disabled={!view || busy || capturing} onClick={() => setConfirm(true)}>Enable file mode…</Button>}
     {confirm && <fieldset disabled={busy || capturing}>
-      <legend>Перейти на физические папки?</legend>
-      <p>Сначала выберите корень и явно удалите прежние сессии, если они больше не нужны.
-        Автоматической миграции и удаления нет. Отключение после перехода недоступно.</p>
-      <Button onClick={() => void run('enable')}>Подтвердить файловый режим</Button>
-      <Button onClick={() => setConfirm(false)}>Отмена</Button>
+      <legend>Switch to physical folders?</legend>
+      <p>First choose a root and explicitly delete earlier sessions if you no longer need them.
+        There is no automatic migration or deletion. File mode cannot be turned off after switching.</p>
+      <Button onClick={() => void run('enable')}>Confirm file mode</Button>
+      <Button onClick={() => setConfirm(false)}>Cancel</Button>
     </fieldset>}
     {view?.pending && <>
-      <p role="alert">Операция с файлами не завершена ({view.pending.kind}, {view.pending.phase}).
-        Запись и следующие перемещения заблокированы. Восстановление продолжает операцию,
-        а не отменяет удаление. При внешних изменениях файлы сохраняются для ручного разбора.</p>
-      <Button disabled={busy || capturing} onClick={() => void run('recover')}>Продолжить восстановление</Button>
+      <p role="alert">A file operation is unfinished ({view.pending.kind}, {view.pending.phase}).
+        Recording and further moves are blocked. Recovery continues the operation,
+        it does not undo a deletion. If files were changed externally, they are kept for manual review.</p>
+      <Button disabled={busy || capturing} onClick={() => void run('recover')}>Continue recovery</Button>
     </>}
     {view?.enabled && !view.pending && <Button disabled={busy || capturing} onClick={() => void run('choose')}>
-      Перенести сессии в другой корень…
+      Move sessions to another root…
     </Button>}
     {move && <fieldset disabled={busy || capturing}>
-      <legend>Подтвердить перенос сессий?</legend>
+      <legend>Confirm moving sessions?</legend>
       <code className="storage-root__path">{move.root}</code>
-      <p>Переносится аудио, транскрипции и заметки всех сессий. Внешние файлы корня и сохранённые архивы
-        остаются на прежнем месте. Перенос между дисками недоступен; занятые папки не заменяются.</p>
-      <Button onClick={() => void run('move')}>Подтвердить перенос</Button>
-      <Button onClick={() => setMove(null)}>Отмена</Button>
+      <p>Audio, transcripts and notes of all sessions are moved. Other files in the root and saved archives
+        stay where they are. Moving between disks is not supported; occupied folders are not replaced.</p>
+      <Button onClick={() => void run('move')}>Confirm move</Button>
+      <Button onClick={() => setMove(null)}>Cancel</Button>
     </fieldset>}
     {error && <p role="alert">{error}</p>}
-    <Button disabled={busy} onClick={() => void run('read')}>Проверить файловый режим</Button>
+    <Button disabled={busy} onClick={() => void run('read')}>Check file mode</Button>
   </section>;
 }

@@ -15,7 +15,7 @@ from audiohelper.live_store import LiveStore
 def test_live_translation_tail_replaces_speaker_turns_without_changing_sources(tmp_path: Path) -> None:
     path = tmp_path / "tail.sqlite"
     db = Database(path)
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     sid = repo.create_session(db, "Tail").id
     connection = store.open(sid, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x01\x00" * 1600)
@@ -58,7 +58,7 @@ def test_live_translation_tail_replaces_speaker_turns_without_changing_sources(t
     db.close()
     db = Database(path)
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         assert store.snapshot(sid)["live_translation_projection"] == projection
         store.save_event(connection.id, ordinal=3, event=SonioxEvent(
             (), (), (), 20, 100, False, token_order=(),
@@ -76,7 +76,7 @@ def test_live_translation_tail_replaces_speaker_turns_without_changing_sources(t
 def test_no_guessed_translation_ownership_after_reopen(tmp_path: Path, case: str) -> None:
     path = tmp_path / "links.sqlite"
     db = Database(path)
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     sid = repo.create_session(db, "Links").id
     connection = store.open(sid, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x01\x00" * 1600)
@@ -119,7 +119,7 @@ def test_no_guessed_translation_ownership_after_reopen(tmp_path: Path, case: str
     db.close()
     db = Database(path)
     try:
-        assert LiveStore(db, tmp_path / "audio").snapshot(sid)["final_translation_projection"] == projection
+        assert LiveStore(db).snapshot(sid)["final_translation_projection"] == projection
     finally:
         db.close()
 
@@ -128,7 +128,7 @@ def test_no_guessed_translation_ownership_after_reopen(tmp_path: Path, case: str
 def test_live_tail_never_borrows_ownership_from_another_request(tmp_path: Path, case: str) -> None:
     db = Database(tmp_path / "isolation.sqlite")
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         sid = repo.create_session(db, "Isolation").id
         first = store.open(sid, sample_rate=16000, model="stt-rt-v5")
         store.append_audio(first.id, sequence=0, start_sample=0, pcm=b"\x01\x00" * 1600)
@@ -171,7 +171,7 @@ def test_live_tail_never_borrows_ownership_from_another_request(tmp_path: Path, 
 def test_multiple_chunks_link_to_one_turn_but_provisional_translation_is_not_final(tmp_path: Path) -> None:
     db = Database(tmp_path / "chunks.sqlite")
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         sid = repo.create_session(db, "Chunks").id
         connection = store.open(sid, sample_rate=16000, model="stt-rt-v5")
         store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x01\x00" * 1600)

@@ -72,7 +72,7 @@ async def store(
     end_ms: int,
 ) -> None:
     response = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": sequence, "start_ms": start_ms, "end_ms": end_ms},
         content=body,
         headers={"Content-Type": "audio/wav"},
@@ -177,8 +177,9 @@ async def test_update_persists_bounded_provenance_and_replay_is_idempotent(
     assert manual.status_code == 200, manual.text
     assert manual.json()["text"] == "manual preview remains transient"
     assert (await client.get(f"/sessions/{session_id}/asr/live")).json() == created.json()
-    assert (config.audio_dir / session_id / "000004.wav").read_bytes() == first
-    assert (config.audio_dir / session_id / "000009.wav").read_bytes() == second
+    assert app.state.runtime.ingestion.audio.get(session_id, 4) == first
+    assert app.state.runtime.ingestion.audio.get(session_id, 9) == second
+    assert not list(config.audio_dir.rglob("*.wav"))
     detail = (await client.get(f"/sessions/{session_id}")).json()
     assert detail["segments"] == []
     with app.state.runtime.db.read() as connection:
@@ -247,7 +248,7 @@ async def test_current_revision_can_replace_range_without_advancing_epoch(
 async def test_untrusted_saved_sources_invalidate_read_and_update_before_decode(
     client: httpx.AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
-    config: AppConfig,
+    app: Any,
     damage: str,
 ) -> None:
     await use_local_profile(client)
@@ -261,11 +262,11 @@ async def test_untrusted_saved_sources_invalidate_read_and_update_before_decode(
         json={"first_sequence": 0, "last_sequence": 0, "expected_revision": 0},
     )
     assert created.status_code == 200, created.text
-    path = config.audio_dir / session_id / "000000.wav"
+    audio = app.state.runtime.ingestion.audio
     if damage == "missing":
-        path.unlink()
+        audio.discard(session_id)
     else:
-        path.write_bytes(make_wav(0.5, frequency=880))
+        audio.put(session_id, 0, make_wav(0.5, frequency=880))
 
     read = await client.get(f"/sessions/{session_id}/asr/live")
     update = await client.post(
@@ -279,7 +280,7 @@ async def test_untrusted_saved_sources_invalidate_read_and_update_before_decode(
         "status": "missing" if damage == "missing" else "corrupt",
         "trusted": False,
         "detail": (
-            "Saved draft source audio is missing."
+            "Live ASR input is no longer buffered. Saved transcript text is retained."
             if damage == "missing"
             else "Saved draft source audio failed integrity validation."
         ),
@@ -510,7 +511,9 @@ async def test_draft_survives_backend_restart_with_identical_source_refs(
         ) as second_client:
             restored = await second_client.get(f"/sessions/{session_id}/asr/live")
         assert restored.status_code == 200, restored.text
-        assert restored.json() == expected
+        assert restored.json()["draft"] == expected["draft"]
+        assert restored.json()["source_integrity"]["status"] == "missing"
+        assert restored.json()["resume_compatibility"]["can_resume"] is False
         assert engine.calls == 1
     finally:
         await second_app.state.runtime.http.aclose()

@@ -106,7 +106,7 @@ describe('NativeMonologues DOM cost', () => {
     expect(Array.from(
       view.container.querySelectorAll('.native-monologue__speaker'),
       (el) => el.textContent,
-    )).toEqual(['Спикер 1', 'Спикер 2']);
+    )).toEqual(['Speaker 1', 'Speaker 2']);
   });
 
   it('keeps the unsaved live tail addressable even though it has no segment', () => {

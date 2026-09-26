@@ -77,9 +77,9 @@ class TranscriptContext:
     start_ms: int = 0
     end_ms: int = 0
 
-    def citations_for(self, answer: str) -> list[Citation]:
+    def citations_for(self, answer: str, *, labelled: bool = False) -> list[Citation]:
         """Resolve the labels the model used; unknown labels are dropped."""
-        return citations_from(self.references, answer)
+        return citations_from(self.references, answer, labelled=labelled)
 
 
 @dataclass(frozen=True)
@@ -134,7 +134,9 @@ def _labels_in_block(block: str) -> list[str]:
     return [] if parsed.malformed else parsed.keys
 
 
-def citations_from(references: dict[str, list[Segment]], answer: str) -> list[Citation]:
+def citations_from(
+    references: dict[str, list[Segment]], answer: str, *, labelled: bool = False,
+) -> list[Citation]:
     """Citations for every known label cited in ``answer``, in first-use order.
 
     A passage label contributes all of its original segments, deduplicated against
@@ -142,17 +144,21 @@ def citations_from(references: dict[str, list[Segment]], answer: str) -> list[Ci
     source this way, and the total stays bounded by :data:`MAX_CITATIONS`.
     """
     cited: dict[str, Segment] = {}
+    labels: dict[str, list[str]] = {}
     for block in LABEL_PATTERN.findall(answer):
         for key in _labels_in_block(block):
             for segment in references.get(key, ()):
                 if segment.id not in cited and len(cited) < MAX_CITATIONS:
                     cited[segment.id] = segment
+                if segment.id in cited and key not in labels.setdefault(segment.id, []):
+                    labels[segment.id].append(key)
     return [
         Citation(
             segment_id=segment.id,
             start_ms=segment.start_ms,
             end_ms=segment.end_ms,
             text=segment.text,
+            labels=labels[segment.id] if labelled else [],
         )
         for segment in cited.values()
     ]

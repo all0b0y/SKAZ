@@ -137,8 +137,42 @@ async def settle(client: httpx.AsyncClient, session_id: str, *, expect: str) -> 
             return {"status": "deleted"}
         body = response.json()
         if body["status"] == expect:
-            return body
+            return dict(body)
     raise AssertionError(f"import never reached {expect}")
+
+
+@pytest.mark.parametrize("endpoint", ["sessions", "imports"])
+@pytest.mark.parametrize("managed", [False, True])
+async def test_completed_import_can_be_deleted_without_touching_source(
+    ready: httpx.AsyncClient, tmp_path: Path, managed: bool, endpoint: str,
+) -> None:
+    if managed:
+        root = await ready.put("/storage/root", json={"root": str(tmp_path / "files"), "expected_root": None})
+        assert root.status_code == 200, root.text
+        assert (await ready.post("/storage/layout")).status_code == 200
+    source = audio_file(tmp_path)
+    original = source.read_bytes()
+    result = await start_import(ready, source)
+    sid = result["session"]["id"]
+    await settle(ready, sid, expect="completed")
+    response = await ready.delete(f"/{endpoint}/{sid}")
+    assert response.status_code == 200, response.text
+    assert (await ready.get(f"/sessions/{sid}")).status_code == 404
+    assert source.read_bytes() == original
+    if managed:
+        assert not (tmp_path / "files" / "Ungrouped" / sid).exists()
+
+
+async def test_import_origin_survives_list_detail_and_rename(
+    ready: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    result = await start_import(ready, audio_file(tmp_path))
+    sid = result["session"]["id"]
+    await settle(ready, sid, expect="completed")
+    assert result["session"]["origin"] == "import"
+    assert (await ready.get("/sessions")).json()["sessions"][0]["origin"] == "import"
+    assert (await ready.get(f"/sessions/{sid}")).json()["session"]["origin"] == "import"
+    assert (await ready.patch(f"/sessions/{sid}", json={"title": "Renamed"})).json()["origin"] == "import"
 
 
 async def start_import(client: httpx.AsyncClient, path: Path, **over: Any) -> dict[str, Any]:
@@ -146,7 +180,7 @@ async def start_import(client: httpx.AsyncClient, path: Path, **over: Any) -> di
         "path": str(path), "title": "Лекция", "declared_duration_ms": 2_500, **over,
     })
     assert response.status_code == 201, response.text
-    return response.json()
+    return dict(response.json())
 
 
 async def test_import_produces_a_live_shaped_transcript_with_speakers(
@@ -233,7 +267,7 @@ async def test_a_failed_import_is_never_retried_automatically(
     assert provider.create_calls == 1
 
 
-async def test_retry_starts_a_new_session_and_a_new_job(
+async def test_retry_recovers_existing_job_in_the_same_session(
     ready: httpx.AsyncClient, tmp_path: Path, provider: Provider,
 ) -> None:
     provider.queue(provider.failed("audio_decode_failed", "Bad file."))
@@ -244,14 +278,17 @@ async def test_retry_starts_a_new_session_and_a_new_job(
     response = await ready.post(f"/imports/{failed_id}/retry")
     assert response.status_code == 201
     retried_id = response.json()["session"]["id"]
-    assert retried_id != failed_id
+    assert retried_id == failed_id
     await settle(ready, retried_id, expect="completed")
-    assert provider.create_calls == 2
+    assert provider.create_calls == 1
 
 
 async def test_cancelling_a_running_import_removes_provider_side_copies(
-    ready: httpx.AsyncClient, tmp_path: Path, provider: Provider,
+    ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A zero poll delay lets a fast machine drain every "processing" reply before
+    # the cancel request lands; keep the job running long enough to cancel it.
+    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (0.05,))
     provider.queue(*[provider.processing() for _ in range(200)])
     created = await start_import(ready, audio_file(tmp_path))
     session_id = created["session"]["id"]
@@ -268,9 +305,10 @@ async def test_cancelling_a_running_import_removes_provider_side_copies(
 
 
 async def test_a_refused_job_deletion_does_not_break_cancellation(
-    ready: httpx.AsyncClient, tmp_path: Path, provider: Provider,
+    ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The provider refuses to delete a processing job; that is not our failure.
+    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (0.05,))
     provider.job_deletion_status = 409
     provider.queue(*[provider.processing() for _ in range(200)])
     created = await start_import(ready, audio_file(tmp_path))
@@ -372,10 +410,10 @@ async def test_capabilities_tell_the_dialog_what_it_may_promise(
     assert body["translation_rate_per_hour_usd"] == 0.15
     assert body["warn_above_usd"] == 0.30
     assert body["cloud_consent"] is True and body["has_api_key"] is True
-    assert body["max_concurrent_imports"] == 3
+    assert body["max_concurrent_imports"] == 1
     # Markdown projection is off by default: say so instead of inventing a path.
     assert body["markdown_enabled"] is False
-    assert "хранилище" in body["destination"]
+    assert "internal storage" in body["destination"]
 
 
 async def test_the_cost_warning_threshold_can_be_changed_and_cleared(
@@ -386,6 +424,18 @@ async def test_the_cost_warning_threshold_can_be_changed_and_cleared(
 
     await ready.put("/settings", json={"clear_import_cost_warning": True})
     assert (await ready.get("/imports")).json()["warn_above_usd"] is None
+
+
+async def test_an_import_cannot_queue_behind_another(
+    ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (10.0,))
+    source = audio_file(tmp_path)
+    first = await start_import(ready, source)
+    second = await ready.post("/imports", json={"path": str(source), "title": "Second"})
+    assert second.status_code == 409
+    assert len((await ready.get("/sessions")).json()["sessions"]) == 1
+    assert (await ready.get(f"/imports/{first['session']['id']}")).status_code == 200
 
 
 async def test_a_microphone_cannot_record_into_an_imported_session(
@@ -414,7 +464,7 @@ async def test_a_microphone_cannot_record_into_an_imported_session(
         assert socket.receive_json() == {"type": "stream.error", "code": "invalid_stream"}
 
 
-async def test_an_unfinished_import_is_resumed_after_a_restart(
+async def test_an_unfinished_import_waits_for_manual_retry_after_restart(
     config: AppConfig, outbound: FakeHttp, secrets: MemorySecretStore, tmp_path: Path,
 ) -> None:
     provider = Provider(outbound)
@@ -447,6 +497,11 @@ async def test_an_unfinished_import_is_resumed_after_a_restart(
             pass
         # Entering the app's lifespan is what resumes unfinished imports.
         async with second.router.lifespan_context(second):
+            interrupted = await settle(client, session_id, expect="interrupted")
+            assert interrupted["status"] == "interrupted"
+            await asyncio.sleep(0.05)
+            assert (await client.get(f"/imports/{session_id}")).json()["status"] == "interrupted"
+            assert (await client.post(f"/imports/{session_id}/retry")).status_code == 201
             record = await settle(client, session_id, expect="completed")
     second.state.runtime.close()
 

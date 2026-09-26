@@ -255,6 +255,8 @@ def _pricing(entry: CatalogEntry) -> CatalogPricing | None:
 
 
 def _fits(entry: CatalogEntry, task: Task) -> bool:
+    if task == "embedding":
+        return "embeddings" in entry.output_modalities
     if task == "asr":
         return entry.accepts_audio
     return not entry.excludes_text_output

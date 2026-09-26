@@ -15,6 +15,7 @@ import sys
 
 import uvicorn
 
+from . import parent_watchdog
 from .app import create_app
 from .config import AppConfig
 from .routes.live import MAX_MESSAGE_BYTES
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     config = AppConfig.from_env(arguments.port or _free_port("127.0.0.1"))
     app = create_app(config)
 
+    parent_watchdog.start()
     # The parent process reads this line to learn where the backend listens.
     print(json.dumps({"event": "listening", "host": config.host, "port": config.port}), flush=True)
     uvicorn.run(

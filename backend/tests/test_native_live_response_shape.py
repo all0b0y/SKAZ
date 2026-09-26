@@ -88,7 +88,7 @@ def _record(
             assert ws.receive_json()["type"] == "audio.saved"
             ws.send_json({"type": "end"})
             assert ws.receive_json()["transcription_complete"] is True
-        return http.get(f"/sessions/{sid}/live", headers=AUTH).json()
+        return dict(http.get(f"/sessions/{sid}/live", headers=AUTH).json())
 
 
 def test_live_response_omits_fields_no_client_reads(

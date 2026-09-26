@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { clsx } from 'clsx';
 import type { NoteDetail } from '../../api/types';
 import type { SaveStatus } from '../../lib/autosave';
 import type { NoteTab } from '../../state/noteTabs';
 import { ContextMenu, ContextMenuItem } from '../ui/ContextMenu';
+import { AnchoredPopover, isInside } from '../ui/AnchoredPopover';
+import { ScrollRow } from '../ui/ScrollRow';
 import { NoteTitleInput } from './NoteTitleInput';
 
 interface Props {
@@ -22,6 +24,10 @@ interface Props {
   onRename: (tab: NoteTab, title: string) => void;
   /** Decision 14: deletion is offered from the tab as well as from the list. */
   onDelete: (tab: NoteTab) => void;
+  /** Hand the tab's note to the system share sheet at the menu's position. */
+  onShare: (tab: NoteTab, x: number, y: number) => void;
+  /** Why sharing is impossible on this machine at all, or null when it works. */
+  shareUnavailable: string | null;
   onCreateEmpty: () => void;
   onCreateGenerated: () => void;
   onOpenExisting: () => void;
@@ -29,19 +35,19 @@ interface Props {
 }
 
 const DETAIL_LABELS: Array<[NoteDetail, string]> = [
-  ['brief', 'Тезисно'],
-  ['normal', 'Обычно'],
-  ['detailed', 'Подробно'],
+  ['brief', 'Brief'],
+  ['normal', 'Standard'],
+  ['detailed', 'Detailed'],
 ];
 
 const SAVE_LABELS: Record<SaveStatus, string> = {
-  saved: 'Сохранено',
-  dirty: 'Не сохранено',
-  saving: 'Сохранение…',
-  error: 'Не удалось сохранить',
+  saved: 'Saved',
+  dirty: 'Not saved',
+  saving: 'Saving…',
+  error: 'Could not save',
 };
 
-function useDismiss(onDismiss: () => void) {
+function useDismiss(onDismiss: () => void, popups: Array<RefObject<HTMLElement>>) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const away = (event: MouseEvent) => {
@@ -49,7 +55,9 @@ function useDismiss(onDismiss: () => void) {
       // this one through the window's single-menu register, and treating the
       // press itself as a dismissal would eat the click that opens it.
       if (event.button === 2) return;
-      if (!ref.current?.contains(event.target as Node)) onDismiss();
+      // The dropdown is rendered at <body> (it must not be clipped by the strip),
+      // so a press inside it is not "inside the bar" by DOM ancestry.
+      if (!isInside(event.target, ref, ...popups)) onDismiss();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onDismiss();
@@ -74,11 +82,10 @@ function useDismiss(onDismiss: () => void) {
  * from the one that merely closes a document. A double click is not a second way
  * in either, because it fires while clicking quickly through tabs.
  *
- * The "+" and its menu live OUTSIDE the tab strip on purpose. The strip scrolls
- * horizontally, and an `overflow-x: auto` box clips in both axes — a dropdown
- * anchored inside it was rendered and then cut away, so the button looked dead.
- * The tab's own menu sidesteps that differently: it is fixed to the viewport at
- * the pointer.
+ * The "+" lives OUTSIDE the tab strip, and both its dropdown and the tab's own
+ * menu are rendered at <body> and placed inside the centre column
+ * (.dev/docs/PANES-SPEC.md §1): the strip scrolls horizontally and would clip
+ * anything anchored inside it, and neither menu may spill into the chat.
  *
  * Detail belongs to the "+" menu, where a note is started: it is a parameter of
  * writing one, not a setting of the panel. Regeneration is not in this strip at
@@ -86,19 +93,34 @@ function useDismiss(onDismiss: () => void) {
  */
 export function NoteTabsBar({
   tabs, activeTabId, detail, canGenerate, generateHint, generating, saveStatus,
-  onSelect, onClose, onRename, onDelete,
+  onSelect, onClose, onRename, onDelete, onShare, shareUnavailable,
   onCreateEmpty, onCreateGenerated, onOpenExisting, onDetailChange,
 }: Props) {
   const [menu, setMenu] = useState(false);
+  // The "⋯" list of every open tab, offered only while some are scrolled away.
+  const [list, setList] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  // Picking from "⋯" reveals the tab even when it already was the active one.
+  const [reveal, setReveal] = useState(0);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{ tab: NoteTab; x: number; y: number } | null>(null);
-  const container = useDismiss(() => setMenu(false));
+  const addRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const listButton = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const container = useDismiss(() => { setMenu(false); setList(false); }, [menuRef, listRef]);
 
   return (
     <div className="note-tabs" ref={container}>
-      <div className="note-tabs__strip" role="tablist" aria-label="Открытые конспекты">
+      <ScrollRow
+        className="note-tabs__strip"
+        role="tablist"
+        aria-label="Open notes"
+        activeKey={`${activeTabId}:${reveal}`}
+        onOverflow={(edges) => setOverflowing(edges.start || edges.end)}
+      >
         {tabs.map((tab) => {
-          const name = tab.title || 'Без названия';
+          const name = tab.title || 'Untitled';
           const active = tab.id === activeTabId;
           return (
             <div
@@ -136,6 +158,7 @@ export function NoteTabsBar({
                   role="tab"
                   aria-selected={active}
                   className="note-tab__label"
+                  title={name}
                   onClick={() => onSelect(tab.id)}
                 >
                   {name}
@@ -144,7 +167,7 @@ export function NoteTabsBar({
               <button
                 type="button"
                 className="note-tab__close"
-                aria-label={`Закрыть ${name}`}
+                aria-label={`Close ${name}`}
                 onClick={() => onClose(tab.id)}
               >
                 ×
@@ -152,7 +175,7 @@ export function NoteTabsBar({
             </div>
           );
         })}
-      </div>
+      </ScrollRow>
 
       {/* A tab whose generation has not produced a note yet names and deletes
           nothing: there is no stored document behind it to act on. Both entries
@@ -161,44 +184,88 @@ export function NoteTabsBar({
         <ContextMenu
           x={tabMenu.x}
           y={tabMenu.y}
-          label={`Конспект «${tabMenu.tab.title || 'Без названия'}»`}
+          label={`Notes “${tabMenu.tab.title || 'Untitled'}”`}
           onDismiss={() => setTabMenu(null)}
         >
+          {/* Sends the note as a file through the system share sheet (spec §6). */}
+          <ContextMenuItem
+            disabled={tabMenu.tab.noteId === null || shareUnavailable !== null}
+            hint={shareUnavailable ?? 'The notes are not created yet'}
+            onClick={() => {
+              onShare(tabMenu.tab, tabMenu.x, tabMenu.y);
+              setTabMenu(null);
+            }}
+          >
+            Share…
+          </ContextMenuItem>
           <ContextMenuItem
             disabled={tabMenu.tab.noteId === null}
-            hint="Конспект ещё не создан"
+            hint="The notes are not created yet"
             onClick={() => {
               setRenaming(tabMenu.tab.id);
               setTabMenu(null);
             }}
           >
-            Переименовать
+            Rename
           </ContextMenuItem>
           <ContextMenuItem
             disabled={tabMenu.tab.noteId === null}
-            hint="Конспект ещё не создан"
+            hint="The notes are not created yet"
             onClick={() => {
               onDelete(tabMenu.tab);
               setTabMenu(null);
             }}
           >
-            Удалить
+            Delete
           </ContextMenuItem>
         </ContextMenu>
       )}
 
       <div className="note-tabs__menu-anchor">
+        {overflowing && (
+          <button
+            ref={listButton}
+            type="button"
+            className="note-tabs__add note-tabs__list"
+            aria-label="All open notes"
+            title="All open notes"
+            aria-haspopup="menu"
+            aria-expanded={list}
+            onClick={() => { setMenu(false); setList(!list); }}
+          >
+            ⋯
+          </button>
+        )}
+        {list && overflowing && (
+          <AnchoredPopover ref={listRef} anchorRef={listButton} align="end"
+            className="note-menu note-menu--list" role="menu" aria-label="All open notes">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={tab.id === activeTabId}
+                className={clsx(tab.id === activeTabId && 'note-menu__item--on')}
+                onClick={() => { setList(false); onSelect(tab.id); setReveal((n) => n + 1); }}
+              >
+                {tab.title || 'Untitled'}
+              </button>
+            ))}
+          </AnchoredPopover>
+        )}
         <button
+          ref={addRef}
           type="button"
           className="note-tabs__add"
-          aria-label="Новый конспект"
+          aria-label="New notes"
           aria-expanded={menu}
-          onClick={() => setMenu(!menu)}
+          onClick={() => { setList(false); setMenu(!menu); }}
         >
           +
         </button>
         {menu && (
-          <div className="note-menu" role="menu" aria-label="Новый конспект">
+          <AnchoredPopover ref={menuRef} anchorRef={addRef} align="end"
+            className="note-menu" role="menu" aria-label="New notes">
             <button
               type="button"
               role="menuitem"
@@ -206,20 +273,20 @@ export function NoteTabsBar({
               title={generateHint ?? undefined}
               onClick={() => { setMenu(false); onCreateGenerated(); }}
             >
-              {generating ? 'Генерация…' : 'Создать конспект с ИИ'}
+              {generating ? 'Generating…' : 'Create AI notes'}
               {!canGenerate && generateHint && <small>{generateHint}</small>}
             </button>
             <button type="button" role="menuitem" onClick={() => { setMenu(false); onCreateEmpty(); }}>
-              Создать пустой
+              Create empty
             </button>
             <button type="button" role="menuitem" onClick={() => { setMenu(false); onOpenExisting(); }}>
-              Открыть существующий
+              Open existing
             </button>
             {/* How dense the next generated note should be. The menu stays open
                 after a click: choosing a level prepares the generation above it
                 rather than being an action of its own. */}
             <div className="note-menu__field">
-              <span id="note-detail-label">Подробность</span>
+              <span id="note-detail-label">Detail</span>
               <div className="note-detail" role="radiogroup" aria-labelledby="note-detail-label">
                 {DETAIL_LABELS.map(([value, label]) => (
                   <button
@@ -235,7 +302,7 @@ export function NoteTabsBar({
                 ))}
               </div>
             </div>
-          </div>
+          </AnchoredPopover>
         )}
       </div>
     </div>

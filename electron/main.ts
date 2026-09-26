@@ -7,8 +7,8 @@ import type { NativeLiveClient } from './nativeLive';
 import { CHANNELS } from './channels';
 import { isAllowedExternalUrl } from './ipcPolicy';
 import { hasUnsentAudio, type CaptureProtectionState } from './captureProtection';
-import { isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
-import { isTrustedFrame, validateCaptureState } from './ipcSender';
+import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
+import { isTrustedFrame, validateCaptureState, validateCodexActivity } from './ipcSender';
 import { QuitController } from './quitController';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import type { BackendStatus } from '../frontend/src/api/bridge';
@@ -48,6 +48,8 @@ const DATA_DIR = path.join(app.getPath('userData'), 'data');
 // Latest capture snapshot reported by the renderer (validated). Consulted on
 // close/quit so unsent audio is never dropped without a warning.
 let captureState: CaptureProtectionState = { recorderState: 'idle', pending: 0, failed: 0 };
+// Active Codex tasks last reported by the renderer; only decides whether quit warns.
+let codexActiveTasks = 0;
 
 const manager = new BackendManager({
   repoRoot: REPO_ROOT,
@@ -85,6 +87,22 @@ const quitController = new QuitController({
     const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
     return choice === 1;
   },
+  hasActiveTasks: () => codexActiveTasks > 0,
+  confirmStopTasks: () => {
+    const options: Electron.MessageBoxSyncOptions = {
+      type: 'warning',
+      buttons: ['Stay', 'Stop tasks and quit'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      message: 'Codex is still running tasks',
+      detail:
+        'Quitting stops the tasks. Requests, partial answers and the queue are kept; ' +
+        'after relaunch you can resume them manually — they do not resume by themselves.',
+    };
+    const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
+    return choice === 1;
+  },
   stopBackend: () => manager.stop(),
   quit: () => app.quit(),
   onShutdownError: (err) => {
@@ -108,8 +126,9 @@ function hardenSession(): void {
 
   // Microphone is core to the app; every other permission is denied. Media is
   // granted only for audio-only requests from the main frame of our own trusted
-  // renderer (exact URL/origin); camera/screen capture and untrusted frames can
-  // never be granted. The authoritative grant is the request handler.
+  // renderer (exact URL/origin); camera and screen pictures can never be granted.
+  // System audio comes through getDisplayMedia, whose only grant is loopback
+  // audio (displayMediaGrant). The authoritative grant is the request handler.
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
     const d = details as { requestingUrl?: string; mediaTypes?: string[]; isMainFrame?: boolean };
     const granted = isTrustedMediaRequest(
@@ -135,6 +154,21 @@ function hardenSession(): void {
       },
       EXPECTED_RENDERER_ORIGIN,
     );
+  });
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    const frame = request.frame;
+    const grant = displayMediaGrant(
+      {
+        fromTrustedFrame: frame !== null && frame.parent === null && mainWindow !== null
+          && frame === mainWindow.webContents.mainFrame,
+        securityOrigin: request.securityOrigin,
+        audioRequested: request.audioRequested,
+        videoRequested: request.videoRequested,
+      },
+      EXPECTED_RENDERER_ORIGIN,
+    );
+    // An empty callback denies: the renderer's getDisplayMedia rejects.
+    callback(grant ?? {});
   });
 }
 
@@ -215,6 +249,15 @@ app.whenReady().then(() => {
       isMainFrame: event.senderFrame?.parent === null,
     })) return;
     rendererSave.acknowledge(id, saved);
+  });
+  ipcMain.on(CHANNELS.codexActivity, (event, payload: unknown) => {
+    if (!isTrustedFrame({
+      senderId: event.sender.id,
+      expectedId: mainWindow?.webContents.id ?? null,
+      isMainFrame: event.senderFrame?.parent === null,
+    })) return;
+    const count = validateCodexActivity(payload);
+    if (count !== null) codexActiveTasks = count;
   });
   ipcMain.on(CHANNELS.captureState, (event, payload: unknown) => {
     const trusted = isTrustedFrame({

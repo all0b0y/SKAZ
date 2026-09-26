@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .db import Database
 from .languages import UsedLanguages
@@ -20,12 +20,16 @@ class StoredSettings(BaseModel):
     used_languages: UsedLanguages | None = None
     native_recording_mode: NativeRecordingMode = "transcription"
     translation_target_language: str = "ru"
+    input_device_id: str | None = None
+    capture_system_audio: bool = False
     asr: StoredProfile
     agent: StoredProfile
     notes: StoredProfile
+    embedding: StoredProfile = Field(default_factory=lambda: StoredProfile(provider="openrouter", model=""))
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
+    embedding_budget_usd: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False, strict=True)
     #: Estimated import cost, in US dollars, above which the dialog asks a second
     #: time. None disables the warning; 0 warns for every import. The estimate is
     #: our own arithmetic on the file's duration, never a quote from the provider.
@@ -45,7 +49,7 @@ DEFAULT_SETTINGS = StoredSettings(
     notes=StoredProfile(provider="openrouter", model=""),
 )
 
-TASKS: tuple[Task, ...] = ("asr", "agent", "notes")
+TASKS: tuple[Task, ...] = ("asr", "agent", "notes", "embedding")
 
 #: Providers removed from the product. A settings document written before their
 #: removal must not crash the backend on load: the profile falls back to its
@@ -55,6 +59,8 @@ _RETIRED_PROVIDERS = frozenset({"openai-compatible"})
 
 def _normalise(doc: dict[str, object]) -> dict[str, object]:
     """Drop retired providers and fields from a stored settings document."""
+    if doc.get("native_recording_mode") == "audio_only":
+        doc["native_recording_mode"] = "transcription"
     for task in TASKS:
         profile = doc.get(task)
         if not isinstance(profile, dict):
@@ -137,14 +143,19 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         "output_language",
         "cloud_consent",
         "contextual_local_enabled",
+        "capture_system_audio",
     ):
         value = getattr(update, field)
         if value is not None:
             setattr(merged, field, value)
+    if update.input_device_id is not None:
+        merged.input_device_id = update.input_device_id or None
     # The threshold is nullable, so "clear it" needs its own flag: a bare None
     # means "unchanged" for every other field and must keep meaning that here.
     if update.clear_import_cost_warning:
         merged.import_cost_warning_usd = None
     elif update.import_cost_warning_usd is not None:
         merged.import_cost_warning_usd = update.import_cost_warning_usd
+    if "embedding_budget_usd" in update.model_fields_set:
+        merged.embedding_budget_usd = update.embedding_budget_usd
     return merged

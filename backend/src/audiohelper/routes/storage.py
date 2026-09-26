@@ -54,7 +54,8 @@ async def enable_layout(rt: RuntimeDep) -> dict[str, Any]:
 
 @router.put("/groups")
 async def update_groups(body: GroupsUpdate, rt: RuntimeDep) -> dict[str, Any]:
-    return await disk_call(rt.storage.update_groups, body.data.model_dump(), body.expected_revision)
+    async with rt.codex.source_change(membership=body.data.membership):
+        return await disk_call(rt.storage.update_groups, body.data.model_dump(), body.expected_revision)
 
 
 @router.post("/recover")

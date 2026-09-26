@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useRef } from 'react';
 
 interface Props {
@@ -6,6 +7,9 @@ interface Props {
   /** Set while the accepted replacement is being written. */
   applying?: boolean;
   error?: string | null;
+  /** Heading and explanation; default to the passage-rewrite wording. */
+  title?: string;
+  subtitle?: string;
   onApply: () => void;
   onCancel: () => void;
 }
@@ -21,7 +25,7 @@ interface Props {
  * Nothing here is applied automatically. A rewrite the user does not accept must
  * leave the note exactly as it was.
  */
-export function RewriteDiff({ original, replacement, applying, error, onApply, onCancel }: Props) {
+export function RewriteDiff({ original, replacement, applying, error, title, subtitle, onApply, onCancel }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,28 +40,30 @@ export function RewriteDiff({ original, replacement, applying, error, onApply, o
     dialog.current?.focus();
   }, []);
 
-  return (
+  // Modal = application level (PANES-SPEC §1): rendered at <body> so no
+  // column's clipping or containment can capture it.
+  return createPortal(
     <div className="rewrite-overlay" role="presentation">
       <div
         ref={dialog}
         className="rewrite"
         role="dialog"
         aria-modal="true"
-        aria-label="Сравнение фрагмента"
+        aria-label={title ?? 'Passage comparison'}
         tabIndex={-1}
       >
         <header className="rewrite__head">
-          <h2>Перегенерация фрагмента</h2>
-          <p>Заменится только выделенный фрагмент. Остальной текст не изменится.</p>
+          <h2>{title ?? 'Regenerate passage'}</h2>
+          <p>{subtitle ?? 'Only the selected passage is replaced. The rest of the text stays the same.'}</p>
         </header>
 
         <div className="rewrite__panes">
-          <section className="rewrite__pane" aria-label="Текущий фрагмент">
-            <h3>Сейчас</h3>
+          <section className="rewrite__pane" aria-label="Current passage">
+            <h3>Current</h3>
             <pre className="rewrite__text">{original}</pre>
           </section>
-          <section className="rewrite__pane rewrite__pane--new" aria-label="Новый фрагмент">
-            <h3>Новый вариант</h3>
+          <section className="rewrite__pane rewrite__pane--new" aria-label="New passage">
+            <h3>New version</h3>
             <pre className="rewrite__text">{replacement}</pre>
           </section>
         </div>
@@ -66,13 +72,14 @@ export function RewriteDiff({ original, replacement, applying, error, onApply, o
 
         <footer className="rewrite__actions">
           <button type="button" className="btn btn--ghost" disabled={applying} onClick={onCancel}>
-            Отмена
+            Cancel
           </button>
           <button type="button" className="btn btn--primary" disabled={applying} onClick={onApply}>
-            {applying ? 'Применяю…' : 'Применить'}
+            {applying ? 'Applying…' : 'Apply'}
           </button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

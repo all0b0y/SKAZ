@@ -62,8 +62,15 @@ export function updateGroup(value: SessionGroups, id: string | null, nameInput: 
 }
 
 export function moveSession(value: SessionGroups, sessionId: string, groupId: string | null): SessionGroups {
+  return moveSessions(value, [sessionId], groupId);
+}
+
+export function moveSessions(value: SessionGroups, sessionIds: readonly string[], groupId: string | null): SessionGroups {
   if (groupId !== null && !value.groups.some((g) => g.id === groupId)) throw new Error('This group no longer exists.');
-  return { ...value, membership: { ...value.membership, [sessionId]: groupId } };
+  const membership = { ...value.membership };
+  // defineProperty, not assignment: an id such as "__proto__" must stay a plain key.
+  for (const id of sessionIds) Object.defineProperty(membership, id, { value: groupId, enumerable: true, configurable: true, writable: true });
+  return { ...value, membership };
 }
 
 export function deleteGroup(value: SessionGroups, id: string): SessionGroups {

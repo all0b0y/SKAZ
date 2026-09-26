@@ -126,12 +126,15 @@ class ManagedStorage:
             with _directory(path, create=False) as fd:
                 info = os.fstat(fd)
             with self.db.write() as c:
-                c.execute("INSERT INTO storage_directories VALUES (?,?,?)",
-                          (str(path), info.st_dev, info.st_ino))
+                c.execute(
+                    "INSERT INTO storage_directories VALUES (?,?,?)", (str(path), info.st_dev, info.st_ino)
+                )
 
     def _remove_group(self, path: Path) -> None:
         with self.db.read() as c:
-            row = c.execute("SELECT device,inode FROM storage_directories WHERE path=?", (str(path),)).fetchone()
+            row = c.execute(
+                "SELECT device,inode FROM storage_directories WHERE path=?", (str(path),)
+            ).fetchone()
         if row and os.path.lexists(path):
             if not _same(path, row[0], row[1]):
                 raise StorageConflict("Group directory changed.")
@@ -167,10 +170,33 @@ class ManagedStorage:
                 self._allocate(session.id)
             return session
 
+    @storage_boundary
+    def ensure_import_directory(self, sid: str) -> None:
+        """Allocate imports, including older DB-only imports; never adopt a folder."""
+        with self.files._lock:
+            self.guard()
+            if not self.enabled():
+                return
+            _identity(sid)
+            with self.db.read() as c:
+                if c.execute("SELECT 1 FROM session_locations WHERE session_id=?", (sid,)).fetchone():
+                    return
+                if not c.execute(
+                    "SELECT 1 FROM native_recordings WHERE session_id=? AND origin='import'", (sid,),
+                ).fetchone():
+                    return
+            assert self.files.root is not None
+            path = self.files.root / "Ungrouped" / sid
+            with self.db.write() as write:
+                write.execute("INSERT INTO session_locations VALUES (?,?,NULL,NULL)", (sid, str(path)))
+            self._allocate(sid)
+
     def _allocate(self, sid: str) -> None:
         path = self.directory(sid)
         with self.db.read() as c:
-            row = c.execute("SELECT device,inode FROM session_locations WHERE session_id=?", (sid,)).fetchone()
+            row = c.execute(
+                "SELECT device,inode FROM session_locations WHERE session_id=?", (sid,)
+            ).fetchone()
         if row[0] is not None:
             if not _same(path, row[0], row[1]):
                 raise StorageConflict("Session directory identity changed.")
@@ -184,22 +210,19 @@ class ManagedStorage:
                 c.execute("UPDATE session_locations SET device=?,inode=? WHERE session_id=?",
                           (info.st_dev, info.st_ino, sid))
 
-    def audio_path(self, sid: str, sequence: int) -> Path:
-        self.guard()
-        if not self.enabled():
-            return self.audio_dir / sid / f"{sequence:06d}.wav"
-        self._location(sid)
-        return self.directory(sid) / "audio" / f"{sequence:06d}.wav"
-
     def _save_operation(self, doc: dict[str, Any]) -> None:
         with self.db.write() as c:
             c.execute("INSERT OR REPLACE INTO storage_operations VALUES (1,?)", (json.dumps(doc),))
 
     def _idle(self, sid: str) -> None:
         with self.db.read() as c:
-            if c.execute("SELECT 1 FROM asr_connections WHERE session_id=? AND status='active'", (sid,)).fetchone():
+            if c.execute(
+                "SELECT 1 FROM asr_connections WHERE session_id=? AND status='active'", (sid,)
+            ).fetchone():
                 raise StorageConflict("Pause recording before moving files.")
-            if c.execute("SELECT 1 FROM chunks WHERE session_id=? AND status='processing'", (sid,)).fetchone():
+            if c.execute(
+                "SELECT 1 FROM chunks WHERE session_id=? AND status='processing'", (sid,)
+            ).fetchone():
                 raise StorageConflict("Wait for audio processing before moving files.")
 
     def _location(self, sid: str) -> sqlite3.Row:
@@ -240,14 +263,31 @@ class ManagedStorage:
                             raise StorageConflict("Cross-device moves are not supported.")
                         if os.path.lexists(target):
                             raise StorageConflict("Move destination already exists.")
-                    moves.append({"sid": sid, "source": location["path"], "target": str(target),
-                                  "device": location["device"], "inode": location["inode"]})
+                    moves.append(
+                        {
+                            "sid": sid,
+                            "source": location["path"],
+                            "target": str(target),
+                            "device": location["device"],
+                            "inode": location["inode"],
+                        }
+                    )
             for gid in ids:
                 self._group(self.files.root / _folder(gid))
-            self._save_operation({"kind": "groups", "phase": "prepared", "moves": moves,
-                                  "data": data, "revision": revision + 1,
-                                  "remove_groups": [str(self.files.root / _folder(g["id"]))
-                                                    for g in current["data"]["groups"] if g["id"] not in ids]})
+            self._save_operation(
+                {
+                    "kind": "groups",
+                    "phase": "prepared",
+                    "moves": moves,
+                    "data": data,
+                    "revision": revision + 1,
+                    "remove_groups": [
+                        str(self.files.root / _folder(g["id"]))
+                        for g in current["data"]["groups"]
+                        if g["id"] not in ids
+                    ],
+                }
+            )
             self._recover()
             return self.view()
 
@@ -297,26 +337,36 @@ class ManagedStorage:
                 with _directory(parent, create=False) as fd:
                     os.fsync(fd)
         with self.db.write() as c:
-            chunks = c.execute("SELECT sequence,path FROM chunks WHERE session_id=?", (move["sid"],)).fetchall()
+            chunks = c.execute(
+                "SELECT sequence,path FROM chunks WHERE session_id=? AND path!=''", (move["sid"],)
+            ).fetchall()
             for chunk in chunks:
                 old = Path(chunk["path"])
                 if old.parent not in (source / "audio", target / "audio"):
                     raise StorageConflict("Audio path is outside its session.")
-                c.execute("UPDATE chunks SET path=? WHERE session_id=? AND sequence=?",
-                          (str(target / "audio" / old.name), move["sid"], chunk["sequence"]))
+                c.execute(
+                    "UPDATE chunks SET path=? WHERE session_id=? AND sequence=?",
+                    (str(target / "audio" / old.name), move["sid"], chunk["sequence"]),
+                )
             c.execute("UPDATE session_locations SET path=? WHERE session_id=?", (str(target), move["sid"]))
             # Projection content/source IDs are unchanged, but the displayed path is stale.
             c.execute("DELETE FROM session_file_status WHERE session_id=?", (move["sid"],))
             if "new_root" in move:
-                c.execute("UPDATE file_projections SET root=? WHERE session_id=? AND root=?",
-                          (move["new_root"], move["sid"], move["old_root"]))
+                c.execute(
+                    "UPDATE file_projections SET root=? WHERE session_id=? AND root=?",
+                    (move["new_root"], move["sid"], move["old_root"]),
+                )
 
     def _manifest(self, sid: str, path: Path) -> dict[str, str]:
         with self.db.read() as c:
-            result = {r["name"]: r["digest"] for r in c.execute(
-                "SELECT name,digest FROM file_projections WHERE root=? AND session_id=?",
-                (str(self.files.root), sid))}
-            for row in c.execute("SELECT path,sha256 FROM chunks WHERE session_id=?", (sid,)):
+            result = {
+                r["name"]: r["digest"]
+                for r in c.execute(
+                    "SELECT name,digest FROM file_projections WHERE root=? AND session_id=?",
+                    (str(self.files.root), sid),
+                )
+            }
+            for row in c.execute("SELECT path,sha256 FROM chunks WHERE session_id=? AND path!=''", (sid,)):
                 audio = Path(row["path"])
                 if audio.parent != path / "audio":
                     raise StorageConflict("Audio path is outside its session.")
@@ -332,14 +382,20 @@ class ManagedStorage:
                         for filename in os.listdir(audio):
                             key = f"audio/{filename}"
                             owned_key = key.removesuffix(".deleting") if missing else key
-                            if (owned_key not in manifest or _digest_at(audio, filename) != manifest[owned_key]
-                                    or owned_key in actual):
+                            if (
+                                owned_key not in manifest
+                                or _digest_at(audio, filename) != manifest[owned_key]
+                                or owned_key in actual
+                            ):
                                 raise StorageConflict("Unowned or changed audio; nothing deleted.")
                             actual.add(owned_key)
                 else:
                     owned_name = name.removesuffix(".deleting") if missing else name
-                    if (owned_name not in manifest or _digest_at(fd, name) != manifest[owned_name]
-                            or owned_name in actual):
+                    if (
+                        owned_name not in manifest
+                        or _digest_at(fd, name) != manifest[owned_name]
+                        or owned_name in actual
+                    ):
                         raise StorageConflict("Unowned or changed files; preserve them before deleting.")
                     actual.add(owned_name)
             if not missing and actual != set(manifest):
@@ -372,34 +428,11 @@ class ManagedStorage:
             self._recover()
 
     @storage_boundary
-    def read_audio(self, sid: str, sequence: int) -> bytes:
-        with self.db.read():
-            self.guard()
-            self._location(sid)
-            chunk = repo.get_chunk(self.db, sid, sequence)
-            if chunk is None:
-                raise StorageConflict("Audio block is missing.")
-            path = self.directory(sid) / "audio" / f"{sequence:06d}.wav"
-            if str(path) != chunk.path:
-                raise StorageConflict("Audio path is outside the session.")
-            with _directory(path.parent, create=False) as fd:
-                descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
-                with os.fdopen(descriptor, "rb") as source:
-                    import hashlib
-                    import stat
-                    info = os.fstat(source.fileno())
-                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 32 * 1024 * 1024:
-                        raise StorageConflict("Unsafe audio block.")
-                    body = source.read()
-                    if hashlib.sha256(body).hexdigest() != chunk.sha256:
-                        raise StorageConflict("Audio block changed.")
-                    return body
-
-    @storage_boundary
     def delete(self, sid: str) -> None:
         with self.files._lock, self.db.read():
             self.guard()
             self._idle(sid)
+            self.ensure_import_directory(sid)
             location = self._location(sid)
             path = Path(location["path"])
             manifest = self._manifest(sid, path)
@@ -422,7 +455,7 @@ class ManagedStorage:
         path = self.audio_dir / sid
         with self.db.read() as c:
             manifest = {}
-            for row in c.execute("SELECT path,sha256 FROM chunks WHERE session_id=?", (sid,)):
+            for row in c.execute("SELECT path,sha256 FROM chunks WHERE session_id=? AND path!=''", (sid,)):
                 audio = Path(row["path"])
                 if audio.parent != path:
                     raise StorageConflict("Legacy audio path is outside its session.")

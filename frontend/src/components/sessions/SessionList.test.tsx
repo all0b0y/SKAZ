@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StrictMode } from 'react';
-import { render, screen, within, act, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SessionList } from './SessionList';
 import { useStore } from '../../state/store';
@@ -45,7 +45,7 @@ it('creates and restores an empty named group with an optional tag', async () =>
   seed([session('s1', 'Lecture')]);
   const user = userEvent.setup();
   const view = render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
-  await user.click(screen.getByRole('button', { name: 'Create group' }));
+  await user.click(screen.getByRole('button', { name: 'New group' }));
   await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'University');
   await user.type(screen.getByRole('textbox', { name: 'Tag (optional)' }), '#study');
   await user.click(screen.getByRole('button', { name: 'Create' }));
@@ -61,7 +61,18 @@ describe('SessionList group chips', () => {
     render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
     expect(screen.getByRole('tab', { name: /All/ })).toBeInTheDocument();
     expect(screen.getAllByRole('tab')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Create group' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New group' })).toBeInTheDocument();
+  });
+
+  it('keeps a single plus for New session and puts New group at the end of the chips, not in the tab list', () => {
+    seed([session('s1', 'Lecture #uni')]);
+    render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
+    expect(screen.queryByRole('button', { name: 'Create group' })).not.toBeInTheDocument();
+    const add = screen.getByRole('button', { name: 'New group' });
+    expect(add).toHaveTextContent('New group');
+    expect(within(screen.getByRole('tablist', { name: 'Session groups' })).queryByRole('button', { name: 'New group' })).not.toBeInTheDocument();
+    const chips = add.parentElement!;
+    expect(chips.lastElementChild).toBe(add);
   });
 
   it('has no Ungrouped chip when every session carries a tag', () => {
@@ -122,30 +133,6 @@ describe('SessionList group chips', () => {
   });
 });
 
-describe('SessionList collapse', () => {
-  it('collapses and expands via the toggle button and hides the session list while collapsed', async () => {
-    seed([session('s1', 'A session')]);
-    const user = userEvent.setup();
-    render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
-    expect(screen.getByRole('list')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /Collapse sessions panel/ }));
-    expect(screen.queryByRole('list')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /Expand sessions panel/ }));
-    expect(screen.getByRole('list')).toBeInTheDocument();
-  });
-
-  it('collapses via Cmd+/ ', async () => {
-    seed([session('s1', 'A session')]);
-    render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
-    expect(screen.getByRole('list')).toBeInTheDocument();
-    const event = new KeyboardEvent('keydown', { key: '/', metaKey: true });
-    act(() => window.dispatchEvent(event));
-    expect(screen.queryByRole('list')).not.toBeInTheDocument();
-  });
-});
-
 describe('Session navigation actions', () => {
   it('keeps the actions menu open and usable in development StrictMode', async () => {
     seed([session('s1', 'Lecture')]);
@@ -161,7 +148,7 @@ describe('Session navigation actions', () => {
 
   const show = () => render(<StrictMode><SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} /></StrictMode>);
   const createGroup = async (user: ReturnType<typeof userEvent.setup>, name: string, tag = '') => {
-    await user.click(screen.getByRole('button', { name: 'Create group' }));
+    await user.click(screen.getByRole('button', { name: 'New group' }));
     await user.type(screen.getByRole('textbox', { name: 'Group name' }), name);
     if (tag) await user.type(screen.getByRole('textbox', { name: 'Tag (optional)' }), tag);
     await user.click(screen.getByRole('button', { name: 'Create' }));
@@ -170,7 +157,7 @@ describe('Session navigation actions', () => {
   it('validates empty/duplicate names and single tags, supports Enter/Escape and restores focus', async () => {
     const user = userEvent.setup(); show();
     await createGroup(user, 'Study');
-    await user.click(screen.getByRole('button', { name: 'Create group' }));
+    await user.click(screen.getByRole('button', { name: 'New group' }));
     expect(screen.getByRole('textbox', { name: 'Group name' })).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
     await user.type(screen.getByRole('textbox', { name: 'Group name' }), ' study {Enter}');
@@ -181,7 +168,7 @@ describe('Session navigation actions', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('one tag');
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create group' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'New group' })).toHaveFocus();
   });
 
   it('moves via menu without selecting the session and persists exactly one membership', async () => {
@@ -202,6 +189,32 @@ describe('Session navigation actions', () => {
     await user.click(screen.getByRole('button', { name: 'Actions for Lecture' }));
     await user.click(screen.getByRole('menuitem', { name: 'Remove from group' }));
     expect(screen.getByRole('tab', { name: /Work 0/ })).toBeInTheDocument();
+  });
+
+  it('creates a group from Move to group and moves the session into it in one step', async () => {
+    seed([session('s1', 'Lecture')]); const user = userEvent.setup(); const view = show();
+    await user.click(screen.getByRole('button', { name: 'Actions for Lecture' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Move to group…' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'New group…' }));
+    expect(screen.getByRole('dialog', { name: 'New group for this session' })).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Physics');
+    await user.click(screen.getByRole('button', { name: 'Create and move' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Physics 1/ })).toBeInTheDocument();
+    view.unmount(); show();
+    expect(screen.getByRole('tab', { name: /Physics 1/ })).toBeInTheDocument();
+  });
+
+  it('keeps the session where it was when creating the group from Move fails', async () => {
+    seed([session('s1', 'Lecture')]); const user = userEvent.setup(); show();
+    await createGroup(user, 'Physics');
+    await user.click(screen.getByRole('button', { name: 'Actions for Lecture' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Move to group…' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'New group…' }));
+    await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'physics{Enter}');
+    expect(screen.getByRole('alert')).toHaveTextContent('already exists');
+    expect(screen.getByRole('tab', { name: /Physics 0/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
   });
 
   it('edits a group without losing membership and deletes it without deleting sessions or reimporting tags', async () => {
@@ -341,5 +354,24 @@ describe('SessionList footer', () => {
     expect(openSearch).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     expect(openSettings).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionList status', () => {
+  const metaOf = (title: string) => screen.getByRole('button', { name: new RegExp(`^${title}`) }).querySelector('.session__meta')?.textContent;
+
+  it('claims Recording only for the session the recorder is capturing', () => {
+    seed([session('live', 'Live lecture', 'recording'), session('idle', 'Idle lecture', 'recording')]);
+    useStore.setState({ activeSessionId: 'live', recorderState: 'recording' });
+    render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
+    expect(metaOf('Live lecture')).toBe('Recording');
+    expect(metaOf('Idle lecture')).toBe('Paused');
+  });
+
+  it('shows a session left in recording as paused while nothing is captured', () => {
+    seed([session('s1', 'Fresh session', 'recording')]);
+    render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
+    expect(metaOf('Fresh session')).toBe('Paused');
+    expect(screen.getByRole('button', { name: /^Fresh session/ }).querySelector('.session__dot--recording')).toBeNull();
   });
 });

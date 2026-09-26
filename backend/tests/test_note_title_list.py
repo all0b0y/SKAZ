@@ -1,4 +1,4 @@
-"""Note titles, list ordering by edit time, and soft deletion.
+"""Note titles, list ordering by edit time, and permanent deletion.
 
 Titles are an independent field in the Obsidian sense: renaming never rewrites the
 document, and editing the document never renames it. A title that sanitises to
@@ -7,7 +7,10 @@ previous name back instead of an unnamed note.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
+import pytest
 
 from tests.conftest import FakeHttp
 
@@ -18,7 +21,7 @@ async def create_session(client: httpx.AsyncClient) -> str:
     return str(created.json()["id"])
 
 
-async def empty_note(client: httpx.AsyncClient, session: str) -> dict:
+async def empty_note(client: httpx.AsyncClient, session: str) -> dict[str, Any]:
     response = await client.post(f"/sessions/{session}/notes/empty")
     assert response.status_code == 200, response.text
     return dict(response.json())
@@ -36,7 +39,9 @@ async def test_rename_leaves_the_document_untouched(client: httpx.AsyncClient) -
     session = await create_session(client)
     note = await empty_note(client, session)
     path = f"/sessions/{session}/notes/{note['id']}"
-    written = await client.patch(path, json={"content": "# Заголовок в тексте\n\nтело", "expected_revision": 1})
+    written = await client.patch(
+        path, json={"content": "# Заголовок в тексте\n\nтело", "expected_revision": 1}
+    )
     assert written.status_code == 200, written.text
 
     renamed = await client.patch(path, json={"title": "Моя лекция", "expected_revision": 2})
@@ -100,7 +105,7 @@ async def test_list_orders_by_last_edit_not_creation(client: httpx.AsyncClient) 
     assert order == [first["id"], second["id"]]
 
 
-async def test_soft_delete_hides_the_note_but_keeps_the_row(client: httpx.AsyncClient) -> None:
+async def test_delete_removes_the_note(client: httpx.AsyncClient) -> None:
     session = await create_session(client)
     kept = await empty_note(client, session)
     doomed = await empty_note(client, session)
@@ -111,7 +116,7 @@ async def test_soft_delete_hides_the_note_but_keeps_the_row(client: httpx.AsyncC
     assert [n["id"] for n in listing] == [kept["id"]]
     detail = (await client.get(f"/sessions/{session}")).json()
     assert [n["id"] for n in detail["notes_list"]] == [kept["id"]]
-    # The row survives for the future trash, so it must not be editable meanwhile.
+    # A removed note cannot be edited or deleted twice.
     stale = await client.patch(
         f"/sessions/{session}/notes/{doomed['id']}", json={"content": "x", "expected_revision": 1},
     )
@@ -121,7 +126,7 @@ async def test_soft_delete_hides_the_note_but_keeps_the_row(client: httpx.AsyncC
 
 
 async def test_deleted_note_disappears_from_the_projected_folder(
-    client: httpx.AsyncClient, tmp_path_factory, outbound: FakeHttp,
+    client: httpx.AsyncClient, tmp_path_factory: pytest.TempPathFactory, outbound: FakeHttp,
 ) -> None:
     session = await create_session(client)
     doomed = await empty_note(client, session)

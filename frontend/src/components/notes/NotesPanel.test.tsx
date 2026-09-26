@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotesPanel } from './NotesPanel';
 import { useStore } from '../../state/store';
 import type { Citation, Note } from '../../api/types';
+import { editorText } from '../../test/noteEditor';
+import { OPEN_SETTINGS_EVENT } from '../../lib/openSettings';
 
 const note = (overrides: Partial<Note> = {}): Note => ({
   id: 'n1',
@@ -26,32 +28,28 @@ const seed = (notes: Note | null, list?: Note[]) => {
       notes_list: list ?? (notes ? [notes] : []),
     } as never,
     recorderState: 'stopped',
-    notesGenerating: false,
+    noteGenerations: {},
     notesError: null,
+    settings: null,
   });
 };
 
-/** Open the note in a tab the way a user does: "+" → "Открыть существующий". */
+/** Open the note in a tab the way a user does: "+" → "Open existing". */
 const openFirstNote = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(screen.getByRole('button', { name: 'Новый конспект' }));
-  await user.click(screen.getByRole('menuitem', { name: 'Открыть существующий' }));
+  await user.click(screen.getByRole('button', { name: 'New notes' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Open existing' }));
   // Scoped to the picker: the session's own note list shows the same names
   // behind the dialog, and an unscoped query cannot tell the two apart.
-  const picker = await screen.findByRole('dialog', { name: 'Открыть конспект' });
+  const picker = await screen.findByRole('dialog', { name: 'Open notes' });
   const entry = await within(picker)
     .findByRole('button', { name: /Some notes content|Без названия|Заголовок/ });
   await user.click(entry);
 };
 
-/** The note opens rendered; editing is entered through the pencil in its corner. */
-const enterEditing = async (user: ReturnType<typeof userEvent.setup>) => {
-  await screen.findByLabelText('Конспект');
-  await user.click(screen.getByRole('button', { name: 'Редактировать' }));
-  return screen.findByLabelText('Текст конспекта');
-};
 
 beforeEach(() => {
   localStorage.clear();
+  useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
   window.audiohelper = {
     ...window.audiohelper,
@@ -76,8 +74,8 @@ beforeEach(() => {
 describe('NotesPanel start screen', () => {
   it('offers both ways to start and never hides either', () => {
     render(<NotesPanel onCite={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /Создать конспект с ИИ/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Создать пустой' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create AI notes/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create empty' })).toBeInTheDocument();
   });
 
   it('disables AI generation with the reason on the button when there is no transcript', () => {
@@ -85,75 +83,110 @@ describe('NotesPanel start screen', () => {
       detail: { segments: [], messages: [], notes: null, notes_list: [] } as never,
     });
     render(<NotesPanel onCite={vi.fn()} />);
-    const generate = screen.getByRole('button', { name: /Создать конспект с ИИ/ });
+    const generate = screen.getByRole('button', { name: /Create AI notes/ });
     expect(generate).toBeDisabled();
-    expect(generate).toHaveTextContent('Нет транскрипции');
+    expect(generate).toHaveTextContent('No transcript');
     // The empty note never depends on the recording.
-    expect(screen.getByRole('button', { name: 'Создать пустой' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Create empty' })).toBeEnabled();
+  });
+
+  it('states a missing notes model on the button instead of a banner over the pane', () => {
+    useStore.setState({ settings: { notes: { model: '' } } as never });
+    render(<NotesPanel onCite={vi.fn()} />);
+    const generate = screen.getByRole('button', { name: /Create AI notes/ });
+    expect(generate).toBeDisabled();
+    expect(generate).toHaveTextContent('No model selected');
+    expect(screen.queryByText(/Модель для конспектов не выбрана/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create empty' })).toBeEnabled();
+  });
+
+  it('offers the way into the Notes settings when no notes model is chosen', async () => {
+    const opened: string[] = [];
+    const onOpen = (event: Event) => opened.push((event as CustomEvent<string>).detail);
+    window.addEventListener(OPEN_SETTINGS_EVENT, onOpen);
+    useStore.setState({ settings: { notes: { model: '' } } as never });
+    render(<NotesPanel onCite={vi.fn()} />);
+    expect(screen.getByText('No model selected for notes.')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    expect(opened).toEqual(['notes']);
+    window.removeEventListener(OPEN_SETTINGS_EVENT, onOpen);
+  });
+
+  it('shows no settings notice while settings are unread or a model is chosen', () => {
+    const view = render(<NotesPanel onCite={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Open settings' })).not.toBeInTheDocument();
+    view.unmount();
+    useStore.setState({ settings: { notes: { model: 'm' } } as never });
+    render(<NotesPanel onCite={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Open settings' })).not.toBeInTheDocument();
+  });
+
+  it('enables AI generation for a native recording whose summary omits segments', () => {
+    // The native summary (`native_window=true`) never carries segments; the
+    // server's has_transcript is the only honest answer there.
+    useStore.setState({
+      detail: { segments: [], has_transcript: true, messages: [], notes: null, notes_list: [] } as never,
+    });
+    render(<NotesPanel onCite={vi.fn()} />);
+    const generate = screen.getByRole('button', { name: /Create AI notes/ });
+    expect(generate).toBeEnabled();
+    expect(generate).not.toHaveTextContent('No transcript');
+  });
+
+  it('keeps generation refused when the server says there is no transcript', () => {
+    useStore.setState({
+      detail: { segments: [], has_transcript: false, messages: [], notes: null, notes_list: [] } as never,
+    });
+    render(<NotesPanel onCite={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /Create AI notes/ })).toBeDisabled();
+  });
+
+  it('opens generation once the post-Stop re-read reports final speech', async () => {
+    const base = window.audiohelper.request;
+    window.audiohelper = {
+      ...window.audiohelper,
+      request: (async (req: { method?: string; path: string }) => {
+        if (req.method === 'GET' && /\/sessions\/[^/]+$/.test(req.path)) {
+          return { ok: true, status: 200, data: {
+            segments: [], has_transcript: true, messages: [], notes: null, notes_list: [],
+          } };
+        }
+        return base(req as never);
+      }) as never,
+    };
+    useStore.setState({
+      detail: { segments: [], has_transcript: false, messages: [], notes: null, notes_list: [] } as never,
+    });
+    render(<NotesPanel onCite={vi.fn()} />);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Create AI notes/ })).toBeEnabled());
   });
 
   it('says to stop the recording rather than silently refusing while capturing', () => {
     useStore.setState({ recorderState: 'recording' });
     render(<NotesPanel onCite={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /Создать конспект с ИИ/ }))
-      .toHaveTextContent('Остановите запись');
+    expect(screen.getByRole('button', { name: /Create AI notes/ }))
+      .toHaveTextContent('Stop recording first');
   });
 });
 
 describe('NotesPanel tabs', () => {
-  it('shows a note as formatted Markdown and swaps to the raw source on the pencil', async () => {
+  it('shows a note formatted, with the Markdown kept as the stored source', async () => {
     const user = userEvent.setup();
     seed(note({ content: '# Заголовок\n\nSome notes content.' }));
     render(<NotesPanel onCite={vi.fn()} />);
     await openFirstNote(user);
-    // At rest it reads as a document: a real heading, no visible "#".
-    const preview = await screen.findByLabelText('Конспект');
-    expect(preview.querySelector('h1')).toHaveTextContent('Заголовок');
-    expect(preview.textContent).not.toContain('#');
-    expect(screen.queryByLabelText('Текст конспекта')).not.toBeInTheDocument();
-
-    const editor = await enterEditing(user);
-    expect(editor).toHaveValue('# Заголовок\n\nSome notes content.');
+    // It reads as a document: a heading line, no visible "#"…
+    const doc = await screen.findByLabelText('Notes');
+    expect(doc.querySelector('.cm-md-h1')).toHaveTextContent('Заголовок');
+    expect(doc.textContent).not.toContain('#');
+    // …while the text itself stays plain Markdown and is editable in place.
+    expect(editorText(doc)).toBe('# Заголовок\n\nSome notes content.');
+    expect(doc).toHaveAttribute('contenteditable', 'true');
     // No mode to enter and no replace action: both were removed on purpose.
+    expect(screen.queryByRole('button', { name: 'Редактировать' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit note' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Заменить текущую' })).not.toBeInTheDocument();
-  });
-
-  it('renders the Markdown again once the check is pressed', async () => {
-    const user = userEvent.setup();
-    seed(note({ content: '# Заголовок' }));
-    render(<NotesPanel onCite={vi.fn()} />);
-    await openFirstNote(user);
-    await enterEditing(user);
-    // Blur is deliberately NOT the way out: the check, the app's menu over the
-    // text and the error line all live outside the field, and leaving on their
-    // focus change ended the session before their click could land.
-    fireEvent.blur(screen.getByLabelText('Текст конспекта'));
-    expect(screen.getByLabelText('Текст конспекта')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Готово' }));
-    const preview = await screen.findByLabelText('Конспект');
-    expect(preview.querySelector('h1')).toHaveTextContent('Заголовок');
-    expect(screen.queryByLabelText('Текст конспекта')).not.toBeInTheDocument();
-  });
-
-  it('never enters editing from a click in the text, selection or not', async () => {
-    const user = userEvent.setup();
-    seed(note({ content: 'Some notes content.' }));
-    render(<NotesPanel onCite={vi.fn()} />);
-    await openFirstNote(user);
-    await screen.findByLabelText('Конспект');
-
-    // A plain click used to turn the page into raw Markdown; now only the pencil
-    // does, so selecting a sentence to ask about it survives the click that made it.
-    await user.click(screen.getByLabelText('Конспект'));
-    expect(screen.queryByLabelText('Текст конспекта')).not.toBeInTheDocument();
-
-    vi.spyOn(window, 'getSelection').mockReturnValue({
-      toString: () => 'Some notes content.', rangeCount: 1,
-    } as unknown as Selection);
-    await user.click(screen.getByLabelText('Конспект'));
-    expect(screen.queryByLabelText('Текст конспекта')).not.toBeInTheDocument();
   });
 
   it('closes a tab and returns to the start screen when it was the last one', async () => {
@@ -161,9 +194,9 @@ describe('NotesPanel tabs', () => {
     seed(note());
     render(<NotesPanel onCite={vi.fn()} />);
     await openFirstNote(user);
-    await user.click(await screen.findByRole('button', { name: /^Закрыть / }));
-    expect(screen.queryByLabelText('Конспект')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Создать пустой' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /^Close / }));
+    expect(screen.queryByLabelText('Notes')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create empty' })).toBeInTheDocument();
   });
 
   it('keeps the open tabs across a remount, which is what a restart looks like', async () => {
@@ -171,11 +204,11 @@ describe('NotesPanel tabs', () => {
     seed(note());
     const first = render(<NotesPanel onCite={vi.fn()} />);
     await openFirstNote(user);
-    await screen.findByLabelText('Конспект');
+    await screen.findByLabelText('Notes');
     first.unmount();
 
     render(<NotesPanel onCite={vi.fn()} />);
-    expect(await screen.findByLabelText('Конспект')).toHaveTextContent('Some notes content.');
+    expect(await screen.findByLabelText('Notes')).toHaveTextContent('Some notes content.');
   });
 });
 
@@ -183,8 +216,8 @@ describe('NotesPanel tools menu', () => {
   it('offers only the tools that actually work', async () => {
     const user = userEvent.setup();
     render(<NotesPanel onCite={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: 'Новый конспект' }));
-    expect(screen.getByRole('menuitem', { name: /Создать конспект с ИИ/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'New notes' }));
+    expect(screen.getByRole('menuitem', { name: /Create AI notes/ })).toBeInTheDocument();
     // Translation and restyling are planned but unimplemented; a greyed-out entry
     // would make a working app look broken.
     expect(screen.queryByRole('menuitem', { name: /Перевод/ })).not.toBeInTheDocument();
@@ -194,10 +227,10 @@ describe('NotesPanel tools menu', () => {
   it('remembers the chosen detail level', async () => {
     const user = userEvent.setup();
     render(<NotesPanel onCite={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: 'Новый конспект' }));
-    await user.click(screen.getByRole('radio', { name: 'Подробно' }));
+    await user.click(screen.getByRole('button', { name: 'New notes' }));
+    await user.click(screen.getByRole('radio', { name: 'Detailed' }));
     expect(localStorage.getItem('audiohelper.noteDetail')).toBe('detailed');
-    expect(screen.getByRole('radio', { name: 'Подробно' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Detailed' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('sends the chosen detail level with the generation request', async () => {
@@ -217,9 +250,9 @@ describe('NotesPanel tools menu', () => {
     } as never;
     const user = userEvent.setup();
     render(<NotesPanel onCite={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: 'Новый конспект' }));
-    await user.click(screen.getByRole('radio', { name: 'Тезисно' }));
-    await user.click(screen.getByRole('menuitem', { name: /Создать конспект с ИИ/ }));
+    await user.click(screen.getByRole('button', { name: 'New notes' }));
+    await user.click(screen.getByRole('radio', { name: 'Brief' }));
+    await user.click(screen.getByRole('menuitem', { name: /Create AI notes/ }));
     // The panel also re-reads the transcript; only the generation POST is meant.
     const generation = () => requests.find((req) => req.method === 'POST');
     await waitFor(() => expect(generation()?.body).toMatchObject({ detail: 'brief' }));
@@ -235,7 +268,7 @@ describe('NotesPanel sources', () => {
     seed(note({ citations: [citation] }));
     render(<NotesPanel onCite={vi.fn()} />);
     await openFirstNote(user);
-    await screen.findByLabelText('Конспект');
+    await screen.findByLabelText('Notes');
     expect(document.querySelector('details.notes__sources')).not.toBeInTheDocument();
     expect(screen.queryByText(/Sources \(/)).not.toBeInTheDocument();
     expect(document.querySelector('[data-cited]')).not.toBeInTheDocument();

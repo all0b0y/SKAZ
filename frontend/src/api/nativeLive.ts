@@ -5,12 +5,14 @@ export interface NativeTranscriptToken {
   connection_id: string;
   segment_id: string | null;
   text: string;
+  window_anchor?: string;
   speaker_number: number | null;
   start_sample: number;
   end_sample: number;
 }
 
 export interface NativeTranslationToken {
+  window_anchor?: string;
   id: string;
   connection_id: string;
   speaker_number: number | null;
@@ -24,6 +26,7 @@ export interface NativeTranslationProjection {
     id: string;
     connection_id: string;
     speaker_number: number | null;
+    start_sample?: number;
     original_token_ids: string[];
     translation_token_ids: string[];
     passthrough_token_ids: string[];
@@ -88,5 +91,5 @@ export interface NativeStopped {
 
 export interface NativeFailure {
   sessionId: string;
-  code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed';
+  code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed' | 'transcription_failed';
 }
