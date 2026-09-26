@@ -39,7 +39,7 @@ const seed = (list: Note[]) => {
       segments: [transcript], messages: [], notes: list[0] ?? null, notes_list: list,
     } as never,
     recorderState: 'stopped',
-    notesGenerating: false,
+    noteGenerations: {},
     notesError: null,
     settings: { notes: { model: 'test-model' } } as never,
   });
@@ -47,20 +47,21 @@ const seed = (list: Note[]) => {
 
 /** Open the first listed note into a tab, the way the list does it. */
 const openFromList = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
-  await user.click(screen.getByRole('button', { name: `Открыть ${name}` }));
-  await screen.findByLabelText('Конспект');
+  await user.click(screen.getByRole('button', { name: `Open ${name}` }));
+  await screen.findByLabelText('Notes');
 };
 
 /** Right click the tab, which is the only way to its actions now. */
 const openTabMenu = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
   await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('tab', { name }) });
-  return screen.findByRole('menu', { name: `Конспект «${name}»` });
+  return screen.findByRole('menu', { name: `Notes “${name}”` });
 };
 
 let sent: Array<{ method?: string; path: string; body?: unknown }>;
 
 beforeEach(() => {
   localStorage.clear();
+  useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
   sent = [];
   window.audiohelper = {
@@ -97,8 +98,8 @@ describe('the tab strip carries no icon row', () => {
     const tab = screen.getByRole('tab', { name: 'Старое имя' }).closest('.note-tab')!;
     const controls = within(tab as HTMLElement).getAllByRole('button');
     expect(controls.map((node) => node.getAttribute('aria-label')))
-      .toEqual(['Закрыть Старое имя']);
-    expect(within(tab as HTMLElement).queryByRole('button', { name: /^Удалить/ }))
+      .toEqual(['Close Старое имя']);
+    expect(within(tab as HTMLElement).queryByRole('button', { name: /^Delete/ }))
       .not.toBeInTheDocument();
   });
 
@@ -113,7 +114,7 @@ describe('the tab strip carries no icon row', () => {
     await openFromList(user, 'Старое имя');
 
     await user.dblClick(screen.getByRole('tab', { name: 'Старое имя' }));
-    expect(screen.queryByLabelText('Название конспекта')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Notes title')).not.toBeInTheDocument();
   });
 });
 
@@ -124,8 +125,8 @@ describe('renaming from the tab', () => {
     await openFromList(user, 'Старое имя');
 
     const menu = await openTabMenu(user, 'Старое имя');
-    await user.click(within(menu).getByRole('menuitem', { name: 'Переименовать' }));
-    const field = await screen.findByLabelText('Название конспекта');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Rename' }));
+    const field = await screen.findByLabelText('Notes title');
     await user.clear(field);
     await user.type(field, 'Новое имя{Enter}');
 
@@ -143,8 +144,8 @@ describe('renaming from the tab', () => {
     await openFromList(user, 'Старое имя');
 
     const menu = await openTabMenu(user, 'Старое имя');
-    await user.click(within(menu).getByRole('menuitem', { name: 'Переименовать' }));
-    const field = await screen.findByLabelText('Название конспекта');
+    await user.click(within(menu).getByRole('menuitem', { name: 'Rename' }));
+    const field = await screen.findByLabelText('Notes title');
     await user.clear(field);
     await user.type(field, '   {Enter}');
 
@@ -156,15 +157,15 @@ describe('renaming from the tab', () => {
     const user = userEvent.setup();
     seed([]);
     render(<NotesPanel onCite={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: /Создать конспект с ИИ/ }));
-    const tab = await screen.findByRole('tab', { name: /Генерация|Старое имя/ });
+    await user.click(screen.getByRole('button', { name: /Create AI notes/ }));
+    const tab = await screen.findByRole('tab', { name: /Generating|Старое имя/ });
 
     await user.pointer({ keys: '[MouseRight]', target: tab });
-    const menu = await screen.findByRole('menu', { name: /^Конспект / });
+    const menu = await screen.findByRole('menu', { name: /^Notes / });
     // There is no stored note to name or delete yet; both say so rather than
     // vanishing, so the user can see the actions exist.
-    expect(within(menu).getByRole('menuitem', { name: /Переименовать/ })).toBeDisabled();
-    expect(within(menu).getByRole('menuitem', { name: /Удалить/ })).toBeDisabled();
+    expect(within(menu).getByRole('menuitem', { name: /Rename/ })).toBeDisabled();
+    expect(within(menu).getByRole('menuitem', { name: /Delete/ })).toBeDisabled();
   });
 });
 
@@ -176,14 +177,19 @@ describe('deleting from the tab', () => {
     await openFromList(user, 'Старое имя');
 
     const menu = await openTabMenu(user, 'Старое имя');
-    await user.click(within(menu).getByRole('menuitem', { name: 'Удалить' }));
+    await user.click(within(menu).getByRole('menuitem', { name: 'Delete' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('cannot be restored');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    const again = await openTabMenu(user, 'Старое имя');
+    await user.click(within(again).getByRole('menuitem', { name: 'Delete' }));
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
 
     await waitFor(() => expect(sent.some((req) =>
       req.method === 'DELETE' && req.path === '/sessions/s1/notes/n1')).toBe(true));
     await waitFor(() =>
       expect(screen.queryByRole('tab', { name: 'Старое имя' })).not.toBeInTheDocument());
     // The other note is untouched and still listed.
-    expect(screen.getByRole('button', { name: 'Открыть Другая' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Другая' })).toBeInTheDocument();
   });
 });
 
@@ -193,16 +199,16 @@ describe('the save dot', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await openFromList(user, 'Старое имя');
     // A second tab, so there is a background one to check against.
-    await user.click(screen.getByRole('button', { name: 'Новый конспект' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Создать пустой' }));
+    await user.click(screen.getByRole('button', { name: 'New notes' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Create empty' }));
     await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2));
 
     const active = screen.getByRole('tab', { selected: true }).closest('.note-tab')!;
-    expect(within(active as HTMLElement).getByLabelText('Сохранено')).toBeInTheDocument();
+    expect(within(active as HTMLElement).getByLabelText('Saved')).toBeInTheDocument();
     // One dot in the window, and it belongs to the document on screen.
-    expect(screen.getAllByLabelText('Сохранено')).toHaveLength(1);
+    expect(screen.getAllByLabelText('Saved')).toHaveLength(1);
     const background = screen.getByRole('tab', { name: 'Старое имя' }).closest('.note-tab')!;
-    expect(within(background as HTMLElement).queryByLabelText('Сохранено')).not.toBeInTheDocument();
+    expect(within(background as HTMLElement).queryByLabelText('Saved')).not.toBeInTheDocument();
   });
 });
 
@@ -210,9 +216,9 @@ describe('the "+" menu carries the detail control', () => {
   it('remembers the chosen detail level', async () => {
     const user = userEvent.setup();
     render(<NotesPanel onCite={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: 'Новый конспект' }));
-    await user.click(screen.getByRole('radio', { name: 'Подробно' }));
+    await user.click(screen.getByRole('button', { name: 'New notes' }));
+    await user.click(screen.getByRole('radio', { name: 'Detailed' }));
     expect(localStorage.getItem('audiohelper.noteDetail')).toBe('detailed');
-    expect(screen.getByRole('radio', { name: 'Подробно' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Detailed' })).toHaveAttribute('aria-checked', 'true');
   });
 });

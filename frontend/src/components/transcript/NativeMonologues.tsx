@@ -9,6 +9,7 @@ interface Turn {
   speaker: number | null;
   tokens: NativeTranscriptToken[];
   display?: NativeTranslationToken[];
+  startSample?: number;
 }
 
 /** Consecutive tokens that share one provenance, rendered as a single node. */
@@ -17,6 +18,7 @@ interface Run {
   text: string;
   /** Present only for confirmed text; the replaceable tail owns no segment. */
   segmentId: string | null;
+  anchor?: string;
 }
 
 /**
@@ -35,11 +37,11 @@ function runs(tokens: Array<NativeTranscriptToken | NativeTranslationToken>): Ru
   for (const token of tokens) {
     const segmentId = 'segment_id' in token ? token.segment_id : null;
     const previous = collapsed.at(-1);
-    if (previous && previous.segmentId === segmentId) {
+    if (previous && previous.segmentId === segmentId && previous.anchor === token.window_anchor) {
       previous.text += token.text;
       continue;
     }
-    collapsed.push({ key: token.id, text: token.text, segmentId });
+    collapsed.push({ key: token.id, text: token.text, segmentId, anchor: token.window_anchor });
   }
   return collapsed;
 }
@@ -49,6 +51,7 @@ function TranscriptRuns({ tokens, focusSegmentId }: {
   focusSegmentId: string | null;
 }) {
   return <>{runs(tokens).map((run) => <span key={run.key}
+    data-native-anchor={run.key}
     data-source-id={run.segmentId ?? undefined}
     className={run.segmentId !== null && run.segmentId === focusSegmentId ? 'segment--focused' : undefined}
   >{run.text}</span>)}</>;
@@ -103,7 +106,7 @@ function translatedTurns(snapshot: NativeSnapshot, segments: Segment[]): Turn[] 
     ...projection.translation_tokens.map((token) => [token.id, token] as const),
   ]);
   const turns: Turn[] = projection.monologues.map((turn) => ({
-    id: turn.id, connection: turn.connection_id, speaker: turn.speaker_number,
+    id: turn.id, connection: turn.connection_id, speaker: turn.speaker_number, startSample: turn.start_sample,
     tokens: turn.original_token_ids.flatMap((id) => originals.get(id) ? [originals.get(id)!] : []),
     display: turn.display_token_ids.flatMap((id) => display.get(id) ? [display.get(id)!] : []),
   }));
@@ -112,7 +115,7 @@ function translatedTurns(snapshot: NativeSnapshot, segments: Segment[]): Turn[] 
   const archive = segments.filter((segment) => !represented.has(segment.id));
   if (archive.length) turns.push(...project({ ...snapshot, final_tokens: [], connections: [] }, archive)
     .map((turn) => ({ ...turn, display: [] })));
-  return turns.sort((a, b) => (a.tokens[0]?.start_sample ?? 0) - (b.tokens[0]?.start_sample ?? 0));
+  return turns.sort((a, b) => (a.startSample ?? a.tokens[0]?.start_sample ?? 0) - (b.startSample ?? b.tokens[0]?.start_sample ?? 0));
 }
 
 export function NativeMonologues({ snapshot, segments, focusSegmentId }: {
@@ -141,16 +144,16 @@ export function NativeMonologues({ snapshot, segments, focusSegmentId }: {
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }, [focusSegmentId, turns]);
-  return <ol ref={list} className="native-monologues" aria-label="Транскрипция">
+  return <ol ref={list} className="native-monologues" aria-label="Transcript">
     {turns.map((turn, index) => <li key={turn.id} className="native-monologue">
       <span className="native-monologue__speaker">
-        {turn.speaker !== null ? `Спикер ${turn.speaker}` : index === 0 && turn.connection !== 'archive' ? 'Спикер 1' : 'Спикер'}
+        {turn.speaker !== null ? `Speaker ${turn.speaker}` : index === 0 && turn.connection !== 'archive' ? 'Speaker 1' : 'Speaker'}
       </span>
       {translation && <p className="native-monologue__text">
         <TranscriptRuns tokens={turn.display ?? []} focusSegmentId={focusSegmentId} />
       </p>}
       {translation ? <details className="native-monologue__original">
-        <summary>Показать оригинал</summary>
+        <summary>Show original</summary>
         <p className="native-monologue__text">
           <TranscriptRuns tokens={turn.tokens} focusSegmentId={focusSegmentId} />
         </p>
@@ -159,7 +162,7 @@ export function NativeMonologues({ snapshot, segments, focusSegmentId }: {
       </p>}
     </li>)}
     {translation && unassigned.length > 0 && <li className="native-monologue">
-      <span className="native-monologue__speaker">Перевод без точной привязки к реплике</span>
+      <span className="native-monologue__speaker">Translation not tied to an exact turn</span>
       <p className="native-monologue__text">
         <TranscriptRuns tokens={unassigned} focusSegmentId={focusSegmentId} />
       </p>

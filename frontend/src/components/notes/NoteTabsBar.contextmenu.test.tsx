@@ -36,7 +36,7 @@ const seed = (list: Note[]) => {
     sessions: [{ id: 's1', title: 'Лекция', created_at: '2026-01-01T00:00:00Z' } as never],
     detail: { segments: [transcript], messages: [], notes: list[0] ?? null, notes_list: list } as never,
     recorderState: 'stopped',
-    notesGenerating: false,
+    noteGenerations: {},
     notesError: null,
     settings: { notes: { model: 'test-model' } } as never,
   });
@@ -44,17 +44,18 @@ const seed = (list: Note[]) => {
 
 /** Two documents already open, the way a returning user finds them. */
 const seedTabs = () => {
-  localStorage.setItem('audiohelper.noteTabs', JSON.stringify({
+  useStore.setState({ noteTabs: { s1: {
     tabs: [
       { id: 't1', sessionId: 's1', noteId: 'n1', title: 'Первая' },
       { id: 't2', sessionId: 's1', noteId: 'n2', title: 'Вторая' },
     ],
     activeTabId: 't2',
-  }));
+  } } });
 };
 
 beforeEach(() => {
   localStorage.clear();
+  useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
   window.audiohelper = {
     ...window.audiohelper,
@@ -81,26 +82,26 @@ describe('a right click always lands its own menu', () => {
     await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2));
 
     await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('tab', { name: 'Первая' }) });
-    expect(await screen.findByRole('menu', { name: 'Конспект «Первая»' })).toBeInTheDocument();
+    expect(await screen.findByRole('menu', { name: 'Notes “Первая”' })).toBeInTheDocument();
 
     // The second right click must not be spent dismissing the first menu.
     await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('tab', { name: 'Вторая' }) });
-    expect(await screen.findByRole('menu', { name: 'Конспект «Вторая»' })).toBeInTheDocument();
-    expect(screen.queryByRole('menu', { name: 'Конспект «Первая»' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menu', { name: 'Notes “Вторая”' })).toBeInTheDocument();
+    expect(screen.queryByRole('menu', { name: 'Notes “Первая”' })).not.toBeInTheDocument();
   });
 
   it('never leaves two menus open at once', async () => {
     const user = userEvent.setup();
     render(<NotesPanel onCite={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: 'Открыть Первая' }));
-    await screen.findByLabelText('Конспект');
+    await user.click(screen.getByRole('button', { name: 'Open Первая' }));
+    await screen.findByLabelText('Notes');
 
     await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('tab', { name: 'Первая' }) });
-    await screen.findByRole('menu', { name: 'Конспект «Первая»' });
+    await screen.findByRole('menu', { name: 'Notes “Первая”' });
 
     // A right click on the document raises the text menu; the tab's must go.
-    await user.pointer({ keys: '[MouseRight]', target: screen.getByLabelText('Конспект') });
-    await screen.findByRole('menu', { name: 'Действия с фрагментом' });
+    await user.pointer({ keys: '[MouseRight]', target: screen.getByLabelText('Notes') });
+    await screen.findByRole('menu', { name: 'Passage actions' });
     expect(screen.getAllByRole('menu')).toHaveLength(1);
   });
 });

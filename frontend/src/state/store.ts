@@ -1,6 +1,9 @@
 import { create } from 'zustand';
+import { IMPORT_RECORDING_MESSAGE } from '../lib/recordingEligibility';
 import { defaultSessionTitle } from '../lib/time';
 import { ApiClient, ApiError } from '../api/client';
+import { forgetTranscript } from '../components/transcript/transcriptCache';
+import { captureSourcesLocked } from './captureSources';
 import type { BackendStatus, BridgeApi } from '../api/bridge';
 import type {
   AskResponse,
@@ -15,6 +18,7 @@ import type {
   LiveAsrSchedulerStatus,
   LiveAsrSourceIntegrity,
   ImportView,
+  BulkDeleteResult,
   Message,
   ModelInfo,
   Note,
@@ -28,14 +32,45 @@ import type {
   SettingsUpdate,
   TaskKind,
 } from '../api/types';
-import { AudioRecorder, type RecordedChunk, type RecorderState } from '../audio/recorder';
+import { AudioRecorder, SystemAudioUnavailable, type CaptureSources, type RecordedChunk, type RecorderState, type SystemAudioFailure } from '../audio/recorder';
 import { browserDiscovery, listInputDevices } from '../audio/devices';
 import { SignalMeter, idleMeterSnapshot, type MeterSnapshot } from '../audio/meter';
 import { PersistenceQueue, type PersistenceQueueState } from '../audio/persistenceQueue';
 import { NativeAudioWriter } from '../audio/nativeWriter';
-import { ContextualSchedulerNotifier } from '../audio/contextualScheduler';
 import type { TranscriptionQueueState } from '../audio/transcriptionQueue';
-import { DEFAULT_WINDOW_MINUTES, type WindowPreset } from '../lib/time';
+import { askScope } from '../lib/askScope';
+import { onTaskSettled, selectCodexNotes, useCodex } from './codex';
+import {
+  attachNote,
+  closeTab,
+  emptyTabs,
+  loadSessionTabs,
+  noteName,
+  openTab,
+  renameTab,
+  saveSessionTabs,
+  type SessionTabs,
+  type TabsState,
+} from './noteTabs';
+
+/** A generation running, or failed, in one tab of one session. */
+export interface NoteGeneration {
+  tabId: string;
+  status: 'running' | 'failed';
+  error: string | null;
+  /** Set when Codex writes the note: its task carries status, journal and resume. */
+  taskId?: string;
+}
+
+const initialNoteTabs = (): SessionTabs => {
+  // Tabs left in "Генерация…" by a previous run can never be bound: the request
+  // that would have filled them died with the process.
+  const loaded = loadSessionTabs();
+  return Object.fromEntries(Object.entries(loaded).map(([sessionId, own]) => {
+    const tabs = own.tabs.filter((tab) => tab.noteId !== null);
+    return [sessionId, { tabs, activeTabId: tabs.some((t) => t.id === own.activeTabId) ? own.activeTabId : (tabs.at(-1)?.id ?? null) }];
+  }));
+};
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -62,6 +97,12 @@ interface DetailCache {
   messages: Message[];
   notes: Note | null;
   notes_list?: Note[];
+  /**
+   * Whether the notes generator has final speech to read. The native summary
+   * omits `segments`, so their length says nothing there; absent on caches
+   * built before a server read, where segments are the only evidence.
+   */
+  has_transcript?: boolean;
 }
 
 const emptyQueueState: PersistenceQueueState = {
@@ -105,12 +146,22 @@ export interface AppState {
   prepareForQuit: () => Promise<boolean>;
   cancelQuit: () => void;
   recorderState: RecorderState;
+  /** Stop was pressed: capture has ended, the remaining audio is being saved and
+   * the provider finalises the last words. True only for that stretch, so the
+   * recorder can tell it apart from the short start/pause/resume transitions. */
+  finishing: boolean;
   elapsedMs: number;
-  level: number;
   meter: MeterSnapshot;
   queue: PersistenceQueueState;
   transcription: TranscriptionQueueState;
   recorderError: string | null;
+  /**
+   * System audio could not be used. `start`/`resume`: nothing was captured and
+   * the capsule offers Open System Settings / Record mic only. `lost`: it ended
+   * mid-recording and the microphone kept recording.
+   */
+  systemAudioIssue: { phase: 'start' | 'resume' | 'lost'; reason: SystemAudioFailure | 'ended' } | null;
+  recorderErrorsBySession: Record<string, string | null>;
   nextRecordingMode: SessionMode;
   liveCapabilities: LiveAsrCapabilities | null;
   /** Imports that are not yet settled, keyed by session id. Drives the session
@@ -137,12 +188,19 @@ export interface AppState {
    * know about it. Cleared on send, on dismissal, and on session switch.
    */
   askContext: AskContext | null;
-  windowMinutes: WindowPreset;
   asking: boolean;
   askError: string | null;
 
-  notesGenerating: boolean;
   notesError: string | null;
+  /**
+   * Open note tabs of every session (docs/NOTES-POLISH-SPEC.md §3).
+   *
+   * Held here, not in the Notes panel, because a generation must be able to bind
+   * its note to the waiting tab after the user left the panel or the session.
+   */
+  noteTabs: SessionTabs;
+  /** At most one generation per session; sessions generate independently. */
+  noteGenerations: Record<string, NoteGeneration>;
 
   theme: ThemeMode;
 
@@ -157,7 +215,6 @@ export interface AppState {
   setNextRecordingMode: (mode: SessionMode) => void;
   changeTranscriptLanguage: (language: string) => Promise<void>;
   refreshContextualLive: (sessionId: string) => Promise<void>;
-  resumeContextualProcessing: () => Promise<void>;
   editLiveFragment: (
     fragmentId: string,
     text: string,
@@ -177,13 +234,19 @@ export interface AppState {
   selectSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   removeSession: (id: string) => Promise<void>;
+  /** Bulk delete; the capturing session is skipped and never sent. */
+  removeSessions: (ids: string[]) => Promise<BulkDeleteResult>;
 
   enumerateDevices: () => Promise<void>;
-  selectDevice: (deviceId: string) => void;
+  /** Persists the preferred microphone; ignored while capture sources are locked. */
+  selectDevice: (deviceId: string) => Promise<void>;
+  /** Persists whether system audio is mixed into the next recording stretch. */
+  setCaptureSystemAudio: (enabled: boolean) => Promise<void>;
 
-  startRecording: () => Promise<void>;
+  /** `micOnly` skips system audio for this start only; the setting is unchanged. */
+  startRecording: (options?: { micOnly?: boolean }) => Promise<void>;
   pauseRecording: () => Promise<void>;
-  resumeRecording: () => Promise<void>;
+  resumeRecording: (options?: { micOnly?: boolean }) => Promise<void>;
   stopRecording: () => Promise<void>;
   retrySessionStatus: () => Promise<void>;
   retryFailedUploads: () => void;
@@ -192,14 +255,21 @@ export interface AppState {
   ask: (question: string) => Promise<void>;
   setChatScope: (scope: ChatScope) => void;
   setAskContext: (context: AskContext | null) => void;
-  setWindowMinutes: (minutes: WindowPreset) => void;
 
-  /** Generation always produces a new note; it never overwrites open text. */
-  generateNotes: (detail?: NoteDetail) => Promise<Note | null>;
+  /**
+   * Start a generation for the active session in a new tab, or retry one in
+   * `tabId`. Generation always produces a new note; it never overwrites open
+   * text. Resolves to the note, or null when refused or failed.
+   */
+  generateNotes: (detail?: NoteDetail, tabId?: string) => Promise<Note | null>;
+  /** Change the open tabs of one session and persist them. */
+  updateNoteTabs: (sessionId: string, change: (state: TabsState) => TabsState) => void;
+  /** Close a tab; a failed generation shown in it is forgotten with it. */
+  closeNoteTab: (sessionId: string, tabId: string) => void;
   createEmptyNote: () => Promise<Note | null>;
   /** Rename without touching the document; a blank name is refused by the caller. */
   renameNote: (note: Note, title: string) => Promise<Note | null>;
-  /** Soft deletion: the note leaves the list but its row waits for the trash. */
+  /** Permanent deletion after UI confirmation. */
   deleteNote: (noteId: string) => Promise<boolean>;
   /**
    * Re-read the stored transcript of the active session.
@@ -222,8 +292,6 @@ let nativeFailureCleanup: (() => void) | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let signalMeter: SignalMeter | null = null;
 let stopRequested = false;
-let contextualNotifier: ContextualSchedulerNotifier | null = null;
-let contextualNotifierSessionId: string | null = null;
 let liveSelectionGeneration = 0;
 let recordingSessionId: string | null = null;
 let sessionStatusIntentGeneration = 0;
@@ -251,6 +319,16 @@ const getClient = (): ApiClient => {
   return client;
 };
 
+export const SYSTEM_AUDIO_LOST_MESSAGE = 'System audio stopped — recording microphone only.';
+
+export function systemAudioMessage(reason: SystemAudioFailure): string {
+  return reason === 'denied'
+    ? 'System audio is not allowed. Grant SKAZ “System Audio Recording” in System Settings, or record the microphone only.'
+    : reason === 'unsupported'
+      ? 'System audio needs macOS 14.2 or later. Record the microphone only.'
+      : 'System audio could not start. Try again, or record the microphone only.';
+}
+
 const messageId = (): string => `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const reconcileImmutableFinals = (existing: Segment[], incoming: Segment[]): Segment[] => {
@@ -262,27 +340,38 @@ const reconcileImmutableFinals = (existing: Segment[], incoming: Segment[]): Seg
 };
 
 export const useStore = create<AppState>((set, get) => {
+  /** Sources for the next recording stretch, from the persisted preferences. */
+  const captureSources = (micOnly = false): CaptureSources => ({
+    deviceId: get().selectedDeviceId ?? undefined,
+    systemAudio: !micOnly && get().settings?.capture_system_audio === true,
+  });
+
   const sessionMode = (sessionId: string): SessionMode => (
     get().sessions.find((item) => item.id === sessionId)?.mode ?? 'legacy'
   );
 
-  const ensureContextualNotifier = (sessionId: string): ContextualSchedulerNotifier => {
-    if (contextualNotifier && contextualNotifierSessionId === sessionId) return contextualNotifier;
-    contextualNotifierSessionId = sessionId;
-    contextualNotifier = new ContextualSchedulerNotifier(async (sequence) => {
-      try {
-        const response = await getClient().advanceLiveAsr(sessionId, sequence);
-        if (get().activeSessionId === sessionId) {
-          set({ liveScheduler: response.scheduler, liveError: null });
-        }
-      } catch (error) {
-        if (get().activeSessionId === sessionId) {
-          set({ liveError: error instanceof Error ? error.message : String(error) });
-        }
-        throw error;
-      }
+  /** Drops deleted sessions from the list and, if the open one went, its view state. */
+  const forgetSessions = (ids: string[]): void => {
+    if (!ids.length) return;
+    const gone = new Set(ids);
+    for (const id of ids) forgetTranscript(id);
+    const activeGone = get().activeSessionId !== null && gone.has(get().activeSessionId!);
+    if (activeGone) liveSelectionGeneration += 1;
+    set((s) => {
+      const statusGone = s.pendingSessionStatusSessionId !== null && gone.has(s.pendingSessionStatusSessionId);
+      return {
+        sessions: s.sessions.filter((x) => !gone.has(x.id)),
+        activeSessionId: activeGone ? null : s.activeSessionId,
+        detail: activeGone ? null : s.detail,
+        liveDraft: activeGone ? null : s.liveDraft,
+        liveFragments: activeGone ? [] : s.liveFragments,
+        liveSourceIntegrity: activeGone ? null : s.liveSourceIntegrity,
+        liveResumeCompatibility: activeGone ? null : s.liveResumeCompatibility,
+        liveScheduler: activeGone ? null : s.liveScheduler,
+        pendingSessionStatus: statusGone ? null : s.pendingSessionStatus,
+        pendingSessionStatusSessionId: statusGone ? null : s.pendingSessionStatusSessionId,
+      };
     });
-    return contextualNotifier;
   };
 
   const acknowledgeSessionStatus = async (
@@ -381,12 +470,13 @@ export const useStore = create<AppState>((set, get) => {
   },
   cancelQuit: () => set({ quitRequested: false }),
   recorderState: 'idle',
+  finishing: false,
   elapsedMs: 0,
-  level: 0,
   meter: idleMeterSnapshot(),
   queue: emptyQueueState,
   transcription: emptyTranscriptionState,
   recorderError: null,
+  recorderErrorsBySession: {},
   nextRecordingMode: 'legacy',
   liveCapabilities: null,
   imports: {},
@@ -401,14 +491,15 @@ export const useStore = create<AppState>((set, get) => {
   languageMarks: [],
   devices: [],
   selectedDeviceId: null,
+  systemAudioIssue: null,
   permissionState: 'unknown',
-  chatScope: 'auto',
+  chatScope: 'session',
   askContext: null,
-  windowMinutes: DEFAULT_WINDOW_MINUTES,
   asking: false,
   askError: null,
-  notesGenerating: false,
   notesError: null,
+  noteTabs: initialNoteTabs(),
+  noteGenerations: {},
   theme: (localStorage.getItem('audiohelper.theme') as ThemeMode | null) ?? 'system',
 
   init: async () => {
@@ -435,7 +526,7 @@ export const useStore = create<AppState>((set, get) => {
   refreshSettings: async () => {
     try {
       const settings = await getClient().getSettings();
-      set({ settings, settingsError: null });
+      set((s) => ({ settings, settingsError: null, selectedDeviceId: settings.input_device_id ?? s.selectedDeviceId }));
     } catch (err) {
       set({ settingsError: err instanceof Error ? err.message : String(err) });
     }
@@ -444,7 +535,7 @@ export const useStore = create<AppState>((set, get) => {
   saveSettings: async (update) => {
     try {
       const settings = await getClient().updateSettings(update);
-      set({ settings, settingsError: null });
+      set((s) => ({ settings, settingsError: null, selectedDeviceId: settings.input_device_id ?? s.selectedDeviceId }));
       await get().refreshLiveCapabilities();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -549,17 +640,19 @@ export const useStore = create<AppState>((set, get) => {
     const generation = ++liveSelectionGeneration;
     set((s) => ({
       activeSessionId: id,
+      recorderErrorsBySession: s.activeSessionId
+        ? { ...s.recorderErrorsBySession, [s.activeSessionId]: s.recorderError }
+        : s.recorderErrorsBySession,
+      recorderError: s.activeSessionId === id ? s.recorderError : s.recorderErrorsBySession[id] ?? null,
       detailLoading: true,
       detailError: null,
       asking: false,
       askError: null,
       // Scope is sticky within a session but must not leak into the next one:
-      // someone returning to a different session later expects "auto", not
-      // whatever window/scope they last left on the previous session.
-      chatScope: s.activeSessionId === id ? s.chatScope : 'auto',
+      // another session must never inherit Group / All access.
+      chatScope: s.activeSessionId === id ? s.chatScope : 'session',
       // A quoted notes fragment belongs to the session it came from.
       askContext: s.activeSessionId === id ? s.askContext : null,
-      notesGenerating: false,
       notesError: null,
       liveDraft: null,
       liveFragments: [],
@@ -573,10 +666,10 @@ export const useStore = create<AppState>((set, get) => {
       languageMarks: s.activeSessionId === id ? s.languageMarks : [],
     }));
     try {
-      const detail: SessionDetail = await getClient().getSession(id);
+      const detail: SessionDetail = await getClient().getSession(id, true);
       if (get().activeSessionId !== id || generation !== liveSelectionGeneration) return;
       set({
-        detail: { segments: detail.segments, messages: detail.messages, notes: detail.notes, notes_list: detail.notes_list },
+        detail: { segments: detail.segments, messages: detail.messages, notes: detail.notes, notes_list: detail.notes_list, has_transcript: detail.has_transcript },
         detailLoading: false,
       });
       if (detail.session.mode === 'contextual_local') void get().refreshContextualLive(id);
@@ -595,29 +688,24 @@ export const useStore = create<AppState>((set, get) => {
 
   removeSession: async (id) => {
     await getClient().deleteSession(id);
-    if (get().activeSessionId === id) liveSelectionGeneration += 1;
-    set((s) => {
-      const sessions = s.sessions.filter((x) => x.id !== id);
-      const wasActive = s.activeSessionId === id;
-      return {
-        sessions,
-        activeSessionId: wasActive ? null : s.activeSessionId,
-        detail: wasActive ? null : s.detail,
-        liveDraft: wasActive ? null : s.liveDraft,
-        liveFragments: wasActive ? [] : s.liveFragments,
-        liveSourceIntegrity: wasActive ? null : s.liveSourceIntegrity,
-        liveResumeCompatibility: wasActive ? null : s.liveResumeCompatibility,
-        liveScheduler: wasActive ? null : s.liveScheduler,
-        pendingSessionStatus: s.pendingSessionStatusSessionId === id
-          ? null
-          : s.pendingSessionStatus,
-        pendingSessionStatusSessionId: s.pendingSessionStatusSessionId === id
-          ? null
-          : s.pendingSessionStatusSessionId,
-      };
-    });
+    forgetSessions([id]);
     const next = get().sessions[0];
     if (next) await get().selectSession(next.id);
+  },
+
+  removeSessions: async (ids) => {
+    // The capturing session is never sent: its audio pipeline still owns it.
+    const capturing = ['recording', 'paused', 'processing'].includes(get().recorderState) ? get().activeSessionId : null;
+    const sendable = [...new Set(ids)].filter((id) => id !== capturing);
+    if (!sendable.length) return { deleted: [], failed: [] };
+    const wasActive = get().activeSessionId;
+    const result = await getClient().deleteSessions(sendable);
+    forgetSessions(result.deleted);
+    if (wasActive && result.deleted.includes(wasActive)) {
+      const next = get().sessions[0];
+      if (next) await get().selectSession(next.id);
+    }
+    return result;
   },
 
   enumerateDevices: async () => {
@@ -634,7 +722,22 @@ export const useStore = create<AppState>((set, get) => {
     }
   },
 
-  selectDevice: (deviceId) => set({ selectedDeviceId: deviceId }),
+  selectDevice: async (deviceId) => {
+    if (captureSourcesLocked(get().recorderState)) return;
+    const previous = get().selectedDeviceId;
+    set({ selectedDeviceId: deviceId });
+    try {
+      await get().saveSettings({ input_device_id: deviceId });
+    } catch (error) {
+      set({ selectedDeviceId: previous });
+      throw error;
+    }
+  },
+
+  setCaptureSystemAudio: async (enabled) => {
+    if (captureSourcesLocked(get().recorderState)) return;
+    await get().saveSettings({ capture_system_audio: enabled });
+  },
 
   refreshContextualLive: async (sessionId) => {
     if (sessionMode(sessionId) !== 'contextual_local') return;
@@ -679,6 +782,7 @@ export const useStore = create<AppState>((set, get) => {
             ? {
                 ...state.detail,
                 segments: reconcileImmutableFinals(state.detail.segments, detail.segments),
+                ...(typeof detail.has_transcript === 'boolean' ? { has_transcript: detail.has_transcript } : {}),
               }
             : state.detail,
         }));
@@ -700,50 +804,6 @@ export const useStore = create<AppState>((set, get) => {
         liveRefreshSessionId = null;
         liveRefreshGeneration = null;
       }
-    }
-  },
-
-  resumeContextualProcessing: async () => {
-    const sessionId = get().activeSessionId;
-    if (!sessionId || sessionMode(sessionId) !== 'contextual_local') return;
-    const generation = liveSelectionGeneration;
-    const isCurrent = () => (
-      get().activeSessionId === sessionId && generation === liveSelectionGeneration
-    );
-    if (!get().liveCapabilities?.capable) {
-      set({ liveError: get().liveCapabilities?.detail ?? 'Contextual local recording capability is unavailable.' });
-      return;
-    }
-    try {
-      let cursor: number | undefined;
-      let latest: number | null = null;
-      let complete = false;
-      for (let pageNumber = 0; pageNumber < 10_000; pageNumber += 1) {
-        const page = await getClient().getAudioManifestPage(sessionId, cursor, 100);
-        if (!isCurrent()) return;
-        for (const chunk of page.chunks) {
-          if (chunk.available) latest = Math.max(latest ?? chunk.sequence, chunk.sequence);
-        }
-        if (page.next_after_sequence === null) {
-          complete = true;
-          break;
-        }
-        if (cursor !== undefined && page.next_after_sequence <= cursor) {
-          throw new Error('Saved-audio manifest returned a repeated cursor.');
-        }
-        cursor = page.next_after_sequence;
-      }
-      if (!isCurrent()) return;
-      if (!complete) throw new Error('Saved-audio manifest exceeded its page limit.');
-      if (latest === null) {
-        set({ liveError: 'No stored audio is available to resume.' });
-        return;
-      }
-      if (!isCurrent()) return;
-      ensureContextualNotifier(sessionId).retry(latest);
-    } catch (error) {
-      if (!isCurrent()) return;
-      set({ liveError: error instanceof Error ? error.message : String(error) });
     }
   },
 
@@ -800,8 +860,12 @@ export const useStore = create<AppState>((set, get) => {
     }
   },
 
-  startRecording: async () => {
+  startRecording: async (options = {}) => {
     if (get().quitRequested) return;
+    if (get().sessions.find((session) => session.id === get().activeSessionId)?.origin === 'import') {
+      set({ recorderError: IMPORT_RECORDING_MESSAGE });
+      return;
+    }
     if (['recording', 'paused', 'processing'].includes(get().recorderState)) return;
     if (get().pendingSessionStatus) {
       set({ recorderError: 'Confirm the previous backend lifecycle state before recording again.' });
@@ -818,7 +882,7 @@ export const useStore = create<AppState>((set, get) => {
     }
     // Compatibility mode describes archived data, not a choice of live ASR writer.
     if (!currentSettings.used_languages?.length) {
-      set({ recorderError: 'Перед первой записью выберите используемые языки в Settings → System.' });
+      set({ recorderError: 'Before the first recording, choose the languages in use in Settings → System.' });
       return;
     }
     const recordingMode: SessionMode = 'legacy';
@@ -827,7 +891,7 @@ export const useStore = create<AppState>((set, get) => {
     stopRequested = false;
     signalMeter?.reset();
     signalMeter = null;
-    set({ recorderState: 'processing', recorderError: null, meter: idleMeterSnapshot() });
+    set({ recorderState: 'processing', finishing: false, recorderError: null, systemAudioIssue: null, meter: idleMeterSnapshot() });
 
     let { activeSessionId } = get();
     if (!activeSessionId) {
@@ -837,9 +901,9 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const session = await getClient().createSession(name, recordingMode);
         set((s) => ({ sessions: [session, ...s.sessions], activeSessionId: session.id, languageMarks: [] }));
-        const created = await getClient().getSession(session.id);
+        const created = await getClient().getSession(session.id, true);
         set({
-          detail: { segments: created.segments, messages: created.messages, notes: created.notes, notes_list: created.notes_list },
+          detail: { segments: created.segments, messages: created.messages, notes: created.notes, notes_list: created.notes_list, has_transcript: created.has_transcript },
         });
         activeSessionId = session.id;
       } catch (err) {
@@ -863,6 +927,11 @@ export const useStore = create<AppState>((set, get) => {
     nativeWriter = writer;
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
+      if (failure.code === 'transcription_failed') {
+        set({ recorderError: 'Transcription failed. Recording stopped. Try recording again.' });
+        if (!stopRequested) void get().stopRecording();
+        return;
+      }
       writer.disconnect();
       set({ recorderError: 'Local audio transport failed. Capture stopped; explicit retry is required.' });
       void get().stopRecording();
@@ -895,7 +964,12 @@ export const useStore = create<AppState>((set, get) => {
     const sessionMeter = new SignalMeter();
     signalMeter = sessionMeter;
     recorder = new AudioRecorder({
-      onReady: (rate) => writer.open(rate),
+      onReady: async (rate) => {
+        await writer.open(rate);
+        if (!writer.transcriptionAvailable) {
+          throw new Error('Transcription is unavailable. Check Soniox settings and try recording again.');
+        }
+      },
       onChunk: (chunk: RecordedChunk) => {
         return persistenceQueue?.enqueue({
           sequence: chunk.sequence,
@@ -904,7 +978,6 @@ export const useStore = create<AppState>((set, get) => {
           wav: chunk.wav,
         });
       },
-      onLevel: (level) => set({ level }),
       onSignal: (sample) => {
         if (signalMeter !== sessionMeter || get().activeSessionId !== sessionId) return;
         const snapshot = sessionMeter.push(
@@ -916,6 +989,10 @@ export const useStore = create<AppState>((set, get) => {
         if (snapshot) set({ meter: snapshot });
       },
       onCaptureIncomplete: () => set({ captureIncomplete: true }),
+      onSystemAudioLost: () => set({
+        systemAudioIssue: { phase: 'lost', reason: 'ended' },
+        recorderError: SYSTEM_AUDIO_LOST_MESSAGE,
+      }),
       onError: (message) => set({ recorderError: message }),
       onDisconnected: () => {
         if (!get().captureIncomplete) set({ recorderError: 'Microphone disconnected. Captured audio was flushed.' });
@@ -925,7 +1002,7 @@ export const useStore = create<AppState>((set, get) => {
 
     try {
       const activeRecorder = recorder;
-      await activeRecorder.start(get().selectedDeviceId ?? undefined);
+      await activeRecorder.start(captureSources(options.micOnly));
       if (stopRequested || recorder !== activeRecorder) return;
       const intent = beginSessionStatusIntent(sessionId, 'recording');
       set({ recorderState: 'recording', recorderError: null, permissionState: 'granted' });
@@ -970,6 +1047,19 @@ export const useStore = create<AppState>((set, get) => {
         nativeFailureCleanup?.();
         nativeFailureCleanup = null;
       }
+      if (err instanceof SystemAudioUnavailable) {
+        set({
+          recorderError: systemAudioMessage(err.reason),
+          systemAudioIssue: { phase: 'start', reason: err.reason },
+          recorderState: 'idle',
+          meter: idleMeterSnapshot(),
+        });
+        recorder = null;
+        if (recordingSessionId === sessionId) recordingSessionId = null;
+        signalMeter?.reset();
+        signalMeter = null;
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const denied = /denied|not allowed|permission/i.test(message);
       set({
@@ -993,7 +1083,7 @@ export const useStore = create<AppState>((set, get) => {
     const sessionId = recordingSessionId;
     const intent = sessionId ? beginSessionStatusIntent(sessionId, 'paused') : null;
     signalMeter?.reset();
-    set({ recorderState: 'processing', level: 0, meter: idleMeterSnapshot() });
+    set({ recorderState: 'processing', meter: idleMeterSnapshot() });
     await activeRecorder?.pause();
     if (activeRecorder?.state === 'stopped') {
       await get().stopRecording();
@@ -1011,10 +1101,14 @@ export const useStore = create<AppState>((set, get) => {
     if (!stopRequested && recorder === activeRecorder) set({ recorderState: 'paused' });
   },
 
-  resumeRecording: async () => {
+  resumeRecording: async (options = {}) => {
     if (get().quitRequested) return;
+    if (get().sessions.find((session) => session.id === get().activeSessionId)?.origin === 'import') {
+      set({ recorderError: IMPORT_RECORDING_MESSAGE });
+      return;
+    }
     if (['idle', 'stopped'].includes(get().recorderState) && get().activeSessionId) {
-      await get().startRecording();
+      await get().startRecording(options);
       return;
     }
     if (get().recorderState !== 'paused') return;
@@ -1022,9 +1116,30 @@ export const useStore = create<AppState>((set, get) => {
     const sessionId = recordingSessionId;
     const intent = sessionId ? beginSessionStatusIntent(sessionId, 'recording') : null;
     signalMeter?.reset();
-    set({ recorderState: 'processing', meter: idleMeterSnapshot() });
+    set({ recorderState: 'processing', recorderError: null, systemAudioIssue: null, meter: idleMeterSnapshot() });
+    // Sources may have changed while paused. Swap them before the transport
+    // reopens, so a refused system-audio grant leaves nothing half-started.
+    try {
+      await activeRecorder?.changeSources(captureSources(options.micOnly));
+    } catch (error) {
+      if (error instanceof SystemAudioUnavailable) {
+        set({
+          recorderState: 'paused',
+          recorderError: systemAudioMessage(error.reason),
+          systemAudioIssue: { phase: 'resume', reason: error.reason },
+        });
+      } else {
+        set({ recorderState: 'paused', recorderError: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     try {
       await nativeWriter?.open();
+      if (nativeWriter && !nativeWriter.transcriptionAvailable) {
+        set({ recorderError: 'Transcription is unavailable. Check Soniox settings and try recording again.' });
+        await get().stopRecording();
+        return;
+      }
       if (stopRequested || recorder !== activeRecorder) return;
       await activeRecorder?.resume();
     } catch (error) {
@@ -1045,11 +1160,12 @@ export const useStore = create<AppState>((set, get) => {
 
   stopRecording: async () => {
     if (!['recording', 'paused', 'processing'].includes(get().recorderState)) return;
+    const activeRecorder = recorder;
     const id = recordingSessionId ?? get().activeSessionId;
     const intent = id ? beginSessionStatusIntent(id, 'stopped') : null;
     stopRequested = true;
     signalMeter?.reset();
-    set({ recorderState: 'processing', level: 0, meter: idleMeterSnapshot() });
+    set({ recorderState: 'processing', finishing: true, meter: idleMeterSnapshot() });
     await recorder?.stop();
     if (elapsedTimer) {
       clearInterval(elapsedTimer);
@@ -1065,17 +1181,21 @@ export const useStore = create<AppState>((set, get) => {
       await acknowledgeSessionStatus(id, 'stopped', {
         clearErrorOnSuccess: get().pendingSessionStatus !== null,
       }, intent);
-      set({ recorderState: 'stopped', level: 0, meter: idleMeterSnapshot() });
+      set({ recorderState: 'stopped', finishing: false, meter: idleMeterSnapshot() });
       await get().selectSession(id);
       await get().refreshSessions();
       if (sessionMode(id) === 'contextual_local') await get().refreshContextualLive(id);
     } else {
-      set({ recorderState: 'stopped', level: 0, meter: idleMeterSnapshot() });
+      set({ recorderState: 'stopped', finishing: false, meter: idleMeterSnapshot() });
     }
-    recorder = null;
-    if (recordingSessionId === id) recordingSessionId = null;
-    signalMeter?.reset();
-    signalMeter = null;
+    // Record is already available while the read-model refresh is in flight.
+    // A completed old Stop must never detach the user's new capture.
+    if (recorder === activeRecorder) {
+      recorder = null;
+      if (recordingSessionId === id) recordingSessionId = null;
+      signalMeter?.reset();
+      signalMeter = null;
+    }
   },
 
   retrySessionStatus: async () => {
@@ -1122,7 +1242,9 @@ export const useStore = create<AppState>((set, get) => {
 
   ask: async (question) => {
     const id = get().activeSessionId;
-    if (!id || !question.trim()) return;
+    if (!id || !question.trim() || get().asking) return;
+    const selectedScope = get().chatScope;
+    const selectedSessions = get().sessions;
     const userMsg: Message = {
       id: messageId(),
       role: 'user',
@@ -1135,10 +1257,13 @@ export const useStore = create<AppState>((set, get) => {
       askError: null,
     }));
     try {
+      const filter = selectedScope === 'group'
+        ? await askScope(getClient(), selectedScope, id, selectedSessions)
+        : { search_scope: selectedScope };
+      if (get().activeSessionId !== id) return;
       const res: AskResponse = await getClient().ask(id, {
         question: question.trim(),
-        scope: get().chatScope,
-        window_minutes: get().windowMinutes,
+        ...filter,
       });
       const answer: Message = {
         id: messageId(),
@@ -1154,31 +1279,100 @@ export const useStore = create<AppState>((set, get) => {
       }));
     } catch (err) {
       if (get().activeSessionId !== id) return;
-      set({ asking: false, askError: err instanceof Error ? err.message : String(err) });
+      set((s) => ({
+        asking: false, askError: err instanceof Error ? err.message : String(err),
+        detail: s.detail ? { ...s.detail, messages: s.detail.messages.filter((m) => m.id !== userMsg.id) } : s.detail,
+      }));
     }
   },
 
   setChatScope: (scope) => set({ chatScope: scope }),
   setAskContext: (context) => set({ askContext: context }),
-  setWindowMinutes: (minutes) => set({ windowMinutes: minutes }),
 
-  generateNotes: async (detail) => {
+  updateNoteTabs: (sessionId, change) => {
+    set((s) => {
+      const next = change(s.noteTabs[sessionId] ?? emptyTabs);
+      if (next === s.noteTabs[sessionId]) return {};
+      const noteTabs = { ...s.noteTabs, [sessionId]: next };
+      saveSessionTabs(noteTabs);
+      return { noteTabs };
+    });
+  },
+
+  closeNoteTab: (sessionId, tabId) => {
+    get().updateNoteTabs(sessionId, (state) => closeTab(state, tabId));
+    // A running generation keeps going (spec §5): its note lands in the list.
+    // A failure has nothing left to show once its tab is gone.
+    set((s) => {
+      const running = s.noteGenerations[sessionId];
+      if (!running || running.tabId !== tabId || running.status !== 'failed') return {};
+      const { [sessionId]: _dropped, ...rest } = s.noteGenerations;
+      return { noteGenerations: rest };
+    });
+  },
+
+  /**
+   * Generate a note into a tab, surviving the panel and the selected session.
+   *
+   * The tab is opened before the request so the user sees that something
+   * started; the note is bound to it only when it arrives. Both the tab and the
+   * running state are keyed by the session the request was made for, so leaving
+   * the Notes pane or selecting another session no longer strands the result.
+   */
+  generateNotes: async (detail, retryTabId) => {
     const id = get().activeSessionId;
-    if (!id) return null;
-    set({ notesGenerating: true, notesError: null });
+    if (!id || get().noteGenerations[id]?.status === 'running') return null;
+    let tabId = retryTabId ?? '';
+    get().updateNoteTabs(id, (state) => {
+      if (retryTabId) return renameTab(state, retryTabId, 'Generating…');
+      const opened = openTab(state, { sessionId: id, noteId: null, title: 'Generating…' });
+      tabId = opened.activeTabId ?? '';
+      return opened;
+    });
+    set((s) => ({
+      notesError: null,
+      noteGenerations: { ...s.noteGenerations, [id]: { tabId, status: 'running', error: null } },
+    }));
+    const forget = (s: AppState) => {
+      const { [id]: _done, ...rest } = s.noteGenerations;
+      return rest;
+    };
+    if (selectCodexNotes(useCodex.getState())) {
+      // Codex: always this session's confirmed snapshot, whatever the chat scope.
+      // The note arrives when the task completes (see onTaskSettled below).
+      try {
+        const task = await useCodex.getState().generateNotes(id, get().settings?.output_language ?? 'auto', detail ?? 'normal');
+        set((s) => ({ noteGenerations: { ...s.noteGenerations, [id]: { tabId, status: 'running', error: null, taskId: task.id } } }));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        set((s) => ({ noteGenerations: { ...s.noteGenerations, [id]: { tabId, status: 'failed', error: message || 'Could not start the notes' } } }));
+      }
+      return null;
+    }
     try {
       const notes = await getClient().generateNotes(id, get().settings?.output_language, detail);
-      if (get().activeSessionId !== id) return null;
       set((s) => ({
-        detail: s.detail ? { ...s.detail, notes,
+        noteGenerations: forget(s),
+        // Another session on screen reads this note from the server when it is
+        // selected again; only the session actually shown takes it in place.
+        detail: s.activeSessionId === id && s.detail ? { ...s.detail, notes,
           notes_list: [notes, ...(s.detail.notes_list ?? []).filter((n) => n.id !== notes.id)],
         } : s.detail,
-        notesGenerating: false,
       }));
+      if (notes.id) {
+        get().updateNoteTabs(id, (state) => (state.tabs.some((tab) => tab.id === tabId)
+          ? renameTab(attachNote(state, tabId, notes.id!), tabId, noteName(notes))
+          : state));
+      }
       return notes;
     } catch (err) {
-      if (get().activeSessionId !== id) return null;
-      set({ notesGenerating: false, notesError: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      const tabOpen = (get().noteTabs[id]?.tabs ?? []).some((tab) => tab.id === tabId);
+      set((s) => ({
+        noteGenerations: tabOpen
+          ? { ...s.noteGenerations, [id]: { tabId, status: 'failed', error: message || 'Could not create the notes' } }
+          : forget(s),
+      }));
       return null;
     }
   },
@@ -1233,7 +1427,7 @@ export const useStore = create<AppState>((set, get) => {
     }
   },
 
-  /** Soft deletion: it leaves the list, the row waits for the trash. */
+  /** Permanent deletion; update the list only after success. */
   deleteNote: async (noteId) => {
     const id = get().activeSessionId;
     if (!id) return false;
@@ -1266,13 +1460,17 @@ export const useStore = create<AppState>((set, get) => {
     const id = get().activeSessionId;
     if (!id) return;
     try {
-      const detail = await getClient().getSession(id);
+      const detail = await getClient().getSession(id, true);
       if (get().activeSessionId !== id) return;
       // A response without a segment array is not a transcript: writing it would
       // put `undefined` where the panel iterates and take the whole pane down.
       if (!Array.isArray(detail?.segments)) return;
       set((s) => ({
-        detail: s.detail ? { ...s.detail, segments: detail.segments } : s.detail,
+        detail: s.detail ? {
+          ...s.detail,
+          segments: detail.segments,
+          ...(typeof detail.has_transcript === 'boolean' ? { has_transcript: detail.has_transcript } : {}),
+        } : s.detail,
       }));
     } catch {
       // A failed read leaves the previous transcript in place: the panel keeps
@@ -1304,4 +1502,46 @@ useStore.subscribe((state) => {
   if (key === lastReported) return;
   lastReported = key;
   window.audiohelper.reportCaptureState?.(snapshot);
+});
+
+// A Codex notes task that ended: a completed one binds its note to the tab that
+// was waiting for it (and refreshes the list if that session is on screen); an
+// unfinished one leaves the tab showing why, with its task still reachable for a
+// manual resume. Tasks restored after a restart have no tab and only refresh.
+onTaskSettled((task) => {
+  if (task.kind !== 'notes') return;
+  const state = useStore.getState();
+  const entry = Object.entries(state.noteGenerations).find(([, g]) => g.taskId === task.id);
+  const sessionId = entry?.[0] ?? task.session_ids[0];
+  if (!sessionId) return;
+  const generation = entry?.[1];
+  if (task.status !== 'completed' || !task.note_id) {
+    if (!generation) return;
+    const reason = task.status === 'paused' ? 'Generation was interrupted and waits to be resumed manually.'
+      : task.status === 'cancelled' ? 'Generation stopped.'
+      : task.error || 'Could not create the notes';
+    useStore.setState((s) => ({ noteGenerations: { ...s.noteGenerations, [sessionId]: { ...generation, status: 'failed', error: reason } } }));
+    return;
+  }
+  const noteId = task.note_id;
+  void getClient().listNotes(sessionId).then(({ notes }) => {
+    const note = notes.find((n) => n.id === noteId);
+    useStore.setState((s) => {
+      const { [sessionId]: _done, ...rest } = s.noteGenerations;
+      return {
+        noteGenerations: generation ? rest : s.noteGenerations,
+        detail: s.activeSessionId === sessionId && s.detail
+          ? { ...s.detail, notes: note ?? s.detail.notes, notes_list: notes } : s.detail,
+      };
+    });
+    if (generation) {
+      useStore.getState().updateNoteTabs(sessionId, (tabs) => (tabs.tabs.some((tab) => tab.id === generation.tabId)
+        ? renameTab(attachNote(tabs, generation.tabId, noteId), generation.tabId, note ? noteName(note) : 'Notes')
+        : tabs));
+    }
+  }).catch((err: unknown) => {
+    if (!generation) return;
+    useStore.setState((s) => ({ noteGenerations: { ...s.noteGenerations, [sessionId]: { ...generation, status: 'failed',
+      error: `Notes created, but the notes list could not be read: ${err instanceof Error ? err.message : String(err)}` } } }));
+  });
 });

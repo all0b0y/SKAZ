@@ -45,6 +45,18 @@ async function fixture(acknowledge = true, transcription = 'unavailable') {
 }
 
 describe('main-owned native live transport', () => {
+  it('reports ASR failure without breaking tail delivery or the next capture owner', async () => {
+    const f = await fixture(true, 'connecting');
+    await f.client.open('session', 16000);
+    for (const socket of f.server.clients) socket.send(JSON.stringify({ type: 'transcription.failed' }));
+    await vi.waitFor(() => expect(f.failed).toHaveBeenCalledWith({ sessionId: 'session', code: 'transcription_failed' }));
+    await expect(f.client.audio('session', { sequence: 0, startSample: 0 }, new ArrayBuffer(3200)))
+      .resolves.toMatchObject({ saved_samples: 1600 });
+    await f.client.end('session', 'stop');
+    await expect(f.client.open('other', 16000)).resolves.toMatchObject({ transcription: 'connecting' });
+    await f.client.end('other', 'stop');
+  });
+
   it('accepts intentionally disabled transcription without treating local capture as a failure', async () => {
     const f = await fixture(true, 'disabled');
     expect(await f.client.open('session', 16000)).toMatchObject({ transcription: 'disabled' });

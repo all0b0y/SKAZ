@@ -1,4 +1,4 @@
-"""Storage-first native live stream; network tasks never gate audio persistence."""
+"""Bounded native live transport; only transcript and transport clocks persist."""
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,6 @@ from .gateways.soniox import SonioxConfig, SonioxGateway, SonioxGatewayError, So
 from .live_store import LiveConflict, LiveConnection, LiveStore
 from .native_io import disk_call, drain_on_cancel
 
-RECONNECT_DELAY_S = 1.0
 FINISH_TIMEOUT_S = 10.0
 SEND_TIMEOUT_S = 2.0
 
@@ -17,11 +16,7 @@ class NativeStream:
     def __init__(self, store: LiveStore, connection: LiveConnection, api_key: str | None) -> None:
         self.store = store
         self.connection = connection
-        if connection.recording_mode == "audio_only":
-            api_key = None
         self.state = "connecting" if api_key else "unavailable"
-        if connection.recording_mode == "audio_only":
-            self.state = "disabled"
         self.complete = False
         self._storage_lock = asyncio.Lock()
         self._key = api_key
@@ -49,8 +44,8 @@ class NativeStream:
                 waiter = asyncio.current_task()
                 if not self._provider_disabled or (waiter is not None and waiter.cancelling()):
                     raise
-                # Revocation ends cloud work, not the local PCM transport.
-                await asyncio.Event().wait()
+                # Notify the client to stop capture; keep transport open for its tail.
+                return
         else:
             await asyncio.Event().wait()
 
@@ -161,17 +156,14 @@ class NativeStream:
                 while not self._queue.empty():
                     self._queue.get_nowait()
                 self._queued_bytes = 0
+            # Failure belongs to this attempt. Never keep the microphone running
+            # through an ASR outage or reconnect without an explicit user action.
             if not self._stopping.is_set():
-                # Even a remote finished:true is not the end of local capture.
                 self.complete = False
-                with suppress(TimeoutError):
-                    async with asyncio.timeout(RECONNECT_DELAY_S):
-                        await self._stopping.wait()
+            return
 
     async def disable_provider(self) -> None:
         """Revoke cloud access without closing local storage or replaying audio."""
-        if self.connection.recording_mode == "audio_only":
-            return
         self._provider_disabled = True
         self._key = None
         self.state = "unavailable"

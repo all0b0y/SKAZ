@@ -29,6 +29,7 @@ from ..schemas import (
     ImportView,
 )
 from .deps import RuntimeDep
+from .sessions import delete_session
 
 router = APIRouter(prefix="/imports")
 
@@ -55,7 +56,7 @@ async def read_capabilities(runtime: RuntimeDep) -> ImportCapabilities:
         # Honest about where the result lands: the database always, a folder only
         # when the user turned the Markdown projection on.
         destination=(str(root) if root is not None
-                     else "Внутреннее хранилище приложения (экспорт в папку не включён)"),
+                     else "App internal storage (export to a folder is off)"),
         markdown_enabled=root is not None,
     )
 
@@ -147,10 +148,7 @@ async def delete_import(session_id: str, runtime: RuntimeDep) -> DeleteResponse:
     record = await disk_call(runtime.imports.store.get, session_id)
     if record is None:
         raise HTTPException(status_code=404, detail="This session is not an import.")
-    if record.status in ("queued", "uploading", "processing"):
-        await runtime.imports.cancel(session_id)
-    deleted = await disk_call(repo.delete_session, runtime.db, session_id)
-    return DeleteResponse(deleted=deleted)
+    return await delete_session(session_id, runtime)
 
 
 def _validate_candidate(path: Path) -> None:

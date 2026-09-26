@@ -27,12 +27,21 @@ export type AudioUploadPurpose = 'transcribe' | 'store';
 
 /** Exact backend target for the two binary-only audio channels. */
 export function audioUploadPath(sessionId: string, purpose: AudioUploadPurpose): string {
-  return `/sessions/${encodeURIComponent(sessionId)}/audio${purpose === 'store' ? '/store' : ''}`;
+  return `/sessions/${encodeURIComponent(sessionId)}/audio${purpose === 'store' ? '/buffer' : ''}`;
 }
 
 // A JSON body larger than this is almost certainly a bug or abuse; settings
 // updates and questions are tiny. Audio never travels through this path.
 const MAX_JSON_BODY_CHARS = 64 * 1024;
+// Editable Notes allow 200k characters; leave room for JSON escaping and metadata.
+const MAX_NOTE_BODY_CHARS = 1_300_000;
+
+/** Synchronous API Notes can need many provider responses. Codex admission stays fast. */
+export function requestTimeoutMs(req: BridgeRequestShape): number {
+  const noteGeneration = req.method === 'POST' &&
+    /^\/sessions\/[^/]+\/notes(?:\/[^/]+\/rewrite)?$/.test(req.path);
+  return noteGeneration ? 3_600_000 : 120_000;
+}
 // Windows are capped at 30s of PCM16 mono; even at 48kHz that is < 3MB. Leave
 // generous headroom for the WAV header and higher sample rates.
 const MAX_WAV_BYTES = 8 * 1024 * 1024;
@@ -49,6 +58,10 @@ interface Route {
 // id/sequence segment.
 const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/health$/ },
+  { method: 'GET', pattern: /^\/web-search\/settings$/ },
+  { method: 'PUT', pattern: /^\/web-search\/settings$/ },
+  { method: 'GET', pattern: /^\/web-search\/pending$/ },
+  { method: 'POST', pattern: /^\/web-search\/requests\/[^/]+\/decision$/ },
   { method: 'GET', pattern: /^\/settings$/ },
   { method: 'GET', pattern: /^\/storage\/root$/ },
   { method: 'GET', pattern: /^\/storage\/layout$/ },
@@ -75,10 +88,10 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/sessions\/[^/]+$/ },
   { method: 'PATCH', pattern: /^\/sessions\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/sessions\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/sessions\/delete$/ },
   { method: 'POST', pattern: /^\/sessions\/[^/]+\/audio$/ },
-  { method: 'GET', pattern: /^\/sessions\/[^/]+\/audio$/ },
-  { method: 'GET', pattern: /^\/sessions\/[^/]+\/audio\/[^/]+$/ },
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/live$/ },
+  { method: 'GET', pattern: /^\/sessions\/[^/]+\/live\/events$/ },
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/files$/ },
   { method: 'POST', pattern: /^\/sessions\/[^/]+\/files$/ },
   { method: 'POST', pattern: /^\/sessions\/[^/]+\/files\/preserve$/ },
@@ -94,8 +107,24 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/notes$/ },
   { method: 'PATCH', pattern: /^\/sessions\/[^/]+\/notes\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/sessions\/[^/]+\/notes\/[^/]+$/ },
-  { method: 'GET', pattern: /^\/sessions\/[^/]+\/notes\/[^/]+\/history$/ },
-  { method: 'POST', pattern: /^\/sessions\/[^/]+\/notes\/[^/]+\/history\/[^/]+\/restore$/ },
+  // Codex Assistant / Notes (.dev/docs/CODEX-UI-CONTRACT.md). No route here can
+  // reach a shell, a file or a credential: login returns only an https URL.
+  { method: 'GET', pattern: /^\/codex\/state$/ },
+  { method: 'POST', pattern: /^\/codex\/chats$/ },
+  { method: 'GET', pattern: /^\/codex\/chats\/[^/]+$/ },
+  { method: 'PATCH', pattern: /^\/codex\/chats\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/codex\/chats\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/codex\/chats\/[^/]+\/messages$/ },
+  { method: 'POST', pattern: /^\/codex\/tasks\/[^/]+\/stop$/ },
+  { method: 'POST', pattern: /^\/codex\/tasks\/[^/]+\/resume$/ },
+  { method: 'POST', pattern: /^\/codex\/sessions\/[^/]+\/notes$/ },
+  { method: 'PUT', pattern: /^\/codex\/settings$/ },
+  { method: 'POST', pattern: /^\/codex\/connection\/check$/ },
+  { method: 'POST', pattern: /^\/codex\/connection\/login$/ },
+  { method: 'POST', pattern: /^\/codex\/connection\/logout$/ },
+  { method: 'GET', pattern: /^\/codex\/previews$/ },
+  { method: 'POST', pattern: /^\/codex\/previews\/[^/]+\/apply$/ },
+  { method: 'POST', pattern: /^\/codex\/previews\/[^/]+\/discard$/ },
 ];
 
 /** True only for links safe to hand to the OS browser via shell.openExternal. */
@@ -145,8 +174,10 @@ export function validateBridgeRequest(req: BridgeRequestShape): string | null {
     } catch {
       return 'request body is not JSON-serializable';
     }
-    if (serialized.length > MAX_JSON_BODY_CHARS) {
-      return `request body too large (${serialized.length} > ${MAX_JSON_BODY_CHARS} chars)`;
+    const limit = req.method === 'PATCH' && /^\/sessions\/[^/]+\/notes\/[^/]+$/.test(req.path)
+      ? MAX_NOTE_BODY_CHARS : MAX_JSON_BODY_CHARS;
+    if (serialized.length > limit) {
+      return `request body too large (${serialized.length} > ${limit} chars)`;
     }
   }
   return null;
@@ -188,4 +219,31 @@ export function validateAudioUpload(
     return 'invalid audio body size';
   }
   return null;
+}
+
+/** A shared note is text the user already sees; this only bounds its size. */
+const MAX_SHARE_CHARS = 2 * 1024 * 1024;
+const MAX_SHARE_NAME = 120;
+
+export interface ShareNoteShape {
+  fileName: string;
+  content: string;
+}
+
+/**
+ * The renderer names the shared file, so the name is untrusted input for a path
+ * built in main. Only a bare file name is accepted — no directory parts, no
+ * traversal, no control characters — and `.md` is appended here, never taken
+ * from the renderer, so a note cannot be shared as an executable or a folder.
+ * Returns the safe file name, or null when the request must be refused.
+ */
+export function shareFileName(req: ShareNoteShape): string | null {
+  if (typeof req?.fileName !== 'string' || typeof req.content !== 'string') return null;
+  if (req.content.length > MAX_SHARE_CHARS) return null;
+  let base = req.fileName.replace(/[/\\:]/g, ' ').replace(/\.{2,}/g, ' ').replace(/\s+/g, ' ').trim();
+  if (hasControlChar(base) || /[\u007f]/.test(base)) return null;
+  while (base.toLowerCase().endsWith('.md')) base = base.slice(0, -3).trim();
+  base = base.replace(/^\.+/, '').replace(/[ .]+$/, '').slice(0, MAX_SHARE_NAME).trim();
+  if (!base) return null;
+  return `${base}.md`;
 }

@@ -104,50 +104,6 @@ describe('SignalMeter — peak clipping', () => {
   });
 });
 
-describe('SignalMeter — sustained low level vs momentary pause', () => {
-  it('does not warn for a brief pause between words', () => {
-    const clock = fakeClock();
-    const meter = new SignalMeter(clock.now);
-    meter.push(0.3, 0.3, 10, 1_000); // normal speech level
-    meter.push(0.0005, 0.0005, 10, 1_000); // a short quiet gap
-    clock.advance(500);
-    expect(meter.push(0.0005, 0.0005, 500, 1_000)!.sustainedLow).toBe(false);
-    clock.advance(200);
-    meter.push(0.3, 0.3, 200, 1_000); // speech resumes before the sustained threshold
-    expect(meter.peekSnapshot().sustainedLow).toBe(false);
-  });
-
-  it('warns only once the level stays low continuously past the sustained threshold', () => {
-    const clock = fakeClock();
-    const meter = new SignalMeter(clock.now);
-    meter.push(0.0005, 0.0005, 1, 1_000);
-    clock.advance(2_999);
-    expect(meter.push(0.0005, 0.0005, 2_998, 1_000)!.sustainedLow).toBe(false);
-    clock.advance(2);
-    meter.push(0.0005, 0.0005, 2, 1_000); // may be throttled; read state via peekSnapshot regardless
-    expect(meter.peekSnapshot().sustainedLow).toBe(true);
-  });
-
-  it('does not turn a delivery stall into three seconds of quiet audio', () => {
-    const clock = fakeClock();
-    const meter = new SignalMeter(clock.now);
-    meter.push(0.0005, 0.0005, 10, 1_000);
-    clock.advance(4_000);
-
-    expect(meter.push(0.0005, 0.0005, 10, 1_000)!.sustainedLow).toBe(false);
-  });
-
-  it('never labels the sustained-low signal as speech detection', () => {
-    const clock = fakeClock();
-    const meter = new SignalMeter(clock.now);
-    meter.push(0.0005, 0.0005, 3_100, 1_000);
-    clock.advance(3_100);
-    const snap = meter.peekSnapshot();
-    expect(snap.sustainedLow).toBe(true);
-    expect(snap.vad).toBe('unavailable');
-  });
-});
-
 describe('SignalMeter — reset on lifecycle transitions', () => {
   it('clears the window on reset', () => {
     const clock = fakeClock();
@@ -164,31 +120,5 @@ describe('SignalMeter — reset on lifecycle transitions', () => {
     clock.advance(50);
 
     expect(meter.reset().clipping).toBe(false);
-  });
-
-  it('clears the sustained-low timer on reset so a resumed low signal needs its own full duration', () => {
-    const clock = fakeClock();
-    const meter = new SignalMeter(clock.now);
-    meter.push(0.0005, 0.0005, 2_500, 1_000);
-    clock.advance(2_500); // most of the way to the sustained threshold
-    meter.push(0.0005, 0.0005, 1, 1_000);
-
-    meter.reset();
-
-    clock.advance(1); // low signal resumes just after the reset
-    expect(meter.push(0.0005, 0.0005, 1, 1_000)!.sustainedLow).toBe(false); // timer re-anchored here
-
-    clock.advance(2_999);
-    expect(meter.push(0.0005, 0.0005, 2_998, 1_000)!.sustainedLow).toBe(false); // just under 3000ms since the reset-anchored onset
-
-    clock.advance(2);
-    meter.push(0.0005, 0.0005, 2, 1_000); // may be throttled; read state via peekSnapshot regardless
-    expect(meter.peekSnapshot().sustainedLow).toBe(true); // crossed 3000ms since reset, not since the original onset
-  });
-
-  it('always reports an explicit not-available VAD status; nothing infers speech from amplitude', () => {
-    const meter = new SignalMeter(() => 0);
-    expect(meter.reset().vad).toBe('unavailable');
-    expect(meter.push(0.5, 0.5, 10, 1_000)!.vad).toBe('unavailable');
   });
 });

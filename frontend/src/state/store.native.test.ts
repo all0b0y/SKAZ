@@ -55,7 +55,7 @@ beforeEach(async () => {
       return { ok: false, status: 404, detail: 'not found' };
     }) as BridgeApi['request'],
     openNative: vi.fn<BridgeApi['openNative']>(async (_id, rate) => ({ ok: true, status: 200, data: {
-      connection_id: 'fixture', sample_rate: rate, saved_samples: saved, next_sequence: sequence, transcription: 'unavailable',
+      connection_id: 'fixture', sample_rate: rate, saved_samples: saved, next_sequence: sequence, transcription: 'connecting',
     } })),
     sendNativeAudio: vi.fn<BridgeApi['sendNativeAudio']>(async (_id, meta, pcm) => {
       expect(meta).toEqual({ sequence, startSample: saved });
@@ -83,6 +83,133 @@ afterEach(async () => {
 });
 
 describe('native Record lifecycle', () => {
+  it('warns on each unavailable start and clears the error on a successful attempt', async () => {
+    const opened = vi.mocked(bridge.openNative).getMockImplementation()!;
+    vi.mocked(bridge.openNative).mockImplementation(async (id, rate) => {
+      const result = await opened(id, rate);
+      if (!result.ok) return result;
+      return { ...result, data: { ...result.data, transcription: 'unavailable' } };
+    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await useStore.getState().startRecording();
+      expect(useStore.getState().recorderState).toBe('idle');
+      expect(useStore.getState().recorderError).toMatch(/transcription/i);
+      expect(useStore.getState().pendingSessionStatus).toBeNull();
+    }
+    expect(bridge.openNative).toHaveBeenCalledTimes(2);
+    expect(trackStop).toHaveBeenCalledTimes(2);
+    vi.mocked(bridge.openNative).mockImplementation(opened);
+    await useStore.getState().startRecording();
+    expect(useStore.getState().recorderState).toBe('recording');
+    expect(useStore.getState().recorderError).toBeNull();
+  });
+
+  it('keeps warnings in the failed session and lets a different session record', async () => {
+    await useStore.getState().selectSession(session.id);
+    useStore.setState({ recorderError: 'Transcription failed. Try again.' });
+    await useStore.getState().selectSession('other');
+    expect(useStore.getState().recorderError).toBeNull();
+    await useStore.getState().selectSession(session.id);
+    expect(useStore.getState().recorderError).toBe('Transcription failed. Try again.');
+    await useStore.getState().selectSession('other');
+    await useStore.getState().startRecording();
+    expect(bridge.openNative).toHaveBeenCalledWith('other', 16000);
+    expect(useStore.getState().recorderState).toBe('recording');
+  });
+
+  it('stops an ASR failure during opening without leaving a sticky stop confirmation', async () => {
+    let failure!: Parameters<BridgeApi['onNativeFailure']>[0];
+    vi.mocked(bridge.onNativeFailure).mockImplementation((callback) => { failure = callback; return () => {}; });
+    const opened = vi.mocked(bridge.openNative).getMockImplementation()!;
+    vi.mocked(bridge.openNative).mockImplementationOnce(async (id, rate) => {
+      failure({ sessionId: id, code: 'transcription_failed' });
+      return opened(id, rate);
+    });
+    await useStore.getState().startRecording();
+    await vi.waitFor(() => expect(useStore.getState().recorderState).toBe('stopped'));
+    expect(useStore.getState().pendingSessionStatus).toBeNull();
+    expect(useStore.getState().recorderError).toMatch(/transcription/i);
+    await useStore.getState().startRecording();
+    expect(useStore.getState().recorderState).toBe('recording');
+    expect(useStore.getState().recorderError).toBeNull();
+  });
+
+  it('ends an unavailable Resume attempt and allows the next Resume to succeed', async () => {
+    await useStore.getState().startRecording();
+    const pausing = useStore.getState().pauseRecording();
+    releaseBarrier();
+    await pausing;
+    const opened = vi.mocked(bridge.openNative).getMockImplementation()!;
+    vi.mocked(bridge.openNative).mockImplementationOnce(async (id, rate) => {
+      const result = await opened(id, rate);
+      return result.ok ? { ...result, data: { ...result.data, transcription: 'unavailable' } } : result;
+    });
+    const resuming = useStore.getState().resumeRecording();
+    await vi.waitFor(() => expect(useStore.getState().finishing).toBe(true));
+    releaseBarrier();
+    await resuming;
+    expect(useStore.getState().recorderState).toBe('stopped');
+    expect(useStore.getState().pendingSessionStatus).toBeNull();
+    expect(useStore.getState().recorderError).toMatch(/transcription/i);
+    await useStore.getState().resumeRecording();
+    expect(useStore.getState().recorderState).toBe('recording');
+    expect(useStore.getState().recorderError).toBeNull();
+  });
+
+  it('does not let the previous Stop refresh detach a fresh capture', async () => {
+    await useStore.getState().startRecording();
+    const request = vi.mocked(bridge.request).getMockImplementation()!;
+    let releaseRead!: () => void;
+    vi.mocked(bridge.request).mockImplementationOnce((req) => new Promise((resolve) => {
+      releaseRead = () => { void request(req).then(resolve); };
+    }));
+    const stopping = useStore.getState().stopRecording();
+    releaseBarrier();
+    await vi.waitFor(() => expect(releaseRead).toBeTypeOf('function'));
+    await useStore.getState().resumeRecording();
+    expect(useStore.getState().recorderState).toBe('recording');
+    trackStop.mockClear(); // Count only the new physical capture, not the previous teardown.
+    releaseRead();
+    await stopping;
+    const finalStop = useStore.getState().stopRecording();
+    releaseBarrier();
+    await finalStop;
+    expect(trackStop).toHaveBeenCalled();
+  });
+
+  it('stops on ASR failure, preserves the clock and allows a successful fresh attempt', async () => {
+    let failure!: Parameters<BridgeApi['onNativeFailure']>[0];
+    vi.mocked(bridge.onNativeFailure).mockImplementation((callback) => { failure = callback; return () => {}; });
+    await useStore.getState().startRecording();
+    deliver(new Float32Array(1600).fill(0.25));
+    await vi.waitFor(() => expect(saved).toBe(1600));
+    failure({ sessionId: 'other', code: 'transcription_failed' });
+    expect(useStore.getState().recorderState).toBe('recording');
+    failure({ sessionId: session.id, code: 'transcription_failed' });
+    releaseBarrier();
+    await vi.waitFor(() => expect(useStore.getState().recorderState).toBe('stopped'));
+    expect(trackStop).toHaveBeenCalled();
+    expect(useStore.getState().recorderError).toMatch(/transcription/i);
+    expect(useStore.getState().pendingSessionStatus).toBeNull();
+    expect(useStore.getState().queue.failed).toEqual([]);
+    await useStore.getState().resumeRecording();
+    expect(useStore.getState().recorderState).toBe('recording');
+    expect(useStore.getState().recorderError).toBeNull();
+    expect(saved).toBe(1600);
+    expect(bridge.openNative).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['startRecording', 'resumeRecording'] as const)('blocks %s for imports before microphone or IPC', async (action) => {
+    const microphone = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+    useStore.setState({ activeSessionId: session.id, sessions: [{ ...session, origin: 'import' }], recorderState: 'stopped' });
+    await useStore.getState()[action]();
+    expect(microphone).not.toHaveBeenCalled();
+    expect(bridge.openNative).not.toHaveBeenCalled();
+    expect(bridge.endNative).not.toHaveBeenCalled();
+    expect(useStore.getState().recorderState).toBe('stopped');
+    expect(useStore.getState().pendingSessionStatus).toBeNull();
+    expect(useStore.getState().recorderError).toContain('created from an audio file');
+  });
   it('continues a reopened session instead of creating a new session or resetting the sample clock', async () => {
     saved = 16000; sequence = 10;
     const note = { id: 'n1', revision: 1, content: 'Original note', model: 'fixture', created_at: '', citations: [], stale: false };
@@ -119,7 +246,7 @@ describe('native Record lifecycle', () => {
     expect(bridge.openNative).not.toHaveBeenCalled();
     expect(bridge.request).not.toHaveBeenCalled();
     expect(useStore.getState().recorderState).toBe('idle');
-    expect(useStore.getState().recorderError).toMatch(/используемые языки/i);
+    expect(useStore.getState().recorderError).toMatch(/languages in use/i);
   });
   it('waits for an in-flight open on Quit and never starts late capture', async () => {
     let resolveOpen!: () => void;
@@ -253,9 +380,9 @@ describe('native Record lifecycle', () => {
     expect(useStore.getState().recorderError).toMatch(/cannot become a native stream/);
     expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST', path: '/sessions' }));
     expect(bridge.openNative).toHaveBeenCalledWith('archive', 16000);
-    expect(bridge.storeAudio).not.toHaveBeenCalled();
+    expect(bridge.bufferAudio).not.toHaveBeenCalled();
     expect(bridge.uploadAudio).not.toHaveBeenCalled();
-    expect(bridge.fetchAudio).not.toHaveBeenCalled();
+    expect(bridge).not.toHaveProperty('fetchAudio');
     expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({ path: expect.stringContaining('/asr/live/advance') }));
   });
 
@@ -342,7 +469,7 @@ describe('native Record lifecycle', () => {
   it('publishes capture signal diagnostics and clears them on Stop', async () => {
     await useStore.getState().startRecording();
     deliver(new Float32Array(1600).fill(1));
-    expect(useStore.getState().meter).toMatchObject({ clipping: true, vad: 'unavailable', dbfs: 0 });
+    expect(useStore.getState().meter).toMatchObject({ clipping: true, dbfs: 0 });
     const stopping = useStore.getState().stopRecording();
     releaseBarrier();
     await stopping;
@@ -501,7 +628,22 @@ describe('native Record lifecycle', () => {
     await expect(quitting).resolves.toBe(true);
     expect(saved).toBe(1616);
     expect(bridge.endNative).toHaveBeenCalledExactlyOnceWith('native-test', 'stop');
-    expect(bridge.storeAudio).not.toHaveBeenCalled();
+    expect(bridge.bufferAudio).not.toHaveBeenCalled();
     expect(bridge.uploadAudio).not.toHaveBeenCalled();
+  });
+
+  // The worklet delivers a 128-sample frame ~375x/s at 48 kHz. A store write per
+  // frame re-runs every subscriber's selector that often; the level meter
+  // itself is throttled to ~10 Hz, so frames alone must not notify the store.
+  it('does not notify store subscribers for every captured audio frame', async () => {
+    await useStore.getState().startRecording();
+    const notified = vi.fn();
+    const unsubscribe = useStore.subscribe(notified);
+    // 50 small frames = 800 samples, under one 100 ms window (1600 at 16 kHz):
+    // no chunk is emitted, so any store write here is driven by frames alone.
+    for (let frame = 0; frame < 50; frame += 1) deliver(new Float32Array(16).fill(0.25));
+    unsubscribe();
+    // The meter is wall-clock throttled (100 ms): at most one emission in this burst.
+    expect(notified.mock.calls.length).toBeLessThanOrEqual(1);
   });
 });

@@ -58,7 +58,15 @@ NO_TRANSCRIPT_ANSWER = {
 
 
 async def answer(runtime: Runtime, session_id: str, request: AskRequest) -> AskResponse:
+    if request.search_scope is not None:
+        from .library_ask import answer as library_answer
+
+        return await library_answer(runtime, session_id, request)
     settings = runtime.settings_store.load()
+    if settings.embedding.model:
+        from .hybrid_ask import answer as hybrid_answer
+
+        return await hybrid_answer(runtime, session_id, request)
     language = request.language or settings.output_language
     watermark = repo.latest_segment_end(runtime.db, session_id)
 
@@ -146,7 +154,7 @@ async def answer(runtime: Runtime, session_id: str, request: AskRequest) -> AskR
         [ChatMessage("system", SYSTEM_RULES), *history, ChatMessage("user", prompt)],
         max_tokens=MAX_ANSWER_TOKENS,
     )
-    citations = ctx.citations_from(references, text)
+    citations = ctx.citations_from(references, text, labelled=True)
 
     repo.add_message(runtime.db, session_id, "user", request.question, [])
     repo.add_message(runtime.db, session_id, "assistant", text, citations)

@@ -300,6 +300,50 @@ class SessionFiles:
                 return self.status(session_id)
             return self._project(session_id)
 
+    def delete_note(self, session_id: str, note_id: str) -> None:
+        """Delete only a canonical, unchanged note; preserve all external bytes."""
+        with self._lock:
+            note_store.check_revision(self.db, session_id, note_id,
+                                      next((n.revision for n in note_store.list_notes(self.db, session_id)
+                                            if n.id == note_id), None))
+            name = f"Note-{note_id}.md"
+            if not re.fullmatch(r"Note-[a-f0-9]{32}\.md", name):
+                raise FileDeletionBlocked
+            with self.db.read() as connection:
+                rows = connection.execute(
+                    "SELECT root,digest FROM file_projections WHERE session_id=? AND name=?",
+                    (session_id, name),
+                ).fetchall()
+            try:
+                if any(row["root"] != str(self.root) for row in rows):
+                    raise ValueError("Previous projection root needs attention.")
+                if self.root is not None:
+                    if self.storage is not None:
+                        self.storage.guard()
+                    path = self.directory(session_id)
+                    if path.exists() or rows:
+                        with _directory(path, create=False) as directory:
+                            digest = _digest_at(directory, name)
+                            expected = rows[0]["digest"] if rows else None
+                            if digest != expected:
+                                raise ValueError("Note changed outside the application.")
+                            if digest is not None:
+                                recovery = f"Note-{note_id}.recovery-{uuid4().hex}.md"
+                                _rename_at(directory, name, recovery, exchange=False)
+                                os.fsync(directory)
+                                if _digest_at(directory, recovery) != expected:
+                                    _rename_at(directory, recovery, name, exchange=False)
+                                    os.fsync(directory)
+                                    raise ValueError("Note changed during deletion.")
+                                os.unlink(recovery, dir_fd=directory)
+                                os.fsync(directory)
+                with self.db.write() as connection:
+                    note_store.delete(self.db, session_id, note_id)
+                    connection.execute("DELETE FROM file_projections WHERE session_id=? AND name=?",
+                                       (session_id, name))
+            except (OSError, ValueError) as error:
+                raise FileDeletionBlocked from error
+
     def delete_session(self, session_id: str) -> None:
         # Only this lock is held across file I/O. Holding the database lock here
         # would stall every other request, including the existence check of a
@@ -494,16 +538,21 @@ class SessionFiles:
             notes = note_store.list_notes(self.db, session_id)
             source_version = self._source_version(session_id)
         transcript = f"# {_text(session.title)}\n\n"
-        transcript += "\n\n".join(
-            f'<a id="segment-{s.id}"></a>\n\n'
-            f"[{_time(s.start_ms)}–{_time(s.end_ms)}] `{s.id}`\n\n{_text(s.text)}"
-            for s in segments
-        ) or "No stable transcript yet."
+        transcript += (
+            "\n\n".join(
+                f'<a id="segment-{s.id}"></a>\n\n'
+                f"[{_time(s.start_ms)}–{_time(s.end_ms)}] `{s.id}`\n\n{_text(s.text)}"
+                for s in segments
+            )
+            or "No stable transcript yet."
+        )
         documents: list[tuple[str, Note | None]] = [("Transcript.md", None)]
         documents.extend((f"Note-{note.id}.md", note) for note in notes)
         transcript_path = "Transcript.md"
         result: dict[str, Any] = {
-            "state": "ready", "directory": str(self.directory(session_id).relative_to(self.root)), "files": [],
+            "state": "ready",
+            "directory": str(self.directory(session_id).relative_to(self.root)),
+            "files": [],
             "conflicts": self.status(session_id).get("conflicts", []),
             "source_version": source_version,
         }

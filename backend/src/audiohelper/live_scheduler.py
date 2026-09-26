@@ -158,6 +158,15 @@ class LiveAsrScheduler:
         )
 
     def source_ended(self, session_id: str) -> None:
+        """Retain temporary input until the final consumer finishes, then release it."""
+        self._schedule_source_end(session_id)
+        task = self._task if self._session_id == session_id else None
+        if task is not None and not task.done():
+            task.add_done_callback(lambda _: self._runtime.ingestion.audio.discard(session_id))
+        else:
+            self._runtime.ingestion.audio.discard(session_id)
+
+    def _schedule_source_end(self, session_id: str) -> None:
         """Schedule one bounded EOF pass after the durable stopped-session ACK."""
         if self._session_id == session_id and self._task is not None and not self._task.done():
             return

@@ -372,7 +372,7 @@ class LiveAsrDraftService:
             return LiveAsrSourceIntegrity(
                 status="missing",
                 trusted=False,
-                detail="Saved draft source audio is missing.",
+                detail="Live ASR input is no longer buffered. Saved transcript text is retained.",
             )
         except (PreviewSourceConflict, PreviewTooLarge):
             return LiveAsrSourceIntegrity(

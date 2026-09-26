@@ -147,6 +147,21 @@ def migrate_native_live(connection: sqlite3.Connection) -> None:
         ("native_stream_order_v5", _NATIVE_STREAM_ORDER_V5),
         ("native_languages_v6", _NATIVE_LANGUAGES_V6),
         ("native_async_import_v7", _NATIVE_ASYNC_IMPORT_V7),
+        # SQLite includes rowid in this index: neighbouring connections can be
+        # sought without scanning every other session's reconnect history.
+        ("native_event_pages_v8", (
+            "CREATE INDEX asr_connections_by_session ON asr_connections(session_id)",
+        )),
+        ("native_page_projection_v9", (
+            "CREATE TABLE native_page_state (connection_id TEXT PRIMARY KEY "
+            "REFERENCES asr_connections(id) ON DELETE CASCADE,doc TEXT NOT NULL)",
+            "CREATE TABLE native_page_events (connection_id TEXT NOT NULL,ordinal INTEGER NOT NULL,"
+            "doc TEXT NOT NULL,PRIMARY KEY(connection_id,ordinal),FOREIGN KEY(connection_id,ordinal) "
+            "REFERENCES native_asr_events(connection_id,ordinal) ON DELETE CASCADE)",
+            "CREATE TABLE native_page_groups (connection_id TEXT NOT NULL "
+            "REFERENCES asr_connections(id) ON DELETE CASCADE,id TEXT NOT NULL,target TEXT NOT NULL,"
+            "PRIMARY KEY(connection_id,id))",
+        )),
     ):
         if connection.execute("SELECT 1 FROM schema_migrations WHERE name=?", (name,)).fetchone():
             continue

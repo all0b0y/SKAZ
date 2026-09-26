@@ -16,7 +16,7 @@ from audiohelper.live_store import LiveConflict, LiveStore
 def test_ordered_tail_replacement_replay_and_reopen(tmp_path: Path) -> None:
     path = tmp_path / "order.sqlite"
     db = Database(path)
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     sid = repo.create_session(db, "Order").id
     connection = store.open(sid, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x01\x00" * 1600)
@@ -33,7 +33,7 @@ def test_ordered_tail_replacement_replay_and_reopen(tmp_path: Path) -> None:
     db.close()
     db = Database(path)
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         assert store.snapshot(sid)["partial_stream_tokens"] == tail
         replacement = replace(event, partial_tokens=(), partial_translation_tokens=(
             SonioxTranslationToken("Hallo", .9, False, "de", "en", "2"),
@@ -58,7 +58,7 @@ def test_ordered_tail_replacement_replay_and_reopen(tmp_path: Path) -> None:
 def test_pre_v5_data_remains_readable_without_invented_order(tmp_path: Path) -> None:
     path = tmp_path / "old.sqlite"
     db = Database(path)
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     sid = repo.create_session(db, "Old").id
     connection = store.open(sid, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x01\x00" * 1600)
@@ -71,7 +71,7 @@ def test_pre_v5_data_remains_readable_without_invented_order(tmp_path: Path) -> 
         old.execute("DELETE FROM schema_migrations WHERE name='native_stream_order_v5'")
     db = Database(path)
     try:
-        store = LiveStore(db, tmp_path / "audio")
+        store = LiveStore(db)
         assert store.snapshot(sid)["final_stream_tokens"] == []
         assert [t["text"] for t in store.snapshot(sid)["final_tokens"]] == ["Hello"]
         assert store.save_event(connection.id, ordinal=0, event=replace(

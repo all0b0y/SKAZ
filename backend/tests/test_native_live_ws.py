@@ -39,7 +39,7 @@ def test_ws_saves_pcm_without_asr_and_resume_keeps_sample_clock(app: Any) -> Non
         snapshot = http.get(f"/sessions/{session_id}/live", headers=AUTH).json()
         assert snapshot["saved_samples"] == 1600
         assert snapshot["connections"][0]["status"] == "incomplete"
-        assert http.get(f"/sessions/{session_id}/audio/0", headers=AUTH).content[44:] == packet(0, 0)[20:]
+        assert http.get(f"/sessions/{session_id}/audio/0", headers=AUTH).status_code == 404
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             opened = ws.receive_json()

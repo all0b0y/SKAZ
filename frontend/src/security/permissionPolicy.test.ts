@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  displayMediaGrant,
   isTrustedMediaRequest,
   isTrustedMediaCheck,
+  type DisplayMediaContext,
   type MediaRequestContext,
   type MediaCheckContext,
 } from '../../../electron/permissionPolicy';
@@ -50,11 +52,38 @@ describe('media permission request handler trust', () => {
     expect(isTrustedMediaRequest(req({ requestingUrl: 'http://localhost:5173/' }), expected)).toBe(true);
   });
 
-  it('denies video and denies unknown/empty media types by default', () => {
+  it('denies video and denies unknown media types by default', () => {
     expect(isTrustedMediaRequest(req({ mediaTypes: ['audio', 'video'] }), EXPECTED_URL)).toBe(false);
     expect(isTrustedMediaRequest(req({ mediaTypes: ['video'] }), EXPECTED_URL)).toBe(false);
-    expect(isTrustedMediaRequest(req({ mediaTypes: [] }), EXPECTED_URL)).toBe(false);
     expect(isTrustedMediaRequest(req({ mediaTypes: undefined }), EXPECTED_URL)).toBe(false);
+  });
+
+  /**
+   * getDisplayMedia asks for `media` with an EMPTY type list before the
+   * display-media handler runs; that handler is the real gate and only ever
+   * grants loopback audio. The empty list is still bound to the trusted renderer.
+   */
+  it('lets the trusted renderer reach the display-media gate, nobody else', () => {
+    expect(isTrustedMediaRequest(req({ mediaTypes: [] }), EXPECTED_URL)).toBe(true);
+    expect(isTrustedMediaRequest(req({ mediaTypes: [], fromTrustedWebContents: false }), EXPECTED_URL)).toBe(false);
+    expect(isTrustedMediaRequest(req({ mediaTypes: [], requestingUrl: 'https://evil.test/' }), EXPECTED_URL)).toBe(false);
+  });
+});
+
+describe('display-media (system audio) grant', () => {
+  const display = (over: Partial<DisplayMediaContext> = {}): DisplayMediaContext => ({
+    fromTrustedFrame: true, securityOrigin: 'file:///', audioRequested: true, videoRequested: false, ...over,
+  });
+
+  it('grants loopback audio only, never video, to the trusted main frame', () => {
+    expect(displayMediaGrant(display(), EXPECTED_ORIGIN)).toEqual({ audio: 'loopback' });
+  });
+
+  it('denies a request that asks for video, lacks audio, or comes from elsewhere', () => {
+    expect(displayMediaGrant(display({ videoRequested: true }), EXPECTED_ORIGIN)).toBeNull();
+    expect(displayMediaGrant(display({ audioRequested: false }), EXPECTED_ORIGIN)).toBeNull();
+    expect(displayMediaGrant(display({ fromTrustedFrame: false }), EXPECTED_ORIGIN)).toBeNull();
+    expect(displayMediaGrant(display({ securityOrigin: 'https://evil.test' }), EXPECTED_ORIGIN)).toBeNull();
   });
 });
 

@@ -57,26 +57,26 @@ afterEach(() => { vi.unstubAllGlobals(); });
 it('shows the provider status and elapsed time, never an invented percentage', async () => {
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  expect(await screen.findByText('Провайдер обрабатывает')).toBeVisible();
+  expect(await screen.findByText('Provider is processing')).toBeVisible();
   expect(screen.getByText('lecture.m4a')).toBeVisible();
-  expect(screen.getByText('1 ч 00 мин')).toBeVisible();
-  expect(screen.getByText('Только транскрипция')).toBeVisible();
+  expect(screen.getByText('1 h 00 min')).toBeVisible();
+  expect(screen.getByText('Transcription only')).toBeVisible();
   // Soniox reports queued/processing/completed and nothing else.
   expect(screen.queryByRole('progressbar')).toBeNull();
-  expect(screen.getByText(/Точного процента провайдер не сообщает/)).toBeVisible();
+  expect(screen.getByText(/The provider does not report an exact percentage/)).toBeVisible();
 });
 
 it('tells the user the app may be closed while the provider works', async () => {
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  expect(await screen.findByText(/Приложение можно закрыть/)).toBeVisible();
+  expect(await screen.findByText(/You can close the app/)).toBeVisible();
 });
 
 it('cancels an in-flight import and reports the settled state upward', async () => {
   const user = userEvent.setup();
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  await user.click(await screen.findByRole('button', { name: 'Отменить импорт' }));
+  await user.click(await screen.findByRole('button', { name: 'Cancel import' }));
 
   await waitFor(() => expect(onSettled).toHaveBeenCalledWith(
     expect.objectContaining({ status: 'cancelled' }),
@@ -88,7 +88,7 @@ it('says plainly that a cancelled import may still have been billed', async () =
   states = [view({ status: 'cancelled', settled_at: 'now' })];
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  expect(await screen.findByText(/могла быть тарифицирована/)).toBeVisible();
+  expect(await screen.findByText(/may have charged/)).toBeVisible();
 });
 
 it('keeps the provider reason on failure and offers retry or delete, never auto-retry', async () => {
@@ -96,9 +96,9 @@ it('keeps the provider reason on failure and offers retry or delete, never auto-
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
   expect(await screen.findByRole('alert')).toHaveTextContent('audio_decode_failed');
-  expect(screen.getByRole('button', { name: /Повторить \(новый платный запуск\)/ })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Удалить сессию' })).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'Отменить импорт' })).toBeNull();
+  expect(screen.getByRole('button', { name: /Retry \(new paid run\)/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Delete session' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Cancel import' })).toBeNull();
   // Nothing was retried on its own: a new job costs money and needs a click.
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
 });
@@ -110,7 +110,7 @@ it('retry announces the new session instead of silently replacing this one', asy
   window.addEventListener('skaz-import-started', started);
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  await user.click(await screen.findByRole('button', { name: /Повторить/ }));
+  await user.click(await screen.findByRole('button', { name: /Retry/ }));
 
   await waitFor(() => expect(started).toHaveBeenCalled());
   window.removeEventListener('skaz-import-started', started);
@@ -121,7 +121,7 @@ it('deleting a settled import reports it upward', async () => {
   states = [view({ status: 'failed', error: 'bad file' })];
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  await user.click(await screen.findByRole('button', { name: 'Удалить сессию' }));
+  await user.click(await screen.findByRole('button', { name: 'Delete session' }));
 
   await waitFor(() => expect(onDeleted).toHaveBeenCalled());
   expect(requests.some((r) => r.method === 'DELETE' && r.path === '/imports/s1')).toBe(true);
@@ -134,8 +134,8 @@ it('reports a missing source file without pretending the transcript is broken', 
   })];
   render(<Panel sessionId="s1" onSettled={onSettled} onDeleted={onDeleted} />);
 
-  expect(await screen.findByText(/Недоступен по прежнему пути/)).toBeVisible();
-  expect(screen.getByText(/заметки продолжают работать/)).toBeVisible();
+  expect(await screen.findByText(/Not available at its previous path/)).toBeVisible();
+  expect(screen.getByText(/notes keep working/)).toBeVisible();
 });
 
 it('stops polling once the import has settled', async () => {

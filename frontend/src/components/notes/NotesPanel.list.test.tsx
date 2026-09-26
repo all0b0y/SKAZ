@@ -36,7 +36,7 @@ const seed = (list: Note[]) => {
       notes_list: list,
     } as never,
     recorderState: 'stopped',
-    notesGenerating: false,
+    noteGenerations: {},
     notesError: null,
     settings: { notes: { model: 'test-model' } } as never,
   });
@@ -44,6 +44,7 @@ const seed = (list: Note[]) => {
 
 beforeEach(() => {
   localStorage.clear();
+  useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
   window.audiohelper = {
     ...window.audiohelper,
@@ -70,7 +71,7 @@ describe('existing notes are shown, not guessed at', () => {
       note({ id: 'n2', content: '# Из текста\n\nтело', updated_at: '2026-01-01T00:00:00Z' }),
     ]);
     render(<NotesPanel onCite={vi.fn()} />);
-    const list = screen.getByRole('list', { name: 'Конспекты сессии' });
+    const list = screen.getByRole('list', { name: 'Session notes' });
     const entries = within(list).getAllByRole('listitem');
     expect(entries).toHaveLength(2);
     expect(entries[0]).toHaveTextContent('Первая лекция');
@@ -81,10 +82,11 @@ describe('existing notes are shown, not guessed at', () => {
 
   it('keeps both start buttons visible when the session has no notes at all', () => {
     render(<NotesPanel onCite={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /Создать конспект с ИИ/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Создать пустой' })).toBeInTheDocument();
-    // With nothing to show, the empty state still explains what this pane is for.
-    expect(screen.getByText('Нет конспектов')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create AI notes/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create empty' })).toBeInTheDocument();
+    // One quiet line instead of an illustrated empty state (NOTES-POLISH-SPEC §6).
+    expect(screen.getByText('No notes yet')).toBeInTheDocument();
+    expect(document.querySelector('.empty')).toBeNull();
   });
 
   it('drops the empty-state prose once there is a list, keeping only the buttons', () => {
@@ -92,12 +94,12 @@ describe('existing notes are shown, not guessed at', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     // The list already says what this pane holds; a heading and a hint above it
     // are noise that push the notes down the pane.
-    expect(screen.queryByText('Нет конспектов')).not.toBeInTheDocument();
-    expect(screen.queryByText('Новый конспект', { selector: 'p' })).not.toBeInTheDocument();
+    expect(screen.queryByText('No notes yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('New notes', { selector: 'p' })).not.toBeInTheDocument();
     expect(screen.queryByText(/те же действия есть в меню/)).not.toBeInTheDocument();
     // The two ways to start stay, exactly as before.
-    expect(screen.getByRole('button', { name: /Создать конспект с ИИ/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Создать пустой' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Create AI notes/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create empty' })).toBeInTheDocument();
   });
 
   it('opens a listed note on click and never opens one by itself', async () => {
@@ -105,9 +107,9 @@ describe('existing notes are shown, not guessed at', () => {
     seed([note({ id: 'n1', title: 'Первая лекция', content: 'тело заметки' })]);
     render(<NotesPanel onCite={vi.fn()} />);
     // Nothing is open until the user asks: a closed tab must stay closed.
-    expect(screen.queryByLabelText('Конспект')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Открыть Первая лекция' }));
-    expect(await screen.findByLabelText('Конспект')).toHaveTextContent('тело заметки');
+    expect(screen.queryByLabelText('Notes')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open Первая лекция' }));
+    expect(await screen.findByLabelText('Notes')).toHaveTextContent('тело заметки');
   });
 });
 
@@ -130,7 +132,7 @@ describe('renaming', () => {
     render(<NotesPanel onCite={vi.fn()} />);
 
     await user.dblClick(screen.getByText('Старое имя'));
-    const field = await screen.findByLabelText('Название конспекта');
+    const field = await screen.findByLabelText('Notes title');
     await user.clear(field);
     await user.type(field, 'Новое имя{Enter}');
 
@@ -156,7 +158,7 @@ describe('renaming', () => {
     render(<NotesPanel onCite={vi.fn()} />);
 
     await user.dblClick(screen.getByText('Старое имя'));
-    const field = await screen.findByLabelText('Название конспекта');
+    const field = await screen.findByLabelText('Notes title');
     await user.clear(field);
     await user.type(field, '   {Enter}');
 
@@ -188,17 +190,17 @@ describe('generation indicator', () => {
     } as never;
     render(<NotesPanel onCite={vi.fn()} />);
 
-    await user.click(screen.getByRole('button', { name: /Создать конспект с ИИ/ }));
-    const pending = await screen.findByRole('status', { name: 'Генерация конспекта' });
+    await user.click(screen.getByRole('button', { name: /Create AI notes/ }));
+    const pending = await screen.findByRole('status', { name: 'Generating notes' });
     expect(pending).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Генерация/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Generating/ })).toBeInTheDocument();
     // Nothing may be typed into a document that does not exist yet.
     expect(screen.queryByLabelText('Текст конспекта')).not.toBeInTheDocument();
 
     await waitFor(() => expect(release).not.toBeNull());
     release!(note({ id: 'gen1', content: '# Готово\n\nтекст' }));
-    expect(await screen.findByLabelText('Конспект')).toHaveTextContent('Готово');
-    expect(screen.queryByRole('status', { name: 'Генерация конспекта' })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Notes')).toHaveTextContent('Готово');
+    expect(screen.queryByRole('status', { name: 'Generating notes' })).not.toBeInTheDocument();
   });
 
   it('keeps the tab with the reason and a retry when generation fails', async () => {
@@ -223,17 +225,17 @@ describe('generation indicator', () => {
     } as never;
     render(<NotesPanel onCite={vi.fn()} />);
 
-    await user.click(screen.getByRole('button', { name: /Создать конспект с ИИ/ }));
+    await user.click(screen.getByRole('button', { name: /Create AI notes/ }));
     expect(await screen.findByText(/Провайдер недоступен/)).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Генерация/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Generating/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Повторить' }));
-    expect(await screen.findByLabelText('Конспект')).toHaveTextContent('Со второго раза');
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByLabelText('Notes')).toHaveTextContent('Со второго раза');
   });
 });
 
 describe('deleting a note', () => {
-  it('removes it from the list through a soft delete', async () => {
+  it('removes it from the list only after permanent-delete confirmation', async () => {
     const user = userEvent.setup();
     const deleted: string[] = [];
     window.audiohelper = {
@@ -249,7 +251,11 @@ describe('deleting a note', () => {
     seed([note({ id: 'n1', title: 'Ненужная' }), note({ id: 'n2', title: 'Нужная' })]);
     render(<NotesPanel onCite={vi.fn()} />);
 
-    await user.click(screen.getByRole('button', { name: 'Удалить Ненужная' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Ненужная' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('cannot be restored');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: 'Delete Ненужная' }));
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
     await waitFor(() => expect(deleted).toEqual(['/sessions/s1/notes/n1']));
     await waitFor(() => expect(screen.queryByText('Ненужная')).not.toBeInTheDocument());
     expect(screen.getByText('Нужная')).toBeInTheDocument();

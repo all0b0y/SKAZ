@@ -27,7 +27,6 @@ beforeEach(() => {
   useStore.setState({
     recorderState: 'recording',
     elapsedMs: 0,
-    level: 0,
     meter: idleMeterSnapshot(),
     queue: queue(),
     transcription: {
@@ -69,7 +68,7 @@ describe('RecorderBar isolation from the clock and meter ticks', () => {
     for (let i = 0; i < 10; i += 1) {
       act(() => {
         useStore.setState({
-          meter: { dbfs: -20 - i, peakDbfs: -1, clipping: false, sustainedLow: false, vad: 'unavailable' },
+          meter: { dbfs: -20 - i, peakDbfs: -1, clipping: false },
         } as never);
       });
     }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from '../../state/store';
 import { Icon } from '../ui/Icon';
@@ -21,6 +21,17 @@ interface ProfileEditorProps {
   /** Whether a key exists for the currently selected provider (stored or pending). */
   hasProviderKey: boolean;
   onChange: (update: ProfileUpdate) => void;
+  /** Codex as the first tab: chosen instead of, not replacing, the API profile below. */
+  codex?: CodexTab;
+}
+
+export interface CodexTab {
+  selected: boolean;
+  /** False when this backend does not serve Codex; the tab is shown but cannot be chosen. */
+  available: boolean;
+  onSelect: () => void;
+  onDeselect: () => void;
+  panel: ReactNode;
 }
 
 export function ProfileEditor({
@@ -31,7 +42,9 @@ export function ProfileEditor({
   draft,
   hasProviderKey,
   onChange,
+  codex,
 }: ProfileEditorProps) {
+  const codexSelected = codex?.selected === true;
   const loadModels = useStore((s) => s.loadModels);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -48,6 +61,8 @@ export function ProfileEditor({
   modelRef.current = model;
 
   useEffect(() => {
+    // The API catalog is not needed while Codex is chosen; it loads on switching back.
+    if (codexSelected) return undefined;
     let active = true;
     setLoading(true);
     setCatalogError(null);
@@ -72,7 +87,7 @@ export function ProfileEditor({
       // A late resolve from a superseded provider is dropped by this flag.
       active = false;
     };
-  }, [provider, task, loadModels]);
+  }, [provider, task, loadModels, codexSelected]);
 
   // A text task only accepts models that can emit text. An empty/absent
   // output_modalities (stale or partial catalog) is retained — we cannot prove it
@@ -83,7 +98,10 @@ export function ProfileEditor({
   };
   // Defend against a stale catalog that still lists non-text-output models: never
   // offer them as selectable for a text task, even if the backend forgot to filter.
-  const selectable = task === 'asr' ? models : models.filter(emitsText);
+  const compatible = (m: ModelInfo): boolean => task === 'embedding'
+    ? m.output_modalities?.includes('embeddings') === true
+    : task === 'asr' || emitsText(m);
+  const selectable = models.filter(compatible);
 
   const trimmedQuery = query.trim().toLowerCase();
   // Search is scoped to the provider tab currently open, not the whole catalog
@@ -115,7 +133,7 @@ export function ProfileEditor({
   const unverifiedSelection = selectedModel && !selectedModel.verified;
   // A text task cannot use a non-text-output model. When such a model is the stored
   // selection we still show it (honest provenance) but disable it and warn definitively.
-  const isIncompatible = (m: ModelInfo): boolean => task !== 'asr' && !emitsText(m);
+  const isIncompatible = (m: ModelInfo): boolean => !compatible(m);
   const incompatibleSelection = selectedModel && isIncompatible(selectedModel);
   // Local ASR checkpoints have an explicit, honest download/preparation path,
   // managed independently in the Local models section (see
@@ -125,9 +143,11 @@ export function ProfileEditor({
   // section, but its absence is this card's problem: a cloud provider assigned
   // here with no key will fail every real request. Say so plainly instead of
   // letting the user discover it only when a call errors out.
-  const missingKey = needsKey(provider) && !hasProviderKey;
+  const missingKey = !codexSelected && needsKey(provider) && !hasProviderKey;
 
   const selectProvider = (next: ProviderName) => {
+    // Leaving Codex for the stored API provider keeps its stored model.
+    if (codexSelected) codex?.onDeselect();
     if (next === provider) return;
     setCustom(false);
     onChange({ ...draft, provider: next, model: '' });
@@ -148,13 +168,27 @@ export function ProfileEditor({
       )}
 
       <div role="tablist" aria-label={`${label} provider`} className="provider-tabs">
+        {codex && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={codexSelected}
+            disabled={!codex.available}
+            title={codex.available ? undefined : 'This build’s backend does not provide Codex'}
+            className={clsx('provider-tabs__tab', codexSelected && 'provider-tabs__tab--active')}
+            onClick={() => { if (!codexSelected) codex.onSelect(); }}
+          >
+            <Icon name="robot" size={16} />
+            Codex
+          </button>
+        )}
         {PROVIDERS[task].map((p) => (
           <button
             key={p}
             type="button"
             role="tab"
-            aria-selected={p === provider}
-            className={clsx('provider-tabs__tab', p === provider && 'provider-tabs__tab--active')}
+            aria-selected={!codexSelected && p === provider}
+            className={clsx('provider-tabs__tab', !codexSelected && p === provider && 'provider-tabs__tab--active')}
             onClick={() => selectProvider(p)}
           >
             <ProviderIcon provider={p} size={16} />
@@ -163,6 +197,7 @@ export function ProfileEditor({
         ))}
       </div>
 
+      {codexSelected ? codex?.panel : <>
       <div className="field">
         {custom ? (
           <>
@@ -236,8 +271,8 @@ export function ProfileEditor({
       )}
       {!custom && incompatibleSelection && (
         <p className="profile__note profile__note--warn">
-          <Icon name="warning" size={13} /> This model does not list text output and is incompatible with this task.
-          It is shown only to preserve your stored selection; choose a text-capable model.
+          <Icon name="warning" size={13} /> This model does not list {task === 'embedding' ? 'embedding' : 'text'} output and is incompatible with this task.
+          It is shown only to preserve your stored selection; choose a compatible model.
         </p>
       )}
       {!custom && unverifiedSelection && task === 'asr' && (
@@ -255,7 +290,7 @@ export function ProfileEditor({
           task. The catalog does not prove it works; a real request must succeed first.
         </p>
       )}
-
+      </>}
     </section>
   );
 }

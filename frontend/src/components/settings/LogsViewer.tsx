@@ -47,7 +47,7 @@ export function LogsViewer() {
   if (!supported) {
     return (
       <p className="profile__note">
-        Логи доступны только в десктоп-приложении — в браузерной сборке файл не пишется.
+        Logs are available only in the desktop app — the browser build writes no file.
       </p>
     );
   }
@@ -58,15 +58,15 @@ export function LogsViewer() {
     <div className="logs">
       <div className="logs__bar">
         <div className="field">
-          <label htmlFor="log-level">Уровень</label>
+          <label htmlFor="log-level">Level</label>
           <select id="log-level" value={level} onChange={(e) => setLevel(e.target.value as Level)}>
             {LEVELS.map((value) => (
-              <option key={value} value={value}>{value === 'ALL' ? 'Все' : value}</option>
+              <option key={value} value={value}>{value === 'ALL' ? 'All' : value}</option>
             ))}
           </select>
         </div>
         <div className="logs__actions">
-          <Button variant="ghost" onClick={() => void refresh()}>Обновить</Button>
+          <Button variant="ghost" onClick={() => void refresh()}>Refresh</Button>
           <Button
             variant="ghost"
             onClick={() => {
@@ -75,10 +75,10 @@ export function LogsViewer() {
               window.setTimeout(() => setCopied(false), 1500);
             }}
           >
-            {copied ? 'Скопировано' : 'Копировать'}
+            {copied ? 'Copied' : 'Copy'}
           </Button>
           {typeof bridge?.openLogsFolder === 'function' && (
-            <Button variant="ghost" onClick={() => void bridge.openLogsFolder!()}>Открыть папку</Button>
+            <Button variant="ghost" onClick={() => void bridge.openLogsFolder!()}>Open folder</Button>
           )}
         </div>
       </div>
@@ -86,14 +86,14 @@ export function LogsViewer() {
       {error && <p className="profile__note profile__note--warn">{error}</p>}
 
       {lines.length === 0 ? (
-        <p className="profile__note">Записей пока нет.</p>
+        <p className="profile__note">No entries yet.</p>
       ) : (
-        <pre className="logs__output" aria-label="Логи приложения">{lines.join('\n')}</pre>
+        <pre className="logs__output" aria-label="App logs">{lines.join('\n')}</pre>
       )}
 
       <p className="field__hint">
-        Пишется уровень INFO и выше. Текст транскрипции, ответы ассистента и ключи в файл
-        не попадают. Файл ограничен по размеру и перезаписывается по кругу.
+        INFO and above is written. Transcript text, assistant answers and keys never
+        reach the file. The file is size-limited and rotates.
       </p>
     </div>
   );

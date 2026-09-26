@@ -37,7 +37,7 @@ it('saves a physical group through IPC and readback, never browser storage', asy
   const user = userEvent.setup();
   render(<SessionNavigator />);
   await waitFor(() => expect(requests).toHaveLength(1));
-  await user.click(screen.getByRole('button', { name: 'Create group' }));
+  await user.click(screen.getByRole('button', { name: 'New group' }));
   await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Physics');
   await user.click(screen.getByRole('button', { name: 'Create' }));
   expect(await screen.findByRole('tab', { name: /Physics/ })).toBeVisible();
@@ -52,7 +52,7 @@ it('does not announce a physical move or fall back to local prefs after unknown 
   failWrite = true;
   render(<SessionNavigator />);
   await act(async () => {});
-  await user.click(screen.getByRole('button', { name: 'Create group' }));
+  await user.click(screen.getByRole('button', { name: 'New group' }));
   await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Not saved');
   await user.click(screen.getByRole('button', { name: 'Create' }));
   expect(screen.queryByRole('tab', { name: /Not saved/ })).not.toBeInTheDocument();
@@ -66,10 +66,10 @@ it('requires explicit confirmation for enabling and only GETs on mount', async (
   view.enabled = false;
   const user = userEvent.setup();
   render(<PhysicalStoragePanel capturing={false} />);
-  await user.click(await screen.findByRole('button', { name: 'Включить файловый режим…' }));
+  await user.click(await screen.findByRole('button', { name: 'Enable file mode…' }));
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
-  await user.click(screen.getByRole('button', { name: 'Подтвердить файловый режим' }));
-  expect(await screen.findByText(/Файловый режим включён/)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Confirm file mode' }));
+  expect(await screen.findByText(/File mode is on/)).toBeVisible();
   expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
     'GET /storage/layout', 'POST /storage/layout', 'GET /storage/layout',
   ]);
@@ -79,9 +79,9 @@ it('discloses pending deletion and resumes only on explicit click with readback'
   view.pending = { kind: 'delete', phase: 'cleanup' };
   const user = userEvent.setup();
   render(<PhysicalStoragePanel capturing={false} />);
-  expect(await screen.findByRole('alert')).toHaveTextContent('не отменяет удаление');
+  expect(await screen.findByRole('alert')).toHaveTextContent('does not undo a deletion');
   expect(requests.every((r) => r.method === 'GET')).toBe(true);
-  await user.click(screen.getByRole('button', { name: 'Продолжить восстановление' }));
+  await user.click(screen.getByRole('button', { name: 'Continue recovery' }));
   await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
     'GET /storage/layout', 'POST /storage/recover', 'GET /storage/layout',

@@ -2,7 +2,7 @@ import { WindowChunker } from './chunker';
 import { SampleTimeline } from './clock';
 import { encodeWavPcm16Mono } from './wav';
 
-// Microphone capture via AudioWorklet. Produces standalone 5-second PCM16 mono
+// Microphone (+ optional system audio, mixed to mono) capture via AudioWorklet. Produces standalone 5-second PCM16 mono
 // WAV windows with sequence numbers and recording-timeline timestamps (pauses
 // excluded). On pause/stop the tail is flushed so the last words are never
 // dropped. Sample rate is the device rate; the backend resamples for local ASR
@@ -43,11 +43,78 @@ export interface RecorderCallbacks {
   onSignal?: (sample: RecordedSignal) => void;
   onError?: (message: string) => void;
   onDisconnected?: () => void;
+  /** System audio ended mid-recording; the microphone keeps recording. */
+  onSystemAudioLost?: () => void;
   /** Sticky loss of confidence: received PCM is saved, but an in-flight tail may be missing. */
   onCaptureIncomplete?: () => void;
 }
 
 export type RecorderState = 'idle' | 'recording' | 'paused' | 'processing' | 'stopped';
+
+/** What to capture. Absent `deviceId` = the system default microphone. */
+export interface CaptureSources {
+  deviceId?: string;
+  /** Mix whole-system loopback audio into the same mono capture. */
+  systemAudio?: boolean;
+}
+
+export type SystemAudioFailure = 'denied' | 'unsupported' | 'failed';
+
+/** System audio was asked for and could not be opened; nothing was started. */
+export class SystemAudioUnavailable extends Error {
+  constructor(readonly reason: SystemAudioFailure, cause?: unknown) {
+    super(reason === 'denied' ? 'System audio access was denied.'
+      : reason === 'unsupported' ? 'System audio capture is not supported on this system.'
+        : 'System audio could not be started.');
+    this.name = 'SystemAudioUnavailable';
+    if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
+  }
+}
+
+// Raw signal, as for the microphone: no browser processing on either source.
+const RAW_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false } as const;
+
+function microphoneConstraints(deviceId: string | undefined): MediaStreamConstraints {
+  return { audio: deviceId ? { deviceId: { exact: deviceId }, ...RAW_AUDIO } : { ...RAW_AUDIO } };
+}
+
+function stopTracks(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => track.stop());
+}
+
+/** Opens the microphone; a saved device that is gone falls back to the default one. */
+async function openMicrophone(deviceId: string | undefined): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia(microphoneConstraints(deviceId));
+  } catch (error) {
+    const name = (error as { name?: string }).name;
+    if (!deviceId || (name !== 'OverconstrainedError' && name !== 'NotFoundError')) throw error;
+    return navigator.mediaDevices.getUserMedia(microphoneConstraints(undefined));
+  }
+}
+
+/** Opens whole-system loopback audio. Any picture track is dropped at once. */
+async function openSystemAudio(): Promise<MediaStream> {
+  if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') throw new SystemAudioUnavailable('unsupported');
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ audio: { ...RAW_AUDIO }, video: false });
+  } catch (error) {
+    const name = (error as { name?: string }).name;
+    throw new SystemAudioUnavailable(
+      name === 'NotAllowedError' || name === 'SecurityError' ? 'denied'
+        : name === 'NotSupportedError' || name === 'TypeError' ? 'unsupported' : 'failed',
+      error,
+    );
+  }
+  stream.getVideoTracks().forEach((track) => track.stop());
+  // Some macOS versions hand back a loopback track that is already over.
+  if (!stream.getAudioTracks().some((track) => track.readyState === 'live')) {
+    stopTracks(stream);
+    throw new SystemAudioUnavailable('failed');
+  }
+  return stream;
+}
 
 interface BarrierMessage {
   type: 'barrier';
@@ -58,9 +125,12 @@ const BARRIER_TIMEOUT_MS = 2_000;
 
 export class AudioRecorder {
   private context: AudioContext | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
   private worklet: AudioWorkletNode | null = null;
-  private stream: MediaStream | null = null;
+  private micStream: MediaStream | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
+  private micDeviceId: string | undefined;
+  private systemStream: MediaStream | null = null;
+  private systemSource: MediaStreamAudioSourceNode | null = null;
 
   private timeline: SampleTimeline | null = null;
   private chunker: WindowChunker | null = null;
@@ -93,18 +163,22 @@ export class AudioRecorder {
     return this.timeline?.elapsedMs() ?? 0;
   }
 
-  async start(deviceId?: string): Promise<void> {
+  /** True while system audio is part of the capture. */
+  get systemAudioActive(): boolean {
+    return this.systemStream !== null;
+  }
+
+  async start(sources: CaptureSources = {}): Promise<void> {
     if (['recording', 'processing', 'paused'].includes(this._state)) return;
     this._state = 'processing';
     this.stopRequested = false;
     this.stopPromise = null;
-    const constraints: MediaStreamConstraints = {
-      audio: deviceId
-        ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-        : { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    };
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.micStream = await openMicrophone(sources.deviceId);
+      this.micDeviceId = sources.deviceId;
+      if (this.stopRequested) throw new Error('Recording start was cancelled.');
+      // Both sources or neither: the user asked to record the other side too.
+      if (sources.systemAudio) this.systemStream = await openSystemAudio();
       if (this.stopRequested) throw new Error('Recording start was cancelled.');
       this.context = new AudioContext();
       this.sampleRate = this.context.sampleRate;
@@ -115,8 +189,11 @@ export class AudioRecorder {
       if (this.stopRequested) throw new Error('Recording start was cancelled.');
       await this.callbacks.onReady?.(this.sampleRate);
       if (this.stopRequested) throw new Error('Recording start was cancelled.');
-      this.source = this.context.createMediaStreamSource(this.stream);
-      this.worklet = new AudioWorkletNode(this.context, 'pcm-forwarder');
+      // Mono down-mix at the worklet input: connected sources are summed there,
+      // and a stereo loopback contributes (L+R)/2 instead of only its left side.
+      this.worklet = new AudioWorkletNode(this.context, 'pcm-forwarder', {
+        channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+      });
       this.worklet.port.onmessage = (event: MessageEvent<Float32Array | BarrierMessage>) => {
         const data = event.data;
         if (data instanceof Float32Array) this.onFrame(data);
@@ -125,22 +202,99 @@ export class AudioRecorder {
           this.barrierWaiters.delete(data.id);
         }
       };
-      this.source.connect(this.worklet);
+      this.attachSources();
+      this.connectSources();
 
       this.sequence = 0;
-      this.stream.getAudioTracks().forEach((track) => {
-        track.addEventListener('ended', () => {
-          if (this._state === 'stopped' || this._state === 'idle') return;
-          this.callbacks.onError?.('Microphone disconnected; captured audio is being flushed');
-          void this.stop().finally(() => this.callbacks.onDisconnected?.());
-        });
-      });
       this._state = 'recording';
     } catch (err) {
       await this.teardown();
       this._state = this.stopRequested ? 'stopped' : 'idle';
       throw err;
     }
+  }
+
+  /**
+   * Swaps capture sources between recording stretches (paused only). New
+   * streams are opened first; if any fails, the old sources stay as they were.
+   * The timeline, chunk sequence and transport are untouched.
+   */
+  async changeSources(sources: CaptureSources): Promise<void> {
+    if (this._state !== 'paused' || !this.context) {
+      throw new Error('Capture sources cannot change while recording; pause first.');
+    }
+    const replaceMic = 'deviceId' in sources && sources.deviceId !== this.micDeviceId;
+    const addSystem = sources.systemAudio === true && !this.systemStream;
+    const dropSystem = sources.systemAudio === false && this.systemStream !== null;
+    let nextMic: MediaStream | null = null;
+    let nextSystem: MediaStream | null = null;
+    try {
+      if (replaceMic) nextMic = await openMicrophone(sources.deviceId);
+      if (addSystem) nextSystem = await openSystemAudio();
+    } catch (error) {
+      stopTracks(nextMic);
+      throw error;
+    }
+    if (this._state !== 'paused' || !this.context) {
+      stopTracks(nextMic);
+      stopTracks(nextSystem);
+      return;
+    }
+    if (nextMic) {
+      this.micSource?.disconnect();
+      stopTracks(this.micStream);
+      this.micStream = nextMic;
+      this.micSource = null;
+      this.micDeviceId = sources.deviceId;
+    }
+    if (dropSystem) this.releaseSystemAudio();
+    if (nextSystem) this.systemStream = nextSystem;
+    this.attachSources();
+  }
+
+  /** Creates graph nodes and end-of-track handling for streams that have none yet. */
+  private attachSources(): void {
+    if (!this.context) return;
+    if (this.micStream && !this.micSource) {
+      const stream = this.micStream;
+      this.micSource = this.context.createMediaStreamSource(stream);
+      stream.getAudioTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+          if (this.micStream !== stream || this._state === 'stopped' || this._state === 'idle') return;
+          this.callbacks.onError?.('Microphone disconnected; captured audio is being flushed');
+          void this.stop().finally(() => this.callbacks.onDisconnected?.());
+        });
+      });
+    }
+    if (this.systemStream && !this.systemSource) {
+      const stream = this.systemStream;
+      this.systemSource = this.context.createMediaStreamSource(stream);
+      stream.getAudioTracks().forEach((track) => {
+        track.addEventListener('ended', () => {
+          if (this.systemStream !== stream || this._state === 'stopped' || this._state === 'idle') return;
+          this.releaseSystemAudio();
+          this.callbacks.onSystemAudioLost?.();
+        });
+      });
+    }
+  }
+
+  private connectSources(): void {
+    if (!this.worklet) return;
+    this.micSource?.connect(this.worklet);
+    this.systemSource?.connect(this.worklet);
+  }
+
+  private disconnectSources(): void {
+    this.micSource?.disconnect();
+    this.systemSource?.disconnect();
+  }
+
+  private releaseSystemAudio(): void {
+    this.systemSource?.disconnect();
+    stopTracks(this.systemStream);
+    this.systemSource = null;
+    this.systemStream = null;
   }
 
   private onFrame(frame: Float32Array): void {
@@ -195,7 +349,7 @@ export class AudioRecorder {
 
   async resume(): Promise<void> {
     if (this._state !== 'paused') return;
-    if (this.source && this.worklet) this.source.connect(this.worklet);
+    this.connectSources();
     this._state = 'recording';
   }
 
@@ -204,8 +358,9 @@ export class AudioRecorder {
     if (this._state === 'idle' || this._state === 'stopped') return;
     this.stopRequested = true;
     this._state = 'processing';
-    // Stop the physical input immediately; still accept queued PCM up to the barrier.
-    this.stream?.getTracks().forEach((track) => track.stop());
+    // Stop the physical inputs immediately; still accept queued PCM up to the barrier.
+    stopTracks(this.micStream);
+    stopTracks(this.systemStream);
     this.stopPromise = this.finishStop();
     return this.stopPromise;
   }
@@ -222,7 +377,7 @@ export class AudioRecorder {
   private drainCapture(): Promise<void> {
     if (this.drainPromise) return this.drainPromise;
     this.draining = true;
-    this.source?.disconnect();
+    this.disconnectSources();
     this.drainPromise = this.awaitWorkletBarrier().then(async (complete) => {
       this.draining = false;
       this.flushTail();
@@ -270,13 +425,16 @@ export class AudioRecorder {
     try {
       this.worklet?.port.close();
       this.worklet?.disconnect();
-      this.source?.disconnect();
-      this.stream?.getTracks().forEach((t) => t.stop());
+      this.disconnectSources();
+      stopTracks(this.micStream);
+      stopTracks(this.systemStream);
       if (this.context && this.context.state !== 'closed') await this.context.close();
     } finally {
       this.worklet = null;
-      this.source = null;
-      this.stream = null;
+      this.micSource = null;
+      this.micStream = null;
+      this.systemSource = null;
+      this.systemStream = null;
       this.context = null;
       this.chunker = null;
       this.barrierWaiters.clear();

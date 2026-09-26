@@ -47,6 +47,15 @@ export interface AudioFileChoice {
 
 export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped';
 
+/** One note offered to the share sheet: its file name (without extension) and clean text. */
+export interface SharedNote {
+  fileName: string;
+  content: string;
+  /** Window coordinates the share menu opens at. */
+  x: number;
+  y: number;
+}
+
 export interface BackendStatus {
   phase: BackendPhase;
   detail?: string;
@@ -74,16 +83,21 @@ export interface BridgeApi {
     meta: AudioUploadMeta,
     wav: ArrayBuffer,
   ): Promise<JsonResponse<T>>;
-  /** Durably store captured WAV without starting ASR. */
-  storeAudio<T = unknown>(
+  /** Bounded transient input for live ASR; never a durable recording. */
+  bufferAudio<T = unknown>(
     sessionId: string,
     meta: AudioUploadMeta,
     wav: ArrayBuffer,
   ): Promise<JsonResponse<T>>;
-  /** Fetch stored audio (WAV) for playback. */
-  fetchAudio(sessionId: string, sequence: number): Promise<BinaryResponse>;
   /** Native picker for one audio file to import. Null when cancelled. */
   chooseAudioFile(): Promise<AudioFileChoice | null>;
+  /**
+   * Hand one note to the macOS share sheet as a `.md` file, opened at the given
+   * point of the window. The text is written to a private temporary file only for
+   * the share; nothing in the session folder changes. Resolves false when the
+   * platform has no share sheet or the request was refused.
+   */
+  shareNote?(note: SharedNote): Promise<boolean>;
   /** Tail of the desktop app log file (no session content is written there). */
   readLogs?(): Promise<string>;
   /** Reveal the log directory in the OS file manager. */
@@ -96,10 +110,16 @@ export interface BridgeApi {
   onBackendStatus(listener: (status: BackendStatus) => void): () => void;
   /** Report live capture state to main (one-way) so close/quit can be guarded. */
   reportCaptureState?(state: CaptureState): void;
+  /** Report how many Codex tasks are still active (one-way) so quit can warn first. */
+  reportCodexActivity?(activeTasks: number): void;
   /** Main requests Stop/drain; only the boolean save outcome is returned. */
   onPrepareQuit?(listener: () => Promise<boolean>): () => void;
   onQuitCancelled?(listener: () => void): () => void;
   readonly platform: string;
+  /** Whether this OS can capture whole-system audio (macOS 14.2+, Windows). */
+  readonly systemAudioSupported?: boolean;
+  /** Open the OS privacy pane where system-audio recording is granted. */
+  openSystemAudioSettings?(): Promise<boolean>;
 }
 
 declare global {

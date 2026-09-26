@@ -32,7 +32,7 @@ def test_submillisecond_tail_is_saved_exactly_and_resume_keeps_samples(app: Any)
             }
             ws.send_json({"type": "end", "action": "pause"})
             assert ws.receive_json()["saved_samples"] == 1
-        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).content[44:] == b"\x01\x00"
+        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             opened = ws.receive_json()
@@ -41,13 +41,14 @@ def test_submillisecond_tail_is_saved_exactly_and_resume_keeps_samples(app: Any)
             assert ws.receive_json()["saved_samples"] == 16
             ws.send_json({"type": "end"})
             assert ws.receive_json()["saved_samples"] == 16
-        manifest = http.get(f"/sessions/{sid}/audio", headers=AUTH).json()
-        assert [(c["start_ms"], c["end_ms"]) for c in manifest["chunks"]] == [(0, 0), (0, 1)]
+        assert http.get(f"/sessions/{sid}/audio", headers=AUTH).status_code == 405
+        assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["saved_samples"] == 16
+        assert not list(app.state.runtime.config.audio_dir.rglob("*.wav"))
 
 
 @pytest.mark.parametrize("remove_key", [False, True])
 @pytest.mark.parametrize("connecting", [False, True])
-def test_revoking_consent_closes_provider_but_keeps_local_capture(
+def test_revoking_consent_warns_to_stop_capture_but_allows_tail_drain(
     app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch, connecting: bool, remove_key: bool,
 ) -> None:
     socket = ProviderSocket()
@@ -91,6 +92,8 @@ def test_revoking_consent_closes_provider_but_keeps_local_capture(
             assert response.status_code == 200
             assert cancelled.is_set() if connecting else socket.closed
             assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["transcription"] == "unavailable"
+            assert ws.receive_json() == {"type": "transcription.failed"}
+            # Only transport draining remains; the renderer stops the microphone.
             next_sequence = 0 if connecting else 1
             ws.send_bytes(packet(next_sequence, next_sequence * 1600))
             assert ws.receive_json()["saved_samples"] == (next_sequence + 1) * 1600
@@ -101,7 +104,7 @@ def test_revoking_consent_closes_provider_but_keeps_local_capture(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["transcription_complete"] is False
         assert socket.audio == ([] if connecting else [packet(0, 0)[20:]])
-        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).content[44:] == packet(0, 0)[20:]
+        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404
 
 
 @pytest.mark.parametrize("cancel_request", [False, True])
@@ -187,6 +190,7 @@ def test_consent_write_settles_before_cancel_or_unrelated_update(
                 other.result(timeout=2)
             assert socket.closed
             assert http.get("/settings", headers=AUTH).json()["cloud_consent"] is False
+            assert ws.receive_json() == {"type": "transcription.failed"}
             ws.send_bytes(packet(0, 0))
             assert ws.receive_json()["saved_samples"] == 1600
             ws.send_json({"type": "end"})
@@ -218,4 +222,4 @@ def test_native_cloud_consent_gates_provider_but_not_local_saving(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["saved_samples"] == 1600
         assert bool(calls) is consent
-        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).content[44:] == packet(0, 0)[20:]
+        assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404

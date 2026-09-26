@@ -40,7 +40,7 @@ async def test_recording_preferences_are_independent_and_partial_updates_preserv
     assert (await client.get("/settings")).json()["translation_target_language"] == "en"
 
 
-@pytest.mark.parametrize("mode", ["transcription", "translation", "audio_only"])
+@pytest.mark.parametrize("mode", ["transcription", "translation"])
 def test_recording_preferences_survive_restart_without_network_or_enabling_consent(
     config: AppConfig, outbound: FakeHttp, mode: str,
 ) -> None:
@@ -133,7 +133,7 @@ async def test_changing_mode_keeps_the_last_target_language(client: httpx.AsyncC
         "native_recording_mode": "translation", "translation_target_language": "pt-BR",
     })
     assert response.status_code == 200
-    for mode in ("audio_only", "transcription", "translation"):
+    for mode in ("transcription", "translation"):
         response = await client.put("/settings", json={"native_recording_mode": mode})
         assert response.status_code == 200
         assert response.json()["native_recording_mode"] == mode
@@ -142,6 +142,7 @@ async def test_changing_mode_keeps_the_last_target_language(client: httpx.AsyncC
 
 @pytest.mark.parametrize("patch", [
     {"native_recording_mode": "legacy"},
+    {"native_recording_mode": "audio_only"},
     {"native_recording_mode": ""},
     {"native_recording_mode": True},
     {"translation_target_language": ""},

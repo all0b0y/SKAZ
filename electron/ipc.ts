@@ -1,22 +1,35 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
-import { mkdirSync } from 'node:fs';
-import { basename } from 'node:path';
+import { app, BrowserWindow, dialog, ipcMain, shell, ShareMenu, type IpcMainInvokeEvent } from 'electron';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CHANNELS } from './channels';
+import { SYSTEM_AUDIO_SETTINGS_URL } from './systemAudio';
 import { NativeLiveClient } from './nativeLive';
 import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeLive';
 import type { BackendManager } from './backend';
-import { audioUploadPath, validateAudioUpload, validateBridgeRequest } from './ipcPolicy';
+import { audioUploadPath, requestTimeoutMs, shareFileName, validateAudioUpload, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import type {
   AudioFileChoice,
   AudioUploadMeta,
-  BinaryResponse,
   BridgeRequest,
   HttpMethod,
   JsonResponse,
+  SharedNote,
 } from '../frontend/src/api/bridge';
 import { AUDIO_EXTENSIONS } from '../frontend/src/api/bridge';
+
+/** Private scratch for shared notes, cleared on quit. */
+let shareDirectory: string | null = null;
+function shareRoot(): string {
+  if (!shareDirectory) {
+    shareDirectory = mkdtempSync(join(app.getPath('temp'), 'skaz-share-'));
+    app.once('will-quit', () => {
+      if (shareDirectory) rmSync(shareDirectory, { recursive: true, force: true });
+    });
+  }
+  return shareDirectory;
+}
 
 // Registers the request-scoped IPC handlers. Every call is proxied to the
 // loopback backend with the per-run bearer token attached here in main, so the
@@ -113,11 +126,11 @@ export function registerIpc(
     choosingAudio = true;
     try {
       const result = await dialog.showOpenDialog(owner, {
-        title: 'Выберите аудиофайл',
+        title: 'Choose an audio file',
         defaultPath: app.getPath('downloads'),
         // One file per import: each import is one priced confirmation.
         properties: ['openFile'],
-        filters: [{ name: 'Аудио', extensions: [...AUDIO_EXTENSIONS] }],
+        filters: [{ name: 'Audio', extensions: [...AUDIO_EXTENSIONS] }],
       });
       const chosen = result.canceled ? null : result.filePaths[0] ?? null;
       if (!chosen) return null;
@@ -125,9 +138,34 @@ export function registerIpc(
       // container metadata; the bytes themselves are never sent through IPC.
       return { path: chosen, name: basename(chosen), url: pathToFileURL(chosen).href };
     } catch {
-      throw new Error('Файловый диалог недоступен.');
+      throw new Error('The file dialog is unavailable.');
     } finally {
       choosingAudio = false;
+    }
+  });
+
+  let sharing = false;
+  ipcMain.handle(CHANNELS.shareNote, async (event, note: SharedNote): Promise<boolean> => {
+    if (!senderTrusted(event) || sharing || process.platform !== 'darwin') return false;
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const name = shareFileName(note);
+    if (!owner || !name) return false;
+    sharing = true;
+    try {
+      // A private per-share directory: the file keeps the note's own name for the
+      // recipient, and two shares of same-named notes never collide. It lives
+      // only as long as the app does; the session folder is never touched.
+      const directory = mkdtempSync(join(shareRoot(), 'note-'));
+      const file = join(directory, name);
+      writeFileSync(file, note.content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      const x = Number.isFinite(note.x) ? Math.round(note.x) : undefined;
+      const y = Number.isFinite(note.y) ? Math.round(note.y) : undefined;
+      new ShareMenu({ filePaths: [file] }).popup({ window: owner, x, y });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      sharing = false;
     }
   });
 
@@ -143,6 +181,13 @@ export function registerIpc(
     const log = manager.getLog();
     mkdirSync(log.directory, { recursive: true });
     await shell.openPath(log.directory);
+    return true;
+  });
+
+  // Fixed destination only: the renderer cannot choose what gets opened.
+  ipcMain.handle(CHANNELS.openSystemAudioSettings, async (event) => {
+    if (!senderTrusted(event) || !SYSTEM_AUDIO_SETTINGS_URL) return false;
+    await shell.openExternal(SYSTEM_AUDIO_SETTINGS_URL);
     return true;
   });
 
@@ -165,7 +210,7 @@ export function registerIpc(
           ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
         },
         body: hasBody ? JSON.stringify(req.body) : undefined,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(requestTimeoutMs(req)),
       });
       if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
       const text = await res.text();
@@ -213,7 +258,7 @@ export function registerIpc(
   );
 
   ipcMain.handle(
-    CHANNELS.storeAudio,
+    CHANNELS.bufferAudio,
     async (
       event,
       sessionId: string,
@@ -248,27 +293,5 @@ export function registerIpc(
     },
   );
 
-  ipcMain.handle(
-    CHANNELS.fetchAudio,
-    async (event, sessionId: string, sequence: number): Promise<BinaryResponse> => {
-      if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
-      const handle = manager.getHandle();
-      if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
-      try {
-        const url = buildUrl(
-          handle.port,
-          `/sessions/${encodeURIComponent(sessionId)}/audio/${encodeURIComponent(String(sequence))}`,
-        );
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${handle.token}` },
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
-        return { ok: true, status: res.status, data: await res.arrayBuffer() };
-      } catch (err) {
-        return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
   return native;
 }

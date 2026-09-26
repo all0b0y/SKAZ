@@ -49,8 +49,6 @@ class AppConfig:
     request_timeout_s: float = 90.0
     #: Outbound HTTP timeout for transcription calls.
     asr_timeout_s: float = 120.0
-    #: Native capture retains transcripts only; archival code remains available for explicit tests.
-    retain_native_audio: bool = False
     #: How many audio chunks may wait for transcription per session before the API pushes back.
     max_pending_chunks: int = 8
     max_chunk_seconds: float = 30.0

@@ -56,6 +56,14 @@ class ProviderTimeout(ProviderError):
     """The provider did not answer within the configured timeout."""
 
 
+class OutputTruncated(ProviderError):
+    """A transport-limited response, never silently accepted as complete."""
+
+    def __init__(self, partial: str) -> None:
+        super().__init__("The model reached its output limit before completing the response.")
+        self.partial = partial
+
+
 @dataclass(frozen=True)
 class ChatMessage:
     role: str
@@ -202,9 +210,15 @@ async def _post_completion(
             attempt += 1
             continue
 
+        payload: dict[str, Any] = {}
         try:
             payload = _json(response, provider)
             text = read(payload)
+        except OutputTruncated:
+            _log(
+                provider, model, attempt, started, outcome="output_limit", status=status, usage=usage(payload)
+            )
+            raise
         except ProviderError:
             _log(provider, model, attempt, started, outcome="invalid_response", status=status)
             raise
@@ -345,6 +359,8 @@ def _text_from_blocks(payload: dict[str, Any]) -> str:
     if not isinstance(blocks, list):
         raise ProviderError("anthropic returned no content blocks.")
     text = _joined_text(blocks)
+    if payload.get("stop_reason") == "max_tokens":
+        raise OutputTruncated(text)
     if not text.strip():
         raise ProviderError("anthropic returned an empty message. Try again or pick another model.")
     return text
@@ -364,6 +380,8 @@ def _text_from_choices(provider: str, payload: dict[str, Any]) -> str:
     first = choices[0]
     message = first.get("message") if isinstance(first, dict) else None
     text = _joined_text(message.get("content") if isinstance(message, dict) else None)
+    if isinstance(first, dict) and first.get("finish_reason") == "length":
+        raise OutputTruncated(text)
     if not text.strip():
         raise ProviderError(f"{provider} returned an empty message. Try again or pick another model.")
     return text

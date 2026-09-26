@@ -37,7 +37,9 @@ def _catalog(outbound: FakeHttp) -> None:
 async def configure(client: httpx.AsyncClient) -> None:
     response = await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "agent": {"provider": "openrouter", "model": "qwen/qwen3-30b-a3b-instruct-2507"},
             "notes": {"provider": "openrouter", "model": "qwen/qwen3-30b-a3b-instruct-2507"},
             "cloud_consent": True,
@@ -444,7 +446,9 @@ async def test_output_language_is_requested(
 async def test_unconfigured_agent_profile_is_reported(client: httpx.AsyncClient, outbound: FakeHttp) -> None:
     await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "cloud_consent": True,
         },
     )
@@ -478,11 +482,10 @@ async def test_asr_keeps_running_while_a_question_is_answered(
     """A slow agent request must not block audio ingestion."""
     await client.put(
         "/settings",
-        json={"provider_keys": {"openai": "sk-openai", "openrouter": "sk-router"}, "asr": {"provider": "openai", "model": "whisper-1"},
-            "agent": {
-                "provider": "openrouter",
-                "model": "qwen/qwen3-30b-a3b-instruct-2507"
-            },
+        json={
+            "provider_keys": {"openai": "sk-openai", "openrouter": "sk-router"},
+            "asr": {"provider": "openai", "model": "whisper-1"},
+            "agent": {"provider": "openrouter", "model": "qwen/qwen3-30b-a3b-instruct-2507"},
             "cloud_consent": True,
         },
     )

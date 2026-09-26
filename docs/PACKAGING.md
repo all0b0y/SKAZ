@@ -10,8 +10,13 @@ only ever sees the `.dmg`.
 npm run dist:mac
 ```
 
-Result: `release/SKAZ-<version>-arm64.dmg` — the familiar installer window where
-the app is dragged onto `Applications`.
+Result:
+
+- `release/SKAZ-<version>-arm64.dmg` — the familiar installer window where the app
+  is dragged onto `Applications`.
+- `release/SKAZ-<version>-arm64.pkg` — a classic macOS Installer package that
+  installs `SKAZ.app` into `/Applications`. It is unsigned (no Developer ID
+  Installer certificate here), so Gatekeeper warns on other Macs.
 
 `dist:mac` chains four steps, each runnable on its own:
 
@@ -20,7 +25,7 @@ the app is dragged onto `Applications`.
 | 1. Icon | `npm run icon` | `build/icon.icns`, `build/icon.png` |
 | 2. Backend | `npm run build:backend` | `backend/dist/skaz-backend/` |
 | 3. Renderer/main/preload | `npm run build` | `dist/` |
-| 4. Bundle + DMG | `electron-builder --mac dmg` | `release/*.dmg` |
+| 4. Bundle + DMG + PKG | `electron-builder --mac` | `release/*.dmg`, `release/*.pkg` |
 
 Prerequisites: `npm install`, a populated `backend/.venv` (with `pyinstaller`
 installed into it: `uv pip install --python backend/.venv/bin/python pyinstaller`),

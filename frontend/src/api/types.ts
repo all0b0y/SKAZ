@@ -11,7 +11,7 @@ export type ProviderName =
   | 'anthropic'
   | 'claude-code';
 
-export type TaskKind = 'asr' | 'agent' | 'notes';
+export type TaskKind = 'asr' | 'agent' | 'notes' | 'embedding';
 export type LocalProviderName = 'local-whisper' | 'local-gigachat-mlx';
 export type CloudProviderName = 'openrouter' | 'openai' | 'anthropic' | 'soniox';
 
@@ -51,7 +51,7 @@ export interface SessionStatusOptions {
   flush_transcription?: boolean;
 }
 
-export type ChatScope = 'auto' | 'recent' | 'all' | 'beginning' | 'search';
+export type ChatScope = 'session' | 'group' | 'all';
 
 export interface Profile {
   provider: ProviderName;
@@ -64,15 +64,22 @@ export interface Settings {
   /** Stored next-recording preferences; capture wiring is a separate contract. */
   native_recording_mode?: NativeRecordingMode;
   translation_target_language?: string;
+  /** Preferred microphone (browser deviceId); null = the system default. */
+  input_device_id?: string | null;
+  /** Mix whole-system audio into the next recording (macOS 14.2+). */
+  capture_system_audio?: boolean;
 
   /** Key presence per cloud provider; a key belongs to the provider, not to a task. */
   provider_has_api_key?: Partial<Record<CloudProviderName, boolean>>;
   asr: Profile;
   agent: Profile;
   notes: Profile;
+  embedding?: Profile;
   transcript_language: string; // "auto" or a language code
   output_language: string;
   cloud_consent: boolean;
+  /** Optional embedding cost cap per question. Null disables; omitted preserves on update. */
+  embedding_budget_usd?: number | null;
   /** Warn when an import's estimated cost exceeds this many US dollars; null disables. */
   import_cost_warning_usd?: number | null;
   /** Explicit opt-in for the experimental contextual local mode; off by default. */
@@ -89,15 +96,20 @@ export interface SettingsUpdate {
   used_languages?: string[];
   native_recording_mode?: NativeRecordingMode;
   translation_target_language?: string;
+  /** "" resets to the system default microphone. */
+  input_device_id?: string;
+  capture_system_audio?: boolean;
 
   /** Write-only provider keys. Omitted provider preserves; empty string removes. */
   provider_keys?: Partial<Record<CloudProviderName, string>>;
   asr?: ProfileUpdate;
   agent?: ProfileUpdate;
   notes?: ProfileUpdate;
+  embedding?: ProfileUpdate;
   transcript_language?: string;
   output_language?: string;
   cloud_consent?: boolean;
+  embedding_budget_usd?: number | null;
   import_cost_warning_usd?: number;
   /** Explicit flag, because a bare null means "unchanged" for every other field. */
   clear_import_cost_warning?: boolean;
@@ -220,6 +232,13 @@ export interface Session {
   status: SessionStatus;
   duration_ms: number;
   mode: SessionMode;
+  origin?: 'live' | 'import';
+}
+
+/** `POST /sessions/delete`: each id is deleted independently. */
+export interface BulkDeleteResult {
+  deleted: string[];
+  failed: { id: string; reason: string }[];
 }
 
 export interface SegmentSource {
@@ -378,6 +397,8 @@ export interface AcceptLiveAsrFragmentRequest {
 }
 
 export interface Citation {
+  session_id?: string | null;
+  session_title?: string | null;
   segment_id: string;
   start_ms: number;
   end_ms: number;
@@ -392,6 +413,12 @@ export interface Citation {
   start_token_id?: string | null;
   end_token_id?: string | null;
   speaker?: number | null;
+  /**
+   * Assistant answers only: the prompt labels (`P3`) that resolved to this source.
+   * The answer text keeps those labels, so each footnote lands where it was cited.
+   * Empty/absent on answers saved before the backend recorded it.
+   */
+  labels?: string[];
 }
 
 export interface Message {
@@ -400,6 +427,8 @@ export interface Message {
   content: string;
   created_at: string;
   citations?: Citation[];
+  /** Codex answer generated again from scratch after its run was interrupted. */
+  restarted?: boolean;
 }
 
 export interface Note {
@@ -443,6 +472,8 @@ export interface SessionDetail {
   messages: Message[];
   notes: Note | null;
   notes_list?: Note[];
+  /** Server-computed: the notes generator has final speech to read. */
+  has_transcript?: boolean;
 }
 
 export interface AudioIngestResponse {
@@ -450,7 +481,7 @@ export interface AudioIngestResponse {
   duplicate: boolean;
 }
 
-export interface StoredAudioResponse {
+export interface BufferedAudioResponse {
   sequence: number;
   start_ms: number;
   end_ms: number;
@@ -479,6 +510,12 @@ export interface AudioManifestPage {
 }
 
 export interface AskContext {
+  search_scope?: ChatScope | null;
+  session_count?: number;
+  source_count?: number;
+  selected_count?: number;
+  truncated?: boolean;
+  retrieval?: 'legacy' | 'hybrid' | 'monologues' | 'lexical';
   start_ms: number;
   end_ms: number;
   scope: string;
@@ -493,7 +530,7 @@ export interface AskResponse {
 
 export interface AskRequest {
   question: string;
-  window_minutes?: number;
-  scope?: ChatScope;
+  search_scope?: ChatScope;
+  group_session_ids?: string[];
   language?: string;
 }

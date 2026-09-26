@@ -20,6 +20,15 @@ if (!('mediaDevices' in navigator)) {
   });
 }
 
+// jsdom has no layout: CodeMirror (the Notes editor) measures text through
+// Range rects on clicks and selection changes. Empty rects are enough for it to
+// run; no test asserts on geometry.
+if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
+  const empty = { length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] };
+  Range.prototype.getClientRects = () => empty as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+}
+
 // A minimal preload bridge so the store's lazily-created client can exist.
 if (!('audiohelper' in window)) {
   Object.defineProperty(window, 'audiohelper', {
@@ -28,8 +37,7 @@ if (!('audiohelper' in window)) {
     value: {
       request: vi.fn(async () => ({ ok: true, status: 200, data: null })),
       uploadAudio: vi.fn(async () => ({ ok: true, status: 200, data: { duplicate: false, segments: [] } })),
-      storeAudio: vi.fn(async () => ({ ok: true, status: 201, data: { sequence: 0, duplicate: false } })),
-      fetchAudio: vi.fn(async () => ({ ok: true, status: 200, data: new ArrayBuffer(0) })),
+      bufferAudio: vi.fn(async () => ({ ok: true, status: 201, data: { sequence: 0, duplicate: false } })),
       getBackendStatus: vi.fn(async () => ({ phase: 'ready' })),
       onBackendStatus: vi.fn(() => () => undefined),
       platform: 'test',

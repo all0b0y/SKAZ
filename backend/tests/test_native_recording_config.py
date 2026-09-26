@@ -18,60 +18,12 @@ from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
 
-def test_audio_only_stays_local_after_preferences_change_and_restart(
-    config: AppConfig, outbound: FakeHttp, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class GuardedSecrets(MemorySecretStore):
-        reads = 0
-
-        def get(self, provider: str) -> str | None:
-            if provider == "soniox":
-                self.reads += 1
-            return super().get(provider)
-
-    secrets = GuardedSecrets()
-    secrets.set("soniox", "fixture-key-not-real")
-    calls: list[bool] = []
-
-    async def connect(*args: Any, **kwargs: Any) -> None:
-        calls.append(True)
-        raise AssertionError("Audio-only must never connect")
-
-    monkeypatch.setattr(soniox, "connect", connect)
-    sid = ""
-    for restart in (False, True):
-        app = create_app(config, secret_store=secrets, http_client=outbound.client())
-        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-            if not restart:
-                assert http.put("/settings", headers=AUTH, json={
-                    "native_recording_mode": "audio_only", "translation_target_language": "de",
-                    "cloud_consent": True,
-                }).status_code == 200
-                sid = http.post("/sessions", headers=AUTH, json={"title": "Local"}).json()["id"]
-            reads = secrets.reads
-            with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
-                ws.send_json({"type": "open", "sample_rate": 16000})
-                opened = ws.receive_json()
-                assert opened["transcription"] == "disabled"
-                assert secrets.reads == reads
-                index = 1 if restart else 0
-                ws.send_bytes(packet(index, index * 1600))
-                assert ws.receive_json()["type"] == "audio.saved"
-                snap = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
-                assert snap["recording_mode"] == "audio_only"
-                assert snap["translation_target_language"] == "de"
-                assert http.put("/settings", headers=AUTH, json={
-                    "native_recording_mode": "translation", "translation_target_language": "fr",
-                }).status_code == 200
-                ws.send_json({"type": "end", "action": "stop" if restart else "pause"})
-                assert ws.receive_json()["transcription_complete"] is False
-            audio = http.get(f"/sessions/{sid}/audio/{index}", headers=AUTH)
-            assert audio.content[44:] == packet(index, 0)[20:]
-            snap = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
-            assert snap["recording_mode"] == "audio_only"
-            assert snap["final_tokens"] == []
-    assert calls == []
-    assert outbound.requests == []
+def test_audio_only_is_rejected_without_applying_other_preferences(app: Any) -> None:
+    with TestClient(app, base_url="http://127.0.0.1", headers=AUTH) as http:
+        before = http.get("/settings").json()
+        result = http.put("/settings", json={"native_recording_mode": "audio_only", "cloud_consent": True})
+        assert result.status_code == 422
+        assert http.get("/settings").json() == before
 
 
 @pytest.mark.parametrize("mode", ["translation", "transcription"])
@@ -129,10 +81,20 @@ def test_recording_config_survives_pause_restart_and_reaches_provider(
                     assert "translation" not in configs[-1]
                 assert configs[-1]["language_hints"] == ["ru", "en"]
                 assert configs[-1]["language_hints_strict"] is True
-                assert http.put("/settings", headers=AUTH, json={
-                    "native_recording_mode": "audio_only", "translation_target_language": "fr",
-                    "used_languages": ["fr"],
-                }).status_code == 200
+                assert (
+                    http.put(
+                        "/settings",
+                        headers=AUTH,
+                        json={
+                            "native_recording_mode": "transcription"
+                            if mode == "translation"
+                            else "translation",
+                            "translation_target_language": "fr",
+                            "used_languages": ["fr"],
+                        },
+                    ).status_code
+                    == 200
+                )
                 ws.send_bytes(packet(index, index * 1600))
                 assert ws.receive_json()["type"] == "audio.saved"
                 ws.send_json({"type": "end", "action": "pause" if index == 0 else "stop"})
@@ -193,7 +155,7 @@ def test_v3_recording_migrates_as_transcription_not_current_preferences(
             assert snapshot["translation_target_language"] == "ru"
             assert snapshot["used_languages"] is None
             assert snapshot["saved_samples"] == 1600
-            assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).content[44:] == packet(0, 0)[20:]
+            assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404
             with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
                 ws.send_json({"type": "open", "sample_rate": 16000})
                 assert ws.receive_json()["saved_samples"] == 1600

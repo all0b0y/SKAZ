@@ -45,3 +45,8 @@ export function validateCaptureState(payload: unknown): CaptureProtectionState |
   if (!isBoundedCount(raw.pending) || !isBoundedCount(raw.failed)) return null;
   return { recorderState: raw.recorderState, pending: raw.pending, failed: raw.failed };
 }
+
+/** Validate the renderer-reported number of active Codex tasks. */
+export function validateCodexActivity(payload: unknown): number | null {
+  return isBoundedCount(payload) ? payload : null;
+}

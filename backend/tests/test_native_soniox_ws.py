@@ -39,6 +39,48 @@ class ProviderSocket:
         self.closed = True
 
 
+def test_provider_failure_warns_once_and_allows_explicit_retry(
+    app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    socket = ProviderSocket()
+
+    async def connect(*args: Any, **kwargs: Any) -> ProviderSocket:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("provider unavailable")
+        return socket
+
+    monkeypatch.setattr(soniox, "connect", connect)
+    secrets.set("soniox", "fixture-key-not-real")
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+        http.put("/settings", headers=AUTH, json={"cloud_consent": True})
+        sid = http.post("/sessions", headers=AUTH, json={"title": "Retry"}).json()["id"]
+        url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
+        with http.websocket_connect(url, headers=AUTH) as ws:
+            ws.send_json({"type": "open", "sample_rate": 16000})
+            assert ws.receive_json()["type"] == "stream.opened"
+            assert ws.receive_json() == {"type": "transcription.failed"}
+            ws.send_bytes(packet(0, 0))  # the captured tail still receives an ACK
+            assert ws.receive_json()["type"] == "audio.saved"
+            ws.send_json({"type": "end"})
+            assert ws.receive_json()["type"] == "stream.stopped"
+        assert attempts == 1
+        with http.websocket_connect(url, headers=AUTH) as ws:
+            ws.send_json({"type": "open", "sample_rate": 16000})
+            opened = ws.receive_json()
+            assert opened["transcription"] == "connecting"
+            assert http.portal is not None
+            http.portal.call(asyncio.sleep, 0)
+            ws.send_bytes(packet(opened["next_sequence"], opened["saved_samples"]))
+            assert ws.receive_json()["type"] == "audio.saved"
+            ws.send_json({"type": "end"})
+            assert ws.receive_json()["type"] == "stream.stopped"
+        assert attempts == 2
+        assert http.get(f"/sessions/{sid}", headers=AUTH).json()["segments"][0]["text"] == "Hello"
+
+
 def test_native_ws_forwards_once_and_persists_final_before_stop(
     app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -94,20 +136,36 @@ def test_connect_delay_does_not_block_storage_or_backfill_audio(
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
         sid = http.post("/sessions", headers=AUTH, json={"title": "Delayed"}).json()["id"]
-        assert http.put("/settings", headers=AUTH, json={
-            "native_recording_mode": mode, "translation_target_language": "de",
-            "used_languages": ["ru", "en"],
-        }).status_code == 200
+        assert (
+            http.put(
+                "/settings",
+                headers=AUTH,
+                json={
+                    "native_recording_mode": mode,
+                    "translation_target_language": "de",
+                    "used_languages": ["ru", "en"],
+                },
+            ).status_code
+            == 200
+        )
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
             ws.send_bytes(packet(0, 0))
             assert ws.receive_json()["saved_samples"] == 1600
             assert socket.audio == []
-            assert http.put("/settings", headers=AUTH, json={
-                "native_recording_mode": "audio_only", "translation_target_language": "fr",
-                "used_languages": ["fr"],
-            }).status_code == 200
+            assert (
+                http.put(
+                    "/settings",
+                    headers=AUTH,
+                    json={
+                        "native_recording_mode": "transcription" if mode == "translation" else "translation",
+                        "translation_target_language": "fr",
+                        "used_languages": ["fr"],
+                    },
+                ).status_code
+                == 200
+            )
             assert http.portal is not None
             http.portal.call(ready.set)
             http.portal.call(asyncio.sleep, 0)

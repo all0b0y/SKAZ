@@ -56,15 +56,38 @@ function originMatches(actual: string | undefined, expected: string): boolean {
 
 /**
  * Authoritative grant gate for getUserMedia. Grants only audio-only capture from
- * the exact trusted renderer URL on the main window's webContents.
+ * the exact trusted renderer URL on the main window's webContents. An EMPTY type
+ * list is how Chromium asks before a getDisplayMedia call; it only reaches
+ * `displayMediaGrant`, which never hands out video.
  */
 export function isTrustedMediaRequest(ctx: MediaRequestContext, expectedUrl: string): boolean {
   if (ctx.permission !== 'media') return false;
   if (!ctx.fromTrustedWebContents) return false;
   if (!urlMatches(ctx.requestingUrl, expectedUrl)) return false;
   const types = ctx.mediaTypes;
-  if (!types || types.length === 0) return false; // unknown media types → deny by default
+  if (!types) return false; // unknown media types → deny by default
+  if (types.length === 0) return true; // display-media probe; gated by displayMediaGrant
   return types.includes('audio') && !types.includes('video');
+}
+
+export interface DisplayMediaContext {
+  /** The requesting frame is the main window's main frame. */
+  fromTrustedFrame: boolean;
+  securityOrigin: string | undefined;
+  audioRequested: boolean;
+  videoRequested: boolean;
+}
+
+/**
+ * The only system-audio grant: whole-system loopback audio for the trusted
+ * renderer, never a screen or window picture (.dev/docs/CAPTURE-SOURCES-BULK-SPEC.md §1).
+ * Null means deny.
+ */
+export function displayMediaGrant(ctx: DisplayMediaContext, expectedOrigin: string): { audio: 'loopback' } | null {
+  if (!ctx.fromTrustedFrame) return null;
+  if (!originMatches(ctx.securityOrigin, expectedOrigin)) return null;
+  if (ctx.videoRequested || !ctx.audioRequested) return null;
+  return { audio: 'loopback' };
 }
 
 /**

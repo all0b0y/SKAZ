@@ -124,6 +124,21 @@ async def test_open_sends_accuracy_first_multilingual_configuration() -> None:
     await session.aclose()
 
 
+@pytest.mark.parametrize("final", [False, True])
+async def test_stream_accepts_null_translation_status(final: bool) -> None:
+    socket, _, session = await open_fake()
+    try:
+        value = {**token("Hello", final=final), "translation_status": None}
+        await socket.incoming.put(response(tokens=[value]))
+        event = await asyncio.wait_for(anext(session.events()), timeout=1)
+        parsed = event.final_tokens if final else event.partial_tokens
+        assert len(parsed) == 1
+        assert parsed[0].text == "Hello"
+        assert event.token_order[0].translation_status == "none"
+    finally:
+        await session.aclose()
+
+
 async def test_translation_stream_keeps_original_and_untimed_translation_separate() -> None:
     socket = FakeSocket()
     session = await SonioxGateway(

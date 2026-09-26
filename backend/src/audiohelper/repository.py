@@ -14,6 +14,7 @@ from .db import Database
 from .schemas import (
     AudioChunkStatus,
     Citation,
+    LiveAsrFragmentCompletionProvenance,
     Message,
     Note,
     Segment,
@@ -113,7 +114,7 @@ class LiveAsrFragmentRecord:
     draft_revision: int
     config_revision: int
     protected: bool
-    completion_provenance: str | None
+    completion_provenance: LiveAsrFragmentCompletionProvenance | None
     segment_id: str | None
     accepted_at: str | None
     accepted_key: str | None
@@ -195,13 +196,21 @@ def create_session(db: Database, title: str, mode: SessionMode = "legacy") -> Se
 
 def list_sessions(db: Database) -> list[Session]:
     with db.read() as connection:
-        rows = connection.execute("SELECT * FROM sessions ORDER BY created_at DESC, rowid DESC").fetchall()
+        rows = connection.execute(
+            "SELECT sessions.*, COALESCE(n.origin, 'live') AS origin FROM sessions "
+            "LEFT JOIN native_recordings n ON n.session_id=sessions.id "
+            "ORDER BY sessions.created_at DESC, sessions.rowid DESC"
+        ).fetchall()
     return [_session(row) for row in rows]
 
 
 def get_session(db: Database, session_id: str) -> Session | None:
     with db.read() as connection:
-        row = connection.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        row = connection.execute(
+            "SELECT sessions.*, COALESCE(n.origin, 'live') AS origin FROM sessions "
+            "LEFT JOIN native_recordings n ON n.session_id=sessions.id WHERE sessions.id=?",
+            (session_id,),
+        ).fetchone()
     return _session(row) if row else None
 
 
@@ -248,6 +257,7 @@ def _session(row: sqlite3.Row) -> Session:
         status=row["status"],
         duration_ms=row["duration_ms"],
         mode=row["mode"],
+        origin=row["origin"],
     )
 
 

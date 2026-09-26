@@ -47,6 +47,22 @@ describe('TranscriptView isolation from audio-queue events', () => {
   beforeEach(() => {
     restore = window.audiohelper.request;
     window.audiohelper.request = (async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
+      if (req.path === `/sessions/${SESSION}/live/events`) {
+        const original = nativeSnapshot().final_tokens[0]!;
+        return { ok: true, status: 200, data: {
+          protocol: 1, session_id: SESSION, sample_rate: SAMPLE_RATE, saved_samples: SAMPLE_RATE,
+          recording_mode: 'transcription', transcription: 'streaming', translation_target_language: 'ru',
+          connection: { id: 'c1', status: 'active', start_sample: 0, end_sample: null,
+            final_sample: SAMPLE_RATE, processed_sample: SAMPLE_RATE },
+          through: 0, next_after: 0, next_before: 0, has_older: false, has_newer: false,
+          previous_connection_id: null, next_connection_id: null, tail: null,
+          events: [{ ordinal: 0, originals: [original], translations: [], originals_available: true,
+            segment_ids: ['seg-1'], order: [], projection: { owners: { 'tok-1': {
+              id: 'tok-1', connection_id: 'c1', speaker_number: 1, start_sample: 0,
+            } }, translations: {}, passthrough: [] } }],
+          projection: { available: false, groups: {}, tail: null },
+        } as T };
+      }
       if (req.path === `/sessions/${SESSION}/live`) {
         return { ok: true, status: 200, data: nativeSnapshot() as T };
       }

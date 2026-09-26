@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { clsx } from 'clsx';
 import { Icon } from '../ui/Icon';
 import { TASK_LABELS } from './providers';
+import { ProviderKeyLink } from './ProviderKeyLink';
+import { PROVIDER_LABELS } from './ProviderIcon';
 import type { CloudProviderName, TaskKind } from '../../api/types';
 
 interface ProviderCredentialsProps {
@@ -27,6 +29,7 @@ export function ProviderCredentials({
   onChangeKey,
 }: ProviderCredentialsProps) {
   const [showKey, setShowKey] = useState(false);
+  const label = provider === 'soniox' ? 'Soniox' : PROVIDER_LABELS[provider];
 
   const usage =
     tasks.length > 0
@@ -38,7 +41,7 @@ export function ProviderCredentials({
   return (
     <section className="profile provider-card">
       <header className="profile__head">
-        <h4>{provider}</h4>
+        <h4>{label}</h4>
         <p>{usage}</p>
       </header>
 
@@ -55,13 +58,14 @@ export function ProviderCredentials({
         <button type="button" className="field__toggle" onClick={() => setShowKey((s) => !s)}>
           {showKey ? 'Hide' : 'Show'}
         </button>
+        <ProviderKeyLink provider={provider} />
         <span className={clsx('profile__key', effectivelyStored && 'profile__key--set')}>
           {effectivelyStored ? (
             <>
-              <Icon name="check" size={12} /> Key stored securely for {provider} (write-only)
+              <Icon name="check" size={12} /> Key stored securely for {label} (write-only)
             </>
           ) : (
-            `One key per provider, shared by every task assigned to ${provider}. Keys are stored by the backend and never shown again.`
+            `One key per provider, shared by every task assigned to ${label}. Keys are stored by the backend and never shown again.`
           )}
         </span>
       </div>

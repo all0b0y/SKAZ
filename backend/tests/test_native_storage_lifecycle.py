@@ -1,7 +1,6 @@
 """Disk stalls and cancellation observed through the native session API."""
 from __future__ import annotations
 
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -15,12 +14,12 @@ from tests.test_native_live_ws import AUTH, packet
 
 def test_disk_sync_does_not_block_event_loop(app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     entered, release = threading.Event(), threading.Event()
-    real_sync = os.fsync
+    real_accept = app.state.runtime.live_store._accept_transient
 
-    def blocked_sync(fd: int) -> None:
+    def blocked_accept(*args: Any) -> bool:
         entered.set()
-        assert release.wait(3), "test disk gate timed out"
-        real_sync(fd)
+        assert release.wait(3), "test database gate timed out"
+        return bool(real_accept(*args))
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         sid = http.post("/sessions", headers=AUTH, json={"title": "Slow disk"}).json()["id"]
@@ -28,7 +27,7 @@ def test_disk_sync_does_not_block_event_loop(app: Any, monkeypatch: pytest.Monke
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
             with monkeypatch.context() as boundary, ThreadPoolExecutor() as threads:
-                boundary.setattr(os, "fsync", blocked_sync)
+                boundary.setattr(app.state.runtime.live_store, "_accept_transient", blocked_accept)
                 ws.send_bytes(packet(0, 0))
                 assert entered.wait(1)
                 health = threads.submit(http.get, "/health")
@@ -47,7 +46,7 @@ def test_session_request_during_disk_sync_keeps_loop_responsive(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
     entered, release, request_started = threading.Event(), threading.Event(), threading.Event()
-    real_sync = os.fsync
+    real_accept = app.state.runtime.live_store._accept_transient
 
     @app.middleware("http")
     async def mark_request(request: Any, call_next: Any) -> Any:
@@ -55,10 +54,10 @@ def test_session_request_during_disk_sync_keeps_loop_responsive(
             request_started.set()
         return await call_next(request)
 
-    def blocked_sync(fd: int) -> None:
+    def blocked_accept(*args: Any) -> bool:
         entered.set()
-        assert release.wait(3), "test disk gate timed out"
-        real_sync(fd)
+        assert release.wait(3), "test database gate timed out"
+        return bool(real_accept(*args))
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         sid = http.post("/sessions", headers=AUTH, json={"title": "Disk race"}).json()["id"]
@@ -66,7 +65,7 @@ def test_session_request_during_disk_sync_keeps_loop_responsive(
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
             with monkeypatch.context() as boundary, ThreadPoolExecutor() as threads:
-                boundary.setattr(os, "fsync", blocked_sync)
+                boundary.setattr(app.state.runtime.live_store, "_accept_transient", blocked_accept)
                 ws.send_bytes(packet(0, 0))
                 assert entered.wait(1)
                 headers = {**AUTH, "x-test-disk-race": "1"}

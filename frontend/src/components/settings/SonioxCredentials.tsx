@@ -1,3 +1,5 @@
+import { ProviderKeyLink } from './ProviderKeyLink';
+
 interface SonioxCredentialsProps {
   hasKey: boolean;
   value: string | null;
@@ -25,6 +27,7 @@ export function SonioxCredentials({ hasKey, value, onChange, disabled }: SonioxC
           placeholder={hasKey ? 'Key stored — enter a replacement' : 'Not set'}
           onChange={(event) => onChange(event.target.value)}
         />
+        <ProviderKeyLink provider="soniox" />
         <p className="profile__note" role="status">
           {value === '' ? 'Soniox key will be removed on Save.' : value !== null
             ? 'Soniox key replacement pending Save.' : hasKey

@@ -8,7 +8,9 @@ import os
 import httpx
 
 from .activity import ActivityLog
+from .agent.codex_runtime import CodexRuntime
 from .agent.note_rewrite import PendingRewrites
+from .agent.retrieval import EmbeddingIndex
 from .capabilities import describe
 from .catalog import ProviderCatalogs
 from .config import AppConfig, adopt_legacy_database
@@ -27,6 +29,7 @@ from .secrets import FileSecretStore, SecretStore
 from .session_files import SessionFiles
 from .settings_store import TASKS, SettingsStore, StoredSettings
 from .verifications import note
+from .web_search import WebSearch
 from .window_asr import WindowAsrPreview
 
 
@@ -39,26 +42,29 @@ class Runtime:
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         config.data_dir.mkdir(parents=True, exist_ok=True)
-        config.audio_dir.mkdir(parents=True, exist_ok=True)
         # Must run before the database is opened, or SQLite creates an empty
         # skaz.sqlite3 beside the pre-rename file and the install looks wiped.
         adopt_legacy_database(config)
         self.config = config
         self.activity_log = ActivityLog(config.activity_log_capacity)
         self.db = Database(config.db_path)
+        self.codex = CodexRuntime(self.db, config.data_dir / "codex")
+        self.embedding_index = EmbeddingIndex(self.db)
+        self.embedding_lock = asyncio.Lock()
         self.session_files = SessionFiles(
             self.db, config.session_files_root, data_dir=config.data_dir,
             suggested_root=config.documents_dir / "SKAZ",
         )
         self.storage = ManagedStorage(self.db, self.session_files, config.audio_dir)
         self.session_files.storage = self.storage
-        self.live_store = LiveStore(self.db, config.audio_dir, storage=self.storage,
-                                    retain_audio=config.retain_native_audio)
+        self.live_store = LiveStore(self.db)
         self.live_store.recover_interrupted()
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
         self.http = http_client or httpx.AsyncClient(timeout=config.request_timeout_s)
+        self.web_search = WebSearch(self.db, self.secrets)
+        self.codex.web_search = self.web_search
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
         self.ingestion = IngestionService(self)
@@ -75,6 +81,7 @@ class Runtime:
         self.native_tasks: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}
         self.native_streams: dict[str, NativeStream] = {}
         self.native_closing: set[str] = set()
+        self.session_deletions: dict[str, asyncio.Task[None]] = {}
         self.native_shutdown = False
         self.native_settings_lock = asyncio.Lock()
         #: Local Whisper weights are fetched only when the user opts in explicitly.
@@ -131,6 +138,8 @@ class Runtime:
             used_languages=settings.used_languages,
             native_recording_mode=settings.native_recording_mode,
             translation_target_language=settings.translation_target_language,
+            input_device_id=settings.input_device_id,
+            capture_system_audio=settings.capture_system_audio,
 
             provider_has_api_key={
                 provider: bool(self.api_key(provider)) for provider in CLOUD_PROVIDERS
@@ -138,10 +147,12 @@ class Runtime:
             asr=profiles["asr"],
             agent=profiles["agent"],
             notes=profiles["notes"],
+            embedding=profiles["embedding"],
             transcript_language=settings.transcript_language,
             output_language=settings.output_language,
             cloud_consent=settings.cloud_consent,
             import_cost_warning_usd=settings.import_cost_warning_usd,
+            embedding_budget_usd=settings.embedding_budget_usd,
             contextual_local_enabled=settings.contextual_local_enabled,
         )
 
@@ -173,6 +184,7 @@ class Runtime:
         self._finish_close()
 
     def _finish_close(self) -> None:
+        self.codex.close_storage()
         self.window_asr.close()
         self.local_models.close()
         self.ingestion.close()

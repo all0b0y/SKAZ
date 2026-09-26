@@ -91,6 +91,7 @@ class ImportService:
                             if settings.used_languages is not None else None),
             declared_duration_ms=request.declared_duration_ms,
         )
+        await disk_call(self._runtime.storage.ensure_import_directory, request.session_id)
         self._spawn(record)
         return record
 
@@ -138,6 +139,15 @@ class ImportService:
         await self._release(record, delete_job=True)
         return cancelled
 
+    async def prepare_delete(self, session_id: str) -> None:
+        """Stop imports and drain final projection before either delete endpoint."""
+        record = await disk_call(self.store.get, session_id)
+        if record is not None and record.status in ("queued", "uploading", "processing"):
+            await self.cancel(session_id)
+        task = self._tasks.get(session_id)
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+
     async def _run(self, session_id: str) -> None:
         async with self._slots:
             record = await disk_call(self.store.get, session_id)
@@ -153,6 +163,7 @@ class ImportService:
                 await self._fail(session_id, str(error))
 
     async def _execute(self, record: ImportRecord) -> None:
+        await disk_call(self._runtime.storage.ensure_import_directory, record.session_id)
         gateway = await self._gateway()
         session_id = record.session_id
         if record.transcription_id is None:

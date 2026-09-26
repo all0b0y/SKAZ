@@ -137,8 +137,42 @@ async def settle(client: httpx.AsyncClient, session_id: str, *, expect: str) -> 
             return {"status": "deleted"}
         body = response.json()
         if body["status"] == expect:
-            return body
+            return dict(body)
     raise AssertionError(f"import never reached {expect}")
+
+
+@pytest.mark.parametrize("endpoint", ["sessions", "imports"])
+@pytest.mark.parametrize("managed", [False, True])
+async def test_completed_import_can_be_deleted_without_touching_source(
+    ready: httpx.AsyncClient, tmp_path: Path, managed: bool, endpoint: str,
+) -> None:
+    if managed:
+        root = await ready.put("/storage/root", json={"root": str(tmp_path / "files"), "expected_root": None})
+        assert root.status_code == 200, root.text
+        assert (await ready.post("/storage/layout")).status_code == 200
+    source = audio_file(tmp_path)
+    original = source.read_bytes()
+    result = await start_import(ready, source)
+    sid = result["session"]["id"]
+    await settle(ready, sid, expect="completed")
+    response = await ready.delete(f"/{endpoint}/{sid}")
+    assert response.status_code == 200, response.text
+    assert (await ready.get(f"/sessions/{sid}")).status_code == 404
+    assert source.read_bytes() == original
+    if managed:
+        assert not (tmp_path / "files" / "Ungrouped" / sid).exists()
+
+
+async def test_import_origin_survives_list_detail_and_rename(
+    ready: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    result = await start_import(ready, audio_file(tmp_path))
+    sid = result["session"]["id"]
+    await settle(ready, sid, expect="completed")
+    assert result["session"]["origin"] == "import"
+    assert (await ready.get("/sessions")).json()["sessions"][0]["origin"] == "import"
+    assert (await ready.get(f"/sessions/{sid}")).json()["session"]["origin"] == "import"
+    assert (await ready.patch(f"/sessions/{sid}", json={"title": "Renamed"})).json()["origin"] == "import"
 
 
 async def start_import(client: httpx.AsyncClient, path: Path, **over: Any) -> dict[str, Any]:
@@ -146,7 +180,7 @@ async def start_import(client: httpx.AsyncClient, path: Path, **over: Any) -> di
         "path": str(path), "title": "Лекция", "declared_duration_ms": 2_500, **over,
     })
     assert response.status_code == 201, response.text
-    return response.json()
+    return dict(response.json())
 
 
 async def test_import_produces_a_live_shaped_transcript_with_speakers(
@@ -375,7 +409,7 @@ async def test_capabilities_tell_the_dialog_what_it_may_promise(
     assert body["max_concurrent_imports"] == 3
     # Markdown projection is off by default: say so instead of inventing a path.
     assert body["markdown_enabled"] is False
-    assert "хранилище" in body["destination"]
+    assert "internal storage" in body["destination"]
 
 
 async def test_the_cost_warning_threshold_can_be_changed_and_cleared(

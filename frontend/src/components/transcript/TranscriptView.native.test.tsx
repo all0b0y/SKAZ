@@ -64,13 +64,13 @@ describe('native transcript read model', () => {
       } as T };
     };
     render(<TranscriptView focusSegmentId={null} />);
-    const list = await screen.findByRole('list', { name: 'Транскрипция' });
+    const list = await screen.findByRole('list', { name: 'Transcript' });
     const turns = within(list).getAllByRole('listitem');
     expect(turns).toHaveLength(4);
     expect(turns[0]?.querySelector('p')).toHaveTextContent('Hallo ja danke');
     expect(turns[1]?.querySelector('p')).toHaveTextContent('Ja');
     expect(turns[2]?.querySelector('p')).toHaveTextContent('Nochmals');
-    expect(turns[3]).toHaveTextContent('Перевод без точной привязки к репликеUncertain');
+    expect(turns[3]).toHaveTextContent('Translation not tied to an exact turnUncertain');
     // Tokens of one segment now share a node, so the original reads as one run.
     expect(within(list).getByText('Hello jaThanks')).not.toBeVisible();
     expect(within(list).getAllByText('Uncertain')).toHaveLength(1);
@@ -86,7 +86,7 @@ describe('native transcript read model', () => {
       } as T };
     };
     render(<TranscriptView focusSegmentId={null} />);
-    const list = await screen.findByRole('list', { name: 'Транскрипция' });
+    const list = await screen.findByRole('list', { name: 'Transcript' });
     expect(within(list).getByText('Исторический перевод')).toBeVisible();
     expect(within(list).getByText('Confirmed text')).not.toBeVisible();
     expect(within(list).getByText('Unconfirmed tail')).not.toBeVisible();
@@ -115,12 +115,12 @@ describe('native transcript read model', () => {
     Element.prototype.scrollIntoView = scroll;
     const view = render(<TranscriptView focusSegmentId={null} />);
     await act(async () => {});
-    const list = screen.getByRole('list', { name: 'Транскрипция' });
+    const list = screen.getByRole('list', { name: 'Transcript' });
     expect(within(list).getByText('Привет')).toBeVisible();
     expect(within(list).getByText('Hello')).not.toBeVisible();
-    fireEvent.click(within(list).getByText('Показать оригинал'));
+    fireEvent.click(within(list).getByText('Show original'));
     expect(within(list).getByText('Hello')).toBeVisible();
-    fireEvent.click(within(list).getByText('Показать оригинал'));
+    fireEvent.click(within(list).getByText('Show original'));
     translated = 'Здравствуйте';
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(within(list).queryByText('Привет')).not.toBeInTheDocument();
@@ -157,12 +157,12 @@ describe('native transcript read model', () => {
     };
     render(<TranscriptView focusSegmentId={null} />);
     await act(async () => {});
-    const list = screen.getByRole('list', { name: 'Транскрипция' });
+    const list = screen.getByRole('list', { name: 'Transcript' });
     const turns = within(list).getAllByRole('listitem');
     expect(turns).toHaveLength(3);
-    expect(turns[0]).toHaveTextContent('Спикер 1Hello again.');
-    expect(turns[1]).toHaveTextContent('Спикер 2Yes.');
-    expect(turns[2]).toHaveTextContent('Спикер 1And now');
+    expect(turns[0]).toHaveTextContent('Speaker 1Hello again.');
+    expect(turns[1]).toHaveTextContent('Speaker 2Yes.');
+    expect(turns[2]).toHaveTextContent('Speaker 1And now');
     expect(within(list).queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByText('Soniox: transcribing')).not.toBeInTheDocument();
     expect(screen.queryByText('Draft — not used for answers or notes.')).not.toBeInTheDocument();
@@ -182,7 +182,7 @@ describe('native transcript read model', () => {
     finalText = 'A different source read';
     await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
     expect(container.scrollTop).toBe(100);
-    fireEvent.click(screen.getByRole('button', { name: 'К текущей речи' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to live' }));
     expect(container.scrollTop).toBe(2000);
   });
 
@@ -255,6 +255,7 @@ describe('native transcript read model', () => {
     // ApiClient captures the bridge object, whose request is replaced at the IPC boundary.
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getByRole('alert')).toHaveTextContent(/out of date/);
+    expect(screen.queryByRole('button', { name: 'Обновить текст' })).not.toBeInTheDocument();
     expect(screen.getByText('Confirmed text')).toBeInTheDocument();
     view.unmount();
   });
@@ -266,7 +267,7 @@ describe('native transcript read model', () => {
     expect(screen.getByLabelText('Unconfirmed Soniox draft')).toHaveTextContent('00:02.000');
     expect(screen.getByText(/Soniox: transcribing/)).toBeInTheDocument();
     expect(screen.getByText(/00:00.000–00:01.000/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Play source chunk at 00:01' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Play source chunk/ })).not.toBeInTheDocument();
     expect(calls.every((call) => call.method === 'GET')).toBe(true);
   });
 });

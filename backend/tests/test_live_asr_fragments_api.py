@@ -121,7 +121,7 @@ async def _local(client: httpx.AsyncClient) -> None:
 
 async def _store(client: httpx.AsyncClient, session_id: str, sequence: int) -> None:
     response = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": sequence, "start_ms": sequence * 1_000, "end_ms": (sequence + 1) * 1_000},
         content=make_wav(1.0, frequency=220 + sequence * 40),
         headers={"Content-Type": "audio/wav"},
@@ -377,11 +377,7 @@ async def test_fragment_source_corruption_is_visible_and_blocks_edit(
     monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     [fragment] = await _fragments(fragment_client, session_id)
-    with fragment_app.state.runtime.db.read() as connection:
-        path = Path(connection.execute(
-            "SELECT path FROM chunks WHERE session_id=? AND sequence=0", (session_id,)
-        ).fetchone()[0])
-    path.write_bytes(b"corrupt")
+    fragment_app.state.runtime.ingestion.audio.put(session_id, 0, b"corrupt")
 
     [corrupt] = await _fragments(fragment_client, session_id)
     assert corrupt["source_integrity"] == "corrupt"
@@ -400,6 +396,7 @@ async def test_fragment_source_corruption_is_visible_and_blocks_edit(
 
 async def test_source_end_runs_one_trusted_final_pass_and_completes_without_punctuation(
     fragment_client: httpx.AsyncClient,
+    fragment_app: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _local(fragment_client)
@@ -425,6 +422,8 @@ async def test_source_end_runs_one_trusted_final_pass_and_completes_without_punc
     assert terminal["source_ended"] is True
     assert terminal["recovery_required"] is False
     assert engine.calls == 2
+    with pytest.raises(FileNotFoundError):
+        fragment_app.state.runtime.ingestion.audio.get(session_id, 0)
 
     [fragment] = await _fragments(fragment_client, session_id)
     assert fragment["state"] == "complete"
@@ -472,9 +471,9 @@ async def test_invalid_final_pass_is_recoverable_and_not_retried_by_repeated_sto
     retried = await fragment_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 0}
     )
-    assert retried.status_code == 202, retried.text
-    assert (await _wait_scheduler_terminal(fragment_client, session_id))["status"] == "complete"
-    assert engine.calls == 3
+    assert retried.status_code == 404, retried.text
+    assert "input" in retried.json()["detail"].lower()
+    assert engine.calls == 2
 
 
 async def test_missing_source_before_final_pass_is_visible_and_does_not_create_final(
@@ -489,11 +488,7 @@ async def test_missing_source_before_final_pass_is_visible_and_does_not_create_f
     monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
     monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
-    with fragment_app.state.runtime.db.read() as connection:
-        source_path = Path(connection.execute(
-            "SELECT path FROM chunks WHERE session_id=? AND sequence=0", (session_id,)
-        ).fetchone()[0])
-    source_path.unlink()
+    fragment_app.state.runtime.ingestion.audio.discard(session_id)
 
     assert (await fragment_client.patch(
         f"/sessions/{session_id}",
@@ -527,11 +522,7 @@ async def test_corrupt_or_failing_final_pass_preserves_recoverable_fragment(
     monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     if failure == "corrupt":
-        with fragment_app.state.runtime.db.read() as connection:
-            source_path = Path(connection.execute(
-                "SELECT path FROM chunks WHERE session_id=? AND sequence=0", (session_id,)
-            ).fetchone()[0])
-        source_path.write_bytes(b"not the authenticated wav")
+        fragment_app.state.runtime.ingestion.audio.put(session_id, 0, b"not authenticated")
 
     assert (await fragment_client.patch(
         f"/sessions/{session_id}",
@@ -546,6 +537,8 @@ async def test_corrupt_or_failing_final_pass_preserves_recoverable_fragment(
     assert fragment["state"] == "error"
     assert fragment["text"] == "retained"
     assert fragment["state_reason"] == terminal["block_reason"]
+    with pytest.raises(FileNotFoundError):
+        fragment_app.state.runtime.ingestion.audio.get(session_id, 0)
     assert (await fragment_client.get(f"/sessions/{session_id}")).json()["segments"] == []
 
 

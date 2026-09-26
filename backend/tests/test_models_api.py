@@ -142,7 +142,9 @@ async def test_dedicated_model_stays_dedicated_when_the_stt_listing_is_down(
     outbound.routes[("GET", "openrouter.ai/api/v1/models")] = only_unfiltered
     response = await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
             "cloud_consent": True,
         },
     )
@@ -174,7 +176,9 @@ async def test_dedicated_model_becomes_verified_after_a_successful_transcription
 ) -> None:
     await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
             "cloud_consent": True,
         },
     )

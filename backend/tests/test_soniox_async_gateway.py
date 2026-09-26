@@ -132,6 +132,30 @@ async def test_transcript_parses_speaker_language_and_translation_status() -> No
     assert transcript.tokens[2].speaker is None
 
 
+@pytest.mark.parametrize("status", [None, "none", "original", "translation"])
+async def test_transcript_accepts_nullable_translation_status(status: str | None) -> None:
+    recorder = Recorder(httpx.Response(200, json={"id": JOB_ID, "tokens": [
+        {"text": "Hello", "start_ms": 270, "end_ms": 330, "confidence": 0.86,
+         "speaker": "1", "language": "en", "translation_status": status},
+    ]}))
+    transcript = await gateway(recorder).transcript(JOB_ID)
+
+    assert len(transcript.tokens) == 1
+    assert transcript.tokens[0].translation_status == ("none" if status is None else status)
+    assert transcript.tokens[0].start_ms == 270
+    assert transcript.tokens[0].text == "Hello"
+
+
+@pytest.mark.parametrize("status", ["", False, 0, [], {}, "unknown"])
+async def test_transcript_rejects_invalid_translation_status(status: Any) -> None:
+    recorder = Recorder(httpx.Response(200, json={"id": JOB_ID, "tokens": [
+        {"text": "Hello", "start_ms": 270, "end_ms": 330, "confidence": 0.86,
+         "translation_status": status},
+    ]}))
+    with pytest.raises(SonioxAsyncProtocolError):
+        await gateway(recorder).transcript(JOB_ID)
+
+
 async def test_transcript_rejects_reversed_timestamps() -> None:
     recorder = Recorder(httpx.Response(200, json={"id": JOB_ID, "text": "x", "tokens": [
         {"text": "x", "start_ms": 500, "end_ms": 100, "confidence": 0.9},

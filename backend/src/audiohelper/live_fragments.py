@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from . import repository as repo
@@ -138,9 +137,7 @@ class LiveAsrFragmentService:
             if chunk.sha256 != source.sha256:
                 return "corrupt"
             try:
-                path = Path(chunk.path)
-                with path.open("rb") as handle:
-                    data = handle.read(self._runtime.config.max_chunk_bytes + 1)
+                data = self._runtime.ingestion.audio.get(record.session_id, source.sequence)
             except FileNotFoundError:
                 return "missing"
             except OSError:

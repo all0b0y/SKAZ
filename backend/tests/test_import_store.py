@@ -130,7 +130,7 @@ def test_translated_tokens_are_stored_and_projected_against_their_speech(
         token("Привет", 0, 0, speaker="1", language="ru", status="translation"),
     ], audio_duration_ms=600)
 
-    snapshot = LiveStore(db, tmp_path / "audio").snapshot(session_id)
+    snapshot = LiveStore(db).snapshot(session_id)
     assert [t["text"] for t in snapshot["final_tokens"]] == ["Hello"]
     assert [t["text"] for t in snapshot["final_translation_tokens"]] == ["Привет"]
     projection = snapshot["final_translation_projection"]
@@ -156,7 +156,7 @@ def test_a_session_with_a_live_recording_cannot_be_imported_into(
     from audiohelper.live_store import LiveStore
 
     session = create_session(db, "Live")
-    LiveStore(db, tmp_path / "audio").open(session.id, sample_rate=48_000, model="stt-rt-v5")
+    LiveStore(db).open(session.id, sample_rate=48_000, model="stt-rt-v5")
     with pytest.raises(ImportConflict, match="already holds a recording"):
         store.create(session.id, source=source(tmp_path), model=ASYNC_MODEL, translate=False,
                      translation_target_language="ru", used_languages=None, declared_duration_ms=None)
@@ -171,7 +171,7 @@ def test_a_microphone_cannot_continue_an_imported_session(
     store.apply_transcript(session_id, tokens=[token("раз", 0, 500)], audio_duration_ms=1_000)
 
     with pytest.raises(LiveConflict, match="imported"):
-        LiveStore(db, tmp_path / "audio").open(session_id, sample_rate=48_000, model="stt-rt-v5")
+        LiveStore(db).open(session_id, sample_rate=48_000, model="stt-rt-v5")
 
 
 def test_unsettled_imports_are_listed_for_restart_recovery(

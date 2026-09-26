@@ -73,3 +73,18 @@ def test_offset_continues_the_numbering_across_batches() -> None:
     assert "[P2]" in second.text
     (citation,) = second.citations_for("Вывод. [P2]")
     assert citation.monologue_id == monologues[1].id
+
+
+def test_labelled_citations_record_which_labels_named_them() -> None:
+    monologues = build(("Первая.", 1), ("Вторая.", 1), ("Третья.", 2))
+    context = mctx.build(monologues, budget_chars=10_000)
+    cited = context.citations_for("Итог [P1-P2]. Ещё [P3], и снова [P1].", labelled=True)
+    assert [c.monologue_id for c in cited] == [m.id for m in monologues]
+    assert [c.labels for c in cited] == [["P1"], ["P2"], ["P3"]]
+
+
+def test_unlabelled_citations_keep_the_stored_shape_unchanged() -> None:
+    context = mctx.build(build(("Первая.", 1)), budget_chars=10_000)
+    (citation,) = context.citations_for("Итог [P1].")
+    assert citation.labels == []
+    assert "labels" not in citation.model_dump(exclude_defaults=True)

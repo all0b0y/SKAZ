@@ -57,7 +57,7 @@ async def _contextual_session(client: httpx.AsyncClient) -> str:
 async def _store(client: httpx.AsyncClient, session_id: str, sequence: int) -> None:
     start = sequence * 5_000
     response = await client.post(
-        f"/sessions/{session_id}/audio/store",
+        f"/sessions/{session_id}/audio/buffer",
         params={"sequence": sequence, "start_ms": start, "end_ms": start + 5_000},
         content=make_wav(5.0, frequency=220 + sequence),
         headers={"Content-Type": "audio/wav"},

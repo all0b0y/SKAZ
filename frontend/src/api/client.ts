@@ -4,12 +4,13 @@ import type {
   JsonResponse,
 } from './bridge';
 import type { NativeAudioMeta, NativeOpened, NativeSaved, NativeStopped, NativeFailure, NativeSnapshot } from './nativeLive';
+import type { NativeEventPage, NativeEventPageQuery } from './nativeEventPages';
 import type {
   AskRequest,
   AskResponse,
   AudioIngestResponse,
-  AudioManifestPage,
-  StoredAudioResponse,
+  BufferedAudioResponse,
+  BulkDeleteResult,
   LocalModelStatus,
   LocalProviderName,
   LiveAsrAdvanceResponse,
@@ -100,6 +101,12 @@ export class ApiClient {
 
   onNativeFailure(callback: (failure: NativeFailure) => void): () => void {
     return this.bridge.onNativeFailure(callback);
+  }
+
+  getNativeEventPage(sessionId: string, query: NativeEventPageQuery = {}): Promise<NativeEventPage> {
+    return this.bridge.request<NativeEventPage>({
+      method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live/events`, query,
+    }).then(unwrap);
   }
 
   getNativeSnapshot(sessionId: string): Promise<NativeSnapshot> {
@@ -276,9 +283,10 @@ export class ApiClient {
     }).then(unwrap);
   }
 
-  getSession(id: string): Promise<SessionDetail> {
+  getSession(id: string, nativeWindow = false): Promise<SessionDetail> {
     return this.bridge
-      .request<SessionDetail>({ method: 'GET', path: `/sessions/${encodeURIComponent(id)}` })
+      .request<SessionDetail>({ method: 'GET', path: `/sessions/${encodeURIComponent(id)}`,
+        ...(nativeWindow ? { query: { native_window: true } } : {}) })
       .then(unwrap);
   }
 
@@ -321,28 +329,19 @@ export class ApiClient {
       .then(() => undefined);
   }
 
+  /** Deletes each id independently; a failure is reported per id, never thrown for the batch. */
+  deleteSessions(ids: string[]): Promise<BulkDeleteResult> {
+    return this.bridge
+      .request<BulkDeleteResult>({ method: 'POST', path: '/sessions/delete', body: { ids } })
+      .then(unwrap);
+  }
+
   uploadAudio(sessionId: string, meta: AudioUploadMeta, wav: ArrayBuffer): Promise<AudioIngestResponse> {
     return this.bridge.uploadAudio<AudioIngestResponse>(sessionId, meta, wav).then(unwrap);
   }
 
-  storeAudio(sessionId: string, meta: AudioUploadMeta, wav: ArrayBuffer): Promise<StoredAudioResponse> {
-    return this.bridge.storeAudio<StoredAudioResponse>(sessionId, meta, wav).then(unwrap);
-  }
-
-  getAudioManifestPage(
-    sessionId: string,
-    afterSequence?: number,
-    limit = 100,
-  ): Promise<AudioManifestPage> {
-    const query: { after_sequence?: number; limit: number } = { limit };
-    if (afterSequence !== undefined) query.after_sequence = afterSequence;
-    return this.bridge
-      .request<AudioManifestPage>({
-        method: 'GET',
-        path: `/sessions/${encodeURIComponent(sessionId)}/audio`,
-        query,
-      })
-      .then(unwrap);
+  bufferAudio(sessionId: string, meta: AudioUploadMeta, wav: ArrayBuffer): Promise<BufferedAudioResponse> {
+    return this.bridge.bufferAudio<BufferedAudioResponse>(sessionId, meta, wav).then(unwrap);
   }
 
   ask(sessionId: string, req: AskRequest): Promise<AskResponse> {
@@ -375,7 +374,7 @@ export class ApiClient {
     }).then(unwrap);
   }
 
-  /** Soft deletion: the row waits for the trash, so a mistaken click is recoverable. */
+  /** Permanent deletion after explicit confirmation. */
   deleteNote(sessionId: string, noteId: string): Promise<{ deleted: boolean }> {
     return this.bridge.request<{ deleted: boolean }>({ method: 'DELETE',
       path: `/sessions/${encodeURIComponent(sessionId)}/notes/${encodeURIComponent(noteId)}`,
@@ -433,9 +432,5 @@ export class ApiClient {
     }).then(unwrap);
   }
 
-  async fetchAudio(sessionId: string, sequence: number): Promise<ArrayBuffer> {
-    const res = await this.bridge.fetchAudio(sessionId, sequence);
-    if (!res.ok) throw new ApiError(res.status, res.detail);
-    return res.data;
-  }
+
 }

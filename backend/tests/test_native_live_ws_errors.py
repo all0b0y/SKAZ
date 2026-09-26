@@ -1,7 +1,6 @@
 """Error boundaries for the native PCM WebSocket."""
 from __future__ import annotations
 
-import os
 import struct
 from typing import Any
 
@@ -52,8 +51,8 @@ def test_sqlite_write_failure_does_not_escape_or_acknowledge(app: Any) -> None:
         assert http.get(f"/sessions/{identity}/live", headers=AUTH).json()["saved_samples"] == 0
 
 
-def test_fsync_failure_is_disclosed_without_saved_ack(app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    def failed_sync(_fd: int) -> None:
+def test_receipt_write_failure_is_disclosed_without_ack(app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def failed_write(*args: Any) -> None:
         raise OSError("private disk information")
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
@@ -62,7 +61,7 @@ def test_fsync_failure_is_disclosed_without_saved_ack(app: Any, monkeypatch: pyt
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
             with monkeypatch.context() as boundary:
-                boundary.setattr(os, "fsync", failed_sync)
+                boundary.setattr(app.state.runtime.live_store, "_accept_transient", failed_write)
                 ws.send_bytes(packet(0, 0))
                 assert ws.receive_json() == {"type": "stream.error", "code": "storage_failed"}
         assert http.get(f"/sessions/{identity}/live", headers=AUTH).json()["saved_samples"] == 0

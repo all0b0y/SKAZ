@@ -1,37 +1,37 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEdgeFade } from '../../hooks/useOverflowEdges';
 import { ApiClient, ApiError } from '../../api/client';
 import { useStore } from '../../state/store';
-import { EmptyState } from '../ui/EmptyState';
 import { ContextMenu, ContextMenuItem } from '../ui/ContextMenu';
 import { findCitationForSelection } from '../../lib/citationMatch';
 import { copyToClipboard } from '../../lib/clipboard';
 import type { SaveStatus } from '../../lib/autosave';
-import { NoteEditor, type EditorSelection } from './NoteEditor';
+import { NoteEditor, type EditorHandle, type EditorSelection } from './NoteEditor';
 import { NoteTabsBar } from './NoteTabsBar';
 import { OpenNoteDialog } from './OpenNoteDialog';
 import { RewriteDiff } from './RewriteDiff';
 import {
   activeTab as activeTabOf,
   attachNote,
-  closeTab,
-  loadTabs,
+  emptyTabs,
   noteName,
   openTab,
   pruneTabs,
   renameTab,
-  saveTabs,
   selectTab,
-  titleFromContent,
   type NoteTab,
   type TabsState,
 } from '../../state/noteTabs';
 import { NoteList } from './NoteList';
+import { SetupNotice } from '../ui/SetupNotice';
+import { SessionDialog } from '../sessions/SessionOverlays';
 import type { Citation, Note, NoteDetail } from '../../api/types';
+import { selectCodexNotes, useCodex } from '../../state/codex';
+import { shareableNote } from '../../state/shareNote';
+import { STATUS_LABEL } from '../assistant/codexLabels';
 
 interface NotesPanelProps {
   onCite: (citation: Citation) => void;
-  /** Offered next to a "no model configured" failure, which is only fixable there. */
-  onOpenSettings?: () => void;
 }
 
 const COPY_FEEDBACK_MS = 1_500;
@@ -73,9 +73,9 @@ const loadDetail = (): NoteDetail => {
  * "Показать в записи" when it is selected; a point the user wrote themselves offers
  * nothing, and the note reads as an ordinary document either way.
  */
-export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
+export function NotesPanel({ onCite }: NotesPanelProps) {
   const sessionDetail = useStore((s) => s.detail);
-  const generating = useStore((s) => s.notesGenerating);
+  const generation = useStore((s) => (s.activeSessionId ? s.noteGenerations[s.activeSessionId] : undefined));
   const error = useStore((s) => s.notesError);
   const recorderState = useStore((s) => s.recorderState);
   const generate = useStore((s) => s.generateNotes);
@@ -85,30 +85,51 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
   const refreshTranscriptSource = useStore((s) => s.refreshTranscriptSource);
   const setAskContext = useStore((s) => s.setAskContext);
   const activeId = useStore((s) => s.activeSessionId);
+  const detailLoading = useStore((s) => s.detailLoading);
   const settings = useStore((s) => s.settings);
-
-  const [tabs, setTabs] = useState<TabsState>(() => loadTabs());
+  const codexOn = useCodex(selectCodexNotes);
+  const codexSettings = useCodex((s) => s.settings);
+  const codexTask = useCodex((s) => s.tasks.find((t) => t.id === generation?.taskId));
+  // Each session keeps its own tabs (docs/NOTES-POLISH-SPEC.md §3), held by the
+  // store so a generation can fill its tab after this panel has unmounted.
+  const tabs = useStore((s) => (s.activeSessionId ? s.noteTabs[s.activeSessionId] : undefined)) ?? emptyTabs;
+  const updateNoteTabs = useStore((s) => s.updateNoteTabs);
+  const closeNoteTab = useStore((s) => s.closeNoteTab);
+  const setTabs = useCallback((change: (state: TabsState) => TabsState) => {
+    if (activeId) updateNoteTabs(activeId, change);
+  }, [activeId, updateNoteTabs]);
   const [noteDetail, setNoteDetail] = useState<NoteDetail>(loadDetail);
   const [picking, setPicking] = useState(false);
+  const [deleting, setDeleting] = useState<{ sessionId: string; noteId: string } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  useEffect(() => { setDeleting(null); }, [activeId]);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [rewrite, setRewrite] = useState<RewriteState | null>(null);
   const [rewriting, setRewriting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
-  // Why a generation tab is not showing a document: still running, or failed.
-  const [pendingError, setPendingError] = useState<string | null>(null);
+  const editorHandle = useRef<EditorHandle | null>(null);
+  // The note page is the column's one scrolling body (PANES-SPEC §5).
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEdgeFade(bodyRef);
+  const shareUnavailable = window.audiohelper.shareNote && window.audiohelper.platform === 'darwin'
+    ? null : 'Available on macOS only';
 
   const allNotes = useMemo(
     () => sessionDetail?.notes_list ?? (sessionDetail?.notes ? [sessionDetail.notes] : []),
     [sessionDetail],
   );
-  const capturing = recorderState === 'recording' || recorderState === 'processing';
-  const hasSegments = (sessionDetail?.segments.length ?? 0) > 0;
+  // Codex reads a confirmed snapshot taken at request time, so it does not need
+  // the recording to stop; the existing generator still does.
+  const capturing = !codexOn && (recorderState === 'recording' || recorderState === 'processing');
+  // The server's answer when it gave one: the native summary never carries
+  // segments, so their count would call every new recording empty.
+  const hasSegments = sessionDetail?.has_transcript ?? (sessionDetail?.segments.length ?? 0) > 0;
   // Only once settings are actually loaded. An unread settings document must not
   // be reported as "no model chosen" — that would be a guess about the config.
-  const notesModelMissing = !!settings && !settings.notes.model;
-
-  useEffect(() => saveTabs(tabs), [tabs]);
+  const notesModelMissing = codexOn
+    ? !codexSettings?.notes_model || !codexSettings.notes_effort
+    : !!settings && !settings.notes.model;
 
   // Finals can still land after Stop, and nothing else refreshes the stored
   // transcript while the user sits on this tab. Without this read, generation
@@ -121,76 +142,48 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
   // A tab pointing at a note of the *current* session that no longer exists is
   // dropped. Tabs of other sessions are left alone: their notes are simply not
   // loaded right now, and closing them would throw away the user's working set.
+  //
+  // Not while a session is loading: until its detail arrives the store still
+  // holds the previous session's notes, and checking against those closed
+  // every tab of the session just selected.
   useEffect(() => {
-    if (!activeId || !sessionDetail) return;
+    if (!activeId || !sessionDetail || detailLoading) return;
     const known = new Set(allNotes.map((note) => note.id));
     setTabs((state) => pruneTabs(state, (tab) =>
       tab.sessionId !== activeId || tab.noteId === null || known.has(tab.noteId)));
-  }, [activeId, sessionDetail, allNotes]);
+  }, [activeId, sessionDetail, detailLoading, allNotes, setTabs]);
 
   const current: NoteTab | null = activeTabOf(tabs);
-  const openNote: Note | null = current && current.sessionId === activeId && current.noteId
+  const openNote: Note | null = current && current.sessionId === activeId && current.noteId && !detailLoading
     ? allNotes.find((note) => note.id === current.noteId) ?? null
     : null;
+  const generating = generation?.status === 'running';
+  // What the tab without a document is waiting on: this tab's own generation.
+  const pending = current && !current.noteId && generation?.tabId === current.id ? generation : null;
 
   // Every reason generation is refused, stated on the control itself rather than
   // left as a dead button the user has to guess about.
   const generateHint = capturing
-    ? 'Остановите запись'
-    : !hasSegments ? 'Нет транскрипции'
-    : notesModelMissing ? 'Не выбрана модель' : null;
+    ? 'Stop recording first'
+    : !hasSegments ? 'No transcript'
+    : notesModelMissing ? 'No model selected' : null;
   const canGenerate = !!activeId && hasSegments && !capturing && !notesModelMissing;
 
-  /**
-   * Run one generation into an already open tab.
-   *
-   * The tab exists before the request so the user sees that something started;
-   * the note does not, because a failed generation must not leave an empty
-   * document behind. Binding happens only once the note actually arrives, and a
-   * tab closed meanwhile is left closed — the note is in the list either way.
-   */
-  const runGeneration = useCallback(async (pendingTabId: string) => {
-    const note = await generate(noteDetail);
-    if (!note?.id) {
-      // The tab stays, carrying the reason and a retry: a vanishing tab loses
-      // which generation failed, and the panel-wide banner cannot say.
-      setPendingError(useStore.getState().notesError ?? 'Не удалось создать конспект');
-      return;
-    }
-    setPendingError(null);
-    setTabs((state) => {
-      if (!state.tabs.some((tab) => tab.id === pendingTabId)) return state;
-      return renameTab(attachNote(state, pendingTabId, note.id!), pendingTabId, noteName(note));
-    });
+  const handleGenerate = useCallback(() => {
+    void generate(noteDetail);
   }, [generate, noteDetail]);
 
-  const handleGenerate = useCallback(async () => {
-    if (!activeId) return;
-    setPendingError(null);
-    let pendingTabId = '';
-    setTabs((state) => {
-      const opened = openTab(state, { sessionId: activeId, noteId: null, title: 'Генерация…' });
-      pendingTabId = opened.activeTabId ?? '';
-      return opened;
-    });
-    await runGeneration(pendingTabId);
-  }, [activeId, runGeneration]);
-
   /** Retry inside the tab that failed, rather than stacking another one beside it. */
-  const handleRetry = useCallback(async () => {
-    const tabId = tabs.activeTabId;
-    if (!tabId) return;
-    setPendingError(null);
-    setTabs((state) => renameTab(state, tabId, 'Генерация…'));
-    await runGeneration(tabId);
-  }, [tabs.activeTabId, runGeneration]);
+  const handleRetry = useCallback(() => {
+    if (tabs.activeTabId) void generate(noteDetail, tabs.activeTabId);
+  }, [generate, noteDetail, tabs.activeTabId]);
 
   const handleCreateEmpty = useCallback(async () => {
     if (!activeId) return;
     const note = await createEmptyNote();
     if (!note?.id) return;
-    setTabs((state) => openTab(state, { sessionId: activeId, noteId: note.id!, title: 'Без названия' }));
-  }, [activeId, createEmptyNote]);
+    setTabs((state) => openTab(state, { sessionId: activeId, noteId: note.id!, title: 'Untitled' }));
+  }, [activeId, createEmptyNote, setTabs]);
 
   /**
    * Rename the note a tab points at (decision 9).
@@ -208,21 +201,39 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
     // the store's own update follows when the write is accepted.
     setTabs((state) => renameTab(state, tab.id, title));
     void renameNote(target, title);
-  }, [activeId, allNotes, renameNote]);
+  }, [activeId, allNotes, renameNote, setTabs]);
 
   /** Delete the note a tab points at (decision 14) and close the tab with it. */
   const handleDeleteTab = useCallback((tab: NoteTab) => {
     if (tab.sessionId !== activeId || !tab.noteId) return;
-    setTabs((state) => closeTab(state, tab.id));
-    void deleteNote(tab.noteId);
-  }, [activeId, deleteNote]);
+    setDeleting({ sessionId: activeId, noteId: tab.noteId });
+  }, [activeId]);
+
+  /**
+   * Send a note as a clean `.md` file through the system share sheet (spec §5-6).
+   *
+   * The open note is saved first and shared as it is on screen, so the recipient
+   * never gets a version older than what the user sees. A background tab has no
+   * pending edits: its stored text is already the latest.
+   */
+  const handleShareTab = useCallback(async (tab: NoteTab, x: number, y: number) => {
+    if (tab.sessionId !== activeId || !tab.noteId) return;
+    const stored = allNotes.find((note) => note.id === tab.noteId);
+    if (!stored) return;
+    const editor = editorHandle.current;
+    const content = editor && editor.noteId === tab.noteId ? await editor.flush() : stored.content;
+    const session = useStore.getState().sessions.find((s) => s.id === activeId);
+    const shared = shareableNote({ title: stored.title, content }, session?.title ?? null);
+    const ok = await window.audiohelper.shareNote?.({ ...shared, x, y });
+    if (!ok) useStore.setState({ notesError: 'Could not open the Share menu' });
+  }, [activeId, allNotes]);
 
   /**
    * A right click inside the document raises the app's own menu.
    *
    * The citation is resolved once, here, so every entry of the menu agrees about
-   * whether this passage rests on stored speech: "Показать в транскрипции" and
-   * "Перегенерировать" are the same claim seen twice.
+   * whether this passage rests on stored speech: "Show in transcript" and
+   * "Regenerate" are the same claim seen twice.
    */
   const handleEditorMenu = useCallback((selection: EditorSelection) => {
     setCopied(false);
@@ -245,18 +256,13 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
     setMenu(null);
   };
 
-  /** Paste into the raw field the editor is in; the rendered view cannot take text. */
+  /** Paste where the editor's selection is, through the editor itself. */
   const handlePaste = () => {
+    const insert = menu?.insert;
     setMenu(null);
+    if (!insert) return;
     void navigator.clipboard?.readText?.().then((text) => {
-      if (!text) return;
-      const field = document.querySelector<HTMLTextAreaElement>('.note-editor__text');
-      if (!field) return;
-      const from = field.selectionStart ?? field.value.length;
-      const to = field.selectionEnd ?? from;
-      field.setRangeText(text, from, to, 'end');
-      // React listens for input, not for a programmatic value change.
-      field.dispatchEvent(new Event('input', { bubbles: true }));
+      if (text) insert(text);
     }).catch(() => undefined);
   };
 
@@ -300,14 +306,14 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
     } catch (error) {
       setRewrite((state) => state && {
         ...state, applying: false,
-        error: error instanceof ApiError ? error.message : 'Не удалось применить фрагмент',
+        error: error instanceof ApiError ? error.message : 'Could not apply the passage',
       });
     }
   }, [rewrite, openNote, activeId, allNotes]);
 
   const setRewriteError = (error: unknown) => {
     useStore.setState({
-      notesError: error instanceof ApiError ? error.message : 'Не удалось перегенерировать фрагмент',
+      notesError: error instanceof ApiError ? error.message : 'Could not regenerate the passage',
     });
   };
 
@@ -321,9 +327,9 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
         className="btn btn--primary notes__start-btn"
         disabled={!canGenerate || generating}
         title={generateHint ?? undefined}
-        onClick={() => void handleGenerate()}
+        onClick={handleGenerate}
       >
-        <span>Создать конспект с ИИ</span>
+        <span>Create AI notes</span>
         {generateHint && <small>{generateHint}</small>}
       </button>
       <button
@@ -332,7 +338,7 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
         disabled={!activeId}
         onClick={() => void handleCreateEmpty()}
       >
-        <span>Создать пустой</span>
+        <span>Create empty</span>
       </button>
     </>
   );
@@ -348,11 +354,13 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
         generating={generating}
         saveStatus={openNote && current && activeId ? saveStatus : null}
         onSelect={(id) => setTabs((state) => selectTab(state, id))}
-        onClose={(id) => setTabs((state) => closeTab(state, id))}
+        onClose={(id) => { if (activeId) closeNoteTab(activeId, id); }}
         onRename={handleRenameTab}
         onDelete={handleDeleteTab}
+        onShare={(tab, x, y) => void handleShareTab(tab, x, y)}
+        shareUnavailable={shareUnavailable}
         onCreateEmpty={() => void handleCreateEmpty()}
-        onCreateGenerated={() => void handleGenerate()}
+        onCreateGenerated={handleGenerate}
         onOpenExisting={() => setPicking(true)}
         onDetailChange={(next) => {
           setNoteDetail(next);
@@ -360,47 +368,72 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
         }}
       />
 
-      {/* A missing model is a settings problem, so the way to fix it is offered
-          here instead of leaving the user to find the drawer themselves. */}
-      {notesModelMissing && (
-        <p className="notes__notice" role="status">
-          Модель для конспектов не выбрана — генерация с ИИ недоступна. Пустой конспект
-          можно создать и без модели.
-          {onOpenSettings && (
-            <button type="button" className="notes__notice-action" onClick={onOpenSettings}>
-              Открыть настройки
-            </button>
-          )}
-        </p>
-      )}
+      {/* Failures of actions without a tab of their own (create, rename,
+          delete). A generation failure is reported inside its own tab. */}
+      {error && <p className="notes__error" role="alert">{error}</p>}
 
-      {/* A generation failure is reported inside its own tab (decision 12); the
-          panel-wide banner cannot say which generation failed, so it must not
-          repeat the same sentence over the whole pane. */}
-      {error && !pendingError && <p className="notes__error" role="alert">{error}</p>}
-
-      <div className="notes__body">
+      <div className="notes__body" ref={bodyRef}>
         {/* A tab with no note behind it is a generation in flight — or one that
             failed. Either way the user sees which tab it was, instead of a banner
             over the whole panel that cannot say. */}
-        {current && !openNote && !pendingError && generating && (
-          <div className="note-pending" role="status" aria-label="Генерация конспекта">
+        {current && !openNote && pending?.status === 'running' && (
+          <div className="note-pending" role="status" aria-label="Generating notes">
             <span className="note-pending__spinner" aria-hidden="true" />
-            <p>Читаю транскрипцию и собираю конспект…</p>
+            {pending.taskId ? (
+              <>
+                <p>
+                  {codexTask ? STATUS_LABEL[codexTask.status] : 'Starting'} · Codex is reading the whole recording
+                  {codexTask?.activity.at(-1) ? ` · ${codexTask.activity.at(-1)}` : ''}
+                </p>
+                {codexTask && ['preparing', 'queued', 'running'].includes(codexTask.status) && (
+                  <button type="button" className="btn btn--quiet"
+                    onClick={() => void useCodex.getState().stop(codexTask.id)}>
+                    {codexTask.status === 'running' ? 'Stop' : 'Cancel'}
+                  </button>
+                )}
+                {codexTask && codexTask.activity.length > 0 && (
+                  <details className="codex-task__journal">
+                    <summary>Activity log · {codexTask.activity.length}</summary>
+                    <ol>{codexTask.activity.map((entry, i) => <li key={i}>{entry}</li>)}</ol>
+                  </details>
+                )}
+              </>
+            ) : (
+              <p>Reading the transcript and writing notes…</p>
+            )}
           </div>
         )}
 
-        {current && !openNote && pendingError && (
+        {current && !openNote && pending?.status === 'failed' && (
           <div className="note-pending note-pending--failed">
-            <p role="alert">{pendingError}</p>
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={!canGenerate || generating}
-              onClick={() => void handleRetry()}
-            >
-              Повторить
-            </button>
+            <p role="alert">{pending.error}</p>
+            {codexTask?.answer && (
+              <p className="codex-task__note">Partial text was not saved as a note: the notes are unfinished.</p>
+            )}
+            {codexTask && (codexTask.status === 'paused' || codexTask.status === 'failed') ? (
+              <button type="button" className="btn btn--primary" onClick={() => {
+                const sessionId = activeId;
+                if (!sessionId) return;
+                useStore.setState((s) => ({ noteGenerations: { ...s.noteGenerations,
+                  [sessionId]: { ...pending, status: 'running', error: null } } }));
+                void useCodex.getState().resume(codexTask.id).then(() => {
+                  const failed = useCodex.getState().error;
+                  if (failed) useStore.setState((s) => ({ noteGenerations: { ...s.noteGenerations,
+                    [sessionId]: { ...pending, status: 'failed', error: failed } } }));
+                });
+              }}>
+                Continue
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!canGenerate || generating}
+                onClick={handleRetry}
+              >
+                Retry
+              </button>
+            )}
           </div>
         )}
 
@@ -414,32 +447,32 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
                 sessionId: activeId!, noteId: note.id!, title: noteName(note),
               }))}
               onRename={(note, title) => void renameNote(note, title)}
-              onDelete={(note) => void deleteNote(note.id!)}
+              onDelete={(note) => activeId && setDeleting({ sessionId: activeId, noteId: note.id! })}
             />
             {/* The icon, heading and hint only explain a pane that shows nothing.
                 Above an actual list they are noise that pushes the notes down, so
                 once there is a list only the two start buttons remain. */}
-            {allNotes.length > 0 ? (
-              <div className="notes__start notes__start--compact">{startButtons}</div>
-            ) : (
-              <EmptyState
-                icon="notes"
-                title="Нет конспектов"
-                hint="Создайте конспект с ИИ или пустой — те же действия есть в меню «+» над этим полем."
-              >
-                <div className="notes__start">{startButtons}</div>
-              </EmptyState>
+            {/* No illustration and no heading (docs/NOTES-POLISH-SPEC.md §6): one
+                quiet line where the list would be, then the same two buttons. */}
+            {allNotes.length === 0 && <p className="notes__empty">No notes yet</p>}
+            <div className="notes__start">{startButtons}</div>
+            {notesModelMissing && (
+              <SetupNotice
+                message={codexOn ? 'No Codex model selected for notes.' : 'No model selected for notes.'}
+                section="notes"
+              />
             )}
           </>
         )}
 
         {openNote && current && activeId && (
-          <div className="notes__content-wrap">
+          <div className="notes__page">
             <NoteEditor
               key={`${activeId}:${openNote.id}`}
               sessionId={activeId}
               note={openNote}
               onStatusChange={setSaveStatus}
+              onHandle={(handle) => { editorHandle.current = handle; }}
               onSaved={(saved) => {
                 useStore.setState((state) => state.activeSessionId !== activeId || !state.detail ? {} : {
                   detail: { ...state.detail, notes: saved,
@@ -463,23 +496,23 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          label="Действия с фрагментом"
+          label="Passage actions"
           onDismiss={() => setMenu(null)}
         >
           <ContextMenuItem
             disabled={!menu.citation}
-            hint={menu.text ? 'Источник не найден' : 'Ничего не выделено'}
+            hint={menu.text ? 'Source not found' : 'Nothing selected'}
             onClick={() => {
               if (!menu.citation) return;
               onCite(menu.citation);
               setMenu(null);
             }}
           >
-            Показать в транскрипции
+            Show in transcript
           </ContextMenuItem>
           <ContextMenuItem
             disabled={!menu.text}
-            hint="Ничего не выделено"
+            hint="Nothing selected"
             onClick={() => {
               setAskContext({ text: menu.text, citation: menu.citation });
               setMenu(null);
@@ -489,17 +522,17 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
           </ContextMenuItem>
           <ContextMenuItem
             disabled={!menu.citation || !menu.span || rewriting}
-            hint={!menu.text ? 'Ничего не выделено'
-              : !menu.citation ? 'Источник не найден'
-              : !menu.span ? 'Фрагмент не найден в тексте' : 'Идёт перегенерация'}
+            hint={!menu.text ? 'Nothing selected'
+              : !menu.citation ? 'Source not found'
+              : !menu.span ? 'Passage not found in the text' : 'Regenerating'}
             onClick={() => void handleRewrite()}
           >
-            Перегенерировать
+            Regenerate
           </ContextMenuItem>
-          <ContextMenuItem disabled={!menu.text} hint="Ничего не выделено" onClick={handleCopy}>
-            {copied ? 'Скопировано' : 'Копировать'}
+          <ContextMenuItem disabled={!menu.text} hint="Nothing selected" onClick={handleCopy}>
+            {copied ? 'Copied' : 'Copy'}
           </ContextMenuItem>
-          <ContextMenuItem onClick={handlePaste}>Вставить</ContextMenuItem>
+          <ContextMenuItem onClick={handlePaste}>Paste</ContextMenuItem>
         </ContextMenu>
       )}
 
@@ -514,13 +547,35 @@ export function NotesPanel({ onCite, onOpenSettings }: NotesPanelProps) {
         />
       )}
 
+      {deleting && deleting.sessionId === activeId && (
+        <SessionDialog title="Delete notes permanently?" busy={deleteBusy} onClose={() => setDeleting(null)}>
+          <p>The notes will be deleted and cannot be restored. There is no trash.</p>
+          <div className="session-dialog__actions">
+            <button className="btn btn--quiet" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancel</button>
+            <button className="btn btn--primary" disabled={deleteBusy} onClick={() => {
+              const target = deleting;
+              setDeleteBusy(true);
+              void deleteNote(target.noteId).then((deleted) => {
+                if (deleted) {
+                  for (const tab of tabs.tabs) {
+                    if (tab.noteId === target.noteId) closeNoteTab(target.sessionId, tab.id);
+                  }
+                  setDeleting(null);
+                }
+              }).finally(() => setDeleteBusy(false));
+            }}>Delete permanently</button>
+          </div>
+        </SessionDialog>
+      )}
       {picking && (
         <OpenNoteDialog
+          notes={allNotes}
           onClose={() => setPicking(false)}
-          onPick={(sessionId, note) => {
+          onPick={(note) => {
             setPicking(false);
+            if (!activeId) return;
             setTabs((state) => openTab(state, {
-              sessionId, noteId: note.id!, title: titleFromContent(note.content) || 'Без названия',
+              sessionId: activeId, noteId: note.id!, title: noteName(note),
             }));
           }}
         />

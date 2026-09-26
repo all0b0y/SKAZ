@@ -21,9 +21,9 @@ test('transcript-only desktop accepts PCM without archiving and resumes its cloc
     expect(paths.session).toBe(path.join(directory, 'session'));
     const page = await app.firstWindow();
     await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
-    const onboarding = page.getByRole('dialog', { name: 'На каких языках вы говорите?' });
-    await onboarding.getByRole('button', { name: 'Русский + English', exact: true }).click();
-    await onboarding.getByRole('button', { name: 'Продолжить', exact: true }).click();
+    const onboarding = page.getByRole('dialog', { name: 'Which languages do you speak?' });
+    await onboarding.getByRole('button', { name: 'Russian + English', exact: true }).click();
+    await onboarding.getByRole('button', { name: 'Continue', exact: true }).click();
     const result = await page.evaluate(async () => {
       const api = window.audiohelper;
       const created = await api.request<{ id: string }>({ method: 'POST', path: '/sessions', body: { title: 'Transient smoke' } });
@@ -37,8 +37,8 @@ test('transcript-only desktop accepts PCM without archiving and resumes its cloc
       const paused = await api.endNative(id, 'pause');
       const resumed = await api.openNative(id, 16000);
       const ended = await api.endNative(id, 'stop');
-      const audio = await api.fetchAudio(id, 0);
-      return { id, opened, paused, resumed, ended, audioAvailable: audio.ok };
+      // Nothing is archived, so the bridge offers no way to read audio back.
+      return { id, opened, paused, resumed, ended, audioAvailable: 'fetchAudio' in api };
     });
     expect(result.opened).toMatchObject({ ok: true, data: { audio_retained: false } });
     expect(result.resumed).toMatchObject({ ok: true, data: { saved_samples: 160000, next_sequence: 100, audio_retained: false } });
@@ -48,10 +48,11 @@ test('transcript-only desktop accepts PCM without archiving and resumes its cloc
     await expect(page.getByRole('button', { name: 'Continue recording', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Diagnostic audio', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(page.getByLabel('Режим новой записи').locator('option[value="audio_only"]')).toHaveCount(0);
-    await expect(page.getByText('Сохраняются транскрипция и таймкоды. Аудио используется для распознавания и не сохраняется.')).toBeVisible();
+    await expect(page.getByLabel('New recording mode').locator('option[value="audio_only"]')).toHaveCount(0);
+    await expect(page.getByText('The transcript and timestamps are saved. Audio is used for recognition and is not stored.')).toBeVisible();
     await page.screenshot({ path: '/tmp/transcript-only-settings.png' });
-    const files = await fs.readdir(path.join(directory, 'data/audio'), { recursive: true });
+    // No audio directory at all is the strongest form of "nothing archived".
+    const files = await fs.readdir(path.join(directory, 'data/audio'), { recursive: true }).catch(() => [] as string[]);
     expect(files.filter((name) => name.endsWith('.wav'))).toEqual([]);
-  } finally { await app.close(); }
+  } finally { await app.close(); await fs.rm(directory, { recursive: true, force: true }); }
 });

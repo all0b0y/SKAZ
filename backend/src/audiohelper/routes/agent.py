@@ -19,12 +19,11 @@ from ..schemas import (
     DeleteResponse,
     EditNoteRequest,
     Note,
-    NoteRevisionRequest,
     NotesRequest,
-    NoteVersion,
     RewritePassageRequest,
     RewritePreview,
 )
+from ..session_files import FileDeletionBlocked
 from .deps import RuntimeDep
 
 router = APIRouter(prefix="/sessions")
@@ -123,16 +122,16 @@ def edit_note(session_id: str, note_id: str, payload: EditNoteRequest, runtime: 
 
 @router.delete("/{session_id}/notes/{note_id}")
 def delete_note(session_id: str, note_id: str, runtime: RuntimeDep) -> DeleteResponse:
-    """Hide a note: the row waits for the trash instead of being destroyed.
-
-    The projection runs afterwards so the note's Markdown leaves the session folder
-    with it; the primary record stays recoverable in the database.
-    """
+    """Permanently delete this note; no application trash or restore."""
     _require_session(runtime, session_id)
     try:
-        note_store.soft_delete(runtime.db, session_id, note_id)
+        runtime.session_files.delete_note(session_id, note_id)
     except note_store.NoteMissing as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except FileDeletionBlocked as error:
+        raise HTTPException(
+            status_code=409, detail="Note was not deleted: its Markdown file needs attention."
+        ) from error
     # A preview of a deleted note can never be applied; holding it would only keep
     # generated text in memory for a document that is gone.
     runtime.note_rewrites.drop_note(note_id)
@@ -190,25 +189,3 @@ async def apply_rewrite(
         raise HTTPException(status_code=409, detail=str(error)) from error
     await disk_call(runtime.session_files.project, session_id)
     return note
-
-
-@router.get("/{session_id}/notes/{note_id}/history")
-def note_history(session_id: str, note_id: str, runtime: RuntimeDep) -> dict[str, list[NoteVersion]]:
-    try:
-        return {"versions": note_store.history(runtime.db, session_id, note_id)}
-    except note_store.NoteMissing as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-
-
-@router.post("/{session_id}/notes/{note_id}/history/{version_id}/restore")
-def restore_note(
-    session_id: str, note_id: str, version_id: str, payload: NoteRevisionRequest, runtime: RuntimeDep,
-) -> Note:
-    try:
-        note = note_store.restore(runtime.db, session_id, note_id, version_id, payload.expected_revision)
-        runtime.session_files.project(session_id)
-        return note
-    except note_store.NoteMissing as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
-    except note_store.NoteConflict as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error

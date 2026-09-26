@@ -1,14 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { CHANNELS } from './channels';
+import { systemAudioSupported } from './systemAudio';
 import type {
   AudioFileChoice,
   AudioUploadMeta,
   BackendStatus,
-  BinaryResponse,
   BridgeApi,
   BridgeRequest,
   CaptureState,
   JsonResponse,
+  SharedNote,
 } from '../frontend/src/api/bridge';
 
 // The only object exposed to the renderer. Context isolation is on and node
@@ -34,15 +35,12 @@ const api: BridgeApi = {
   ): Promise<JsonResponse<T>> {
     return ipcRenderer.invoke(CHANNELS.uploadAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
   },
-  storeAudio<T = unknown>(
+  bufferAudio<T = unknown>(
     sessionId: string,
     meta: AudioUploadMeta,
     wav: ArrayBuffer,
   ): Promise<JsonResponse<T>> {
-    return ipcRenderer.invoke(CHANNELS.storeAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
-  },
-  fetchAudio(sessionId: string, sequence: number): Promise<BinaryResponse> {
-    return ipcRenderer.invoke(CHANNELS.fetchAudio, sessionId, sequence) as Promise<BinaryResponse>;
+    return ipcRenderer.invoke(CHANNELS.bufferAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
   },
   readLogs(): Promise<string> {
     return ipcRenderer.invoke(CHANNELS.readLogs) as Promise<string>;
@@ -56,6 +54,9 @@ const api: BridgeApi = {
   chooseAudioFile(): Promise<AudioFileChoice | null> {
     return ipcRenderer.invoke(CHANNELS.chooseAudioFile) as Promise<AudioFileChoice | null>;
   },
+  shareNote(note: SharedNote): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.shareNote, note) as Promise<boolean>;
+  },
   getBackendStatus(): Promise<BackendStatus> {
     return ipcRenderer.invoke(CHANNELS.status) as Promise<BackendStatus>;
   },
@@ -66,6 +67,9 @@ const api: BridgeApi = {
   },
   reportCaptureState(state: CaptureState): void {
     ipcRenderer.send(CHANNELS.captureState, state);
+  },
+  reportCodexActivity(activeTasks: number): void {
+    ipcRenderer.send(CHANNELS.codexActivity, activeTasks);
   },
   onPrepareQuit(listener) {
     const handler = (_event: unknown, id: unknown): void => {
@@ -83,7 +87,11 @@ const api: BridgeApi = {
     ipcRenderer.on(CHANNELS.cancelQuit, handler);
     return () => ipcRenderer.removeListener(CHANNELS.cancelQuit, handler);
   },
+  openSystemAudioSettings(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.openSystemAudioSettings) as Promise<boolean>;
+  },
   platform: process.platform,
+  systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
 };
 
 contextBridge.exposeInMainWorld('audiohelper', api);

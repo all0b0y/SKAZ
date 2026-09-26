@@ -107,9 +107,7 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             nonlocal connection
             connection = await disk_call(
                 runtime.live_store.open, session_id, sample_rate=config.sample_rate, model=DEFAULT_MODEL,
-                recording_mode=("transcription" if not runtime.live_store.retain_audio
-                                and settings.native_recording_mode == "audio_only"
-                                else settings.native_recording_mode),
+                recording_mode=settings.native_recording_mode,
                 translation_target_language=settings.translation_target_language,
                 used_languages=(tuple(settings.used_languages)
                                 if settings.used_languages is not None else None),
@@ -122,7 +120,7 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             assert connection is not None
             key = (
                 await disk_call(runtime.api_key, "soniox")
-                if settings.cloud_consent and connection.recording_mode != "audio_only" else None
+                if settings.cloud_consent else None
             )
             stream = NativeStream(runtime.live_store, connection, key)
             runtime.native_streams[session_id] = stream
@@ -131,16 +129,20 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             "type": "stream.opened", "connection_id": connection.id,
             "sample_rate": config.sample_rate, "saved_samples": saved_samples,
             "next_sequence": connection.next_sequence, "transcription": stream.state,
-            **({"audio_retained": False} if not runtime.live_store.retain_audio else {}),
+            "audio_retained": False,
         })
         failure = asyncio.create_task(stream.wait_failure())
         while True:
             incoming = asyncio.create_task(socket.receive())
-            done, _ = await asyncio.wait((incoming, failure), return_when=asyncio.FIRST_COMPLETED)
-            if failure in done:
-                failure.result()
-                raise LiveConflict("Stream worker ended unexpectedly.")
-            message = incoming.result()
+            if failure is not None:
+                done, _ = await asyncio.wait((incoming, failure), return_when=asyncio.FIRST_COMPLETED)
+                if failure in done:
+                    failure.result()  # Storage failures still fail the transport.
+                    await socket.send_json({"type": "transcription.failed"})
+                    failure = None
+            # ASR failure is not transport failure: drain captured tail and accept
+            # the explicit Stop, releasing ownership before the next attempt.
+            message = await incoming
             incoming = None
             if message["type"] == "websocket.disconnect":
                 disconnected = True
@@ -163,8 +165,9 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                 raise LiveConflict("Invalid stream control message.")
             control = EndStream.model_validate(json.loads(text))
             end_state = "paused" if control.action == "pause" else "stopped"
-            failure.cancel()
-            await asyncio.gather(failure, return_exceptions=True)
+            if failure is not None:
+                failure.cancel()
+                await asyncio.gather(failure, return_exceptions=True)
             complete = await stream.finish()
             await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
             await disk_call(runtime.session_files.project, session_id)

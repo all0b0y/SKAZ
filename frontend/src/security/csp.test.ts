@@ -19,4 +19,13 @@ describe('renderer Content Security Policy', () => {
     expect(mainSource).toContain(`'${devPreambleHash}'`);
     expect(rendererHtml).toContain(`'${devPreambleHash}'`);
   });
+
+  it('keeps frame-ancestors only in the response header, where browsers honour it', () => {
+    // In a <meta> CSP the directive is ignored and logs an error on every load.
+    const mainSource = readFileSync(`${repoRoot}/electron/main.ts`, 'utf8');
+    const rendererHtml = readFileSync(`${repoRoot}/frontend/index.html`, 'utf8');
+
+    expect(mainSource).toContain("frame-ancestors 'none'");
+    expect(rendererHtml).not.toContain('frame-ancestors');
+  });
 });

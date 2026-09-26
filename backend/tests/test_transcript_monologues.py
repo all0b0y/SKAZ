@@ -29,7 +29,7 @@ def test_segment_only_session_yields_monologues_without_invented_speakers(tmp_pa
 
 def test_live_tokens_group_by_speaker(tmp_path: Path) -> None:
     db = Database(tmp_path / "live.sqlite")
-    store = LiveStore(db, tmp_path / "audio")
+    store = LiveStore(db)
     session_id = repo.create_session(db, "Встреча").id
     connection_id = store.open(session_id, sample_rate=16_000, model="stt-rt-v5").id
     # Blocks are bounded to 500 ms each, so two seconds of audio is five of them.

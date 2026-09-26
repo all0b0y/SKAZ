@@ -409,7 +409,9 @@ class SonioxSession:
                     raise SonioxProtocolError
                 markers.append("end" if text == "<end>" else "fin")
                 continue
-            status = value.get("translation_status", "none")
+            status = value.get("translation_status")
+            if status is None:
+                status = "none"
             if status == "translation":
                 if self._config.translation_target_language is None:
                     raise SonioxProtocolError

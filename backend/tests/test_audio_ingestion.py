@@ -34,7 +34,9 @@ async def session(client: httpx.AsyncClient, outbound: FakeHttp) -> str:
     """A recording session configured for the verified OpenRouter audio-input model."""
     response = await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "cloud_consent": True,
         },
     )
@@ -67,7 +69,9 @@ def stub_transcript(outbound: FakeHttp, text: str = "Hello from the lecture.") -
 async def configure_dedicated(client: httpx.AsyncClient) -> str:
     response = await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "qwen/qwen3-asr-1.7b"},
             "cloud_consent": True,
         },
     )
@@ -254,9 +258,9 @@ async def test_concurrent_identical_sequence_is_transcribed_once(
 
 
 async def test_concurrent_conflicting_sequence_keeps_the_stored_audio_consistent(
-    client: httpx.AsyncClient, session: str, outbound: FakeHttp
+    client: httpx.AsyncClient, session: str, outbound: FakeHttp, app: Any
 ) -> None:
-    """Racing uploads of one sequence: one owner, one 409, and no mixed-up bytes on disk."""
+    """Racing uploads of one sequence: one owner, one 409, and no mixed-up bytes in the temporary buffer."""
     import asyncio
     import hashlib
 
@@ -270,8 +274,9 @@ async def test_concurrent_conflicting_sequence_keeps_the_stored_audio_consistent
     assert sorted(response.status_code for response in responses) == [200, 409]
     winner = quiet if responses[0].status_code == 200 else loud
     stored = await client.get(f"/sessions/{session}/audio/3")
-    assert stored.status_code == 200
-    assert hashlib.sha256(stored.content).hexdigest() == hashlib.sha256(winner).hexdigest()
+    assert stored.status_code == 404
+    buffered = app.state.runtime.ingestion.audio.get(session, 3)
+    assert hashlib.sha256(buffered).hexdigest() == hashlib.sha256(winner).hexdigest()
 
 
 async def test_concurrent_conflicting_metadata_is_rejected_not_silently_merged(
@@ -342,9 +347,9 @@ async def test_failed_transcription_keeps_the_chunk_and_flushes_on_stop(
     assert "503" in detail and "temporarily unavailable" in detail
     assert "upstream down" not in detail  # the provider body never reaches the user
 
-    # The audio survived the provider failure and is still downloadable.
+    # Retry may use the temporary input, but there is no playback endpoint.
     stored = await client.get(f"/sessions/{session}/audio/0")
-    assert stored.status_code == 200
+    assert stored.status_code == 404
 
     stub_transcript(outbound, "Recovered text.")
     stopped = await client.patch(f"/sessions/{session}", json={"status": "stopped"})
@@ -353,30 +358,29 @@ async def test_failed_transcription_keeps_the_chunk_and_flushes_on_stop(
     assert [segment["text"] for segment in detail["segments"]] == ["Recovered text."]
 
 
-async def test_stored_audio_is_returned_byte_identical(
+async def test_ingested_audio_has_no_playback_endpoint(
     client: httpx.AsyncClient, session: str, outbound: FakeHttp
 ) -> None:
     stub_transcript(outbound)
     body = make_wav(1.0, sample_rate=44_100)
     await post_chunk(client, session, 3, body=body)
     response = await client.get(f"/sessions/{session}/audio/3")
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("audio/wav")
-    assert response.content == body
+    assert response.status_code == 404
+    assert (await client.get(f"/sessions/{session}")).json()["segments"]
 
 
-async def test_stored_audio_requires_auth_and_exists(
+async def test_removed_audio_route_is_unavailable_with_or_without_auth(
     client: httpx.AsyncClient, session: str, outbound: FakeHttp
 ) -> None:
     stub_transcript(outbound)
     await post_chunk(client, session, 0)
     assert (
         await client.get(f"/sessions/{session}/audio/0", headers={"Authorization": ""})
-    ).status_code == 401
+    ).status_code == 404
     assert (await client.get(f"/sessions/{session}/audio/9")).status_code == 404
     assert (
         await client.get(f"/sessions/{session}/audio/0", headers={"Authorization": f"Bearer {TOKEN}"})
-    ).status_code == 200
+    ).status_code == 404
 
 
 async def test_delete_session_removes_stored_audio(
@@ -384,7 +388,7 @@ async def test_delete_session_removes_stored_audio(
 ) -> None:
     stub_transcript(outbound)
     await post_chunk(client, session, 0)
-    assert list(config.audio_dir.rglob("*.wav"))
+    assert not list(config.audio_dir.rglob("*.wav"))
     await client.delete(f"/sessions/{session}")
     assert not list(config.audio_dir.rglob("*.wav"))
     assert (await client.get(f"/sessions/{session}/audio/0")).status_code == 404
@@ -394,7 +398,9 @@ async def test_cloud_upload_requires_consent(client: httpx.AsyncClient, outbound
     stub_transcript(outbound)
     await client.put(
         "/settings",
-        json={"provider_keys": {"openrouter": "sk-test"}, "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
+        json={
+            "provider_keys": {"openrouter": "sk-test"},
+            "asr": {"provider": "openrouter", "model": "google/gemini-2.5-flash-lite"},
             "cloud_consent": False,
         },
     )

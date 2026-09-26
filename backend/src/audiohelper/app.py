@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import Depends, FastAPI, Request
@@ -16,8 +14,20 @@ from .activity import current_activity
 from .config import AppConfig
 from .managed_storage import StorageConflict
 from .native_io import disk_call
-from .note_store import prune_history
-from .routes import agent, asr, health, imports, live, logs, models, sessions, settings, storage
+from .routes import (
+    agent,
+    asr,
+    codex,
+    health,
+    imports,
+    live,
+    logs,
+    models,
+    sessions,
+    settings,
+    storage,
+    web_search,
+)
 from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
@@ -34,25 +44,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        async def clean_note_history() -> None:
-            while True:
-                try:
-                    await disk_call(prune_history, runtime.db)
-                except Exception:
-                    logging.getLogger(__name__).warning("Note history cleanup failed; retrying later.")
-                await asyncio.sleep(3600)
-
-        cleanup = asyncio.create_task(clean_note_history())
         try:
             await disk_call(runtime.session_files.reconcile)
             # Imports outlive the process that started them: a paid job keeps
             # running at the provider, so re-attach instead of abandoning it.
             runtime.imports.resume()
+            runtime.codex.start()
             yield
         finally:
-            cleanup.cancel()
-            with suppress(asyncio.CancelledError):
-                await cleanup
+            await runtime.codex.close()
             await runtime.imports.close()
             await runtime.stop_native()
             await runtime.http.aclose()
@@ -95,6 +95,8 @@ def create_app(
     app.include_router(sessions.router, dependencies=protected)
     app.include_router(imports.router, dependencies=protected)
     app.include_router(agent.router, dependencies=protected)
+    app.include_router(codex.router, dependencies=protected)
+    app.include_router(web_search.router, dependencies=protected)
     app.include_router(models.router, dependencies=protected)
     app.include_router(logs.router, dependencies=protected)
     return app

@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from . import repository as repo
@@ -70,19 +69,6 @@ class TimedPreview:
     response: AsrPreviewResponse
     words: tuple[TranscriptWord, ...] | None
     provenance: Literal["live", "source_ended_final_pass"] = "live"
-
-
-def _read_bounded(path: Path, maximum: int) -> bytes:
-    try:
-        with path.open("rb") as handle:
-            data = handle.read(maximum + 1)
-    except FileNotFoundError as error:
-        raise PreviewSourceMissing("A selected source audio file is missing.") from error
-    except OSError as error:
-        raise PreviewSourceConflict("A selected source audio file cannot be read.") from error
-    if len(data) > maximum:
-        raise PreviewTooLarge("Selected source audio exceeds the combined byte limit.")
-    return data
 
 
 class WindowAsrPreview:
@@ -277,28 +263,22 @@ class WindowAsrPreview:
 
         byte_limit = self._runtime.config.max_chunk_bytes
         total_bytes = 0
-        paths: list[Path] = []
+        inputs: list[bytes] = []
         for record in records:
-            path = Path(record.path)
             try:
-                size = path.stat().st_size
+                data = self._runtime.ingestion.audio.get(session_id, record.sequence)
             except FileNotFoundError as error:
-                raise PreviewSourceMissing("A selected source audio file is missing.") from error
-            except OSError as error:
-                raise PreviewSourceConflict("A selected source audio file cannot be read.") from error
-            total_bytes += size
+                raise PreviewSourceMissing("Live ASR input expired; provide the input again.") from error
+            total_bytes += len(data)
             if total_bytes > byte_limit:
                 raise PreviewTooLarge("Selected source audio exceeds the combined byte limit.")
-            paths.append(path)
+            inputs.append(data)
 
         frames = bytearray()
         sources: list[AsrPreviewSource] = []
         sample_rate: int | None = None
         previous_end: int | None = None
-        bytes_read = 0
-        for record, path in zip(records, paths, strict=True):
-            data = _read_bounded(path, byte_limit - bytes_read)
-            bytes_read += len(data)
+        for record, data in zip(records, inputs, strict=True):
             if hashlib.sha256(data).hexdigest() != record.sha256:
                 raise PreviewSourceConflict("A selected source audio digest does not match metadata.")
             try:

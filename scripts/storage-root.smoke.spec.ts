@@ -36,10 +36,10 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
     const sid = sessions.data.sessions[0]!.id;
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Files', exact: true }).click();
-    await expect(page.getByText('Markdown-проекция выключена.')).toBeVisible();
+    await expect(page.getByText('Markdown projection is off.')).toBeVisible();
     await expect(page.getByText(path.join(directory, 'Documents/SKAZ'), { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Использовать Documents/SKAZ' }).click();
-    await page.getByRole('button', { name: 'Отмена', exact: true }).click();
+    await page.getByRole('button', { name: 'Use Documents/SKAZ' }).click();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     expect((await fs.readdir(path.join(directory, 'Documents')))).toEqual([]);
     // Only the OS dialog is a fixture. Actual renderer/preload/main/backend run.
     await app.evaluate(({ dialog }, selected) => {
@@ -48,12 +48,12 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
         return { canceled: false, filePaths: [selected] };
       };
     }, chosen);
-    await page.getByRole('button', { name: 'Выбрать папку…' }).click();
+    await page.getByRole('button', { name: 'Choose folder…' }).click();
     await expect(page.getByText(chosen, { exact: true })).toBeVisible();
     const before = await page.evaluate(() => window.audiohelper.request<{ root: string | null }>({ method: 'GET', path: '/storage/root' }));
     expect(before.ok && before.data.root).toBeNull();
-    await page.getByRole('button', { name: 'Подтвердить корень Markdown' }).click();
-    await expect(page.getByText('Корень Markdown сохранён.')).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm Markdown root' }).click();
+    await expect(page.getByText('Markdown root saved.')).toBeVisible();
     expect(await fs.readdir(chosen)).toEqual(['personal.txt']);
     await page.setViewportSize({ width: 1280, height: 820 });
     const shots = path.join(root, '.runtime/storage-root');
@@ -65,21 +65,21 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
       expect(await page.locator('.settings-content').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     }
     await page.getByRole('button', { name: 'Close', exact: true }).last().click();
-    // Disabled session status is invalidated by root confirmation without a reload.
-    await page.getByRole('button', { name: 'Повторить сохранение файлов' }).click();
-    await expect(page.getByText('Последнее сохранение Markdown выполнено.')).toBeVisible();
-    const transcript = path.join(chosen, 'Ungrouped', sid, 'Transcript.md');
-    expect(await fs.readFile(transcript, 'utf8')).toContain('No stable transcript');
+    // The per-session "retry file save" panel was removed from the UI, so this
+    // smoke no longer forces a session projection; it covers the root choice,
+    // its confirmation, persistence and the untouched foreign file.
+    void sid;
     await app.close(); app = await launch(); page = await app.firstWindow();
     page.on('pageerror', (error) => errors.push(error.message));
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await page.getByRole('button', { name: 'Files', exact: true }).click();
     await expect(page.getByText(chosen, { exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Выбрать папку…' })).toBeDisabled();
+    // The root locks only once Markdown has been written into it
+    // (session_files.change_locked); nothing is projected here, so it stays open.
     const persisted = await page.evaluate(() => window.audiohelper.request<{ root: string; change_locked: boolean }>({ method: 'GET', path: '/storage/root' }));
-    expect(persisted.ok && persisted.data).toMatchObject({ root: chosen, change_locked: true });
+    expect(persisted.ok && persisted.data).toMatchObject({ root: chosen, change_locked: false });
+    await expect(page.getByRole('button', { name: 'Choose folder…' })).toBeEnabled();
     expect(await fs.readFile(path.join(chosen, 'personal.txt'), 'utf8')).toBe('external fixture');
-    expect(await fs.readFile(transcript, 'utf8')).toContain('No stable transcript');
     expect(errors).toEqual([]);
   } finally {
     await app.close();

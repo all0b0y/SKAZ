@@ -42,7 +42,7 @@ beforeEach(() => {
 });
 
 const makeGroup = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
-  await user.click(screen.getByRole('button', { name: 'Create group' }));
+  await user.click(screen.getByRole('button', { name: 'New group' }));
   await user.type(screen.getByRole('textbox', { name: 'Group name' }), name);
   await user.click(screen.getByRole('button', { name: 'Create' }));
   return screen.findByRole('tab', { name: new RegExp(name) });

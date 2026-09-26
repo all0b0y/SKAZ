@@ -154,6 +154,9 @@ export class BackendManager {
         AUDIOHELPER_TOKEN: token,
         AUDIOHELPER_DATA_DIR: this.dataDir,
         AUDIOHELPER_DOCUMENTS_DIR: app.getPath('documents'),
+        // The backend exits on its own if this process dies without stopping it
+        // (crash / force quit), so it never keeps the database and queue locks.
+        AUDIOHELPER_PARENT_PID: String(process.pid),
         PYTHONUNBUFFERED: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],

@@ -37,9 +37,9 @@ export function formatDuration(ms: number): string {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
-  if (hours > 0) return `${hours} ч ${String(minutes).padStart(2, '0')} мин`;
-  if (minutes > 0) return `${minutes} мин ${String(seconds).padStart(2, '0')} с`;
-  return `${seconds} с`;
+  if (hours > 0) return `${hours} h ${String(minutes).padStart(2, '0')} min`;
+  if (minutes > 0) return `${minutes} min ${String(seconds).padStart(2, '0')} s`;
+  return `${seconds} s`;
 }
 
 /** Estimated, never a quote: Soniox bills its own tokens, we bill nothing. */
@@ -109,12 +109,12 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
   };
 
   return (
-    <SessionDialog title="Импорт аудиофайла" onClose={onClose} busy={busy}>
+    <SessionDialog title="Import audio file" onClose={onClose} busy={busy}>
       <div className="import-dialog">
         <p className="import-dialog__file" title={file.path}>{file.name}</p>
 
         <label className="import-dialog__field">
-          <span>Название сессии</span>
+          <span>Session name</span>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -124,7 +124,7 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
         </label>
 
         <fieldset className="import-dialog__modes" disabled={busy}>
-          <legend>Что делаем</legend>
+          <legend>What to do</legend>
           <label>
             <input
               type="radio"
@@ -132,7 +132,7 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
               checked={!translate}
               onChange={() => setTranslate(false)}
             />
-            <span>Только транскрипция</span>
+            <span>Transcription only</span>
           </label>
           <label>
             <input
@@ -141,70 +141,70 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
               checked={translate}
               onChange={() => setTranslate(true)}
             />
-            <span>Транскрипция и перевод</span>
+            <span>Transcription and translation</span>
           </label>
         </fieldset>
 
         <dl className="import-dialog__facts">
-          <dt>Длительность</dt>
+          <dt>Duration</dt>
           <dd>
             {duration === undefined
-              ? 'читаем…'
+              ? 'reading…'
               : duration === null
-                ? 'не удалось прочитать из файла'
+                ? 'could not be read from the file'
                 : formatDuration(duration)}
           </dd>
-          <dt>Примерная стоимость</dt>
+          <dt>Estimated cost</dt>
           <dd>
             {estimate != null && rate != null
-              ? `≈ ${formatCost(estimate)} (по ставке $${rate.toFixed(2)} за час аудио)`
+              ? `≈ ${formatCost(estimate)} (at $${rate.toFixed(2)} per audio hour)`
               : rate != null
-                ? `≈ $${rate.toFixed(2)} за час аудио — точную сумму покажем после обработки`
+                ? `≈ $${rate.toFixed(2)} per audio hour — the exact amount is shown after processing`
                 : '—'}
           </dd>
-          <dt>Куда сохранится</dt>
+          <dt>Saved to</dt>
           <dd>{caps ? caps.destination : '—'}</dd>
         </dl>
 
         <p className="import-dialog__note">
-          Оценка, а не счёт: провайдер тарифицирует по своим токенам. Исходный файл
-          остаётся у вас, приложение его не копирует.
+          An estimate, not a bill: the provider charges by its own tokens. The original file
+          stays where it is; the app does not copy it.
         </p>
 
         {tooLong && (
           <p role="alert" className="import-dialog__error">
-            Файл длиннее {formatDuration(caps!.max_duration_ms)} — провайдер такие не принимает.
+            The file is longer than {formatDuration(caps!.max_duration_ms)} — the provider does not accept it.
           </p>
         )}
         {caps && !caps.cloud_consent && (
           <p role="alert" className="import-dialog__error">
-            Импорт отправляет аудиофайл в Soniox. Включите согласие на облачную обработку
-            в «Настройки → Провайдеры».
+            Import sends the audio file to Soniox. Turn on cloud processing
+            in Settings → API keys.
           </p>
         )}
         {caps && caps.cloud_consent && !caps.has_api_key && (
           <p role="alert" className="import-dialog__error">
-            Не сохранён ключ Soniox. Добавьте его в «Настройки → Провайдеры».
+            No Soniox key is saved. Add it in Settings → API keys.
           </p>
         )}
         {queued && !blocked && (
           <p className="import-dialog__warning">
-            Уже выполняется {caps!.active_imports} импорта — этот встанет в очередь.
+            {caps!.active_imports} import(s) already running — this one will be queued.
           </p>
         )}
         {expensive && (
           <p role="alert" className="import-dialog__warning">
-            Это дороже вашего порога {formatCost(caps!.warn_above_usd!)}.
+            This costs more than your threshold of {formatCost(caps!.warn_above_usd!)}.
             {confirmedExpensive
-              ? ` Нажмите ещё раз, чтобы продолжить за ≈ ${formatCost(estimate!)}.`
-              : ` Продолжить за ≈ ${formatCost(estimate!)}?`}
+              ? ` Press again to continue for ≈ ${formatCost(estimate!)}.`
+              : ` Continue for ≈ ${formatCost(estimate!)}?`}
           </p>
         )}
         {capsError && <p role="alert" className="import-dialog__error">{capsError}</p>}
         {error && <p role="alert" className="import-dialog__error">{error}</p>}
 
         <div className="import-dialog__actions">
-          <Button variant="ghost" onClick={onClose} disabled={busy}>Отмена</Button>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button
             variant="primary"
             onClick={submit}
@@ -213,7 +213,7 @@ export function ImportDialog({ file, onClose, onCreated }: Props) {
             {/* The label only changes once the warning has been shown and
                 acknowledged; renaming it up front would make the first click
                 look like it did nothing. */}
-            {expensive && confirmedExpensive ? 'Всё равно транскрибировать' : 'Транскрибировать'}
+            {expensive && confirmedExpensive ? 'Transcribe anyway' : 'Transcribe'}
           </Button>
         </div>
       </div>
