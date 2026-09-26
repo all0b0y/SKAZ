@@ -7,8 +7,8 @@ import type { ImportView } from '../../api/types';
 let Panel: typeof import('./ImportPanel')['ImportPanel'];
 let requests: BridgeRequest[];
 let states: ImportView[];
-let onSettled: ReturnType<typeof vi.fn>;
-let onDeleted: ReturnType<typeof vi.fn>;
+let onSettled: ReturnType<typeof vi.fn<(state: ImportView) => void>>;
+let onDeleted: ReturnType<typeof vi.fn<() => void>>;
 
 function view(over: Partial<ImportView> = {}): ImportView {
   return {

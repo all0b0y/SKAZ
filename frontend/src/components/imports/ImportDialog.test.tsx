@@ -2,12 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { BridgeRequest, JsonResponse } from '../../api/bridge';
-import type { ImportCapabilities } from '../../api/types';
+import type { ImportCapabilities, ImportCreated } from '../../api/types';
 
 let Dialog: typeof import('./ImportDialog')['ImportDialog'];
 let requests: BridgeRequest[];
 let caps: ImportCapabilities;
-let created: ReturnType<typeof vi.fn>;
+let created: ReturnType<typeof vi.fn<(created: ImportCreated) => void>>;
 let duration: number | null;
 
 const FILE = { path: '/Users/me/Downloads/lecture.m4a', name: 'lecture.m4a', url: 'file:///Users/me/Downloads/lecture.m4a' };
