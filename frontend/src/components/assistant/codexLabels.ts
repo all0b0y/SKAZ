@@ -28,12 +28,35 @@ export const UNFINISHED_NOTE: Partial<Record<CodexTaskStatus, string>> = {
 export const taskTitle = (task: CodexTask): string =>
   task.kind === 'notes' ? 'Recording notes' : task.question.trim() || 'Question';
 
-/** Only the connection states that make a send pointless block the composer. */
-export function connectionBlock(connection: CodexConnection | null): string | null {
+/**
+ * Why Codex cannot run right now, and what fixes it. `checking` blocks quietly
+ * while the launch check runs; `relogin` means one click renews an expired
+ * sign-in (consent was already given); `settings` sends the user to the Codex tab.
+ */
+export interface ConnectionBlock {
+  text: string;
+  fix: 'none' | 'relogin' | 'settings';
+}
+
+export function connectionBlockOf(connection: CodexConnection | null): ConnectionBlock | null {
   switch (connection?.status) {
-    case 'missing': return 'Codex was not found on this computer.';
-    case 'incompatible': return `The installed Codex version${connection.version ? ` ${connection.version}` : ''} is incompatible.`;
-    case 'signed_out': return 'No ChatGPT account connected.';
+    case undefined:
+    case 'unchecked':
+    case 'checking': return { text: 'Checking Codex…', fix: 'none' };
+    case 'missing': return { text: 'Codex was not found on this computer.', fix: 'settings' };
+    case 'incompatible': return {
+      text: `The installed Codex version${connection.version ? ` ${connection.version}` : ''} is incompatible.`,
+      fix: 'settings',
+    };
+    case 'signed_out': return connection.relogin_available
+      ? { text: 'Your ChatGPT sign-in has expired.', fix: 'relogin' }
+      : { text: 'No ChatGPT account connected.', fix: 'settings' };
+    case 'error': return { text: `Codex check failed: ${connection.error ?? 'no details'}`, fix: 'settings' };
     default: return null;
   }
+}
+
+/** Only the connection states that make a send pointless block the composer. */
+export function connectionBlock(connection: CodexConnection | null): string | null {
+  return connectionBlockOf(connection)?.text ?? null;
 }

@@ -49,6 +49,7 @@ class CodexRuntime:
         self.connection = CodexConnection(root / "account")
         self.web_search: WebSearch | None = None
         self._monitor: asyncio.Task[None] | None = None
+        self._connection_check: asyncio.Task[Any] | None = None
         self._monitor_wake = asyncio.Event()
         #: Terminal tasks already published; finalization is idempotent and final.
         self._finalized: set[str] = set()
@@ -86,8 +87,22 @@ class CodexRuntime:
                 self._dispatcher = CodexDispatcher(
                     self.queue, self._runner, self._check,
                     multipart=lambda task: self._meta(task.id)["kind"] == "notes",
+                    on_interrupted=self.recheck_connection,
                 )
             return self._dispatcher
+
+    def recheck_connection(self) -> None:
+        """Re-read the account in the background, once; never refreshes or retries."""
+        if self._closed or (self._connection_check is not None and not self._connection_check.done()):
+            return
+        # Visible as "checking" so the UI follows it to the verdict.
+        self.connection.view["status"] = "checking"
+        self._connection_check = asyncio.create_task(self.connection.check())
+
+    def _wants_connection(self) -> bool:
+        settings = self.settings()
+        return bool(settings["assistant_enabled"] or settings["notes_enabled"]) \
+            or self.connection.has_saved_login()
 
     def close_storage(self) -> None:
         """Release an acquired owner without acquiring one during cleanup."""
@@ -174,6 +189,9 @@ class CodexRuntime:
         _ = self.queue  # Recover without dispatching; ownership failures fail startup.
         if self._monitor is None:
             self._monitor = asyncio.create_task(self._watch())
+        # A saved sign-in is re-read at launch, so Codex is ready without a manual check.
+        if self._wants_connection():
+            self.recheck_connection()
 
     def settings(self) -> dict[str, Any]:
         with self.db.read() as c:
@@ -700,6 +718,9 @@ class CodexRuntime:
             self._monitor.cancel()
             with suppress(asyncio.CancelledError):
                 await self._monitor
+        if self._connection_check is not None and not self._connection_check.done():
+            self._connection_check.cancel()
+            await asyncio.gather(self._connection_check, return_exceptions=True)
         if self._dispatcher is not None:
             await self._dispatcher.close()
         await self.connection.close()

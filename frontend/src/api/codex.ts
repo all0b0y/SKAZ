@@ -75,7 +75,7 @@ export interface CodexModel {
 }
 
 export type CodexConnectionStatus =
-  | 'unchecked' | 'missing' | 'incompatible' | 'signed_out' | 'connected' | 'error';
+  | 'unchecked' | 'checking' | 'missing' | 'incompatible' | 'signed_out' | 'connected' | 'error';
 
 /**
  * The official browser login: `pending` while its page is open, otherwise how
@@ -92,6 +92,10 @@ export interface CodexConnection {
   install_available: boolean;
   /** Absent from a backend that predates observable login. */
   login?: CodexLoginState;
+  /** Where the Codex CLI was found; null when missing or not yet checked. */
+  path?: string | null;
+  /** A sign-in happened with consent before, so re-login needs no checkbox. */
+  relogin_available?: boolean;
 }
 
 export interface CodexPreview {

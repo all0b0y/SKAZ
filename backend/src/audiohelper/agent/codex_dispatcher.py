@@ -20,11 +20,14 @@ class CodexDispatcher:
     def __init__(
         self, queue: SnapshotQueue, runner: Runner, check: Check | None = None,
         *, multipart: Callable[[SnapshotTask], bool] | None = None,
+        on_interrupted: Callable[[], None] | None = None,
     ) -> None:
         self.queue = queue
         self._runner = runner
         self._check = check
         self._multipart = multipart
+        #: Called when a run ends in an error (not a user stop), e.g. an expired sign-in.
+        self._on_interrupted = on_interrupted
         self._pump: asyncio.Task[None] | None = None
         self._execution: asyncio.Task[None] | None = None
         self._active: str | None = None
@@ -122,6 +125,8 @@ class CodexDispatcher:
                     await disk_call(self.queue.finish, task.id, "completed", current.answer)
                 else:
                     await disk_call(self.queue.pause, task.id)
+                    if self._on_interrupted is not None and not self._closing:
+                        self._on_interrupted()
 
     async def stop(self, task_id: str) -> None:
         async with self._controls:

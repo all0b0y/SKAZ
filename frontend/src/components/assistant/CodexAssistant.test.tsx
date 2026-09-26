@@ -266,7 +266,30 @@ describe('Codex chats', () => {
     await renderPanel();
     expect(screen.getByText('No ChatGPT account connected.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Question' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Codex settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Codex settings' })).toBeInTheDocument();
+  });
+
+  it('renews an expired sign-in from the banner in one click', async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    fake.connection.status = 'signed_out';
+    fake.connection.relogin_available = true;
+    await renderPanel();
+    expect(screen.getByText('Your ChatGPT sign-in has expired.')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Question' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Sign in again' }));
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+    expect(fake.calls.filter((c) => c.path === '/codex/connection/login')).toHaveLength(1);
+    expect(fake.calls.some((c) => c.path.endsWith('/messages'))).toBe(false);
+    open.mockRestore();
+  });
+
+  it('says it is checking while the launch check runs, without an error or action', async () => {
+    fake.connection.status = 'checking';
+    await renderPanel();
+    expect(screen.getByText('Checking Codex…')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Question' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Open Codex settings|Sign in again/ })).toBeNull();
   });
 });
 

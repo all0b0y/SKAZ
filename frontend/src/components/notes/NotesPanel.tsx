@@ -28,7 +28,9 @@ import { SessionDialog } from '../sessions/SessionOverlays';
 import type { Citation, Note, NoteDetail } from '../../api/types';
 import { selectCodexNotes, useCodex } from '../../state/codex';
 import { shareableNote } from '../../state/shareNote';
-import { STATUS_LABEL } from '../assistant/codexLabels';
+import { STATUS_LABEL, connectionBlockOf } from '../assistant/codexLabels';
+import { CodexConnectionNotice } from '../assistant/CodexConnectionNotice';
+import { openSettings } from '../../lib/openSettings';
 
 interface NotesPanelProps {
   onCite: (citation: Citation) => void;
@@ -89,6 +91,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
   const settings = useStore((s) => s.settings);
   const codexOn = useCodex(selectCodexNotes);
   const codexSettings = useCodex((s) => s.settings);
+  const codexConnection = useCodex((s) => s.connection);
   const codexTask = useCodex((s) => s.tasks.find((t) => t.id === generation?.taskId));
   // Each session keeps its own tabs (docs/NOTES-POLISH-SPEC.md §3), held by the
   // store so a generation can fill its tab after this panel has unmounted.
@@ -163,11 +166,13 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
 
   // Every reason generation is refused, stated on the control itself rather than
   // left as a dead button the user has to guess about.
+  const codexBlock = codexOn ? connectionBlockOf(codexConnection) : null;
   const generateHint = capturing
     ? 'Stop recording first'
     : !hasSegments ? 'No transcript'
+    : codexBlock ? codexBlock.text
     : notesModelMissing ? 'No model selected' : null;
-  const canGenerate = !!activeId && hasSegments && !capturing && !notesModelMissing;
+  const canGenerate = !!activeId && hasSegments && !capturing && !notesModelMissing && !codexBlock;
 
   const handleGenerate = useCallback(() => {
     void generate(noteDetail);
@@ -456,7 +461,11 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
                 quiet line where the list would be, then the same two buttons. */}
             {allNotes.length === 0 && <p className="notes__empty">No notes yet</p>}
             <div className="notes__start">{startButtons}</div>
-            {notesModelMissing && (
+            {codexBlock && (
+              <CodexConnectionNotice block={codexBlock} text={codexBlock.text}
+                onOpenSettings={() => openSettings('notes')} />
+            )}
+            {!codexBlock && notesModelMissing && (
               <SetupNotice
                 message={codexOn ? 'No Codex model selected for notes.' : 'No model selected for notes.'}
                 section="notes"

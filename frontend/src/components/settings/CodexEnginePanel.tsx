@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCodex } from '../../state/codex';
 import { PURPOSE_KEYS, type CodexConnection, type CodexPurpose, type CodexSettings } from '../../api/codex';
 import { Button } from '../ui/Button';
@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 function connectionText(c: CodexConnection | null): string {
   switch (c?.status) {
     case 'connected': return `Connected${c.version ? ` · Codex ${c.version}` : ''}`;
+    case 'checking': return 'Checking Codex…';
     case 'signed_out': return `Codex found${c.version ? ` (${c.version})` : ''}, not signed in to ChatGPT`;
     case 'missing': return 'Codex was not found on this computer';
     case 'incompatible': return `Incompatible Codex version${c.version ? ` ${c.version}` : ''}`;
@@ -37,8 +38,14 @@ export function CodexEnginePanel({ purpose, settings, disabled, onChange }: Code
   const loginWatch = useCodex((s) => s.loginWatch);
   const codex = useCodex.getState;
   const [consent, setConsent] = useState(false);
+  const ready = availability === 'available' && !!settings;
 
-  if (availability !== 'available' || !settings) {
+  // Opening the Codex tab re-reads the account once (decision: auto-check on open).
+  useEffect(() => {
+    if (ready && useCodex.getState().loginWatch.phase !== 'waiting') void useCodex.getState().checkConnection();
+  }, [ready]);
+
+  if (!ready) {
     return <p className="field__hint">Reading Codex status…</p>;
   }
 
@@ -47,6 +54,7 @@ export function CodexEnginePanel({ purpose, settings, disabled, onChange }: Code
   const effort = settings[keys.effort];
   const connected = connection?.status === 'connected';
   const waiting = loginWatch.phase === 'waiting';
+  const consentGiven = consent || connection?.relogin_available === true;
 
   return (
     <div className="codex-engine">
@@ -54,6 +62,9 @@ export function CodexEnginePanel({ purpose, settings, disabled, onChange }: Code
         <div>
           <label>Connection</label>
           <p className="field__hint" data-testid="codex-connection">{connectionText(connection)}</p>
+          {connection?.path && (
+            <p className="field__hint" data-testid="codex-path">Codex: <code>{connection.path}</code></p>
+          )}
         </div>
         {!waiting && (
           <Button variant="ghost" disabled={connecting} onClick={() => void codex().checkConnection()}>
@@ -91,12 +102,16 @@ export function CodexEnginePanel({ purpose, settings, disabled, onChange }: Code
             guaranteed. We recommend turning off training on your data in ChatGPT settings
             (Data Controls) — SKAZ cannot check this setting for you. Usage counts against your subscription limits.
           </p>
-          <label className="consent">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>I understand the terms and want to connect my account</span>
-          </label>
-          <Button variant="primary" disabled={!consent || connecting} onClick={() => void codex().login()}>
-            {waiting ? 'Open the sign-in page again' : 'Sign in with ChatGPT'}
+          {connection.relogin_available ? (
+            <p className="field__hint">You agreed to these terms when you first signed in.</p>
+          ) : (
+            <label className="consent">
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+              <span>I understand the terms and want to connect my account</span>
+            </label>
+          )}
+          <Button variant="primary" disabled={!consentGiven || connecting} onClick={() => void codex().login()}>
+            {waiting ? 'Open the sign-in page again' : connection.relogin_available ? 'Sign in again' : 'Sign in with ChatGPT'}
           </Button>
           {waiting && (
             <p className="field__hint" role="status">

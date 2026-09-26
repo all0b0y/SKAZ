@@ -137,6 +137,13 @@ export function stopLoginWatch(): void {
 
 const wait = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
+/** Connection states that the backend is still resolving on its own. */
+const PENDING_CONNECTION = new Set(['unchecked', 'checking']);
+const CONNECTION_POLL_MS = 1000;
+/** A launch check reads a version and the account: well under this. */
+const CONNECTION_WATCH_MS = 30_000;
+let connectionWatch = false;
+
 let codexClient: CodexClient | null = null;
 let codexBridge: BridgeApi | null = null;
 const client = (): CodexClient => {
@@ -240,6 +247,32 @@ export const useCodex = create<CodexStoreState>((set, get) => {
     }
   };
 
+  /**
+   * Follow the launch/background connection check until it settles, so the
+   * banner turns into a connected composer without a manual check. Bounded.
+   */
+  const watchConnection = async () => {
+    if (connectionWatch) return;
+    connectionWatch = true;
+    try {
+      const deadline = Date.now() + CONNECTION_WATCH_MS;
+      // Always re-read at least once: a just-paused task may start the check
+      // a moment after the read that reported the pause.
+      while (Date.now() < deadline) {
+        await wait(CONNECTION_POLL_MS);
+        try {
+          set({ connection: (await client().state(null)).connection });
+        } catch {
+          return;
+        }
+        const status = get().connection?.status;
+        if (status && !PENDING_CONNECTION.has(status)) return;
+      }
+    } finally {
+      connectionWatch = false;
+    }
+  };
+
   const schedule = () => {
     if (pollTimer) return;
     const anyActive = get().tasks.some(isActive)
@@ -280,6 +313,8 @@ export const useCodex = create<CodexStoreState>((set, get) => {
           selectedChatId: state.selected_chat_id,
         });
         applyTasks(state.tasks);
+        // The backend checks a saved sign-in at launch; follow it to its verdict.
+        if (PENDING_CONNECTION.has(state.connection.status)) void watchConnection();
         // Returning to a session reopens the chat last chosen in it.
         if (state.selected_chat_id) await get().openChat(state.selected_chat_id);
         schedule();
@@ -309,6 +344,11 @@ export const useCodex = create<CodexStoreState>((set, get) => {
         }
         const before = get().tasks;
         applyTasks(state.tasks);
+        // An interrupted task makes the backend re-read the account.
+        if (PENDING_CONNECTION.has(state.connection.status)
+          || before.some((t) => isActive(t) && state.tasks.some((n) => n.id === t.id && n.status === 'paused'))) {
+          void watchConnection();
+        }
         // The open chat and any chat whose task just ended are re-read so the
         // final answer lands as a stored message rather than a stale stream.
         const touched = new Set<string>();

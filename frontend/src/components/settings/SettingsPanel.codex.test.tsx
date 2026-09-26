@@ -47,7 +47,9 @@ const start = async (patch: (f: FakeCodex) => void = () => undefined) => {
 };
 
 /** Only these would start work, sign in or reach a model. */
-const sideEffects = () => fake.calls.filter((c) => /messages|\/notes$|login|resume|check/.test(c.path));
+// Reading the account on opening the Codex tab is an agreed free local check
+// (CODEX-DMG-TRANSCRIPT-FIX-SPEC §2); model calls, logins and resumes are not.
+const sideEffects = () => fake.calls.filter((c) => /messages|\/notes$|login|resume/.test(c.path));
 const stateReads = () => fake.calls.filter((c) => c.path === '/codex/state').length;
 const tabs = (label: string) => within(screen.getByRole('tablist', { name: `${label} provider` })).getAllByRole('tab');
 const save = (user: ReturnType<typeof userEvent.setup>) => user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -152,6 +154,9 @@ describe('Codex inside Assistant and Notes settings', () => {
     await user.click(tabs('Assistant')[0]!);
     expect(screen.getByText(/Zero data retention \(ZDR\) is not\s+guaranteed/)).toBeInTheDocument();
     expect(screen.queryByLabelText('Codex model')).toBeNull();
+    const checks = () => fake.calls.filter((c) => c.path === '/codex/connection/check').length;
+    // Opening the tab re-reads the account once; nothing more happens on its own.
+    await waitFor(() => expect(checks()).toBe(1));
     const login = screen.getByRole('button', { name: 'Sign in with ChatGPT' });
     expect(login).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: /I understand the terms/ }));
@@ -164,10 +169,22 @@ describe('Codex inside Assistant and Notes settings', () => {
     await act(() => vi.advanceTimersByTimeAsync(2000));
     expect(await screen.findByLabelText('Codex model')).toBeInTheDocument();
     expect(screen.getByLabelText('Reasoning effort')).toBeInTheDocument();
-    expect(fake.calls.some((c) => c.path === '/codex/connection/check')).toBe(false);
+    // Sign-in is followed by reading state, never by another check request.
+    expect(checks()).toBe(1);
     const reads = stateReads();
     await act(() => vi.advanceTimersByTimeAsync(10_000));
     expect(stateReads()).toBe(reads);
+  });
+
+  it('offers a one-click re-login after an earlier consented sign-in and shows the Codex path', async () => {
+    const user = userEvent.setup();
+    await start((f) => {
+      f.connection = { ...f.connection, status: 'signed_out', models: [], relogin_available: true, path: '/Users/me/.local/bin/codex' };
+    });
+    await user.click(tabs('Assistant')[0]!);
+    expect(screen.getByTestId('codex-path')).toHaveTextContent('/Users/me/.local/bin/codex');
+    expect(screen.queryByRole('checkbox', { name: /I understand the terms/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeEnabled();
   });
 
   it('reports a failed login once and stops watching', async () => {

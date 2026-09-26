@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 import { AppLog } from './logFile';
+import { readLoginShellPath } from './shellPath';
 import { app } from 'electron';
 
 // Owns the lifecycle of the Python backend subprocess: pick a free loopback
@@ -56,6 +57,8 @@ export class BackendManager {
   private readonly dataDir: string;
   private readonly onStatus?: StatusListener;
   private readonly log: AppLog;
+  /** The login shell's PATH, read once per app run; null if it could not be read. */
+  private userPath: Promise<string | null> | null = null;
 
   constructor(options: BackendManagerOptions) {
     this.repoRoot = options.repoRoot;
@@ -142,6 +145,9 @@ export class BackendManager {
     const handle: BackendHandle = { port, token };
 
     const { command, args } = this.resolveSpawn(port);
+    this.userPath ??= readLoginShellPath();
+    const userPath = await this.userPath;
+    this.log.write('INFO', 'app', userPath ? 'login shell PATH read' : 'login shell PATH unavailable; standard folders only');
     // In a packaged app `repoRoot` points inside app.asar, which is a virtual
     // archive rather than a real directory: spawning with it as cwd fails
     // before the child ever runs. The frozen backend resolves everything from
@@ -157,6 +163,8 @@ export class BackendManager {
         // The backend exits on its own if this process dies without stopping it
         // (crash / force quit), so it never keeps the database and queue locks.
         AUDIOHELPER_PARENT_PID: String(process.pid),
+        // Where the user's own tools (Codex, Node) live; see electron/shellPath.ts.
+        ...(userPath ? { AUDIOHELPER_USER_PATH: userPath } : {}),
         PYTHONUNBUFFERED: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],

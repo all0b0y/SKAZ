@@ -12,7 +12,8 @@ import { CodexChatPicker } from './CodexChatPicker';
 import { CodexPreviewCard } from './CodexPreviewCard';
 import { CodexQueue } from './CodexQueue';
 import { CodexTaskCard } from './CodexTaskCard';
-import { SCOPE_HINT, SCOPE_LABEL, connectionBlock } from './codexLabels';
+import { CodexConnectionNotice } from './CodexConnectionNotice';
+import { SCOPE_HINT, SCOPE_LABEL, connectionBlockOf } from './codexLabels';
 
 interface Props {
   onCite: (citation: Citation) => void;
@@ -66,7 +67,8 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
   }, [view, tasks, selectedChatId]);
 
   // No model is ever substituted: without the user's choice nothing is sent.
-  const blocked = connectionBlock(connection)
+  const block = connectionBlockOf(connection);
+  const blocked = block?.text
     ?? (settings && (!settings.assistant_model || !settings.assistant_effort)
       ? 'Choose a Codex model and reasoning effort for Assistant.' : null);
   const revoked = selected?.revoked === true;
@@ -184,8 +186,7 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
           action={{ label: `New chat · ${SCOPE_LABEL[selected.scope]}`, onClick: () => newChat(selected.scope) }} />
       )}
       {!revoked && blocked && (
-        <AssistantNotice role="status" text={blocked}
-          action={onOpenSettings ? { label: 'Codex settings', onClick: onOpenSettings } : undefined} />
+        <CodexConnectionNotice block={block} text={blocked} onOpenSettings={onOpenSettings} />
       )}
 
       {askContext && <QuoteChip quote={askContext} onClear={() => setAskContext(null)} />}
