@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from audiohelper.gateways.soniox import SonioxToken, SonioxTokenRef, SonioxTranslationToken
+from skaz.gateways.soniox import SonioxToken, SonioxTokenRef, SonioxTranslationToken
 from tests.test_native_event_pages_api import event, recording
 
 

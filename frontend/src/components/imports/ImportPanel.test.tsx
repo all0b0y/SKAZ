@@ -32,8 +32,8 @@ beforeEach(async () => {
   states = [view()];
   onSettled = vi.fn();
   onDeleted = vi.fn();
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
       requests.push(req);
       if (req.method === 'POST' && req.path.endsWith('/cancel')) {

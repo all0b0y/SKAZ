@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.agent.snapshot_queue import SnapshotQueue
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.agent.snapshot_queue import SnapshotQueue
+from skaz.db import Database
+from skaz.schemas import Segment
 
 
 def test_queued_requests_own_snapshots_and_restart_requires_manual_resume(tmp_path: Path) -> None:

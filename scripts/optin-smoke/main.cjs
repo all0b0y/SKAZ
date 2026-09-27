@@ -12,7 +12,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { app } = require('electron');
 
-const requested = process.env.AUDIOHELPER_OPTIN_SMOKE_USER_DATA;
+const requested = process.env.SKAZ_OPTIN_SMOKE_USER_DATA;
 
 function refuse(reason) {
   console.error(`[optin-smoke] refusing to launch: ${reason}`);
@@ -20,7 +20,7 @@ function refuse(reason) {
 }
 
 if (!requested) {
-  refuse('AUDIOHELPER_OPTIN_SMOKE_USER_DATA is not set');
+  refuse('SKAZ_OPTIN_SMOKE_USER_DATA is not set');
 } else {
   let isolated = false;
   try {

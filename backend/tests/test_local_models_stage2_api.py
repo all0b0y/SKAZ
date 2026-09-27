@@ -21,13 +21,13 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper import local_models
-from audiohelper.app import create_app
-from audiohelper.audio import parse_wav
-from audiohelper.gateways import ProviderError
-from audiohelper.gateways import asr as asr_gateway
-from audiohelper.local_models import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
-from audiohelper.secrets import MemorySecretStore
+from skaz import local_models
+from skaz.app import create_app
+from skaz.audio import parse_wav
+from skaz.gateways import ProviderError
+from skaz.gateways import asr as asr_gateway
+from skaz.local_models import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 

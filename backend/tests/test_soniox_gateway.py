@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from audiohelper.gateways.soniox import (
+from skaz.gateways.soniox import (
     DEFAULT_MODEL,
     SONIOX_WEBSOCKET_URL,
     SonioxConfig,
@@ -481,7 +481,7 @@ async def test_smoke_keeps_received_text_and_token_times_after_send_failure(
         return socket
 
     # Replace the external network boundary, not the production gateway.
-    monkeypatch.setattr("audiohelper.gateways.soniox.connect", connect_locally)
+    monkeypatch.setattr("skaz.gateways.soniox.connect", connect_locally)
     monkeypatch.setenv("SONIOX_API_KEY", "local-test-key")
     wav = tmp_path / "fixture.wav"
     with wave.open(str(wav), "wb") as handle:

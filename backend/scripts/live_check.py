@@ -7,8 +7,8 @@ how long each step took. Requires OPENROUTER_API_KEY in the environment.
 The ASR default is OpenRouter's **dedicated** speech-to-text contract
 (POST /api/v1/audio/transcriptions). Override the models without editing this file:
 
-    AUDIOHELPER_LIVE_ASR_MODEL=<id>    # must be an audio->transcription model
-    AUDIOHELPER_LIVE_TEXT_MODEL=<id>
+    SKAZ_LIVE_ASR_MODEL=<id>    # must be an audio->transcription model
+    SKAZ_LIVE_TEXT_MODEL=<id>
 
 Usage: python scripts/live_check.py <base_url> <token> <wav_path>
 """
@@ -27,8 +27,8 @@ from typing import Any
 import httpx
 
 #: Dedicated OpenRouter STT model; catalog pricing is 0.0000075 USD/second.
-ASR_MODEL = os.environ.get("AUDIOHELPER_LIVE_ASR_MODEL", "qwen/qwen3-asr-1.7b")
-TEXT_MODEL = os.environ.get("AUDIOHELPER_LIVE_TEXT_MODEL", "qwen/qwen3-30b-a3b-instruct-2507")
+ASR_MODEL = os.environ.get("SKAZ_LIVE_ASR_MODEL", "qwen/qwen3-asr-1.7b")
+TEXT_MODEL = os.environ.get("SKAZ_LIVE_TEXT_MODEL", "qwen/qwen3-30b-a3b-instruct-2507")
 
 
 def wav_duration_ms(path: Path) -> int:

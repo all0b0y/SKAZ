@@ -78,7 +78,7 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
 
   useEffect(() => {
     let alive = true;
-    void new ApiClient(window.audiohelper).getImportCapabilities()
+    void new ApiClient(window.skaz).getImportCapabilities()
       .then((value) => { if (alive) setCaps(value); })
       .catch((err: unknown) => {
         if (alive) setCapsError(err instanceof Error ? err.message : String(err));
@@ -110,7 +110,7 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
     if (needsSecondClick) { setConfirmedExpensive(true); return; }
     setBusy(true);
     setError('');
-    void new ApiClient(window.audiohelper)
+    void new ApiClient(window.skaz)
       .createImport({
         ...(preview ? { source: preview.source, allow_duplicate: allowDuplicate } : { path: file.path }),
         title: title.trim() || file.name,

@@ -3,7 +3,7 @@
 An app started from Finder/Dock inherits launchd's PATH (``/usr/bin:/bin:...``),
 not the login shell's, so ``shutil.which`` alone misses installs in
 ``~/.local/bin``, Homebrew or nvm. The desktop process passes the login-shell
-PATH as ``AUDIOHELPER_USER_PATH``; standard install folders are the fallback.
+PATH as ``SKAZ_USER_PATH``; standard install folders are the fallback.
 Nothing here runs a binary.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-USER_PATH_ENV = "AUDIOHELPER_USER_PATH"
+USER_PATH_ENV = "SKAZ_USER_PATH"
 
 
 def standard_dirs(home: Path) -> list[str]:

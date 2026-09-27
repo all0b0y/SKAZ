@@ -44,7 +44,7 @@ beforeEach(async () => {
     }
     return { ok: false, status: 404, detail: 'No fixture for this endpoint.' };
   };
-  window.audiohelper = { ...window.audiohelper, request } satisfies BridgeApi;
+  window.skaz = { ...window.skaz, request } satisfies BridgeApi;
   const { useStore } = await import('../../state/store');
   await act(async () => { await useStore.getState().refreshSettings(); });
   SettingsPanel = (await import('./SettingsPanel')).SettingsPanel;

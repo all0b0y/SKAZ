@@ -26,7 +26,7 @@ BACKEND_SRC = ROOT / "backend" / "src"
 if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
-from audiohelper.gateways.soniox import (  # noqa: E402
+from skaz.gateways.soniox import (  # noqa: E402
     DEFAULT_MODEL,
     SonioxCompletion,
     SonioxConfig,

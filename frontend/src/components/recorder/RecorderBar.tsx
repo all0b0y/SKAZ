@@ -226,8 +226,8 @@ export function RecorderBar() {
     : failedCount > 0 || queue.overflow ? [{ label: 'Retry saving', run: retry }]
       // System audio refused at start/resume: nothing was recorded, offer both ways on.
       : systemAudioIssue && systemAudioIssue.phase !== 'lost' ? [
-        ...(systemAudioIssue.reason === 'denied' && window.audiohelper?.openSystemAudioSettings
-          ? [{ label: 'Open System Settings', icon: 'settings' as const, run: () => { void window.audiohelper.openSystemAudioSettings?.(); } }] : []),
+        ...(systemAudioIssue.reason === 'denied' && window.skaz?.openSystemAudioSettings
+          ? [{ label: 'Open System Settings', icon: 'settings' as const, run: () => { void window.skaz.openSystemAudioSettings?.(); } }] : []),
         { label: 'Record mic only', icon: 'mic' as const,
           run: () => { void (systemAudioIssue.phase === 'resume' || hasRecording ? resume({ micOnly: true }) : start({ micOnly: true })); } },
       ] : [];

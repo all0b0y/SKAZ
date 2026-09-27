@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from audiohelper import repository as repo
-from audiohelper import transcript_monologues as tm
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken
-from audiohelper.live_store import LiveStore
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz import transcript_monologues as tm
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken
+from skaz.live_store import LiveStore
+from skaz.schemas import Segment
 
 
 def test_segment_only_session_yields_monologues_without_invented_speakers(tmp_path: Path) -> None:

@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper.db import Database
-from audiohelper.gateways.soniox_async import ASYNC_MODEL, AsyncToken
-from audiohelper.import_store import (
+from skaz.db import Database
+from skaz.gateways.soniox_async import ASYNC_MODEL, AsyncToken
+from skaz.import_store import (
     IMPORT_SAMPLE_RATE,
     ImportConflict,
     ImportSource,
@@ -21,8 +21,8 @@ from audiohelper.import_store import (
     digest_file,
     segment_tokens,
 )
-from audiohelper.repository import create_session
-from audiohelper.transcript_monologues import build_monologues
+from skaz.repository import create_session
+from skaz.transcript_monologues import build_monologues
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ def test_monologue_timestamps_round_trip_through_samples(
 def test_translated_tokens_are_stored_and_projected_against_their_speech(
     store: ImportStore, db: Database, tmp_path: Path,
 ) -> None:
-    from audiohelper.live_store import LiveStore
+    from skaz.live_store import LiveStore
 
     session_id = start(store, db, tmp_path, translate=True)
     store.apply_transcript(session_id, tokens=[
@@ -153,7 +153,7 @@ def test_completion_is_idempotent(store: ImportStore, db: Database, tmp_path: Pa
 def test_a_session_with_a_live_recording_cannot_be_imported_into(
     store: ImportStore, db: Database, tmp_path: Path,
 ) -> None:
-    from audiohelper.live_store import LiveStore
+    from skaz.live_store import LiveStore
 
     session = create_session(db, "Live")
     LiveStore(db).open(session.id, sample_rate=48_000, model="stt-rt-v5")
@@ -165,7 +165,7 @@ def test_a_session_with_a_live_recording_cannot_be_imported_into(
 def test_a_microphone_cannot_continue_an_imported_session(
     store: ImportStore, db: Database, tmp_path: Path,
 ) -> None:
-    from audiohelper.live_store import LiveConflict, LiveStore
+    from skaz.live_store import LiveConflict, LiveStore
 
     session_id = start(store, db, tmp_path)
     store.apply_transcript(session_id, tokens=[token("раз", 0, 500)], audio_duration_ms=1_000)

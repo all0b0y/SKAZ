@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from audiohelper.secrets import MemorySecretStore
+from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
 
 CATALOG = {

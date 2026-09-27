@@ -28,8 +28,8 @@ test.beforeAll(async () => {
     cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   // The real profile must never be touched: prove the relocation before any write.
@@ -38,11 +38,11 @@ test.beforeAll(async () => {
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 1400, height: 860 });
-  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
     { timeout: 60_000 }).toBe('ready');
   // Isolated onboarding preference only (as panels.smoke): no credentials or consent.
   await page.evaluate(async () => {
-    const response = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+    const response = await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
     if (!response.ok) throw new Error('Fixture onboarding failed');
   });
   await page.reload();
@@ -81,12 +81,12 @@ async function expectShell(engine: 'api' | 'codex') {
 
 test('the bridge passes Codex routes and the UI reflects what the real backend serves', async () => {
   // A GET that the contract defines as side-effect free; no POST is sent.
-  const state = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/codex/state' }));
+  const state = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/codex/state' }));
   // Policy rejections come back as status 0 with "not allowed"; a served or
   // unserved route comes back with a real HTTP status from the backend.
   expect(state.ok ? 200 : state.status).toBeGreaterThan(0);
   if (!state.ok) expect(state.detail).not.toMatch(/not allowed/);
-  const blocked = await page.evaluate(() => window.audiohelper.request({ method: 'POST', path: '/codex/shell', body: {} }));
+  const blocked = await page.evaluate(() => window.skaz.request({ method: 'POST', path: '/codex/shell', body: {} }));
   expect(blocked).toMatchObject({ ok: false, status: 0 });
 
   fs.writeFileSync(path.join(shots, 'backend-codex-state.json'),
@@ -118,7 +118,7 @@ test('the bridge passes Codex routes and the UI reflects what the real backend s
     }
     // Nothing saved: closing discards the draft, and no check/login/model route was hit.
     await page.locator('.drawer__close').click();
-    const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/codex/state' }));
+    const settings = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/codex/state' }));
     expect(settings.ok && (settings.data as { settings: Record<string, unknown> }).settings)
       .toMatchObject({ assistant_enabled: false, notes_enabled: false });
     expect(settings.ok && (settings.data as { connection: { status: string } }).connection.status).toBe('unchecked');
@@ -141,7 +141,7 @@ test('independent Codex purpose choices survive saving and renderer reload', asy
   await nav.getByRole('button', { name: 'Notes' }).click();
   await expect(page.getByRole('tablist', { name: 'Notes provider' }).getByRole('tab').first())
     .toHaveAttribute('aria-selected', 'true');
-  let state = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/codex/state' }));
+  let state = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/codex/state' }));
   expect(state.ok && (state.data as { settings: Record<string, unknown> }).settings)
     .toMatchObject({ assistant_enabled: false, notes_enabled: true });
   await nav.getByRole('button', { name: 'Assistant' }).click();
@@ -153,7 +153,7 @@ test('independent Codex purpose choices survive saving and renderer reload', asy
   await page.locator('.drawer__close').click();
   await expect(page.locator('.drawer')).toHaveCount(0);
   await page.reload();
-  state = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/codex/state' }));
+  state = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/codex/state' }));
   expect(state.ok && (state.data as { settings: Record<string, unknown> }).settings)
     .toMatchObject({ assistant_enabled: true, notes_enabled: true });
   expect(state.ok && (state.data as { connection: { status: string } }).connection.status).toBe('unchecked');

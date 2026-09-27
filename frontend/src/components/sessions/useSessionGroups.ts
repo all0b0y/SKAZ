@@ -15,7 +15,7 @@ export function useSessionGroups(sessions: Session[]) {
   useEffect(() => {
     let alive = true;
     const read = () => {
-      void new ApiClient(window.audiohelper).getStorageLayout().then((view) => {
+      void new ApiClient(window.skaz).getStorageLayout().then((view) => {
         if (!alive) return;
         if (!view || typeof view.enabled !== 'boolean') throw new Error('Invalid storage state');
         setRemote(view);
@@ -32,7 +32,7 @@ export function useSessionGroups(sessions: Session[]) {
     if (remote.enabled) {
       running.current = true;
       try {
-        const api = new ApiClient(window.audiohelper);
+        const api = new ApiClient(window.skaz);
         await api.updateStorageGroups(next, remote.revision);
         const confirmed = await api.getStorageLayout();
         setRemote(confirmed); setData(confirmed.data); setError('');

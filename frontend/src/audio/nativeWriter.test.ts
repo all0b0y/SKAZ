@@ -10,7 +10,7 @@ function fixture(retainAudio = true) {
   let loseAck = false;
   const sent: number[] = [];
   const bridge: BridgeApi = {
-    ...window.audiohelper,
+    ...window.skaz,
     openNative: vi.fn<BridgeApi['openNative']>(async (_id, rate) => ({ ok: true, status: 200, data: {
       audio_retained: retainAudio, connection_id: 'fixture', sample_rate: rate, saved_samples: samples, next_sequence: sequence, transcription: 'unavailable',
     } })),

@@ -9,9 +9,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from audiohelper.db import Database
-from audiohelper.secrets import MemorySecretStore
-from audiohelper.web_search import WebSearch
+from skaz.db import Database
+from skaz.secrets import MemorySecretStore
+from skaz.web_search import WebSearch
 
 
 async def wait_pending(service: WebSearch) -> None:

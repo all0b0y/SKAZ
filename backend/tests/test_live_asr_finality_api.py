@@ -12,11 +12,11 @@ import httpx
 import numpy as np
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.db import Database
-from audiohelper.gateways.asr import LocalWhisperTranscriber
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.db import Database
+from skaz.gateways.asr import LocalWhisperTranscriber
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, chat_completion, make_wav
 
 Word = tuple[str, float, float]
@@ -25,15 +25,15 @@ Word = tuple[str, float, float]
 def test_finality_environment_is_off_by_default_and_guard_must_be_positive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AUDIOHELPER_TOKEN", TOKEN)
-    monkeypatch.delenv("AUDIOHELPER_LIVE_FINALITY", raising=False)
-    monkeypatch.delenv("AUDIOHELPER_LIVE_FINALITY_GUARD_MS", raising=False)
+    monkeypatch.setenv("SKAZ_TOKEN", TOKEN)
+    monkeypatch.delenv("SKAZ_LIVE_FINALITY", raising=False)
+    monkeypatch.delenv("SKAZ_LIVE_FINALITY_GUARD_MS", raising=False)
     default = AppConfig.from_env(0)
     assert default.live_finality_enabled is False
     assert default.live_finality_guard_ms == 750
 
-    monkeypatch.setenv("AUDIOHELPER_LIVE_FINALITY", "1")
-    monkeypatch.setenv("AUDIOHELPER_LIVE_FINALITY_GUARD_MS", "0")
+    monkeypatch.setenv("SKAZ_LIVE_FINALITY", "1")
+    monkeypatch.setenv("SKAZ_LIVE_FINALITY_GUARD_MS", "0")
     with pytest.raises(SystemExit, match="positive integer"):
         AppConfig.from_env(0)
 
@@ -263,7 +263,7 @@ async def test_contextual_final_on_legacy_session_blocks_upload_retry_and_defaul
     await store(finality_client, session_id, 0, first, start_ms=0, end_ms=750)
     await store(finality_client, session_id, 1, second, start_ms=750, end_ms=1500)
     engine = CoordinatedWriterEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 0, 0)).status_code == 200
     committed = await update(finality_client, session_id, 0, 1, 1)
@@ -307,7 +307,7 @@ async def test_legacy_final_blocks_contextual_update_before_decoder_and_preserve
     session_id = await create_session(finality_client)
     legacy_audio = make_wav(0.5, frequency=260)
     engine = CoordinatedWriterEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     uploaded = await finality_client.post(
         f"/sessions/{session_id}/audio",
         params={"sequence": 0, "start_ms": 0, "end_ms": 500},
@@ -343,7 +343,7 @@ async def test_opposite_writer_race_commits_only_the_transaction_winner(
     await store(finality_client, session_id, 0, first, start_ms=0, end_ms=750)
     await store(finality_client, session_id, 1, second, start_ms=750, end_ms=1500)
     engine = CoordinatedWriterEngine(block=delayed_writer)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     async def legacy_upload() -> httpx.Response:
         return await finality_client.post(
@@ -395,7 +395,7 @@ async def test_default_off_keeps_live_draft_and_preview_read_only(
     await store(client, session_id, 0, first, start_ms=0, end_ms=750)
     await store(client, session_id, 1, second, start_ms=750, end_ms=1500)
     engine = ScriptedWordEngine([[(' legacy draft', 0.1, 0.5)]])
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     created = await update(client, session_id, 0, 0, 0)
     extended = await update(client, session_id, 0, 1, 1)
@@ -437,7 +437,7 @@ async def test_added_audio_commits_repeat_words_with_sources_and_hides_tail_from
             [(' Alpha', 0.11, 0.31), (' go', 0.81, 0.96), (' go', 1.06, 1.21), (' revised-tail', 1.80, 2.05)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     baseline = await update(finality_client, session_id, 0, 1, 0)
     assert baseline.status_code == 200, baseline.text
@@ -532,7 +532,7 @@ async def test_trailing_sentence_punctuation_does_not_break_lexical_word_agreeme
     engine = ScriptedWordEngine(
         [[(first_surface, 0.1, 0.3)], [(second_surface, 0.11, 0.31), (" tail", 1.1, 1.3)]]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 0, 0)).status_code == 200
     committed = await update(finality_client, session_id, 0, 1, 1)
@@ -560,7 +560,7 @@ async def test_internal_word_punctuation_is_not_collapsed(
     engine = ScriptedWordEngine(
         [[(first_surface, 0.1, 0.3)], [(conflicting_surface, 0.11, 0.31), (" tail", 1.1, 1.3)]]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 0, 0)).status_code == 200
     conflicting = await update(finality_client, session_id, 0, 1, 1)
@@ -601,7 +601,7 @@ async def test_retry_stale_revision_and_new_epoch_do_not_duplicate_final_prefix(
     )
     engines = {"small": small, "base": base}
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper", lambda model, **_kwargs: engines[model]
+        "skaz.gateways.asr.load_local_whisper", lambda model, **_kwargs: engines[model]
     )
 
     assert (await update(finality_client, session_id, 0, 1, 0)).status_code == 200
@@ -651,7 +651,7 @@ async def test_unsupported_or_invalid_word_evidence_keeps_explicit_draft(
     session_id = await create_session(finality_client)
     await store(finality_client, session_id, 0, make_wav(0.75), start_ms=0, end_ms=750)
     engine = ScriptedWordEngine([words])
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     response = await update(finality_client, session_id, 0, 0, 0)
 
@@ -675,7 +675,7 @@ async def test_failed_final_transaction_restores_draft_frontier_fts_and_manifest
     engine = ScriptedWordEngine(
         [[(' Atomic', 0.1, 0.3)], [(' Atomic', 0.1, 0.3), (' tail', 1.0, 1.2)]]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     baseline = await update(finality_client, session_id, 0, 0, 0)
     assert baseline.status_code == 200, baseline.text
     before = (await finality_client.get(f"/sessions/{session_id}/asr/live")).json()
@@ -724,7 +724,7 @@ async def test_changed_window_start_restarts_agreement_before_first_final(
             [(' Anchor', 0.11, 0.31), (' tail', 1.2, 1.4)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 1, 0)).status_code == 200
     restarted = await update(finality_client, session_id, 1, 2, 1)
@@ -766,7 +766,7 @@ async def test_conflict_after_commit_preserves_whole_new_hypothesis_and_old_fina
             third,
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 0, 0)).status_code == 200
     committed = await update(finality_client, session_id, 0, 1, 1)
@@ -819,7 +819,7 @@ async def test_session_delete_cascades_finality_and_source_associations(
     engine = ScriptedWordEngine(
         [[(' Cascade', 0.1, 0.2)], [(' Cascade', 0.1, 0.2), (' tail', 0.8, 0.9)]]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await update(finality_client, session_id, 0, 0, 0)).status_code == 200
     committed = await update(finality_client, session_id, 0, 1, 1)
     assert committed.status_code == 200, committed.text
@@ -845,7 +845,7 @@ async def test_restart_preserves_frontier_and_exact_retry_does_not_refinalize(
     engine = ScriptedWordEngine(
         [[(' Restart', 0.1, 0.3)], [(' Restart', 0.1, 0.3), (' tail', 1.0, 1.2)]]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     headers = {"Authorization": f"Bearer {TOKEN}"}
     first_app = create_app(config, secret_store=MemorySecretStore(), http_client=FakeHttp().client())
     async with httpx.AsyncClient(
@@ -902,7 +902,7 @@ async def test_restart_policy_changes_never_reuse_idempotency_or_duplicate_final
             [(" Policy", 0.11, 0.31), (" tail", 1.0, 1.2)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     headers = {"Authorization": f"Bearer {TOKEN}"}
 
     async def run_app(config: AppConfig, operation: Any) -> Any:
@@ -1101,7 +1101,7 @@ async def test_rollover_crosses_thirty_seconds_without_reinserting_overlap(
             ],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     first = await update(finality_client, session_id, 0, 2, 0)
     committed = await update(finality_client, session_id, 0, 4, 1)
@@ -1166,7 +1166,7 @@ async def test_rollover_rejects_ambiguous_midword_chunk_boundary_with_whole_draf
             [(" Different", 0.0, 0.3), (" retained", 5.0, 5.5)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 2, 0)).status_code == 200
     committed = await update(finality_client, session_id, 0, 3, 1)
@@ -1205,7 +1205,7 @@ async def test_rollover_without_trustworthy_overlap_is_blocked(
             [(" Different", 0.1, 0.4), (" retained", 5.0, 5.5)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     assert (await update(finality_client, session_id, 0, 2, 0)).status_code == 200
     assert (await update(finality_client, session_id, 0, 3, 1)).status_code == 200
@@ -1237,7 +1237,7 @@ async def test_rollover_after_frontier_is_blocked_and_survives_restart(
             [(" Whole", 0.2, 0.5), (" conflict", 1.0, 1.5)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     headers = {"Authorization": f"Bearer {TOKEN}"}
     first_app = create_app(config, secret_store=MemorySecretStore(), http_client=FakeHttp().client())
     async with httpx.AsyncClient(
@@ -1308,7 +1308,7 @@ async def test_unambiguous_split_word_rollover_restores_and_advances_after_resta
             ],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     headers = {"Authorization": f"Bearer {TOKEN}"}
     first_app = create_app(config, secret_store=MemorySecretStore(), http_client=FakeHttp().client())
     async with httpx.AsyncClient(

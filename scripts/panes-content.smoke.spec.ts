@@ -32,17 +32,17 @@ test.beforeAll(async () => {
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 1400, height: 820 });
-  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
     { timeout: 60_000 }).toBe('ready');
-  await page.evaluate(() => window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } }));
-  const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
+  await page.evaluate(() => window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } }));
+  const settings = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/settings' }));
   await app.evaluate(({ ipcMain }, fixture) => {
     const id = 'panes-fixture';
     const session = { id, title: `Очень длинное название лекции про ${fixture.longWord}`, mode: 'legacy',
@@ -135,7 +135,7 @@ test('transcript view: every element inside its column', async () => {
   expect(stacked.timeAbove, 'narrow column: time above the text').toBe(true);
   await audit('transcript-centre-min');
   // Reset for the following tests.
-  await page.evaluate(() => localStorage.removeItem('audiohelper.panels'));
+  await page.evaluate(() => localStorage.removeItem('skaz.panels'));
   await page.reload();
   await expect(page.locator('.gate')).toHaveCount(0, { timeout: 30_000 });
   await page.getByText('Очень длинное название').first().click();
@@ -306,7 +306,7 @@ test('overlay: a floating panel is a screen of its own; a click on the centre cl
 
 test('final pass: every column at its minimum, light and dark', async () => {
   test.setTimeout(120_000);
-  await page.evaluate(() => localStorage.removeItem('audiohelper.panels'));
+  await page.evaluate(() => localStorage.removeItem('skaz.panels'));
   await page.reload();
   await expect(page.locator('.gate')).toHaveCount(0, { timeout: 30_000 });
   await page.getByText('Очень длинное название').first().click();
@@ -323,7 +323,7 @@ test('final pass: every column at its minimum, light and dark', async () => {
     await dragToMinimum('sessions');
     await dragToMinimum('assistant');
     await audit(`final-${theme}-sides-min`);
-    await page.evaluate(() => localStorage.removeItem('audiohelper.panels'));
+    await page.evaluate(() => localStorage.removeItem('skaz.panels'));
     await page.reload();
     await expect(page.locator('.gate')).toHaveCount(0, { timeout: 30_000 });
     await page.getByText('Очень длинное название').first().click();

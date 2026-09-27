@@ -6,10 +6,10 @@ from typing import Any
 
 import httpx
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp
 
 
@@ -154,7 +154,7 @@ async def test_page_byte_limit_never_silently_truncates_an_event(
 async def test_event_above_the_hard_ceiling_is_an_explicit_error(
     client: httpx.AsyncClient, app: Any, monkeypatch: Any,
 ) -> None:
-    from audiohelper import native_event_pages
+    from skaz import native_event_pages
     monkeypatch.setattr(native_event_pages, "HARD_PAGE_BYTES", 300 * 1024)
     sid, cid = await recording(client, app)
     store = app.state.runtime.live_store

@@ -1,6 +1,6 @@
 """Explicit user opt-in for the experimental contextual local mode.
 
-The process flags ``AUDIOHELPER_LIVE_FINALITY`` / ``AUDIOHELPER_LOCAL_SPEECH_GATE``
+The process flags ``SKAZ_LIVE_FINALITY`` / ``SKAZ_LOCAL_SPEECH_GATE``
 stay a developer override. These tests describe the user-facing seam: with no
 process override at all, an explicit persisted settings opt-in is what enables
 the contextual runtime capabilities, reading capability never enables anything,
@@ -19,10 +19,10 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.schemas import LiveAsrDraftResponse
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.schemas import LiveAsrDraftResponse
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 LOCAL_PROFILE = {"asr": {"provider": "local-whisper", "model": "small"}}
@@ -346,9 +346,9 @@ async def test_toggling_off_and_on_during_a_real_decode_never_commits_the_stale_
     await _store(client, session_id, 0)
 
     engine = _BlockingEngine(threading.Event(), threading.Event())
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper",
+        "skaz.gateways.asr.load_local_whisper",
         lambda _model, *, allow_download: engine,
     )
 

@@ -2,7 +2,7 @@
  * Not a behaviour test: dumps real CodexAssistant markup (open chat, streaming
  * task with journal, queue, pending note edit) from the authored contract
  * fixture so scripts/codex-ui.smoke.spec.ts can lay it out with the built CSS
- * in Electron. Runs only when AUDIOHELPER_CODEX_DUMP is set.
+ * in Electron. Runs only when SKAZ_CODEX_DUMP is set.
  */
 import { expect, it } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -14,11 +14,11 @@ import { useStore } from '../../state/store';
 import { stopCodexPolling } from '../../state/codex';
 import { fakeCodex } from '../../test/codexFake';
 
-const out = process.env.AUDIOHELPER_CODEX_DUMP;
+const out = process.env.SKAZ_CODEX_DUMP;
 
 it.runIf(Boolean(out))('dumps the Codex assistant', async () => {
   const fake = fakeCodex();
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: fake.bridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: fake.bridge });
   fake.chats.push(
     { id: 'c1', session_id: 's1', title: 'Бюджет и сроки проекта на следующий квартал', scope: 'group', group_id: 'g', revoked: false, unread: false, updated_at: '2' },
     { id: 'c2', session_id: 's1', title: 'Термины', scope: 'session', group_id: null, revoked: false, unread: true, updated_at: '1' },

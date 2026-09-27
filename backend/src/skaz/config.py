@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_DATA_DIR = Path.home() / ".skaz"
+DEFAULT_DATA_DIR = Path.home() / ".skaz" / "dev" / "data"
 #: Data folder written before the product was renamed; adopted on first start.
 LEGACY_DATA_DIR = Path.home() / ".audiohelper"
 LEGACY_DB_NAME = "audiohelper.sqlite3"
@@ -77,6 +77,7 @@ class AppConfig:
     #: Explicit read-only override; otherwise use the opt-in persisted preference.
     session_files_root: Path | None = None
     documents_dir: Path = field(default_factory=lambda: Path.home() / "Documents")
+    documents_sandbox: Path | None = None
 
     @property
     def audio_dir(self) -> Path:
@@ -88,36 +89,37 @@ class AppConfig:
 
     @classmethod
     def from_env(cls, port: int) -> AppConfig:
-        token = os.environ.get("AUDIOHELPER_TOKEN", "").strip()
+        token = os.environ.get("SKAZ_TOKEN", "").strip()
         if not token:
             raise SystemExit(
-                "AUDIOHELPER_TOKEN is required; the desktop process must supply a per-run token."
+                "SKAZ_TOKEN is required; the desktop process must supply a per-run token."
             )
-        data_dir = Path(os.environ.get("AUDIOHELPER_DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
+        data_dir = Path(os.environ.get("SKAZ_DATA_DIR", str(DEFAULT_DATA_DIR))).expanduser()
         origins = tuple(
-            o.strip() for o in os.environ.get("AUDIOHELPER_ALLOWED_ORIGINS", "").split(",") if o.strip()
+            o.strip() for o in os.environ.get("SKAZ_ALLOWED_ORIGINS", "").split(",") if o.strip()
         )
         return cls(
             token=token,
             data_dir=data_dir,
             port=port,
+            documents_sandbox=(Path(value) if (value := os.environ.get("SKAZ_DOCUMENTS_SANDBOX")) else None),
             documents_dir=Path(os.environ.get(
-                "AUDIOHELPER_DOCUMENTS_DIR", str(Path.home() / "Documents"),
+                "SKAZ_DOCUMENTS_DIR", str(Path.home() / "Documents"),
             )),
             session_files_root=(
                 Path(value).expanduser()
-                if (value := os.environ.get("AUDIOHELPER_SESSION_FILES_ROOT", "").strip())
+                if (value := os.environ.get("SKAZ_SESSION_FILES_ROOT", "").strip())
                 else None
             ),
             extra_allowed_origins=origins,
-            local_speech_gate=_boolean_env("AUDIOHELPER_LOCAL_SPEECH_GATE"),
-            live_finality_enabled=_boolean_env("AUDIOHELPER_LIVE_FINALITY"),
+            local_speech_gate=_boolean_env("SKAZ_LOCAL_SPEECH_GATE"),
+            live_finality_enabled=_boolean_env("SKAZ_LIVE_FINALITY"),
             live_finality_guard_ms=_positive_int_env(
-                "AUDIOHELPER_LIVE_FINALITY_GUARD_MS", default=750
+                "SKAZ_LIVE_FINALITY_GUARD_MS", default=750
             ),
             local_model_cache_dir=(
                 Path(value).expanduser()
-                if (value := os.environ.get("AUDIOHELPER_MODEL_CACHE", "").strip())
+                if (value := os.environ.get("SKAZ_MODEL_CACHE", "").strip())
                 else None
             ),
         )

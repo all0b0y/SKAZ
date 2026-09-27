@@ -13,9 +13,9 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 
 AUTH = {"Authorization": "Bearer test-token"}
 
@@ -208,9 +208,9 @@ CRASH_ROOT = r'''
 import os, sqlite3, sys
 from pathlib import Path
 from starlette.testclient import TestClient
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 native_connect = sqlite3.connect
 class CrashConnection(sqlite3.Connection):
     saving_root = False

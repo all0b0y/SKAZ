@@ -30,8 +30,8 @@ if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
 }
 
 // A minimal preload bridge so the store's lazily-created client can exist.
-if (!('audiohelper' in window)) {
-  Object.defineProperty(window, 'audiohelper', {
+if (!('skaz' in window)) {
+  Object.defineProperty(window, 'skaz', {
     configurable: true,
     writable: true,
     value: {

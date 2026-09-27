@@ -2,7 +2,7 @@
  * Not a behaviour test: dumps the real AssistantPanel markup of a rich answer
  * with footnotes (and an old answer without label records) so
  * scripts/assistant-answer.smoke.spec.ts can lay it out with the built CSS in
- * Electron. Runs only when AUDIOHELPER_ANSWER_DUMP is set.
+ * Electron. Runs only when SKAZ_ANSWER_DUMP is set.
  */
 import { expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -11,12 +11,12 @@ import path from 'node:path';
 import { AssistantPanel } from './AssistantPanel';
 import { useStore } from '../../state/store';
 
-const out = process.env.AUDIOHELPER_ANSWER_DUMP;
+const out = process.env.SKAZ_ANSWER_DUMP;
 
 it.runIf(Boolean(out))('dumps a rich answer', async () => {
   // API engine: the backend fixture does not serve the Codex boundary.
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true,
-    value: { ...window.audiohelper, request: vi.fn(async () => ({ ok: false, status: 404, detail: 'Not Found' })) } });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true,
+    value: { ...window.skaz, request: vi.fn(async () => ({ ok: false, status: 404, detail: 'Not Found' })) } });
   const c = (id: string, label: string, s: number, text: string, extra = {}) =>
     ({ segment_id: id, start_ms: s * 1000, end_ms: s * 1000 + 8000, text, labels: [label], ...extra });
   useStore.setState({

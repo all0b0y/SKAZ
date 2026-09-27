@@ -42,7 +42,7 @@ MAX_ATTEMPTS = 2
 #: These statuses do not guarantee that the provider did not process or charge
 #: the first request; in particular an upstream gateway timeout is ambiguous.
 #:
-#: Deliberately narrower than :data:`~audiohelper.gateways.RETRYABLE_HTTP_STATUSES`,
+#: Deliberately narrower than :data:`~skaz.gateways.RETRYABLE_HTTP_STATUSES`,
 #: which only picks the wording of a message. 500 can mean the request was processed
 #: and then failed to serialise, and 408/409/425 say nothing about what was done with
 #: the body, so replaying them could charge and answer twice.

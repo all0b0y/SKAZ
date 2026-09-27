@@ -125,4 +125,4 @@ web experimentales no implican disponibilidad para producción; la búsqueda web
 [Normas de convivencia](../../CODE_OF_CONDUCT.md) · [Seguridad](../../SECURITY.md) · [Licencia MIT](../../LICENSE)
 
 *Skaz* (сказ) es una palabra rusa que designa una narración oral.
-El nombre de trabajo original era AudioHelper. Copyright © 2026 all0b0y.
+El nombre de trabajo original era SKAZ. Copyright © 2026 all0b0y.

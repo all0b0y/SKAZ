@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 
-from audiohelper.agent.codex_dispatcher import CodexDispatcher
-from audiohelper.agent.codex_runtime import CodexRuntime
-from audiohelper.agent.snapshot_queue import SnapshotTask
-from audiohelper.db import Database
-from audiohelper.gateways import codex_connection
-from audiohelper.gateways.codex_connection import CodexConnection
-from audiohelper.gateways.codex_locate import USER_PATH_ENV, locate_codex
+from skaz.agent.codex_dispatcher import CodexDispatcher
+from skaz.agent.codex_runtime import CodexRuntime
+from skaz.agent.snapshot_queue import SnapshotTask
+from skaz.db import Database
+from skaz.gateways import codex_connection
+from skaz.gateways.codex_connection import CodexConnection
+from skaz.gateways.codex_locate import USER_PATH_ENV, locate_codex
 
 
 def _exe(path: Path, body: str = "#!/bin/sh\nexit 0\n") -> Path:

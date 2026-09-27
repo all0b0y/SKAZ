@@ -16,7 +16,7 @@ const LOCAL_PROVIDERS: { provider: LocalProviderName; label: string }[] = [
  * whatever is currently assigned to a task in Model assignment. Model
  * assignment only ever showed the single selected checkpoint's
  * download/delete panel; this lists the whole known catalog per provider
- * (backend/src/audiohelper/local_models.py has 9 whisper checkpoints + 1
+ * (backend/src/skaz/local_models.py has 9 whisper checkpoints + 1
  * GigaChat checkpoint — a small, fixed, honest list, not paginated infinity).
  */
 export function LocalModelsBrowser() {

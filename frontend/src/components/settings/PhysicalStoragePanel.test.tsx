@@ -16,7 +16,7 @@ beforeEach(() => {
   view = { enabled: true, revision: 0, pending: null, data: { version: 1, groups: [], membership: {} } };
   requests = [];
   useStore.setState({ sessions: [], activeSessionId: null, recorderState: 'idle' });
-  window.audiohelper = { ...window.audiohelper,
+  window.skaz = { ...window.skaz,
     request: async <T,>(request: BridgeRequest): Promise<JsonResponse<T>> => {
       requests.push(request);
       if (request.method === 'PUT') {
@@ -44,7 +44,7 @@ it('saves a physical group through IPC and readback, never browser storage', asy
   expect(requests.map((r) => `${r.method} ${r.path}`)).toEqual([
     'GET /storage/layout', 'PUT /storage/groups', 'GET /storage/layout',
   ]);
-  expect(localStorage.getItem('audiohelper.session-groups.v1')).toBeNull();
+  expect(localStorage.getItem('skaz.session-groups.v1')).toBeNull();
 });
 
 it('does not announce a physical move or fall back to local prefs after unknown PUT outcome', async () => {
@@ -56,7 +56,7 @@ it('does not announce a physical move or fall back to local prefs after unknown 
   await user.type(screen.getByRole('textbox', { name: 'Group name' }), 'Not saved');
   await user.click(screen.getByRole('button', { name: 'Create' }));
   expect(screen.queryByRole('tab', { name: /Not saved/ })).not.toBeInTheDocument();
-  expect(localStorage.getItem('audiohelper.session-groups.v1')).toBeNull();
+  expect(localStorage.getItem('skaz.session-groups.v1')).toBeNull();
   expect(screen.queryByText(/private\/secret/)).not.toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: 'Create' }));
   expect(requests.filter((r) => r.method === 'PUT')).toHaveLength(1);

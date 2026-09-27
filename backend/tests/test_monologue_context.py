@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from audiohelper import monologue_context as mctx
-from audiohelper import monologues as mono
+from skaz import monologue_context as mctx
+from skaz import monologues as mono
 
 
 def build(*speech: tuple[str, int | None]) -> list[mono.Monologue]:

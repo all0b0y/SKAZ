@@ -14,8 +14,8 @@ import httpx
 import numpy as np
 import pytest
 
-from audiohelper.audio import WavAudio
-from audiohelper.gateways.asr import LocalWhisperTranscriber
+from skaz.audio import WavAudio
+from skaz.gateways.asr import LocalWhisperTranscriber
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 
@@ -103,7 +103,7 @@ async def test_two_stored_chunks_are_one_decode_with_exact_multi_source_provenan
     await store(client, session_id, 9, second, start_ms=500, end_ms=750)
     before = {4: first, 9: second}
     engine = RecordingEngine(text="единое окно", language="ru")
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     response = await client.post(
         f"/sessions/{session_id}/asr/preview",
@@ -176,7 +176,7 @@ async def test_preview_is_not_persisted_in_final_fts_or_agent_context(
     body = make_wav(1.0)
     await store(client, session_id, 0, body, start_ms=0, end_ms=1000)
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper",
+        "skaz.gateways.asr.load_local_whisper",
         lambda *_a, **_k: RecordingEngine(text="draft-only-token"),
     )
 
@@ -223,7 +223,7 @@ async def test_invalid_request_never_constructs_decoder(
         called = True
         raise AssertionError("decoder must not be constructed")
 
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", forbidden)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", forbidden)
     response = await client.post(f"/sessions/{session_id}/asr/preview", json=payload)
     assert response.status_code == status, response.text
     assert called is False
@@ -237,7 +237,7 @@ async def test_endpoint_sequences_must_exist_but_interior_ids_may_be_absent(
     body = make_wav(0.5)
     await store(client, session_id, 2, body, start_ms=0, end_ms=500)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     missing = await client.post(
         f"/sessions/{session_id}/asr/preview", json={"first_sequence": 2, "last_sequence": 8}
@@ -272,7 +272,7 @@ async def test_timeline_and_pcm_mismatch_rejected_before_decode(
         end_ms=second_start + 1000,
     )
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     response = await client.post(
         f"/sessions/{session_id}/asr/preview", json={"first_sequence": 0, "last_sequence": 1}
@@ -286,7 +286,7 @@ async def test_missing_corrupt_and_digest_mismatch_rejected_before_decode(
 ) -> None:
     await use_local_profile(client)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     for sequence, replacement, expected in (
         (0, None, 404),
@@ -319,7 +319,7 @@ async def test_combined_duration_and_bytes_are_rejected_without_truncation_or_de
     await store(client, session_id, 0, first, start_ms=0, end_ms=16000)
     await store(client, session_id, 1, second, start_ms=16000, end_ms=31000)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     duration = await client.post(
         f"/sessions/{session_id}/asr/preview", json={"first_sequence": 0, "last_sequence": 1}
@@ -351,7 +351,7 @@ async def test_chunk_metadata_count_is_bounded_before_decode(
         )
     object.__setattr__(app.state.runtime.config, "max_preview_chunks", 1)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     response = await client.post(
         f"/sessions/{session_id}/asr/preview", json={"first_sequence": 0, "last_sequence": 1}
@@ -398,7 +398,7 @@ async def test_other_session_chunks_are_never_included(
     await store(client, selected, 0, make_wav(1.0, frequency=220), start_ms=0, end_ms=1000)
     await store(client, other, 1, make_wav(1.0, frequency=880), start_ms=1000, end_ms=2000)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     response = await client.post(
         f"/sessions/{selected}/asr/preview", json={"first_sequence": 0, "last_sequence": 1}
@@ -423,7 +423,7 @@ async def test_busy_and_cancellation_release_the_single_preview_slot(
             return super().transcribe(*args, **kwargs)
 
     engine = BlockingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     payload = {"first_sequence": 0, "last_sequence": 0}
     first = asyncio.create_task(client.post(f"/sessions/{session_id}/asr/preview", json=payload))
     await asyncio.wait_for(asyncio.to_thread(entered.wait), timeout=1)
@@ -455,7 +455,7 @@ async def test_session_deleted_during_inference_cannot_return_stale_success(
             return super().transcribe(*args, **kwargs)
 
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: BlockingEngine()
+        "skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: BlockingEngine()
     )
     task = asyncio.create_task(
         client.post(
@@ -482,14 +482,14 @@ async def test_local_decoder_errors_are_sanitised_and_slot_is_reusable(
     def broken(*_args: Any, **_kwargs: Any) -> Any:
         raise RuntimeError("private cache path /Users/private/secret")
 
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", broken)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", broken)
     payload = {"first_sequence": 0, "last_sequence": 0}
     failed = await client.post(f"/sessions/{session_id}/asr/preview", json=payload)
     assert failed.status_code in (400, 502)
     assert "private cache path" not in failed.text
 
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     recovered = await client.post(f"/sessions/{session_id}/asr/preview", json=payload)
     assert recovered.status_code == 200, recovered.text
 

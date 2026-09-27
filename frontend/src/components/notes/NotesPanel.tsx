@@ -37,7 +37,7 @@ interface NotesPanelProps {
 }
 
 const COPY_FEEDBACK_MS = 1_500;
-const DETAIL_KEY = 'audiohelper.noteDetail';
+const DETAIL_KEY = 'skaz.noteDetail';
 
 /** An open context menu over the document, with the selection it was raised on. */
 interface MenuState extends EditorSelection {
@@ -115,7 +115,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
   // The note page is the column's one scrolling body (PANES-SPEC §5).
   const bodyRef = useRef<HTMLDivElement>(null);
   useEdgeFade(bodyRef);
-  const shareUnavailable = window.audiohelper.shareNote && window.audiohelper.platform === 'darwin'
+  const shareUnavailable = window.skaz.shareNote && window.skaz.platform === 'darwin'
     ? null : 'Available on macOS only';
 
   const allNotes = useMemo(
@@ -229,7 +229,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
     const content = editor && editor.noteId === tab.noteId ? await editor.flush() : stored.content;
     const session = useStore.getState().sessions.find((s) => s.id === activeId);
     const shared = shareableNote({ title: stored.title, content }, session?.title ?? null);
-    const ok = await window.audiohelper.shareNote?.({ ...shared, x, y });
+    const ok = await window.skaz.shareNote?.({ ...shared, x, y });
     if (!ok) useStore.setState({ notesError: 'Could not open the Share menu' });
   }, [activeId, allNotes]);
 
@@ -284,7 +284,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
     setMenu(null);
     setRewriting(true);
     try {
-      const preview = await new ApiClient(window.audiohelper)
+      const preview = await new ApiClient(window.skaz)
         .rewritePassage(activeId, openNote, start, end, noteDetail);
       setRewrite({
         previewId: preview.id, original: preview.original,
@@ -301,7 +301,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
     if (!rewrite || !openNote?.id || !activeId) return;
     setRewrite({ ...rewrite, applying: true, error: null });
     try {
-      const saved = await new ApiClient(window.audiohelper)
+      const saved = await new ApiClient(window.skaz)
         .applyRewrite(activeId, openNote.id, rewrite.previewId);
       useStore.setState((state) => state.activeSessionId !== activeId || !state.detail ? {} : {
         detail: { ...state.detail, notes: saved,

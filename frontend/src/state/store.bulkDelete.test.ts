@@ -7,7 +7,7 @@ const session = (id: string): Session => ({
   id, title: id, created_at: '2026-09-25T00:00:00Z', status: 'stopped', duration_ms: 1_000, mode: 'legacy',
 });
 
-const bridge = window.audiohelper as unknown as Omit<BridgeApi, 'request'> & { request: ReturnType<typeof vi.fn> };
+const bridge = window.skaz as unknown as Omit<BridgeApi, 'request'> & { request: ReturnType<typeof vi.fn> };
 
 let failed: { id: string; reason: string }[] = [];
 

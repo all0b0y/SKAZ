@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from audiohelper.media_tools import MediaError, run_tool
+from skaz.media_tools import MediaError, run_tool
 
 
 async def test_process_returns_bounded_output() -> None:

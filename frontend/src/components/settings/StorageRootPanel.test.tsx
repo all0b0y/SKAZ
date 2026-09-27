@@ -18,7 +18,7 @@ beforeEach(async () => {
     if (req.method === 'PUT') current = { ...current, root: (req.body as { root: string | null }).root };
     return { ok: true, status: 200, data: { ...current } };
   };
-  window.audiohelper = { ...window.audiohelper, chooseStorageRoot: choose,
+  window.skaz = { ...window.skaz, chooseStorageRoot: choose,
     request: async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
       requests.push(req);
       if (req.path === '/storage/layout') return { ok: true, status: 200,

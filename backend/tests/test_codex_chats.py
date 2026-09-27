@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.agent.codex_chats import ChatAccessRevoked, ChatStore
-from audiohelper.db import Database
+from skaz import repository as repo
+from skaz.agent.codex_chats import ChatAccessRevoked, ChatStore
+from skaz.db import Database
 
 
 def test_legacy_migration_is_idempotent_and_chat_history_isolated(tmp_path: Path) -> None:

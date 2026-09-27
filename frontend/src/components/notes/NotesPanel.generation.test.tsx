@@ -30,8 +30,8 @@ beforeEach(() => {
   vi.restoreAllMocks();
   pending = [];
   notesBySession = {};
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string }) => {
       const session = /\/sessions\/([^/]+)/.exec(req.path)?.[1] ?? '';
       if (req.method === 'GET' && /\/sessions\/[^/]+$/.test(req.path)) {

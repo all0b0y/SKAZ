@@ -4,13 +4,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from audiohelper import note_store
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
-from audiohelper.library_archive import SessionArchive
-from audiohelper.live_store import LiveStore
-from audiohelper.schemas import Citation
+from skaz import note_store
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
+from skaz.library_archive import SessionArchive
+from skaz.live_store import LiveStore
+from skaz.schemas import Citation
 
 
 def test_native_translation_clock_sources_and_replay_survive_new_database(tmp_path: Path) -> None:

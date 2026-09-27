@@ -22,8 +22,8 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.gateways import ProviderError, is_retryable_http_status
-from audiohelper.gateways.chat import (
+from skaz.gateways import ProviderError, is_retryable_http_status
+from skaz.gateways.chat import (
     MAX_ATTEMPTS,
     OPERATION,
     RETRY_STATUSES,
@@ -34,7 +34,7 @@ from audiohelper.gateways.chat import (
 )
 from tests.conftest import FakeHttp, chat_completion, make_wav
 
-LOGGER_NAME = "audiohelper.gateways.chat"
+LOGGER_NAME = "skaz.gateways.chat"
 
 AGENT_MODEL = "qwen/qwen3-30b-a3b-instruct-2507"
 ASR_MODEL = "google/gemini-2.5-flash-lite"

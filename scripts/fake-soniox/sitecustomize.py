@@ -1,14 +1,14 @@
 """Smoke-test fixture: replace the Soniox WebSocket connector in the backend.
 
 Loaded only when a smoke spec puts this directory on PYTHONPATH AND sets
-AUDIOHELPER_SMOKE_FAKE_SONIOX. It exists so UI smokes can run with a stored
+SKAZ_SMOKE_FAKE_SONIOX. It exists so UI smokes can run with a stored
 Soniox key and cloud consent (which the recorder now requires) without any
 network call or paid request.
 
 This is NOT a check of real speech recognition. It never produces a single
 token: it only answers the stream protocol so the recording lifecycle can run.
 
-Modes (value of AUDIOHELPER_SMOKE_FAKE_SONIOX):
+Modes (value of SKAZ_SMOKE_FAKE_SONIOX):
   accept — the connection opens, audio is swallowed, the end-of-stream marker
            is answered with an empty ``finished`` response.
   refuse — every connection attempt fails, as an unreachable provider would.
@@ -18,7 +18,7 @@ import asyncio
 import json
 import os
 
-_MODE = os.environ.get("AUDIOHELPER_SMOKE_FAKE_SONIOX", "").strip().lower()
+_MODE = os.environ.get("SKAZ_SMOKE_FAKE_SONIOX", "").strip().lower()
 
 
 class _AcceptingTransport:
@@ -57,7 +57,7 @@ async def _refusing_connector(url: str) -> _AcceptingTransport:
 
 
 if _MODE in {"accept", "refuse"}:
-    from audiohelper.gateways import soniox as _soniox
+    from skaz.gateways import soniox as _soniox
 
     _defaults = dict(_soniox.SonioxGateway.__init__.__kwdefaults__ or {})
     _defaults["connector"] = _accepting_connector if _MODE == "accept" else _refusing_connector

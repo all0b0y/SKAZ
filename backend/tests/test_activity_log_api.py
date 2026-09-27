@@ -26,9 +26,9 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, chat_completion, make_wav
 
 AGENT_MODEL = "qwen/qwen3-30b-a3b-instruct-2507"

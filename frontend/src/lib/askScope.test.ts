@@ -8,7 +8,7 @@ const sessions: Session[] = ['a', 'b', 'c'].map((id) => ({
   id, title: id, created_at: '2026-01-01', status: 'stopped', duration_ms: 0, mode: 'legacy',
 }));
 beforeEach(() => localStorage.clear());
-const api = () => new ApiClient(window.audiohelper);
+const api = () => new ApiClient(window.skaz);
 
 it('does not send explicit member ids for Session or All', async () => {
   expect(await askScope(api(), 'session', 'a', sessions)).toEqual({ search_scope: 'session' });

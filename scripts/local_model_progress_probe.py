@@ -1,4 +1,4 @@
-"""Probe AudioHelper's Hugging Face progress callback with one tiny public README.
+"""Probe SKAZ's Hugging Face progress callback with one tiny public README.
 
 This is optional evidence, not a model download.  It resolves public metadata
 without a token, refuses files over 100 KB before download, uses a fresh
@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 from huggingface_hub import HfApi, snapshot_download
 
-from audiohelper.local_models import DownloadProgress, _progress_tqdm
+from skaz.local_models import DownloadProgress, _progress_tqdm
 
 REPOSITORY = "Systran/faster-whisper-small"
 FILENAME = "README.md"
@@ -50,7 +50,7 @@ def main() -> int:
         raise RuntimeError("Public repository metadata did not include an immutable revision.")
 
     reports: list[DownloadProgress] = []
-    with tempfile.TemporaryDirectory(prefix="audiohelper-progress-probe-") as cache:
+    with tempfile.TemporaryDirectory(prefix="skaz-progress-probe-") as cache:
         snapshot = Path(
             snapshot_download(
                 repo_id=REPOSITORY,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import httpx
 
-from audiohelper.secrets import MemorySecretStore
+from skaz.secrets import MemorySecretStore
 
 
 async def test_existing_soniox_key_uses_shared_api_without_reentry(

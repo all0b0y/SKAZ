@@ -25,7 +25,7 @@ test('renders the SKAZ shell', async () => {
 
 test('exposes the secure preload bridge and hides the token', async () => {
   const shape = await page.evaluate(() => {
-    const bridge = (window as unknown as { audiohelper?: Record<string, unknown> }).audiohelper;
+    const bridge = (window as unknown as { skaz?: Record<string, unknown> }).skaz;
     return {
       hasBridge: typeof bridge === 'object' && bridge !== null,
       methods: bridge ? Object.keys(bridge).sort() : [],
@@ -40,7 +40,7 @@ test('exposes the secure preload bridge and hides the token', async () => {
 });
 
 test('API keys explains transient audio in the real built window', async ({}, testInfo) => {
-  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
     { timeout: 60_000 }).toBe('ready');
   await page.getByRole('button', { name: 'Russian + English', exact: true }).click();
   await page.getByRole('button', { name: 'Continue', exact: true }).click();

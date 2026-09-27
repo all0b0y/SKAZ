@@ -18,13 +18,13 @@ from typing import Any
 import httpx
 import uvicorn
 
-from audiohelper import repository as repo
-from audiohelper.app import create_app
-from audiohelper.codex_schemas import CodexSettings
-from audiohelper.config import AppConfig
-from audiohelper.gateways.codex_rpc import CodexRpc
-from audiohelper.gateways.codex_session import DISABLED_FEATURES
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.app import create_app
+from skaz.codex_schemas import CodexSettings
+from skaz.config import AppConfig
+from skaz.gateways.codex_rpc import CodexRpc
+from skaz.gateways.codex_session import DISABLED_FEATURES
+from skaz.schemas import Segment
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, required=True)

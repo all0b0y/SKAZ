@@ -25,7 +25,7 @@ export function RecorderSources({ hasRecording }: { hasRecording: boolean }) {
   const [open, setOpen] = useState(false);
   const gearRef = useRef<HTMLButtonElement>(null);
   const locked = captureSourcesLocked(recorderState);
-  const supported = window.audiohelper?.systemAudioSupported === true;
+  const supported = window.skaz?.systemAudioSupported === true;
   const systemOn = settings?.capture_system_audio === true;
   const toggleBlocked = locked || !supported || !settings;
   const toggleTitle = !supported ? UNSUPPORTED : locked ? LOCKED
@@ -66,14 +66,14 @@ function SourcesPopover({ anchor, hasRecording, onClose }: {
   const [sessionMode, setSessionMode] = useState<{ mode: NativeRecordingMode; target: string } | null>(null);
   const locked = captureSourcesLocked(recorderState);
   const modeFixed = hasRecording || locked || recorderState === 'paused';
-  const supported = window.audiohelper?.systemAudioSupported === true;
+  const supported = window.skaz?.systemAudioSupported === true;
   usePanePlacement(ref, () => anchor.current?.getBoundingClientRect() ?? null, { align: 'end', boundsFrom: anchor }, []);
 
   useEffect(() => { void enumerateDevices(); }, [enumerateDevices]);
   useEffect(() => {
     if (!modeFixed || !activeSessionId) { setSessionMode(null); return undefined; }
     let alive = true;
-    void new ApiClient(window.audiohelper).getNativeEventPage(activeSessionId, { limit: 1 })
+    void new ApiClient(window.skaz).getNativeEventPage(activeSessionId, { limit: 1 })
       .then((page) => { if (alive) setSessionMode({ mode: page.recording_mode, target: page.translation_target_language }); })
       .catch(() => undefined);
     return () => { alive = false; };

@@ -44,7 +44,7 @@ ENV_VARS: Mapping[str, tuple[str, ...]] = {
 }
 
 #: Opt-in switch for the environment fallback above.
-ENV_FALLBACK_FLAG = "AUDIOHELPER_ALLOW_ENV_KEYS"
+ENV_FALLBACK_FLAG = "SKAZ_ALLOW_ENV_KEYS"
 
 #: Serialises read-modify-write cycles; two writers would drop each other's keys.
 _VAULT_LOCK = threading.Lock()

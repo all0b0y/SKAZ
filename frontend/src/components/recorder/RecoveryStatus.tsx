@@ -12,7 +12,7 @@ export function RecoveryStatus({ sessionId, active }: { sessionId?: string; acti
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const reply = await window.audiohelper.request<Recovery>({
+        const reply = await window.skaz.request<Recovery>({
           method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live/status`,
         });
         if (alive) setStatus(reply.ok ? reply.data : null);

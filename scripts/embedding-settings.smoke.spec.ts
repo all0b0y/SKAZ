@@ -12,13 +12,13 @@ test('Embedding card uses its own catalog and preserves the saved selection', as
   const app = await electron.launch({
     args: [path.join(root, 'scripts', 'optin-smoke', 'main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory, AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0' },
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory, SKAZ_ALLOW_MODEL_DOWNLOAD: '0' },
   });
   try {
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
-    await page.evaluate(() => window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
-    const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await page.evaluate(() => window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
+    const settings = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/settings' }));
     await app.evaluate(({ ipcMain }, initial) => {
       if (!initial.ok) throw new Error('Settings failed');
       const data = initial.data as { embedding: { provider: string; model: string }; embedding_budget_usd: number | null };

@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.agent.snapshot_queue import SnapshotQueue
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.agent.snapshot_queue import SnapshotQueue
+from skaz.db import Database
+from skaz.schemas import Segment
 
 
 @pytest.mark.parametrize("cancel_capture", [False, True])
@@ -101,10 +101,10 @@ def test_exclusive_owner_capacity_chat_and_scope_guards(tmp_path: Path) -> None:
 CRASH_SCRIPT = '''
 import os, sqlite3, sys
 from pathlib import Path
-from audiohelper import repository as repo
-from audiohelper.agent.snapshot_queue import SnapshotQueue
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.agent.snapshot_queue import SnapshotQueue
+from skaz.db import Database
+from skaz.schemas import Segment
 root, stage = Path(sys.argv[1]), sys.argv[2]
 db = Database(root / "source.sqlite")
 sid = repo.create_session(db, "Fixture").id

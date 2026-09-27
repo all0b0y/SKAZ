@@ -8,11 +8,11 @@ from typing import Any
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.agent.snapshot_queue import SnapshotQueue
-from audiohelper.db import Database
-from audiohelper.gateways.codex_rpc import CodexRpc, CodexRpcError
-from audiohelper.gateways.codex_session import CodexSession, ToolDefinition
+from skaz import repository as repo
+from skaz.agent.snapshot_queue import SnapshotQueue
+from skaz.db import Database
+from skaz.gateways.codex_rpc import CodexRpc, CodexRpcError
+from skaz.gateways.codex_session import CodexSession, ToolDefinition
 
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_session_server.py"
 

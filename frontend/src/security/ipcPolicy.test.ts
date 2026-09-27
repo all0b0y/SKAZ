@@ -51,7 +51,7 @@ describe('Electron IPC policy', () => {
     expect(isAllowedExternalUrl('http://example.com/help')).toBe(true);
     expect(isAllowedExternalUrl('file:///etc/passwd')).toBe(false);
     expect(isAllowedExternalUrl('javascript:alert(1)')).toBe(false);
-    expect(isAllowedExternalUrl('audiohelper://settings')).toBe(false);
+    expect(isAllowedExternalUrl('skaz://settings')).toBe(false);
   });
 
   it('allows only documented method/path pairs', () => {

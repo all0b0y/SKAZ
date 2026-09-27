@@ -53,25 +53,25 @@ test.beforeAll(async () => {
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 1400, height: 820 });
-  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
     { timeout: 60_000 }).toBe('ready');
   await page.evaluate(async () => {
-    await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
-    const s = await window.audiohelper.request<{ id: string }>({ method: 'POST', path: '/sessions',
+    await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+    const s = await window.skaz.request<{ id: string }>({ method: 'POST', path: '/sessions',
       body: { title: 'Очень длинное название лекции, которое не помещается в узкую панель сессий', mode: 'legacy' } });
     const id = (s.data as { id: string }).id;
-    const n = await window.audiohelper.request<{ id: string; revision: number }>({ method: 'POST', path: `/sessions/${id}/notes/empty` });
+    const n = await window.skaz.request<{ id: string; revision: number }>({ method: 'POST', path: `/sessions/${id}/notes/empty` });
     const note = n.data as { id: string; revision: number };
     const line = 'Эластичность показывает, насколько сильно спрос реагирует на изменение цены, и это длинная строка. ';
     const content = `# Спрос и предложение\n\n${line.repeat(6)}\n\n## Раздел\n\n${line.repeat(10)}\n`;
-    await window.audiohelper.request({ method: 'PATCH', path: `/sessions/${id}/notes/${note.id}`, body: { content, expected_revision: note.revision } });
+    await window.skaz.request({ method: 'PATCH', path: `/sessions/${id}/notes/${note.id}`, body: { content, expected_revision: note.revision } });
   });
   await page.reload();
   await expect(page.locator('.gate')).toHaveCount(0, { timeout: 30_000 });

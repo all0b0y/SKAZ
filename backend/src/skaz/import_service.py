@@ -107,7 +107,9 @@ class ImportService:
         duration = request.declared_duration_ms
         if request.url:
             youtube = youtube_source(request.url)
-            if not request.allow_duplicate and await disk_call(self.store.matching_video, youtube.video_id):
+            if not request.allow_duplicate and bool(
+                await disk_call(self.store.matching_video, youtube.video_id)
+            ):
                 raise ImportConflict("This video already has a session. Open it or confirm Transcribe again.")
             info = await media_tools.youtube_metadata(youtube.url)
             duration = info["duration_ms"]

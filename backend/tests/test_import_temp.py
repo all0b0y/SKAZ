@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper.import_temp import ImportTemp
+from skaz.import_temp import ImportTemp
 
 
 def test_cleanup_only_removes_job_owned_audio(tmp_path: Path) -> None:

@@ -11,18 +11,18 @@ test('query-only web approval through real Electron and Codex, no external API',
   const app = await electron.launch({
     args: [path.join(root, 'scripts/codex-e2e/main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: profile, NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: profile,
+      SKAZ_OPTIN_SMOKE_USER_DATA: profile,
       SKAZ_FIXTURE_CODEX: process.env.SKAZ_FIXTURE_CODEX ?? '/Users/all0b0y/.local/bin/codex',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0' },
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0' },
   });
   try {
     expect(await app.evaluate(({ app: a }) => a.getPath('userData'))).toBe(profile);
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+    await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
       { timeout: 60_000 }).toBe('ready');
     expect(fs.existsSync(path.join(profile, 'data/skaz.sqlite3'))).toBe(true);
     await page.evaluate(async () => {
-      const r = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+      const r = await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
       if (!r.ok) throw new Error(r.detail);
     });
     await page.reload();

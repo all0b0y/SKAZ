@@ -57,8 +57,8 @@ beforeEach(() => {
   localStorage.clear();
   useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
       if (req.method === 'PATCH') {
         const body = req.body as { title?: string; content?: string };

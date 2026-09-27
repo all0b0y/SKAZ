@@ -147,9 +147,9 @@ let connectionWatch = false;
 let codexClient: CodexClient | null = null;
 let codexBridge: BridgeApi | null = null;
 const client = (): CodexClient => {
-  if (!codexClient || codexBridge !== window.audiohelper) {
-    codexClient = new CodexClient(window.audiohelper);
-    codexBridge = window.audiohelper;
+  if (!codexClient || codexBridge !== window.skaz) {
+    codexClient = new CodexClient(window.skaz);
+    codexBridge = window.skaz;
   }
   return codexClient;
 };
@@ -579,5 +579,5 @@ useCodex.subscribe((state) => {
   const count = state.tasks.filter(isActive).length;
   if (count === lastActiveCount) return;
   lastActiveCount = count;
-  window.audiohelper.reportCodexActivity?.(count);
+  window.skaz.reportCodexActivity?.(count);
 });

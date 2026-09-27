@@ -13,12 +13,12 @@ import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
 
-from audiohelper.agent.codex_runtime import CodexRuntime
-from audiohelper.agent.snapshot_queue import SnapshotTask
-from audiohelper.codex_schemas import CodexSettings
-from audiohelper.db import Database
-from audiohelper.gateways import codex_connection
-from audiohelper.gateways.codex_connection import CodexConnection
+from skaz.agent.codex_runtime import CodexRuntime
+from skaz.agent.snapshot_queue import SnapshotTask
+from skaz.codex_schemas import CodexSettings
+from skaz.db import Database
+from skaz.gateways import codex_connection
+from skaz.gateways.codex_connection import CodexConnection
 
 AUTH = {"Authorization": "Bearer test-token"}
 CATALOG = [{"id": "m", "label": "M", "efforts": ["low", "high"]}]

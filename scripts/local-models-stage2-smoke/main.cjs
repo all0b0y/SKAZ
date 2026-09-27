@@ -6,7 +6,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { app } = require('electron');
 
-const requested = process.env.AUDIOHELPER_LOCAL_MODELS_SMOKE_USER_DATA;
+const requested = process.env.SKAZ_LOCAL_MODELS_SMOKE_USER_DATA;
 
 function refuse(reason) {
   console.error(`[local-models-smoke] refusing to launch: ${reason}`);
@@ -14,7 +14,7 @@ function refuse(reason) {
 }
 
 if (!requested) {
-  refuse('AUDIOHELPER_LOCAL_MODELS_SMOKE_USER_DATA is not set');
+  refuse('SKAZ_LOCAL_MODELS_SMOKE_USER_DATA is not set');
 } else {
   let isolated = false;
   try {
@@ -35,6 +35,7 @@ if (!requested) {
     refuse('userData/sessionData isolation could not be established');
   }
   if (isolated) {
-    require(path.join(__dirname, '..', '..', 'dist', 'main', 'main.js'));
+    process.env.SKAZ_OPTIN_SMOKE_USER_DATA = requested;
+    require('../optin-smoke/main.cjs');
   }
 }

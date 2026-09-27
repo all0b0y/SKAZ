@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.config import AppConfig
+from skaz.config import AppConfig
 from tests.test_import_store import start, token
 
 

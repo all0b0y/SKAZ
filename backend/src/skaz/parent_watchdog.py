@@ -17,7 +17,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-PARENT_PID_ENV = "AUDIOHELPER_PARENT_PID"
+PARENT_PID_ENV = "SKAZ_PARENT_PID"
 POLL_SECONDS = 1.0
 SHUTDOWN_GRACE_SECONDS = 10.0
 

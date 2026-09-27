@@ -123,4 +123,4 @@ sind kein Versprechen von Produktionsreife; die native Codex-Websuche ist derzei
 [Verhaltensregeln](../../CODE_OF_CONDUCT.md) · [Sicherheit](../../SECURITY.md) · [MIT-Lizenz](../../LICENSE)
 
 *Skaz* (сказ) ist ein russisches Wort für eine mündlich geprägte Erzählung.
-Der ursprüngliche Arbeitstitel war AudioHelper. Copyright © 2026 all0b0y.
+Der ursprüngliche Arbeitstitel war SKAZ. Copyright © 2026 all0b0y.

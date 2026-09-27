@@ -111,5 +111,5 @@ alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的�
 
 [社区行为规范](../../CODE_OF_CONDUCT.md) · [安全政策](../../SECURITY.md) · [MIT 许可](../../LICENSE)
 
-*Skaz*（сказ）是俄语中指口头叙事的词。项目最初的工作名称为 AudioHelper。
+*Skaz*（сказ）是俄语中指口头叙事的词。项目最初的工作名称为 SKAZ。
 Copyright © 2026 all0b0y.

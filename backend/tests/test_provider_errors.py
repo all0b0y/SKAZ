@@ -21,13 +21,13 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.gateways import (
+from skaz.gateways import (
     ProviderError,
     describe_http_error,
     describe_transport_error,
     is_retryable_http_status,
 )
-from audiohelper.gateways.chat import ChatGateway, ChatMessage, ProviderTimeout, build_chat
+from skaz.gateways.chat import ChatGateway, ChatMessage, ProviderTimeout, build_chat
 from tests.conftest import FakeHttp, chat_completion, make_wav
 
 AGENT_MODEL = "qwen/qwen3-30b-a3b-instruct-2507"

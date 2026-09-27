@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from audiohelper.gateways.codex_rpc import CodexRpc
-from audiohelper.gateways.codex_session import (
+from skaz.gateways.codex_rpc import CodexRpc
+from skaz.gateways.codex_session import (
     DISABLED_FEATURES,
     CodexSession,
     ToolDefinition,

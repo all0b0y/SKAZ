@@ -35,7 +35,7 @@ beforeEach(async () => {
   vi.resetModules(); calls = []; through = 1; tailInvalidates = false; secondsPerEvent = 1;
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
-  window.audiohelper = { ...window.audiohelper, request: vi.fn(async (req: BridgeRequest) => {
+  window.skaz = { ...window.skaz, request: vi.fn(async (req: BridgeRequest) => {
     calls.push(req);
     if (req.path === '/sessions/native/live/events') {
       const limit = Number(req.query?.limit ?? 128);

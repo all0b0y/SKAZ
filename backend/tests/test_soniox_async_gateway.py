@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.gateways.soniox_async import (
+from skaz.gateways.soniox_async import (
     ASYNC_MODEL,
     AsyncRequest,
     SonioxAsyncError,

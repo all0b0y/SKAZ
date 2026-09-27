@@ -10,9 +10,9 @@ from pathlib import Path
 
 import httpx
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 
 TOKEN = "test-token"
 

@@ -26,7 +26,7 @@ function executeWrapper(requested, setPath) {
   const sandbox = {
     __dirname,
     console: { error() {}, log() {} },
-    process: { env: { AUDIOHELPER_OPTIN_SMOKE_USER_DATA: requested } },
+    process: { env: { SKAZ_OPTIN_SMOKE_USER_DATA: requested } },
     require(specifier) {
       if (specifier === 'electron') return { app };
       if (specifier === 'node:fs') return fs;
@@ -44,7 +44,7 @@ function executeWrapper(requested, setPath) {
 }
 
 test('refuses before production import when the session directory cannot be created', () => {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'audiohelper-optin-refuse-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-optin-refuse-'));
   try {
     fs.writeFileSync(path.join(profile, 'session'), 'not a directory');
     const result = executeWrapper(profile, (name, value, paths) => {
@@ -53,14 +53,14 @@ test('refuses before production import when the session directory cannot be crea
 
     assert.deepEqual(result.exits, [97]);
     assert.equal(result.productionImported, false);
-    assert.equal(fs.existsSync(path.join(profile, 'data', 'audiohelper.sqlite3')), false);
+    assert.equal(fs.existsSync(path.join(profile, 'data', 'skaz.sqlite3')), false);
   } finally {
     fs.rmSync(profile, { recursive: true, force: true });
   }
 });
 
 test('refuses before production import when Electron rejects userData relocation', () => {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'audiohelper-optin-userdata-refuse-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-optin-userdata-refuse-'));
   try {
     assert.doesNotThrow(() => {
       const result = executeWrapper(profile, (name, value, paths) => {

@@ -76,7 +76,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   // Sources change between recording stretches (before start, paused); they
   // apply at once, like the capsule's gear, and are not part of Save changes.
   const sourcesLocked = captureSourcesLocked(recorderState);
-  const systemAudioSupported = window.audiohelper?.systemAudioSupported === true;
+  const systemAudioSupported = window.skaz?.systemAudioSupported === true;
   const changeSource = (run: () => Promise<void>) => {
     setSourceError('');
     void run().catch((err: unknown) => setSourceError(err instanceof Error ? err.message : String(err)));

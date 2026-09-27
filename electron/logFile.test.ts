@@ -11,7 +11,7 @@ import { AppLog, MAX_LOG_BYTES } from './logFile';
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'audiohelper-log-'));
+  dir = mkdtempSync(join(tmpdir(), 'skaz-log-'));
 });
 
 afterEach(() => {
@@ -40,8 +40,8 @@ describe('AppLog', () => {
 
   it('keeps the level python already assigned to a backend line', () => {
     const log = new AppLog(dir);
-    log.writeBackendChunk('WARNING audiohelper.live: slow finalization\n', 'stdout');
-    expect(log.read()).toContain('WARNING [backend] WARNING audiohelper.live: slow finalization');
+    log.writeBackendChunk('WARNING skaz.live: slow finalization\n', 'stdout');
+    expect(log.read()).toContain('WARNING [backend] WARNING skaz.live: slow finalization');
   });
 
   it('records unlabelled stderr output as ERROR', () => {

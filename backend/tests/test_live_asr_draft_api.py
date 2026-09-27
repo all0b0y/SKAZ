@@ -13,11 +13,11 @@ import httpx
 import numpy as np
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.db import Database
-from audiohelper.gateways.asr import LocalWhisperTranscriber
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.db import Database
+from skaz.gateways.asr import LocalWhisperTranscriber
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 
@@ -145,7 +145,7 @@ async def test_update_persists_bounded_provenance_and_replay_is_idempotent(
     await store(client, session_id, 4, first, start_ms=0, end_ms=500)
     await store(client, session_id, 9, second, start_ms=500, end_ms=1000)
     engine = RecordingEngine("единый долговечный черновик")
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     payload = {"first_sequence": 4, "last_sequence": 9, "expected_revision": 0}
 
     created = await client.post(f"/sessions/{session_id}/asr/live/update", json=payload)
@@ -202,7 +202,7 @@ async def test_changed_payload_with_stale_revision_conflicts_without_decode(
     await store(client, session_id, 0, body, start_ms=0, end_ms=500)
     await store(client, session_id, 1, body, start_ms=500, end_ms=1000)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     first = await client.post(
         f"/sessions/{session_id}/asr/live/update",
         json={"first_sequence": 0, "last_sequence": 0, "expected_revision": 0},
@@ -226,7 +226,7 @@ async def test_current_revision_can_replace_range_without_advancing_epoch(
     await store(client, session_id, 0, body, start_ms=0, end_ms=500)
     await store(client, session_id, 1, body, start_ms=500, end_ms=1000)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     first = await client.post(
         f"/sessions/{session_id}/asr/live/update",
         json={"first_sequence": 0, "last_sequence": 0, "expected_revision": 0},
@@ -256,7 +256,7 @@ async def test_untrusted_saved_sources_invalidate_read_and_update_before_decode(
     body = make_wav(0.5)
     await store(client, session_id, 0, body, start_ms=0, end_ms=500)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     created = await client.post(
         f"/sessions/{session_id}/asr/live/update",
         json={"first_sequence": 0, "last_sequence": 0, "expected_revision": 0},
@@ -314,7 +314,7 @@ async def test_profile_change_during_decode_rejects_stale_completion_and_advance
 
     engines = {"small": BlockingOnSecondEngine("small"), "base": RecordingEngine("fresh")}
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper", lambda model, **_kwargs: engines[model]
+        "skaz.gateways.asr.load_local_whisper", lambda model, **_kwargs: engines[model]
     )
     initial = await client.post(
         f"/sessions/{session_id}/asr/live/update",
@@ -362,7 +362,7 @@ async def test_change_then_change_back_still_invalidates_old_config_generation(
     session_id = await create_session(client)
     await store(client, session_id, 0, make_wav(0.5), start_ms=0, end_ms=500)
     engine = RecordingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     first = await client.post(
         f"/sessions/{session_id}/asr/live/update",
         json={"first_sequence": 0, "last_sequence": 0, "expected_revision": 0},
@@ -404,7 +404,7 @@ async def test_delete_during_decode_returns_404_and_cannot_resurrect_draft(
             return super().transcribe(*args, **kwargs)
 
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: BlockingEngine()
+        "skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: BlockingEngine()
     )
     task = asyncio.create_task(
         client.post(
@@ -439,7 +439,7 @@ async def test_live_update_busy_and_cancellation_keep_decoder_slot_bounded(
             return super().transcribe(*args, **kwargs)
 
     engine = BlockingEngine()
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     payload = {"first_sequence": 0, "last_sequence": 0, "expected_revision": 0}
     first = asyncio.create_task(client.post(f"/sessions/{session_id}/asr/live/update", json=payload))
     await asyncio.wait_for(asyncio.to_thread(entered.wait), timeout=1)
@@ -463,7 +463,7 @@ async def test_draft_text_bound_rejects_result_without_persistence(
     await store(client, session_id, 0, make_wav(0.5), start_ms=0, end_ms=500)
     object.__setattr__(app.state.runtime.config, "max_live_draft_chars", 8)
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: RecordingEngine("too long text")
+        "skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: RecordingEngine("too long text")
     )
     response = await client.post(
         f"/sessions/{session_id}/asr/live/update",
@@ -478,7 +478,7 @@ async def test_draft_survives_backend_restart_with_identical_source_refs(
 ) -> None:
     config = AppConfig(token=TOKEN, data_dir=tmp_path / "data", request_timeout_s=5.0)
     engine = RecordingEngine("restart draft")
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     first_app = create_app(
         config, secret_store=MemorySecretStore(), http_client=FakeHttp().client()
     )
@@ -528,7 +528,7 @@ async def test_saved_draft_remains_readable_after_asr_configuration_changes(
     session_id = await create_session(client)
     await store(client, session_id, 0, make_wav(0.5), start_ms=0, end_ms=500)
     monkeypatch.setattr(
-        "audiohelper.gateways.asr.load_local_whisper",
+        "skaz.gateways.asr.load_local_whisper",
         lambda *_a, **_k: RecordingEngine("persisted before config change"),
     )
     created = await client.post(

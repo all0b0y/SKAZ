@@ -16,9 +16,9 @@ import wave
 from pathlib import Path
 
 import httpx
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 from check_openrouter import ROOT, project_key
 
 REFERENCE = 'And so my fellow Americans ask not what your country can do for you ask what you can do for your country'

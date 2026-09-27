@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef
-from audiohelper.library_archive import ArchiveRefused, SessionArchive
-from audiohelper.live_store import LiveStore
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef
+from skaz.library_archive import ArchiveRefused, SessionArchive
+from skaz.live_store import LiveStore
 
 
 def native_document(db: Database, tmp_path: Path) -> dict[str, Any]:

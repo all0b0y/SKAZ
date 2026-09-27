@@ -47,7 +47,7 @@ beforeEach(async () => {
   vi.resetModules(); calls = []; through = { a: 300, b: 3, c: 3 }; secondsPerEvent = 1;
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
-  window.audiohelper = { ...window.audiohelper, request: vi.fn(async (req: BridgeRequest) => {
+  window.skaz = { ...window.skaz, request: vi.fn(async (req: BridgeRequest) => {
     calls.push(req);
     if (req.method === 'DELETE') return { ok: true, status: 200, data: { deleted: true } } as never;
     const session = /^\/sessions\/([^/]+)\/live\/events$/.exec(req.path)?.[1];

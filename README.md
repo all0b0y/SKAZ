@@ -122,4 +122,4 @@ paths are not a promise of production readiness; native Codex web search is curr
 [Community rules](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [MIT license](LICENSE)
 
 *Skaz* (сказ) is a Russian word for a spoken narrative. The original working name
-was AudioHelper. Copyright © 2026 all0b0y.
+was SKAZ. Copyright © 2026 all0b0y.

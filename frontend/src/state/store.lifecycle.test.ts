@@ -27,7 +27,7 @@ const session = (id: string, status: Session['status'] = 'stopped'): Session => 
 
 // Replace only `request` with a plain mock; keeping BridgeApi's generic
 // `request` signature in the intersection makes the mock unassignable.
-const bridge = window.audiohelper as unknown as Omit<BridgeApi, 'request'> & {
+const bridge = window.skaz as unknown as Omit<BridgeApi, 'request'> & {
   request: ReturnType<typeof vi.fn>;
 };
 
@@ -111,7 +111,7 @@ beforeEach(() => {
     noteGenerations: {},
     notesError: null,
   });
-  Object.assign(window.audiohelper, { bufferAudio: vi.fn(async (_sessionId: string, meta: { sequence: number; startMs: number; endMs: number }) => ({
+  Object.assign(window.skaz, { bufferAudio: vi.fn(async (_sessionId: string, meta: { sequence: number; startMs: number; endMs: number }) => ({
     ok: true,
     status: 201,
     data: {
@@ -297,8 +297,8 @@ describe('async session isolation', () => {
       throw new Error(`unexpected ${req.method} ${req.path}`);
     });
     await useStore.getState().selectSession('restored');
-    expect(window.audiohelper).not.toHaveProperty('fetchAudio');
-    expect(window.audiohelper.uploadAudio).not.toHaveBeenCalled();
+    expect(window.skaz).not.toHaveProperty('fetchAudio');
+    expect(window.skaz.uploadAudio).not.toHaveBeenCalled();
     expect(bridge.request).not.toHaveBeenCalledWith(expect.objectContaining({ method: 'POST' }));
     expect(useStore.getState().detail?.segments).toEqual([]);
   });

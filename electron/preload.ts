@@ -99,4 +99,4 @@ const api: BridgeApi = {
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
 };
 
-contextBridge.exposeInMainWorld('audiohelper', api);
+contextBridge.exposeInMainWorld('skaz', api);

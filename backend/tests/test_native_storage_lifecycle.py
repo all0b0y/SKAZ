@@ -127,7 +127,7 @@ def test_transcript_storage_failure_closes_idle_intake_without_next_packet(
     import json
     import time
 
-    from audiohelper.gateways import soniox
+    from skaz.gateways import soniox
     from tests.test_native_soniox_ws import ProviderSocket
 
     provider = ProviderSocket()

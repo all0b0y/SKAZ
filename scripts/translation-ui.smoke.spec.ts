@@ -9,21 +9,21 @@ const root = path.resolve(__dirname, '..');
 
 // UI-only IPC fixtures: this verifies the built renderer, NOT real ASR/translation.
 test('translation is primary and original is collapsed in the built Electron renderer', async () => {
-  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'audiohelper-translation-ui-')));
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'skaz-translation-ui-')));
   const app = await electron.launch({
     args: [path.join(root, 'scripts', 'optin-smoke', 'main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory,
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory,
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   try {
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
-    await page.evaluate(() => window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
-    const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await page.evaluate(() => window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
+    const settings = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/settings' }));
     const original = { id: 'o1', connection_id: 'c1', segment_id: 's1', speaker_number: 1,
       text: 'We will discuss the results tomorrow.', start_sample: 0, end_sample: 16000 };
     const owner = { id: 'o1', connection_id: 'c1', speaker_number: 1, start_sample: 0 };

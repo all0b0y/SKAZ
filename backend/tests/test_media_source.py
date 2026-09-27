@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from audiohelper.media_source import InvalidMediaSource, youtube_source
+from skaz.media_source import InvalidMediaSource, youtube_source
 
 
 @pytest.mark.parametrize("url", [

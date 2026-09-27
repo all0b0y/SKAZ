@@ -220,7 +220,7 @@ async def test_buffer_auth_and_validation(client: httpx.AsyncClient, config: Any
 async def test_receipt_database_failure_never_reports_acceptance(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from audiohelper import repository
+    from skaz import repository
     sid = await create_session(client)
     def fail(*args: Any) -> bool:
         raise OSError("sensitive local path")

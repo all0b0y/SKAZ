@@ -58,7 +58,7 @@ def create_app(
             await runtime.http.aclose()
             runtime.close()
 
-    app = FastAPI(title="AudioHelper backend", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="SKAZ backend", version="0.1.0", lifespan=lifespan)
     app.state.runtime = runtime
 
     @app.exception_handler(StorageConflict)

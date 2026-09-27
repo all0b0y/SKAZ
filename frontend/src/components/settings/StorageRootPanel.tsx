@@ -17,7 +17,7 @@ export function StorageRootPanel({ capturing }: { capturing: boolean }) {
   const running = useRef(false);
 
   const read = async () => {
-    const next = await new ApiClient(window.audiohelper).getStorageRoot();
+    const next = await new ApiClient(window.skaz).getStorageRoot();
     if (!next || next.mode !== 'markdown_projection' || typeof next.suggested_root !== 'string'
       || (next.root !== null && typeof next.root !== 'string')
       || typeof next.change_locked !== 'boolean' || typeof next.managed !== 'boolean') {
@@ -42,14 +42,14 @@ export function StorageRootPanel({ capturing }: { capturing: boolean }) {
     setBusy(true); setError(''); setMessage('');
     try {
       if (operation === 'choose') {
-        if (!window.audiohelper.chooseStorageRoot) throw new Error('Chooser unavailable');
-        const selected = await window.audiohelper.chooseStorageRoot();
+        if (!window.skaz.chooseStorageRoot) throw new Error('Chooser unavailable');
+        const selected = await window.skaz.chooseStorageRoot();
         if (scope.alive && selected !== null) setCandidate(selected);
       } else {
         if (operation === 'save') {
           if (!view || candidate === undefined || capturing || view.change_locked) return;
           // Never automatically retry a PUT, including when its response is lost.
-          await new ApiClient(window.audiohelper).updateStorageRoot(candidate, view.root);
+          await new ApiClient(window.skaz).updateStorageRoot(candidate, view.root);
         }
         const next = await read();
         if (scope.alive) {

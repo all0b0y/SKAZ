@@ -6,15 +6,15 @@ import dataclasses
 
 import pytest
 
-from audiohelper import monologue_context as mctx
-from audiohelper import monologues as mono
-from audiohelper import repository as repo
-from audiohelper.agent import context as ctx
-from audiohelper.agent import notes
-from audiohelper.agent.scope import resolve
-from audiohelper.audio import InvalidAudio, parse_wav, resample_pcm16
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import monologue_context as mctx
+from skaz import monologues as mono
+from skaz import repository as repo
+from skaz.agent import context as ctx
+from skaz.agent import notes
+from skaz.agent.scope import resolve
+from skaz.audio import InvalidAudio, parse_wav, resample_pcm16
+from skaz.db import Database
+from skaz.schemas import Segment
 from tests.conftest import make_wav
 
 MINUTE = 60_000

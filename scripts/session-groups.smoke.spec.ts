@@ -31,9 +31,9 @@ test('session groups, real drag, menus and restart persistence', async () => {
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
       // Opt-in dev renderer exercises StrictMode effect replay; profile/backend
       // remain isolated even when using an already running Vite server.
-      ...(process.env.AUDIOHELPER_GROUPS_DEV_URL ? { ELECTRON_RENDERER_URL: process.env.AUDIOHELPER_GROUPS_DEV_URL } : {}),
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0' },
+      ...(process.env.SKAZ_GROUPS_DEV_URL ? { ELECTRON_RENDERER_URL: process.env.SKAZ_GROUPS_DEV_URL } : {}),
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0' },
   });
   let app = await launch();
   const errors: string[] = [];
@@ -42,10 +42,10 @@ test('session groups, real drag, menus and restart persistence', async () => {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.setViewportSize({ width: 1280, height: 820 });
     // Isolated onboarding preference only (as panels.smoke): no credentials or consent.
-    await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+    await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
       { timeout: 60_000 }).toBe('ready');
     await page.evaluate(async () => {
-      const response = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+      const response = await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
       if (!response.ok) throw new Error('Fixture onboarding failed');
     });
     await page.reload();

@@ -22,9 +22,9 @@ export async function launchIsolatedSmoke(prefix: string): Promise<{
       cwd: root,
       env: {
         PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-        AUDIOHELPER_OPTIN_SMOKE_USER_DATA: profile,
+        SKAZ_OPTIN_SMOKE_USER_DATA: profile,
         PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-        AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+        SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
       },
     });
     const actual = await app.evaluate(({ app: main }) => ({

@@ -17,16 +17,16 @@ test('share note writes one clean private .md and refuses unsafe names', async (
   // not dismiss, so an unattended run hangs to the worker timeout. Run it with
   // someone at the machine: SKAZ_SMOKE_SHARE_SHEET=1 npx playwright test share-note
   test.skip(!process.env.SKAZ_SMOKE_SHARE_SHEET, 'Needs a person to dismiss the native share sheet');
-  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'audiohelper-share-smoke-')));
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'skaz-share-smoke-')));
   const app = await electron.launch({
     args: [path.join(root, 'scripts', 'optin-smoke', 'main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
       TMPDIR: directory,
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory,
-      AUDIOHELPER_SESSION_FILES_ROOT: path.join(directory, 'session-files'),
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory,
+      SKAZ_SESSION_FILES_ROOT: path.join(directory, 'session-files'),
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   try {
@@ -35,7 +35,7 @@ test('share note writes one clean private .md and refuses unsafe names', async (
     const temp = await app.evaluate(({ app: electronApp }) => electronApp.getPath('temp'));
 
     const content = '# Устойчивость\n\n| A | B |\n|---|---|\n| 1 | 2 |\n';
-    expect(await page.evaluate((text) => window.audiohelper.shareNote!({
+    expect(await page.evaluate((text) => window.skaz.shareNote!({
       fileName: 'Устойчивость', content: text, x: 40, y: 40,
     }), content)).toBe(true);
     await page.keyboard.press('Escape'); // dismiss the real share sheet
@@ -51,11 +51,11 @@ test('share note writes one clean private .md and refuses unsafe names', async (
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
 
     // A traversal name stays a plain file inside its own directory; '..' is refused.
-    expect(await page.evaluate(() => window.audiohelper.shareNote!({
+    expect(await page.evaluate(() => window.skaz.shareNote!({
       fileName: '../../escape', content: 'x', x: 0, y: 0,
     }))).toBe(true);
     await page.keyboard.press('Escape');
-    expect(await page.evaluate(() => window.audiohelper.shareNote!({
+    expect(await page.evaluate(() => window.skaz.shareNote!({
       fileName: '..', content: 'x', x: 0, y: 0,
     }))).toBe(false);
     const all = await fs.readdir(base, { recursive: true });
