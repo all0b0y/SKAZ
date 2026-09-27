@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.import_store import ImportSource, ImportStore
-from audiohelper.library_archive import SessionArchive
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.import_store import ImportSource, ImportStore
+from skaz.library_archive import SessionArchive
 
 
 def test_youtube_provenance_survives_library_recovery(tmp_path: Path) -> None:

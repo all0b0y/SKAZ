@@ -5,7 +5,7 @@ export interface SearchSettings { provider: 'brave'; enabled: boolean; has_key: 
 export interface SearchApproval { id: string; task_id: string; chat_id: string; query: string }
 
 async function request<T>(req: BridgeRequest): Promise<T> {
-  const result = await window.audiohelper.request<T>(req);
+  const result = await window.skaz.request<T>(req);
   if (!result.ok) throw new ApiError(result.status, result.detail);
   return result.data;
 }

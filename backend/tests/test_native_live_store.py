@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
-from audiohelper.live_store import LiveConflict, LiveStore
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
+from skaz.live_store import LiveConflict, LiveStore
 
 
 def test_old_database_without_mode_or_migration_table_keeps_segment_identity(tmp_path: Path) -> None:

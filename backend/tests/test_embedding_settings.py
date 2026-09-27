@@ -59,7 +59,7 @@ async def test_embedding_validation_fails_closed_when_catalog_is_unavailable(
 
 
 def test_existing_settings_without_embedding_load_unconfigured() -> None:
-    from audiohelper.settings_store import DEFAULT_SETTINGS, StoredSettings
+    from skaz.settings_store import DEFAULT_SETTINGS, StoredSettings
 
     legacy = DEFAULT_SETTINGS.model_dump()
     legacy.pop("embedding")

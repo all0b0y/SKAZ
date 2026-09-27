@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from audiohelper import note_anchors
+from skaz import note_anchors
 
 
 def test_labels_are_removed_from_the_stored_text() -> None:

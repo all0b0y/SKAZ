@@ -196,14 +196,24 @@ class FileDeletionBlocked(Exception):
 
 class SessionFiles:
     def __init__(self, db: Database, root: Path | None, *, data_dir: Path | None = None,
-                 suggested_root: Path | None = None) -> None:
+                 suggested_root: Path | None = None, allowed_root: Path | None = None) -> None:
         self.db = db
         self.root = root if root is not None else load_root(db)
         self._managed_root = root is not None
         self._data_dir = data_dir
+        self._allowed_root = allowed_root
+        if self.root is not None:
+            self.check_profile_root(self.root)
         self._suggested_root = suggested_root or Path.home() / "Documents" / "SKAZ"
         self._lock = threading.RLock()
         self.storage: ManagedStorage | None = None
+
+    def check_profile_root(self, root: Path) -> None:
+        if self._allowed_root is not None:
+            boundary = self._allowed_root.resolve()
+            candidate = root.resolve()
+            if candidate != boundary and boundary not in candidate.parents:
+                raise ValueError("Development libraries must stay inside their profile Documents folder.")
 
     def directory(self, session_id: str) -> Path:
         if self.storage is not None and self.storage.enabled():
@@ -239,6 +249,7 @@ class SessionFiles:
                 if self._data_dir is None:
                     raise RootChangeBlocked
                 selected = validate_root(root, self._data_dir)
+                self.check_profile_root(selected)
             else:
                 selected = None
             with self.db.write() as connection:

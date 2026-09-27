@@ -10,7 +10,7 @@ export function PhysicalStoragePanel({ capturing }: { capturing: boolean }) {
   const [move, setMove] = useState<{ root: string; previous: string } | null>(null);
   useEffect(() => {
     let alive = true;
-    void new ApiClient(window.audiohelper).getStorageLayout().then((next) => {
+    void new ApiClient(window.skaz).getStorageLayout().then((next) => {
       if (alive) setView(next);
     }, () => { if (alive) setError('Could not read the file mode.'); });
     return () => { alive = false; };
@@ -18,12 +18,12 @@ export function PhysicalStoragePanel({ capturing }: { capturing: boolean }) {
   const run = async (action: 'read' | 'enable' | 'recover' | 'choose' | 'move') => {
     if (busy) return;
     setBusy(true); setError('');
-    const api = new ApiClient(window.audiohelper);
+    const api = new ApiClient(window.skaz);
     try {
       if (action === 'choose') {
         const root = await api.getStorageRoot();
-        if (root.managed || !root.root || !window.audiohelper.chooseStorageRoot) throw new Error('Managed root');
-        const selected = await window.audiohelper.chooseStorageRoot();
+        if (root.managed || !root.root || !window.skaz.chooseStorageRoot) throw new Error('Managed root');
+        const selected = await window.skaz.chooseStorageRoot();
         if (selected) setMove({ root: selected, previous: root.root });
         return;
       }

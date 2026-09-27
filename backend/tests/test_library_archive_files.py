@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper import note_store
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.library_archive import ArchiveRefused, SessionArchive
-from audiohelper.library_discovery import LibraryUnavailable
+from skaz import note_store
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.library_archive import ArchiveRefused, SessionArchive
+from skaz.library_discovery import LibraryUnavailable
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "directory", "fifo", "invalid-json",

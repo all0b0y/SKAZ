@@ -11,7 +11,7 @@ import type { Citation, Message } from '../../api/types';
 // The API engine: a backend that does not serve the Codex boundary (404)
 // leaves the settings-selected provider answering in the shared shell.
 const initialCodex = useCodex.getState();
-const originalBridge = window.audiohelper;
+const originalBridge = window.skaz;
 const render = async (ui: ReactElement) => {
   const utils = renderUi(ui);
   await waitFor(() => expect(screen.getByRole('region', { name: 'Assistant' })).toHaveAttribute('data-engine', 'api'));
@@ -31,13 +31,13 @@ const seedDetail = (messages: Message[]) => {
 
 beforeEach(() => {
   useCodex.setState(initialCodex, true);
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true,
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true,
     value: { ...originalBridge, request: vi.fn(async () => ({ ok: false, status: 404, detail: 'Not Found' })) } as BridgeApi });
   seedDetail([]);
 });
 
 afterEach(() => {
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: originalBridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: originalBridge });
 });
 
 describe('AssistantPanel', () => {

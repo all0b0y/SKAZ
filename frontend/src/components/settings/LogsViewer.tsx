@@ -19,7 +19,7 @@ export function filterLines(text: string, level: Level): string[] {
 }
 
 export function LogsViewer() {
-  const bridge = typeof window === 'undefined' ? undefined : window.audiohelper;
+  const bridge = typeof window === 'undefined' ? undefined : window.skaz;
   const supported = typeof bridge?.readLogs === 'function';
 
   const [text, setText] = useState('');

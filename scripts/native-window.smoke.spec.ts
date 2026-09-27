@@ -11,15 +11,15 @@ test('vertical time parts preserve reading positions, citations and ordinary cop
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'skaz-window-ui-')));
   const app = await electron.launch({ args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0' } });
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0' } });
   try {
     const page = await app.firstWindow();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
-    await page.evaluate(() => window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
-    const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await page.evaluate(() => window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
+    const settings = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/settings' }));
     await app.evaluate(({ ipcMain }, settings) => {
       const session = { id: 'window-fixture', title: 'Window replay', mode: 'legacy', status: 'stopped',
         duration_ms: 1024 * 30_000, created_at: '2026-01-01T00:00:00Z' };

@@ -15,19 +15,19 @@ from typing import Any
 
 import pytest
 
-from audiohelper import monologues as mono
-from audiohelper import note_store
-from audiohelper import repository as repo
-from audiohelper.agent.codex_dispatcher import CodexDispatcher
-from audiohelper.agent.codex_notes import note_problems, notes_request
-from audiohelper.agent.codex_runtime import CodexRuntime
-from audiohelper.agent.snapshot_queue import SnapshotQueue, SnapshotTask
-from audiohelper.agent.transcript_snapshot import TranscriptSnapshot
-from audiohelper.codex_schemas import CodexSettings
-from audiohelper.db import Database
-from audiohelper.gateways.codex_rpc import CodexRpc
-from audiohelper.gateways.codex_session import CodexSession
-from audiohelper.schemas import Segment
+from skaz import monologues as mono
+from skaz import note_store
+from skaz import repository as repo
+from skaz.agent.codex_dispatcher import CodexDispatcher
+from skaz.agent.codex_notes import note_problems, notes_request
+from skaz.agent.codex_runtime import CodexRuntime
+from skaz.agent.snapshot_queue import SnapshotQueue, SnapshotTask
+from skaz.agent.transcript_snapshot import TranscriptSnapshot
+from skaz.codex_schemas import CodexSettings
+from skaz.db import Database
+from skaz.gateways.codex_rpc import CodexRpc
+from skaz.gateways.codex_session import CodexSession
+from skaz.schemas import Segment
 
 RUNTIME_FIXTURE = Path(__file__).parent / "fixtures/codex_runtime_server.py"
 SESSION_FIXTURE = Path(__file__).parent / "fixtures/codex_session_server.py"

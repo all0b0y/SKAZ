@@ -11,14 +11,14 @@ import { fakeCodex, type FakeCodex } from '../../test/codexFake';
 // interrupted task waits for "Continue". Not a real backend/Codex run.
 
 const initialCodex = useCodex.getState();
-const originalBridge = window.audiohelper;
+const originalBridge = window.skaz;
 let fake: FakeCodex;
 
 beforeEach(async () => {
   localStorage.clear();
   useCodex.setState(initialCodex, true);
   fake = fakeCodex();
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: fake.bridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: fake.bridge });
   useStore.setState({
     ready: true, activeSessionId: 's1', detailLoading: false, notesError: null, noteTabs: {}, noteGenerations: {},
     sessions: [{ id: 's1', title: 'Лекция', created_at: 't', status: 'recording', duration_ms: 1, mode: 'legacy' }],
@@ -32,7 +32,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   stopCodexPolling();
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: originalBridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: originalBridge });
 });
 
 const poll = () => act(() => useCodex.getState().poll());

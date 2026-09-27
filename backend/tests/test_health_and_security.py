@@ -38,7 +38,7 @@ async def test_local_origins_are_allowed(client: httpx.AsyncClient) -> None:
 
 
 async def test_non_loopback_host_header_is_rejected(client: httpx.AsyncClient) -> None:
-    response = await client.get("/settings", headers={"Host": "audiohelper.example"})
+    response = await client.get("/settings", headers={"Host": "skaz.example"})
     assert response.status_code == 403
 
 

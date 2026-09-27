@@ -16,11 +16,11 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from audiohelper.db import Database
-from audiohelper.live_store import LiveStore
-from audiohelper.native_event_pages import read_event_page
-from audiohelper.native_page_projection import read_projected_page
-from audiohelper.routes.sessions import _live_view
+from skaz.db import Database
+from skaz.live_store import LiveStore
+from skaz.native_event_pages import read_event_page
+from skaz.native_page_projection import read_projected_page
+from skaz.routes.sessions import _live_view
 
 
 def measure(read: Callable[[], dict[str, Any]], repeats: int) -> dict[str, Any]:

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.schemas import Segment
 
 
 def test_pinned_read_allows_recording_commits_and_keeps_one_revision(tmp_path: Path) -> None:

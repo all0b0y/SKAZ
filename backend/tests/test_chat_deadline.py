@@ -5,7 +5,7 @@ import asyncio
 import httpx
 import pytest
 
-from audiohelper.gateways.chat import ChatMessage, ProviderTimeout, build_chat
+from skaz.gateways.chat import ChatMessage, ProviderTimeout, build_chat
 
 
 @pytest.mark.parametrize("provider", ["openrouter", "anthropic"])

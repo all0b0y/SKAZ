@@ -14,10 +14,10 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.gateways.soniox_async import ASYNC_MODEL
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.gateways.soniox_async import ASYNC_MODEL
+from skaz.secrets import MemorySecretStore
 
 from .conftest import TOKEN, FakeHttp
 
@@ -28,7 +28,7 @@ JOB_ID = "73d4357d-cad2-4338-a60d-ec6f2044f721"
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the real backoff logic, remove the wall-clock wait."""
-    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (0.0,))
+    monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (0.0,))
 
 
 def audio_file(tmp_path: Path, name: str = "lecture.m4a") -> Path:
@@ -288,7 +288,7 @@ async def test_cancelling_a_running_import_removes_provider_side_copies(
 ) -> None:
     # A zero poll delay lets a fast machine drain every "processing" reply before
     # the cancel request lands; keep the job running long enough to cancel it.
-    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (0.05,))
+    monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (0.05,))
     provider.queue(*[provider.processing() for _ in range(200)])
     created = await start_import(ready, audio_file(tmp_path))
     session_id = created["session"]["id"]
@@ -308,7 +308,7 @@ async def test_a_refused_job_deletion_does_not_break_cancellation(
     ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The provider refuses to delete a processing job; that is not our failure.
-    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (0.05,))
+    monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (0.05,))
     provider.job_deletion_status = 409
     provider.queue(*[provider.processing() for _ in range(200)])
     created = await start_import(ready, audio_file(tmp_path))
@@ -429,7 +429,7 @@ async def test_the_cost_warning_threshold_can_be_changed_and_cleared(
 async def test_an_import_cannot_queue_behind_another(
     ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (10.0,))
+    monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (10.0,))
     source = audio_file(tmp_path)
     first = await start_import(ready, source)
     second = await ready.post("/imports", json={"path": str(source), "title": "Second"})
@@ -449,7 +449,7 @@ async def test_a_microphone_cannot_record_into_an_imported_session(
     # transcript: the two have no shared time axis and no comparable speakers.
     from starlette.testclient import TestClient
 
-    from audiohelper.app import create_app
+    from skaz.app import create_app
 
     app = ready._transport.app  # type: ignore[attr-defined]
     assert create_app is not None

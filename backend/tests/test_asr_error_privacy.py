@@ -3,9 +3,9 @@
 import httpx
 import pytest
 
-from audiohelper.audio import WavAudio
-from audiohelper.gateways import ProviderError
-from audiohelper.gateways.asr import (
+from skaz.audio import WavAudio
+from skaz.gateways import ProviderError
+from skaz.gateways.asr import (
     OpenAITranscriber,
     OpenRouterLegacyAudioTranscriber,
     OpenRouterTranscriber,

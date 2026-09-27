@@ -23,8 +23,8 @@ const session = (id: string, title: string): Session => ({
 
 beforeEach(() => {
   localStorage.clear();
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(): Promise<JsonResponse<T>> => ({ ok: true, status: 200,
       data: { enabled: false, revision: 0, pending: null,
         data: { version: 1, groups: [], membership: {} } } as T }),

@@ -6,7 +6,7 @@ who is speaking, where the silences are — never against a guess about meaning.
 
 from __future__ import annotations
 
-from audiohelper import monologues as mono
+from skaz import monologues as mono
 
 
 def token(

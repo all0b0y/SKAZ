@@ -217,7 +217,7 @@ export function SessionNavigator() {
   useEffect(() => {
     if (!menuSessionId || !menuImported) return undefined;
     let current = true;
-    void new ApiClient(window.audiohelper).getImport(menuSessionId)
+    void new ApiClient(window.skaz).getImport(menuSessionId)
       .then((value) => { if (current) setOriginalLink({ id: menuSessionId, url: mediaSourceLink(value.source.video_id) }); })
       .catch(() => undefined);
     return () => { current = false; };

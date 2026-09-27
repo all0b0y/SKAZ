@@ -5,7 +5,7 @@ import { RecoveryStatus } from './RecoveryStatus';
 it('shows the backend retry attempt and removes the notice on pause', async () => {
   const request = vi.fn().mockResolvedValue({ ok: true, status: 200,
     data: { state: 'reconnecting', attempt: 2, max_attempts: 3 } });
-  window.audiohelper = { ...window.audiohelper, request };
+  window.skaz = { ...window.skaz, request };
   const view = render(<RecoveryStatus sessionId="s1" active />);
   expect(await screen.findByRole('status')).toHaveTextContent('Attempt 2/3');
   expect(request).toHaveBeenCalledWith({ method: 'GET', path: '/sessions/s1/live/status' });

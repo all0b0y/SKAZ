@@ -1,4 +1,4 @@
-// Contract for the preload bridge (window.audiohelper). This is the ONLY
+// Contract for the preload bridge (window.skaz). This is the ONLY
 // surface the renderer uses to reach the managed Python backend. The renderer
 // never learns the per-run token or the backend port: the main process owns
 // both and attaches the Authorization header to every proxied request. The
@@ -125,6 +125,6 @@ export interface BridgeApi {
 
 declare global {
   interface Window {
-    audiohelper: BridgeApi;
+    skaz: BridgeApi;
   }
 }

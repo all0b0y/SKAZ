@@ -6,8 +6,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from audiohelper import secrets as secrets_module
-from audiohelper.secrets import MemorySecretStore
+from skaz import secrets as secrets_module
+from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
 
 

@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from audiohelper.gateways.codex_rpc import CodexRpc
-from audiohelper.gateways.codex_tools import CodexTools
+from skaz.gateways.codex_rpc import CodexRpc
+from skaz.gateways.codex_tools import CodexTools
 
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_rpc_server.py"
 

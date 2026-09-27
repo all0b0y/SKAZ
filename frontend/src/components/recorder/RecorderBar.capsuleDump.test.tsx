@@ -1,7 +1,7 @@
 /**
  * Not a behaviour test: dumps the real RecorderBar markup for each capsule state
  * so scripts/recorder-capsule.smoke.spec.ts can lay it out with the built CSS in
- * Electron/Chromium. Runs only when AUDIOHELPER_CAPSULE_DUMP is set.
+ * Electron/Chromium. Runs only when SKAZ_CAPSULE_DUMP is set.
  */
 import { it } from 'vitest';
 import { act, render } from '@testing-library/react';
@@ -11,7 +11,7 @@ import { RecorderBar } from './RecorderBar';
 import { useStore } from '../../state/store';
 import { idleMeterSnapshot } from '../../audio/meter';
 
-const out = process.env.AUDIOHELPER_CAPSULE_DUMP;
+const out = process.env.SKAZ_CAPSULE_DUMP;
 
 it.runIf(Boolean(out))('dumps capsule states', () => {
   const base = {
@@ -35,7 +35,7 @@ it.runIf(Boolean(out))('dumps capsule states', () => {
       recorderError: 'System audio is not allowed. Grant SKAZ “System Audio Recording” in System Settings, or record the microphone only.',
       systemAudioIssue: { phase: 'start', reason: 'denied' } },
   };
-  window.audiohelper = { ...window.audiohelper, systemAudioSupported: true, openSystemAudioSettings: async () => true };
+  window.skaz = { ...window.skaz, systemAudioSupported: true, openSystemAudioSettings: async () => true };
   const dump: Record<string, string> = {};
   for (const [name, state] of Object.entries(states)) {
     useStore.setState({ ...base, ...state } as never);

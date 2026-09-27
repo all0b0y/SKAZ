@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper.secrets import FileSecretStore
+from skaz.secrets import FileSecretStore
 
 
 @pytest.fixture
@@ -94,12 +94,12 @@ def test_environment_fallback_stays_opt_in(vault_dir: Path) -> None:
     env = {"SONIOX_API_KEY": "sk-from-env"}
     assert FileSecretStore(vault_dir, env=env).get("soniox") is None
 
-    opted_in = {**env, "AUDIOHELPER_ALLOW_ENV_KEYS": "1"}
+    opted_in = {**env, "SKAZ_ALLOW_ENV_KEYS": "1"}
     assert FileSecretStore(vault_dir, env=opted_in).get("soniox") == "sk-from-env"
 
 
 def test_a_stored_value_wins_over_the_environment(vault_dir: Path) -> None:
-    env = {"SONIOX_API_KEY": "sk-from-env", "AUDIOHELPER_ALLOW_ENV_KEYS": "1"}
+    env = {"SONIOX_API_KEY": "sk-from-env", "SKAZ_ALLOW_ENV_KEYS": "1"}
     store = FileSecretStore(vault_dir, env=env)
     store.set("soniox", "sk-stored")
 

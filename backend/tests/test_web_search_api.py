@@ -10,11 +10,11 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.codex_schemas import CodexSettings
-from audiohelper.gateways.codex_rpc import CodexRpc
-from audiohelper.runtime import Runtime
-from audiohelper.web_search import WebSearch
+from skaz import repository as repo
+from skaz.codex_schemas import CodexSettings
+from skaz.gateways.codex_rpc import CodexRpc
+from skaz.runtime import Runtime
+from skaz.web_search import WebSearch
 
 
 async def pending(client: httpx.AsyncClient) -> dict[str, str]:

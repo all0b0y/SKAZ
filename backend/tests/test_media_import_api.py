@@ -12,10 +12,10 @@ from .test_imports_api import ready as ready  # pytest fixture re-export
 
 @pytest.fixture(autouse=True)
 def media(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("audiohelper.import_service.POLL_SCHEDULE", (0.0,))
+    monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (0.0,))
 
     async def metadata(url: str) -> dict[str, Any]:
-        from audiohelper.media_source import youtube_source
+        from skaz.media_source import youtube_source
         source = youtube_source(url)
         return {"url": source.url, "video_id": source.video_id,
                 "title": "Lecture", "duration_ms": 2500}
@@ -30,9 +30,9 @@ def media(monkeypatch: pytest.MonkeyPatch) -> None:
         path.write_bytes(source.read_bytes())
         return path
 
-    monkeypatch.setattr("audiohelper.media_tools.youtube_metadata", metadata)
-    monkeypatch.setattr("audiohelper.media_tools.download_audio", download)
-    monkeypatch.setattr("audiohelper.media_tools.extract_audio", extract)
+    monkeypatch.setattr("skaz.media_tools.youtube_metadata", metadata)
+    monkeypatch.setattr("skaz.media_tools.download_audio", download)
+    monkeypatch.setattr("skaz.media_tools.extract_audio", extract)
 
 
 async def test_youtube_preview_import_and_duplicate(ready: httpx.AsyncClient) -> None:

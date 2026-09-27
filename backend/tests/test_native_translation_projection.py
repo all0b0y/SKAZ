@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
-from audiohelper.live_store import LiveStore
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
+from skaz.live_store import LiveStore
 
 
 def test_live_translation_tail_replaces_speaker_turns_without_changing_sources(tmp_path: Path) -> None:

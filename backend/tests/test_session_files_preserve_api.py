@@ -10,8 +10,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from audiohelper import session_files
-from audiohelper.config import AppConfig
+from skaz import session_files
+from skaz.config import AppConfig
 from tests.conftest import FakeHttp
 from tests.test_session_files_api import seed_note
 from tests.test_session_files_recovery_api import CRASH_WRITER, open_client
@@ -193,7 +193,7 @@ async def test_preservation_at_syscall_boundaries_never_clobbers_external_bytes(
         original_fsync(fd)
 
     with monkeypatch.context() as patcher:
-        patcher.setattr("audiohelper.file_preservation._rename_at", rename)
+        patcher.setattr("skaz.file_preservation._rename_at", rename)
         patcher.setattr(os, "fsync", fsync)
         response = await client.post(f"/sessions/{sid}/files/preserve")
     assert hit

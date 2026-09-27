@@ -15,8 +15,8 @@ from pathlib import Path
 PARENT = r"""
 import os, subprocess, sys
 child = subprocess.Popen(
-    [sys.executable, "-m", "audiohelper", "--port", "0", "--log-level", "warning"],
-    env={**os.environ, "AUDIOHELPER_PARENT_PID": str(os.getpid())},
+    [sys.executable, "-m", "skaz", "--port", "0", "--log-level", "warning"],
+    env={**os.environ, "SKAZ_PARENT_PID": str(os.getpid())},
     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
 )
 sys.stdout.write(f"{child.pid}\n")
@@ -37,9 +37,9 @@ def _alive(pid: int) -> bool:
 def test_backend_exits_after_its_parent_dies(tmp_path: Path) -> None:
     env = {
         **os.environ,
-        "AUDIOHELPER_TOKEN": "t" * 32,
-        "AUDIOHELPER_DATA_DIR": str(tmp_path / "data"),
-        "AUDIOHELPER_DOCUMENTS_DIR": str(tmp_path / "docs"),
+        "SKAZ_TOKEN": "t" * 32,
+        "SKAZ_DATA_DIR": str(tmp_path / "data"),
+        "SKAZ_DOCUMENTS_DIR": str(tmp_path / "docs"),
         "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
     }
     parent = subprocess.run(

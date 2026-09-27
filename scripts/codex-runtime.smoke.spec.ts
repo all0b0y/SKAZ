@@ -14,19 +14,19 @@ test('Codex runtime roundtrip, Notes, confirmed edit and reopen', async () => {
     args: [path.join(root, 'scripts/codex-e2e/main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: profile, NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: profile,
+      SKAZ_OPTIN_SMOKE_USER_DATA: profile,
       SKAZ_FIXTURE_CODEX: process.env.SKAZ_FIXTURE_CODEX ?? '/Users/all0b0y/.local/bin/codex',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0',
     },
   });
   let app = await launch();
   try {
     expect(await app.evaluate(({ app: a }) => a.getPath('userData'))).toBe(profile);
     let page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+    await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
       { timeout: 60_000 }).toBe('ready');
     await page.evaluate(async () => {
-      const res = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+      const res = await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
       if (!res.ok) throw new Error(res.detail);
     });
     await page.reload();
@@ -38,7 +38,7 @@ test('Codex runtime roundtrip, Notes, confirmed edit and reopen', async () => {
     await input.press('Enter');
     await expect(page.locator('.msg--assistant').first()).toContainText('AUTHORED E2E ANSWER', { timeout: 45_000 });
     const state = await page.evaluate(async () => {
-      const r = await window.audiohelper.request({ method: 'GET', path: '/codex/state' });
+      const r = await window.skaz.request({ method: 'GET', path: '/codex/state' });
       if (!r.ok) throw new Error(r.detail);
       return r.data as { tasks: { session_ids: string[]; citations: unknown[] }[] };
     });
@@ -78,12 +78,12 @@ test('Codex runtime roundtrip, Notes, confirmed edit and reopen', async () => {
     await app.close();
     app = await launch();
     page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+    await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
       { timeout: 60_000 }).toBe('ready');
     await page.getByText('AUTHORED E2E SESSION', { exact: true }).first().click();
     await expect(page.locator('.assistant--codex')).toContainText('AUTHORED E2E ANSWER');
     const notes = await page.evaluate(async (id) => {
-      const r = await window.audiohelper.request({ method: 'GET', path: `/sessions/${id}` });
+      const r = await window.skaz.request({ method: 'GET', path: `/sessions/${id}` });
       if (!r.ok) throw new Error(r.detail);
       return r.data as { notes_list: { content: string }[] };
     }, sid);

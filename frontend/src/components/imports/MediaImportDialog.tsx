@@ -43,7 +43,7 @@ export function MediaImportDialog({ onClose, onCreated, onOpenExisting, onOpenSe
     const version = ++generation.current;
     setPreview(null); setError(''); setChecking(true);
     try {
-      const result = await new ApiClient(window.audiohelper).previewImport(source);
+      const result = await new ApiClient(window.skaz).previewImport(source);
       if (version === generation.current) setPreview(result);
     } catch (err) {
       if (version === generation.current) setError(err instanceof Error ? err.message : String(err));
@@ -67,7 +67,7 @@ export function MediaImportDialog({ onClose, onCreated, onOpenExisting, onOpenSe
   };
   const choose = async () => {
     try {
-      const choice = await window.audiohelper.chooseAudioFile();
+      const choice = await window.skaz.chooseAudioFile();
       if (choice) selectFile(choice);
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
@@ -79,7 +79,7 @@ export function MediaImportDialog({ onClose, onCreated, onOpenExisting, onOpenSe
     if (checking || busy) return;
     if (files.length !== 1) { setError('Choose one audio or video file.'); return; }
     try {
-      const choice = window.audiohelper.droppedMediaFile?.(files[0]!);
+      const choice = window.skaz.droppedMediaFile?.(files[0]!);
       if (choice) selectFile(choice);
       else setError('This file could not be opened. Choose it instead.');
     } catch { setError('This file could not be opened. Choose it instead.'); }

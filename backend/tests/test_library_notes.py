@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper.library_discovery import LibraryUnavailable
-from audiohelper.library_notes import NoteRegistration, RegisteredNotes
+from skaz.library_discovery import LibraryUnavailable
+from skaz.library_notes import NoteRegistration, RegisteredNotes
 
 NOTE_ID = "11111111111141118111111111111111"
 OTHER_ID = "22222222222242228222222222222222"

@@ -10,8 +10,8 @@ test('transcript-only desktop accepts PCM without archiving and resumes its cloc
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
       PYTHONPATH: path.join(root, 'backend/src'),
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory,
-      PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring', AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0' },
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory,
+      PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring', SKAZ_ALLOW_MODEL_DOWNLOAD: '0' },
   });
   app.process().stdout?.on('data', (data) => console.log(String(data)));
   app.process().stderr?.on('data', (data) => console.log(String(data)));
@@ -20,12 +20,12 @@ test('transcript-only desktop accepts PCM without archiving and resumes its cloc
     expect(paths.user).toBe(directory);
     expect(paths.session).toBe(path.join(directory, 'session'));
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
     const onboarding = page.getByRole('dialog', { name: 'Which languages do you speak?' });
     await onboarding.getByRole('button', { name: 'Russian + English', exact: true }).click();
     await onboarding.getByRole('button', { name: 'Continue', exact: true }).click();
     const result = await page.evaluate(async () => {
-      const api = window.audiohelper;
+      const api = window.skaz;
       const created = await api.request<{ id: string }>({ method: 'POST', path: '/sessions', body: { title: 'Transient smoke' } });
       if (!created.ok) throw new Error('session creation failed');
       const id = created.data.id;

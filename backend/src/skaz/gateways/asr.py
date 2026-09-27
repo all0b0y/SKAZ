@@ -54,10 +54,10 @@ OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptio
 WHISPER_SAMPLE_RATE = 16_000
 LOCAL_SPEECH_GATE_DEPENDENCY_DETAIL = (
     "Local speech presence detection is unavailable. Install the backend with the "
-    "'local-asr' extra, or disable AUDIOHELPER_LOCAL_SPEECH_GATE."
+    "'local-asr' extra, or disable SKAZ_LOCAL_SPEECH_GATE."
 )
 LOCAL_SPEECH_GATE_FAILURE_DETAIL = (
-    "Local speech presence detection failed. Disable AUDIOHELPER_LOCAL_SPEECH_GATE "
+    "Local speech presence detection failed. Disable SKAZ_LOCAL_SPEECH_GATE "
     "and retry the original stored audio."
 )
 
@@ -302,7 +302,7 @@ def gigachat_host_status() -> HostStatus:
             False,
             "The pinned 22.54 GB BF16 artifact needs approximately "
             f"{GIGACHAT_REQUIRED_MEMORY_BYTES / GIB:.1f} GiB of physical memory, but this Mac has "
-            f"{physical / GIB:.1f} GiB. AudioHelper will not download it or silently switch to q8.",
+            f"{physical / GIB:.1f} GiB. SKAZ will not download it or silently switch to q8.",
             physical,
             GIGACHAT_REQUIRED_MEMORY_BYTES,
         )
@@ -472,7 +472,7 @@ class LocalWhisperTranscriber:
             raise ProviderNotConfigured(
                 f"Local Whisper model '{self.model}' could not be loaded: {error}. "
                 "Prepare it explicitly (POST /models/local/prepare), or set "
-                "AUDIOHELPER_ALLOW_MODEL_DOWNLOAD=1 to allow downloading the weights."
+                "SKAZ_ALLOW_MODEL_DOWNLOAD=1 to allow downloading the weights."
             ) from error
         LocalWhisperTranscriber._models[cache_key] = engine
         return engine
@@ -578,7 +578,7 @@ class LocalGigaChatTranscriber:
                 engine,
                 audio_seconds=audio.duration_ms / 1000,
             )
-            with tempfile.TemporaryDirectory(prefix="audiohelper-gigachat-") as temporary:
+            with tempfile.TemporaryDirectory(prefix="skaz-gigachat-") as temporary:
                 audio_path = Path(temporary) / "chunk.wav"
                 audio_path.write_bytes(audio.to_wav_bytes())
                 messages = [

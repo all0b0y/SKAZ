@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from audiohelper.config import AppConfig, adopt_legacy_database
+from skaz.config import AppConfig, adopt_legacy_database
 
 
 def _config(data_dir: Path) -> AppConfig:

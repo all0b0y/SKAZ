@@ -8,13 +8,13 @@ from typing import Any
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.agent.transcript_snapshot import TranscriptSnapshot
-from audiohelper.agent.transcript_tools import transcript_tool
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
-from audiohelper.live_store import LiveStore
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.agent.transcript_snapshot import TranscriptSnapshot
+from skaz.agent.transcript_tools import transcript_tool
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
+from skaz.live_store import LiveStore
+from skaz.schemas import Segment
 
 
 def test_capture_does_not_hold_recording_lock_and_has_one_cutoff(
@@ -71,7 +71,7 @@ def test_capture_abort_releases_reader_and_no_partial_result(
     cancel = Event()
     connect = sqlite3.connect
     clock = [0.0]
-    monkeypatch.setattr("audiohelper.agent.transcript_snapshot.monotonic", lambda: clock[0])
+    monkeypatch.setattr("skaz.agent.transcript_snapshot.monotonic", lambda: clock[0])
 
     def trace(sql: str) -> None:
         if "FROM native_token_events" in sql:

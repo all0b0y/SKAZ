@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper.gateways.codex_rpc import CodexRpc, CodexRpcError
+from skaz.gateways.codex_rpc import CodexRpc, CodexRpcError
 
 FIXTURE = Path(__file__).parent / "fixtures" / "codex_rpc_server.py"
 

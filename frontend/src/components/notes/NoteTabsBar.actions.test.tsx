@@ -64,8 +64,8 @@ beforeEach(() => {
   useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
   sent = [];
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
       sent.push(req);
       if (req.method === 'PATCH') {
@@ -218,7 +218,7 @@ describe('the "+" menu carries the detail control', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'New notes' }));
     await user.click(screen.getByRole('radio', { name: 'Detailed' }));
-    expect(localStorage.getItem('audiohelper.noteDetail')).toBe('detailed');
+    expect(localStorage.getItem('skaz.noteDetail')).toBe('detailed');
     expect(screen.getByRole('radio', { name: 'Detailed' })).toHaveAttribute('aria-checked', 'true');
   });
 });

@@ -40,7 +40,7 @@ const OVERLAY_GUTTER = 48;
 /** Auto-close order when the window is too narrow: the assistant goes first. */
 const CLOSE_ORDER: PanelId[] = ['assistant', 'sessions'];
 
-export const STORAGE_KEY = 'audiohelper.panels';
+export const STORAGE_KEY = 'skaz.panels';
 
 export function defaultPrefs(): PanelPrefs {
   return {

@@ -1,4 +1,4 @@
-# PyInstaller spec for the AudioHelper/SKAZ local backend.
+# PyInstaller spec for the SKAZ/SKAZ local backend.
 #
 # The shipped app cannot run `uv run` or a repo virtualenv, so the backend is
 # frozen into a self-contained binary that main.ts launches from

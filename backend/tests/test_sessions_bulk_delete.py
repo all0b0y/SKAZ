@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from audiohelper.config import AppConfig
+from skaz.config import AppConfig
 
 
 @pytest.fixture

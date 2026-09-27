@@ -213,7 +213,7 @@ async def test_oversize_full_review_refuses_before_generation(
 async def test_native_confirmed_prefix_and_provenance_exclude_draft_translation_and_post_snapshot_tokens(
     client: httpx.AsyncClient, outbound: FakeHttp, app: Any,
 ) -> None:
-    from audiohelper.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
+    from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTranslationToken
 
     await setup(client, outbound)
     sid = (await client.post("/sessions", json={"title": "Native snapshot"})).json()["id"]
@@ -260,7 +260,7 @@ async def test_native_confirmed_prefix_and_provenance_exclude_draft_translation_
 async def test_cache_survives_backend_restart(
     client: httpx.AsyncClient, outbound: FakeHttp, app: Any,
 ) -> None:
-    from audiohelper.app import create_app
+    from skaz.app import create_app
     from tests.conftest import TOKEN
 
     sid = await setup(client, outbound)

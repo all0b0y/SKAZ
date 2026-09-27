@@ -1,7 +1,7 @@
 """Recovery policy/PCM retention contract; no audio is persisted or sent to a provider."""
 import pytest
 
-from audiohelper.native_recovery import RecoveryBudget, ReplayBuffer
+from skaz.native_recovery import RecoveryBudget, ReplayBuffer
 
 
 def test_only_unconfirmed_pcm_is_replayed_and_clear_releases_it() -> None:

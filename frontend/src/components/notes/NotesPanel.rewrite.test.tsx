@@ -77,8 +77,8 @@ beforeEach(() => {
     id: 'preview-1', note_id: 'n1', revision: 3,
     start: 0, end: 0, original: CITED, replacement: `${CITED}, и это важно`, citations: [citation],
   };
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
       sent.push(req);
       if (req.path.endsWith('/rewrite')) return { ok: true, status: 200, data: preview as T };

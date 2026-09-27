@@ -12,12 +12,12 @@ from typing import Any
 
 import pytest
 
-from audiohelper import note_store
-from audiohelper import repository as repo
-from audiohelper.agent.codex_runtime import CodexRuntime
-from audiohelper.codex_schemas import CodexSettings
-from audiohelper.db import Database
-from audiohelper.gateways.codex_rpc import CodexRpc
+from skaz import note_store
+from skaz import repository as repo
+from skaz.agent.codex_runtime import CodexRuntime
+from skaz.codex_schemas import CodexSettings
+from skaz.db import Database
+from skaz.gateways.codex_rpc import CodexRpc
 
 
 @pytest.mark.asyncio

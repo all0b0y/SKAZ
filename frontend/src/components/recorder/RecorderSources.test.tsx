@@ -21,7 +21,7 @@ beforeEach(() => {
   saveSettings = vi.fn(async (update: SettingsUpdate) => {
     useStore.setState((s) => ({ settings: { ...s.settings!, ...update } as Settings }));
   });
-  window.audiohelper = { ...window.audiohelper, systemAudioSupported: true,
+  window.skaz = { ...window.skaz, systemAudioSupported: true,
     request: vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
       if (req.path.endsWith('/live/events')) return { ok: true, status: 200, data: { recording_mode: pageMode, translation_target_language: 'de' } };
       return { ok: false, status: 404, detail: 'nope' };
@@ -111,7 +111,7 @@ describe('RecorderSources', () => {
   });
 
   it('disables system audio where the OS cannot capture it', async () => {
-    window.audiohelper = { ...window.audiohelper, systemAudioSupported: false };
+    window.skaz = { ...window.skaz, systemAudioSupported: false };
     show();
     const toggle = screen.getByRole('button', { name: 'Include system audio' });
     expect(toggle).toHaveAttribute('aria-disabled', 'true');

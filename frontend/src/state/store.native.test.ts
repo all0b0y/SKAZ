@@ -46,7 +46,7 @@ beforeEach(async () => {
     enumerateDevices: async () => [],
   } });
   bridge = {
-    ...window.audiohelper,
+    ...window.skaz,
     request: vi.fn(async (req: BridgeRequest) => {
       if (req.path === '/sessions' && req.method === 'POST') return { ok: true, status: 200, data: session };
       if (req.path === '/sessions' && req.method === 'GET') return { ok: true, status: 200, data: { sessions: [session] } };
@@ -68,7 +68,7 @@ beforeEach(async () => {
     } })),
     onNativeFailure: vi.fn(() => () => {}),
   };
-  window.audiohelper = bridge;
+  window.skaz = bridge;
   useStore = (await import('./store')).useStore;
   useStore.setState({ settings, ready: true });
 });

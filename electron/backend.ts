@@ -100,14 +100,14 @@ export class BackendManager {
       return { command: bundled, args: ['--port', String(port)] };
     }
     // Development: prefer an existing backend virtualenv; fall back to `uv run`
-    // per docs/API.md. Both run `python -m audiohelper --port N` from repo root.
+    // per docs/API.md. Both run `python -m skaz --port N` from repo root.
     const venvPython = path.join(this.repoRoot, 'backend', '.venv', 'bin', 'python');
     if (existsSync(venvPython)) {
-      return { command: venvPython, args: ['-m', 'audiohelper', '--port', String(port)] };
+      return { command: venvPython, args: ['-m', 'skaz', '--port', String(port)] };
     }
     return {
       command: 'uv',
-      args: ['run', '--project', 'backend', 'python', '-m', 'audiohelper', '--port', String(port)],
+      args: ['run', '--project', 'backend', 'python', '-m', 'skaz', '--port', String(port)],
     };
   }
 
@@ -157,14 +157,19 @@ export class BackendManager {
       cwd,
       env: {
         ...process.env,
-        AUDIOHELPER_TOKEN: token,
-        AUDIOHELPER_DATA_DIR: this.dataDir,
-        AUDIOHELPER_DOCUMENTS_DIR: app.getPath('documents'),
+        SKAZ_TOKEN: token,
+        SKAZ_DATA_DIR: this.dataDir,
+        SKAZ_DOCUMENTS_DIR: app.getPath('documents'),
+        // Development cannot connect the installed app's document library.
+        SKAZ_DOCUMENTS_SANDBOX: app.isPackaged ? '' : (
+          process.env.SKAZ_OPTIN_SMOKE_USER_DATA ? app.getPath('userData') : app.getPath('documents')
+        ),
+        SKAZ_SESSION_FILES_ROOT: app.isPackaged ? '' : process.env.SKAZ_SESSION_FILES_ROOT ?? '',
         // The backend exits on its own if this process dies without stopping it
         // (crash / force quit), so it never keeps the database and queue locks.
-        AUDIOHELPER_PARENT_PID: String(process.pid),
+        SKAZ_PARENT_PID: String(process.pid),
         // Where the user's own tools (Codex, Node) live; see electron/shellPath.ts.
-        ...(userPath ? { AUDIOHELPER_USER_PATH: userPath } : {}),
+        ...(userPath ? { SKAZ_USER_PATH: userPath } : {}),
         PYTHONUNBUFFERED: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],

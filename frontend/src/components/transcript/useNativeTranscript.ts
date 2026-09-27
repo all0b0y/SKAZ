@@ -52,7 +52,7 @@ export function useNativeTranscript(sessionId: string | null, polling: boolean, 
 
   useEffect(() => {
     if (!sessionId) { setRead(empty(null)); return; }
-    const api = new ApiClient(window.audiohelper);
+    const api = new ApiClient(window.skaz);
     const entry = openTranscript(sessionId);
     const cache = entry.history;
     let parts = entry.parts;

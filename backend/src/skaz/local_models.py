@@ -140,8 +140,8 @@ def _progress_tqdm(callback: ProgressCallback) -> type:
 
     class ProgressTqdm(tqdm):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            self._audiohelper_name = kwargs.get("name")
-            self._audiohelper_unit = kwargs.get("unit", "it")
+            self._skaz_name = kwargs.get("name")
+            self._skaz_unit = kwargs.get("unit", "it")
             super().__init__(*args, **kwargs)  # type: ignore[no-untyped-call]
 
         def update(self, n: int | float = 1) -> bool | None:
@@ -149,8 +149,8 @@ def _progress_tqdm(callback: ProgressCallback) -> type:
             nonlocal aggregate
             with lock:
                 if (
-                    self._audiohelper_unit == "B"
-                    and self._audiohelper_name != "huggingface_hub.snapshot_download"
+                    self._skaz_unit == "B"
+                    and self._skaz_name != "huggingface_hub.snapshot_download"
                 ):
                     aggregate = DownloadProgress(
                         downloaded_bytes=aggregate.downloaded_bytes + max(0, int(n)),
@@ -158,7 +158,7 @@ def _progress_tqdm(callback: ProgressCallback) -> type:
                         total_bytes=None,
                         total_files=aggregate.total_files,
                     )
-                elif self._audiohelper_unit in ("it", "file", "files"):
+                elif self._skaz_unit in ("it", "file", "files"):
                     total = getattr(self, "total", None)
                     aggregate = DownloadProgress(
                         downloaded_bytes=aggregate.downloaded_bytes,

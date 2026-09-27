@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.gateways import soniox
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.gateways import soniox
+from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket

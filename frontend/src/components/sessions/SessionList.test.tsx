@@ -34,7 +34,7 @@ const onOpenSearch = () => vi.fn();
 
 beforeEach(() => {
   localStorage.clear();
-  window.audiohelper = { ...window.audiohelper,
+  window.skaz = { ...window.skaz,
     request: async <T,>(): Promise<JsonResponse<T>> => ({ ok: true, status: 200,
       data: { enabled: false, revision: 0, pending: null, data: { version: 1, groups: [], membership: {} } } as T }),
   };
@@ -333,12 +333,12 @@ describe('Session navigation actions', () => {
   });
 
   it('does not overwrite unreadable preferences and reports failed persistence', async () => {
-    localStorage.setItem('audiohelper.session-groups.v1', 'broken');
+    localStorage.setItem('skaz.session-groups.v1', 'broken');
     const user = userEvent.setup(); show();
     expect(screen.getByRole('alert')).toHaveTextContent('have not been overwritten');
     await createGroup(user, 'Study');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(localStorage.getItem('audiohelper.session-groups.v1')).toBe('broken');
+    expect(localStorage.getItem('skaz.session-groups.v1')).toBe('broken');
     expect(screen.queryByRole('tab', { name: /Study/ })).not.toBeInTheDocument();
   });
 });

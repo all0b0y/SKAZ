@@ -6,10 +6,10 @@ from threading import Event
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.agent.transcript_snapshot import TranscriptSnapshot
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.agent.transcript_snapshot import TranscriptSnapshot
+from skaz.db import Database
+from skaz.schemas import Segment
 
 
 def test_saved_snapshot_reopens_without_source_and_preserves_citations(tmp_path: Path) -> None:

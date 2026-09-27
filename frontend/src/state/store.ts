@@ -312,9 +312,9 @@ interface SessionStatusIntent {
 // worst place for a stale reference to hide.
 let clientBridge: BridgeApi | null = null;
 const getClient = (): ApiClient => {
-  if (!client || clientBridge !== window.audiohelper) {
-    client = new ApiClient(window.audiohelper);
-    clientBridge = window.audiohelper;
+  if (!client || clientBridge !== window.skaz) {
+    client = new ApiClient(window.skaz);
+    clientBridge = window.skaz;
   }
   return client;
 };
@@ -502,10 +502,10 @@ export const useStore = create<AppState>((set, get) => {
   notesError: null,
   noteTabs: initialNoteTabs(),
   noteGenerations: {},
-  theme: (localStorage.getItem('audiohelper.theme') as ThemeMode | null) ?? 'system',
+  theme: (localStorage.getItem('skaz.theme') as ThemeMode | null) ?? 'system',
 
   init: async () => {
-    const bridge = window.audiohelper;
+    const bridge = window.skaz;
     set({ backend: await bridge.getBackendStatus() });
     bridge.onBackendStatus((status) => {
       set({ backend: status, ready: status.phase === 'ready' });
@@ -1493,7 +1493,7 @@ export const useStore = create<AppState>((set, get) => {
   },
 
   setTheme: (theme) => {
-    localStorage.setItem('audiohelper.theme', theme);
+    localStorage.setItem('skaz.theme', theme);
     set({ theme });
   },
   });
@@ -1502,8 +1502,8 @@ export const useStore = create<AppState>((set, get) => {
 // Push live capture state to main so a window close / quit can be guarded while
 // audio is still recording, draining, or held for retry. One-way and cheap;
 // `reportCaptureState` is optional so the bridge stub used in tests is a no-op.
-window.audiohelper.onPrepareQuit?.(() => useStore.getState().prepareForQuit());
-window.audiohelper.onQuitCancelled?.(() => useStore.getState().cancelQuit());
+window.skaz.onPrepareQuit?.(() => useStore.getState().prepareForQuit());
+window.skaz.onQuitCancelled?.(() => useStore.getState().cancelQuit());
 
 let lastReported = '';
 useStore.subscribe((state) => {
@@ -1515,7 +1515,7 @@ useStore.subscribe((state) => {
   const key = `${snapshot.recorderState}:${snapshot.pending}:${snapshot.failed}`;
   if (key === lastReported) return;
   lastReported = key;
-  window.audiohelper.reportCaptureState?.(snapshot);
+  window.skaz.reportCaptureState?.(snapshot);
 });
 
 // A Codex notes task that ended: a completed one binds its note to the tab that

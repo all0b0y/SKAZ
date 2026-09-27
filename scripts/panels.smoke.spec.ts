@@ -27,18 +27,18 @@ test.beforeAll(async () => {
     cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 1400, height: 820 });
-  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase),
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
     { timeout: 60_000 }).toBe('ready');
   // Isolated onboarding preference only (as storage-root.smoke): no credentials or consent.
   await page.evaluate(async () => {
-    const response = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+    const response = await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
     if (!response.ok) throw new Error('Fixture onboarding failed');
   });
   await page.reload();

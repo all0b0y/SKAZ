@@ -12,10 +12,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bin = process.platform === 'win32' ? 'electron-vite.cmd' : 'electron-vite';
 const electronVite = path.join(root, 'node_modules', '.bin', bin);
 
+const args = process.argv.slice(2);
+if (args.length > 1 || args.some((arg) => !['--profile=dev', '--profile=test'].includes(arg))) {
+  throw new Error('Usage: npm run dev -- [--profile=dev|--profile=test]');
+}
+const profile = args[0]?.split('=')[1] ?? process.env.SKAZ_PROFILE ?? 'dev';
+if (!['dev', 'test'].includes(profile)) throw new Error('SKAZ_PROFILE must be dev or test.');
+
 const child = spawn(electronVite, ['dev'], {
   cwd: root,
   stdio: 'inherit',
-  env: process.env,
+  env: { ...process.env, SKAZ_PROFILE: profile },
 });
 
 const forward = (signal) => () => {

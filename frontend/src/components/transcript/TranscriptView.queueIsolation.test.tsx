@@ -42,11 +42,11 @@ function nativeSnapshot() {
 }
 
 describe('TranscriptView isolation from audio-queue events', () => {
-  let restore: typeof window.audiohelper.request;
+  let restore: typeof window.skaz.request;
 
   beforeEach(() => {
-    restore = window.audiohelper.request;
-    window.audiohelper.request = (async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
+    restore = window.skaz.request;
+    window.skaz.request = (async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
       if (req.path === `/sessions/${SESSION}/live/events`) {
         const original = nativeSnapshot().final_tokens[0]!;
         return { ok: true, status: 200, data: {
@@ -76,7 +76,7 @@ describe('TranscriptView isolation from audio-queue events', () => {
         };
       }
       return { ok: true, status: 200, data: {} as T };
-    }) as typeof window.audiohelper.request;
+    }) as typeof window.skaz.request;
     useStore.setState({
       activeSessionId: SESSION,
       sessions: [{ id: SESSION, title: 'perf', mode: 'native', duration_ms: 1000 }],
@@ -87,7 +87,7 @@ describe('TranscriptView isolation from audio-queue events', () => {
   });
 
   afterEach(() => {
-    window.audiohelper.request = restore;
+    window.skaz.request = restore;
     vi.restoreAllMocks();
   });
 

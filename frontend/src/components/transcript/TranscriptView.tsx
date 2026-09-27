@@ -191,7 +191,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
   useEffect(() => {
     let current = true;
     setVideoId(null);
-    if (imported && activeSessionId) void new ApiClient(window.audiohelper).getImport(activeSessionId)
+    if (imported && activeSessionId) void new ApiClient(window.skaz).getImport(activeSessionId)
       .then((value) => { if (current) setVideoId(value.source.video_id ?? null); }).catch(() => undefined);
     return () => { current = false; };
   }, [activeSessionId, imported]);

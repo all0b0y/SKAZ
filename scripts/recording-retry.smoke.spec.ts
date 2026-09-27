@@ -15,16 +15,16 @@ test('Record waits for a Soniox key and consent, then warns on every failed atte
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory,
-      AUDIOHELPER_SESSION_FILES_ROOT: path.join(directory, 'files'),
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory,
+      SKAZ_SESSION_FILES_ROOT: path.join(directory, 'files'),
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
-      PYTHONPATH: path.join(root, 'scripts', 'fake-soniox'), AUDIOHELPER_SMOKE_FAKE_SONIOX: 'refuse',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
+      PYTHONPATH: path.join(root, 'scripts', 'fake-soniox'), SKAZ_SMOKE_FAKE_SONIOX: 'refuse',
     },
   });
   try {
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
     const onboarding = page.getByRole('dialog', { name: 'Which languages do you speak?' });
     await expect(onboarding).toBeVisible();
     await onboarding.getByRole('button', { name: 'Russian + English', exact: true }).click();
@@ -99,7 +99,7 @@ test('Record waits for a Soniox key and consent, then warns on every failed atte
     await expect(warning).toContainText(/Transcription (is unavailable|failed)/, { timeout: 15000 });
     await expect(record).toBeEnabled();
     await expect(page.locator('html')).toHaveAttribute('data-capture-attempts', '3');
-    const sessions = await page.evaluate(() => window.audiohelper.request<{ sessions: Array<{ status: string }> }>({
+    const sessions = await page.evaluate(() => window.skaz.request<{ sessions: Array<{ status: string }> }>({
       method: 'GET', path: '/sessions',
     }));
     expect(sessions.ok && sessions.data.sessions.every((s) => s.status === 'stopped')).toBe(true);

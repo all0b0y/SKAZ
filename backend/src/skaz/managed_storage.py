@@ -300,6 +300,7 @@ class ManagedStorage:
                     or self.files._managed_root or self.files._data_dir is None):
                 raise StorageConflict("Root changed or is managed.")
             root = validate_root(value, self.files._data_dir)
+            self.files.check_profile_root(root)
             if root == old or root.is_relative_to(old) or old.is_relative_to(root):
                 raise StorageConflict("Choose a separate root.")
             view = self.view()

@@ -43,7 +43,7 @@ beforeEach(async () => {
   vi.resetModules(); calls = []; words = ['Confirmed text.']; transcription = 'streaming'; failReads = false;
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
-  window.audiohelper = { ...window.audiohelper, request: vi.fn(async (req: BridgeRequest) => {
+  window.skaz = { ...window.skaz, request: vi.fn(async (req: BridgeRequest) => {
     calls.push(req);
     if (req.path === '/sessions/native/live/events') {
       if (failReads) return { ok: false, status: 503, detail: 'Unavailable' } as never;
@@ -148,8 +148,8 @@ describe('transcript screen states', () => {
   it('does not install a delayed page after switching sessions', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    const original = window.audiohelper.request;
-    window.audiohelper.request = vi.fn(async (req: BridgeRequest) => {
+    const original = window.skaz.request;
+    window.skaz.request = vi.fn(async (req: BridgeRequest) => {
       if (req.path === '/sessions/archive') return { ok: true, status: 200, data: {
         session: { id: 'archive', title: 'Archive', mode: 'legacy', status: 'stopped', duration_ms: 0, created_at: '' },
         segments: [], messages: [], notes: null } } as never;

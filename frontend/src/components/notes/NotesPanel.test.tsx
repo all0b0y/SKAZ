@@ -51,8 +51,8 @@ beforeEach(() => {
   localStorage.clear();
   useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string }) => {
       if (req.path.endsWith('/notes')) {
         return { ok: true, status: 200, data: { notes: [note()] } as T };
@@ -142,9 +142,9 @@ describe('NotesPanel start screen', () => {
   });
 
   it('opens generation once the post-Stop re-read reports final speech', async () => {
-    const base = window.audiohelper.request;
-    window.audiohelper = {
-      ...window.audiohelper,
+    const base = window.skaz.request;
+    window.skaz = {
+      ...window.skaz,
       request: (async (req: { method?: string; path: string }) => {
         if (req.method === 'GET' && /\/sessions\/[^/]+$/.test(req.path)) {
           return { ok: true, status: 200, data: {
@@ -229,14 +229,14 @@ describe('NotesPanel tools menu', () => {
     render(<NotesPanel onCite={vi.fn()} />);
     await user.click(screen.getByRole('button', { name: 'New notes' }));
     await user.click(screen.getByRole('radio', { name: 'Detailed' }));
-    expect(localStorage.getItem('audiohelper.noteDetail')).toBe('detailed');
+    expect(localStorage.getItem('skaz.noteDetail')).toBe('detailed');
     expect(screen.getByRole('radio', { name: 'Detailed' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('sends the chosen detail level with the generation request', async () => {
     const requests: Array<{ method?: string; path: string; body?: unknown }> = [];
-    window.audiohelper = {
-      ...window.audiohelper,
+    window.skaz = {
+      ...window.skaz,
       request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
         requests.push(req);
         if (req.method === 'GET' && /\/sessions\/[^/]+$/.test(req.path)) {

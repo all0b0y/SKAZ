@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-REPORT_SCHEMA = "audiohelper.asr-eval/1"
+REPORT_SCHEMA = "skaz.asr-eval/1"
 MANIFEST_VERSION = 1
 REPLAY_LABEL = "offline replay"
 EVIDENCE_CLASS = (
@@ -184,7 +184,7 @@ def _validate_audio(path: Path, max_audio_seconds: float, label: str) -> None:
     if str(BACKEND_SRC) not in sys.path:
         sys.path.insert(0, str(BACKEND_SRC))
     try:
-        from audiohelper.audio import InvalidAudio, parse_wav
+        from skaz.audio import InvalidAudio, parse_wav
     except ImportError as error:
         raise ManifestError(f"{label}: cannot validate audio, backend unavailable: {error}") from error
     try:
@@ -663,8 +663,8 @@ def local_runner_available() -> bool:
 def _load_backend() -> tuple[Any, Any]:
     if str(BACKEND_SRC) not in sys.path:
         sys.path.insert(0, str(BACKEND_SRC))
-    from audiohelper.audio import parse_wav
-    from audiohelper.gateways.asr import build_transcriber
+    from skaz.audio import parse_wav
+    from skaz.gateways.asr import build_transcriber
     return parse_wav, build_transcriber
 
 

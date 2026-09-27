@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 
-from audiohelper.gateways import asr as asr_gateway
+from skaz.gateways import asr as asr_gateway
 from tests.conftest import make_wav
 
 

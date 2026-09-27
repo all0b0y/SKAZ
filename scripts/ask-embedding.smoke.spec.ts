@@ -12,15 +12,15 @@ test('Ask library scopes and cross-session source navigation', async () => {
   const app = await electron.launch({
     args: [path.join(root, 'scripts', 'optin-smoke', 'main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory, AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0' },
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory, SKAZ_ALLOW_MODEL_DOWNLOAD: '0' },
   });
   try {
     // The real profile must never be touched: prove the relocation before any write.
     expect(await fs.realpath(await app.evaluate(({ app: a }) => a.getPath('userData')))).toBe(directory);
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
-    await page.evaluate(() => window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
-    const settings = await page.evaluate(() => window.audiohelper.request({ method: 'GET', path: '/settings' }));
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await page.evaluate(() => window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru', 'en'] } }));
+    const settings = await page.evaluate(() => window.skaz.request({ method: 'GET', path: '/settings' }));
     await app.evaluate(({ ipcMain }, initial) => {
       if (!initial.ok) throw new Error('Settings failed');
       const data = initial.data as { embedding: { provider: string; model: string } };
@@ -50,7 +50,7 @@ test('Ask library scopes and cross-session source navigation', async () => {
         return { ok: false, status: 404, detail: 'UI fixture only' };
       });
     }, settings);
-    await page.evaluate(() => localStorage.setItem('audiohelper.session-groups.v1', JSON.stringify({
+    await page.evaluate(() => localStorage.setItem('skaz.session-groups.v1', JSON.stringify({
       version: 1, groups: [{ id: 'g', name: 'Group', tag: '' }],
       membership: { 'embedding-fixture': 'g', 'source-fixture': 'g' },
     })));

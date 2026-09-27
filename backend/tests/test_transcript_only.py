@@ -4,12 +4,12 @@ from typing import Any
 
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.config import AppConfig
-from audiohelper.db import Database
-from audiohelper.gateways.soniox import SonioxEvent, SonioxToken
-from audiohelper.live_store import LiveConflict, LiveStore
-from audiohelper.secrets import MemorySecretStore
+from skaz import repository as repo
+from skaz.config import AppConfig
+from skaz.db import Database
+from skaz.gateways.soniox import SonioxEvent, SonioxToken
+from skaz.live_store import LiveConflict, LiveStore
+from skaz.secrets import MemorySecretStore
 
 
 def test_default_disables_retention(tmp_path: Path) -> None:

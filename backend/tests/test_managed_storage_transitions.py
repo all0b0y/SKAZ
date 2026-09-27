@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from audiohelper.config import AppConfig
+from skaz.config import AppConfig
 from tests.conftest import FakeHttp, make_wav
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_session_files_recovery_api import open_client

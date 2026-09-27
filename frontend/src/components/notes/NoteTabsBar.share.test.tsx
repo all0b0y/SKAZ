@@ -23,8 +23,8 @@ let patches: string[];
 const install = (platform: string, share = true) => {
   shared = [];
   patches = [];
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     platform,
     shareNote: share ? async (payload: SharedNote) => { shared.push(payload); return true; } : undefined,
     request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {

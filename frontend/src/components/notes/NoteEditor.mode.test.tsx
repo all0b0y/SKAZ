@@ -51,8 +51,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
   sent = [];
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
       sent.push(req);
       if (req.method === 'PATCH') {

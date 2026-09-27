@@ -13,7 +13,7 @@ let configured: boolean;
 
 beforeEach(() => {
   calls = []; waiting = true; configured = false;
-  vi.spyOn(window.audiohelper, 'request').mockImplementation(async (req) => {
+  vi.spyOn(window.skaz, 'request').mockImplementation(async (req) => {
     calls.push(req);
     let data: unknown;
     if (req.path === '/web-search/pending') data = { requests: waiting ? [approval] : [] };

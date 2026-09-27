@@ -57,8 +57,8 @@ beforeEach(async () => {
   }
   vi.stubGlobal('Audio', FakeAudio);
 
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: BridgeRequest): Promise<JsonResponse<T>> => {
       requests.push(req);
       if (req.method === 'GET' && req.path === '/imports') {

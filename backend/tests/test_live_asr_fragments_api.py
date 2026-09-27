@@ -11,10 +11,10 @@ import httpx
 import numpy as np
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.gateways.asr import LocalWhisperTranscriber
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.gateways.asr import LocalWhisperTranscriber
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 Word = tuple[str, float, float]
@@ -65,7 +65,7 @@ class FailingFinalEngine(FragmentEngine):
 @pytest.fixture(autouse=True)
 def clear_local_model_cache(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     LocalWhisperTranscriber._models.clear()
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
     yield
     LocalWhisperTranscriber._models.clear()
 
@@ -185,7 +185,7 @@ async def test_edit_uses_absolute_range_and_later_speech_becomes_a_separate_tail
             ],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     first = await _update(fragment_client, session_id, 0, 0)
     assert first.status_code == 200, first.text
@@ -278,7 +278,7 @@ async def test_accept_requires_complete_revision_and_is_idempotent(
             [(" Ready", 0.11, 0.31), (" tail", 1.20, 1.40)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     [open_fragment] = await _fragments(fragment_client, session_id)
 
@@ -337,7 +337,7 @@ async def test_edit_during_decode_invalidates_old_result_but_preserves_new_audio
         ],
         block_call=1,
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     [fragment] = await _fragments(fragment_client, session_id)
 
@@ -374,7 +374,7 @@ async def test_fragment_source_corruption_is_visible_and_blocks_edit(
     session_id = await _session(fragment_client)
     await _store(fragment_client, session_id, 0)
     engine = FragmentEngine([[(" Stored", 0.10, 0.40)]])
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     [fragment] = await _fragments(fragment_client, session_id)
     fragment_app.state.runtime.ingestion.audio.put(session_id, 0, b"corrupt")
@@ -408,8 +408,8 @@ async def test_source_end_runs_one_trusted_final_pass_and_completes_without_punc
             [(" unfinished sentence", 0.21, 0.81)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
 
     stopped = await fragment_client.patch(
@@ -448,8 +448,8 @@ async def test_invalid_final_pass_is_recoverable_and_not_retried_by_repeated_sto
             [(" retained", 0.21, 0.81)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
 
     for _ in range(2):
@@ -485,8 +485,8 @@ async def test_missing_source_before_final_pass_is_visible_and_does_not_create_f
     session_id = await _session(fragment_client)
     await _store(fragment_client, session_id, 0)
     engine = FragmentEngine([[(" retained", 0.20, 0.80)]])
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     fragment_app.state.runtime.ingestion.audio.discard(session_id)
 
@@ -519,7 +519,7 @@ async def test_corrupt_or_failing_final_pass_preserves_recoverable_fragment(
         if failure == "decoder"
         else FragmentEngine([[(" retained", 0.20, 0.80)]])
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     assert (await _update(fragment_client, session_id, 0, 0)).status_code == 200
     if failure == "corrupt":
         fragment_app.state.runtime.ingestion.audio.put(session_id, 0, b"not authenticated")
@@ -548,7 +548,7 @@ async def test_protected_text_and_absolute_range_survive_restart_and_config_chan
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = FragmentEngine([[(" original", 0.20, 0.80)]])
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     headers = {"Authorization": f"Bearer {TOKEN}"}
     first_app = create_app(
         fragment_config,

@@ -165,7 +165,7 @@ def _canned(fixture: dict) -> httpx.MockTransport:
 
 def _seed(runtime, session_id: str, fixture: dict) -> list[dict]:
     """Store the fixture's transcript as this session's segments. No audio is decoded."""
-    from audiohelper import repository as repo
+    from skaz import repository as repo
 
     stored = []
     for item in fixture['segments']:
@@ -178,9 +178,9 @@ def _seed(runtime, session_id: str, fixture: dict) -> list[dict]:
 
 
 async def run(args: argparse.Namespace, *, transport: httpx.MockTransport | None = None) -> Path:
-    from audiohelper.app import create_app
-    from audiohelper.config import AppConfig
-    from audiohelper.secrets import MemorySecretStore
+    from skaz.app import create_app
+    from skaz.config import AppConfig
+    from skaz.secrets import MemorySecretStore
 
     if transport is not None and not args.dry_run:
         raise ValueError('An injected offline transport requires --dry-run')
@@ -239,9 +239,9 @@ async def run(args: argparse.Namespace, *, transport: httpx.MockTransport | None
                     '--dry-run' if args.dry_run else '--live', '--repeats', str(args.repeats),
                     '--model', args.model, '--fixture', str(args.fixture), '--out', str(out)],
         'source_sha256': {path: hashlib.sha256((ROOT / path).read_bytes()).hexdigest() for path in (
-            'scripts/semantic_eval.py', 'backend/src/audiohelper/agent/ask.py',
-            'backend/src/audiohelper/agent/context.py', 'backend/src/audiohelper/agent/scope.py',
-            'backend/src/audiohelper/gateways/chat.py')},
+            'scripts/semantic_eval.py', 'backend/src/skaz/agent/ask.py',
+            'backend/src/skaz/agent/context.py', 'backend/src/skaz/agent/scope.py',
+            'backend/src/skaz/gateways/chat.py')},
         'mode': mode,
         'scope': ('production ask API in-process on a replayed stored transcript; '
                   'no ASR, no microphone, no desktop'),

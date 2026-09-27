@@ -11,10 +11,10 @@ it('opens before a source is chosen, previews a URL, and starts only after confi
       max_concurrent_imports: 1, max_duration_ms: 18000000, rate_per_hour_usd: 0.1,
       translation_rate_per_hour_usd: 0.15, destination: 'Internal storage' }
       : { session: { id: 'new' }, import_state: { status: 'queued' } } }));
-  window.audiohelper = { ...window.audiohelper, request: request as BridgeApi['request'], chooseAudioFile: vi.fn(async () => null) };
+  window.skaz = { ...window.skaz, request: request as BridgeApi['request'], chooseAudioFile: vi.fn(async () => null) };
   const created = vi.fn();
   render(<MediaImportDialog onClose={vi.fn()} onCreated={created} onOpenExisting={vi.fn()} />);
-  expect(window.audiohelper.chooseAudioFile).not.toHaveBeenCalled();
+  expect(window.skaz.chooseAudioFile).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Choose file' })).toBeVisible();
   // No "Check link": a YouTube link is checked by itself (UI-CLEANUP §5).
   expect(screen.queryByRole('button', { name: 'Check link' })).toBeNull();

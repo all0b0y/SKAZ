@@ -12,8 +12,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from audiohelper import session_files
-from audiohelper.config import AppConfig
+from skaz import session_files
+from skaz.config import AppConfig
 from tests.conftest import FakeHttp
 from tests.test_session_files_api import seed_note
 from tests.test_session_files_recovery_api import open_client
@@ -178,8 +178,8 @@ def test_root_change_does_not_orphan_ownership_and_original_root_can_retry(
 CRASH_DELETE = r'''
 import os, sys
 from pathlib import Path
-from audiohelper import session_files
-from audiohelper.config import AppConfig
+from skaz import session_files
+from skaz.config import AppConfig
 from tests.conftest import FakeHttp
 from tests.test_session_files_recovery_api import open_client
 config = AppConfig(token="test-token", data_dir=Path(sys.argv[1]), session_files_root=Path(sys.argv[2]))

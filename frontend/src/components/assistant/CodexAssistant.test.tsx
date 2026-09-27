@@ -12,7 +12,7 @@ import type { Session } from '../../api/types';
 // Not evidence that the real backend or Codex work end to end.
 
 const initialCodex = useCodex.getState();
-const originalBridge = window.audiohelper;
+const originalBridge = window.skaz;
 const sessions: Session[] = [
   { id: 's1', title: 'Лекция 1', created_at: 't', status: 'stopped', duration_ms: 1000, mode: 'legacy' },
   { id: 's2', title: 'Лекция 2', created_at: 't', status: 'stopped', duration_ms: 1000, mode: 'legacy' },
@@ -20,7 +20,7 @@ const sessions: Session[] = [
 
 let fake: FakeCodex;
 const install = (bridge: BridgeApi) => {
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: bridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: bridge });
 };
 const poll = () => act(() => useCodex.getState().poll());
 
@@ -312,7 +312,7 @@ describe('Codex queue', () => {
     expect(fake.task('q2').status).toBe('cancelled');
     await user.click(within(screen.getByRole('dialog', { name: 'Codex queue' })).getByRole('button', { name: 'Continue' }));
     expect(fake.task('q3').status).toBe('queued');
-    expect(window.audiohelper.reportCodexActivity).toHaveBeenCalled();
+    expect(window.skaz.reportCodexActivity).toHaveBeenCalled();
   });
 });
 

@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 
 import httpx
 
-from audiohelper import repository as repo
-from audiohelper.db import Database
-from audiohelper.schemas import Segment
+from skaz import repository as repo
+from skaz.db import Database
+from skaz.schemas import Segment
 from tests.conftest import make_wav
 
 

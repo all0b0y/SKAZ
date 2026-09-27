@@ -39,12 +39,12 @@ An installed `.app` has no repository and no `uv`. `BackendManager.resolveSpawn`
 
 - **Packaged** — runs `Contents/Resources/backend/skaz-backend`, a PyInstaller
   bundle built from `backend/skaz-backend.spec`.
-- **Unpackaged** — unchanged: `backend/.venv/bin/python -m audiohelper`, or
+- **Unpackaged** — unchanged: `backend/.venv/bin/python -m skaz`, or
   `uv run --project backend` as a fallback.
 
 `backend/scripts/frozen_entry.py` exists because PyInstaller executes the analysed
 script as `__main__`, which breaks the relative imports inside
-`audiohelper/__main__.py`. The entry point imports the package properly instead.
+`skaz/__main__.py`. The entry point imports the package properly instead.
 
 The spec **excludes** `faster-whisper`, `ctranslate2`, `onnxruntime`, `av` and
 `tokenizers`. Local Whisper is an optional extra worth several hundred MB; the
@@ -77,13 +77,44 @@ makes a second launch focus the existing window instead of starting another app
 and backend. The offer is skipped when launched with `--user-data-dir`, so release
 checks and smoke tests never see it.
 
-## The rename and user data
+## Product identity and persistent storage
 
-`productName: SKAZ` renames the bundle, the Dock/menu title **and** the Electron
-userData directory. The app creates `~/Library/Application Support/SKAZ/data` on
-first launch and owns it exclusively: nothing is inherited or copied from any
-earlier install. A pre-rename `audiohelper` folder, if present, is simply left
-alone.
+The product is **SKAZ**, the Python package is `skaz`, and application environment
+variables use `SKAZ_`. Historical names exist only in migration compatibility code.
+
+| Launch | Private state | Default document library |
+|---|---|---|
+| Installed DMG/PKG | `~/.skaz/default/` | `~/Documents/SKAZ/` |
+| `npm run dev` | `~/.skaz/dev/` | `~/Documents/SKAZ-dev/SKAZ/` |
+| `npm run dev -- --profile=test` | `~/.skaz/test/` | `~/Documents/SKAZ-test/SKAZ/` |
+
+`SKAZ_PROFILE=test npm run dev` is equivalent. Both development profiles persist
+between launches and start without seed/demo content. Development libraries must
+stay within their respective Documents parent; they cannot connect the installed
+library. Packaged builds ignore development profile flags/environment settings.
+
+Each private profile holds `data/skaz.sqlite3`, SKAZ-owned authentication/settings,
+Electron caches and logs. Transcripts, Notes and group/session folders remain in
+the document library (or the user's explicitly selected production location).
+Standalone Codex/Hermes homes and externally imported source media are not moved.
+
+Reinstalling the app does **not** clear data. On first use of the new installed
+profile, the current product's old Application Support directory is adopted as a
+whole, including SQLite sidecars and Electron preferences. An existing target is
+never overwritten or merged. Older backend-only layouts are staged and copied,
+retaining their source for safety. A running old installation or a pending migration
+lock blocks migration rather than risking concurrent writes. Development/test
+profiles never adopt old production data.
+
+The DMG/PKG contains code/resources only, never a personal database, credentials,
+or sample sessions. A genuinely empty local acceptance run requires a separate,
+explicit cleanup of **both** private state and the selected SKAZ library. This is
+not an installer feature. Do not remove the entire Documents directory.
+
+For isolated release QA, an explicit absolute `--user-data-dir` keeps all private
+state and the offered Documents location under that directory and skips migration.
+It does not enable test/demo content. Eject the installer volume after installation;
+old app copies in Trash or mounted volumes can leave extra macOS registrations.
 
 ## Working directory of the frozen backend
 
@@ -119,7 +150,7 @@ that created it, and an app signed with a development certificate cannot own a
 stable item — the packaged backend logged `KeyringLocked` and keys silently failed
 to persist across restarts.
 
-`FileSecretStore` (backend/src/audiohelper/secrets.py) stores them as a
+`FileSecretStore` (backend/src/skaz/secrets.py) stores them as a
 Fernet-encrypted `secrets.json.enc` inside the app's data
 directory, with the key beside it in `secrets.key` (file `0600`, directory `0700`).
 The whole provider map is one encrypted blob, so provider names are not readable

@@ -37,7 +37,7 @@ explicit environment-key fallback for development/CI; see [.env.example](.env.ex
 Neither `npm run dev` nor the backend automatically loads that example as dotenv.
 If needed, make a private `.env.local` and export its variables into the launching
 process using your own trusted local setup. Do not put secrets in shell history,
-PRs, screenshots or logs. Keep `AUDIOHELPER_ALLOW_ENV_KEYS=0` unless you deliberately
+PRs, screenshots or logs. Keep `SKAZ_ALLOW_ENV_KEYS=0` unless you deliberately
 want environment-key fallback. An existing stored key takes precedence.
 
 ## Verify changes

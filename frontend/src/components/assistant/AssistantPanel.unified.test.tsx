@@ -14,7 +14,7 @@ import type { Citation, Session } from '../../api/types';
 
 const initialCodex = useCodex.getState();
 const initialAsk = useStore.getState().ask;
-const originalBridge = window.audiohelper;
+const originalBridge = window.skaz;
 const sessions: Session[] = [
   { id: 's1', title: 'Лекция 1', created_at: 't', status: 'stopped', duration_ms: 1000, mode: 'legacy' },
 ];
@@ -22,7 +22,7 @@ const citation: Citation = { segment_id: 'seg-7', start_ms: 65_000, end_ms: 70_0
 
 let fake: FakeCodex;
 const install = (bridge: BridgeApi) => {
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: bridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: bridge });
 };
 
 beforeEach(() => {

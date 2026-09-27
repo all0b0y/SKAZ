@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.config import AppConfig
+from skaz.config import AppConfig
 from tests.conftest import FakeHttp, make_wav
 from tests.test_session_files_recovery_api import open_client
 
@@ -157,8 +157,8 @@ import os, sys
 from pathlib import Path
 from dataclasses import replace
 from contextlib import contextmanager
-from audiohelper.config import AppConfig
-from audiohelper import managed_storage as storage
+from skaz.config import AppConfig
+from skaz import managed_storage as storage
 from tests.test_session_files_recovery_api import open_client
 config = replace(
     AppConfig(token="test-token", data_dir=Path(sys.argv[1])),

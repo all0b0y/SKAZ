@@ -10,9 +10,9 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
 from tests.test_native_live_ws import AUTH
 from tests.test_session_files_api import seed_note
@@ -26,9 +26,9 @@ import stat
 import sys
 from pathlib import Path
 from starlette.testclient import TestClient
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
 
 phase = sys.argv[4]

@@ -1,7 +1,7 @@
-"""Entry point: ``uv run --project backend python -m audiohelper --port N``.
+"""Entry point: ``uv run --project backend python -m skaz --port N``.
 
 The desktop process picks a free port, passes the per-run token in
-``AUDIOHELPER_TOKEN`` and the storage location in ``AUDIOHELPER_DATA_DIR``, then
+``SKAZ_TOKEN`` and the storage location in ``SKAZ_DATA_DIR``, then
 polls ``GET /health`` before exposing the connection to the renderer.
 """
 
@@ -28,7 +28,7 @@ def _free_port(host: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="audiohelper", description="AudioHelper local backend")
+    parser = argparse.ArgumentParser(prog="skaz", description="SKAZ local backend")
     parser.add_argument("--port", type=int, default=0, help="TCP port on 127.0.0.1; 0 picks a free one")
     parser.add_argument("--log-level", default="info")
     arguments = parser.parse_args(argv)

@@ -26,7 +26,7 @@ export interface TabsState {
   activeTabId: string | null;
 }
 
-const STORAGE_KEY = 'audiohelper.noteTabs';
+const STORAGE_KEY = 'skaz.noteTabs';
 /** Enough for a working set; beyond this the strip stops being navigable anyway. */
 const MAX_TABS = 24;
 
@@ -167,7 +167,7 @@ export function saveTabs(state: TabsState, storage: Pick<Storage, 'setItem'> = l
 /** Open tabs of every session, keyed by session id (docs/NOTES-POLISH-SPEC.md §3). */
 export type SessionTabs = Record<string, TabsState>;
 
-const SESSION_STORAGE_KEY = 'audiohelper.noteTabsBySession';
+const SESSION_STORAGE_KEY = 'skaz.noteTabsBySession';
 
 /**
  * Split one tab set into a set per session.

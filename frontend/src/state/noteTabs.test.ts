@@ -118,13 +118,13 @@ describe('note tabs persistence', () => {
 
   it('returns no tabs rather than throwing on corrupt storage', () => {
     const storage = memory();
-    storage.setItem('audiohelper.noteTabs', '{not json');
+    storage.setItem('skaz.noteTabs', '{not json');
     expect(loadTabs(storage)).toEqual(emptyTabs);
   });
 
   it('drops malformed entries instead of rendering a tab that points nowhere', () => {
     const storage = memory();
-    storage.setItem('audiohelper.noteTabs', JSON.stringify({
+    storage.setItem('skaz.noteTabs', JSON.stringify({
       tabs: [{ id: 't1', sessionId: 's1', noteId: 'n1', title: 'Ok' }, { id: 't2' }, null, 'x'],
       activeTabId: 't2',
     }));
@@ -136,6 +136,6 @@ describe('note tabs persistence', () => {
   it('never persists note text, only the reference', () => {
     const storage = memory();
     saveTabs(open(emptyTabs, 's1', 'n1', 'Заголовок'), storage);
-    expect(storage.getItem('audiohelper.noteTabs')).not.toContain('content');
+    expect(storage.getItem('skaz.noteTabs')).not.toContain('content');
   });
 });

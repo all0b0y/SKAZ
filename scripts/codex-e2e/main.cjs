@@ -3,7 +3,7 @@ const cp = require('node:child_process');
 const path = require('node:path');
 const original = cp.spawn;
 cp.spawn = function(command, args, options) {
-  if (args?.[0] === '-m' && args?.[1] === 'audiohelper') {
+  if (args?.[0] === '-m' && args?.[1] === 'skaz') {
     args = [path.join(__dirname, '../../backend/tests/fixtures/codex_e2e_backend.py'), ...args.slice(2)];
   }
   return original.call(this, command, args, options);

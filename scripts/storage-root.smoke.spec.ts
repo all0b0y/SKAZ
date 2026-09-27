@@ -14,8 +14,8 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
   const launch = () => electron.launch({
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0' },
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0' },
   });
   let app = await launch();
   try {
@@ -23,15 +23,15 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await expect(page.getByRole('button', { name: 'New session' })).toBeVisible();
-    await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase)).toBe('ready');
+    await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase)).toBe('ready');
     // Set only isolated onboarding preferences; no credentials or cloud consent.
     await page.evaluate(async () => {
-      const response = await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+      const response = await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
       if (!response.ok) throw new Error('Fixture onboarding failed');
     });
     await page.reload();
     await page.getByRole('button', { name: 'New session' }).click();
-    const sessions = await page.evaluate(async () => window.audiohelper.request<{ sessions: { id: string }[] }>({ method: 'GET', path: '/sessions' }));
+    const sessions = await page.evaluate(async () => window.skaz.request<{ sessions: { id: string }[] }>({ method: 'GET', path: '/sessions' }));
     if (!sessions.ok) throw new Error('Session read failed');
     const sid = sessions.data.sessions[0]!.id;
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -50,7 +50,7 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
     }, chosen);
     await page.getByRole('button', { name: 'Choose folder…' }).click();
     await expect(page.getByText(chosen, { exact: true })).toBeVisible();
-    const before = await page.evaluate(() => window.audiohelper.request<{ root: string | null }>({ method: 'GET', path: '/storage/root' }));
+    const before = await page.evaluate(() => window.skaz.request<{ root: string | null }>({ method: 'GET', path: '/storage/root' }));
     expect(before.ok && before.data.root).toBeNull();
     await page.getByRole('button', { name: 'Confirm Markdown root' }).click();
     await expect(page.getByText('Markdown root saved.')).toBeVisible();
@@ -76,7 +76,7 @@ test('explicit Markdown root: picker, confirmation, readback, disk and restart',
     await expect(page.getByText(chosen, { exact: true })).toBeVisible();
     // The root locks only once Markdown has been written into it
     // (session_files.change_locked); nothing is projected here, so it stays open.
-    const persisted = await page.evaluate(() => window.audiohelper.request<{ root: string; change_locked: boolean }>({ method: 'GET', path: '/storage/root' }));
+    const persisted = await page.evaluate(() => window.skaz.request<{ root: string; change_locked: boolean }>({ method: 'GET', path: '/storage/root' }));
     expect(persisted.ok && persisted.data).toMatchObject({ root: chosen, change_locked: false });
     await expect(page.getByRole('button', { name: 'Choose folder…' })).toBeEnabled();
     expect(await fs.readFile(path.join(chosen, 'personal.txt'), 'utf8')).toBe('external fixture');

@@ -9,7 +9,7 @@ let releaseEvents: (() => void) | null;
 beforeEach(async () => {
   vi.resetModules(); vi.useFakeTimers(); releaseEvents = null;
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
-  window.audiohelper = { ...window.audiohelper, request: vi.fn(async (req: BridgeRequest) => {
+  window.skaz = { ...window.skaz, request: vi.fn(async (req: BridgeRequest) => {
     // The first native page stays in flight until the test releases it.
     if (req.path === '/sessions/saved/live/events') {
       await new Promise<void>((resolve) => { releaseEvents = resolve; });

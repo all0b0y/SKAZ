@@ -3,7 +3,7 @@ import { parseTags } from './sessionTags';
 
 // Local navigation preferences only: no transcript, credentials or model context.
 // This is deliberately separate from backend project_id / cross-session AI scope.
-const KEY = 'audiohelper.session-groups.v1';
+const KEY = 'skaz.session-groups.v1';
 export interface SessionGroup { id: string; name: string; tag: string }
 export interface SessionGroups { version: 1; groups: SessionGroup[]; membership: Record<string, string | null> }
 export const emptyGroups = (): SessionGroups => ({ version: 1, groups: [], membership: {} });

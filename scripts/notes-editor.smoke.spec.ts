@@ -17,23 +17,23 @@ test('notes list, tabs and live-preview editor', async () => {
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_OPTIN_SMOKE_USER_DATA: userData, PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.setViewportSize({ width: 1400, height: 820 });
-  await expect.poll(() => page.evaluate(async () => (await window.audiohelper.getBackendStatus()).phase), { timeout: 60_000 }).toBe('ready');
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase), { timeout: 60_000 }).toBe('ready');
   await page.evaluate(async () => {
-    await window.audiohelper.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
-    const s = await window.audiohelper.request<{ id: string }>({ method: 'POST', path: '/sessions', body: { title: 'Лекция по экономике', mode: 'legacy' } });
+    await window.skaz.request({ method: 'PUT', path: '/settings', body: { used_languages: ['ru'] } });
+    const s = await window.skaz.request<{ id: string }>({ method: 'POST', path: '/sessions', body: { title: 'Лекция по экономике', mode: 'legacy' } });
     const id = (s.data as { id: string }).id;
-    const n = await window.audiohelper.request<{ id: string; revision: number }>({ method: 'POST', path: `/sessions/${id}/notes/empty` });
+    const n = await window.skaz.request<{ id: string; revision: number }>({ method: 'POST', path: `/sessions/${id}/notes/empty` });
     const note = n.data as { id: string; revision: number };
     const content = '# Спрос и предложение\n\n## Основные понятия\n\n- **Спрос** — количество товара, которое покупатели готовы купить по данной цене.\n- **Предложение** — количество, которое продавцы готовы продать.\n- Равновесие достигается там, где кривые пересекаются.\n\n## Эластичность\n\nЭластичность показывает, насколько сильно спрос реагирует на изменение цены. Для товаров первой необходимости она низкая.\n\n1. Ценовая эластичность\n2. Перекрёстная эластичность\n3. Эластичность по доходу\n';
-    await window.audiohelper.request({ method: 'PATCH', path: `/sessions/${id}/notes/${note.id}`, body: { content, expected_revision: note.revision } });
-    await window.audiohelper.request({ method: 'POST', path: `/sessions/${id}/notes/empty` });
+    await window.skaz.request({ method: 'PATCH', path: `/sessions/${id}/notes/${note.id}`, body: { content, expected_revision: note.revision } });
+    await window.skaz.request({ method: 'POST', path: `/sessions/${id}/notes/empty` });
   });
   await page.reload();
   await expect(page.locator('.gate')).toHaveCount(0, { timeout: 30_000 });
@@ -57,9 +57,9 @@ test('notes list, tabs and live-preview editor', async () => {
   await page.keyboard.press('Meta+b');
   await page.waitForTimeout(2_600);
   const stored = await page.evaluate(async () => {
-    const sessions = await window.audiohelper.request({ method: 'GET', path: '/sessions' }) as { data: { sessions: Array<{ id: string }> } };
+    const sessions = await window.skaz.request({ method: 'GET', path: '/sessions' }) as { data: { sessions: Array<{ id: string }> } };
     const id = sessions.data.sessions[0]!.id;
-    const notes = await window.audiohelper.request({ method: 'GET', path: `/sessions/${id}/notes` }) as { data: { notes: Array<{ content: string }> } };
+    const notes = await window.skaz.request({ method: 'GET', path: `/sessions/${id}/notes` }) as { data: { notes: Array<{ content: string }> } };
     return notes.data.notes.map((n) => n.content).join('\n---\n');
   });
   expect(stored).toContain('**рыночный**');

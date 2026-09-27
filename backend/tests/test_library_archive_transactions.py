@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from audiohelper import note_store
-from audiohelper import repository as repo
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.db import Database
-from audiohelper.library_archive import ArchiveRefused, SessionArchive
-from audiohelper.secrets import MemorySecretStore
+from skaz import note_store
+from skaz import repository as repo
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.db import Database
+from skaz.library_archive import ArchiveRefused, SessionArchive
+from skaz.secrets import MemorySecretStore
 from tests.test_library_archive_validation import native_document
 
 

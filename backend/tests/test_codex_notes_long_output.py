@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from audiohelper import note_store
+from skaz import note_store
 from tests.test_codex_notes_fix import generate
 
 

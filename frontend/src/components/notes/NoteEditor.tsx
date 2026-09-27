@@ -79,7 +79,7 @@ export function NoteEditor({ sessionId, note, onSaved, onStatusChange, onContext
 
   const autosave = useMemo(() => new Autosave({
     save: async (content) => {
-      const stored = await new ApiClient(window.audiohelper).editNote(sessionId, current.current, content);
+      const stored = await new ApiClient(window.skaz).editNote(sessionId, current.current, content);
       current.current = stored;
       saved.current(stored);
     },

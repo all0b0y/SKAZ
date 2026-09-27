@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
 import path from 'node:path';
+import { mkdirSync, realpathSync } from 'node:fs';
+import { migrateLegacyProfile, resolveStorageProfile } from './storageProfile';
 import { fileURLToPath } from 'node:url';
 import { BackendManager } from './backend';
 import { registerIpc } from './ipc';
@@ -42,8 +44,33 @@ const CSP =
 let mainWindow: BrowserWindow | null = null;
 let nativeClient: NativeLiveClient | null = null;
 
-// SKAZ owns its own store under the product-named userData directory. It is
-// created on first run; nothing is inherited from any earlier install.
+// Resolve every persistent path before the backend, singleton or Chromium session
+// is constructed. Packaged builds ignore development profile flags/env entirely.
+const PROFILE = resolveStorageProfile({
+  home: app.getPath('home'), documents: app.getPath('documents'),
+  packaged: app.isPackaged, requested: process.env.SKAZ_PROFILE,
+});
+const smokePath = !app.isPackaged ? process.env.SKAZ_OPTIN_SMOKE_USER_DATA : undefined;
+const customPath = app.commandLine.getSwitchValue('user-data-dir');
+if (smokePath) {
+  if (realpathSync(app.getPath('userData')) !== realpathSync(smokePath)) {
+    throw new Error('Smoke profile was not isolated by the launch wrapper.');
+  }
+} else {
+  const userData = customPath ? path.resolve(customPath) : PROFILE.userData;
+  if (!customPath && PROFILE.name === 'default') migrateLegacyProfile(app.getPath('home'), userData);
+  const documents = customPath ? path.join(userData, 'Documents') : PROFILE.documents;
+  for (const directory of [userData, documents]) {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
+  app.setPath('userData', userData);
+  app.setPath('sessionData', userData);
+  app.setPath('documents', documents);
+}
+app.setAppLogsPath(path.join(app.getPath('userData'), 'logs'));
+const crashDirectory = path.join(app.getPath('userData'), 'crashes');
+mkdirSync(crashDirectory, { recursive: true, mode: 0o700 });
+app.setPath('crashDumps', crashDirectory);
 const DATA_DIR = path.join(app.getPath('userData'), 'data');
 
 // Latest capture snapshot reported by the renderer (validated). Consulted on
@@ -261,7 +288,8 @@ function offerMoveToApplications(): boolean {
 
 // One SKAZ at a time: a second launch focuses the existing window instead of
 // starting a second app and a second backend on the same data.
-if (!app.requestSingleInstanceLock()) {
+const ownsInstance = app.requestSingleInstanceLock();
+if (!ownsInstance) {
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -273,7 +301,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
-  if (offerMoveToApplications()) return;
+  if (!ownsInstance || offerMoveToApplications()) return;
   hardenSession();
   if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(APP_ICON);
   // macOS gates microphone access at the OS level, on top of Chromium's own

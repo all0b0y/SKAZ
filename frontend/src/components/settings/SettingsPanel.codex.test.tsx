@@ -13,7 +13,7 @@ import type { Settings, SettingsUpdate } from '../../api/types';
 // authored contract fixture. No real login, binary check or model call.
 
 const initialCodex = useCodex.getState();
-const originalBridge = window.audiohelper;
+const originalBridge = window.skaz;
 let fake: FakeCodex;
 let saveSettings: ReturnType<typeof vi.fn>;
 
@@ -42,7 +42,7 @@ const start = async (patch: (f: FakeCodex) => void = () => undefined) => {
   fake = fakeCodex({ settings: { ...OFF } });
   fake.connection.models = CATALOG;
   patch(fake);
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: fake.bridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: fake.bridge });
   await act(() => useCodex.getState().load(null));
   render(<SettingsPanel onClose={() => {}} initialSection="agent" />);
 };
@@ -75,7 +75,7 @@ afterEach(() => {
   stopCodexPolling();
   stopLoginWatch();
   vi.useRealTimers();
-  Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: originalBridge });
+  Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: originalBridge });
 });
 
 describe('Codex inside Assistant and Notes settings', () => {
@@ -290,7 +290,7 @@ describe('Codex inside Assistant and Notes settings', () => {
 
   it('cannot choose Codex when this backend does not serve it', async () => {
     useCodex.setState(initialCodex, true);
-    Object.defineProperty(window, 'audiohelper', { configurable: true, writable: true, value: {
+    Object.defineProperty(window, 'skaz', { configurable: true, writable: true, value: {
       ...originalBridge, request: vi.fn(async () => ({ ok: false, status: 404, detail: 'Not Found' })) } });
     await act(() => useCodex.getState().load(null));
     render(<SettingsPanel onClose={() => {}} initialSection="agent" />);

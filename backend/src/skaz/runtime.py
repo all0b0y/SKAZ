@@ -54,6 +54,7 @@ class Runtime:
         self.session_files = SessionFiles(
             self.db, config.session_files_root, data_dir=config.data_dir,
             suggested_root=config.documents_dir / "SKAZ",
+            allowed_root=config.documents_sandbox,
         )
         self.storage = ManagedStorage(self.db, self.session_files, config.audio_dir)
         self.session_files.storage = self.storage
@@ -85,7 +86,7 @@ class Runtime:
         self.native_shutdown = False
         self.native_settings_lock = asyncio.Lock()
         #: Local Whisper weights are fetched only when the user opts in explicitly.
-        self.allow_model_download = os.environ.get("AUDIOHELPER_ALLOW_MODEL_DOWNLOAD", "") == "1"
+        self.allow_model_download = os.environ.get("SKAZ_ALLOW_MODEL_DOWNLOAD", "") == "1"
         #: The explicit "prepare this checkpoint" path; separate from the toggle above.
         self.local_models = LocalModelPreparations(config.local_model_cache_dir)
 

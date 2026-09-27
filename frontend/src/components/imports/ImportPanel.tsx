@@ -61,7 +61,7 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const api = new ApiClient(window.audiohelper);
+    const api = new ApiClient(window.skaz);
     const tick = () => {
       void api.getImport(sessionId)
         .then((value) => {
@@ -102,7 +102,7 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
   const cancel = () => {
     setConfirmCancel(false);
     setBusy(true);
-    void new ApiClient(window.audiohelper).cancelImport(sessionId)
+    void new ApiClient(window.skaz).cancelImport(sessionId)
       .then((value) => { setState(value); onSettled(value); if (value.status === 'cancelled') onDeleted(); })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false));
@@ -110,7 +110,7 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
 
   const retry = () => {
     setBusy(true);
-    void new ApiClient(window.audiohelper).retryImport(sessionId)
+    void new ApiClient(window.skaz).retryImport(sessionId)
       .then((created) => { window.dispatchEvent(new CustomEvent('skaz-import-started', { detail: created })); })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false));
@@ -118,7 +118,7 @@ export function ImportPanel({ sessionId, onSettled, onDeleted }: Props) {
 
   const remove = () => {
     setBusy(true);
-    void new ApiClient(window.audiohelper).deleteImport(sessionId)
+    void new ApiClient(window.skaz).deleteImport(sessionId)
       .then(onDeleted)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false));

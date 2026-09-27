@@ -18,15 +18,15 @@ test('media dialog resolves an OS-backed dropped File and previews it without a 
     args: [path.join(root, 'scripts/optin-smoke/main.cjs')], cwd: root,
     env: {
       PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
-      AUDIOHELPER_OPTIN_SMOKE_USER_DATA: directory,
-      AUDIOHELPER_SESSION_FILES_ROOT: path.join(directory, 'files'),
+      SKAZ_OPTIN_SMOKE_USER_DATA: directory,
+      SKAZ_SESSION_FILES_ROOT: path.join(directory, 'files'),
       PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-      AUDIOHELPER_ALLOW_MODEL_DOWNLOAD: '0', AUDIOHELPER_LIVE_FINALITY: '0', AUDIOHELPER_LOCAL_SPEECH_GATE: '0',
+      SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
     },
   });
   try {
     const page = await app.firstWindow();
-    await expect.poll(() => page.evaluate(() => window.audiohelper.getBackendStatus())).toMatchObject({ phase: 'ready' });
+    await expect.poll(() => page.evaluate(() => window.skaz.getBackendStatus())).toMatchObject({ phase: 'ready' });
     const onboarding = page.getByRole('dialog', { name: 'Which languages do you speak?' });
     await expect(onboarding).toBeVisible();
     await onboarding.getByRole('button', { name: 'Russian + English', exact: true }).click();
@@ -43,7 +43,7 @@ test('media dialog resolves an OS-backed dropped File and previews it without a 
     const resolved = await page.evaluate(() => {
       const input = document.querySelector<HTMLInputElement>('#fixture-drop')!;
       const file = input.files![0]!;
-      const result = window.audiohelper.droppedMediaFile?.(file);
+      const result = window.skaz.droppedMediaFile?.(file);
       const transfer = new DataTransfer(); transfer.items.add(file);
       document.querySelector('.import-dialog__drop')!.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: transfer }));
       input.remove();
@@ -57,7 +57,7 @@ test('media dialog resolves an OS-backed dropped File and previews it without a 
     await expect(page.getByLabel('Session name')).toHaveCount(0);
     await page.getByRole('button', { name: 'Check link' }).click();
     await expect(page.getByRole('alert')).toBeVisible();
-    const imports = await page.evaluate(() => window.audiohelper.request<{ imports: unknown[] }>({ method: 'GET', path: '/imports/active' }));
+    const imports = await page.evaluate(() => window.skaz.request<{ imports: unknown[] }>({ method: 'GET', path: '/imports/active' }));
     expect(imports.ok && imports.data.imports).toEqual([]);
     expect((await fs.stat(source)).size).toBeGreaterThan(0);
     await page.screenshot({ path: path.join(root, '.runtime/media-import.png') });

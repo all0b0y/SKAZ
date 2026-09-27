@@ -48,7 +48,7 @@ beforeEach(async () => {
     getDisplayMedia, enumerateDevices: async () => [],
   } });
   bridge = {
-    ...window.audiohelper,
+    ...window.skaz,
     request: vi.fn(async (req: BridgeRequest) => {
       if (req.path === '/sessions/sys-test' && req.method === 'GET') return { ok: true, status: 200, data: { session, segments: [], messages: [], notes: null } };
       if (req.path === '/sessions/sys-test' && req.method === 'PATCH') return { ok: true, status: 200, data: session };
@@ -62,7 +62,7 @@ beforeEach(async () => {
       saved_samples: 0, status: action === 'pause' ? 'paused' : 'stopped', transcription_complete: false } })),
     onNativeFailure: vi.fn(() => () => {}),
   };
-  window.audiohelper = bridge;
+  window.skaz = bridge;
   useStore = (await import('./store')).useStore;
   useStore.setState({ settings: baseSettings, ready: true, activeSessionId: session.id, sessions: [session] });
 });

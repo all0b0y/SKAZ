@@ -46,8 +46,8 @@ beforeEach(() => {
   localStorage.clear();
   useStore.setState({ noteTabs: {}, noteGenerations: {} });
   vi.restoreAllMocks();
-  window.audiohelper = {
-    ...window.audiohelper,
+  window.skaz = {
+    ...window.skaz,
     request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
       if (req.method === 'GET' && /\/sessions\/[^/]+$/.test(req.path)) {
         return { ok: true, status: 200, data: {
@@ -117,8 +117,8 @@ describe('renaming', () => {
   it('renames from the list without touching the document', async () => {
     const user = userEvent.setup();
     const sent: Array<{ path: string; body?: unknown }> = [];
-    window.audiohelper = {
-      ...window.audiohelper,
+    window.skaz = {
+      ...window.skaz,
       request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
         if (req.method === 'PATCH') {
           sent.push({ path: req.path, body: req.body });
@@ -147,8 +147,8 @@ describe('renaming', () => {
   it('restores the previous name when the field is cleared', async () => {
     const user = userEvent.setup();
     const sent: unknown[] = [];
-    window.audiohelper = {
-      ...window.audiohelper,
+    window.skaz = {
+      ...window.skaz,
       request: async <T,>(req: { method?: string; path: string; body?: unknown }) => {
         if (req.method === 'PATCH') sent.push(req.body);
         return { ok: true, status: 200, data: { notes: [] } as T };
@@ -172,8 +172,8 @@ describe('generation indicator', () => {
   it('opens a tab with a spinner the moment generation starts', async () => {
     const user = userEvent.setup();
     let release: ((note: Note) => void) | null = null;
-    window.audiohelper = {
-      ...window.audiohelper,
+    window.skaz = {
+      ...window.skaz,
       request: async <T,>(req: { method?: string; path: string }) => {
         if (req.method === 'POST' && req.path.endsWith('/notes')) {
           const result = await new Promise<Note>((resolve) => { release = resolve; });
@@ -206,8 +206,8 @@ describe('generation indicator', () => {
   it('keeps the tab with the reason and a retry when generation fails', async () => {
     const user = userEvent.setup();
     let attempts = 0;
-    window.audiohelper = {
-      ...window.audiohelper,
+    window.skaz = {
+      ...window.skaz,
       request: async <T,>(req: { method?: string; path: string }) => {
         if (req.method === 'POST' && req.path.endsWith('/notes')) {
           attempts += 1;
@@ -238,8 +238,8 @@ describe('deleting a note', () => {
   it('removes it from the list only after permanent-delete confirmation', async () => {
     const user = userEvent.setup();
     const deleted: string[] = [];
-    window.audiohelper = {
-      ...window.audiohelper,
+    window.skaz = {
+      ...window.skaz,
       request: async <T,>(req: { method?: string; path: string }) => {
         if (req.method === 'DELETE') {
           deleted.push(req.path);

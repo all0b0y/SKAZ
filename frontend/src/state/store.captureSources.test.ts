@@ -10,7 +10,7 @@ const settings = (over: Partial<Settings> = {}): Settings => ({
   cloud_consent: true, contextual_local_enabled: false, input_device_id: null, capture_system_audio: false, ...over,
 });
 
-const bridge = window.audiohelper as unknown as Omit<BridgeApi, 'request'> & { request: ReturnType<typeof vi.fn> };
+const bridge = window.skaz as unknown as Omit<BridgeApi, 'request'> & { request: ReturnType<typeof vi.fn> };
 let stored: Settings;
 let failNext = false;
 

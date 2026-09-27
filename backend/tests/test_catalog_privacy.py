@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from audiohelper.secrets import MemorySecretStore
+from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
 
 

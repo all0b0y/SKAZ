@@ -17,12 +17,12 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper.app import create_app
-from audiohelper.audio import parse_wav
-from audiohelper.config import AppConfig
-from audiohelper.gateways import ProviderError, ProviderNotConfigured
-from audiohelper.gateways import asr as asr_gateway
-from audiohelper.secrets import MemorySecretStore
+from skaz.app import create_app
+from skaz.audio import parse_wav
+from skaz.config import AppConfig
+from skaz.gateways import ProviderError, ProviderNotConfigured
+from skaz.gateways import asr as asr_gateway
+from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 
@@ -68,9 +68,9 @@ def test_local_speech_gate_defaults_off() -> None:
 def test_local_speech_gate_process_flag_accepts_explicit_true(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
 ) -> None:
-    monkeypatch.setenv("AUDIOHELPER_TOKEN", TOKEN)
-    monkeypatch.setenv("AUDIOHELPER_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AUDIOHELPER_LOCAL_SPEECH_GATE", value)
+    monkeypatch.setenv("SKAZ_TOKEN", TOKEN)
+    monkeypatch.setenv("SKAZ_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SKAZ_LOCAL_SPEECH_GATE", value)
 
     assert AppConfig.from_env(0).local_speech_gate is True
 
@@ -79,9 +79,9 @@ def test_local_speech_gate_process_flag_accepts_explicit_true(
 def test_local_speech_gate_process_flag_accepts_explicit_false(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, value: str
 ) -> None:
-    monkeypatch.setenv("AUDIOHELPER_TOKEN", TOKEN)
-    monkeypatch.setenv("AUDIOHELPER_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AUDIOHELPER_LOCAL_SPEECH_GATE", value)
+    monkeypatch.setenv("SKAZ_TOKEN", TOKEN)
+    monkeypatch.setenv("SKAZ_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SKAZ_LOCAL_SPEECH_GATE", value)
 
     assert AppConfig.from_env(0).local_speech_gate is False
 
@@ -89,11 +89,11 @@ def test_local_speech_gate_process_flag_accepts_explicit_false(
 def test_local_speech_gate_process_flag_rejects_ambiguous_value(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("AUDIOHELPER_TOKEN", TOKEN)
-    monkeypatch.setenv("AUDIOHELPER_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AUDIOHELPER_LOCAL_SPEECH_GATE", "sometimes")
+    monkeypatch.setenv("SKAZ_TOKEN", TOKEN)
+    monkeypatch.setenv("SKAZ_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SKAZ_LOCAL_SPEECH_GATE", "sometimes")
 
-    with pytest.raises(SystemExit, match="AUDIOHELPER_LOCAL_SPEECH_GATE"):
+    with pytest.raises(SystemExit, match="SKAZ_LOCAL_SPEECH_GATE"):
         AppConfig.from_env(0)
 
 

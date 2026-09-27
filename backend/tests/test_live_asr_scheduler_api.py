@@ -10,13 +10,13 @@ from typing import Any
 import httpx
 import pytest
 
-from audiohelper import repository as repo
-from audiohelper.app import create_app
-from audiohelper.config import AppConfig
-from audiohelper.gateways.asr import LocalWhisperTranscriber
-from audiohelper.schemas import LiveAsrDraftResponse
-from audiohelper.secrets import MemorySecretStore
-from audiohelper.window_asr import PreviewSourceMissing
+from skaz import repository as repo
+from skaz.app import create_app
+from skaz.config import AppConfig
+from skaz.gateways.asr import LocalWhisperTranscriber
+from skaz.schemas import LiveAsrDraftResponse
+from skaz.secrets import MemorySecretStore
+from skaz.window_asr import PreviewSourceMissing
 from tests.conftest import TOKEN, FakeHttp, make_wav
 
 Word = tuple[str, float, float]
@@ -445,7 +445,7 @@ async def test_unexpected_background_failure_becomes_visible_bounded_stall(
 ) -> None:
     """A scheduler task must never disappear while its public status stays `running`."""
     await _local(scheduler_client)
-    caplog.set_level("ERROR", logger="audiohelper.live_scheduler")
+    caplog.set_level("ERROR", logger="skaz.live_scheduler")
     session_id = await _session(scheduler_client)
     await _store(scheduler_client, session_id, 0)
 
@@ -481,8 +481,8 @@ async def test_new_speech_after_quiet_window_is_processed_without_empty_final(
             [(" New", 5.1, 5.5), (" Tail", 10.1, 10.5)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     await _store(scheduler_client, session_id, 0)
     first = await scheduler_client.post(
@@ -527,8 +527,8 @@ async def test_stopped_session_runs_trusted_final_pass_and_restores_complete_sta
     session_id = str(created.json()["id"])
     await _store(scheduler_client, session_id, 0)
     engine = WindowEngine([[(' Tail', 1.0, 1.5)]])
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     accepted = await scheduler_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 0}
@@ -617,8 +617,8 @@ async def test_stop_racing_active_decode_serializes_one_successful_final_pass(
     entered = threading.Event()
     release = threading.Event()
     engine = WindowEngine([[(' Tail', 1.0, 1.5)]], entered=entered, release=release)
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     accepted = await scheduler_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 0}
@@ -650,8 +650,8 @@ async def test_late_durable_source_after_stop_cannot_leave_false_complete(
     )
     session_id = str(created.json()["id"])
     engine = WindowEngine([[]])
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     await _store(scheduler_client, session_id, 0)
     accepted = await scheduler_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 0}
@@ -680,7 +680,7 @@ async def test_scheduler_real_local_adapter_rolls_over_with_extension_room(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    caplog.set_level("INFO", logger="audiohelper.live_scheduler")
+    caplog.set_level("INFO", logger="skaz.live_scheduler")
     await _local(scheduler_client)
     session_id = await _session(scheduler_client)
     for sequence in range(7):
@@ -693,13 +693,13 @@ async def test_scheduler_real_local_adapter_rolls_over_with_extension_room(
     ]
     engine = WindowEngine(hypotheses)
     downloads: list[bool] = []
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
 
     def load(_model: str, *, allow_download: bool) -> WindowEngine:
         downloads.append(allow_download)
         return engine
 
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", load)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", load)
     accepted = await scheduler_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 6}
     )
@@ -747,8 +747,8 @@ async def test_rollover_retries_only_one_earlier_anchor_then_stalls(
             [(" must-not-retry", 1.0, 2.0)],
         ]
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
 
     accepted = await scheduler_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 6}
@@ -850,8 +850,8 @@ async def test_manual_preview_observes_decoder_busy_while_scheduler_owns_it(
         entered=entered,
         release=release,
     )
-    monkeypatch.setattr("audiohelper.gateways.asr.detect_speech_presence", lambda _samples: True)
-    monkeypatch.setattr("audiohelper.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
+    monkeypatch.setattr("skaz.gateways.asr.detect_speech_presence", lambda _samples: True)
+    monkeypatch.setattr("skaz.gateways.asr.load_local_whisper", lambda *_a, **_k: engine)
     accepted = await scheduler_client.post(
         f"/sessions/{session_id}/asr/live/advance", json={"through_sequence": 0}
     )
