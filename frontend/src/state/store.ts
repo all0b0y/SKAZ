@@ -884,7 +884,9 @@ export const useStore = create<AppState>((set, get) => {
     }
     if (['recording', 'paused', 'processing'].includes(get().recorderState)) return;
     if (get().pendingSessionStatus) {
-      set({ recorderError: 'Confirm the previous backend lifecycle state before recording again.' });
+      const previous = get().pendingSessionStatus === 'stopped' ? 'Stop'
+        : get().pendingSessionStatus === 'paused' ? 'Pause' : 'Record';
+      set({ recorderError: `The previous ${previous} was not confirmed by the backend yet. Use its Retry confirmation button, then record again.` });
       return;
     }
     if (get().queue.pending > 0 || get().queue.failed.length > 0) {

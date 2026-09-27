@@ -355,3 +355,45 @@ def test_local_stream_is_complete_after_a_tail_that_is_not_a_whole_millisecond(
             assert stopped["saved_samples"] == offset
             assert stopped["transcription_complete"] is True
         assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["gaps"] == []
+
+
+def test_stop_is_acknowledged_promptly_while_a_local_model_is_still_loading(
+    app: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model load runs in a thread that cannot be interrupted. Stop must still be
+    acknowledged within the desktop's 15 s budget instead of waiting for it."""
+    import threading
+    import time
+
+    release = threading.Event()
+
+    def slow_open(runtime: Any, settings: StoredSettings, connection: LiveConnection,
+                  target: str | None) -> Callable[[], Awaitable[LiveAsrSession]]:
+        async def open_local() -> LiveAsrSession:
+            from skaz.gateways.asr import _to_thread_until_finished
+
+            await _to_thread_until_finished(release.wait, 20)  # a 20 s model load
+            raise AssertionError("unreachable in this test")
+
+        return open_local
+
+    monkeypatch.setattr(asr_providers, "_local_opener", slow_open)
+    monkeypatch.setattr("skaz.native_stream.FINISH_TIMEOUT_S", 0.5)
+    try:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+            http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
+            sid = http.post("/sessions", headers=AUTH, json={"title": "Quick stop"}).json()["id"]
+            with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
+                ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
+                assert ws.receive_json()["transcription"] == "connecting"
+                ws.send_bytes(pcm_packet(0, 0, b"\x00\x00" * 1600))
+                assert ws.receive_json()["type"] == "audio.saved"
+                started = time.monotonic()
+                ws.send_json({"type": "end"})
+                stopped = ws.receive_json()
+                elapsed = time.monotonic() - started
+                release.set()  # let the "model load" end so the test does not wait for it
+            assert stopped["type"] == "stream.stopped" and stopped["transcription_complete"] is False
+            assert elapsed < 3, elapsed
+    finally:
+        release.set()

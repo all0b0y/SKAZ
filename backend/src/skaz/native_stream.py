@@ -17,6 +17,8 @@ from .native_io import disk_call, drain_on_cancel
 from .native_recovery import RecoveryBudget, ReplayBuffer
 
 FINISH_TIMEOUT_S = 10.0
+#: How long Stop waits for a worker that is not streaming (connecting, loading).
+CANCEL_WAIT_S = 2.0
 SEND_TIMEOUT_S = 2.0
 
 
@@ -212,15 +214,12 @@ class NativeStream:
     async def finish(self) -> bool:
         self._stopping.set()
         if self._worker is not None:
-            try:
-                async with asyncio.timeout(FINISH_TIMEOUT_S):
-                    if self.state == "streaming":
-                        self._wake.set()
-                    else:
-                        self._worker.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await self._worker
-            except TimeoutError:
+            streaming = self.state == "streaming"
+            if streaming:
+                self._wake.set()
+            else:
+                self._worker.cancel()
+            if not await self._settle_worker(FINISH_TIMEOUT_S if streaming else CANCEL_WAIT_S):
                 self.complete = False
         self.buffer.clear()
         snapshot = await disk_call(self.store.snapshot, self.connection.session_id)
@@ -230,13 +229,31 @@ class NativeStream:
         # Complete means the entire saved recording, not just its latest connection.
         return finished and all(c["status"] == "finished" for c in snapshot["connections"][:-1])
 
+    async def _settle_worker(self, timeout: float) -> bool:
+        """Wait a bounded time for the provider worker; True when it ended by itself.
+
+        The wait is not a cancellation of this coroutine: a local provider can be
+        inside an uninterruptible thread (a model load or a decode), and awaiting a
+        cancelled task waits for that thread. Stop must be acknowledged within the
+        desktop's budget regardless; a late worker finds its connection closed and
+        cannot write to it.
+        """
+        worker = self._worker
+        assert worker is not None
+        done, _pending = await asyncio.wait({worker}, timeout=timeout)
+        if not done:
+            worker.cancel()
+            return False
+        if not worker.cancelled():
+            worker.result()  # Storage errors must stop capture, not become ASR errors.
+        return True
+
     async def abort(self) -> None:
         self._stopping.set()
         try:
             if self._worker is not None:
                 self._worker.cancel()
-                with suppress(asyncio.CancelledError):
-                    await self._worker
+                await self._settle_worker(CANCEL_WAIT_S)
         finally:
             self.buffer.clear()
             await disk_call(self.store.close, self.connection.id, finished=False)
