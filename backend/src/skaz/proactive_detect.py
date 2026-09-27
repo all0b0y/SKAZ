@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Literal
 
 Addressed = Literal["direct", "possible"]
@@ -149,9 +150,20 @@ def _add_sentence(text: str, start: int, end: int, out: list[Sentence]) -> None:
     out.append(Sentence(first, last, body, bool(_TERMINAL.search(body))))
 
 
-def _alias_pattern(alias: str) -> re.Pattern[str]:
-    words = [re.escape(word) for word in alias.split()]
-    return re.compile(r"(?<![\w])" + r"\s+".join(words) + r"(?![\w])", re.I | re.U)
+@lru_cache(maxsize=64)
+def _names_pattern(names: tuple[str, ...]) -> re.Pattern[str]:
+    """One compiled pattern for every name, longest first, so text is scanned once.
+
+    The cost of a scan therefore hardly depends on how many names the user set.
+    """
+    alternatives = [r"\s+".join(re.escape(word) for word in name.split()) for name in names]
+    return re.compile(r"(?<![\w])(?:" + "|".join(alternatives) + r")(?![\w])", re.I | re.U)
+
+
+def _canonical(names: Sequence[str]) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Normalised names and a lookup from a matched spelling back to the configured name."""
+    ordered = tuple(normalise_aliases(names))
+    return ordered, {name.casefold(): name for name in ordered}
 
 
 def is_question_or_request(text: str) -> bool:
@@ -215,17 +227,17 @@ def detect(text: str, aliases: Sequence[str], *, final: bool) -> list[Detection]
     ``final`` tells whether more speech can still extend the text: a sentence
     without terminal punctuation is finished only when the text is final.
     """
-    names = normalise_aliases(aliases)
+    names, lookup = _canonical(aliases)
     if not names or not text.strip():
         return []
-    patterns = [(alias, _alias_pattern(alias)) for alias in names]
+    pattern = _names_pattern(names)
     sentences = split_sentences(text)
     found: list[Detection] = []
     used_until = -1
     for index, sentence in enumerate(sentences):
         if sentence.start < used_until:
             continue
-        match = _first_address(sentence.text, patterns)
+        match = _first_address(sentence.text, pattern, lookup)
         if match is None:
             continue
         alias, kind, (a, b) = match
@@ -253,19 +265,19 @@ def detect(text: str, aliases: Sequence[str], *, final: bool) -> list[Detection]
 
 
 def _first_address(
-    sentence: str, patterns: list[tuple[str, re.Pattern[str]]],
+    sentence: str, pattern: re.Pattern[str], lookup: dict[str, str],
 ) -> tuple[str, Literal["vocative", "bare_lead", "bare_tail"], tuple[int, int]] | None:
+    """The best address in ``sentence``: a vocative beats an uncertain one, earlier beats later."""
     best: tuple[str, Literal["vocative", "bare_lead", "bare_tail"], tuple[int, int]] | None = None
-    for alias, pattern in patterns:
-        for match in pattern.finditer(sentence):
-            kind = _address(sentence, match.start(), match.end())
-            if kind is None:
-                continue
-            candidate = (alias, kind, (match.start(), match.end()))
-            if best is None or (kind == "vocative" and best[1] != "vocative") or (
-                (kind == "vocative") == (best[1] == "vocative") and match.start() < best[2][0]
-            ):
-                best = candidate
+    for match in pattern.finditer(sentence):
+        kind = _address(sentence, match.start(), match.end())
+        if kind is None:
+            continue
+        alias = lookup.get(" ".join(match.group(0).split()).casefold(), match.group(0))
+        if best is None or (kind == "vocative" and best[1] != "vocative"):
+            best = (alias, kind, (match.start(), match.end()))
+            if kind == "vocative":
+                break
     return best
 
 
@@ -276,9 +288,8 @@ def public_query(question: str, aliases: Sequence[str]) -> str:
     address punctuation around them; the user still reviews and edits the query
     before anything is sent.
     """
-    result = question
-    for alias in normalise_aliases(aliases):
-        result = _alias_pattern(alias).sub(" ", result)
+    names, _lookup = _canonical(aliases)
+    result = _names_pattern(names).sub(" ", question) if names else question
     words = result.split()
     while words and words[0].strip(",.!?:;—–-").casefold() in _INTERJECTIONS:
         words.pop(0)
@@ -290,4 +301,5 @@ def public_query(question: str, aliases: Sequence[str]) -> str:
 
 
 def mentions_alias(text: str, aliases: Sequence[str]) -> bool:
-    return any(_alias_pattern(alias).search(text) for alias in normalise_aliases(aliases))
+    names, _lookup = _canonical(aliases)
+    return bool(names) and _names_pattern(names).search(text) is not None

@@ -68,7 +68,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   useStore.setState(initial, true);
-  delete (window.skaz as { notifyProactive?: unknown }).notifyProactive;
+  delete (window.skaz as { onProactiveChanged?: unknown }).onProactiveChanged;
 });
 
 it('renders nothing while the proactive assistant is disabled', async () => {
@@ -120,22 +120,27 @@ it('labels the assistant’s own knowledge as its addition', async () => {
   expect(addition).toHaveTextContent('not said in the session');
 });
 
-it('announces only new cards, with a content-free notification when not focused', async () => {
-  const notify = vi.fn();
-  (window.skaz as { notifyProactive?: (sound: boolean) => void }).notifyProactive = notify;
-  vi.spyOn(document, 'hasFocus').mockReturnValue(false);
-  render(<ProactiveCards onCite={() => {}} />);
+it('refreshes at once when main pushes a change for this session, not for others', async () => {
+  let push: ((sessionIds: string[]) => void) | null = null;
+  const unsubscribe = vi.fn();
+  (window.skaz as { onProactiveChanged?: unknown }).onProactiveChanged = (listener: (ids: string[]) => void) => {
+    push = listener;
+    return unsubscribe;
+  };
+  const { unmount } = render(<ProactiveCards onCite={() => {}} />);
   await screen.findByRole('article');
-  // The card that already existed when the session opened is not announced.
-  expect(notify).not.toHaveBeenCalled();
-  current = view([card({ id: 'card-2', question: 'Alex, can you share the slides?' }), card()], { sound: true });
-  await waitFor(() => expect(notify).toHaveBeenCalledTimes(1), { timeout: 3000 });
-  // Only the sound preference crosses to main; never any transcript text.
-  expect(notify).toHaveBeenCalledWith(true);
-  // The same card on later polls is not announced again (the answer updates in place).
-  current = view([card({ id: 'card-2', revision: 2 }), card()], { sound: true });
-  await new Promise((resolve) => setTimeout(resolve, 1200));
-  expect(notify).toHaveBeenCalledTimes(1);
+  const reads = () => calls.filter((c) => c.method === 'GET' && c.path === '/sessions/s1/proactive').length;
+  const before = reads();
+  push!(['another-session']);
+  await act(async () => { await Promise.resolve(); });
+  expect(reads()).toBe(before);
+  current = view([card({ id: 'card-2', question: 'Alex, can you share the slides?' }), card()]);
+  push!(['s1']);
+  // Well before the fallback poll: the push alone brings the new card.
+  await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2), { timeout: 500 });
+  expect(screen.getByText('“Alex, can you share the slides?”')).toBeInTheDocument();
+  unmount();
+  expect(unsubscribe).toHaveBeenCalled();
 });
 
 it('turns the assistant off for this session only', async () => {

@@ -24,6 +24,8 @@ import json
 import logging
 import re
 import time
+from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
@@ -55,7 +57,15 @@ RECENT_MONOLOGUES = 6
 #: Monologues before the question shown as its transcript context.
 CONTEXT_MONOLOGUES = 2
 MAX_CARDS = 30
-MIN_SCAN_INTERVAL_S = 0.2
+MIN_SCAN_INTERVAL_S = 0.05
+#: Confirmed-speech events are read newest first, a page at a time, only until the
+#: needed stretch is covered: a scan costs the same in minute 1 and in hour 3.
+EVENT_PAGE = 64
+MAX_EVENTS = 5_000
+#: Changes kept for the push feed; a reader further behind just gets a fresh start.
+MAX_CHANGES = 256
+#: Upper bound on one long-poll of the push feed.
+MAX_WAIT_S = 30.0
 MAX_ANSWER_TOKENS = 600
 #: Upper bound on one answer call; the target in issue #10 is 8 s after the question.
 ANSWER_TIMEOUT_S = 30.0
@@ -193,11 +203,45 @@ class ProactiveService:
         self.runtime = runtime
         self._sessions: dict[str, SessionState] = {}
         self._closed = False
+        #: Push feed for Electron main: a sequence number per change and a wake-up.
+        self._seq = 0
+        self._changes: deque[tuple[int, str, bool]] = deque(maxlen=MAX_CHANGES)
+        self._wake = asyncio.Event()
 
     # -- wiring -----------------------------------------------------------------
 
     def _state(self, session_id: str) -> SessionState:
         return self._sessions.setdefault(session_id, SessionState())
+
+    def _changed(self, session_id: str, *, new_card: bool = False) -> None:
+        """Record a visible change and wake every waiting push reader at once."""
+        state = self._state(session_id)
+        state.version += 1
+        self._seq += 1
+        self._changes.append((self._seq, session_id, new_card))
+        self._wake.set()
+        self._wake = asyncio.Event()
+
+    async def changes(self, after: int, timeout: float) -> dict[str, Any]:
+        """Changes after sequence ``after``, waiting up to ``timeout`` for the first one.
+
+        ``after < 0`` (a reader that just started) or a sequence from before a restart
+        returns the current position immediately and reports nothing: cards that
+        existed before the reader connected are never announced again.
+        """
+        if after < 0 or after > self._seq:
+            return {"seq": self._seq, "changes": []}
+        if after == self._seq and timeout > 0:
+            wake = self._wake
+            with suppress(TimeoutError):
+                await asyncio.wait_for(wake.wait(), min(timeout, MAX_WAIT_S))
+        summary: dict[str, dict[str, Any]] = {}
+        for seq, session_id, new_card in self._changes:
+            if seq <= after:
+                continue
+            entry = summary.setdefault(session_id, {"session_id": session_id, "new_cards": 0})
+            entry["new_cards"] += int(new_card)
+        return {"seq": self._seq, "changes": list(summary.values())}
 
     def notify(self, session_id: str) -> None:
         """New confirmed speech (or the end of a recording) in ``session_id``.
@@ -265,7 +309,7 @@ class ProactiveService:
                 card.status = "stopped"
                 card.notice = notice
                 card.touch()
-                state.version += 1
+                self._changed(session_id)
 
     # -- reading ----------------------------------------------------------------
 
@@ -292,7 +336,7 @@ class ProactiveService:
                 state.scanner.cancel()
                 state.scanner = None
             state.dirty = False
-        state.version += 1
+        self._changed(session_id)
 
     # -- detection --------------------------------------------------------------
 
@@ -305,7 +349,7 @@ class ProactiveService:
         session = await disk_call(repo.get_session, self.runtime.db, session_id)
         if session is None or session.origin != "live":
             return  # Imported audio never triggers the proactive assistant.
-        monologues = await disk_call(self._monologues, session_id)
+        monologues = await disk_call(self._recent, session_id, span_ms=RECENT_MS, chars=None)
         if not monologues:
             return
         live = session_id in self.runtime.native_streams
@@ -315,6 +359,7 @@ class ProactiveService:
             if index >= len(monologues) - RECENT_MONOLOGUES and item.end_ms >= watermark - RECENT_MS
         ]
         changed = False
+        known = set(state.cards)
         for index, monologue in recent:
             final = not live or index < len(monologues) - 1
             text, offsets = _joined(monologue)
@@ -325,18 +370,51 @@ class ProactiveService:
                 changed |= self._upsert(
                     state, session_id, monologues, index, monologue, tokens, detection, observed,
                 )
+        created = bool(set(state.cards) - known)
         if changed:
-            state.version += 1
+            self._changed(session_id, new_card=created)
         if settings.proactive.model_consent:
             for card in list(state.cards.values()):
                 if card.finished and card.status == "listening" and card.id not in state.tasks:
                     self._start_answer(session_id, card)
 
-    def _monologues(self, session_id: str) -> list[mono.Monologue]:
+    def _recent(self, session_id: str, *, span_ms: int | None, chars: int | None) -> list[mono.Monologue]:
+        """The latest confirmed speech as monologues, read newest first.
+
+        Reading stops once ``span_ms`` of speech or ``chars`` of text is covered, so
+        the cost follows what is needed, not the length of the session. When the
+        read stopped early, the oldest monologue may be cut and is left out.
+        """
+        newest_first: list[mono.Token] = []
+        complete = False
         with self.runtime.db.read() as connection:
-            return tmono.build_monologues(
-                connection, session_id, repo.list_segments(self.runtime.db, session_id)
-            )
+            rate = tmono._sample_rate(connection, session_id)
+            offset = 0
+            used = 0
+            while offset < MAX_EVENTS:
+                page = connection.execute(
+                    "SELECT e.tokens_json FROM native_token_events e "
+                    "JOIN asr_connections c ON c.id=e.connection_id WHERE c.session_id=? "
+                    "ORDER BY c.rowid DESC, e.ordinal DESC LIMIT ? OFFSET ?",
+                    (session_id, EVENT_PAGE, offset),
+                ).fetchall()
+                offset += len(page)
+                for row in page:
+                    for item in reversed(json.loads(row["tokens_json"])):
+                        token = tmono._from_token(item, rate)
+                        newest_first.append(token)
+                        used += len(token.text)
+                if len(page) < EVENT_PAGE:
+                    complete = True
+                    break
+                if newest_first and span_ms is not None and (
+                    newest_first[0].end_ms - newest_first[-1].start_ms > span_ms + mono.MAX_MONOLOGUE_MS
+                ):
+                    break
+                if chars is not None and used > chars:
+                    break
+        monologues = mono.build([token for token in reversed(newest_first) if token.text.strip()])
+        return monologues if complete or len(monologues) < 2 else monologues[1:]
 
     def _upsert(
         self, state: SessionState, session_id: str, monologues: list[mono.Monologue], index: int,
@@ -386,13 +464,12 @@ class ProactiveService:
         state = self._state(session_id)
         card.status = "answering"
         card.touch()
-        state.version += 1
+        self._changed(session_id)
         task = asyncio.get_running_loop().create_task(self._answer(session_id, card))
         state.tasks[card.id] = task
         task.add_done_callback(lambda _task: state.tasks.pop(card.id, None))
 
     async def _answer(self, session_id: str, card: Card) -> None:
-        state = self._state(session_id)
         try:
             await self._prepare(session_id, card)
         except asyncio.CancelledError:
@@ -414,7 +491,7 @@ class ProactiveService:
             card.notice = "Could not prepare an answer; the question and its context are shown."
             card.touch()
         finally:
-            state.version += 1
+            self._changed(session_id)
 
     async def _prepare(self, session_id: str, card: Card) -> None:
         from .agent.ask import _gateway
@@ -423,12 +500,12 @@ class ProactiveService:
         if not settings.proactive.model_consent:
             raise ProviderNotConfigured("sending text to the model is not allowed in Proactive settings.")
         gateway = _gateway(self.runtime)
-        monologues = await disk_call(self._monologues, session_id)
+        budget = max(1, self.runtime.config.max_context_chars - len(SYSTEM_RULES) - len(card.question) - 600)
+        monologues = await disk_call(self._recent, session_id, span_ms=None, chars=budget * 2)
         selected = _up_to(monologues, card)
         if not selected:
             raise ProviderNotConfigured("the question is no longer in the transcript.")
         question_monologue = selected[-1]
-        budget = max(1, self.runtime.config.max_context_chars - len(SYSTEM_RULES) - len(card.question) - 600)
         selected = _latest_within(selected, budget)
         block = mctx.build(selected, budget_chars=budget)
         question_label = next(
@@ -507,7 +584,7 @@ class ProactiveService:
 
         card.web = WebLookup(query=query, status="awaiting_approval")
         card.touch()
-        state.version += 1
+        self._changed(session_id)
 
         async def run() -> None:
             assert card.web is not None
@@ -526,7 +603,7 @@ class ProactiveService:
                 card.web = WebLookup(query=query, status="failed", error=str(error) or "The lookup failed.")
             finally:
                 card.touch()
-                state.version += 1
+                self._changed(session_id)
 
         task = asyncio.get_running_loop().create_task(run())
         state.tasks[f"web:{card_id}"] = task

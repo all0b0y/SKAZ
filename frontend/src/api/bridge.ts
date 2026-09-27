@@ -112,11 +112,11 @@ export interface BridgeApi {
   /** Report live capture state to main (one-way) so close/quit can be guarded. */
   reportCaptureState?(state: CaptureState): void;
   /**
-   * Ask main to show the proactive assistant's system notification when the
-   * window is not focused. Only the sound preference crosses IPC: main owns the
-   * fixed, content-free text, so no transcript can reach the notification.
+   * Proactive assistant cards changed in these sessions. Main follows the
+   * backend's push feed (and shows the content-free notification itself), so the
+   * window refreshes at once instead of waiting for its own timers.
    */
-  notifyProactive?(sound: boolean): void;
+  onProactiveChanged?(listener: (sessionIds: string[]) => void): () => void;
   /** Report how many Codex tasks are still active (one-way) so quit can warn first. */
   reportCodexActivity?(activeTasks: number): void;
   /** Main requests Stop/drain; only the boolean save outcome is returned. */

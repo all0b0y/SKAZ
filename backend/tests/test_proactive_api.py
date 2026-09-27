@@ -480,3 +480,109 @@ def test_live_stream_confirmed_speech_raises_the_card(
         assert [card["question"] for card in cards] == ["Alex, when does the beta start?"]
         assert cards[0]["status"] == "no_answer"
         assert cards[0]["timings"]["detect_ms"] is not None
+
+
+def speak_events(app: Any, session_id: str, sentences: list[tuple[int, str]]) -> None:
+    """One confirmed Soniox event per sentence, as a long live recording stores them."""
+    store = app.state.runtime.live_store
+    words = sum(len(text.split()) for _speaker, text in sentences)
+    total_ms = words * 300 + 1000
+    connection = store.open(session_id, sample_rate=RATE, model="stt-rt-v3")
+    samples = total_ms * RATE // 1000
+    for sequence, start in enumerate(range(0, samples, RATE // 2)):
+        store.append_audio(connection.id, sequence=sequence, start_sample=start,
+                           pcm=b"\0\0" * min(RATE // 2, samples - start))
+    at = 0
+    for ordinal, (speaker, text) in enumerate(sentences):
+        tokens = []
+        for word in text.split():
+            text_piece = f" {word}" if at else word
+            tokens.append(SonioxToken(text_piece, at, at + 250, 0.99, True, "en", str(speaker)))
+            at += 300
+        store.save_event(connection.id, ordinal=ordinal, event=SonioxEvent(
+            final_tokens=tuple(tokens), partial_tokens=(), markers=(),
+            final_audio_proc_ms=at, total_audio_proc_ms=at, finished=False,
+        ))
+    store.close(connection.id, finished=True)
+
+
+async def test_long_session_scan_reads_only_recent_speech(
+    app: Any, client: httpx.AsyncClient, secrets: MemorySecretStore, outbound: FakeHttp,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An hour-long transcript: the old question stays silent, the new one gets its context."""
+    from skaz import proactive as service
+
+    configure(app, secrets, model_consent=True)
+    session_id = await new_session(client)
+    filler = [
+        (1 + index % 2, f"Point number {index} of the lecture was explained in detail.")
+        for index in range(1500)
+    ]
+    speak_events(app, session_id, [
+        (2, "Alex, what was the first topic?"),  # Long ago: never raised now.
+        *filler,
+        (1, "The release moves to June because of the audit."),
+        (2, "Alex, when is the release?"),
+    ])
+    model_reply(outbound, {"context": "", "answer": "In June [P1].", "missing": "", "outside_recording": ""})
+    reads: list[int] = []
+    original = service.ProactiveService._recent
+
+    def counting(self: Any, session_id: str, *, span_ms: int | None, chars: int | None) -> Any:
+        result = original(self, session_id, span_ms=span_ms, chars=chars)
+        reads.append(sum(len(item.tokens) for item in result))
+        return result
+
+    monkeypatch.setattr(service.ProactiveService, "_recent", counting)
+    await settle(app, session_id)
+    [card] = (await client.get(f"/sessions/{session_id}/proactive")).json()["cards"]
+    assert card["question"] == "Alex, when is the release?"
+    assert card["context_citations"][-1]["text"] == "The release moves to June because of the audit."
+    assert card["answer"] == "In June [P1]."
+    total_words = 7 + sum(len(text.split()) for _speaker, text in filler) + 13
+    # Detection read a bounded tail, far from the whole transcript.
+    assert reads[0] < total_words // 5
+
+
+async def test_many_names_are_matched_in_one_pass(
+    app: Any, client: httpx.AsyncClient, secrets: MemorySecretStore, outbound: FakeHttp,
+) -> None:
+    names = [f"Name{index}" for index in range(19)] + ["Alex"]
+    configure(app, secrets, aliases=names)
+    session_id = await new_session(client)
+    speak(app, session_id, MEETING)
+    model_reply(outbound, {"context": "", "answer": "", "missing": "Not said.", "outside_recording": ""})
+    await settle(app, session_id)
+    [card] = (await client.get(f"/sessions/{session_id}/proactive")).json()["cards"]
+    assert card["question"] == "Alex, when does the beta start?"
+    assert card["public_query"] == "when does the beta start?"
+
+
+async def test_push_feed_reports_new_cards_without_content(
+    app: Any, client: httpx.AsyncClient, secrets: MemorySecretStore, outbound: FakeHttp,
+) -> None:
+    configure(app, secrets, sound=True)
+    session_id = await new_session(client)
+    start = (await client.get("/proactive/events", params={"after": -1})).json()
+    assert start == {"seq": 0, "changes": [], "sound": True}
+
+    # Nothing yet: the long-poll waits and returns empty at its timeout.
+    idle = (await client.get("/proactive/events", params={"after": 0, "timeout": 0.05})).json()
+    assert idle["changes"] == []
+
+    speak(app, session_id, MEETING)
+    model_reply(outbound, {"context": "", "answer": "", "missing": "Not said.", "outside_recording": ""})
+    waiting = asyncio.create_task(client.get("/proactive/events", params={"after": 0, "timeout": 5}))
+    await asyncio.sleep(0.05)
+    assert not waiting.done()
+    await settle(app, session_id)
+    feed = (await asyncio.wait_for(waiting, 2)).json()
+    assert feed["changes"][0] == {"session_id": session_id, "new_cards": 1}
+    assert "Alex" not in json.dumps(feed)  # Ids and counts only, never card text.
+
+    # The answer filling the same card is a change, not a new card.
+    later = (await client.get("/proactive/events", params={"after": feed["seq"], "timeout": 0})).json()
+    assert all(change["new_cards"] == 0 for change in later["changes"])
+    # A reader from before a backend restart starts over instead of replaying.
+    assert (await client.get("/proactive/events", params={"after": 10_000})).json()["changes"] == []

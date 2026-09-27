@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from .. import repository as repo
@@ -13,6 +13,8 @@ from ..proactive import ProactiveUnavailable
 from .deps import RuntimeDep
 
 router = APIRouter(prefix="/sessions")
+#: Push feed for Electron main only; the renderer's route allowlist does not include it.
+events_router = APIRouter(prefix="/proactive")
 
 
 class SessionSwitch(BaseModel):
@@ -68,3 +70,20 @@ async def web_lookup(
         raise HTTPException(status_code=400, detail=str(error)) from error
     settings = await disk_call(runtime.settings_store.load)
     return runtime.proactive.view(session_id, settings, origin=origin)
+
+
+@events_router.get("/events")
+async def wait_for_changes(
+    runtime: RuntimeDep,
+    after: int = Query(ge=-1),
+    timeout: float = Query(default=25.0, ge=0, le=30),
+) -> dict[str, Any]:
+    """Long-poll: which sessions' cards changed after ``after``, and how many are new.
+
+    Carries no card content: Electron main uses it to show the content-free
+    notification at once and to tell the window to refresh, without waiting for
+    the window's own (possibly background-throttled) timers.
+    """
+    feed = await runtime.proactive.changes(after, timeout)
+    settings = await disk_call(runtime.settings_store.load)
+    return {**feed, "sound": settings.proactive.sound}

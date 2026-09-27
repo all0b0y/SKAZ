@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiClient } from '../../api/client';
 import type { ProactiveCard, ProactiveView } from '../../api/types';
 
-/** Fast enough for the ≤ 3 s card target on top of the backend's own scan. */
-export const PROACTIVE_POLL_MS = 1000;
-const IDLE_POLL_MS = 5000;
+/**
+ * Fallback polling only. Cards arrive by push: Electron main follows the
+ * backend's feed and tells the window the moment a session's cards change.
+ */
+export const PROACTIVE_POLL_MS = 3000;
+const IDLE_POLL_MS = 10_000;
 
 const busy = (card: ProactiveCard): boolean =>
   card.status === 'listening' || card.status === 'answering' || card.web?.status === 'awaiting_approval';
@@ -31,9 +34,9 @@ function chime(): void {
 }
 
 /**
- * Cards for one session. Polls every second while capturing or while a card is
- * still changing, and announces each NEW card once: a system notification
- * without any content when SKAZ is not focused, a chime when it is and sound is on.
+ * Cards for one session. Refetched the moment main reports a change for this
+ * session, with a slow poll as a fallback. The out-of-focus system notification
+ * belongs to main; while SKAZ is focused a new card only chimes, if sound is on.
  * Cards that already existed when the session was opened are never announced.
  */
 export function useProactiveCards(sessionId: string | null, enabled: boolean, capturing: boolean) {
@@ -43,7 +46,7 @@ export function useProactiveCards(sessionId: string | null, enabled: boolean, ca
   const viewRef = useRef<ProactiveView | null>(null);
   const capturingRef = useRef(capturing);
   capturingRef.current = capturing;
-  const [tick, setTick] = useState(0);
+  const refresh = useRef<() => void>(() => {});
 
   const accept = useCallback((next: ProactiveView) => {
     const known = seen.current;
@@ -51,10 +54,7 @@ export function useProactiveCards(sessionId: string | null, enabled: boolean, ca
     seen.current = new Set(next.cards.map((card) => card.id));
     viewRef.current = next;
     setView(next);
-    if (fresh.length) {
-      if (!document.hasFocus()) window.skaz.notifyProactive?.(next.sound);
-      else if (next.sound) chime();
-    }
+    if (fresh.length && next.sound && document.hasFocus()) chime();
   }, []);
 
   useEffect(() => {
@@ -62,14 +62,16 @@ export function useProactiveCards(sessionId: string | null, enabled: boolean, ca
     viewRef.current = null;
     setView(null);
     setError(null);
-  }, [sessionId, enabled]);
-
-  useEffect(() => {
     if (!sessionId || !enabled) return;
     const api = new ApiClient(window.skaz);
     let alive = true;
+    let running = false;
+    let again = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
+      if (running) { again = true; return; }
+      running = true;
+      clearTimeout(timer);
       try {
         const next = await api.getProactive(sessionId);
         if (!alive) return;
@@ -77,18 +79,29 @@ export function useProactiveCards(sessionId: string | null, enabled: boolean, ca
         accept(next);
       } catch {
         if (alive) setError('Could not refresh the proactive assistant.');
+      } finally {
+        running = false;
       }
       if (!alive) return;
-      const current = viewRef.current;
-      const active = capturingRef.current || (current?.cards.some(busy) ?? false);
+      if (again) { again = false; void poll(); return; }
+      const active = capturingRef.current || (viewRef.current?.cards.some(busy) ?? false);
       timer = setTimeout(() => void poll(), active ? PROACTIVE_POLL_MS : IDLE_POLL_MS);
     };
+    refresh.current = () => void poll();
+    const unsubscribe = window.skaz.onProactiveChanged?.((sessionIds) => {
+      if (sessionIds.includes(sessionId)) void poll();
+    });
     void poll();
-    return () => { alive = false; clearTimeout(timer); };
-  }, [sessionId, enabled, accept, tick]);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      unsubscribe?.();
+      refresh.current = () => {};
+    };
+  }, [sessionId, enabled, accept]);
 
-  // Capture starting is exactly when a fast poll matters: restart the loop.
-  useEffect(() => { if (capturing) setTick((value) => value + 1); }, [capturing]);
+  // Capture starting is exactly when fresh cards matter: read them now.
+  useEffect(() => { if (capturing) refresh.current(); }, [capturing]);
 
   return { view, error, accept };
 }
