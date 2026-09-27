@@ -55,7 +55,9 @@ help you check an answer; they do not guarantee it is correct.
   Use only material you are authorized to process; availability and formats vary.
 - **Separate model choices:** configure Assistant and Notes independently, using
   Codex account sign-in or supported OpenAI, Anthropic and OpenRouter API profiles.
-  Live speech uses Soniox, not those text models.
+  In **agent mode**, an API model with tool calling reads the library step by step
+  through the same bounded SKAZ tools Codex uses, instead of answering from passages
+  picked in advance. Live speech uses Soniox, not those text models.
 
 ## Install and first launch
 

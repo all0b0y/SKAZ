@@ -7,10 +7,11 @@ import type { ConnectionBlock } from './codexLabels';
  * sign-in in place (consent was given before), or open the Codex settings.
  * While the launch check runs it only says so — no action, no error.
  */
-export function CodexConnectionNotice({ block, text, onOpenSettings }: {
+export function CodexConnectionNotice({ block, text, onOpenSettings, settingsLabel = 'Open Codex settings' }: {
   block: ConnectionBlock | null;
   text: string;
   onOpenSettings?: () => void;
+  settingsLabel?: string;
 }) {
   const connecting = useCodex((s) => s.connecting);
   const loginWatch = useCodex((s) => s.loginWatch);
@@ -26,6 +27,6 @@ export function CodexConnectionNotice({ block, text, onOpenSettings }: {
         }} />
     );
   }
-  const action = block?.fix === 'none' || !onOpenSettings ? undefined : { label: 'Open Codex settings', onClick: onOpenSettings };
+  const action = block?.fix === 'none' || !onOpenSettings ? undefined : { label: settingsLabel, onClick: onOpenSettings };
   return <AssistantNotice role="status" text={text} action={action} />;
 }

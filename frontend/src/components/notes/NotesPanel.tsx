@@ -26,7 +26,7 @@ import { NoteList } from './NoteList';
 import { SetupNotice } from '../ui/SetupNotice';
 import { SessionDialog } from '../sessions/SessionOverlays';
 import type { Citation, Note, NoteDetail } from '../../api/types';
-import { selectCodexNotes, useCodex } from '../../state/codex';
+import { apiAgentBlock, engineOf, selectAgentNotes, useCodex } from '../../state/codex';
 import { shareableNote } from '../../state/shareNote';
 import { STATUS_LABEL, connectionBlockOf } from '../assistant/codexLabels';
 import { CodexConnectionNotice } from '../assistant/CodexConnectionNotice';
@@ -89,7 +89,10 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
   const activeId = useStore((s) => s.activeSessionId);
   const detailLoading = useStore((s) => s.detailLoading);
   const settings = useStore((s) => s.settings);
-  const codexOn = useCodex(selectCodexNotes);
+  // Codex or API agent mode: either way the notes are a queued task that reads a snapshot.
+  const agentOn = useCodex(selectAgentNotes);
+  const codexOn = useCodex((s) => engineOf(s, 'notes') === 'codex');
+  const apiBlock = useCodex((s) => apiAgentBlock(s, 'notes'));
   const codexSettings = useCodex((s) => s.settings);
   const codexConnection = useCodex((s) => s.connection);
   const codexTask = useCodex((s) => s.tasks.find((t) => t.id === generation?.taskId));
@@ -122,9 +125,9 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
     () => sessionDetail?.notes_list ?? (sessionDetail?.notes ? [sessionDetail.notes] : []),
     [sessionDetail],
   );
-  // Codex reads a confirmed snapshot taken at request time, so it does not need
-  // the recording to stop; the existing generator still does.
-  const capturing = !codexOn && (recorderState === 'recording' || recorderState === 'processing');
+  // The agent reads a confirmed snapshot taken at request time, so it does not need
+  // the recording to stop; the one-pass generator still does.
+  const capturing = !agentOn && (recorderState === 'recording' || recorderState === 'processing');
   // The server's answer when it gave one: the native summary never carries
   // segments, so their count would call every new recording empty.
   const hasSegments = sessionDetail?.has_transcript ?? (sessionDetail?.segments.length ?? 0) > 0;
@@ -166,7 +169,8 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
 
   // Every reason generation is refused, stated on the control itself rather than
   // left as a dead button the user has to guess about.
-  const codexBlock = codexOn ? connectionBlockOf(codexConnection) : null;
+  const codexBlock = codexOn ? connectionBlockOf(codexConnection)
+    : apiBlock && !notesModelMissing ? { text: apiBlock, fix: 'settings' as const } : null;
   const generateHint = capturing
     ? 'Stop recording first'
     : !hasSegments ? 'No transcript'
@@ -387,7 +391,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
             {pending.taskId ? (
               <>
                 <p>
-                  {codexTask ? STATUS_LABEL[codexTask.status] : 'Starting'} · Codex is reading the whole recording
+                  {codexTask ? STATUS_LABEL[codexTask.status] : 'Starting'} · {codexOn ? 'Codex' : 'The agent'} is reading the whole recording
                   {codexTask?.activity.at(-1) ? ` · ${codexTask.activity.at(-1)}` : ''}
                 </p>
                 {codexTask && ['preparing', 'queued', 'running'].includes(codexTask.status) && (
@@ -415,7 +419,8 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
             {codexTask?.answer && (
               <p className="codex-task__note">Partial text was not saved as a note: the notes are unfinished.</p>
             )}
-            {codexTask && (codexTask.status === 'paused' || codexTask.status === 'failed') ? (
+            {codexTask && (codexTask.status === 'paused'
+              || (codexTask.status === 'failed' && codexTask.engine !== 'api')) ? (
               <button type="button" className="btn btn--primary" onClick={() => {
                 const sessionId = activeId;
                 if (!sessionId) return;
@@ -463,6 +468,7 @@ export function NotesPanel({ onCite }: NotesPanelProps) {
             <div className="notes__start">{startButtons}</div>
             {codexBlock && (
               <CodexConnectionNotice block={codexBlock} text={codexBlock.text}
+                settingsLabel={codexOn ? 'Open Codex settings' : 'Open Notes settings'}
                 onOpenSettings={() => openSettings('notes')} />
             )}
             {!codexBlock && notesModelMissing && (

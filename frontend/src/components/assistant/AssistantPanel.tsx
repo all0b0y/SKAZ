@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { useStore } from '../../state/store';
 import type { Citation } from '../../api/types';
-import { selectCodexAssistant, useCodex } from '../../state/codex';
+import { selectAgentAssistant, useCodex } from '../../state/codex';
 import { ApiAssistant } from './ApiAssistant';
 import { AssistantComposer, AssistantNotice, AssistantShell, ConversationThread, HeadTitle } from './AssistantShell';
 import { CodexAssistant } from './CodexAssistant';
@@ -12,8 +12,9 @@ interface AssistantPanelProps {
 }
 
 /**
- * One Assistant look for every engine. Codex when the backend serves it and the
- * user chose it for Assistant; otherwise the API provider from settings. Until
+ * One Assistant look for every engine. The agent chat (chats, queue, stop and
+ * resume) when the user chose Codex or API agent mode for Assistant; otherwise
+ * the one-pass API provider from settings. Until
  * that choice is known — or when it cannot be read — nothing is sent, and the
  * panel says why instead of quietly answering through either engine.
  */
@@ -22,7 +23,7 @@ export function AssistantPanel({ onCite, onOpenSettings }: AssistantPanelProps) 
   const activeId = useStore((s) => s.activeSessionId);
   const availability = useCodex((s) => s.availability);
   const reason = useCodex((s) => s.unavailableReason);
-  const codexOn = useCodex(selectCodexAssistant);
+  const agentOn = useCodex(selectAgentAssistant);
   const load = useCodex((s) => s.load);
 
   useEffect(() => {
@@ -41,7 +42,7 @@ export function AssistantPanel({ onCite, onOpenSettings }: AssistantPanelProps) 
       )} />
     );
   }
-  return codexOn
+  return agentOn
     ? <CodexAssistant onCite={onCite} onOpenSettings={onOpenSettings} />
     : <ApiAssistant onCite={onCite} />;
 }

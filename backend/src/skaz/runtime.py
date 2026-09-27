@@ -8,6 +8,7 @@ import os
 import httpx
 
 from .activity import ActivityLog
+from .agent.api_agent import ApiAgentEngine
 from .agent.codex_runtime import CodexRuntime
 from .agent.note_rewrite import PendingRewrites
 from .agent.retrieval import EmbeddingIndex
@@ -68,6 +69,10 @@ class Runtime:
         self.codex.web_search = self.web_search
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
+        self.codex.api_agents = ApiAgentEngine(
+            settings=self.settings_store.load, api_key=self.api_key, http=self.http,
+            catalogs=self.catalogs, timeout=config.request_timeout_s,
+        )
         self.ingestion = IngestionService(self)
         #: File imports. Resumption is started by the app lifespan, not here: a
         #: constructor must not create tasks on a loop it does not own.

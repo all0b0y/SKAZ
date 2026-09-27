@@ -65,6 +65,14 @@ class CatalogEntry:
     max_output_tokens: int | None = None
     pricing_amount_usd: float | None = None
     pricing_unit: str | None = None
+    #: Request parameters the provider declares for this model (OpenRouter only).
+    #: Empty means *unknown*, exactly like the modality tuples.
+    supported_parameters: tuple[str, ...] = ()
+
+    @property
+    def declares_tools(self) -> bool:
+        """True only when the provider itself lists native tool calling for this model."""
+        return "tools" in self.supported_parameters
 
     @property
     def accepts_audio(self) -> bool:
@@ -216,6 +224,12 @@ class ProviderCatalogs:
             f"OpenRouter model '{model_id}' has no dedicated transcription or legacy audio-chat contract."
         )
 
+    def cached_entry(self, provider: str, model_id: str) -> CatalogEntry | None:
+        """The entry from memory or the disk cache only: never a network request."""
+        cached = self._memory.get(self._cache_key(provider, None))
+        entries = cached[1] if cached else self._read_disk_cache(provider, None) or []
+        return next((entry for entry in entries if entry.id == model_id), None)
+
     def cached_openrouter_asr_kind(self, model_id: str) -> str | None:
         for entry in self._memory.get(self._cache_key("openrouter", "asr"), (0, []))[1]:
             if entry.id == model_id and entry.emits_transcription:
@@ -316,6 +330,7 @@ class ProviderCatalogs:
                     max_output_tokens=item.get("max_output_tokens"),
                     pricing_amount_usd=item.get("pricing_amount_usd"),
                     pricing_unit=item.get("pricing_unit"),
+                    supported_parameters=_modalities(item.get("supported_parameters")),
                 )
                 for item in raw.get("models", [])
             ]
@@ -335,6 +350,7 @@ class ProviderCatalogs:
                     "max_output_tokens": entry.max_output_tokens,
                     "pricing_amount_usd": entry.pricing_amount_usd,
                     "pricing_unit": entry.pricing_unit,
+                    "supported_parameters": list(entry.supported_parameters),
                 }
                 for entry in entries
             ],
@@ -409,4 +425,5 @@ def _openrouter_entry(item: Any) -> CatalogEntry | None:
         max_output_tokens=max_output,
         pricing_amount_usd=pricing_amount,
         pricing_unit=pricing_unit,
+        supported_parameters=_modalities(item.get("supported_parameters")),
     )

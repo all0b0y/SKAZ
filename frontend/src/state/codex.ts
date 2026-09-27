@@ -13,6 +13,8 @@ import {
   type CodexScope,
   type CodexSettings,
   type CodexTask,
+  type AgentView,
+  type PurposeEngine,
 } from '../api/codex';
 
 // Renderer state for the Codex Assistant / Notes boundary. It holds only what
@@ -56,6 +58,8 @@ export interface CodexStoreState {
   unavailableReason: string | null;
   settings: CodexSettings | null;
   connection: CodexConnection | null;
+  /** Per purpose: which engine answers, and whether API agent mode can run (null: not served). */
+  agent: AgentView | null;
   /** The session whose chat list is loaded. */
   sessionId: string | null;
   chats: CodexChat[];
@@ -80,6 +84,8 @@ export interface CodexStoreState {
   resume: (taskId: string) => Promise<void>;
   generateNotes: (sessionId: string, language: string, detail: NoteDetail) => Promise<CodexTask>;
   saveSettings: (settings: CodexSettings) => Promise<CodexSettings>;
+  /** Re-read which engine each purpose uses, e.g. after its API profile was saved. */
+  refreshAgent: () => Promise<void>;
   checkConnection: () => Promise<void>;
   login: () => Promise<void>;
   logout: () => Promise<void>;
@@ -289,6 +295,7 @@ export const useCodex = create<CodexStoreState>((set, get) => {
     unavailableReason: null,
     settings: null,
     connection: null,
+    agent: null,
     sessionId: null,
     chats: [],
     selectedChatId: null,
@@ -309,6 +316,7 @@ export const useCodex = create<CodexStoreState>((set, get) => {
           unavailableReason: null,
           settings: state.settings,
           connection: state.connection,
+          agent: state.agent ?? null,
           chats: state.chats,
           selectedChatId: state.selected_chat_id,
         });
@@ -340,7 +348,7 @@ export const useCodex = create<CodexStoreState>((set, get) => {
         const { sessionId, selectedChatId } = get();
         const state = await client().state(sessionId);
         if (get().sessionId === sessionId) {
-          set({ chats: state.chats, connection: state.connection });
+          set({ chats: state.chats, connection: state.connection, agent: state.agent ?? null });
         }
         const before = get().tasks;
         applyTasks(state.tasks);
@@ -487,7 +495,17 @@ export const useCodex = create<CodexStoreState>((set, get) => {
     saveSettings: async (settings) => {
       const saved = await client().saveSettings(settings);
       set({ settings: saved });
+      await get().refreshAgent();
       return saved;
+    },
+
+    refreshAgent: async () => {
+      try {
+        const state = await client().state(null);
+        set({ agent: state.agent ?? null, settings: state.settings });
+      } catch {
+        // The next load or poll reads it again; the saved settings are already applied.
+      }
     },
 
     checkConnection: async () => {
@@ -571,6 +589,35 @@ const selectCodexFor = (purpose: CodexPurpose) => (s: CodexStoreState): boolean 
 
 export const selectCodexAssistant = selectCodexFor('assistant');
 export const selectCodexNotes = selectCodexFor('notes');
+
+/** The engine the settings choose for a purpose, as far as the renderer knows. */
+export const engineOf = (s: CodexStoreState, purpose: CodexPurpose): PurposeEngine => {
+  if (s.availability !== 'available' || !s.settings) return 'api';
+  const keys = purpose === 'assistant'
+    ? { codex: s.settings.assistant_enabled, agent: s.settings.assistant_api_agent }
+    : { codex: s.settings.notes_enabled, agent: s.settings.notes_api_agent };
+  return keys.codex ? 'codex' : keys.agent === true ? 'api_agent' : 'api';
+};
+
+/**
+ * The purpose runs as a tool-driven agent — on Codex or on its API profile —
+ * and therefore through the chats, the queue and the task cards.
+ */
+const selectAgentFor = (purpose: CodexPurpose) => (s: CodexStoreState): boolean => engineOf(s, purpose) !== 'api';
+
+export const selectAgentAssistant = selectAgentFor('assistant');
+export const selectAgentNotes = selectAgentFor('notes');
+
+/**
+ * Why API agent mode cannot run for a purpose, or null when it can (or is not chosen).
+ * Nothing is sent while this has a value: no fallback to the one-pass path.
+ */
+export const apiAgentBlock = (s: CodexStoreState, purpose: CodexPurpose): string | null => {
+  if (engineOf(s, purpose) !== 'api_agent') return null;
+  const status = s.agent?.[purpose]?.api_agent;
+  if (!status) return 'Agent mode status is not available yet.';
+  return status.available ? null : (status.reason ?? 'Agent mode cannot run with this model.');
+};
 
 // Main guards quit while a task is still active. One-way and optional, so the
 // test bridge stub is a no-op.

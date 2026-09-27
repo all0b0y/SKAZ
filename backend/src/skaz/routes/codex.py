@@ -47,6 +47,7 @@ async def state(runtime: RuntimeDep, session_id: str | None = None) -> dict[str,
         "tasks": await disk_call(service.task_views),
         "settings": await disk_call(service.settings),
         "connection": dict(service.connection.view),
+        "agent": await disk_call(service.agent_view),
     }
 
 

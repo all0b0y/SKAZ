@@ -9,7 +9,7 @@ import { LogsViewer } from './LogsViewer';
 import { StorageRootPanel } from './StorageRootPanel';
 import { CodexEnginePanel } from './CodexEnginePanel';
 import { WebSearchSettings } from './WebSearchSettings';
-import type { CodexTab } from './ProfileEditor';
+import type { AgentModeToggle, CodexTab } from './ProfileEditor';
 import { SonioxCredentials } from './SonioxCredentials';
 import { UsedLanguages, languageName, byShownName } from './UsedLanguages';
 import { CLOUD_PROVIDERS } from './providers';
@@ -71,6 +71,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   const [sourceError, setSourceError] = useState('');
   const codexAvailability = useCodex((s) => s.availability);
   const codexStored = useCodex((s) => s.settings);
+  const agentView = useCodex((s) => s.agent);
 
   const capturing = ['recording', 'paused', 'processing'].includes(recorderState);
   // Sources change between recording stretches (before start, paused); they
@@ -174,6 +175,18 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
     };
   };
 
+  // Agent mode keeps the API profile and only changes how it reads the library.
+  const agentMode = (purpose: CodexPurpose): AgentModeToggle | undefined => {
+    if (!codexSettings || !agentView) return undefined;
+    const flag = PURPOSE_KEYS[purpose].apiAgent;
+    return {
+      checked: codexSettings[flag] === true,
+      disabled: saving,
+      onChange: (checked) => changeCodex({ [flag]: checked }),
+      status: agentView[purpose]?.api_agent ?? null,
+    };
+  };
+
   const buildUpdate = (): SettingsUpdate => {
     const update: SettingsUpdate = {};
     if (Object.keys(asr).length) update.asr = asr;
@@ -216,6 +229,9 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
       if (codexDirty) {
         // The API profiles above are already saved; a Codex failure keeps only its own draft.
         await useCodex.getState().saveSettings({ ...codexStored!, ...codexDraft });
+      } else {
+        // A new API model changes whether agent mode can run; re-read the verdict.
+        void useCodex.getState().refreshAgent();
       }
       setCodexDraft({});
       setSaved(true);
@@ -420,6 +436,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
                   hasProviderKey={providerHasKey(effectiveProvider('agent'))}
                   onChange={setAgent}
                   codex={codexTab('assistant')}
+                  agentMode={agentMode('assistant')}
                 />
               </section>
             )}
@@ -436,6 +453,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
                   hasProviderKey={providerHasKey(effectiveProvider('notes'))}
                   onChange={setNotes}
                   codex={codexTab('notes')}
+                  agentMode={agentMode('notes')}
                 />
               </section>
             )}

@@ -23,6 +23,16 @@ interface ProfileEditorProps {
   onChange: (update: ProfileUpdate) => void;
   /** Codex as the first tab: chosen instead of, not replacing, the API profile below. */
   codex?: CodexTab;
+  /** Run this API profile as a tool-driven agent (Assistant and Notes only). */
+  agentMode?: AgentModeToggle;
+}
+
+export interface AgentModeToggle {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (checked: boolean) => void;
+  /** The backend's verdict on the saved profile: null while unknown or not served. */
+  status: { model: string; available: boolean; reason: string | null } | null;
 }
 
 export interface CodexTab {
@@ -43,6 +53,7 @@ export function ProfileEditor({
   hasProviderKey,
   onChange,
   codex,
+  agentMode,
 }: ProfileEditorProps) {
   const codexSelected = codex?.selected === true;
   const loadModels = useStore((s) => s.loadModels);
@@ -198,6 +209,29 @@ export function ProfileEditor({
       </div>
 
       {codexSelected ? codex?.panel : <>
+      {agentMode && (
+        <>
+          <label className="consent">
+            <input type="checkbox" checked={agentMode.checked} disabled={agentMode.disabled}
+              onChange={(e) => agentMode.onChange(e.target.checked)} />
+            <span>
+              <strong>Agent mode</strong>
+              <span className="field__hint">
+                The model reads the library step by step with SKAZ tools, as Codex does, instead of answering
+                from passages picked in advance. Needs a model with tool calling; there is no fallback.
+              </span>
+            </span>
+          </label>
+          {agentMode.checked && agentMode.status && agentMode.status.model !== model && (
+            <p className="field__hint">Tool calling is checked for the model once it is saved.</p>
+          )}
+          {agentMode.checked && agentMode.status && agentMode.status.model === model && !agentMode.status.available && (
+            <p className="profile__note profile__note--warn" role="alert">
+              <Icon name="warning" size={13} /> Agent mode unavailable: {agentMode.status.reason}
+            </p>
+          )}
+        </>
+      )}
       <div className="field">
         {custom ? (
           <>

@@ -298,3 +298,37 @@ describe('Codex inside Assistant and Notes settings', () => {
     expect(tabs('Assistant')[1]).toHaveAttribute('aria-selected', 'true');
   });
 });
+
+describe('agent mode for an API profile', () => {
+  const view = (available: boolean, reason: string | null) => ({
+    assistant: { engine: 'api' as const, api_agent: { provider: 'openrouter', model: 'agent-model', available, reason } },
+    notes: { engine: 'api' as const, api_agent: { provider: 'openrouter', model: 'notes-model', available, reason } },
+  });
+
+  it('is a choice on the API tab that keeps the profile and starts nothing', async () => {
+    const user = userEvent.setup();
+    await start((f) => { f.agent = view(true, null); });
+    const toggle = screen.getByRole('checkbox', { name: /Agent mode/ });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await save(user);
+    await waitFor(() => expect(fake.settings.assistant_api_agent).toBe(true));
+    expect(fake.settings.assistant_enabled).toBe(false);
+    expect(saveSettings).toHaveBeenCalledWith({});
+    expect(sideEffects()).toEqual([]);
+  });
+
+  it('shows why the saved model cannot run as an agent', async () => {
+    await start((f) => {
+      f.settings = { ...OFF, assistant_api_agent: true };
+      f.agent = view(false, "OpenRouter does not list tool calling for 'agent-model'.");
+    });
+    expect(screen.getByRole('checkbox', { name: /Agent mode/ })).toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent("Agent mode unavailable: OpenRouter does not list tool calling for 'agent-model'.");
+  });
+
+  it('is not offered by a backend without agent mode', async () => {
+    await start();
+    expect(screen.queryByRole('checkbox', { name: /Agent mode/ })).toBeNull();
+  });
+});

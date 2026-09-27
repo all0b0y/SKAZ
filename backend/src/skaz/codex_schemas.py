@@ -15,6 +15,9 @@ class StrictModel(BaseModel):
 class CodexSettings(StrictModel):
     """Assistant and Notes each choose Codex or their API profile on their own.
 
+    With Codex off, ``*_api_agent`` runs the purpose's API profile as a tool-driven
+    agent; otherwise the API profile answers in one pass.
+
     The single legacy ``enabled`` flag is accepted on input only: it fills a
     per-purpose flag that the document does not state, and is never returned.
     """
@@ -26,6 +29,10 @@ class CodexSettings(StrictModel):
     notes_model: str = Field(default="", max_length=256)
     notes_effort: str = Field(default="", max_length=32)
     ask_before_large: bool = True
+    #: When the purpose uses its API profile (Codex off), run it as the same tool-driven
+    #: agent Codex is: it reads the library through SKAZ tools instead of one fixed pass.
+    assistant_api_agent: bool = False
+    notes_api_agent: bool = False
 
     @model_validator(mode="before")
     @classmethod
