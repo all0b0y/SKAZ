@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from ..gateways import ProviderError
-from ..gateways.codex_session import CodexSession, TurnResult
+from ..gateways.codex_session import AgentSession, TurnResult
 from .note_completion import (
     CONTINUE_REQUEST,
     MAX_DOCUMENT_CHARS,
@@ -15,7 +15,7 @@ from .note_completion import (
 
 
 async def ask_note(
-    session: CodexSession, question: str, *, on_answer: Callable[[str], Awaitable[None]],
+    session: AgentSession, question: str, *, on_answer: Callable[[str], Awaitable[None]],
 ) -> TurnResult:
     # Local to one execution (and one correction). A resumed task starts over.
     parts: list[str] = []

@@ -60,6 +60,41 @@ describe('Notes engine choice', () => {
   });
 });
 
+describe('Notes in API agent mode', () => {
+  const agent = (available: boolean, reason: string | null) => ({
+    assistant: { engine: 'codex' as const, api_agent: null },
+    notes: { engine: 'api_agent' as const, api_agent: { provider: 'openrouter', model: 'notes-model', available, reason } },
+  });
+
+  it('runs as a queued task on the API profile, reading a snapshot even while recording', async () => {
+    fake.settings = { ...fake.settings, notes_enabled: false, notes_api_agent: true };
+    fake.connection = { ...fake.connection, status: 'missing', models: [] };
+    fake.agent = agent(true, null);
+    await act(() => useCodex.getState().load('s1'));
+    useStore.setState({ settings: { notes: { provider: 'openrouter', model: 'notes-model' }, output_language: 'ru' } as never });
+    const user = userEvent.setup();
+    render(<NotesPanel onCite={() => undefined} />);
+    await user.click(screen.getByRole('button', { name: 'Create AI notes' }));
+    await waitFor(() => expect(fake.tasks).toHaveLength(1));
+    expect(fake.calls.some((c) => c.path === '/codex/sessions/s1/notes')).toBe(true);
+    expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/sessions/s1/notes')).toBe(false);
+    fake.update(fake.tasks[0]!.id, { status: 'running', engine: 'api', activity: ['Model step 1 · 120 tokens · 1 tool calls'] });
+    await poll();
+    expect(screen.getByRole('status', { name: 'Generating notes' })).toHaveTextContent('The agent is reading the whole recording');
+  });
+
+  it('refuses to generate with a model that cannot call tools, and says why', async () => {
+    fake.settings = { ...fake.settings, notes_enabled: false, notes_api_agent: true };
+    fake.agent = agent(false, "OpenRouter does not list tool calling for 'notes-model'.");
+    await act(() => useCodex.getState().load('s1'));
+    useStore.setState({ settings: { notes: { provider: 'openrouter', model: 'notes-model' }, output_language: 'ru' } as never });
+    render(<NotesPanel onCite={() => undefined} />);
+    expect(screen.getByRole('button', { name: /^Create AI notes/ })).toBeDisabled();
+    expect(screen.getAllByText(/does not list tool calling/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Open Notes settings' })).toBeInTheDocument();
+  });
+});
+
 describe('NotesPanel with Codex', () => {
   it('generates for this session only, shows real activity and binds the finished note to its tab', async () => {
     const user = userEvent.setup();

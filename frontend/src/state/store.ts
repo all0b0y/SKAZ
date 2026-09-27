@@ -39,7 +39,7 @@ import { PersistenceQueue, type PersistenceQueueState } from '../audio/persisten
 import { NativeAudioWriter } from '../audio/nativeWriter';
 import type { TranscriptionQueueState } from '../audio/transcriptionQueue';
 import { askScope } from '../lib/askScope';
-import { onTaskSettled, selectCodexNotes, useCodex } from './codex';
+import { onTaskSettled, selectAgentNotes, useCodex } from './codex';
 import {
   attachNote,
   closeTab,
@@ -1351,8 +1351,8 @@ export const useStore = create<AppState>((set, get) => {
       const { [id]: _done, ...rest } = s.noteGenerations;
       return rest;
     };
-    if (selectCodexNotes(useCodex.getState())) {
-      // Codex: always this session's confirmed snapshot, whatever the chat scope.
+    if (selectAgentNotes(useCodex.getState())) {
+      // Codex or API agent mode: always this session's confirmed snapshot, whatever the chat scope.
       // The note arrives when the task completes (see onTaskSettled below).
       try {
         const task = await useCodex.getState().generateNotes(id, get().settings?.output_language ?? 'auto', detail ?? 'normal');
@@ -1531,7 +1531,9 @@ onTaskSettled((task) => {
   const generation = entry?.[1];
   if (task.status !== 'completed' || !task.note_id) {
     if (!generation) return;
-    const reason = task.status === 'paused' ? 'Generation was interrupted and waits to be resumed manually.'
+    // An API provider's classified error says what went wrong; Codex pauses without one.
+    const reason = task.status === 'paused' && task.engine === 'api' && task.error ? task.error
+      : task.status === 'paused' ? 'Generation was interrupted and waits to be resumed manually.'
       : task.status === 'cancelled' ? 'Generation stopped.'
       : task.error || 'Could not create the notes';
     useStore.setState((s) => ({ noteGenerations: { ...s.noteGenerations, [sessionId]: { ...generation, status: 'failed', error: reason } } }));

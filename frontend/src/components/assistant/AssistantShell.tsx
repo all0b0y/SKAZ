@@ -14,13 +14,13 @@ import { useEdgeFade } from '../../hooks/useOverflowEdges';
 // into the header and which controls they actually support.
 
 /** Which engine answers in this panel; `pending` until that is known. */
-export type AssistantEngine = 'codex' | 'api' | 'pending';
+export type AssistantEngine = 'codex' | 'api_agent' | 'api' | 'pending';
 
 export const EMPTY_HINT = 'Ask about your recordings — answers cite the transcript.';
 
 export function AssistantShell({ engine, head, children }: { engine: AssistantEngine; head: ReactNode; children: ReactNode }) {
   return (
-    <section className={clsx('assistant assistant--chat', engine === 'codex' && 'assistant--codex')}
+    <section className={clsx('assistant assistant--chat', (engine === 'codex' || engine === 'api_agent') && 'assistant--codex')}
       aria-label="Assistant" data-engine={engine}>
       <header className="assistant__head codex-head">{head}</header>
       {children}

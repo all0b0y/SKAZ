@@ -45,6 +45,10 @@ export interface CodexTask {
   activity: string[];
   /** This run started over after an interruption; the old draft was discarded. */
   restarted?: boolean;
+  /** What runs the task: Codex, or the API profile as a tool-driven agent. Absent = Codex. */
+  engine?: 'codex' | 'api';
+  /** `codex`, or the API provider of an agent-mode task. */
+  provider?: string;
 }
 
 /** The two jobs that can each run on Codex or on their own API profile. */
@@ -60,12 +64,18 @@ export interface CodexSettings {
   notes_model: string;
   notes_effort: string;
   ask_before_large: boolean;
+  /** With Codex off: the Assistant API profile reads the library with SKAZ tools (agent mode). */
+  assistant_api_agent?: boolean;
+  /** With Codex off: the Notes API profile reads the transcript with SKAZ tools (agent mode). */
+  notes_api_agent?: boolean;
 }
 
 /** The settings keys that belong to one purpose. */
 export const PURPOSE_KEYS = {
-  assistant: { enabled: 'assistant_enabled', model: 'assistant_model', effort: 'assistant_effort' },
-  notes: { enabled: 'notes_enabled', model: 'notes_model', effort: 'notes_effort' },
+  assistant: {
+    enabled: 'assistant_enabled', model: 'assistant_model', effort: 'assistant_effort', apiAgent: 'assistant_api_agent',
+  },
+  notes: { enabled: 'notes_enabled', model: 'notes_model', effort: 'notes_effort', apiAgent: 'notes_api_agent' },
 } as const satisfies Record<CodexPurpose, Record<string, keyof CodexSettings>>;
 
 export interface CodexModel {
@@ -109,12 +119,35 @@ export interface CodexPreview {
   status: 'pending' | 'applied' | 'discarded';
 }
 
+/** Whether a purpose's API profile can run as an agent, and if not, why. */
+export interface ApiAgentStatus {
+  provider: string;
+  model: string;
+  available: boolean;
+  reason: string | null;
+}
+
+/**
+ * The engine that answers a purpose: Codex, the API profile with SKAZ tools
+ * (`api_agent`), or the one-pass API path (`api`).
+ */
+export type PurposeEngine = 'codex' | 'api_agent' | 'api';
+
+export interface PurposeAgentView {
+  engine: PurposeEngine;
+  api_agent: ApiAgentStatus | null;
+}
+
+export type AgentView = Record<CodexPurpose, PurposeAgentView>;
+
 export interface CodexState {
   chats: CodexChat[];
   selected_chat_id: string | null;
   tasks: CodexTask[];
   settings: CodexSettings;
   connection: CodexConnection;
+  /** Absent from a backend without agent mode for API providers. */
+  agent?: AgentView;
 }
 
 export interface CodexChatDetail {

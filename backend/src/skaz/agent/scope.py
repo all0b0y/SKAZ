@@ -100,6 +100,36 @@ WHOLE_SESSION_PATTERNS = (
     r"\bentire\s+(?:recording|session)\b",
 )
 
+#: Requests whose honest answer needs the whole scope, not a ranked selection.
+FULL_REVIEW_PATTERNS = (
+    *WHOLE_SESSION_PATTERNS,
+    r"\bвс[юяеё]\s+(?:запис|лекци|встреч|сесси)",
+    r"\bцеликом\b",
+    r"\bполност",
+    r"\bрезюм",
+    r"\bперескаж",
+    r"\bконспект",
+    r"\bсаммари\b",
+    r"\bкратк\w*\s+(?:содержани|изложени)",
+    r"\bsummar(?:y|ise|ize|ising|izing)\b",
+    r"\brecap\b",
+    r"\boverview\b",
+    r"\b(?:whole|entire|full)\s+(?:recording|session|lecture|meeting|library|group|scope)s?\b",
+    r"\ball\s+(?:recordings|sessions|lectures|meetings)\b",
+    r"\bfirst\s+(?:defined|mentioned|introduced|time)\b",
+    r"\bвпервые\b",
+)
+
+
+def is_full_review(question: str) -> bool:
+    """Whether answering ``question`` means reading the whole scope in order.
+
+    A summary of a recording, or "where was X first defined", cannot be answered
+    honestly from a top-k selection: the agent must read everything, or refuse.
+    """
+    return _matches(question, FULL_REVIEW_PATTERNS)
+
+
 #: Words that carry no topic meaning and would only pollute a full-text query.
 STOPWORDS = frozenset(
     [

@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import type { BridgeApi, BridgeRequest, JsonResponse } from '../api/bridge';
-import type { CodexChat, CodexConnection, CodexPreview, CodexSettings, CodexTask } from '../api/codex';
+import type { AgentView, CodexChat, CodexConnection, CodexPreview, CodexSettings, CodexTask } from '../api/codex';
 import type { Message, Note } from '../api/types';
 
 // Authored in-memory stand-in for the Codex HTTP boundary, shaped after
@@ -16,6 +16,8 @@ export interface FakeCodex {
   notes: Note[];
   settings: CodexSettings;
   connection: CodexConnection;
+  /** Engine verdicts per purpose; omitted from the state like an older backend when unset. */
+  agent?: AgentView;
   selected: Record<string, string | null>;
   calls: { method: string; path: string; body?: unknown; query?: unknown }[];
   /** Next POST .../messages answers with this error once. */
@@ -67,7 +69,8 @@ export function fakeCodex(init: Partial<Pick<FakeCodex, 'settings' | 'connection
     if (req.method === 'GET' && p === '/codex/state') {
       const sid = String(req.query?.session_id ?? '');
       return ok({ chats: fake.chats.filter((c) => c.session_id === sid), selected_chat_id: fake.selected[sid] ?? null,
-        tasks: fake.tasks.map((t) => ({ ...t })), settings: { ...fake.settings }, connection: { ...fake.connection } });
+        tasks: fake.tasks.map((t) => ({ ...t })), settings: { ...fake.settings }, connection: { ...fake.connection },
+        ...(fake.agent ? { agent: fake.agent } : {}) });
     }
     if (req.method === 'POST' && p === '/codex/chats') {
       const chat: CodexChat = { id: id('c'), session_id: String(body.session_id), title: 'New chat',

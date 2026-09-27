@@ -17,7 +17,7 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 import httpx
 
@@ -30,6 +30,9 @@ ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
 logger = logging.getLogger(__name__)
+
+#: What one successful reply is read into: answer text, or a structured agent step.
+T = TypeVar("T")
 
 #: The one operation these adapters perform, named in every log line.
 OPERATION = "provider text completion"
@@ -164,9 +167,9 @@ async def _post_completion(
     headers: dict[str, str],
     body: bytes,
     timeout: float,
-    read: Callable[[dict[str, Any]], str],
+    read: Callable[[dict[str, Any]], T],
     usage: Callable[[dict[str, Any]], dict[str, int]],
-) -> str:
+) -> T:
     """Post one completion request, replaying it at most once, and log the outcome.
 
     ``timeout`` is the budget for the whole operation, not for one attempt: the

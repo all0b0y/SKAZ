@@ -13,6 +13,8 @@ interface Props {
   onCite: (citation: Citation) => void;
   onStop: (taskId: string) => void;
   onResume: (taskId: string) => void;
+  /** Where another model is chosen; offered when an API-provider run ends in an error. */
+  onOpenSettings?: () => void;
 }
 
 /**
@@ -24,11 +26,14 @@ interface Props {
  * never be mistaken for a complete one. The journal lists recorded tool work
  * only — there is no invented progress and no model reasoning here.
  */
-export function CodexTaskCard({ task, activeSessionId, readOnly, onCite, onStop, onResume }: Props) {
+export function CodexTaskCard({ task, activeSessionId, readOnly, onCite, onStop, onResume, onOpenSettings }: Props) {
   const active = isActive(task);
   const latest = task.activity.at(-1);
   const unfinished = UNFINISHED_NOTE[task.status];
-  const canResume = !readOnly && (task.status === 'paused' || task.status === 'failed');
+  // A refused API task (a spent budget) failed for good: only a new question helps.
+  const canResume = !readOnly && (task.status === 'paused' || (task.status === 'failed' && task.engine !== 'api'));
+  // An API-provider error is shown with its two ways out: the same model again, or another one.
+  const apiError = task.engine === 'api' && !!task.error && (task.status === 'paused' || task.status === 'failed');
 
   return (
     <li className={clsx('msg msg--assistant codex-task', `codex-task--${task.status}`)} data-testid="codex-task">
@@ -43,7 +48,12 @@ export function CodexTaskCard({ task, activeSessionId, readOnly, onCite, onStop,
         )}
         {canResume && (
           <button type="button" className="btn btn--ghost codex-task__action" onClick={() => onResume(task.id)}>
-            Continue
+            {apiError ? 'Retry' : 'Continue'}
+          </button>
+        )}
+        {apiError && onOpenSettings && (
+          <button type="button" className="btn btn--quiet codex-task__action" onClick={onOpenSettings}>
+            Choose another model
           </button>
         )}
         {task.status === 'paused' && (

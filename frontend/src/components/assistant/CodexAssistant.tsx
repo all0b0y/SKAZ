@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../state/store';
-import { useCodex } from '../../state/codex';
+import { apiAgentBlock, engineOf, useCodex } from '../../state/codex';
 import { isActive, type CodexScope, type CodexTask } from '../../api/codex';
 import type { Citation, Note } from '../../api/types';
 import { SessionDialog } from '../sessions/SessionOverlays';
@@ -29,9 +29,10 @@ function openTask(tasks: CodexTask[]): CodexTask | null {
 }
 
 /**
- * Assistant on Codex (CODEX-ASSISTANT-SPEC §5, §7): independent chats per
- * session with a fixed, always-visible scope; one app-wide queue; live answer,
- * stop, manual resume, confirmable note edits.
+ * The agent Assistant (CODEX-ASSISTANT-SPEC §5, §7) on Codex or on the API
+ * profile in agent mode: independent chats per session with a fixed,
+ * always-visible scope; one app-wide queue; live answer, stop, manual resume,
+ * confirmable note edits. Both engines read the library through the same tools.
  */
 export function CodexAssistant({ onCite, onOpenSettings }: Props) {
   const activeId = useStore((s) => s.activeSessionId);
@@ -48,6 +49,8 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
   const settings = useCodex((s) => s.settings);
   const connection = useCodex((s) => s.connection);
   const error = useCodex((s) => s.error);
+  const engine = useCodex((s) => engineOf(s, 'assistant'));
+  const apiBlock = useCodex((s) => apiAgentBlock(s, 'assistant'));
   const codex = useCodex.getState;
 
   const [question, setQuestion] = useState('');
@@ -67,8 +70,9 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
   }, [view, tasks, selectedChatId]);
 
   // No model is ever substituted: without the user's choice nothing is sent.
-  const block = connectionBlockOf(connection);
-  const blocked = block?.text
+  const onCodex = engine === 'codex';
+  const block = onCodex ? connectionBlockOf(connection) : null;
+  const blocked = !onCodex ? apiBlock : block?.text
     ?? (settings && (!settings.assistant_model || !settings.assistant_effort)
       ? 'Choose a Codex model and reasoning effort for Assistant.' : null);
   const revoked = selected?.revoked === true;
@@ -139,7 +143,7 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
   const isEmpty = messages.length === 0 && !current && !previews.some((p) => p.status === 'pending');
 
   return (
-    <AssistantShell engine="codex" head={(
+    <AssistantShell engine={onCodex ? 'codex' : 'api_agent'} head={(
       <>
         <CodexChatPicker
           chats={chats}
@@ -168,7 +172,8 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
         )}
         {current && (
           <CodexTaskCard task={current} activeSessionId={activeId} readOnly={revoked} onCite={onCite}
-            onStop={(id) => void codex().stop(id)} onResume={(id) => void codex().resume(id)} />
+            onStop={(id) => void codex().stop(id)} onResume={(id) => void codex().resume(id)}
+            onOpenSettings={onOpenSettings} />
         )}
         {previews.map((preview) => (
           <CodexPreviewCard key={preview.id} preview={preview} sessions={sessions} knownNotes={knownNotes}
@@ -186,7 +191,8 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
           action={{ label: `New chat · ${SCOPE_LABEL[selected.scope]}`, onClick: () => newChat(selected.scope) }} />
       )}
       {!revoked && blocked && (
-        <CodexConnectionNotice block={block} text={blocked} onOpenSettings={onOpenSettings} />
+        <CodexConnectionNotice block={block} text={blocked} onOpenSettings={onOpenSettings}
+          settingsLabel={onCodex ? 'Open Codex settings' : 'Open Assistant settings'} />
       )}
 
       {askContext && <QuoteChip quote={askContext} onClear={() => setAskContext(null)} />}
@@ -200,7 +206,7 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
           <p>{confirm.detail}</p>
           <label className="consent">
             <input type="checkbox" checked={dontAsk} onChange={(e) => setDontAsk(e.target.checked)} />
-            <span>Don’t ask again (you can turn it back on in Settings → Assistant → Codex)</span>
+            <span>Don’t ask again (you can turn it back on in Settings → Assistant)</span>
           </label>
           <div className="session-dialog__actions">
             <button className="btn btn--quiet" onClick={() => setConfirm(null)}>Cancel</button>

@@ -34,6 +34,21 @@ def _require_session(runtime: RuntimeDep, session_id: str) -> None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' does not exist.")
 
 
+def _require_one_pass(runtime: RuntimeDep, purpose: str) -> None:
+    """The one-pass path never answers for a purpose the user put in agent mode.
+
+    Otherwise a renderer that still used the old path would quietly downgrade the
+    tool-driven reading to a fixed top-k context: a silent fallback.
+    """
+    settings = runtime.codex.settings()
+    if settings[f"{purpose}_api_agent"] and not settings[f"{purpose}_enabled"]:
+        label = "Assistant" if purpose == "assistant" else "Notes"
+        raise HTTPException(
+            status_code=409,
+            detail=f"{label} runs in agent mode; use the agent chat. The one-pass path is not used instead.",
+        )
+
+
 def _provider_failure(error: Exception) -> HTTPException:
     if isinstance(error, ProviderTimeout):
         return HTTPException(status_code=504, detail=str(error))
@@ -47,6 +62,7 @@ async def ask(session_id: str, payload: AskRequest, runtime: RuntimeDep) -> AskR
     _require_session(runtime, session_id)
     if not payload.question.strip():
         raise HTTPException(status_code=422, detail="question must not be empty.")
+    _require_one_pass(runtime, "assistant")
     try:
         return await ask_service.answer(runtime, session_id, payload)
     except (ProviderNotConfigured, ProviderError) as error:
@@ -56,6 +72,7 @@ async def ask(session_id: str, payload: AskRequest, runtime: RuntimeDep) -> AskR
 @router.post("/{session_id}/notes")
 async def write_notes(session_id: str, payload: NotesRequest, runtime: RuntimeDep) -> Note:
     _require_session(runtime, session_id)
+    _require_one_pass(runtime, "notes")
     try:
         note = await notes_service.write(
             runtime, session_id, payload.language, payload.replace_note_id,

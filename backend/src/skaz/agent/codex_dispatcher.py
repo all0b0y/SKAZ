@@ -5,12 +5,14 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 
-from ..gateways.codex_session import CodexSession, TurnResult
+from ..gateways import ProviderError
+from ..gateways.codex_session import AgentSession, TurnResult
 from ..native_io import disk_call, drain_on_cancel
+from .api_session import BudgetExceeded
 from .codex_note_completion import ask_note
 from .snapshot_queue import SnapshotQueue, SnapshotTask
 
-Runner = Callable[[SnapshotTask], AbstractAsyncContextManager[CodexSession]]
+Runner = Callable[[SnapshotTask], AbstractAsyncContextManager[AgentSession]]
 #: Looks at a finished answer. ``None`` accepts it; a string is the correction to send
 #: back to the same thread for exactly one more attempt.
 Check = Callable[[SnapshotTask, str], Awaitable[str | None]]
@@ -31,7 +33,7 @@ class CodexDispatcher:
         self._pump: asyncio.Task[None] | None = None
         self._execution: asyncio.Task[None] | None = None
         self._active: str | None = None
-        self._session: CodexSession | None = None
+        self._session: AgentSession | None = None
         self._closing = False
         self._wake_requested = False
         self._controls = asyncio.Lock()
@@ -77,6 +79,10 @@ class CodexDispatcher:
     async def _execute(self, task: SnapshotTask) -> None:
         completed = False
         rejected = False
+        #: A spent budget ends the task: resuming would only spend it again.
+        refused: str | None = None
+        #: A provider's own classified message; the task stays resumable (Retry).
+        failure: str | None = None
         try:
             if task.answer:
                 # An interrupted run is never continued: a resumed turn starts its
@@ -110,6 +116,11 @@ class CodexDispatcher:
                             answer = (await disk_call(self.queue.get, task.id)).answer
                             rejected = await self._check(task, answer) is not None
                 # Only classified callback text is persisted. Never the raw TurnResult tail.
+        except BudgetExceeded as error:
+            refused = str(error)
+        except ProviderError as error:
+            # Provider errors are written for the UI and never carry source text or keys.
+            failure = str(error)
         except (Exception, asyncio.CancelledError):
             # Sanitized, no retry; the runner context must already have reaped its process.
             completed = False
@@ -119,12 +130,17 @@ class CodexDispatcher:
             if current.status == "stopping":
                 await disk_call(self.queue.acknowledge_cancel, task.id)
             elif current.status == "running":
-                if rejected:
+                if refused is not None:
+                    await disk_call(self.queue.finish, task.id, "failed", "", error=refused)
+                elif rejected:
                     await disk_call(self.queue.finish, task.id, "failed", "", error="answer_rejected")
                 elif completed:
                     await disk_call(self.queue.finish, task.id, "completed", current.answer)
                 else:
-                    await disk_call(self.queue.pause, task.id)
+                    if failure is None:
+                        await disk_call(self.queue.pause, task.id)
+                    else:
+                        await disk_call(self.queue.pause, task.id, failure)
                     if self._on_interrupted is not None and not self._closing:
                         self._on_interrupted()
 
