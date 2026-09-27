@@ -33,6 +33,7 @@ from ..local_models import (
     GIGACHAT_PROVIDER,
     GIGACHAT_REQUIRED_MEMORY_BYTES,
     GIGACHAT_REVISION,
+    SPEAKER_PROVIDER,
     CacheSafetyError,
     DeleteResult,
     DownloadProgress,
@@ -43,6 +44,8 @@ from ..local_models import (
     local_model_cache_present,
     local_platform,
     physical_memory_bytes,
+    speaker_model_path,
+    speaker_runtime_available,
 )
 from ..schemas import LocalModelState
 from . import ProviderError, ProviderNotConfigured, describe_http_error, describe_transport_error
@@ -620,6 +623,21 @@ class LocalGigaChatTranscriber:
         return str(cache_dir or "") in cls._models
 
 
+SPEAKER_DEPENDENCY_DETAIL = (
+    "Speaker separation needs ONNX Runtime and NumPy. Install the backend with the "
+    "'local-asr' extra; model status never installs it implicitly."
+)
+
+
+def load_speaker_embedder(*, cache_dir: Path | None) -> Any:
+    """The cached voice-embedding model, strictly offline."""
+    if not speaker_runtime_available():
+        raise LocalAsrDependencyMissing(SPEAKER_DEPENDENCY_DETAIL)
+    from .whisper_local import OnnxSpeakerEmbedder
+
+    return OnnxSpeakerEmbedder(speaker_model_path(cache_dir=cache_dir))
+
+
 class LocalModelBusy(RuntimeError):
     """Another local checkpoint is already being prepared."""
 
@@ -728,6 +746,9 @@ class LocalModelPreparations:
                 return "unsupported", host.detail
             if not gigachat_runtime_available():
                 return "dependency_missing", GIGACHAT_DEPENDENCY_DETAIL
+        elif provider == SPEAKER_PROVIDER:
+            if not speaker_runtime_available():
+                return "dependency_missing", SPEAKER_DEPENDENCY_DETAIL
         elif not local_asr_available():
             return "dependency_missing", LOCAL_ASR_DEPENDENCY_DETAIL
         return None
@@ -741,7 +762,8 @@ class LocalModelPreparations:
             engine_cached = (
                 LocalGigaChatTranscriber.has_cached_engine(self._cache_dir)
                 if provider == GIGACHAT_PROVIDER
-                else LocalWhisperTranscriber.has_cached_engine(model, self._cache_dir)
+                else provider == "local-whisper"
+                and LocalWhisperTranscriber.has_cached_engine(model, self._cache_dir)
             )
             if engine_cached:
                 self._reports[key] = ("ready", None)
@@ -842,12 +864,7 @@ class LocalModelPreparations:
                 progress=update,
             )
         except LocalAsrDependencyMissing:
-            detail = (
-                GIGACHAT_DEPENDENCY_DETAIL
-                if provider == GIGACHAT_PROVIDER
-                else LOCAL_ASR_DEPENDENCY_DETAIL
-            )
-            return "dependency_missing", detail
+            return "dependency_missing", _dependency_detail(provider)
         except Exception as error:
             return "error", _classify_download_failure(error)
         return None
@@ -857,18 +874,15 @@ class LocalModelPreparations:
         try:
             if provider == GIGACHAT_PROVIDER:
                 await _to_thread_until_finished(load_local_gigachat, cache_dir=self._cache_dir)
+            elif provider == SPEAKER_PROVIDER:
+                await _to_thread_until_finished(load_speaker_embedder, cache_dir=self._cache_dir)
             else:
                 kwargs: dict[str, Any] = {"allow_download": False}
                 if self._cache_dir is not None:
                     kwargs["cache_dir"] = self._cache_dir
                 await _to_thread_until_finished(load_local_whisper, model, **kwargs)
         except LocalAsrDependencyMissing:
-            detail = (
-                GIGACHAT_DEPENDENCY_DETAIL
-                if provider == GIGACHAT_PROVIDER
-                else LOCAL_ASR_DEPENDENCY_DETAIL
-            )
-            return "dependency_missing", detail
+            return "dependency_missing", _dependency_detail(provider)
         except Exception as error:
             return _classify_local_load(error)
         return "ready", None
@@ -911,7 +925,7 @@ class LocalModelPreparations:
         try:
             if provider == "local-whisper":
                 LocalWhisperTranscriber.invalidate(model)
-            else:
+            elif provider == GIGACHAT_PROVIDER:
                 LocalGigaChatTranscriber.invalidate()
             result = await _to_thread_until_finished(
                 delete_local_model_cache,
@@ -938,6 +952,14 @@ class LocalModelPreparations:
     def close(self) -> None:
         if self._task is not None:
             self._task.cancel()
+
+
+def _dependency_detail(provider: str) -> str:
+    if provider == GIGACHAT_PROVIDER:
+        return GIGACHAT_DEPENDENCY_DETAIL
+    if provider == SPEAKER_PROVIDER:
+        return SPEAKER_DEPENDENCY_DETAIL
+    return LOCAL_ASR_DEPENDENCY_DETAIL
 
 
 def _json(response: httpx.Response, provider: str) -> dict[str, Any]:

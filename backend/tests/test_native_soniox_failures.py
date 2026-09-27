@@ -106,7 +106,10 @@ def test_explicit_auth_retry_uses_current_clock_and_retains_gap(
                     while not first.closed:
                         await asyncio.sleep(0.001)
             http.portal.call(wait_closed)
-            assert ws.receive_json() == {"type": "transcription.failed"}
+            # The warning names the provider's sanitized reason, never raw provider text.
+            assert ws.receive_json() == {
+                "type": "transcription.failed", "reason": "Soniox request failed (HTTP 401).",
+            }
             ws.send_bytes(packet(1, 1600))  # drain the already captured tail
             assert ws.receive_json()["saved_samples"] == 3200
             ws.send_json({"type": "end"})

@@ -1,11 +1,17 @@
-"""Bounded native live transport; only transcript and transport clocks persist."""
+"""Bounded native live transport; only transcript and transport clocks persist.
+
+The stream is provider-neutral: it opens sessions through a
+:class:`~.gateways.live_session.LiveSessionOpener` and reopens the *same* provider
+after a retryable failure. It never switches to another provider.
+"""
 from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
 
 from . import native_recovery
-from .gateways.soniox import SonioxConfig, SonioxGateway, SonioxGatewayError, SonioxSession
+from .gateways import LiveAsrError
+from .gateways.live_session import LiveAsrSession, LiveSessionOpener
 from .live_store import LiveConflict, LiveConnection, LiveStore
 from .native_io import disk_call, drain_on_cancel
 from .native_recovery import RecoveryBudget, ReplayBuffer
@@ -15,24 +21,32 @@ SEND_TIMEOUT_S = 2.0
 
 
 class NativeStream:
-    def __init__(self, store: LiveStore, connection: LiveConnection, api_key: str | None) -> None:
+    def __init__(
+        self, store: LiveStore, connection: LiveConnection, opener: LiveSessionOpener | None, *,
+        unavailable_reason: str | None = None, cloud: bool = True, api_key_provider: str | None = None,
+    ) -> None:
         self.store = store
         self.connection = connection
-        self.state = "connecting" if api_key else "unavailable"
+        self.state = "connecting" if opener else "unavailable"
         self.complete = False
         self._storage_lock = asyncio.Lock()
-        self._key = api_key
+        self._opener = opener
+        self.provider = opener.provider if opener else None
+        #: Consent revocation stops only streams that send audio off this computer.
+        self.cloud = cloud
+        self.api_key_provider = api_key_provider
+        self._label = opener.label if opener else "Transcription"
         self._provider_disabled = False
         self.buffer = ReplayBuffer(connection.sample_rate, connection.start_sample)
         self.recovery = RecoveryBudget()
-        self.failure_reason: str | None = None
+        self.failure_reason: str | None = None if opener else unavailable_reason
         self._wake = asyncio.Event()
         self._overflow = asyncio.Event()
         self._stopping = asyncio.Event()
         self._submitted_samples = 0
         self._opened_provider = False
-        self._session: SonioxSession | None = None
-        self._worker = asyncio.create_task(self._run()) if api_key else None
+        self._session: LiveAsrSession | None = None
+        self._worker = asyncio.create_task(self._run()) if opener else None
 
     def check(self) -> None:
         if self._worker is not None and self._worker.done():
@@ -80,7 +94,7 @@ class NativeStream:
                 self.offer(pcm)
             return added
 
-    async def _activate(self, config: SonioxConfig) -> None:
+    async def _activate(self) -> None:
         async with self._storage_lock:
             if self._opened_provider:
                 self.connection = await disk_call(self.store.reconnect, self.connection.id)
@@ -89,7 +103,7 @@ class NativeStream:
             self.state = "streaming"
             self.recovery.connected(asyncio.get_running_loop().time())
 
-    async def _receive(self, session: SonioxSession) -> None:
+    async def _receive(self, session: LiveAsrSession) -> None:
         ordinal = 0
         async for event in session.events():
             if event.total_audio_proc_ms * self.connection.sample_rate > self._submitted_samples * 1000:
@@ -101,7 +115,7 @@ class NativeStream:
             if event.finished:
                 self.complete = True
 
-    async def _send(self, session: SonioxSession) -> None:
+    async def _send(self, session: LiveAsrSession) -> None:
         cursor = self.buffer.start
         while True:
             self._wake.clear()
@@ -117,7 +131,7 @@ class NativeStream:
             else:
                 await self._wake.wait()
 
-    async def _connected(self, session: SonioxSession) -> None:
+    async def _connected(self, session: LiveAsrSession) -> None:
         receiver = asyncio.create_task(self._receive(session))
         sender = asyncio.create_task(self._send(session))
         overflow = asyncio.create_task(self._overflow.wait())
@@ -128,7 +142,8 @@ class NativeStream:
             if sender in done and self._stopping.is_set():
                 await receiver
             if not self._stopping.is_set() and not self.complete:
-                raise SonioxGatewayError("Soniox stream interrupted.", retryable=session.failure_retryable)
+                reason = getattr(session, "failure_message", None) or f"{self._label} stream interrupted."
+                raise LiveAsrError(reason, retryable=session.failure_retryable)
         finally:
             for task in (sender, receiver, overflow):
                 task.cancel()
@@ -137,37 +152,34 @@ class NativeStream:
             self._session = None
 
     async def _run(self) -> None:
-        assert self._key is not None
-        config = SonioxConfig(
-            sample_rate=self.connection.sample_rate, event_queue_size=8,
-            used_languages=self.connection.used_languages,
-            translation_target_language=(self.connection.translation_target_language
-                                         if self.connection.recording_mode == "translation" else None),
-        )
+        opener = self._opener
+        assert opener is not None
         try:
             while not self._stopping.is_set():
                 try:
                     delay = self.recovery.next_delay()
-                except TimeoutError as error:
-                    self.failure_reason = str(error)
+                except TimeoutError:
+                    # Keep the last concrete provider reason; it says what to fix.
+                    self.failure_reason = self.failure_reason or (
+                        f"{self._label} connection failed after three attempts.")
                     return
                 initial = self.recovery.attempt == 1 and not self._opened_provider
                 self.state = "connecting" if initial else "reconnecting"
                 self.complete = False
                 try:
                     await asyncio.sleep(delay)
-                    async with asyncio.timeout(native_recovery.OPEN_TIMEOUT_S):
-                        self._session = await SonioxGateway(api_key=self._key, config=config).open()
-                    await drain_on_cancel(self._activate(config))
+                    async with asyncio.timeout(opener.open_timeout_s or native_recovery.OPEN_TIMEOUT_S):
+                        self._session = await opener.open()
+                    await drain_on_cancel(self._activate())
                     await self._connected(self._session)
                     if self.complete or self._stopping.is_set():
                         return
-                except SonioxGatewayError as error:
+                except LiveAsrError as error:
                     self.failure_reason = str(error)
                     if not error.retryable:
                         return
                 except TimeoutError:
-                    self.failure_reason = "Soniox connection timed out."
+                    self.failure_reason = f"{self._label} connection timed out."
                 except LiveConflict:
                     self.failure_reason = "Transcription timing could not be verified."
                     return
@@ -186,7 +198,7 @@ class NativeStream:
     async def disable_provider(self) -> None:
         """Revoke cloud access without closing local storage or replaying audio."""
         self._provider_disabled = True
-        self._key = None
+        self._opener = None
         self.state = "unavailable"
         self.complete = False
         if self._worker is not None:

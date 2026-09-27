@@ -42,8 +42,12 @@ help you check an answer; they do not guarantee it is correct.
 
 ## Features
 
-- **Live transcription and translation:** Soniox speech recognition, speaker-grouped
-  text and access to the original when using translation.
+- **Live transcription and translation:** choose the speech provider in
+  **Settings → Transcription** — Soniox (cloud streaming, full speaker separation,
+  translation), **Local Whisper** (faster-whisper on this Mac, works with the network
+  off; approximate speakers, translation into English only) or OpenAI. Text is
+  grouped by speaker, with access to the original when translating. There is never
+  a silent fallback between providers.
 - **Microphone and system audio:** select a microphone and optionally include your
   Mac's sound. System-audio capture requires macOS 14.2+ and OS permission.
 - **Questions with context:** ask about a session or a wider library scope and
@@ -57,7 +61,7 @@ help you check an answer; they do not guarantee it is correct.
   Codex account sign-in or supported OpenAI, Anthropic and OpenRouter API profiles.
   In **agent mode**, an API model with tool calling reads the library step by step
   through the same bounded SKAZ tools Codex uses, instead of answering from passages
-  picked in advance. Live speech uses Soniox, not those text models.
+  picked in advance. Live speech uses the transcription provider, not those text models.
 
 ## Install and first launch
 
@@ -70,7 +74,9 @@ To run the current code instead, use [development setup](CONTRIBUTING.md).
 On first launch:
 
 1. Choose the languages you expect to hear.
-2. Open **Settings → API keys**, add your Soniox key, enable cloud consent and save.
+2. Open **Settings → API keys**, add your Soniox key, enable cloud consent and save —
+   or, to keep audio on this Mac, choose **Local Whisper** in **Settings → Transcription**
+   and download a model (the size is shown first; no key or cloud consent needed).
 3. In **Settings → Transcription**, choose transcription or translation and its target language.
 4. Configure **Assistant** and **Notes** separately. For Codex, install the official
    [Codex CLI](https://developers.openai.com/codex/cli/) and sign in through SKAZ's
@@ -86,7 +92,8 @@ services have their own pricing; the MIT license does not include their usage.
 
 - Transcripts, notes and chats are stored locally. There is no permanent live-audio
   archive for playback; temporary audio may be used for processing or recovery.
-- Audio goes to Soniox for recognition after consent. Assistant and Notes send
+- With Soniox or OpenAI, audio goes to that provider for recognition after consent;
+  with Local Whisper it is transcribed on this Mac and never sent. Assistant and Notes send
   context to the selected service. Provider retention and training policies apply:
   **local storage does not mean offline processing**.
 - API keys are stored in an encrypted local file, with its encryption key alongside
@@ -98,7 +105,7 @@ services have their own pricing; the MIT license does not include their usage.
 ## How it works
 
 ```text
-Microphone / system audio / media → Electron → Python → Soniox
+Microphone / system audio / media → Electron → Python → Soniox | Local Whisper | OpenAI
                                       ↓         ↓
                                   React UI   Local library
                                                 ↕

@@ -46,6 +46,10 @@ export interface NativeSnapshot {
   translation_target_language?: string;
   used_languages?: string[] | null;
   transcription: 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive' | 'disabled';
+  /** Provider transcribing (or that last transcribed) this recording; absent = Soniox. */
+  transcription_provider?: string;
+  /** Sanitized reason transcription is unavailable, when known. */
+  transcription_detail?: string;
   final_tokens?: NativeTranscriptToken[];
   live_translation_projection?: NativeTranslationProjection;
   final_translation_tokens?: NativeTranslationToken[];
@@ -75,6 +79,10 @@ export interface NativeOpened {
   saved_samples: number;
   next_sequence: number;
   transcription: 'connecting' | 'unavailable' | 'disabled';
+  /** Which provider transcribes this stream (soniox, local-whisper, openai). */
+  transcription_provider?: string;
+  /** Sanitized reason transcription is unavailable, when the backend knows it. */
+  transcription_detail?: string;
 }
 
 export interface NativeSaved {
@@ -92,4 +100,6 @@ export interface NativeStopped {
 export interface NativeFailure {
   sessionId: string;
   code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed' | 'transcription_failed';
+  /** Sanitized provider reason for transcription_failed (e.g. "Local Whisper cannot keep up…"). */
+  reason?: string;
 }

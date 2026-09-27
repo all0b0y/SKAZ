@@ -39,6 +39,27 @@ LOCAL_WHISPER_REPOSITORIES: dict[str, str] = {
     "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
 }
 
+#: Approximate download sizes, shown before the user confirms a download.
+LOCAL_MODEL_SIZES: dict[str, int] = {
+    "tiny": 75_000_000,
+    "base": 145_000_000,
+    "small": 484_000_000,
+    "medium": 1_530_000_000,
+    "large-v2": 3_090_000_000,
+    "large-v3": 3_090_000_000,
+    "large-v3-turbo": 1_620_000_000,
+    "distil-small.en": 336_000_000,
+    "distil-large-v3": 1_510_000_000,
+}
+
+#: Local voice-embedding model used for approximate speaker separation.
+SPEAKER_PROVIDER = "local-speaker"
+SPEAKER_MODEL_ID = "wespeaker-voxceleb-resnet34-LM"
+#: WeSpeaker ResNet34-LM exported to ONNX (the export pyannote.audio 3.0 used).
+SPEAKER_REPOSITORY = "hbredin/wespeaker-voxceleb-resnet34-LM"
+SPEAKER_MODEL_BYTES = 26_600_000
+SPEAKER_ALLOW_PATTERNS = ("*.onnx",)
+
 WHISPER_ALLOW_PATTERNS = (
     "config.json",
     "preprocessor_config.json",
@@ -92,7 +113,45 @@ def local_model_spec(provider: str, model: str) -> LocalModelSpec | None:
         return LocalModelSpec(provider, model, repo_id) if repo_id else None
     if provider == GIGACHAT_PROVIDER and model == GIGACHAT_MODEL_ID:
         return LocalModelSpec(provider, model, GIGACHAT_MODEL_ID, GIGACHAT_REVISION)
+    if provider == SPEAKER_PROVIDER and model == SPEAKER_MODEL_ID:
+        return LocalModelSpec(provider, model, SPEAKER_REPOSITORY)
     return None
+
+
+def local_model_size(provider: str, model: str) -> int | None:
+    """Approximate download size in bytes, or None when unknown."""
+    if provider == "local-whisper":
+        return LOCAL_MODEL_SIZES.get(model)
+    if provider == GIGACHAT_PROVIDER and model == GIGACHAT_MODEL_ID:
+        return GIGACHAT_RUNTIME_BYTES
+    if provider == SPEAKER_PROVIDER and model == SPEAKER_MODEL_ID:
+        return SPEAKER_MODEL_BYTES
+    return None
+
+
+def speaker_runtime_available() -> bool:
+    """ONNX Runtime and NumPy arrive with the 'local-asr' extra (faster-whisper)."""
+    try:
+        return (importlib.util.find_spec("onnxruntime") is not None
+                and importlib.util.find_spec("numpy") is not None)
+    except (ImportError, ModuleNotFoundError):
+        return False
+
+
+def speaker_model_path(*, cache_dir: Path | None) -> Path:
+    """The cached ONNX file, strictly offline. Raises FileNotFoundError when absent."""
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError as error:
+        raise FileNotFoundError("huggingface-hub is not installed") from error
+    snapshot = Path(snapshot_download(
+        repo_id=SPEAKER_REPOSITORY, cache_dir=str(hf_cache_dir(cache_dir)),
+        allow_patterns=list(SPEAKER_ALLOW_PATTERNS), local_files_only=True,
+    ))
+    candidates = sorted(path for path in snapshot.glob("*.onnx") if path.is_file())
+    if not candidates:
+        raise FileNotFoundError("the speaker model file is missing from the local cache")
+    return candidates[0]
 
 
 def local_platform() -> tuple[str, str]:
@@ -187,11 +246,12 @@ def download_local_model(
 
     target_cache = str(hf_cache_dir(cache_dir))
     progress_class = _progress_tqdm(progress)
-    if provider == "local-whisper":
+    if provider in ("local-whisper", SPEAKER_PROVIDER):
+        patterns = WHISPER_ALLOW_PATTERNS if provider == "local-whisper" else SPEAKER_ALLOW_PATTERNS
         snapshot_download(
             repo_id=spec.repo_id,
             cache_dir=target_cache,
-            allow_patterns=list(WHISPER_ALLOW_PATTERNS),
+            allow_patterns=list(patterns),
             tqdm_class=progress_class,
         )
         return

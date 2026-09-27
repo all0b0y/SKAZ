@@ -7,6 +7,8 @@ import type { PersistedAudioAck } from './persistenceQueue';
 export class NativeAudioWriter {
   private rate: number | null = null;
   transcriptionAvailable = false;
+  /** Backend's sanitized reason transcription could not start, if it sent one. */
+  transcriptionDetail: string | null = null;
   transcriptionIncomplete = false;
   private audioRetained = true;
   private sequence = 0;
@@ -54,6 +56,7 @@ export class NativeAudioWriter {
       }
       this.recovered = lostAck ? this.sequence : null;
       this.transcriptionAvailable = opened.transcription === 'connecting';
+      this.transcriptionDetail = opened.transcription_detail ?? null;
       this.audioRetained = opened.audio_retained !== false;
       this.transcriptionIncomplete = false;
       this.clockInitialized = true;

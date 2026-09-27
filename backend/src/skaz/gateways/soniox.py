@@ -19,6 +19,7 @@ from typing import Any, Literal, Protocol, cast
 from websockets.asyncio.client import connect
 
 from ..languages import validate_languages
+from . import LiveAsrError
 
 SONIOX_WEBSOCKET_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 DEFAULT_MODEL = "stt-rt-v5"
@@ -31,12 +32,11 @@ _SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 Marker = Literal["end", "fin"]
 
 
-class SonioxGatewayError(RuntimeError):
+class SonioxGatewayError(LiveAsrError):
     """A sanitized connection, provider, or protocol failure."""
 
     def __init__(self, message: str = "Soniox protocol failure", *, retryable: bool = False) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+        super().__init__(message, retryable=retryable)
 
 
 class SonioxProtocolError(SonioxGatewayError):
@@ -268,6 +268,13 @@ class SonioxSession:
         self._closed = False
         self._final_audio_proc_ms = 0
         self._total_audio_proc_ms = 0
+
+    @property
+    def failure_message(self) -> str | None:
+        """The sanitized reason this session ended without ``finished:true``, if known."""
+        if not self._completion.done():
+            return None
+        return self._completion.result().error
 
     @property
     def pending_event_count(self) -> int:

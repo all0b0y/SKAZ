@@ -33,6 +33,7 @@ LIVE_RESPONSE_ALLOWED = {
     "recording_mode", "translation_target_language", "used_languages", "transcription",
     "final_tokens", "live_translation_projection", "final_translation_tokens",
     "partial_translation_tokens", "speakers", "connections", "gaps", "origin",
+    "transcription_provider", "transcription_detail",
 }
 NEVER_READ = {"final_stream_tokens", "final_translation_projection", "partial_stream_tokens"}
 TRANSLATION_ONLY = {

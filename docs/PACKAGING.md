@@ -28,9 +28,10 @@ Result:
 | 4. Renderer/main/preload | `npm run build` | `dist/` |
 | 5. Bundle + DMG + PKG | `electron-builder --mac --config electron-builder.yml` | `release/*.dmg`, `release/*.pkg` |
 
-Prerequisites: `npm install`, a populated `backend/.venv` (with `pyinstaller`
-installed into it: `uv pip install --python backend/.venv/bin/python pyinstaller`),
-and Python 3 with Pillow on the PATH for the icon step.
+Prerequisites: `npm install`, a populated `backend/.venv` with the Local Whisper
+runtime (`uv sync --project backend --extra local-asr`) and `pyinstaller` installed
+into it (`uv pip install --python backend/.venv/bin/python pyinstaller`), and
+Python 3 with Pillow on the PATH for the icon step.
 
 ## Why the backend is frozen
 
@@ -46,11 +47,9 @@ An installed `.app` has no repository and no `uv`. `BackendManager.resolveSpawn`
 script as `__main__`, which breaks the relative imports inside
 `skaz/__main__.py`. The entry point imports the package properly instead.
 
-The spec **excludes** `faster-whisper`, `ctranslate2`, `onnxruntime`, `av` and
-`tokenizers`. Local Whisper is an optional extra worth several hundred MB; the
-product's live path is Soniox, and the local-models probes degrade gracefully when
-the module is absent. Shipping local ASR means removing those excludes and
-accepting the size.
+The spec **includes** the Local Whisper runtime (`faster-whisper`, `ctranslate2`,
+`onnxruntime`, `av`, `tokenizers`, `huggingface-hub`) when the backend venv has the
+`local-asr` extra; see [Local ASR runtime](#local-asr-runtime) below.
 
 ## The icon
 
@@ -163,15 +162,24 @@ next to the ciphertext, so the real boundary is file permissions. It does **not*
 protect against another process running as your user, or a backup or synced copy
 containing both files. Protect the data directory and its backups accordingly.
 
-## Local ASR is deliberately not shipped
+## Local ASR runtime
 
-`skaz-backend.spec` excludes `faster_whisper`, `ctranslate2`, `onnxruntime`, `av`
-and `tokenizers`. The live path is Soniox; local Whisper would add hundreds of MB
-for a feature the product does not currently use, and the local-model probes
-degrade gracefully when the modules are absent. Verified on the built bundle: none
-of those libraries appear under `Contents/Resources/backend` (50 MB total).
+Settings → Transcription offers Local Whisper, so the frozen backend carries its
+runtime: `faster_whisper` (with the bundled Silero VAD ONNX file), `ctranslate2`,
+`onnxruntime` (VAD and the optional speaker-separation model), `av`, `tokenizers`
+and `huggingface_hub`. The spec collects their submodules, data files and dynamic
+libraries only when they are importable in `backend/.venv`; build from a venv made
+with `uv sync --project backend --extra local-asr`. A venv without the extra still
+produces a working backend where Local Whisper reports "dependency missing".
 
-Shipping local ASR later means removing those excludes and accepting the size.
+Model **weights are never bundled**: Whisper checkpoints (75 MB–3.1 GB) and the
+speaker model (~27 MB) are downloaded on demand after the user confirms the size in
+Settings, into the Hugging Face cache, and are then loaded with the network closed.
+The runtime is large: in a Linux x86_64 test build of this spec it added about
+350 MB to the backend (PyAV ~100 MB, CTranslate2 ~130 MB, ONNX Runtime ~57 MB,
+NumPy ~42 MB, tokenizers ~11 MB; 414 MB total). The macOS arm64 wheels differ and
+have not been measured yet — measure `Contents/Resources/backend` after building
+and record it in the release notes. GigaChat Audio MLX remains excluded.
 
 ## Architecture
 

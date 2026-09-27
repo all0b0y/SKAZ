@@ -12,6 +12,7 @@ from .agent.api_agent import ApiAgentEngine
 from .agent.codex_runtime import CodexRuntime
 from .agent.note_rewrite import PendingRewrites
 from .agent.retrieval import EmbeddingIndex
+from .asr_providers import describe_providers
 from .capabilities import describe
 from .catalog import ProviderCatalogs
 from .config import AppConfig, adopt_legacy_database
@@ -160,6 +161,11 @@ class Runtime:
             import_cost_warning_usd=settings.import_cost_warning_usd,
             embedding_budget_usd=settings.embedding_budget_usd,
             contextual_local_enabled=settings.contextual_local_enabled,
+            transcription_provider=settings.transcription_provider,
+            local_whisper_model=settings.local_whisper_model,
+            openai_transcription_model=settings.openai_transcription_model,
+            speaker_separation=settings.speaker_separation,
+            transcription_providers=describe_providers(self, settings),
         )
 
     def mark_verified(self, task: Task, provider: str, model: str, detail: str) -> None:

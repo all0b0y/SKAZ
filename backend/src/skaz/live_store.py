@@ -49,8 +49,12 @@ class LiveStore:
         recording_mode: NativeRecordingMode = "transcription", translation_target_language: str = "ru",
         used_languages: tuple[str, ...] | None = None,
     ) -> LiveConnection:
-        SonioxConfig(sample_rate=sample_rate, model=model,
+        SonioxConfig(sample_rate=sample_rate,
                      translation_target_language=translation_target_language, used_languages=used_languages)
+        # Provenance only (e.g. "stt-rt-v5", "local-whisper/small"): a bounded identifier.
+        if (not isinstance(model, str) or not 0 < len(model) <= 96
+                or any(character.isspace() for character in model)):
+            raise LiveConflict("Invalid transcription model identity.")
         if recording_mode not in ("transcription", "translation"):
             raise LiveConflict("Invalid recording mode.")
         with self.db.write() as connection:

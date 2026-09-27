@@ -43,8 +43,11 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
 
 ## Funciones
 
-- **Transcripción y traducción en directo:** reconocimiento con Soniox, texto agrupado
-  por hablante y acceso al original al usar la traducción.
+- **Transcripción y traducción en directo:** el proveedor se elige en
+  **Settings → Transcription**: Soniox (streaming en la nube, separación completa de
+  hablantes, traducción), **Local Whisper** (faster-whisper en este Mac, funciona sin red;
+  hablantes aproximados, traducción solo al inglés) u OpenAI. Texto agrupado por hablante
+  y acceso al original al traducir. Nunca se cambia de proveedor en silencio.
 - **Micrófono y audio del sistema:** selecciona un micrófono y, si quieres, incluye
   el sonido del Mac. El audio del sistema requiere macOS 14.2+ y permiso del sistema.
 - **Preguntas con contexto:** consulta una sesión o un ámbito más amplio de la biblioteca;
@@ -55,7 +58,7 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
 - **Importación de medios (experimental):** audio y vídeo locales y contenido de YouTube.
   Procesa solo material que tengas autorización para usar; la disponibilidad y los formatos varían.
 - **Modelos independientes:** configura Assistant y Notes por separado mediante una
-  cuenta Codex o perfiles API de OpenAI, Anthropic y OpenRouter. Soniox se encarga de la voz en directo.
+  cuenta Codex o perfiles API de OpenAI, Anthropic y OpenRouter. El proveedor de transcripción se encarga de la voz en directo.
 
 ## Instalación y primer inicio
 
@@ -68,7 +71,9 @@ protecciones de macOS. Para ejecutar el código actual, consulta la [configuraci
 En el primer inicio:
 
 1. Elige los idiomas que esperas escuchar.
-2. Abre **Settings → API keys**, añade tu clave Soniox, autoriza el procesamiento en la nube y guarda.
+2. Abre **Settings → API keys**, añade tu clave Soniox, autoriza el procesamiento en la nube y guarda —
+   o, para que el audio no salga del Mac, elige **Local Whisper** en **Settings → Transcription**
+   y descarga un modelo (el tamaño se muestra antes; sin clave ni consentimiento de nube).
 3. En **Settings → Transcription**, elige transcripción o traducción y el idioma de destino.
 4. Configura **Assistant** y **Notes** por separado. Para Codex, instala el
    [Codex CLI oficial](https://developers.openai.com/codex/cli/) e inicia sesión desde
@@ -86,7 +91,8 @@ servicios de modelos de texto tienen sus propias tarifas; la licencia MIT no inc
 
 - Las transcripciones, notas y chats se guardan localmente. No hay un archivo permanente
   del audio en directo para reproducirlo; puede usarse audio temporal para procesamiento o recuperación.
-- Con tu consentimiento, el audio se envía a Soniox. Assistant y Notes envían contexto
+- Con Soniox u OpenAI, el audio se envía a ese proveedor tras tu consentimiento; con Local
+  Whisper se reconoce en este Mac y nunca se envía. Assistant y Notes envían contexto
   al servicio seleccionado. Se aplican sus políticas de conservación y entrenamiento:
   **almacenamiento local no significa procesamiento sin conexión**.
 - Las claves API se guardan en un archivo cifrado, junto a su clave de cifrado. La
@@ -98,7 +104,7 @@ servicios de modelos de texto tienen sus propias tarifas; la licencia MIT no inc
 ## Cómo funciona
 
 ```text
-Micrófono / audio del sistema / medios → Electron → Python → Soniox
+Micrófono / audio del sistema / medios → Electron → Python → Soniox | Local Whisper | OpenAI
                                            ↓         ↓
                                        React UI   Biblioteca local
                                                      ↕

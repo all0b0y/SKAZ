@@ -10,7 +10,7 @@ import type {
   ChatScope,
   Citation,
   LocalModelStatus,
-  LocalProviderName,
+  LocalModelProviderName,
   LiveAsrCapabilities,
   LiveAsrDraft,
   LiveAsrFragment,
@@ -208,9 +208,9 @@ export interface AppState {
   refreshSettings: () => Promise<void>;
   saveSettings: (update: SettingsUpdate) => Promise<void>;
   loadModels: (provider: string, task: TaskKind) => Promise<ModelInfo[]>;
-  prepareLocalModel: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>;
-  localModelStatus: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>;
-  deleteLocalModel: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>;
+  prepareLocalModel: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>;
+  localModelStatus: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>;
+  deleteLocalModel: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>;
   refreshLiveCapabilities: () => Promise<void>;
   setNextRecordingMode: (mode: SessionMode) => void;
   changeTranscriptLanguage: (language: string) => Promise<void>;
@@ -288,6 +288,12 @@ let client: ApiClient | null = null;
 let recorder: AudioRecorder | null = null;
 let persistenceQueue: PersistenceQueue | null = null;
 let nativeWriter: NativeAudioWriter | null = null;
+
+function transcriptionUnavailableMessage(detail: string | null): string {
+  return detail
+    ? `Transcription is unavailable: ${detail} Check Settings → Transcription and try recording again.`
+    : 'Transcription is unavailable. Check Settings → Transcription and try recording again.';
+}
 let nativeFailureCleanup: (() => void) | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let signalMeter: SignalMeter | null = null;
@@ -938,7 +944,8 @@ export const useStore = create<AppState>((set, get) => {
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
       if (failure.code === 'transcription_failed') {
-        set({ recorderError: 'Transcription failed. Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.' });
+        const reason = failure.reason ? ` ${failure.reason.replace(/\.?$/, '.')}` : '';
+        set({ recorderError: `Transcription failed.${reason} Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.` });
         if (!stopRequested) void get().stopRecording();
         return;
       }
@@ -977,7 +984,7 @@ export const useStore = create<AppState>((set, get) => {
       onReady: async (rate) => {
         await writer.open(rate);
         if (!writer.transcriptionAvailable) {
-          throw new Error('Transcription is unavailable. Check Soniox settings and try recording again.');
+          throw new Error(transcriptionUnavailableMessage(writer.transcriptionDetail));
         }
       },
       onChunk: (chunk: RecordedChunk) => {
@@ -1150,7 +1157,7 @@ export const useStore = create<AppState>((set, get) => {
     try {
       await nativeWriter?.open();
       if (nativeWriter && !nativeWriter.transcriptionAvailable) {
-        set({ recorderError: 'Transcription is unavailable. Check Soniox settings and try recording again.' });
+        set({ recorderError: transcriptionUnavailableMessage(nativeWriter.transcriptionDetail) });
         await get().stopRecording();
         return;
       }

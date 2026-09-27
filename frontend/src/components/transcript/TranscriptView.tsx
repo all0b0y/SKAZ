@@ -14,14 +14,27 @@ import { useTranscriptIssue } from '../../state/transcriptIssue';
 import type { NativeSnapshot } from '../../api/nativeLive';
 import { useEdgeFade } from '../../hooks/useOverflowEdges';
 
-const SONIOX_STATUS: Record<NativeSnapshot['transcription'], string> = {
-  connecting: 'Soniox: connecting',
-  reconnecting: 'Soniox: reconnecting',
-  streaming: 'Soniox: transcribing',
-  unavailable: 'Soniox: transcription unavailable — audio is still saved locally',
-  inactive: 'Soniox: not active',
-  disabled: 'Audio-only recording — transcription is disabled',
+const PROVIDER_LABELS: Record<string, string> = {
+  soniox: 'Soniox', 'local-whisper': 'Local Whisper', openai: 'OpenAI',
 };
+
+/** The provider the snapshot names; older backends only ever used Soniox. */
+const providerLabel = (snapshot: NativeSnapshot | null | undefined): string =>
+  PROVIDER_LABELS[snapshot?.transcription_provider ?? 'soniox'] ?? 'Transcription';
+
+function transcriptionStatus(snapshot: NativeSnapshot | null): string {
+  const label = providerLabel(snapshot);
+  const loading = snapshot?.transcription_provider === 'local-whisper' ? 'loading the model' : 'connecting';
+  const status: Record<NativeSnapshot['transcription'], string> = {
+    connecting: `${label}: ${loading}`,
+    reconnecting: `${label}: reconnecting`,
+    streaming: `${label}: transcribing`,
+    unavailable: `${label}: transcription unavailable — audio is still saved locally`,
+    inactive: `${label}: not active`,
+    disabled: 'Audio-only recording — transcription is disabled',
+  };
+  return snapshot?.recording_mode === 'audio_only' ? status.disabled : status[snapshot?.transcription ?? 'connecting'];
+}
 
 /** Whether a native snapshot holds any text to read (confirmed, tail or translation). */
 const hasWords = (snapshot: NativeSnapshot): boolean =>
@@ -30,8 +43,7 @@ const hasWords = (snapshot: NativeSnapshot): boolean =>
 /** Capturing, but no word has arrived yet: one static state, no pulse, no
  * second screen. The recording may not even exist on the server yet. */
 function WaitingForWords({ snapshot }: { snapshot: NativeSnapshot | null }) {
-  const status = snapshot?.recording_mode === 'audio_only' ? SONIOX_STATUS.disabled
-    : SONIOX_STATUS[snapshot?.transcription ?? 'connecting'];
+  const status = transcriptionStatus(snapshot);
   return (
     <div className="panel__center">
       <EmptyState icon="transcript" title="Recording — waiting for first words" hint={status} />
@@ -210,10 +222,16 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
     if (!activeSessionId) { reportIssue(null); return undefined; }
     reportIssue(native.error
       ? { sessionId: activeSessionId, message: native.error, action: { label: 'Retry', run: () => retryRef.current() } }
-      : unavailable ? { sessionId: activeSessionId, message: 'Recognition failed. Soniox is unavailable.', action: null }
+      : unavailable ? {
+        sessionId: activeSessionId,
+        message: `Recognition failed. ${providerLabel(native.snapshot)} is unavailable.${
+          native.snapshot?.transcription_detail ? ` ${native.snapshot.transcription_detail}` : ''}`,
+        action: null,
+      }
         : null);
     return undefined;
-  }, [activeSessionId, native.error, unavailable, reportIssue]);
+  }, [activeSessionId, native.error, unavailable, reportIssue, native.snapshot?.transcription_provider,
+    native.snapshot?.transcription_detail]);
   useEffect(() => () => reportIssue(null), [reportIssue]);
   /** Per-part reading places live in the transcript cache so a return restores them. */
   const fallbackPlaces = useRef(new Map<string, ReadingPlace>());

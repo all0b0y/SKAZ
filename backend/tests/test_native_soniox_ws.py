@@ -63,7 +63,10 @@ def test_auth_failure_warns_once_and_allows_explicit_retry(
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
-            assert ws.receive_json() == {"type": "transcription.failed"}
+            # The warning names the provider's sanitized reason, never raw provider text.
+            assert ws.receive_json() == {
+                "type": "transcription.failed", "reason": "Soniox request failed (HTTP 401).",
+            }
             ws.send_bytes(packet(0, 0))  # the captured tail still receives an ACK
             assert ws.receive_json()["type"] == "audio.saved"
             ws.send_json({"type": "end"})

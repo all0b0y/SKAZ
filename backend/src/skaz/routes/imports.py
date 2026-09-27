@@ -14,7 +14,8 @@ from fastapi import APIRouter, HTTPException
 
 from .. import media_tools
 from .. import repository as repo
-from ..gateways import ProviderNotConfigured
+from ..asr_providers import CAPABILITIES, LABELS, OPENAI_RATE_PER_HOUR_USD, readiness
+from ..gateways import LiveAsrError, ProviderNotConfigured
 from ..gateways.soniox_async import SUPPORTED_EXTENSIONS, SonioxAsyncError
 from ..import_service import MAX_CONCURRENT_IMPORTS, ImportRejected, ImportRequest
 from ..import_store import ImportConflict, ImportRecord
@@ -47,14 +48,24 @@ TRANSLATION_RATE_PER_HOUR_USD = 0.15
 async def read_capabilities(runtime: RuntimeDep) -> ImportCapabilities:
     settings = await disk_call(runtime.settings_store.load)
     root = runtime.session_files.root
+    provider = settings.transcription_provider
+    ready, detail = await disk_call(readiness, runtime, settings, provider)
+    capabilities = CAPABILITIES[provider]
+    rate, translation_rate = RATE_PER_HOUR_USD, TRANSLATION_RATE_PER_HOUR_USD
+    if provider == "local-whisper":
+        rate = translation_rate = 0.0
+    elif provider == "openai":
+        rate = translation_rate = OPENAI_RATE_PER_HOUR_USD.get(settings.openai_transcription_model, 0.36)
     return ImportCapabilities(
         supported_extensions=list(SUPPORTED_EXTENSIONS),
         max_duration_ms=MAX_IMPORT_DURATION_MS,
-        rate_per_hour_usd=RATE_PER_HOUR_USD,
-        translation_rate_per_hour_usd=TRANSLATION_RATE_PER_HOUR_USD,
+        rate_per_hour_usd=rate,
+        translation_rate_per_hour_usd=translation_rate,
         warn_above_usd=settings.import_cost_warning_usd,
         cloud_consent=settings.cloud_consent,
-        has_api_key=bool(await disk_call(runtime.api_key, "soniox")),
+        # The key of the provider imports use; an on-device provider needs none.
+        has_api_key=(bool(await disk_call(runtime.api_key, capabilities.api_key_provider))
+                     if capabilities.api_key_provider else True),
         active_imports=runtime.imports.active,
         max_concurrent_imports=MAX_CONCURRENT_IMPORTS,
         # Honest about where the result lands: the database always, a folder only
@@ -62,6 +73,12 @@ async def read_capabilities(runtime: RuntimeDep) -> ImportCapabilities:
         destination=(str(root) if root is not None
                      else "App internal storage (export to a folder is off)"),
         markdown_enabled=root is not None,
+        provider=provider,
+        provider_label=LABELS[provider],
+        provider_ready=ready,
+        provider_detail=detail,
+        sends_audio=not capabilities.offline,
+        translation=capabilities.translation,
     )
 
 
@@ -140,7 +157,7 @@ async def retry_import(session_id: str, runtime: RuntimeDep) -> ImportCreatedRes
     """Reconcile and resume the same session, never blindly create a new paid job."""
     try:
         record = await runtime.imports.retry(session_id)
-    except (ImportConflict, ProviderNotConfigured, SonioxAsyncError) as error:
+    except (ImportConflict, ProviderNotConfigured, SonioxAsyncError, LiveAsrError) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     session = await disk_call(repo.get_session, runtime.db, session_id)
     if session is None:
