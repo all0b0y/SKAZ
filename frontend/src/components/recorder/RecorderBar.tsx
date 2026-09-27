@@ -141,6 +141,31 @@ function RecorderProgress({
  * demand, a real action when one exists, and it stays until fixed or closed. */
 interface CapsuleAction { label: string; run: () => void; icon?: 'retry' | 'settings' | 'mic' }
 
+/** Waiting this long for the provider's confirmation offers the user a way out. */
+export const FORCE_FINISH_OFFER_MS = 5_000;
+
+/**
+ * Stop is waiting for the transcription provider to confirm the rest of the
+ * transcript. The wait follows the provider's status, not a timer; once it has
+ * taken a while, the user may choose to finish now and keep what is confirmed.
+ */
+function FinalizingStatus({ elapsedMs, pendingMs, onForce }: {
+  elapsedMs: number; pendingMs: number; onForce: () => void;
+}) {
+  const seconds = Math.max(1, Math.round(pendingMs / 1000));
+  return (
+    <span className="capsule__label capsule__finalizing" role="status">
+      {pendingMs > 0 ? `Finishing transcript… ${seconds} s left to confirm` : 'Finishing transcript…'}
+      {elapsedMs >= FORCE_FINISH_OFFER_MS && (
+        <button type="button" className="capsule__error-action" onClick={onForce}
+          title="Stop waiting; text confirmed so far is kept, the rest is not transcribed">
+          Finish now
+        </button>
+      )}
+    </span>
+  );
+}
+
 function CapsuleError({ message, actions, onDismiss }: {
   message: string;
   actions: CapsuleAction[];
@@ -168,6 +193,8 @@ type CapsuleView = 'idle' | 'recording' | 'paused' | 'busy' | 'finishing' | 'don
 export function RecorderBar() {
   const state = useStore((s) => s.recorderState);
   const finishing = useStore((s) => s.finishing);
+  const finalizing = useStore((s) => s.finalizing);
+  const forceFinish = useStore((s) => s.forceFinishTranscription);
   const queue = useStore((s) => s.queue);
   const transcriptionPending = useStore((s) => s.transcription.pending + s.transcription.deferred);
   // Only the segments, not the whole `detail`: a durable audio save rebuilds
@@ -301,7 +328,9 @@ export function RecorderBar() {
             aria-label="Finishing transcript…" title="Recording is available again once the transcript is finished" />
         )}
 
-        {view === 'finishing' ? (
+        {finalizing && (view === 'finishing' || view === 'busy') ? (
+          <FinalizingStatus elapsedMs={finalizing.elapsedMs} pendingMs={finalizing.pendingMs} onForce={() => void forceFinish()} />
+        ) : view === 'finishing' ? (
           <span className="capsule__label">Finishing transcript…</span>
         ) : view === 'done' ? (
           <span className="capsule__label capsule__done" role="status"><Icon name="check" size={14} /> Done</span>

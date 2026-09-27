@@ -150,6 +150,10 @@ export interface AppState {
    * the provider finalises the last words. True only for that stretch, so the
    * recorder can tell it apart from the short start/pause/resume transitions. */
   finishing: boolean;
+  /** Stop/Pause is waiting for the transcription provider's final confirmation. */
+  finalizing: { sessionId: string; elapsedMs: number; pendingMs: number } | null;
+  /** The user's explicit choice to stop waiting for that confirmation. */
+  forceFinishTranscription: () => Promise<void>;
   elapsedMs: number;
   meter: MeterSnapshot;
   queue: PersistenceQueueState;
@@ -400,7 +404,13 @@ export const useStore = create<AppState>((set, get) => {
       if (!current()) return;
       try {
         const writer = nativeWriter?.sessionId === sessionId ? nativeWriter : null;
-        if (writer && status !== 'recording') await writer.finish(status === 'paused' ? 'pause' : 'stop');
+        if (writer && status !== 'recording') {
+          try {
+            await writer.finish(status === 'paused' ? 'pause' : 'stop');
+          } finally {
+            set({ finalizing: null });
+          }
+        }
         // stream.opened/stream.stopped are already durable lifecycle ACKs.
         // A later read-model refresh must not invalidate a successful Stop.
         const updated = writer
@@ -479,6 +489,7 @@ export const useStore = create<AppState>((set, get) => {
   cancelQuit: () => set({ quitRequested: false }),
   recorderState: 'idle',
   finishing: false,
+  finalizing: null,
   elapsedMs: 0,
   meter: idleMeterSnapshot(),
   queue: emptyQueueState,
@@ -945,6 +956,10 @@ export const useStore = create<AppState>((set, get) => {
     nativeWriter = writer;
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
+      if (failure.code === 'transcription_finalizing') {
+        set({ finalizing: { sessionId, elapsedMs: failure.elapsed_ms ?? 0, pendingMs: failure.pending_ms ?? 0 } });
+        return;
+      }
       if (failure.code === 'transcription_failed') {
         const reason = failure.reason ? ` ${failure.reason.replace(/\.?$/, '.')}` : '';
         set({ recorderError: `Transcription failed.${reason} Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.` });
@@ -1218,6 +1233,16 @@ export const useStore = create<AppState>((set, get) => {
       if (recordingSessionId === id) recordingSessionId = null;
       signalMeter?.reset();
       signalMeter = null;
+    }
+  },
+
+  forceFinishTranscription: async () => {
+    const finalizing = get().finalizing;
+    if (!finalizing) return;
+    try {
+      await getClient().forceNative(finalizing.sessionId);
+    } catch (error) {
+      set({ recorderError: error instanceof Error ? error.message : String(error) });
     }
   },
 

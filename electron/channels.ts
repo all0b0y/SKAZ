@@ -6,6 +6,7 @@ export const CHANNELS = {
   nativeOpen: 'backend:native-open',
   nativeAudio: 'backend:native-audio',
   nativeEnd: 'backend:native-end',
+  nativeForce: 'backend:native-force',
   nativeFailure: 'backend:native-failure',
   request: 'backend:request',
   uploadAudio: 'backend:uploadAudio',

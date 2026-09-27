@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from skaz import native_stream
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
 from tests.test_native_live_ws import AUTH, packet
@@ -39,7 +38,6 @@ def test_network_stall_never_blocks_audio_ack_and_stop_is_incomplete(
         return socket
 
     monkeypatch.setattr(soniox, "connect", connect)
-    monkeypatch.setattr(native_stream, "FINISH_TIMEOUT_S", 0.1)
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
@@ -57,11 +55,24 @@ def test_network_stall_never_blocks_audio_ack_and_stop_is_incomplete(
                     response = ws.receive_json()
                 assert response["type"] == "audio.saved"
             ws.send_json({"type": "end"})
-            result = ws.receive_json()
-            if result["type"] == "transcription.failed":
-                assert not warned
+            # Stop waits for the provider's verdict, reporting progress; a stalled
+            # provider never gives one, so the user forces the end.
+            forced = False
+            while True:
                 result = ws.receive_json()
+                if result["type"] == "transcription.failed":
+                    assert not warned
+                    warned = True
+                elif result["type"] == "stream.finalizing":
+                    assert result["pending_ms"] >= 0
+                    if not forced:
+                        ws.send_json({"type": "force"})
+                        forced = True
+                else:
+                    break
+            assert result["type"] == "stream.stopped"
             assert result["transcription_complete"] is False
+            assert result["transcription_detail"]
             assert result["saved_samples"] == 64000
         assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["saved_samples"] == 64000
         if blocked != "connect":

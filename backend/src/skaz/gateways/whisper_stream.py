@@ -107,8 +107,8 @@ class StreamSettings:
     #: Received-but-undecoded audio beyond this means the decoder cannot keep up.
     max_backlog_s: float = 12.0
     event_queue_size: int = 8
-    #: The native stream allows 10 s for the final decode at Stop.
-    finish_timeout_s: float = 9.0
+    #: None: Stop waits for the last decode to finish, however long it takes.
+    finish_timeout_s: float | None = None
 
     def __post_init__(self) -> None:
         if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int)
@@ -397,11 +397,13 @@ class WhisperStreamSession:
                 return
             yield event
 
-    async def finish(self) -> bool:
+    async def finish(self, *, timeout_s: float | None = None) -> bool:
+        """Decode everything received, emit ``finished``, and only then return."""
         self._finishing = True
         self._wake.set()
+        deadline = timeout_s if timeout_s is not None else self._settings.finish_timeout_s
         with contextlib.suppress(TimeoutError, asyncio.CancelledError, Exception):
-            async with asyncio.timeout(self._settings.finish_timeout_s):
+            async with asyncio.timeout(deadline):
                 await asyncio.shield(self._worker)
         return self._finished
 

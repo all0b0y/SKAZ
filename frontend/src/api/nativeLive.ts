@@ -101,7 +101,12 @@ export interface NativeStopped {
 
 export interface NativeFailure {
   sessionId: string;
-  code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed' | 'transcription_failed';
+  /** transcription_finalizing is progress, not a failure: Stop is waiting for the provider. */
+  code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed' | 'transcription_failed'
+    | 'transcription_finalizing';
+  /** transcription_finalizing: time since Stop and captured audio not yet confirmed. */
+  elapsed_ms?: number;
+  pending_ms?: number;
   /** Sanitized provider reason for transcription_failed (e.g. "Local Whisper cannot keep up…"). */
   reason?: string;
 }

@@ -20,6 +20,7 @@ const api: BridgeApi = {
   openNative: (sessionId, sampleRate) => ipcRenderer.invoke(CHANNELS.nativeOpen, sessionId, sampleRate),
   sendNativeAudio: (sessionId, meta, pcm) => ipcRenderer.invoke(CHANNELS.nativeAudio, sessionId, meta, pcm),
   endNative: (sessionId, action) => ipcRenderer.invoke(CHANNELS.nativeEnd, sessionId, action),
+  forceNative: (sessionId) => ipcRenderer.invoke(CHANNELS.nativeForce, sessionId),
   onNativeFailure(listener) {
     const handler = (_event: unknown, failure: Parameters<typeof listener>[0]): void => listener(failure);
     ipcRenderer.on(CHANNELS.nativeFailure, handler);

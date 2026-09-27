@@ -315,16 +315,22 @@ class SonioxSession:
             self._event_slots.release()
             yield event
 
-    async def finish(self, *, timeout_s: float = FINALIZATION_TIMEOUT_S) -> SonioxCompletion:
-        """Send empty binary end-of-stream once and await ``finished:true``."""
-        if not math.isfinite(timeout_s) or timeout_s <= 0:
-            raise ValueError("timeout_s must be positive and finite")
-        timeout_s = min(timeout_s, FINALIZATION_TIMEOUT_S)
+    async def finish(self, *, timeout_s: float | None = FINALIZATION_TIMEOUT_S) -> SonioxCompletion:
+        """Send empty binary end-of-stream once and await ``finished:true``.
+
+        ``timeout_s=None`` waits for the provider's own verdict instead of a clock:
+        ``finished:true``, an error, or the connection ending. A dead connection
+        still ends, through the WebSocket keepalive pings.
+        """
+        if timeout_s is not None:
+            if not math.isfinite(timeout_s) or timeout_s <= 0:
+                raise ValueError("timeout_s must be positive and finite")
+            timeout_s = min(timeout_s, FINALIZATION_TIMEOUT_S)
         if self._finish_task is None:
             self._finish_task = asyncio.create_task(self._finish_once(timeout_s), name="soniox-finish")
         return await asyncio.shield(self._finish_task)
 
-    async def _finish_once(self, timeout_s: float) -> SonioxCompletion:
+    async def _finish_once(self, timeout_s: float | None) -> SonioxCompletion:
         if self._completion.done():
             return self._completion.result()
         self._sent_end = True

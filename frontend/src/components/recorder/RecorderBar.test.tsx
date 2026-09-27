@@ -300,3 +300,19 @@ describe('RecorderBar — transcription not connected', () => {
     expect(screen.queryByText(/Transcription is not set up/)).not.toBeInTheDocument();
   });
 });
+
+describe('RecorderBar finalizing after Stop', () => {
+  it('waits for the provider, then offers Finish now once the wait is long', async () => {
+    const force = vi.fn(async () => undefined);
+    useStore.setState({
+      recorderState: 'processing', finishing: true, forceFinishTranscription: force,
+      finalizing: { sessionId: 's', elapsedMs: 1_000, pendingMs: 2_400 },
+    });
+    render(<RecorderBar />);
+    expect(screen.getByText('Finishing transcript… 2 s left to confirm')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Finish now' })).toBeNull();
+    act(() => useStore.setState({ finalizing: { sessionId: 's', elapsedMs: 6_000, pendingMs: 2_400 } }));
+    await userEvent.click(screen.getByRole('button', { name: 'Finish now' }));
+    expect(force).toHaveBeenCalledOnce();
+  });
+});
