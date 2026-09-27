@@ -188,6 +188,8 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             await socket.send_json({
                 "type": "stream.stopped", "saved_samples": saved_samples,
                 "transcription_complete": complete, "status": end_state,
+                **({"transcription_detail": stream.incomplete_reason}
+                   if not complete and stream.incomplete_reason else {}),
             })
             break
     except asyncio.CancelledError:

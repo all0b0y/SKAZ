@@ -10,6 +10,8 @@ export class NativeAudioWriter {
   /** Backend's sanitized reason transcription could not start, if it sent one. */
   transcriptionDetail: string | null = null;
   transcriptionIncomplete = false;
+  /** Why the last Stop/Pause was not fully transcribed, when the backend knows. */
+  incompleteDetail: string | null = null;
   private audioRetained = true;
   private sequence = 0;
   private samples = 0;
@@ -129,6 +131,7 @@ export class NativeAudioWriter {
           throw new Error('Native finalization ACK does not match recording state.');
         }
         this.transcriptionIncomplete = !ack.transcription_complete && this.samples > 0;
+        this.incompleteDetail = this.transcriptionIncomplete ? ack.transcription_detail ?? null : null;
       } else {
         await this.api.setSessionStatus(this.sessionId, 'stopped', { flush_transcription: false });
       }

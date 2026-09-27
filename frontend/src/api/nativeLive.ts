@@ -94,6 +94,8 @@ export interface NativeSaved {
 export interface NativeStopped {
   saved_samples: number;
   transcription_complete: boolean;
+  /** Backend's specific reason when transcription_complete is false. */
+  transcription_detail?: string;
   status: 'paused' | 'stopped';
 }
 

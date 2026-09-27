@@ -7,6 +7,7 @@ after a retryable failure. It never switches to another provider.
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import suppress
 
 from . import native_recovery
@@ -15,6 +16,8 @@ from .gateways.live_session import LiveAsrSession, LiveSessionOpener
 from .live_store import LiveConflict, LiveConnection, LiveStore
 from .native_io import disk_call, drain_on_cancel
 from .native_recovery import RecoveryBudget, ReplayBuffer
+
+logger = logging.getLogger(__name__)
 
 FINISH_TIMEOUT_S = 10.0
 #: How long Stop waits for a worker that is not streaming (connecting, loading).
@@ -42,6 +45,8 @@ class NativeStream:
         self.buffer = ReplayBuffer(connection.sample_rate, connection.start_sample)
         self.recovery = RecoveryBudget()
         self.failure_reason: str | None = None if opener else unavailable_reason
+        #: Why the last finish() could not call the recording completely transcribed.
+        self.incomplete_reason: str | None = None
         self._wake = asyncio.Event()
         self._overflow = asyncio.Event()
         self._stopping = asyncio.Event()
@@ -108,11 +113,14 @@ class NativeStream:
     async def _receive(self, session: LiveAsrSession) -> None:
         ordinal = 0
         async for event in session.events():
-            if event.total_audio_proc_ms * self.connection.sample_rate > self._submitted_samples * 1000:
+            excess = event.total_audio_proc_ms * self.connection.sample_rate - self._submitted_samples * 1000
+            # A provider's final clock may round the last fraction of a millisecond up.
+            if excess > 0 and not (event.finished and excess <= self.connection.sample_rate):
                 raise LiveConflict("Provider progress exceeds submitted audio.")
             await disk_call(self.store.save_event, self.connection.id, ordinal=ordinal, event=event)
-            self.buffer.confirm(self.connection.start_sample
-                                + event.final_audio_proc_ms * self.connection.sample_rate // 1000)
+            confirmed = (self.connection.start_sample
+                         + event.final_audio_proc_ms * self.connection.sample_rate // 1000)
+            self.buffer.confirm(min(confirmed, self.buffer.end))  # rounded-up final millisecond
             ordinal += 1
             if event.finished:
                 self.complete = True
@@ -219,15 +227,49 @@ class NativeStream:
                 self._wake.set()
             else:
                 self._worker.cancel()
-            if not await self._settle_worker(FINISH_TIMEOUT_S if streaming else CANCEL_WAIT_S):
+            settled = await self._settle_worker(FINISH_TIMEOUT_S if streaming else CANCEL_WAIT_S)
+            if not settled:
                 self.complete = False
+        else:
+            streaming = settled = False
         self.buffer.clear()
         snapshot = await disk_call(self.store.snapshot, self.connection.session_id)
         current = snapshot["connections"][-1]
         finished = self.complete and current["final_sample"] == snapshot["saved_samples"]
         await disk_call(self.store.close, self.connection.id, finished=finished)
         # Complete means the entire saved recording, not just its latest connection.
-        return finished and all(c["status"] == "finished" for c in snapshot["connections"][:-1])
+        earlier_complete = all(c["status"] == "finished" for c in snapshot["connections"][:-1])
+        self.incomplete_reason = self._incomplete_reason(
+            snapshot, current, finished=finished, earlier_complete=earlier_complete,
+            streaming=streaming, settled=settled,
+        )
+        if self.incomplete_reason:
+            logger.warning("Live transcription incomplete at stop: %s", self.incomplete_reason)
+        return finished and earlier_complete
+
+    def _incomplete_reason(
+        self, snapshot: dict[str, object], current: dict[str, object], *, finished: bool,
+        earlier_complete: bool, streaming: bool, settled: bool,
+    ) -> str | None:
+        """A sanitized, specific reason, so an incomplete Stop can be diagnosed."""
+        if finished and earlier_complete:
+            return None
+        if snapshot.get("saved_samples") == current.get("start_sample") and earlier_complete:
+            return None  # nothing was captured in this stretch
+        rate = self.connection.sample_rate
+        if not finished:
+            if self._worker is None:
+                return self.failure_reason or "Transcription was not running for this recording."
+            if not streaming:
+                return self.failure_reason or f"{self._label} was not connected when recording stopped."
+            if not settled:
+                return f"{self._label} did not finish within {FINISH_TIMEOUT_S:.0f} s after Stop."
+            if not self.complete:
+                return self.failure_reason or f"{self._label} did not confirm the end of the stream."
+            final_ms = int(str(current.get("final_sample", 0))) * 1000 // rate
+            saved_ms = int(str(snapshot.get("saved_samples", 0))) * 1000 // rate
+            return f"{self._label} confirmed {final_ms} ms of {saved_ms} ms of audio."
+        return "An earlier part of this recording (before a pause or reconnect) was not fully transcribed."
 
     async def _settle_worker(self, timeout: float) -> bool:
         """Wait a bounded time for the provider worker; True when it ended by itself.

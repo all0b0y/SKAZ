@@ -175,7 +175,11 @@ class NativeConnection {
         || message.status !== status) { this.fail(); throw failure(); }
       this.phase = 'closed';
       this.socket.close();
-      return { saved_samples: message.saved_samples, transcription_complete: message.transcription_complete, status };
+      const detail = boundedText(message.transcription_detail);
+      return {
+        saved_samples: message.saved_samples, transcription_complete: message.transcription_complete, status,
+        ...(detail ? { transcription_detail: detail } : {}),
+      };
     });
     return this.ending;
   }

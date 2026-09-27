@@ -421,7 +421,7 @@ export const useStore = create<AppState>((set, get) => {
             ? null
             : state.pendingSessionStatusSessionId,
           recorderError: writer?.transcriptionIncomplete
-            ? state.recorderError ?? 'Some audio could not be transcribed. The unconfirmed audio was cleared from memory; confirmed text was preserved.'
+            ? state.recorderError ?? `Some audio could not be transcribed${writer.incompleteDetail ? ` (${writer.incompleteDetail.replace(/\.$/, '')})` : ''}. The unconfirmed audio was cleared from memory; confirmed text was preserved.`
             : options.clearErrorOnSuccess ? null : state.recorderError,
         }));
         acknowledged = true;

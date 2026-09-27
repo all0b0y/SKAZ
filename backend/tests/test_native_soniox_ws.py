@@ -270,3 +270,77 @@ def test_stop_after_a_tail_shorter_than_a_millisecond_is_complete(
         snapshot = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
         assert snapshot["connections"][0]["status"] == "finished"
         assert snapshot["gaps"] == []
+
+
+class RoundingUpProviderSocket(MillisecondProviderSocket):
+    async def send(self, message: str | bytes) -> None:
+        if isinstance(message, str):
+            return
+        if message:
+            self.audio.append(message)
+            return
+        samples = sum(len(frame) // 2 for frame in self.audio)
+        duration = -(-samples * 1000 // self.rate)  # ceil: the provider rounds its clock up
+        await self.responses.put(json.dumps({
+            "tokens": [{"text": "Hello", "start_ms": 0, "end_ms": duration,
+                        "confidence": 0.99, "is_final": True, "language": "en"}],
+            "final_audio_proc_ms": duration, "total_audio_proc_ms": duration, "finished": True,
+        }))
+
+
+def _record_and_stop(http: Any, socket: ProviderSocket, rate: int, sizes: list[int]) -> dict[str, Any]:
+    sid = http.post("/sessions", headers=AUTH, json={"title": "Stop"}).json()["id"]
+    with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
+        ws.send_json({"type": "open", "sample_rate": rate})
+        assert ws.receive_json()["type"] == "stream.opened"
+        start = 0
+        for sequence, size in enumerate(sizes):
+            ws.send_bytes(packet(sequence, start, size))
+            assert ws.receive_json()["type"] == "audio.saved"
+            start += size
+        assert http.portal is not None
+        http.portal.call(asyncio.sleep, 0.05)
+        ws.send_json({"type": "end"})
+        return dict(ws.receive_json())
+
+
+def test_stop_is_complete_when_the_provider_rounds_its_last_millisecond_up(
+    app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    socket = RoundingUpProviderSocket(48_000)
+
+    async def connect(*args: Any, **kwargs: Any) -> ProviderSocket:
+        return socket
+
+    monkeypatch.setattr(soniox, "connect", connect)
+    secrets.set("soniox", "fixture-key-not-real")
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+        http.put("/settings", headers=AUTH, json={"cloud_consent": True})
+        stopped = _record_and_stop(http, socket, 48_000, [4800, 1_000])
+    assert stopped.get("transcription_detail") is None, stopped
+    assert stopped["transcription_complete"] is True
+    assert "transcription_detail" not in stopped
+
+
+def test_incomplete_stop_names_its_reason(
+    app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Silent(ProviderSocket):
+        async def send(self, message: str | bytes) -> None:
+            if isinstance(message, bytes) and message:
+                self.audio.append(message)  # never answers the end of stream
+
+    socket = Silent()
+
+    async def connect(*args: Any, **kwargs: Any) -> ProviderSocket:
+        return socket
+
+    monkeypatch.setattr(soniox, "connect", connect)
+    monkeypatch.setattr("skaz.native_stream.FINISH_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(soniox, "FINALIZATION_TIMEOUT_S", 0.2)
+    secrets.set("soniox", "fixture-key-not-real")
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+        http.put("/settings", headers=AUTH, json={"cloud_consent": True})
+        stopped = _record_and_stop(http, socket, 16_000, [1600])
+    assert stopped["transcription_complete"] is False
+    assert stopped["transcription_detail"].startswith("Soniox")

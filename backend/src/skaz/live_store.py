@@ -201,11 +201,12 @@ class LiveStore:
             final_sample = anchor + event.final_audio_proc_ms * rate // 1000
             processed_sample = anchor + event.total_audio_proc_ms * rate // 1000
             if (event.finished and event.final_audio_proc_ms == event.total_audio_proc_ms
-                    and 0 <= row["saved_samples"] - final_sample <= rate // 1000 + 1):
+                    and abs(row["saved_samples"] - final_sample) <= rate // 1000 + 1):
                 # The provider clock counts whole milliseconds, but Stop flushes a tail
-                # of any sample length (Web Audio renders 128-sample quanta). A finished
-                # stream that finalized everything up to that rounding is complete: the
-                # fraction of a millisecond is not untranscribed audio or a gap.
+                # of any sample length (Web Audio renders 128-sample quanta), so its last
+                # value is rounded down or up. A finished stream that finalized everything
+                # up to that rounding is complete: the fraction of a millisecond is not
+                # untranscribed audio, a gap, or progress past the saved audio.
                 final_sample = processed_sample = row["saved_samples"]
             if (final_sample < row["final_sample"] or processed_sample < row["processed_sample"]
                     or final_sample > processed_sample or processed_sample > row["saved_samples"]):
