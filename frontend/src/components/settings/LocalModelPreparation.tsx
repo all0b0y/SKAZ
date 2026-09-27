@@ -147,11 +147,14 @@ export function LocalModelPreparation({ provider, model, sizeBytes, onState }: L
           <Icon name="warning" size={13} /> {requestError}
         </p>
       )}
-      {status?.warning && <p className="profile__note profile__note--warn">{status.warning}</p>}
+      {/* The shared-cache warning is about deleting files; it matters only once files exist. */}
+      {status?.warning && status.cached && <p className="profile__note">{status.warning}</p>}
 
       {state === 'not_installed' && (
         <>
-          <p className="profile__note">This model is not fully installed in the selected cache.</p>
+          <p className="profile__note">
+            {status?.cached ? 'This model is only partly downloaded.' : 'Not downloaded yet.'}
+          </p>
           <button
             type="button"
             className="profile__download"

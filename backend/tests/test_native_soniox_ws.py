@@ -217,3 +217,56 @@ def test_delete_active_stream_closes_provider_before_removing_data(
             assert http.get(f"/sessions/{sid}", headers=AUTH).status_code == 404
 
 
+
+
+class MillisecondProviderSocket(ProviderSocket):
+    """Reports progress in whole milliseconds, as the provider protocol does."""
+
+    def __init__(self, rate: int) -> None:
+        super().__init__()
+        self.rate = rate
+
+    async def send(self, message: str | bytes) -> None:
+        if isinstance(message, str):
+            return
+        if message:
+            self.audio.append(message)
+            return
+        duration = sum(len(frame) // 2 for frame in self.audio) * 1000 // self.rate
+        await self.responses.put(json.dumps({
+            "tokens": [{"text": "Hello", "start_ms": 0, "end_ms": duration,
+                        "confidence": 0.99, "is_final": True, "language": "en"}],
+            "final_audio_proc_ms": duration, "total_audio_proc_ms": duration, "finished": True,
+        }))
+
+
+def test_stop_after_a_tail_shorter_than_a_millisecond_is_complete(
+    app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recorder flushes an arbitrary-length tail on Stop (Web Audio quanta are 128
+    samples). A provider clock in whole milliseconds cannot name its last fraction
+    of a millisecond; that rounding is not untranscribed audio."""
+    socket = MillisecondProviderSocket(48_000)
+
+    async def connect(*args: Any, **kwargs: Any) -> ProviderSocket:
+        return socket
+
+    monkeypatch.setattr(soniox, "connect", connect)
+    secrets.set("soniox", "fixture-key-not-real")
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+        http.put("/settings", headers=AUTH, json={"cloud_consent": True})
+        sid = http.post("/sessions", headers=AUTH, json={"title": "Tail"}).json()["id"]
+        with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
+            ws.send_json({"type": "open", "sample_rate": 48_000})
+            assert ws.receive_json()["transcription"] == "connecting"
+            ws.send_bytes(packet(0, 0, 4800))
+            assert ws.receive_json()["saved_samples"] == 4800
+            ws.send_bytes(packet(1, 4800, 1_000))  # ~20.8 ms: not a whole millisecond
+            assert ws.receive_json()["saved_samples"] == 5800
+            assert http.portal is not None
+            http.portal.call(asyncio.sleep, 0.05)
+            ws.send_json({"type": "end"})
+            assert ws.receive_json()["transcription_complete"] is True
+        snapshot = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
+        assert snapshot["connections"][0]["status"] == "finished"
+        assert snapshot["gaps"] == []

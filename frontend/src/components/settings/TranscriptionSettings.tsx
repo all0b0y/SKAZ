@@ -185,7 +185,16 @@ export function TranscriptionSettings({ settings, draft, onChange, disabled, cap
                 </span>
               </label>
               {speakerSeparation && (
-                <LocalModelPreparation provider="local-speaker" model={SPEAKER_MODEL} sizeBytes={SPEAKER_MODEL_BYTES} />
+                <div className="transcription__speaker-model">
+                  <strong>Speaker model</strong>
+                  <span className="field__hint">
+                    {info.capabilities.offline
+                      ? 'Downloaded once, then used offline together with the Whisper model.'
+                      : `Runs on this computer next to ${info.label}: ${info.label} returns no speaker labels, so SKAZ groups `
+                        + 'voices locally. Nothing extra is sent anywhere.'}
+                  </span>
+                  <LocalModelPreparation provider="local-speaker" model={SPEAKER_MODEL} sizeBytes={SPEAKER_MODEL_BYTES} />
+                </div>
               )}
             </div>
           )}

@@ -132,4 +132,16 @@ describe('Settings → Transcription provider choice', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(saveSettings.mock.calls[0]![0]).toEqual({ speaker_separation: false });
   });
+
+  it('warns about the shared cache only once there are files to delete', async () => {
+    const warning = 'This is the shared Hugging Face cache. Deleting this model may affect other applications.';
+    useStore.setState({
+      settings: settings({ transcription_provider: 'openai' }),
+      localModelStatus: vi.fn(async (_provider, model) => ({ model, state: 'not_installed' as const, warning, cached: false })),
+    });
+    render(<SettingsPanel onClose={() => {}} initialSection="asr" />);
+    expect(await screen.findByText('Not downloaded yet.')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing extra is sent anywhere/)).toBeInTheDocument();
+    expect(screen.queryByText(warning)).toBeNull();
+  });
 });

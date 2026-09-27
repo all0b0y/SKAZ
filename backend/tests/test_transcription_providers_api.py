@@ -328,3 +328,30 @@ async def test_import_refuses_translation_a_provider_cannot_do(
     assert response.status_code == 409
     assert "English only" in response.json()["detail"]
     assert json.loads(json.dumps((await client.get("/sessions")).json()))["sessions"] == []
+
+
+def test_local_stream_is_complete_after_a_tail_that_is_not_a_whole_millisecond(
+    app: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(asr_providers, "_local_opener", scripted_local_opener)
+    rate = 44_100
+    audio = tone(2, [(" Hello", 0.5, 0.9)], rate=rate)
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+        http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
+        sid = http.post("/sessions", headers=AUTH, json={"title": "Tail"}).json()["id"]
+        with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
+            ws.send_json({"type": "open", "sample_rate": rate})
+            assert ws.receive_json()["transcription"] == "connecting"
+            sizes = [rate // 2, rate // 2, 777]  # the Stop flush is an arbitrary length
+            offset = 0
+            for sequence, size in enumerate(sizes):
+                ws.send_bytes(pcm_packet(sequence, offset, audio[offset * 2:(offset + size) * 2]))
+                assert ws.receive_json()["type"] == "audio.saved"
+                offset += size
+            assert http.portal is not None
+            http.portal.call(asyncio.sleep, 0.05)
+            ws.send_json({"type": "end"})
+            stopped = ws.receive_json()
+            assert stopped["saved_samples"] == offset
+            assert stopped["transcription_complete"] is True
+        assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["gaps"] == []
