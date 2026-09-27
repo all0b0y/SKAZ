@@ -13,6 +13,7 @@ import { NotesPanel } from './components/notes/NotesPanel';
 import { AssistantPanel } from './components/assistant/AssistantPanel';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { WebSearchApproval } from './components/web/WebSearchApproval';
+import { ProactiveCards } from './components/proactive/ProactiveCards';
 import { SearchPalette } from './components/search/SearchPalette';
 import { Icon } from './components/ui/Icon';
 import { PanelResizer, TitlebarLeading, TitlebarTrailing } from './components/layout/PanelChrome';
@@ -235,6 +236,7 @@ export default function App() {
             )}
           </div>
           <div className="center__footer">
+            <ProactiveCards onCite={onCite} />
             <RecorderBar />
           </div>
         </section>

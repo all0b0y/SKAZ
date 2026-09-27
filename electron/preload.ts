@@ -73,6 +73,9 @@ const api: BridgeApi = {
   reportCaptureState(state: CaptureState): void {
     ipcRenderer.send(CHANNELS.captureState, state);
   },
+  notifyProactive(sound: boolean): void {
+    ipcRenderer.send(CHANNELS.proactiveNotice, sound === true);
+  },
   reportCodexActivity(activeTasks: number): void {
     ipcRenderer.send(CHANNELS.codexActivity, activeTasks);
   },

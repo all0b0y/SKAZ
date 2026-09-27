@@ -320,7 +320,7 @@ describe('Settings navigation', () => {
     const nav = screen.getByRole('navigation', { name: 'Settings sections' });
     const groups = within(nav).getAllByRole('group');
     expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Models', 'Access', 'App']);
-    expect(within(groups[0]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['Transcription', 'Assistant', 'Notes', 'Embedding']);
+    expect(within(groups[0]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['Transcription', 'Assistant', 'Proactive', 'Notes', 'Embedding']);
     expect(within(groups[1]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['API keys', 'Web Search']);
     expect(within(groups[2]!).getAllByRole('button').map((b) => b.textContent)).toEqual(['System', 'Files', 'Logs']);
     // Headings are text, not controls, and carry no icon.

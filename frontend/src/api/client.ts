@@ -28,6 +28,7 @@ import type {
   ModelsResponse,
   Note,
   NoteDetail,
+  ProactiveView,
   RewritePreview,
   Session,
   SessionDetail,
@@ -124,6 +125,28 @@ export class ApiClient {
   updateStorageRoot(root: string | null, expectedRoot: string | null): Promise<StorageRootView> {
     return this.bridge.request<StorageRootView>({
       method: 'PUT', path: '/storage/root', body: { root, expected_root: expectedRoot },
+    }).then(unwrap);
+  }
+
+  getProactive(sessionId: string): Promise<ProactiveView> {
+    return this.bridge.request<ProactiveView>({
+      method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/proactive`,
+    }).then(unwrap);
+  }
+
+  /** Off stops every automatic model call for this session, including a running one. */
+  setProactiveSession(sessionId: string, enabled: boolean): Promise<ProactiveView> {
+    return this.bridge.request<ProactiveView>({
+      method: 'PUT', path: `/sessions/${encodeURIComponent(sessionId)}/proactive`, body: { enabled },
+    }).then(unwrap);
+  }
+
+  /** Prepares a lookup; the exact query still waits for approval before it is sent. */
+  proactiveWebLookup(sessionId: string, cardId: string, query: string): Promise<ProactiveView> {
+    return this.bridge.request<ProactiveView>({
+      method: 'POST',
+      path: `/sessions/${encodeURIComponent(sessionId)}/proactive/cards/${encodeURIComponent(cardId)}/web`,
+      body: { query },
     }).then(unwrap);
   }
 

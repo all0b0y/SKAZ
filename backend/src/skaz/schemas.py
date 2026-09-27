@@ -55,6 +55,35 @@ class ProfileUpdate(BaseModel):
     model: str | None = None
 
 
+ProactiveAlias = Annotated[str, Field(min_length=1, max_length=60, pattern=r"^[^\x00-\x1f\x7f]+$")]
+#: At most this many names, nicknames or code phrases may trigger the proactive assistant.
+MAX_PROACTIVE_ALIASES = 20
+
+
+class ProactiveSettings(BaseModel):
+    """Noticing a direct question to the user during a live session (issue #10).
+
+    Off by default. Enabling it requires at least one name/alias and a separate,
+    explicit consent to send transcript text to the selected Assistant model.
+    """
+
+    enabled: bool = False
+    aliases: list[ProactiveAlias] = Field(default_factory=list, max_length=MAX_PROACTIVE_ALIASES)
+    #: Sound for the out-of-focus system notification; off by default.
+    sound: bool = False
+    #: Consent to send transcript text to the selected Assistant model automatically.
+    model_consent: bool = False
+
+
+class ProactiveSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: StrictBool | None = None
+    aliases: list[ProactiveAlias] | None = Field(default=None, max_length=MAX_PROACTIVE_ALIASES)
+    sound: StrictBool | None = None
+    model_consent: StrictBool | None = None
+
+
 class Settings(BaseModel):
     used_languages: UsedLanguages | None = None
     supported_languages: list[str] = Field(default_factory=lambda: list(SUPPORTED_LANGUAGES))
@@ -79,6 +108,8 @@ class Settings(BaseModel):
     import_cost_warning_usd: float | None = 0.30
     #: Explicit opt-in for the experimental contextual local mode; off by default.
     contextual_local_enabled: bool = False
+    #: Proactive assistant (issue #10): off by default, see :class:`ProactiveSettings`.
+    proactive: ProactiveSettings = Field(default_factory=lambda: ProactiveSettings())
 
 
 class SettingsUpdate(BaseModel):
@@ -115,6 +146,8 @@ class SettingsUpdate(BaseModel):
     clear_import_cost_warning: bool = False
     #: Omitted keeps the stored value: enabling is always an explicit user action.
     contextual_local_enabled: bool | None = None
+    #: Omitted keeps the stored proactive settings; given fields replace stored ones.
+    proactive: ProactiveSettingsUpdate | None = None
 
 
 PricingUnit = Literal["second", "minute", "request", "token"]

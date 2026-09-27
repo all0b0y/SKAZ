@@ -1,0 +1,91 @@
+/* Proactive assistant cards (issue #10): above the recorder, never over the transcript. */
+.proactive {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 42vh;
+  overflow: auto;
+  margin: 0 12px 8px;
+  padding: 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  background: var(--paper-sunken);
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+.proactive__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--ink-soft);
+}
+.proactive__title { font-size: var(--text-xs); }
+.proactive__card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--paper-raised);
+  color: var(--ink);
+  min-width: 0;
+}
+.proactive__card--stopped,
+.proactive__card--failed { border-left-color: var(--warning); }
+.proactive__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.proactive__dismiss {
+  border: 0;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.proactive__card h4 {
+  margin: 4px 0 2px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-transform: none;
+}
+.proactive__question { margin: 0; }
+.proactive__source {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.proactive__source:hover .proactive__quote { text-decoration: underline; }
+.proactive__question .proactive__quote { font-family: var(--font-read); font-size: var(--text-md); }
+.proactive__time { color: var(--accent); flex: none; }
+.proactive__speaker { color: var(--ink-faint); flex: none; font-size: var(--text-xs); }
+.proactive__quote { overflow-wrap: anywhere; }
+.proactive__sources { display: flex; flex-direction: column; }
+.proactive__status, .proactive__hint { margin: 0; color: var(--ink-soft); font-size: var(--text-xs); }
+.proactive__missing { margin: 0; color: var(--ink-soft); }
+.proactive__notice { margin: 0; color: var(--warning); font-size: var(--text-xs); }
+.proactive__error { margin: 0; color: var(--warning); }
+.proactive__addition {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-wash);
+}
+.proactive__addition p { margin: 0; }
+.proactive__addition ul { margin: 4px 0 0; padding-left: 18px; }
+.proactive__addition a { color: var(--accent); overflow-wrap: anywhere; }
+.proactive__actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.proactive__web-form { display: flex; flex-direction: column; gap: 6px; }
+.proactive__web-open { align-self: flex-start; }
+.proactive__web-approval pre { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; margin: 4px 0; }
+.proactive__web-approval p { margin: 0; }

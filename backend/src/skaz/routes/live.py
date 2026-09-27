@@ -124,7 +124,10 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                 await disk_call(runtime.api_key, "soniox")
                 if settings.cloud_consent else None
             )
-            stream = NativeStream(runtime.live_store, connection, key)
+            stream = NativeStream(
+                runtime.live_store, connection, key,
+                on_final=lambda: runtime.proactive.notify(session_id),
+            )
             runtime.native_streams[session_id] = stream
         saved_samples = connection.start_sample
         await socket.send_json({
@@ -177,6 +180,8 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             completed_owner = runtime.native_tasks.pop(session_id)
             runtime.native_streams.pop(session_id, None)
             completed_owner[1].set()
+            # A question still open at Stop is finished now: let the scanner settle it.
+            runtime.proactive.notify(session_id)
             await socket.send_json({
                 "type": "stream.stopped", "saved_samples": saved_samples,
                 "transcription_complete": complete, "status": end_state,

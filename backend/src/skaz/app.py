@@ -23,6 +23,7 @@ from .routes import (
     live,
     logs,
     models,
+    proactive,
     sessions,
     settings,
     storage,
@@ -95,6 +96,7 @@ def create_app(
     app.include_router(sessions.router, dependencies=protected)
     app.include_router(imports.router, dependencies=protected)
     app.include_router(agent.router, dependencies=protected)
+    app.include_router(proactive.router, dependencies=protected)
     app.include_router(codex.router, dependencies=protected)
     app.include_router(web_search.router, dependencies=protected)
     app.include_router(models.router, dependencies=protected)

@@ -487,6 +487,7 @@ async def _delete_session(session_id: str, runtime: Runtime) -> None:
     async def remove() -> None:
         await runtime.imports.prepare_delete(session_id)
         await runtime.stop_native(session_id)
+        runtime.proactive.forget(session_id)
         runtime.ingestion.audio.discard(session_id)
         try:
             await disk_call(_require_session, runtime, session_id)

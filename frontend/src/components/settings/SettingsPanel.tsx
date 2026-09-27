@@ -9,6 +9,7 @@ import { LogsViewer } from './LogsViewer';
 import { StorageRootPanel } from './StorageRootPanel';
 import { CodexEnginePanel } from './CodexEnginePanel';
 import { WebSearchSettings } from './WebSearchSettings';
+import { ProactiveSettingsSection, effectiveProactive, proactiveUpdate, type ProactiveDraft } from './ProactiveSettings';
 import type { AgentModeToggle, CodexTab } from './ProfileEditor';
 import { SonioxCredentials } from './SonioxCredentials';
 import { UsedLanguages, languageName, byShownName } from './UsedLanguages';
@@ -32,7 +33,7 @@ const THEMES: { value: ThemeMode; label: string }[] = [
 const TASKS: TaskKind[] = ['asr', 'agent', 'notes', 'embedding'];
 const EMPTY_EMBEDDING: Profile = { provider: 'openrouter', model: '' };
 
-export type SectionId = 'system' | 'asr' | 'agent' | 'notes' | 'embedding' | 'api-keys' | 'logs' | 'files' | 'web-search';
+export type SectionId = 'system' | 'asr' | 'agent' | 'proactive' | 'notes' | 'embedding' | 'api-keys' | 'logs' | 'files' | 'web-search';
 
 // Each model-assignment task is its own section so only ONE model catalog is
 // ever mounted: all three at once put ~900 interactive rows in the DOM, which
@@ -42,6 +43,7 @@ const SECTION_GROUPS: { label: string; sections: { id: SectionId; label: string;
   { label: 'Models', sections: [
     { id: 'asr', label: 'Transcription', icon: 'waveform' },
     { id: 'agent', label: 'Assistant', icon: 'robot' },
+    { id: 'proactive', label: 'Proactive', icon: 'dot' },
     { id: 'notes', label: 'Notes', icon: 'notes' },
     { id: 'embedding', label: 'Embedding', icon: 'nodes' },
   ] },
@@ -113,6 +115,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   const [nativeMode, setNativeMode] = useState<NativeRecordingMode | null>(null);
   const [translationTarget, setTranslationTarget] = useState<string | null>(null);
   const [outputLanguage, setOutputLanguage] = useState<string | null>(null);
+  const [proactive, setProactive] = useState<ProactiveDraft>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -203,6 +206,8 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
 
     if (Object.keys(providerKeys).length) update.provider_keys = providerKeys;
     if (cloudConsent !== null) update.cloud_consent = cloudConsent;
+    const proactivePatch = proactiveUpdate(settings.proactive, proactive);
+    if (proactivePatch) update.proactive = proactivePatch;
     return update;
   };
 
@@ -226,6 +231,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
       setNativeMode(null);
       setTranslationTarget(null);
       setOutputLanguage(null);
+      setProactive({});
       if (codexDirty) {
         // The API profiles above are already saved; a Codex failure keeps only its own draft.
         await useCodex.getState().saveSettings({ ...codexStored!, ...codexDraft });
@@ -441,6 +447,11 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
               </section>
             )}
 
+            {activeSection === 'proactive' && (
+              <ProactiveSettingsSection stored={settings.proactive} draft={proactive} onChange={setProactive}
+                disabled={saving} agentModel={(agent.model ?? settings.agent.model) || ''} />
+            )}
+
             {activeSection === 'notes' && (
               <section className="settings-section">
                 <h3 className="settings-section__title">Notes</h3>
@@ -552,7 +563,8 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
           {saveError && <span className="profile__note profile__note--warn">{saveError}</span>}
           {saved && !saveError && <span className="profile__note profile__note--ok"><Icon name="check" size={13} /> Saved</span>}
           <Button variant="ghost" onClick={onClose}>Close</Button>
-          <Button variant="primary" onClick={() => void save()} disabled={activeSection === 'files' || saving || invalidLimit || usedLanguages?.length === 0}>
+          <Button variant="primary" onClick={() => void save()} disabled={activeSection === 'files' || saving || invalidLimit || usedLanguages?.length === 0
+            || effectiveProactive(settings.proactive, proactive).problem !== null}>
             {saving ? 'Saving…' : 'Save changes'}
           </Button>
         </footer>

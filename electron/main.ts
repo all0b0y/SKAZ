@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, session, shell, systemPreferences } from 'electron';
 import path from 'node:path';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { migrateLegacyProfile, resolveStorageProfile } from './storageProfile';
@@ -12,6 +12,7 @@ import { hasUnsentAudio, type CaptureProtectionState } from './captureProtection
 import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
 import { isTrustedFrame, validateCaptureState, validateCodexActivity } from './ipcSender';
 import { QuitController } from './quitController';
+import { proactiveNotice } from './proactiveNotice';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
 import type { BackendStatus } from '../frontend/src/api/bridge';
@@ -325,6 +326,28 @@ app.whenReady().then(() => {
       isMainFrame: event.senderFrame?.parent === null,
     })) return;
     rendererSave.acknowledge(id, saved);
+  });
+  let proactiveShownAt: number | null = null;
+  ipcMain.on(CHANNELS.proactiveNotice, (event, sound: unknown) => {
+    if (!isTrustedFrame({
+      senderId: event.sender.id,
+      expectedId: mainWindow?.webContents.id ?? null,
+      isMainFrame: event.senderFrame?.parent === null,
+    }) || !Notification.isSupported()) return;
+    const now = Date.now();
+    const options = proactiveNotice(sound, {
+      focused: mainWindow?.isFocused() === true, lastShownAt: proactiveShownAt, now,
+    });
+    if (!options) return;
+    proactiveShownAt = now;
+    const notice = new Notification(options);
+    notice.on('click', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
+    notice.show();
   });
   ipcMain.on(CHANNELS.codexActivity, (event, payload: unknown) => {
     if (!isTrustedFrame({

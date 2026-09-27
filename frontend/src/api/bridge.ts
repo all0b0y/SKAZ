@@ -111,6 +111,12 @@ export interface BridgeApi {
   onBackendStatus(listener: (status: BackendStatus) => void): () => void;
   /** Report live capture state to main (one-way) so close/quit can be guarded. */
   reportCaptureState?(state: CaptureState): void;
+  /**
+   * Ask main to show the proactive assistant's system notification when the
+   * window is not focused. Only the sound preference crosses IPC: main owns the
+   * fixed, content-free text, so no transcript can reach the notification.
+   */
+  notifyProactive?(sound: boolean): void;
   /** Report how many Codex tasks are still active (one-way) so quit can warn first. */
   reportCodexActivity?(activeTasks: number): void;
   /** Main requests Stop/drain; only the boolean save outcome is returned. */
