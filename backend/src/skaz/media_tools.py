@@ -153,3 +153,15 @@ async def extract_audio(source: Path, directory: Path) -> Path:
     if not output.is_file() or output.stat().st_size >= MAX_MEDIA_BYTES:
         raise MediaError("The extracted audio exceeded the supported size.")
     return output
+
+
+async def decode_pcm16k(source: Path, directory: Path) -> Path:
+    """Decode the first audio track to raw 16 kHz mono PCM16 for on-device transcription."""
+    output = directory / "audio.s16le"
+    await run_tool([tool_path("ffmpeg"), "-nostdin", "-v", "error", "-y",
+                    "-protocol_whitelist", "file,pipe", "-i", str(source),
+                    "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "s16le",
+                    "-t", str(MAX_DURATION_MS // 1000), str(output)], timeout=3600)
+    if not output.is_file() or output.stat().st_size < 2:
+        raise MediaError("The file has no decodable audio track.")
+    return output

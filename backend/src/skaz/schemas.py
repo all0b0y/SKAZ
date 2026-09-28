@@ -18,7 +18,10 @@ Provider = Literal[
     "openrouter",
     "anthropic",
 ]
-LocalProvider = Literal["local-whisper", "local-gigachat-mlx"]
+LocalProvider = Literal["local-whisper", "local-gigachat-mlx", "local-speaker"]
+#: Who turns live speech (and imported media) into the native transcript. Switching
+#: is always an explicit settings change; there is never a fallback between them.
+TranscriptionProvider = Literal["soniox", "local-whisper", "openai"]
 CloudProvider = Literal["openai", "openrouter", "anthropic", "soniox"]
 #: Cloud providers that own an API key. The key belongs to the provider, not to a
 #: task profile: two tasks on the same provider share one credential.
@@ -55,6 +58,49 @@ class ProfileUpdate(BaseModel):
     model: str | None = None
 
 
+class TranscriptionCapabilities(BaseModel):
+    """What a transcription provider really does, so the UI can say what is missing."""
+
+    #: "streaming": words while speaking; "near_streaming": provisional text refined
+    #: every second or so; "utterance": final text after each pause, no provisional text.
+    live: Literal["streaming", "near_streaming", "utterance"]
+    provisional_text: bool
+    file_transcription: bool
+    #: "full": provider diarization; "approximate": local voice clustering; "none".
+    speakers: Literal["full", "approximate", "none"]
+    translation: Literal["any", "english_only", "none"]
+    #: "full": any language; "selected_languages": picked among the spoken languages.
+    language_detection: Literal["full", "selected_languages"]
+    word_timestamps: Literal["exact", "approximate"]
+    offline: bool
+    requires_cloud_consent: bool
+    #: Provider whose stored API key this one uses, if any.
+    api_key_provider: CloudProvider | None = None
+
+
+class TranscriptionModel(BaseModel):
+    id: str
+    name: str
+    #: Approximate download size for local models.
+    size_bytes: int | None = None
+    note: str | None = None
+    recommended: bool = False
+
+
+class TranscriptionProviderInfo(BaseModel):
+    id: TranscriptionProvider
+    label: str
+    capabilities: TranscriptionCapabilities
+    models: list[TranscriptionModel] = Field(default_factory=list)
+    #: The selected model for this provider (None for a provider with one fixed model).
+    model: str | None = None
+    #: Whether a recording can start with this provider right now, and why not.
+    ready: bool
+    detail: str | None = None
+    #: Honest, user-facing gaps compared with the full-featured provider.
+    limitations: list[str] = Field(default_factory=list)
+
+
 class Settings(BaseModel):
     used_languages: UsedLanguages | None = None
     supported_languages: list[str] = Field(default_factory=lambda: list(SUPPORTED_LANGUAGES))
@@ -79,6 +125,12 @@ class Settings(BaseModel):
     import_cost_warning_usd: float | None = 0.30
     #: Explicit opt-in for the experimental contextual local mode; off by default.
     contextual_local_enabled: bool = False
+    transcription_provider: TranscriptionProvider = "soniox"
+    local_whisper_model: str = "small"
+    openai_transcription_model: str = "whisper-1"
+    #: Local voice clustering for providers without their own diarization.
+    speaker_separation: bool = True
+    transcription_providers: list[TranscriptionProviderInfo] = Field(default_factory=list)
 
 
 class SettingsUpdate(BaseModel):
@@ -115,6 +167,10 @@ class SettingsUpdate(BaseModel):
     clear_import_cost_warning: bool = False
     #: Omitted keeps the stored value: enabling is always an explicit user action.
     contextual_local_enabled: bool | None = None
+    transcription_provider: TranscriptionProvider | None = None
+    local_whisper_model: str | None = Field(default=None, max_length=64)
+    openai_transcription_model: str | None = Field(default=None, max_length=64)
+    speaker_separation: StrictBool | None = None
 
 
 PricingUnit = Literal["second", "minute", "request", "token"]
@@ -464,6 +520,15 @@ class ImportCapabilities(BaseModel):
     #: Where a finished import will be written, in words the user can check.
     destination: str
     markdown_enabled: bool
+    #: The transcription provider a new import will use (Settings → Transcription).
+    provider: TranscriptionProvider = "soniox"
+    provider_label: str = "Soniox"
+    #: False with a reason when the provider cannot run (key, consent, local model).
+    provider_ready: bool = True
+    provider_detail: str | None = None
+    #: False for on-device transcription: the file never leaves this computer.
+    sends_audio: bool = True
+    translation: Literal["any", "english_only", "none"] = "any"
 
 
 class AudioResponse(BaseModel):

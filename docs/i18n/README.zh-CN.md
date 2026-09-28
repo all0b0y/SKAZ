@@ -39,7 +39,9 @@ SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助�
 
 ## 功能
 
-- **实时转写与翻译：** 使用 Soniox 识别语音，按说话人分组，翻译时仍可查看原文。
+- **实时转写与翻译：** 在 **Settings → Transcription** 中选择语音识别服务——Soniox（云端流式、
+  完整说话人区分、翻译）、**Local Whisper**（在本机运行 faster-whisper，断网可用；说话人区分为近似，
+  仅可翻译为英语）或 OpenAI。按说话人分组，翻译时仍可查看原文。不会在服务之间静默切换。
 - **麦克风与系统音频：** 选择麦克风，也可包含 Mac 播放的声音。
   系统音频采集需要 macOS 14.2+ 及系统授权。
 - **基于上下文提问：** 查询单个会话或更大的资料库范围，通过时间戳引用返回转写。
@@ -48,7 +50,7 @@ SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助�
 - **媒体导入（实验性）：** 支持本地音频、视频及 YouTube 导入流程。
   仅处理你有权使用的材料；可用性及支持格式可能不同。
 - **独立选择模型：** 分别配置 Assistant 和 Notes，使用 Codex 账号登录，
-  或 OpenAI、Anthropic、OpenRouter 的 API 配置。实时语音由 Soniox 处理，而非文本模型。
+  或 OpenAI、Anthropic、OpenRouter 的 API 配置。实时语音由所选转写服务处理，而非文本模型。
 
 ## 安装与首次启动
 
@@ -61,7 +63,9 @@ alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的�
 首次启动时：
 
 1. 选择预计会听到的语言。
-2. 打开 **Settings → API keys**，填入 Soniox 密钥，同意云端处理并保存。
+2. 打开 **Settings → API keys**，填入 Soniox 密钥，同意云端处理并保存——
+   或者，为让音频留在本机，在 **Settings → Transcription** 中选择 **Local Whisper** 并下载模型
+   （下载前显示大小；无需密钥或云端同意）。
 3. 在 **Settings → Transcription** 中选择转写或翻译模式，以及翻译目标语言。
 4. 分别配置 **Assistant** 和 **Notes**。使用 Codex 时，先安装官方
    [Codex CLI](https://developers.openai.com/codex/cli/)，再通过 SKAZ 的 Codex 设置登录；
@@ -76,7 +80,8 @@ alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的�
 
 - 转写、笔记和聊天保存在本机。不提供用于回放的永久实时音频存档；
   处理或恢复过程中可能使用临时音频。
-- 获得同意后，音频会发送给 Soniox 识别。Assistant 和 Notes 会将上下文发送给
+- 使用 Soniox 或 OpenAI 时，获得同意后音频会发送给该服务；使用 Local Whisper 时在本机识别，
+  不会发送。Assistant 和 Notes 会将上下文发送给
   所选服务。服务商的数据保留与训练政策适用：**本地存储不等于离线处理**。
 - API 密钥保存在本地加密文件中，加密密钥存放在旁边。主要保护边界是文件权限，
   无法防御以同一用户身份运行的其他进程。也请保护好导出文件和备份。
@@ -86,7 +91,7 @@ alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的�
 ## 工作原理
 
 ```text
-麦克风 / 系统音频 / 媒体 → Electron → Python → Soniox
+麦克风 / 系统音频 / 媒体 → Electron → Python → Soniox | Local Whisper | OpenAI
                               ↓         ↓
                           React UI   本地资料库
                                         ↕

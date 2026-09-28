@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import media_tools
-from .gateways import ProviderNotConfigured
+from .asr_providers import LABELS, check_import, import_model, import_provider, transcribe_import
+from .gateways import LiveAsrError, ProviderNotConfigured
 from .gateways.soniox_async import (
-    ASYNC_MODEL,
     AsyncRequest,
     SonioxAsyncError,
     SonioxAsyncGateway,
@@ -98,12 +98,17 @@ class ImportService:
 
     async def _start(self, request: ImportRequest) -> ImportRecord:
         settings = await disk_call(self._runtime.settings_store.load)
-        if not settings.cloud_consent:
-            raise ProviderNotConfigured(
-                "Importing a file sends its audio to Soniox; enable cloud consent in settings."
-            )
-        if not await disk_call(self._runtime.api_key, "soniox"):
-            raise ProviderNotConfigured("Soniox has no API key stored; add one in settings.")
+        if settings.transcription_provider == "soniox":
+            if not settings.cloud_consent:
+                raise ProviderNotConfigured(
+                    "Importing a file sends its audio to Soniox; enable cloud consent in settings."
+                )
+            if not await disk_call(self._runtime.api_key, "soniox"):
+                raise ProviderNotConfigured("Soniox has no API key stored; add one in settings.")
+        else:
+            # The provider is fixed now and recorded on the import; a later settings
+            # change never silently moves this file to another provider.
+            await disk_call(check_import, self._runtime, settings, translate=request.translate)
         duration = request.declared_duration_ms
         if request.url:
             youtube = youtube_source(request.url)
@@ -122,7 +127,7 @@ class ImportService:
                 duration = info["duration_ms"]
                 source = replace(source, prepare_media=True)
         record = await disk_call(
-            self.store.create, request.session_id, source=source, model=ASYNC_MODEL,
+            self.store.create, request.session_id, source=source, model=import_model(settings),
             translate=request.translate,
             translation_target_language=settings.translation_target_language,
             used_languages=(tuple(settings.used_languages)
@@ -141,12 +146,21 @@ class ImportService:
         self._claim()
         try:
             settings = await disk_call(self._runtime.settings_store.load)
-            if not settings.cloud_consent:
-                raise ProviderNotConfigured("Enable cloud processing before retrying an import.")
-            gateway = await self._gateway()
             previous = await disk_call(self.store.get, session_id)
             if previous is None or previous.status not in ("failed", "interrupted"):
                 raise ImportConflict("Only a failed or interrupted import can be retried.")
+            if import_provider(previous.model) == "local-whisper":
+                # On-device work has no remote job to reconcile: run it again.
+                record = await disk_call(self.store.retry, session_id)
+                self._spawn(record)
+                return record
+            if not settings.cloud_consent:
+                raise ProviderNotConfigured("Enable cloud processing before retrying an import.")
+            if import_provider(previous.model) == "openai":
+                record = await disk_call(self.store.retry, session_id)
+                self._spawn(record)
+                return record
+            gateway = await self._gateway()
             if previous.transcription_id:
                 job = await gateway.status(previous.transcription_id)
                 if job.status == "error":
@@ -216,13 +230,16 @@ class ImportService:
                 await self._execute(record)
             except asyncio.CancelledError:
                 raise
-            except SonioxAsyncError as error:
+            except (SonioxAsyncError, LiveAsrError) as error:
                 await self._fail(session_id, str(error))
             except (ImportConflict, ProviderNotConfigured, OSError, media_tools.MediaError) as error:
                 await self._fail(session_id, str(error))
 
     async def _execute(self, record: ImportRecord) -> None:
         await disk_call(self._runtime.storage.ensure_import_directory, record.session_id)
+        if import_provider(record.model) != "soniox":
+            await self._execute_direct(record)
+            return
         gateway = await self._gateway()
         session_id = record.session_id
         if record.transcription_id is None:
@@ -261,6 +278,31 @@ class ImportService:
         await disk_call(self._runtime.session_files.project, session_id)
         self._runtime.mark_verified(
             "asr", "soniox", record.model, "Transcribed an imported audio file through this installation",
+        )
+
+    async def _execute_direct(self, record: ImportRecord) -> None:
+        """Local Whisper or OpenAI: decode to 16 kHz PCM, transcribe, store like Soniox."""
+        session_id = record.session_id
+        provider = import_provider(record.model)
+        path = await self._audio_path(record)
+        await disk_call(self.store.stage, session_id, "preparing")
+        directory = await disk_call(self.temp.directory, session_id)
+        pcm = await media_tools.decode_pcm16k(path, directory)
+        await disk_call(self.store.stage, session_id, "processing")
+        target, languages = await disk_call(self.store.recognition_settings, session_id)
+        transcript = await transcribe_import(
+            self._runtime, record.model, pcm, languages=languages,
+            translation_target=target if record.translate else None,
+        )
+        await disk_call(self.temp.remove, session_id)
+        await disk_call(
+            self.store.apply_transcript, session_id, tokens=transcript.tokens,
+            audio_duration_ms=transcript.duration_ms,
+        )
+        await disk_call(self._runtime.session_files.project, session_id)
+        self._runtime.mark_verified(
+            "asr", provider, record.model.partition("/")[2],
+            f"Transcribed an imported audio file with {LABELS[provider]} through this installation",
         )
 
     async def _audio_path(self, record: ImportRecord) -> Path:

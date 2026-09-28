@@ -1,4 +1,4 @@
-"""Local PCM WebSocket intake with independent Soniox forwarding.
+"""Local PCM WebSocket intake with independent ASR-provider forwarding.
 
 Only Electron main should connect. An ACK means the PCM and metadata were saved,
 not that an ASR provider received or transcribed them.
@@ -18,8 +18,9 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .. import repository as repo
-from ..gateways.soniox import DEFAULT_MODEL
+from ..asr_providers import connection_model, live_plan
 from ..live_store import LiveConflict, LiveConnection
+from ..native_finalization import start_finalization
 from ..native_io import disk_call, drain_on_cancel
 from ..native_stream import NativeStream
 from ..runtime import Runtime
@@ -108,7 +109,8 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
         async def open_storage() -> None:
             nonlocal connection
             connection = await disk_call(
-                runtime.live_store.open, session_id, sample_rate=config.sample_rate, model=DEFAULT_MODEL,
+                runtime.live_store.open, session_id, sample_rate=config.sample_rate,
+                model=connection_model(settings),
                 recording_mode=settings.native_recording_mode,
                 translation_target_language=settings.translation_target_language,
                 used_languages=(tuple(settings.used_languages)
@@ -120,17 +122,21 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             settings = await disk_call(runtime.settings_store.load)
             await drain_on_cancel(open_storage())
             assert connection is not None
-            key = (
-                await disk_call(runtime.api_key, "soniox")
-                if settings.cloud_consent else None
+            # The provider is decided once per stream: no fallback, ever. Key lookup
+            # reads the encrypted store, so it stays off the event loop.
+            plan = await disk_call(live_plan, runtime, settings, connection)
+            stream = NativeStream(
+                runtime.live_store, connection, plan.opener, unavailable_reason=plan.unavailable,
+                cloud=plan.cloud, api_key_provider=plan.api_key_provider,
             )
-            stream = NativeStream(runtime.live_store, connection, key)
             runtime.native_streams[session_id] = stream
         saved_samples = connection.start_sample
         await socket.send_json({
             "type": "stream.opened", "connection_id": connection.id,
             "sample_rate": config.sample_rate, "saved_samples": saved_samples,
             "next_sequence": connection.next_sequence, "transcription": stream.state,
+            "transcription_provider": plan.provider,
+            **({"transcription_detail": stream.failure_reason} if stream.failure_reason else {}),
             "audio_retained": False,
         })
         failure = asyncio.create_task(stream.wait_failure())
@@ -140,7 +146,10 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                 done, _ = await asyncio.wait((incoming, failure), return_when=asyncio.FIRST_COMPLETED)
                 if failure in done:
                     failure.result()  # Storage failures still fail the transport.
-                    await socket.send_json({"type": "transcription.failed"})
+                    await socket.send_json({
+                        "type": "transcription.failed",
+                        **({"reason": stream.failure_reason} if stream.failure_reason else {}),
+                    })
                     failure = None
             # ASR failure is not transport failure: drain captured tail and accept
             # the explicit Stop, releasing ownership before the next attempt.
@@ -170,6 +179,15 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             if failure is not None:
                 failure.cancel()
                 await asyncio.gather(failure, return_exceptions=True)
+            if stream.provider == "local-whisper" and stream.state != "unavailable":
+                await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
+                start_finalization(runtime, session_id, stream)
+                settled = True
+                await socket.send_json({
+                    "type": "stream.stopped", "saved_samples": saved_samples,
+                    "transcription_complete": False, "transcription_pending": True, "status": end_state,
+                })
+                break
             complete = await stream.finish()
             await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
             await disk_call(runtime.session_files.project, session_id)
@@ -180,6 +198,8 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             await socket.send_json({
                 "type": "stream.stopped", "saved_samples": saved_samples,
                 "transcription_complete": complete, "status": end_state,
+                **({"transcription_detail": stream.incomplete_reason}
+                   if not complete and stream.incomplete_reason else {}),
             })
             break
     except asyncio.CancelledError:

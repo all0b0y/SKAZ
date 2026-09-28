@@ -19,6 +19,7 @@ from typing import Any, Literal, Protocol, cast
 from websockets.asyncio.client import connect
 
 from ..languages import validate_languages
+from . import LiveAsrError
 
 SONIOX_WEBSOCKET_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 DEFAULT_MODEL = "stt-rt-v5"
@@ -31,12 +32,11 @@ _SAFE_ERROR_VALUE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 Marker = Literal["end", "fin"]
 
 
-class SonioxGatewayError(RuntimeError):
+class SonioxGatewayError(LiveAsrError):
     """A sanitized connection, provider, or protocol failure."""
 
     def __init__(self, message: str = "Soniox protocol failure", *, retryable: bool = False) -> None:
-        super().__init__(message)
-        self.retryable = retryable
+        super().__init__(message, retryable=retryable)
 
 
 class SonioxProtocolError(SonioxGatewayError):
@@ -270,6 +270,13 @@ class SonioxSession:
         self._total_audio_proc_ms = 0
 
     @property
+    def failure_message(self) -> str | None:
+        """The sanitized reason this session ended without ``finished:true``, if known."""
+        if not self._completion.done():
+            return None
+        return self._completion.result().error
+
+    @property
     def pending_event_count(self) -> int:
         return self._events.qsize()
 
@@ -309,7 +316,7 @@ class SonioxSession:
             yield event
 
     async def finish(self, *, timeout_s: float = FINALIZATION_TIMEOUT_S) -> SonioxCompletion:
-        """Send empty binary end-of-stream once and await ``finished:true``."""
+        """Send empty text end-of-stream once and await ``finished:true``."""
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("timeout_s must be positive and finite")
         timeout_s = min(timeout_s, FINALIZATION_TIMEOUT_S)
@@ -325,7 +332,7 @@ class SonioxSession:
             # One deadline covers both transport backpressure and the server's
             # remaining results; sending the end marker can itself block.
             async with asyncio.timeout(timeout_s):
-                await self._socket.send(b"")
+                await self._socket.send("")
                 return await asyncio.shield(self._completion)
         except TimeoutError:
             await self._fail("Soniox finalization timed out.")

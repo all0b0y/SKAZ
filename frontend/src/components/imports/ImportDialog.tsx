@@ -95,12 +95,18 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
     [duration, rate],
   );
   const tooLong = caps != null && duration != null && duration > caps.max_duration_ms;
-  const blocked = caps != null && (!caps.cloud_consent || !caps.has_api_key);
+  // Soniox (and older backends) report consent and key; other providers report readiness.
+  const soniox = !caps?.provider || caps.provider === 'soniox';
+  const onDevice = caps?.sends_audio === false;
+  const translationUnavailable = caps?.translation === 'none';
+  const blocked = caps != null && (soniox
+    ? (!caps.cloud_consent || !caps.has_api_key)
+    : caps.provider_ready === false);
   const queued = caps != null && caps.active_imports >= caps.max_concurrent_imports;
   const duplicate = !!preview?.existing_session_ids.length;
   const expensive =
     caps?.warn_above_usd != null && estimate != null && estimate > caps.warn_above_usd
-    && !tooLong && !blocked;
+    && !tooLong && !blocked && !onDevice;
   const needsSecondClick = expensive && !confirmedExpensive;
 
   // Re-arm the second click whenever the price changes under the user.
@@ -126,9 +132,11 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
 
   // The one blocking reason, most fundamental first; fixable ones link to Settings.
   const blocker: { text: string; settings: boolean } | null =
-    caps && !caps.cloud_consent
+    caps && !soniox && caps.provider_ready === false
+      ? { text: `${caps.provider_label ?? 'The transcription provider'} is not ready: ${caps.provider_detail ?? 'check Settings → Transcription.'}`, settings: true }
+      : caps && soniox && !caps.cloud_consent
       ? { text: 'Import sends the audio file to Soniox. Turn on cloud processing in Settings → API keys.', settings: true }
-      : caps && !caps.has_api_key
+      : caps && soniox && !caps.has_api_key
         ? { text: 'No Soniox key is saved. Add it in Settings → API keys.', settings: true }
         : tooLong
           ? { text: `The file is longer than ${formatDuration(caps!.max_duration_ms)} — the provider does not accept it.`, settings: false }
@@ -144,7 +152,8 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
       <div className="import-dialog__switch" role="radiogroup" aria-label="What to do">
         {([[false, 'Transcription', 'Transcription only'], [true, '+ Translation', 'Transcription and translation']] as const)
           .map(([value, label, name]) => (
-            <button key={label} type="button" role="radio" aria-checked={translate === value} aria-label={name} disabled={busy}
+            <button key={label} type="button" role="radio" aria-checked={translate === value} aria-label={name}
+              disabled={busy || (value && translationUnavailable)}
               className={clsx('import-dialog__switch-option', translate === value && 'import-dialog__switch-option--on')}
               onClick={() => setTranslate(value)}>
               {label}
@@ -156,7 +165,9 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
         <span>{duration === undefined ? 'reading…' : duration === null ? 'could not be read from the file' : formatDuration(duration)}</span>
         <span aria-hidden="true"> · </span>
         <span>
-          {estimate != null && rate != null
+          {onDevice
+            ? 'free — transcribed on this computer'
+            : estimate != null && rate != null
             ? `≈ ${formatCost(estimate)}`
             : rate != null
               ? `≈ $${rate.toFixed(2)} per audio hour — the exact amount is shown after processing`
@@ -166,10 +177,20 @@ export function ImportDetails({ file, preview, onOpenExisting, onOpenSettings, o
         <span>Saved to <span>{caps ? caps.destination : '—'}</span></span>
       </p>
 
-      <p className="import-dialog__note">
-        An estimate, not a bill{rate != null && estimate != null ? ` ($${rate.toFixed(2)} per audio hour)` : ''}: the provider
-        charges by its own tokens. The original file stays where it is; temporary audio is deleted afterwards.
-      </p>
+      {onDevice ? (
+        <p className="import-dialog__note">
+          Transcribed by {caps?.provider_label ?? 'Local Whisper'} on this computer; the audio never leaves it.
+          {caps?.translation === 'english_only' ? ' Translation is available into English only.' : ''}
+          {' '}The original file stays where it is; temporary audio is deleted afterwards.
+        </p>
+      ) : (
+        <p className="import-dialog__note">
+          An estimate, not a bill{rate != null && estimate != null ? ` ($${rate.toFixed(2)} per audio hour)` : ''}: the provider
+          charges by its own tokens.{!soniox && caps?.provider_label ? ` Audio is sent to ${caps.provider_label}.` : ''}
+          {translationUnavailable ? ' This provider cannot translate.' : ''} The original file stays where it is; temporary
+          audio is deleted afterwards.
+        </p>
+      )}
 
       {blocker && (
         <p role="alert" className="import-dialog__line">

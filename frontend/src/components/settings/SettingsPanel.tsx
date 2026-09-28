@@ -11,6 +11,7 @@ import { CodexEnginePanel } from './CodexEnginePanel';
 import { WebSearchSettings } from './WebSearchSettings';
 import type { AgentModeToggle, CodexTab } from './ProfileEditor';
 import { SonioxCredentials } from './SonioxCredentials';
+import { TranscriptionSettings, type TranscriptionDraft } from './TranscriptionSettings';
 import { UsedLanguages, languageName, byShownName } from './UsedLanguages';
 import { CLOUD_PROVIDERS } from './providers';
 import { useCodex } from '../../state/codex';
@@ -113,6 +114,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   const [nativeMode, setNativeMode] = useState<NativeRecordingMode | null>(null);
   const [translationTarget, setTranslationTarget] = useState<string | null>(null);
   const [outputLanguage, setOutputLanguage] = useState<string | null>(null);
+  const [transcription, setTranscription] = useState<TranscriptionDraft>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -200,6 +202,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
     if (nativeMode !== null) update.native_recording_mode = nativeMode;
     if (translationTarget !== null) update.translation_target_language = translationTarget;
     if (outputLanguage !== null) update.output_language = outputLanguage;
+    Object.assign(update, transcription);
 
     if (Object.keys(providerKeys).length) update.provider_keys = providerKeys;
     if (cloudConsent !== null) update.cloud_consent = cloudConsent;
@@ -226,6 +229,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
       setNativeMode(null);
       setTranslationTarget(null);
       setOutputLanguage(null);
+      setTranscription({});
       if (codexDirty) {
         // The API profiles above are already saved; a Codex failure keeps only its own draft.
         await useCodex.getState().saveSettings({ ...codexStored!, ...codexDraft });
@@ -372,8 +376,9 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
                         <option key={code} value={code}>{languageName(code)}</option>)}
                     </select>
                     <span className="field__hint">
-                      Speech in any of the selected languages is translated into this language. Soniox shows
-                      the translation instead of the original; the original can be expanded under each turn.
+                      Speech in any of the selected languages is translated into this language. The translation
+                      is shown instead of the original; the original can be expanded under each turn.
+                      Local Whisper translates into English only; OpenAI does not translate live.
                     </span>
                   </div>}
                   <p className="field__hint">The transcript and timestamps are saved. Audio is used for recognition and is not stored.</p>
@@ -406,21 +411,18 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
             {activeSection === 'asr' && (
               <section className="settings-section">
                 <h3 className="settings-section__title">Transcription</h3>
-                <div className="profile profile--fixed">
-                  <div className="profile__head">
-                    <div>
-                      <strong>Transcription (ASR)</strong>
-                      <p className="field__hint">Turns speech into timestamped text. Not a plain text model.</p>
-                    </div>
-                    <span className="profile__fixed-value">Soniox</span>
-                  </div>
-                  <p className="field__hint">
-                    Live transcription runs through Soniox — model and endpoint choices here do not apply.
-                    {settings.provider_has_api_key?.soniox === true
-                      ? ' Key saved.'
-                      : ' No key set — add it under API keys.'}
-                  </p>
-                </div>
+                <p className="settings-section__hint">
+                  Turns live speech and imported media into the timestamped, speaker-grouped transcript.
+                  The provider you choose is used as is: SKAZ never switches to another one on failure.
+                  Save changes to apply; a recording in progress keeps its provider.
+                </p>
+                <TranscriptionSettings
+                  settings={settings}
+                  draft={transcription}
+                  onChange={setTranscription}
+                  disabled={saving}
+                  capturing={capturing}
+                />
               </section>
             )}
 
@@ -514,8 +516,9 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
                   <span>
                     <strong>Allow cloud processing</strong>
                     <span className="field__hint">
-                      Sends audio to Soniox and requested text to configured cloud models; provider charges apply.
-                      Disabling this stops live transcription and recording after Save.
+                      Sends audio to the selected cloud transcription provider (Soniox or OpenAI) and requested
+                      text to configured cloud models; provider charges apply. Local Whisper does not need it.
+                      Disabling this stops cloud live transcription and recording after Save.
                       Saved transcripts and notes are kept; there is no stored audio to upload later.
                     </span>
                   </span>

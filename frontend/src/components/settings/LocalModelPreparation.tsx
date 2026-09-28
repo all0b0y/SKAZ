@@ -1,26 +1,38 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { Icon } from '../ui/Icon';
-import type { LocalModelStatus, LocalProviderName } from '../../api/types';
+import type { LocalModelProviderName, LocalModelStatus } from '../../api/types';
 
 const POLL_INTERVAL_MS = 1000;
 
 interface LocalModelPreparationProps {
-  provider: LocalProviderName;
+  provider: LocalModelProviderName;
   model: string;
+  /** Approximate download size; when known the user confirms it before downloading. */
+  sizeBytes?: number | null;
+  /** Called with each new state, e.g. to refresh readiness once the model is ready. */
+  onState?: (state: LocalModelStatus['state']) => void;
 }
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const formatBytes = (bytes: number): string => {
+export const formatBytes = (bytes: number): string => {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
   return `${bytes} bytes`;
 };
 
-export function LocalModelPreparation({ provider, model }: LocalModelPreparationProps) {
+/** Download progress as 0..1; an estimate from the catalog size when the hub gives no total. */
+function progressFraction(progress: LocalModelStatus['progress'], sizeBytes?: number | null): number | null {
+  if (!progress || progress.stage !== 'downloading') return null;
+  const total = progress.total_bytes || sizeBytes;
+  if (!total) return null;
+  return Math.min(0.99, progress.downloaded_bytes / total);
+}
+
+export function LocalModelPreparation({ provider, model, sizeBytes, onState }: LocalModelPreparationProps) {
   const localModelStatus = useStore((s) => s.localModelStatus);
   const prepareLocalModel = useStore((s) => s.prepareLocalModel);
   const deleteLocalModel = useStore((s) => s.deleteLocalModel);
@@ -49,6 +61,9 @@ export function LocalModelPreparation({ provider, model }: LocalModelPreparation
   }, [provider, model, localModelStatus]);
 
   const state = status?.state;
+  useEffect(() => {
+    if (state) onState?.(state);
+  }, [state, onState]);
   const inProgress = state === 'loading' || state === 'installing' || state === 'verifying';
   useEffect(() => {
     if (!inProgress) return;
@@ -81,7 +96,7 @@ export function LocalModelPreparation({ provider, model }: LocalModelPreparation
   }, [inProgress, provider, model, localModelStatus]);
 
   const runMutation = async (
-    operation: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>,
+    operation: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>,
   ) => {
     // A mutation is authoritative over any earlier GET/poll for the same
     // selection. Its version also lets a provider/model switch invalidate it.
@@ -96,6 +111,13 @@ export function LocalModelPreparation({ provider, model }: LocalModelPreparation
     } finally {
       if (generation.current === requestGeneration) setMutating(false);
     }
+  };
+
+  const onDownload = () => {
+    if (sizeBytes && !window.confirm(
+      `Download ${model} (about ${formatBytes(sizeBytes)})? It is stored on this computer and used offline.`,
+    )) return;
+    void runMutation(prepareLocalModel);
   };
 
   const onDelete = () => {
@@ -125,28 +147,40 @@ export function LocalModelPreparation({ provider, model }: LocalModelPreparation
           <Icon name="warning" size={13} /> {requestError}
         </p>
       )}
-      {status?.warning && <p className="profile__note profile__note--warn">{status.warning}</p>}
+      {/* The shared-cache warning is about deleting files; it matters only once files exist. */}
+      {status?.warning && status.cached && <p className="profile__note">{status.warning}</p>}
 
       {state === 'not_installed' && (
         <>
-          <p className="profile__note">This model is not fully installed in the selected cache.</p>
+          <p className="profile__note">
+            {status?.cached ? 'This model is only partly downloaded.' : 'Not downloaded yet.'}
+          </p>
           <button
             type="button"
             className="profile__download"
-            onClick={() => void runMutation(prepareLocalModel)}
+            onClick={onDownload}
             disabled={mutating}
           >
-            Download model
+            {sizeBytes ? `Download model (about ${formatBytes(sizeBytes)})` : 'Download model'}
           </button>
         </>
       )}
 
+      {inProgress && progressFraction(progress, sizeBytes) !== null && (
+        <progress
+          className="profile__progress"
+          max={1}
+          value={progressFraction(progress, sizeBytes) ?? 0}
+          aria-label={`Downloading ${model}`}
+        />
+      )}
       {inProgress && (
         <p className="profile__note" role="status" aria-live="polite">
           <span className="profile__spinner" aria-hidden="true" />
           {state === 'verifying' ? 'Verifying local files offline…' : 'Preparing the model…'}
           {progress && progress.downloaded_bytes > 0 && (
-            <> {formatBytes(progress.downloaded_bytes)} downloaded.</>
+            <> {formatBytes(progress.downloaded_bytes)}
+              {progress.total_bytes || sizeBytes ? ` of ${progress.total_bytes ? '' : 'about '}${formatBytes(progress.total_bytes || sizeBytes || 0)}` : ''} downloaded.</>
           )}
           {progress && progress.completed_files > 0 && (
             <> {progress.completed_files} files completed.</>
@@ -190,7 +224,7 @@ export function LocalModelPreparation({ provider, model }: LocalModelPreparation
           <button
             type="button"
             className="profile__download"
-            onClick={() => void runMutation(prepareLocalModel)}
+            onClick={onDownload}
             disabled={mutating}
           >
             Retry download

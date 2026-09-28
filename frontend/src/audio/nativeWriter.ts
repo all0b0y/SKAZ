@@ -7,7 +7,12 @@ import type { PersistedAudioAck } from './persistenceQueue';
 export class NativeAudioWriter {
   private rate: number | null = null;
   transcriptionAvailable = false;
+  /** Backend's sanitized reason transcription could not start, if it sent one. */
+  transcriptionDetail: string | null = null;
   transcriptionIncomplete = false;
+  transcriptionPending = false;
+  /** Why the last Stop/Pause was not fully transcribed, when the backend knows. */
+  incompleteDetail: string | null = null;
   private audioRetained = true;
   private sequence = 0;
   private samples = 0;
@@ -54,6 +59,7 @@ export class NativeAudioWriter {
       }
       this.recovered = lostAck ? this.sequence : null;
       this.transcriptionAvailable = opened.transcription === 'connecting';
+      this.transcriptionDetail = opened.transcription_detail ?? null;
       this.audioRetained = opened.audio_retained !== false;
       this.transcriptionIncomplete = false;
       this.clockInitialized = true;
@@ -125,7 +131,9 @@ export class NativeAudioWriter {
         if (ack.saved_samples !== this.samples || ack.status !== (action === 'pause' ? 'paused' : 'stopped')) {
           throw new Error('Native finalization ACK does not match recording state.');
         }
-        this.transcriptionIncomplete = !ack.transcription_complete && this.samples > 0;
+        this.transcriptionPending = ack.transcription_pending === true;
+        this.transcriptionIncomplete = !ack.transcription_complete && !this.transcriptionPending && this.samples > 0;
+        this.incompleteDetail = this.transcriptionIncomplete ? ack.transcription_detail ?? null : null;
       } else {
         await this.api.setSessionStatus(this.sessionId, 'stopped', { flush_transcription: false });
       }

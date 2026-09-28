@@ -12,7 +12,7 @@ import type {
   BufferedAudioResponse,
   BulkDeleteResult,
   LocalModelStatus,
-  LocalProviderName,
+  LocalModelProviderName,
   LiveAsrAdvanceResponse,
   AcceptLiveAsrFragmentRequest,
   EditLiveAsrFragmentRequest,
@@ -146,7 +146,7 @@ export class ApiClient {
   // This UI-facing preparation route may download weights and must be called only
   // on an explicit user action, never on mount or as a side effect of saving
   // settings. The backend's separate environment opt-in is unchanged.
-  prepareLocalModel(provider: LocalProviderName, model: string): Promise<LocalModelStatus> {
+  prepareLocalModel(provider: LocalModelProviderName, model: string): Promise<LocalModelStatus> {
     return this.bridge
       .request<LocalModelStatus>({
         method: 'POST',
@@ -156,7 +156,7 @@ export class ApiClient {
       .then(unwrap);
   }
 
-  getLocalModelStatus(provider: LocalProviderName, model: string): Promise<LocalModelStatus> {
+  getLocalModelStatus(provider: LocalModelProviderName, model: string): Promise<LocalModelStatus> {
     return this.bridge
       .request<LocalModelStatus>({
         method: 'GET',
@@ -166,7 +166,7 @@ export class ApiClient {
       .then(unwrap);
   }
 
-  deleteLocalModel(provider: LocalProviderName, model: string): Promise<LocalModelStatus> {
+  deleteLocalModel(provider: LocalModelProviderName, model: string): Promise<LocalModelStatus> {
     return this.bridge
       .request<LocalModelStatus>({
         method: 'DELETE',

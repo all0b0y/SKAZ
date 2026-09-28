@@ -109,8 +109,8 @@ const quitController = new QuitController({
       noLink: true,
       message: 'Saving before exit could not be confirmed',
       detail:
-        'Some captured audio has not been saved yet. Quitting now may lose it. ' +
-        'Stay to retry saving, or explicitly discard unsaved audio and quit.',
+        'Some captured audio is still being saved or transcribed. Quitting now may lose the unfinished audio. ' +
+        'Stay to let processing finish or retry saving, or explicitly discard it and quit.',
     };
     const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
     return choice === 1;
