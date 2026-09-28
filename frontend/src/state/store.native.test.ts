@@ -13,18 +13,22 @@ const settings: Settings = {
   notes: { provider: 'openrouter', model: 'notes' }, transcript_language: 'auto', output_language: 'ru',
   cloud_consent: false, contextual_local_enabled: false,
 };
+let deviceRate = 16000;
 let saved = 0;
 let sequence = 0;
 let loseAck = false;
 let bridge: BridgeApi;
 let useStore: (typeof import('./store'))['useStore'];
+let useNativeProcessing: (typeof import('./nativeProcessing'))['useNativeProcessing'];
 
 beforeEach(async () => {
   vi.resetModules();
-  saved = 0; sequence = 0; loseAck = false;
+  ({ useNativeProcessing } = await import('./nativeProcessing'));
+  saved = 0; sequence = 0; loseAck = false; deviceRate = 16000;
   trackStop.mockClear();
   class Context {
-    sampleRate = 16000;
+    sampleRate: number;
+    constructor(options?: AudioContextOptions) { this.sampleRate = options?.sampleRate ?? deviceRate; }
     state = 'running';
     audioWorklet = { addModule: async () => {} };
     createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
@@ -83,6 +87,44 @@ afterEach(async () => {
 });
 
 describe('native Record lifecycle', () => {
+  it('acknowledges Stop without a warning, but protects background audio on quit', async () => {
+    await useStore.getState().startRecording();
+    deliver(new Float32Array(1600));
+    vi.mocked(bridge.endNative).mockResolvedValueOnce({ ok: true, status: 200, data: {
+      saved_samples: 1600, status: 'stopped', transcription_complete: false, transcription_pending: true,
+    } });
+    const stopping = useStore.getState().stopRecording();
+    releaseBarrier();
+    await stopping;
+    expect(useStore.getState().recorderState).toBe('stopped');
+    expect(useStore.getState().recorderError).toBeNull();
+    expect(useNativeProcessing.getState().sessions['native-test']?.processing).toBe(true);
+    const original = vi.mocked(bridge.request).getMockImplementation()!;
+    let processing = true;
+    vi.mocked(bridge.request).mockImplementation(async req => req.path.endsWith('/live/status')
+      ? { ok: true, status: 200, data: { processing, incomplete: false } }
+      : original(req));
+    await expect(useStore.getState().prepareForQuit()).resolves.toBe(false);
+    processing = false;
+    await expect(useStore.getState().prepareForQuit()).resolves.toBe(true);
+  });
+
+  it('continues at the persisted rate when the default device rate changes after Stop', async () => {
+    await useStore.getState().startRecording();
+    deliver(new Float32Array(1600));
+    const stopping = useStore.getState().stopRecording();
+    releaseBarrier();
+    await stopping;
+    deviceRate = 48000;
+    const originalRequest = vi.mocked(bridge.request).getMockImplementation()!;
+    vi.mocked(bridge.request).mockImplementation(async (req) => req.path === '/sessions/native-test/live'
+      ? { ok: true, status: 200, data: { sample_rate: 16000 } }
+      : originalRequest(req));
+    await useStore.getState().startRecording();
+    expect(bridge.openNative).toHaveBeenLastCalledWith('native-test', 16000);
+    expect(useStore.getState().recorderState).toBe('recording');
+  });
+
   it('warns on each unavailable start and clears the error on a successful attempt', async () => {
     const opened = vi.mocked(bridge.openNative).getMockImplementation()!;
     vi.mocked(bridge.openNative).mockImplementation(async (id, rate) => {

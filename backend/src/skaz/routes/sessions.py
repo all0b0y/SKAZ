@@ -123,6 +123,9 @@ async def read_native_status(session_id: str, runtime: RuntimeDep) -> dict[str, 
         "state": stream.state if stream is not None else "inactive",
         "attempt": stream.recovery.attempt if stream is not None else 0,
         "max_attempts": 3,
+        "processing": bool(stream and stream.processing),
+        "background_sessions": [sid for sid, worker in runtime.native_streams.items() if worker.processing],
+        "incomplete": await disk_call(runtime.live_store.last_incomplete, session_id),
         "buffered_audio_ms": (stream.buffer.size_bytes * 500 // stream.connection.sample_rate
                               if stream is not None else 0),
     }
@@ -135,6 +138,7 @@ async def read_native_live(session_id: str, runtime: RuntimeDep) -> dict[str, An
         snapshot = await disk_call(runtime.live_store.snapshot, session_id)
         stream = runtime.native_streams.get(session_id)
         snapshot["transcription"] = stream.state if stream is not None else "inactive"
+        snapshot["processing"] = bool(stream and stream.processing)
         _describe_provider(snapshot, stream)
         return _live_view(snapshot)
     except LiveConflict as error:

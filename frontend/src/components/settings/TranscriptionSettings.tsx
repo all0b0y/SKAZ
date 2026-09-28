@@ -231,7 +231,7 @@ function ProviderCard({ provider, selected, disabled, onSelect }: {
       <span className="transcription__provider-head">
         <strong>{provider.label}</strong>
         <span className={clsx('transcription__tag', provider.capabilities.offline && 'transcription__tag--local')}>
-          {provider.capabilities.offline ? 'On this computer' : 'Cloud'}
+          {provider.capabilities.offline ? 'Local' : 'Cloud'}
         </span>
       </span>
       <span className={clsx('profile__note', provider.ready ? 'profile__note--ok' : 'profile__note--warn')}>

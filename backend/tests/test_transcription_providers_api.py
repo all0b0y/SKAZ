@@ -40,6 +40,17 @@ def pcm_packet(sequence: int, start: int, pcm: bytes) -> bytes:
     return struct.pack("!QQI", sequence, start, len(pcm) // 2) + pcm
 
 
+def wait_background(http: TestClient, sid: str) -> None:
+    assert http.portal is not None
+    for _ in range(200):
+        status = http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()
+        if not status["processing"]:
+            assert status["incomplete"] is False
+            return
+        http.portal.call(asyncio.sleep, 0.01)
+    raise AssertionError("Background finalization did not complete")
+
+
 class Voices:
     """First utterance one voice, second another: a stand-in for the ONNX model."""
 
@@ -127,7 +138,8 @@ def test_local_stream_keeps_the_transcript_shape_with_speakers_and_no_cloud_cons
             ws.send_json({"type": "end"})
             stopped = ws.receive_json()
             assert stopped["type"] == "stream.stopped"
-            assert stopped["transcription_complete"] is True
+            assert stopped["transcription_pending"] is True
+            wait_background(http, sid)
         live = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
         assert "".join(token["text"] for token in live["final_tokens"]) == "".join(t for t, _, _ in SCRIPT)
         assert [speaker["number"] for speaker in live["speakers"]] == [1, 2]
@@ -353,58 +365,16 @@ def test_local_stream_is_complete_after_a_tail_that_is_not_a_whole_millisecond(
             ws.send_json({"type": "end"})
             stopped = ws.receive_json()
             assert stopped["saved_samples"] == offset
-            assert stopped["transcription_complete"] is True
+            assert stopped["transcription_pending"] is True
+            wait_background(http, sid)
         assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["gaps"] == []
 
 
-def test_stop_while_the_local_model_loads_waits_and_transcribes_the_recording(
+def test_stop_is_acknowledged_promptly_while_a_local_model_is_still_loading(
     app: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Stop during model load does not throw the audio away: the stream waits for the
-    model, transcribes what was captured and only then confirms, reporting progress."""
-
-    def loading_opener(runtime: Any, settings: StoredSettings, connection: LiveConnection,
-                       target: str | None) -> Callable[[], Awaitable[LiveAsrSession]]:
-        ready = scripted_local_opener(runtime, settings, connection, target)
-
-        async def open_local() -> LiveAsrSession:
-            await asyncio.sleep(1.5)  # the model is still loading when Stop arrives
-            return await ready()
-
-        return open_local
-
-    monkeypatch.setattr(asr_providers, "_local_opener", loading_opener)
-    spoken = SCRIPT[:6]  # "Hello world. This is a test."
-    audio = tone(3.5, spoken)
-    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Early stop"}).json()["id"]
-        with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
-            ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
-            assert ws.receive_json()["transcription"] == "connecting"
-            step = SAMPLE_RATE // 2
-            for sequence, offset in enumerate(range(0, len(audio) // 2, step)):
-                ws.send_bytes(pcm_packet(sequence, offset, audio[offset * 2:(offset + step) * 2]))
-                assert ws.receive_json()["type"] == "audio.saved"
-            ws.send_json({"type": "end"})
-            message = ws.receive_json()
-            beats = 0
-            while message["type"] == "stream.finalizing":
-                beats += 1
-                assert message["pending_ms"] > 0
-                message = ws.receive_json()
-            assert message["type"] == "stream.stopped"
-            assert message["transcription_complete"] is True, message
-            assert beats >= 1
-        tokens = http.get(f"/sessions/{sid}/live", headers=AUTH).json()["final_tokens"]
-        assert "".join(t["text"] for t in tokens) == "".join(text for text, _, _ in spoken)
-
-
-def test_force_finish_ends_a_wait_on_an_uninterruptible_model_load(
-    app: Any, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A model load runs in a thread that cannot be interrupted. "Finish now" must
-    still end the wait at once instead of waiting for the thread."""
+    """A model load runs in a thread that cannot be interrupted. Stop must still be
+    acknowledged within the desktop's 15 s budget instead of waiting for it."""
     import threading
     import time
 
@@ -421,23 +391,22 @@ def test_force_finish_ends_a_wait_on_an_uninterruptible_model_load(
         return open_local
 
     monkeypatch.setattr(asr_providers, "_local_opener", slow_open)
-    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Force"}).json()["id"]
-        with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
-            ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
-            assert ws.receive_json()["transcription"] == "connecting"
-            ws.send_bytes(pcm_packet(0, 0, b"\x00\x00" * 1600))
-            assert ws.receive_json()["type"] == "audio.saved"
-            ws.send_json({"type": "end"})
-            assert ws.receive_json()["type"] == "stream.finalizing"
-            started = time.monotonic()
-            ws.send_json({"type": "force"})
-            stopped = ws.receive_json()
-            while stopped["type"] == "stream.finalizing":
+    monkeypatch.setattr("skaz.native_stream.FINISH_TIMEOUT_S", 0.5)
+    try:
+        with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+            http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
+            sid = http.post("/sessions", headers=AUTH, json={"title": "Quick stop"}).json()["id"]
+            with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
+                ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
+                assert ws.receive_json()["transcription"] == "connecting"
+                ws.send_bytes(pcm_packet(0, 0, b"\x00\x00" * 1600))
+                assert ws.receive_json()["type"] == "audio.saved"
+                started = time.monotonic()
+                ws.send_json({"type": "end"})
                 stopped = ws.receive_json()
-            elapsed = time.monotonic() - started
-            release.set()  # let the "model load" end so the test does not wait for it
-        assert stopped["type"] == "stream.stopped" and stopped["transcription_complete"] is False
-        assert "finished by you" in stopped["transcription_detail"]
-        assert elapsed < 4, elapsed
+                elapsed = time.monotonic() - started
+                release.set()  # let the "model load" end so the test does not wait for it
+            assert stopped["type"] == "stream.stopped" and stopped["transcription_complete"] is False
+            assert elapsed < 3, elapsed
+    finally:
+        release.set()

@@ -305,6 +305,15 @@ class LiveStore:
             # the same state a recovered library session gets.
             connection.execute("UPDATE sessions SET status='paused' WHERE status='recording'")
 
+    def last_incomplete(self, session_id: str) -> bool:
+        """Small status read, without loading a recording's tokens/projections."""
+        with self.db.read() as connection:
+            row = connection.execute(
+                "SELECT status,final_sample,end_sample FROM asr_connections "
+                "WHERE session_id=? ORDER BY rowid DESC LIMIT 1", (session_id,),
+            ).fetchone()
+            return bool(row and row["status"] == "incomplete" and row["final_sample"] < row["end_sample"])
+
     def snapshot(self, session_id: str) -> dict[str, Any]:
         with self.db.read() as connection:
             row = connection.execute(

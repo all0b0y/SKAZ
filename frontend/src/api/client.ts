@@ -101,10 +101,6 @@ export class ApiClient {
     return this.bridge.endNative(sessionId, action).then(unwrap);
   }
 
-  forceNative(sessionId: string): Promise<null> {
-    return this.bridge.forceNative(sessionId).then(unwrap);
-  }
-
   onNativeFailure(callback: (failure: NativeFailure) => void): () => void {
     return this.bridge.onNativeFailure(callback);
   }

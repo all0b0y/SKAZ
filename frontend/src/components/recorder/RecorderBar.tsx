@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { clsx } from 'clsx';
+import { useBackgroundTranscription } from '../../state/useBackgroundTranscription';
 import { RecoveryStatus } from './RecoveryStatus';
 import { useStore } from '../../state/store';
 import { Button } from '../ui/Button';
@@ -141,31 +142,6 @@ function RecorderProgress({
  * demand, a real action when one exists, and it stays until fixed or closed. */
 interface CapsuleAction { label: string; run: () => void; icon?: 'retry' | 'settings' | 'mic' }
 
-/** Waiting this long for the provider's confirmation offers the user a way out. */
-export const FORCE_FINISH_OFFER_MS = 5_000;
-
-/**
- * Stop is waiting for the transcription provider to confirm the rest of the
- * transcript. The wait follows the provider's status, not a timer; once it has
- * taken a while, the user may choose to finish now and keep what is confirmed.
- */
-function FinalizingStatus({ elapsedMs, pendingMs, onForce }: {
-  elapsedMs: number; pendingMs: number; onForce: () => void;
-}) {
-  const seconds = Math.max(1, Math.round(pendingMs / 1000));
-  return (
-    <span className="capsule__label capsule__finalizing" role="status">
-      {pendingMs > 0 ? `Finishing transcript… ${seconds} s left to confirm` : 'Finishing transcript…'}
-      {elapsedMs >= FORCE_FINISH_OFFER_MS && (
-        <button type="button" className="capsule__error-action" onClick={onForce}
-          title="Stop waiting; text confirmed so far is kept, the rest is not transcribed">
-          Finish now
-        </button>
-      )}
-    </span>
-  );
-}
-
 function CapsuleError({ message, actions, onDismiss }: {
   message: string;
   actions: CapsuleAction[];
@@ -193,8 +169,6 @@ type CapsuleView = 'idle' | 'recording' | 'paused' | 'busy' | 'finishing' | 'don
 export function RecorderBar() {
   const state = useStore((s) => s.recorderState);
   const finishing = useStore((s) => s.finishing);
-  const finalizing = useStore((s) => s.finalizing);
-  const forceFinish = useStore((s) => s.forceFinishTranscription);
   const queue = useStore((s) => s.queue);
   const transcriptionPending = useStore((s) => s.transcription.pending + s.transcription.deferred);
   // Only the segments, not the whole `detail`: a durable audio save rebuilds
@@ -220,6 +194,8 @@ export function RecorderBar() {
   const systemAudioIssue = useStore((s) => s.systemAudioIssue);
   // A critical transcript problem of THIS session (UI-CLEANUP §1).
   const activeSessionId = useStore((s) => s.activeSessionId);
+  const background = useBackgroundTranscription(activeSessionId, state === 'recording' || state === 'processing');
+  const processingTail = background?.processing === true;
   const transcriptIssue = useTranscriptIssue((s) => (s.issue && s.issue.sessionId === activeSessionId ? s.issue : null));
 
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -241,6 +217,7 @@ export function RecorderBar() {
   // A protected local save is a storage failure even when nothing else wrote an
   // error: it must stay visible with its retry, never disappear with the pills.
   const recordingProblem = recorderError
+    ?? (background?.incomplete ? 'Some audio could not be transcribed. Confirmed text was preserved.' : null)
     ?? (queue.overflow ? 'Capture stopped · buffered audio retained for retry'
       : failedCount > 0 ? `${failedCount} local save${failedCount > 1 ? 's' : ''} failed` : null);
   // Recording problems win: they risk losing audio; a transcript problem only
@@ -264,11 +241,11 @@ export function RecorderBar() {
     if (isFinishing) { wasFinishing.current = true; setDone(false); return undefined; }
     if (!wasFinishing.current) return undefined;
     wasFinishing.current = false;
-    if (state !== 'stopped' || errorMessage) return undefined;
+    if (state !== 'stopped' || errorMessage || processingTail) return undefined;
     setDone(true);
     const timer = setTimeout(() => setDone(false), DONE_MS);
     return () => clearTimeout(timer);
-  }, [isFinishing, state, errorMessage]);
+  }, [isFinishing, state, errorMessage, processingTail]);
 
   const view: CapsuleView = state === 'recording' ? 'recording'
     : state === 'paused' ? 'paused'
@@ -305,7 +282,7 @@ export function RecorderBar() {
             variant="live"
             icon={hasRecording ? 'play' : 'mic'}
             iconFilled={hasRecording}
-            disabled={imported || contextualDisabled || setupHint !== null}
+            disabled={processingTail || imported || contextualDisabled || setupHint !== null}
             aria-describedby={imported ? 'import-recording-explanation' : setupHint ? 'recorder-setup-hint' : undefined}
             title={imported ? IMPORT_RECORDING_MESSAGE : contextualDisabled ? liveCapabilities?.detail ?? undefined
               : setupHint ?? (hasRecording ? 'Continue recording' : 'Record')}
@@ -328,14 +305,13 @@ export function RecorderBar() {
             aria-label="Finishing transcript…" title="Recording is available again once the transcript is finished" />
         )}
 
-        {finalizing && (view === 'finishing' || view === 'busy') ? (
-          <FinalizingStatus elapsedMs={finalizing.elapsedMs} pendingMs={finalizing.pendingMs} onForce={() => void forceFinish()} />
-        ) : view === 'finishing' ? (
+        {view === 'finishing' ? (
           <span className="capsule__label">Finishing transcript…</span>
         ) : view === 'done' ? (
           <span className="capsule__label capsule__done" role="status"><Icon name="check" size={14} /> Done</span>
         ) : null}
 
+        {processingTail && <span className="capsule__label" role="status">Processing remaining audio…</span>}
         <RecorderClock live={state === 'recording'} />
 
         {(view === 'recording' || view === 'paused') && <LevelWave active={state === 'recording'} />}
@@ -344,7 +320,7 @@ export function RecorderBar() {
           <Button key="pause" className="capsule__round capsule__morph" variant="quiet" icon="pause" aria-label="Pause" title="Pause" onClick={() => void pause()} />
         )}
         {view === 'paused' && (
-          <Button key="resume" className="capsule__round capsule__morph" variant="live" icon="play" iconFilled aria-label="Resume" title="Resume" onClick={() => void resume()} />
+          <Button key="resume" className="capsule__round capsule__morph" variant="live" icon="play" iconFilled disabled={processingTail} aria-label="Resume" title="Resume" onClick={() => void resume()} />
         )}
         {(view === 'recording' || view === 'paused' || view === 'busy') && (
           <Button key="stop" className="capsule__round" variant="danger" icon="stop" aria-label="Stop" title="Stop" onClick={() => void stop()} />

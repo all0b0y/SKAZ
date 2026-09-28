@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .. import repository as repo
 from ..asr_providers import connection_model, live_plan
 from ..live_store import LiveConflict, LiveConnection
+from ..native_finalization import start_finalization
 from ..native_io import disk_call, drain_on_cancel
 from ..native_stream import NativeStream
 from ..runtime import Runtime
@@ -43,63 +44,6 @@ class EndStream(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     type: Literal["end"]
     action: Literal["pause", "stop"] = "stop"
-
-
-class ForceFinish(BaseModel):
-    """Stop waiting for the provider's final confirmation (an explicit user choice)."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    type: Literal["force"]
-
-
-#: While finalizing, the client hears from us this often: proof of life, not a deadline.
-FINALIZING_HEARTBEAT_S = 1.0
-
-
-async def _finalize(socket: WebSocket, stream: NativeStream) -> bool:
-    """Run stream.finish() until the provider confirms, reporting progress meanwhile.
-
-    The wait is driven by the provider's status, never by a clock: every second a
-    ``stream.finalizing`` heartbeat tells the client the work is alive and how much
-    audio is still unconfirmed, and a ``{"type": "force"}`` message ends it early.
-    """
-    loop = asyncio.get_running_loop()
-    started = loop.time()
-    finishing = asyncio.create_task(stream.finish())
-    receiving: asyncio.Task[Any] | None = None
-    try:
-        while True:
-            if receiving is None:
-                receiving = asyncio.create_task(socket.receive())
-            done, _ = await asyncio.wait(
-                {finishing, receiving}, timeout=FINALIZING_HEARTBEAT_S, return_when=asyncio.FIRST_COMPLETED,
-            )
-            if finishing in done:
-                return finishing.result()
-            if receiving in done:
-                message = receiving.result()
-                receiving = None
-                if message["type"] == "websocket.disconnect":
-                    stream.force_finish()
-                    await finishing
-                    raise WebSocketDisconnect()
-                text = message.get("text")
-                if not isinstance(text, str) or len(text.encode()) > 4096:
-                    raise LiveConflict("Only a force message is accepted while finalizing.")
-                ForceFinish.model_validate(json.loads(text))
-                stream.force_finish()
-                continue
-            await socket.send_json({
-                "type": "stream.finalizing",
-                "elapsed_ms": int((loop.time() - started) * 1000),
-                "pending_ms": stream.pending_ms,
-                "transcription": stream.state,
-            })
-    finally:
-        for task in (receiving, finishing):
-            if task is not None and not task.done():
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
 
 
 def _authorized(socket: WebSocket, runtime: Runtime) -> bool:
@@ -235,7 +179,16 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             if failure is not None:
                 failure.cancel()
                 await asyncio.gather(failure, return_exceptions=True)
-            complete = await _finalize(socket, stream)
+            if stream.provider == "local-whisper" and stream.state != "unavailable":
+                await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
+                start_finalization(runtime, session_id, stream)
+                settled = True
+                await socket.send_json({
+                    "type": "stream.stopped", "saved_samples": saved_samples,
+                    "transcription_complete": False, "transcription_pending": True, "status": end_state,
+                })
+                break
+            complete = await stream.finish()
             await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
             await disk_call(runtime.session_files.project, session_id)
             settled = True

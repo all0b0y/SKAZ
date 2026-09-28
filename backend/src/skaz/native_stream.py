@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
+from dataclasses import replace
 
 from . import native_recovery
 from .gateways import LiveAsrError
@@ -19,6 +20,7 @@ from .native_recovery import RecoveryBudget, ReplayBuffer
 
 logger = logging.getLogger(__name__)
 
+FINISH_TIMEOUT_S = 3.0
 #: How long Stop waits for a worker that is not streaming (connecting, loading).
 CANCEL_WAIT_S = 2.0
 SEND_TIMEOUT_S = 2.0
@@ -33,6 +35,8 @@ class NativeStream:
         self.connection = connection
         self.state = "connecting" if opener else "unavailable"
         self.complete = False
+        self.processing = False
+        self.finalized = False
         self._storage_lock = asyncio.Lock()
         self._opener = opener
         self.provider = opener.provider if opener else None
@@ -49,9 +53,8 @@ class NativeStream:
         self._wake = asyncio.Event()
         self._overflow = asyncio.Event()
         self._stopping = asyncio.Event()
-        self._forced = asyncio.Event()
-        self.forced = False
         self._submitted_samples = 0
+        self._end_sent = False
         self._opened_provider = False
         self._session: LiveAsrSession | None = None
         self._worker = asyncio.create_task(self._run()) if opener else None
@@ -114,6 +117,18 @@ class NativeStream:
     async def _receive(self, session: LiveAsrSession) -> None:
         ordinal = 0
         async for event in session.events():
+            # Soniox can report the last 120ms processing block past PCM EOF, even
+            # in the penultimate (not finished) response. This was reproduced with
+            # real 3344ms -> 3360ms and 9968ms -> 10080ms captures. Only normalize
+            # end-of-input counters; do not extend saved audio or rewrite words.
+            submitted_ms = self._submitted_samples * 1000 // self.connection.sample_rate
+            if (self.provider == "soniox" and self._end_sent
+                    and 0 < event.total_audio_proc_ms - submitted_ms <= 120
+                    and all(token.end_ms <= submitted_ms
+                            for token in (*event.final_tokens, *event.partial_tokens))):
+                event = replace(event,
+                                final_audio_proc_ms=min(event.final_audio_proc_ms, submitted_ms),
+                                total_audio_proc_ms=submitted_ms)
             excess = event.total_audio_proc_ms * self.connection.sample_rate - self._submitted_samples * 1000
             # A provider's final clock may round the last fraction of a millisecond up.
             if excess > 0 and not (event.finished and excess <= self.connection.sample_rate):
@@ -137,9 +152,8 @@ class NativeStream:
                 async with asyncio.timeout(SEND_TIMEOUT_S):
                     await session.send_audio(pcm)
             elif self._stopping.is_set():
-                # Wait for the provider's own "finished", not a clock; the user can
-                # still force the end (force_finish), and a dead link ends by itself.
-                await session.finish(timeout_s=None)
+                self._end_sent = True
+                await session.finish()
                 return
             else:
                 await self._wake.wait()
@@ -168,10 +182,7 @@ class NativeStream:
         opener = self._opener
         assert opener is not None
         try:
-            # After Stop, keep (re)connecting while captured audio is still
-            # unconfirmed: a provider still connecting or loading its model must
-            # transcribe what was recorded, not lose it.
-            while not self._stopping.is_set() or self._unconfirmed():
+            while not self._stopping.is_set() or (self.processing and self.buffer.size_bytes > 0):
                 try:
                     delay = self.recovery.next_delay()
                 except TimeoutError:
@@ -187,16 +198,9 @@ class NativeStream:
                     async with asyncio.timeout(opener.open_timeout_s or native_recovery.OPEN_TIMEOUT_S):
                         self._session = await opener.open()
                     await drain_on_cancel(self._activate())
-                    session = self._session
-                    await self._connected(session)
-                    if self.complete:
+                    await self._connected(self._session)
+                    if self.complete or self._stopping.is_set():
                         return
-                    if self._stopping.is_set():
-                        # The provider ended without "finished" after Stop.
-                        self.failure_reason = (getattr(session, "failure_message", None)
-                                               or f"{self._label} ended before confirming the transcript.")
-                        if not session.failure_retryable or not self._unconfirmed():
-                            return
                 except LiveAsrError as error:
                     self.failure_reason = str(error)
                     if not error.retryable:
@@ -218,18 +222,6 @@ class NativeStream:
             self.buffer.clear()
             self.state = "unavailable"
 
-    def _unconfirmed(self) -> bool:
-        return self.buffer.end > self.buffer.start
-
-    @property
-    def pending_ms(self) -> int:
-        """Captured audio the provider has not confirmed as final yet."""
-        return (self.buffer.end - self.buffer.start) * 1000 // self.connection.sample_rate
-
-    def force_finish(self) -> None:
-        """The user chose to stop waiting for the provider's final confirmation."""
-        self._forced.set()
-
     async def disable_provider(self) -> None:
         """Revoke cloud access without closing local storage or replaying audio."""
         self._provider_disabled = True
@@ -244,38 +236,31 @@ class NativeStream:
         self.complete = False
         self.buffer.clear()
 
-    async def finish(self) -> bool:
-        """Finalize: wait until the provider confirms the transcript (or fails).
-
-        There is no clock here. The provider's own status ends the wait:
-        ``finished``, a failure, retries exhausted, or a dead connection. The only
-        other way out is the user's explicit :meth:`force_finish`.
-        """
+    async def finish(self, *, timeout_s: float | None = None, wait_for_open: bool = False) -> bool:
+        timeout_s = FINISH_TIMEOUT_S if timeout_s is None else timeout_s
         self._stopping.set()
-        self._wake.set()
         if self._worker is not None:
-            forced = asyncio.create_task(self._forced.wait())
-            try:
-                await asyncio.wait({self._worker, forced}, return_when=asyncio.FIRST_COMPLETED)
-            finally:
-                forced.cancel()
-            if self._worker.done():
-                if not self._worker.cancelled():
-                    self._worker.result()  # Storage errors must stop capture, not become ASR errors.
+            streaming = self.state == "streaming"
+            if streaming or wait_for_open:
+                self._wake.set()
             else:
-                self.forced = True
-                self.complete = False
                 self._worker.cancel()
-                await self._settle_worker(CANCEL_WAIT_S)
+            settled = await self._settle_worker(timeout_s if streaming or wait_for_open else CANCEL_WAIT_S)
+            if not settled:
+                self.complete = False
+        else:
+            streaming = settled = False
         self.buffer.clear()
         snapshot = await disk_call(self.store.snapshot, self.connection.session_id)
         current = snapshot["connections"][-1]
         finished = self.complete and current["final_sample"] == snapshot["saved_samples"]
         await disk_call(self.store.close, self.connection.id, finished=finished)
+        self.finalized = True
         # Complete means the entire saved recording, not just its latest connection.
         earlier_complete = all(c["status"] == "finished" for c in snapshot["connections"][:-1])
         self.incomplete_reason = self._incomplete_reason(
             snapshot, current, finished=finished, earlier_complete=earlier_complete,
+            streaming=streaming or wait_for_open, settled=settled, timeout_s=timeout_s,
         )
         if self.incomplete_reason:
             logger.warning("Live transcription incomplete at stop: %s", self.incomplete_reason)
@@ -283,7 +268,7 @@ class NativeStream:
 
     def _incomplete_reason(
         self, snapshot: dict[str, object], current: dict[str, object], *, finished: bool,
-        earlier_complete: bool,
+        earlier_complete: bool, streaming: bool, settled: bool, timeout_s: float,
     ) -> str | None:
         """A sanitized, specific reason, so an incomplete Stop can be diagnosed."""
         if finished and earlier_complete:
@@ -294,8 +279,10 @@ class NativeStream:
         if not finished:
             if self._worker is None:
                 return self.failure_reason or "Transcription was not running for this recording."
-            if self.forced:
-                return f"finished by you before {self._label} confirmed the rest of the transcript"
+            if not streaming:
+                return self.failure_reason or f"{self._label} was not connected when recording stopped."
+            if not settled:
+                return f"{self._label} did not finish within {timeout_s:.0f} s after Stop."
             if not self.complete:
                 return self.failure_reason or f"{self._label} did not confirm the end of the stream."
             final_ms = int(str(current.get("final_sample", 0))) * 1000 // rate

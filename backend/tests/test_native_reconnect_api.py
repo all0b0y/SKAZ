@@ -87,7 +87,7 @@ def test_timeout_or_full_buffer_ends_recovery_and_clears_pcm(
 
 
 @pytest.mark.parametrize("action", ["stop", "pause"])
-def test_forced_stop_or_pause_cancels_connect_and_clears_audio(
+def test_stop_or_pause_cancels_connect_and_clears_audio(
     app: Any, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch, action: str,
 ) -> None:
     cancelled = asyncio.Event()
@@ -114,14 +114,7 @@ def test_forced_stop_or_pause_cancels_connect_and_clears_audio(
             assert ws.receive_json()["type"] == "audio.saved"
             assert http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()["buffered_audio_ms"] == 100
             ws.send_json({"type": "end", "action": action})
-            # Stop waits for the provider to connect and transcribe the captured
-            # audio (no clock ends it); the user's "Finish now" cancels the connect.
-            progress = ws.receive_json()
-            assert progress["type"] == "stream.finalizing" and progress["pending_ms"] == 100
-            ws.send_json({"type": "force"})
             result = ws.receive_json()
-            while result["type"] == "stream.finalizing":
-                result = ws.receive_json()
             assert result["transcription_complete"] is False
             assert result["status"] == ("paused" if action == "pause" else "stopped")
         assert cancelled.is_set() and calls == 1

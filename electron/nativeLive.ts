@@ -74,20 +74,6 @@ class NativeConnection {
         this.fail(value.code);
         return;
       }
-      if (value.type === 'stream.finalizing') {
-        // Stop waits for the provider's own verdict, not a clock. Each heartbeat
-        // proves the backend is alive, so it renews the wait for stream.stopped.
-        const pending = this.waiter;
-        if (this.phase !== 'ending' || !pending || pending.type !== 'stream.stopped') throw failure();
-        clearTimeout(pending.timer);
-        pending.timer = setTimeout(() => this.fail(), END_TIMEOUT_MS);
-        this.onFailure({
-          sessionId: this.sessionId, code: 'transcription_finalizing',
-          elapsed_ms: integer(value.elapsed_ms) ? value.elapsed_ms : 0,
-          pending_ms: integer(value.pending_ms) ? value.pending_ms : 0,
-        });
-        return;
-      }
       if (value.type === 'transcription.failed') {
         // ASR has stopped, but the local stream must still drain and acknowledge
         // Stop. Terminating it here would turn a warning into a sticky save error.
@@ -193,14 +179,10 @@ class NativeConnection {
       return {
         saved_samples: message.saved_samples, transcription_complete: message.transcription_complete, status,
         ...(detail ? { transcription_detail: detail } : {}),
+        ...(message.transcription_pending === true ? { transcription_pending: true } : {}),
       };
     });
     return this.ending;
-  }
-
-  /** Stop waiting for the provider's confirmation; only meaningful while ending. */
-  force(): void {
-    if (this.phase === 'ending') this.send(JSON.stringify({ type: 'force' }));
   }
 
   abort(): void { this.fail(); }
@@ -235,11 +217,6 @@ export class NativeLiveClient {
   async end(sessionId: string, action: 'pause' | 'stop'): Promise<NativeStopped> {
     if (!this.connection || this.connection.sessionId !== sessionId) throw new Error('Wrong native capture owner.');
     return this.connection.end(action);
-  }
-
-  force(sessionId: string): void {
-    if (!this.connection || this.connection.sessionId !== sessionId) throw new Error('Wrong native capture owner.');
-    this.connection.force();
   }
 
   abort(): void { this.connection?.abort(); }

@@ -93,8 +93,6 @@ export function registerIpc(
     nativeReply(event, () => native.audio(id, meta, pcm)));
   ipcMain.handle(CHANNELS.nativeEnd, (event, id: string, action: 'pause' | 'stop') =>
     nativeReply(event, () => native.end(id, action)));
-  ipcMain.handle(CHANNELS.nativeForce, (event, id: string) =>
-    nativeReply(event, async () => { native.force(id); return null; }));
 
   ipcMain.handle(CHANNELS.status, (event) => {
     if (!senderTrusted(event)) return { phase: 'error', detail: 'untrusted sender' };

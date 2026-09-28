@@ -28,13 +28,7 @@ class LiveAsrSession(Protocol):
 
     def events(self) -> AsyncIterator[SonioxEvent]: ...
 
-    async def finish(self, *, timeout_s: float | None = ...) -> Any:
-        """Signal end of audio and wait for the provider's completion.
-
-        ``timeout_s=None`` waits for the provider's verdict (finished, failed, or
-        connection ended), never for a clock.
-        """
-        ...
+    async def finish(self) -> Any: ...
 
     async def aclose(self) -> None: ...
 

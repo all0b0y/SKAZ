@@ -20,7 +20,7 @@ class ProviderSocket:
         self.closed = False
 
     async def send(self, message: str | bytes) -> None:
-        if isinstance(message, str):
+        if isinstance(message, str) and message:
             return
         if message:
             self.audio.append(message)
@@ -227,7 +227,7 @@ class MillisecondProviderSocket(ProviderSocket):
         self.rate = rate
 
     async def send(self, message: str | bytes) -> None:
-        if isinstance(message, str):
+        if isinstance(message, str) and message:
             return
         if message:
             self.audio.append(message)
@@ -274,7 +274,7 @@ def test_stop_after_a_tail_shorter_than_a_millisecond_is_complete(
 
 class RoundingUpProviderSocket(MillisecondProviderSocket):
     async def send(self, message: str | bytes) -> None:
-        if isinstance(message, str):
+        if isinstance(message, str) and message:
             return
         if message:
             self.audio.append(message)
@@ -336,25 +336,11 @@ def test_incomplete_stop_names_its_reason(
         return socket
 
     monkeypatch.setattr(soniox, "connect", connect)
+    monkeypatch.setattr("skaz.native_stream.FINISH_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(soniox, "FINALIZATION_TIMEOUT_S", 0.2)
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Silent"}).json()["id"]
-        with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
-            ws.send_json({"type": "open", "sample_rate": 16_000})
-            ws.receive_json()
-            ws.send_bytes(packet(0, 0, 1600))
-            ws.receive_json()
-            ws.send_json({"type": "end"})
-            # No clock ends this: the provider never answers, so progress keeps
-            # arriving until the user forces the end.
-            beats = [ws.receive_json() for _ in range(2)]
-            assert [beat["type"] for beat in beats] == ["stream.finalizing", "stream.finalizing"]
-            assert beats[1]["elapsed_ms"] > beats[0]["elapsed_ms"]
-            ws.send_json({"type": "force"})
-            stopped = ws.receive_json()
-            while stopped["type"] == "stream.finalizing":
-                stopped = ws.receive_json()
+        stopped = _record_and_stop(http, socket, 16_000, [1600])
     assert stopped["transcription_complete"] is False
-    assert stopped["transcription_detail"] == (
-        "finished by you before Soniox confirmed the rest of the transcript")
+    assert stopped["transcription_detail"].startswith("Soniox")

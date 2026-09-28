@@ -28,6 +28,7 @@ from __future__ import annotations
 import array
 import asyncio
 import contextlib
+import logging
 import math
 import re
 import unicodedata
@@ -37,6 +38,8 @@ from typing import Literal, Protocol
 
 from . import LiveAsrError
 from .soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16_000
 BYTES_PER_SECOND = SAMPLE_RATE * 2
@@ -107,8 +110,8 @@ class StreamSettings:
     #: Received-but-undecoded audio beyond this means the decoder cannot keep up.
     max_backlog_s: float = 12.0
     event_queue_size: int = 8
-    #: None: Stop waits for the last decode to finish, however long it takes.
-    finish_timeout_s: float | None = None
+    #: The native stream allows 10 s for the final decode at Stop.
+    finish_timeout_s: float = 120.0
 
     def __post_init__(self) -> None:
         if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int)
@@ -359,6 +362,7 @@ class WhisperStreamSession:
         self._language: str | None = None
         self._final_ms = 0
         self._total_ms = 0
+        self._diagnostic_at = float("-inf")
         self._pending_translation = _PendingTranslation()
         self._wake = asyncio.Event()
         self._finishing = False
@@ -397,13 +401,11 @@ class WhisperStreamSession:
                 return
             yield event
 
-    async def finish(self, *, timeout_s: float | None = None) -> bool:
-        """Decode everything received, emit ``finished``, and only then return."""
+    async def finish(self) -> bool:
         self._finishing = True
         self._wake.set()
-        deadline = timeout_s if timeout_s is not None else self._settings.finish_timeout_s
         with contextlib.suppress(TimeoutError, asyncio.CancelledError, Exception):
-            async with asyncio.timeout(deadline):
+            async with asyncio.timeout(self._settings.finish_timeout_s):
                 await asyncio.shield(self._worker)
         return self._finished
 
@@ -470,6 +472,10 @@ class WhisperStreamSession:
 
     async def _step(self, *, finishing: bool) -> None:
         settings = self._settings
+        clock = asyncio.get_running_loop().time
+        started = clock()
+        decode_s = 0.0
+        raw_words = fresh_words = 0
         end = self._received
         window = bytes(self._buffer[: (end - self._buffer_start) * 2])
         window_start_s = self._buffer_start / SAMPLE_RATE
@@ -482,6 +488,7 @@ class WhisperStreamSession:
             speech = [(window_start_s + a, window_start_s + b) for a, b in await self._vad.speech(window)]
         else:
             speech = []
+        vad_s = clock() - started
         last_speech_end = speech[-1][1] if speech else window_start_s
         window_s = end_s - window_start_s
         endpoint = finishing or (end_s - last_speech_end) >= settings.endpoint_silence_s
@@ -500,10 +507,13 @@ class WhisperStreamSession:
             limit = int((cut_s - window_start_s) * SAMPLE_RATE) * 2
             if self._language is None and settings.used_languages and len(settings.used_languages) == 1:
                 language = settings.used_languages[0]
+            decode_started = clock()
             decoded = await self._decoder.decode(
                 window[offset:limit], language=language, languages=settings.used_languages,
                 prompt=self._prompt(window_start_s),
             )
+            decode_s = clock() - decode_started
+            raw_words = len(decoded.words)
             base = first
             words = [
                 DecodedWord(w.text, base + max(0.0, w.start_s), min(cut_s, base + max(w.start_s, w.end_s)),
@@ -512,6 +522,7 @@ class WhisperStreamSession:
             ]
             words = [w for w in words if _within_speech(w, speech)]
             words = self._drop_committed(words)
+            fresh_words = len(words)
             language = decoded.language or language
             if self._decoder.redecode and not endpoint and cut_s >= end_s:
                 agreed = _common_prefix(self._hypothesis, words)
@@ -533,13 +544,20 @@ class WhisperStreamSession:
         else:
             partial = self._hypothesis
 
+        post_started = clock()
         committed = await self._commit(commit, window, window_start_s, language)
         translations = await self._translate_ready(finishing or endpoint)
+        post_s = clock() - post_started
 
         # Trim: keep the window starting at the last committed boundary.
         if endpoint and not self._hypothesis:
             new_start_s = max(self._committed_end_s, end_s - 0.2) if speech else max(
                 self._committed_end_s, end_s - 0.3)
+        elif full and decode_now and not self._hypothesis:
+            # A completed window may legitimately produce no new words (noise,
+            # music, or rejected hallucinations). Finalize that decoded prefix,
+            # not the undecoded audio after an interior pause selected above.
+            new_start_s = max(self._committed_end_s, cut_s - 0.2)
         elif self._committed_end_s - window_start_s > 0 and (
                 window_s > settings.trim_after_s or cut_s < end_s):
             new_start_s = self._committed_end_s
@@ -558,6 +576,18 @@ class WhisperStreamSession:
         final_ms = min(total_ms, max(self._final_ms, int(final_s * 1000)))
         if finishing:
             final_ms = total_ms
+        now = clock()
+        if total_ms - final_ms >= 10000 and now - self._diagnostic_at >= 10.0:
+            self._diagnostic_at = now
+            logger.info(
+                "Whisper window: window_s=%.3f processed_ms=%d final_ms=%d "
+                "backlog_s=%.3f vad_ms=%.1f decode_ms=%.1f post_ms=%.1f "
+                "raw_words=%d fresh_words=%d committed_words=%d partial_words=%d "
+                "endpoint=%s full=%s",
+                window_s, total_ms, final_ms, (self._received - end) / SAMPLE_RATE,
+                vad_s * 1000, decode_s * 1000, post_s * 1000,
+                raw_words, fresh_words, len(committed), len(partial), endpoint, full,
+            )
         partial_text = [w.text for w in partial]
         changed = bool(committed or translations or partial_text != self._last_partial
                        or final_ms != self._final_ms or total_ms != self._total_ms)

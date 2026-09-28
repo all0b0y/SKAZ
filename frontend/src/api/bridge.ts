@@ -74,8 +74,6 @@ export interface BridgeApi {
   openNative(sessionId: string, sampleRate: number): Promise<JsonResponse<NativeOpened>>;
   sendNativeAudio(sessionId: string, meta: NativeAudioMeta, pcm: ArrayBuffer): Promise<JsonResponse<NativeSaved>>;
   endNative(sessionId: string, action: 'pause' | 'stop'): Promise<JsonResponse<NativeStopped>>;
-  /** Stop waiting for the transcription provider's final confirmation (user's explicit choice). */
-  forceNative(sessionId: string): Promise<JsonResponse<null>>;
   onNativeFailure(listener: (failure: NativeFailure) => void): () => void;
   /** Proxy a JSON request to the backend with auth attached by main. */
   request<T = unknown>(req: BridgeRequest): Promise<JsonResponse<T>>;

@@ -31,7 +31,7 @@ def test_live_translation_order_replacement_finalization_and_request_isolation(
 
     class LiveSocket(ProviderSocket):
         async def send(self, message: str | bytes) -> None:
-            if isinstance(message, str):
+            if isinstance(message, str) and message:
                 return
             if message:
                 self.audio.append(message)

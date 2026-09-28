@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { IMPORT_RECORDING_MESSAGE } from '../lib/recordingEligibility';
 import { defaultSessionTitle } from '../lib/time';
 import { ApiClient, ApiError } from '../api/client';
+import { useNativeProcessing, hasBackgroundTranscription } from './nativeProcessing';
 import { forgetTranscript } from '../components/transcript/transcriptCache';
 import { captureSourcesLocked } from './captureSources';
 import type { BackendStatus, BridgeApi } from '../api/bridge';
@@ -150,10 +151,6 @@ export interface AppState {
    * the provider finalises the last words. True only for that stretch, so the
    * recorder can tell it apart from the short start/pause/resume transitions. */
   finishing: boolean;
-  /** Stop/Pause is waiting for the transcription provider's final confirmation. */
-  finalizing: { sessionId: string; elapsedMs: number; pendingMs: number } | null;
-  /** The user's explicit choice to stop waiting for that confirmation. */
-  forceFinishTranscription: () => Promise<void>;
   elapsedMs: number;
   meter: MeterSnapshot;
   queue: PersistenceQueueState;
@@ -404,13 +401,8 @@ export const useStore = create<AppState>((set, get) => {
       if (!current()) return;
       try {
         const writer = nativeWriter?.sessionId === sessionId ? nativeWriter : null;
-        if (writer && status !== 'recording') {
-          try {
-            await writer.finish(status === 'paused' ? 'pause' : 'stop');
-          } finally {
-            set({ finalizing: null });
-          }
-        }
+        if (writer && status !== 'recording') await writer.finish(status === 'paused' ? 'pause' : 'stop');
+        if (writer?.transcriptionPending) useNativeProcessing.getState().pending(sessionId);
         // stream.opened/stream.stopped are already durable lifecycle ACKs.
         // A later read-model refresh must not invalidate a successful Stop.
         const updated = writer
@@ -478,6 +470,13 @@ export const useStore = create<AppState>((set, get) => {
       await get().stopRecording();
       const saved = await persistenceQueue?.drain() ?? true;
       const state = get();
+      if (state.activeSessionId && (state.settings?.transcription_provider === 'local-whisper' || hasBackgroundTranscription())) {
+        await useNativeProcessing.getState().refresh(state.activeSessionId);
+      }
+      for (const id of Object.keys(useNativeProcessing.getState().sessions)) {
+        if (useNativeProcessing.getState().sessions[id]?.processing) await useNativeProcessing.getState().refresh(id);
+      }
+      if (hasBackgroundTranscription()) return false;
       return saved && !state.captureIncomplete && ['idle', 'stopped'].includes(state.recorderState)
         && state.queue.pending === 0 && state.queue.failed.length === 0
         && state.pendingSessionStatus === null;
@@ -489,7 +488,6 @@ export const useStore = create<AppState>((set, get) => {
   cancelQuit: () => set({ quitRequested: false }),
   recorderState: 'idle',
   finishing: false,
-  finalizing: null,
   elapsedMs: 0,
   meter: idleMeterSnapshot(),
   queue: emptyQueueState,
@@ -945,6 +943,23 @@ export const useStore = create<AppState>((set, get) => {
     }
     if (!activeSessionId || stopRequested) return;
     const sessionId = activeSessionId;
+    let captureRate: number | undefined;
+    try {
+      const snapshot = await getClient().getNativeSnapshot(sessionId);
+      if (snapshot.processing) {
+        useNativeProcessing.getState().pending(sessionId);
+        set({ recorderState: 'stopped' });
+        return;
+      }
+      captureRate = snapshot.sample_rate;
+    } catch (error) {
+      // A new session has no native clock yet; every other read failure is real.
+      if (!(error instanceof ApiError && error.status === 404)) {
+        set({ recorderState: 'stopped', recorderError: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+    }
+    if (stopRequested) return;
     recordingSessionId = sessionId;
     nativeFailureCleanup?.();
     let transportOpened = false;
@@ -952,14 +967,11 @@ export const useStore = create<AppState>((set, get) => {
     const writer = new NativeAudioWriter(getClient(), sessionId, (opened) => {
       if (!transportOpened) elapsedOffsetMs = opened.saved_samples * 1000 / opened.sample_rate;
       transportOpened = true;
+      useNativeProcessing.getState().started(sessionId);
     }, true);
     nativeWriter = writer;
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
-      if (failure.code === 'transcription_finalizing') {
-        set({ finalizing: { sessionId, elapsedMs: failure.elapsed_ms ?? 0, pendingMs: failure.pending_ms ?? 0 } });
-        return;
-      }
       if (failure.code === 'transcription_failed') {
         const reason = failure.reason ? ` ${failure.reason.replace(/\.?$/, '.')}` : '';
         set({ recorderError: `Transcription failed.${reason} Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.` });
@@ -1032,7 +1044,7 @@ export const useStore = create<AppState>((set, get) => {
         if (!get().captureIncomplete) set({ recorderError: 'Microphone disconnected. Captured audio was flushed.' });
         void get().stopRecording();
       },
-    }, { windowSeconds: 0.1 });
+    }, { windowSeconds: 0.1, sampleRate: captureRate });
 
     try {
       const activeRecorder = recorder;
@@ -1150,6 +1162,12 @@ export const useStore = create<AppState>((set, get) => {
       return;
     }
     if (get().recorderState !== 'paused') return;
+    const pausedSessionId = recordingSessionId;
+    if (pausedSessionId) {
+      try { await useNativeProcessing.getState().refresh(pausedSessionId); }
+      catch { set({ recorderError: 'Could not verify background transcription status.' }); return; }
+      if (useNativeProcessing.getState().sessions[pausedSessionId]?.processing) return;
+    }
     const activeRecorder = recorder;
     const sessionId = recordingSessionId;
     const intent = sessionId ? beginSessionStatusIntent(sessionId, 'recording') : null;
@@ -1233,16 +1251,6 @@ export const useStore = create<AppState>((set, get) => {
       if (recordingSessionId === id) recordingSessionId = null;
       signalMeter?.reset();
       signalMeter = null;
-    }
-  },
-
-  forceFinishTranscription: async () => {
-    const finalizing = get().finalizing;
-    if (!finalizing) return;
-    try {
-      await getClient().forceNative(finalizing.sessionId);
-    } catch (error) {
-      set({ recorderError: error instanceof Error ? error.message : String(error) });
     }
   },
 

@@ -37,6 +37,7 @@ export interface NativeTranslationProjection {
 }
 
 export interface NativeSnapshot {
+  processing?: boolean;
   session_id: string;
   sample_rate: number;
   saved_samples: number;
@@ -94,6 +95,7 @@ export interface NativeSaved {
 export interface NativeStopped {
   saved_samples: number;
   transcription_complete: boolean;
+  transcription_pending?: boolean;
   /** Backend's specific reason when transcription_complete is false. */
   transcription_detail?: string;
   status: 'paused' | 'stopped';
@@ -101,12 +103,7 @@ export interface NativeStopped {
 
 export interface NativeFailure {
   sessionId: string;
-  /** transcription_finalizing is progress, not a failure: Stop is waiting for the provider. */
-  code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed' | 'transcription_failed'
-    | 'transcription_finalizing';
-  /** transcription_finalizing: time since Stop and captured audio not yet confirmed. */
-  elapsed_ms?: number;
-  pending_ms?: number;
+  code: 'native_stream_failed' | 'invalid_stream' | 'storage_failed' | 'transcription_failed';
   /** Sanitized provider reason for transcription_failed (e.g. "Local Whisper cannot keep up…"). */
   reason?: string;
 }

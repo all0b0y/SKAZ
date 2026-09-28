@@ -33,7 +33,7 @@ LIVE_RESPONSE_ALLOWED = {
     "recording_mode", "translation_target_language", "used_languages", "transcription",
     "final_tokens", "live_translation_projection", "final_translation_tokens",
     "partial_translation_tokens", "speakers", "connections", "gaps", "origin",
-    "transcription_provider", "transcription_detail",
+    "transcription_provider", "transcription_detail", "processing",
 }
 NEVER_READ = {"final_stream_tokens", "final_translation_projection", "partial_stream_tokens"}
 TRANSLATION_ONLY = {
@@ -53,7 +53,7 @@ def _record(
 
     class Socket(ProviderSocket):
         async def send(self, message: str | bytes) -> None:
-            if isinstance(message, str):
+            if isinstance(message, str) and message:
                 return
             if message:
                 self.audio.append(message)

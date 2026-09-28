@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useStore, type LanguageMark } from '../../state/store';
+import { useNativeProcessing } from '../../state/nativeProcessing';
 import { EmptyState } from '../ui/EmptyState';
 import { Icon } from '../ui/Icon';
 import { formatTimecode } from '../../lib/time';
@@ -208,8 +209,9 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
     return () => { current = false; };
   }, [activeSessionId, imported]);
   const contextual = sessions.find((session) => session.id === activeSessionId)?.mode === 'contextual_local';
+  const processingTail = useNativeProcessing(s => activeSessionId ? s.sessions[activeSessionId]?.processing === true : false);
   const native = useNativeTranscript(contextual ? null : activeSessionId,
-    ['recording', 'processing'].includes(recorderState), followSpeech,
+    processingTail || ['recording', 'processing'].includes(recorderState), followSpeech,
     dismissedFocus === focusSegmentId ? null : focusSegmentId);
 
   // Critical transcript problems go to the recorder capsule as one line with

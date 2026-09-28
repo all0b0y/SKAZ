@@ -294,18 +294,19 @@ async def test_events_split_final_delta_partial_replacement_and_markers() -> Non
     assert events[2].final_audio_proc_ms == 300
 
 
-async def test_finish_sends_empty_binary_once_and_waits_for_finished() -> None:
+async def test_finish_sends_empty_text_once_and_waits_for_finished() -> None:
     socket, _connector, session = await open_fake()
 
     first_task = asyncio.create_task(session.finish())
     second_task = asyncio.create_task(session.finish())
 
     async def wait_for_end_frame() -> None:
-        while b"" not in socket.sent:
+        while "" not in socket.sent:
             await asyncio.sleep(0)
 
     await asyncio.wait_for(wait_for_end_frame(), timeout=0.1)
-    assert socket.sent.count(b"") == 1
+    assert socket.sent.count("") == 1
+    assert b"" not in socket.sent
     socket.incoming.put_nowait(response(final_ms=160, total_ms=160, finished=True))
     first, second = await asyncio.gather(first_task, second_task)
 
@@ -328,7 +329,7 @@ async def test_finish_timeout_is_explicit_incomplete_and_closes() -> None:
 async def test_finish_deadline_includes_a_blocked_end_frame_send() -> None:
     class BlockedEndSocket(FakeSocket):
         async def send(self, message: str | bytes) -> None:
-            if message == b"":
+            if message == "":
                 await asyncio.Event().wait()
             await super().send(message)
 

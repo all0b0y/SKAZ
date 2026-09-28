@@ -29,7 +29,7 @@ class _AcceptingTransport:
     async def send(self, message: str | bytes) -> None:
         if self._closed.is_set():
             raise ConnectionError("fixture socket closed")
-        if message == b"":
+        if message == "":
             self._replies.put_nowait(json.dumps({
                 "tokens": [], "final_audio_proc_ms": 0, "total_audio_proc_ms": 0, "finished": True,
             }))
