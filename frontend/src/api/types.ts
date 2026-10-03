@@ -129,6 +129,73 @@ export interface Settings {
   /** Local voice clustering for providers without their own diarization. */
   speaker_separation?: boolean;
   transcription_providers?: TranscriptionProviderInfo[];
+  /** Proactive assistant (a card when someone asks you something); off by default. */
+  proactive?: ProactiveSettings;
+}
+
+/** Noticing a direct question to the user in a live session. */
+export interface ProactiveSettings {
+  enabled: boolean;
+  /** Names, nicknames and code phrases that count as addressing the user. */
+  aliases: string[];
+  /** Sound for the out-of-focus system notification. */
+  sound: boolean;
+  /** Consent to send transcript text to the selected Assistant model automatically. */
+  model_consent: boolean;
+}
+
+export type ProactiveCardStatus = 'listening' | 'answering' | 'answered' | 'no_answer' | 'failed' | 'stopped';
+
+export interface ProactiveWebResult { title: string; url: string; description: string }
+
+export interface ProactiveCard {
+  id: string;
+  session_id: string;
+  status: ProactiveCardStatus;
+  /** "possible" when the recogniser left it unclear whether you were addressed. */
+  addressed: 'direct' | 'possible';
+  /** The question exactly as it was heard. */
+  question: string;
+  question_citation: Citation;
+  /** What was said just before the question. */
+  context_citations: Citation[];
+  finished: boolean;
+  /** Model summary of the context, every sentence citing the transcript ([P<n>]). */
+  context: string;
+  /** Draft answer built only from what was said, cited. Empty when there is none. */
+  answer: string;
+  /** What the recording does not say that the answer would need. */
+  missing: string;
+  /** The assistant's own addition — not said in the session. */
+  outside_recording: string;
+  citations: Citation[];
+  notice: string | null;
+  model: string;
+  /** The question without your names: a starting point for a web lookup. */
+  public_query: string;
+  web: {
+    query: string;
+    status: 'awaiting_approval' | 'completed' | 'declined' | 'failed';
+    results: ProactiveWebResult[];
+    error: string | null;
+  } | null;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  answered_at: string | null;
+  timings: { detect_ms: number | null; answer_ms: number | null };
+}
+
+export interface ProactiveView {
+  enabled: boolean;
+  /** False for imported recordings: they never trigger the proactive assistant. */
+  live: boolean;
+  session_enabled: boolean;
+  sound: boolean;
+  version: number;
+  /** Newest first. */
+  cards: ProactiveCard[];
 }
 
 /** Partial update body for PUT /settings. Credentials never live in a profile. */
@@ -164,6 +231,8 @@ export interface SettingsUpdate {
   local_whisper_model?: string;
   openai_transcription_model?: string;
   speaker_separation?: boolean;
+  /** Given fields replace the stored proactive settings. */
+  proactive?: Partial<ProactiveSettings>;
 }
 
 /** An import in flight or settled. Mirrors backend ImportView. */

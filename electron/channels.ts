@@ -20,6 +20,7 @@ export const CHANNELS = {
   shareNote: 'app:share-note',
   captureState: 'app:capture-state',
   codexActivity: 'app:codex-activity',
+  proactiveChanged: 'app:proactive-changed',
   prepareQuit: 'app:prepare-quit',
   quitPrepared: 'app:quit-prepared',
   cancelQuit: 'app:cancel-quit',

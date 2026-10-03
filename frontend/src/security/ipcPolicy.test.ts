@@ -17,6 +17,17 @@ describe('Electron IPC policy', () => {
       expect(validateBridgeRequest({ method, path })).not.toBeNull();
     }
   });
+  it('allows the proactive assistant card routes and nothing adjacent', () => {
+    for (const [method, path] of [['GET', '/sessions/a/proactive'], ['PUT', '/sessions/a/proactive'],
+      ['POST', '/sessions/a/proactive/cards/c/web']] as const) {
+      expect(validateBridgeRequest({ method, path })).toBeNull();
+    }
+    for (const [method, path] of [['POST', '/sessions/a/proactive'], ['DELETE', '/sessions/a/proactive'],
+      ['GET', '/sessions/a/proactive/cards/c/web'], ['POST', '/sessions/a/proactive/cards/c/search'],
+      ['POST', '/sessions/a/proactive/cards/c/web/x']] as const) {
+      expect(validateBridgeRequest({ method, path })).not.toBeNull();
+    }
+  });
   it('allows read-only native event pages, not adjacent or mutating routes', () => {
     expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events' })).toBeNull();
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {

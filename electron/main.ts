@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, session, shell, systemPreferences } from 'electron';
 import path from 'node:path';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { migrateLegacyProfile, resolveStorageProfile } from './storageProfile';
@@ -12,6 +12,8 @@ import { hasUnsentAudio, type CaptureProtectionState } from './captureProtection
 import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
 import { isTrustedFrame, validateCaptureState, validateCodexActivity } from './ipcSender';
 import { QuitController } from './quitController';
+import { proactiveNotice } from './proactiveNotice';
+import { isFeed, ProactiveWatcher } from './proactiveEvents';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
 import type { BackendStatus } from '../frontend/src/api/bridge';
@@ -326,6 +328,45 @@ app.whenReady().then(() => {
     })) return;
     rendererSave.acknowledge(id, saved);
   });
+  // Proactive assistant: main follows the backend's push feed itself, so a card
+  // and its content-free notification never wait for background-throttled timers.
+  let proactiveShownAt: number | null = null;
+  const proactive = new ProactiveWatcher({
+    handle: () => manager.getHandle(),
+    fetchFeed: async (url, token, signal) => {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(40_000)]),
+      });
+      if (!response.ok) throw new Error(`proactive feed: HTTP ${response.status}`);
+      const feed: unknown = await response.json();
+      if (!isFeed(feed)) throw new Error('proactive feed: invalid reply');
+      return feed;
+    },
+    onChanges: (sessionIds) => {
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) {
+        mainWindow.webContents.send(CHANNELS.proactiveChanged, sessionIds);
+      }
+    },
+    onNewCards: (sound) => {
+      const now = Date.now();
+      const options = Notification.isSupported() ? proactiveNotice(sound, {
+        focused: mainWindow?.isFocused() === true, lastShownAt: proactiveShownAt, now,
+      }) : null;
+      if (!options) return;
+      proactiveShownAt = now;
+      const notice = new Notification(options);
+      notice.on('click', () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      });
+      notice.show();
+    },
+  });
+  void proactive.start();
+  app.once('will-quit', () => proactive.stop());
   ipcMain.on(CHANNELS.codexActivity, (event, payload: unknown) => {
     if (!isTrustedFrame({
       senderId: event.sender.id,

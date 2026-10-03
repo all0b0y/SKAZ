@@ -73,6 +73,13 @@ const api: BridgeApi = {
   reportCaptureState(state: CaptureState): void {
     ipcRenderer.send(CHANNELS.captureState, state);
   },
+  onProactiveChanged(listener) {
+    const handler = (_event: unknown, sessionIds: unknown): void => {
+      if (Array.isArray(sessionIds)) listener(sessionIds.filter((id): id is string => typeof id === 'string'));
+    };
+    ipcRenderer.on(CHANNELS.proactiveChanged, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.proactiveChanged, handler);
+  },
   reportCodexActivity(activeTasks: number): void {
     ipcRenderer.send(CHANNELS.codexActivity, activeTasks);
   },

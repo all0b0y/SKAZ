@@ -111,6 +111,12 @@ export interface BridgeApi {
   onBackendStatus(listener: (status: BackendStatus) => void): () => void;
   /** Report live capture state to main (one-way) so close/quit can be guarded. */
   reportCaptureState?(state: CaptureState): void;
+  /**
+   * Proactive assistant cards changed in these sessions. Main follows the
+   * backend's push feed (and shows the content-free notification itself), so the
+   * window refreshes at once instead of waiting for its own timers.
+   */
+  onProactiveChanged?(listener: (sessionIds: string[]) => void): () => void;
   /** Report how many Codex tasks are still active (one-way) so quit can warn first. */
   reportCodexActivity?(activeTasks: number): void;
   /** Main requests Stop/drain; only the boolean save outcome is returned. */

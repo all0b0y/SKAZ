@@ -52,6 +52,10 @@ help you check an answer; they do not guarantee it is correct.
   Mac's sound. System-audio capture requires macOS 14.2+ and OS permission.
 - **Questions with context:** ask about a session or a wider library scope and
   follow timestamped references back to the transcript.
+- **Proactive assistant (opt-in):** during a live recording, notices when someone
+  addresses you by one of your configured names with a question or request, and shows
+  the question as heard, its context and a draft answer built only from what was said,
+  each claim linked to the transcript. Off by default; it never answers for you.
 - **Notes you can edit:** generate notes, edit Markdown in tabs and export it.
 - **A local library:** organize sessions into groups and optionally mirror text
   to a chosen folder for tools such as Obsidian.

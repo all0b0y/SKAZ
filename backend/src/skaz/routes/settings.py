@@ -13,7 +13,7 @@ from ..gateways import ProviderNotConfigured
 from ..native_io import disk_call, drain_on_cancel
 from ..schemas import Settings, SettingsUpdate
 from ..secrets import MemorySecretStore
-from ..settings_store import TASKS, apply_update
+from ..settings_store import TASKS, ProactiveNotReady, apply_update, check_proactive
 from .deps import RuntimeDep
 
 router = APIRouter()
@@ -35,6 +35,10 @@ async def update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Setti
 async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Settings:
     current = runtime.settings_store.load()
     merged = apply_update(current, payload)
+    try:
+        check_proactive(merged)
+    except ProactiveNotReady as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     # Keys are provider-scoped: a credential is written for a provider regardless of
     # which task (if any) currently uses it, so a key can be saved ahead of assignment.
     key_updates: dict[str, str] = {
@@ -80,6 +84,7 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
                     ) from None
             await disk_call(runtime.settings_store.save, merged)
         finally:
+            runtime.proactive.settings_changed(merged)
             # Key removal must close cloud work even if the subsequent DB write fails.
             # A local provider sends nothing off this computer: consent does not stop it.
             await asyncio.gather(*(

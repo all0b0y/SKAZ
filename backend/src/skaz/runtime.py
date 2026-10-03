@@ -26,6 +26,7 @@ from .live_scheduler import LiveAsrScheduler
 from .live_store import LiveStore
 from .managed_storage import ManagedStorage
 from .native_stream import NativeStream
+from .proactive import ProactiveService
 from .schemas import CLOUD_PROVIDERS, Settings, Task
 from .secrets import FileSecretStore, SecretStore
 from .session_files import SessionFiles
@@ -91,6 +92,8 @@ class Runtime:
         self.session_deletions: dict[str, asyncio.Task[None]] = {}
         self.native_shutdown = False
         self.native_settings_lock = asyncio.Lock()
+        #: Cards for questions addressed to the user during a live session.
+        self.proactive = ProactiveService(self)
         #: Local Whisper weights are fetched only when the user opts in explicitly.
         self.allow_model_download = os.environ.get("SKAZ_ALLOW_MODEL_DOWNLOAD", "") == "1"
         #: The explicit "prepare this checkpoint" path; separate from the toggle above.
@@ -161,6 +164,7 @@ class Runtime:
             import_cost_warning_usd=settings.import_cost_warning_usd,
             embedding_budget_usd=settings.embedding_budget_usd,
             contextual_local_enabled=settings.contextual_local_enabled,
+            proactive=settings.proactive,
             transcription_provider=settings.transcription_provider,
             local_whisper_model=settings.local_whisper_model,
             openai_transcription_model=settings.openai_transcription_model,
@@ -196,6 +200,7 @@ class Runtime:
         self._finish_close()
 
     def _finish_close(self) -> None:
+        self.proactive.close()
         self.codex.close_storage()
         self.window_asr.close()
         self.local_models.close()

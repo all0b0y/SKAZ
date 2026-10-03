@@ -52,6 +52,10 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
   el sonido del Mac. El audio del sistema requiere macOS 14.2+ y permiso del sistema.
 - **Preguntas con contexto:** consulta una sesión o un ámbito más amplio de la biblioteca;
   las referencias con marcas de tiempo te llevan a la transcripción.
+- **Asistente proactivo (opcional):** durante una grabación en directo detecta cuando
+  alguien se dirige a ti por uno de tus nombres configurados con una pregunta o petición, y
+  muestra la pregunta tal como se oyó, su contexto y un borrador de respuesta basado solo en lo
+  dicho, con enlaces a la transcripción. Desactivado por defecto; nunca responde por ti.
 - **Notas editables:** genera notas, edita Markdown en pestañas y expórtalo.
 - **Biblioteca local:** organiza sesiones en grupos y guarda opcionalmente una copia
   de los textos en una carpeta para herramientas como Obsidian.

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import replace
 
@@ -30,8 +31,11 @@ class NativeStream:
     def __init__(
         self, store: LiveStore, connection: LiveConnection, opener: LiveSessionOpener | None, *,
         unavailable_reason: str | None = None, cloud: bool = True, api_key_provider: str | None = None,
+        on_final: Callable[[], None] | None = None,
     ) -> None:
         self.store = store
+        #: Called after confirmed (final) speech is saved; must not block or raise.
+        self._on_final = on_final
         self.connection = connection
         self.state = "connecting" if opener else "unavailable"
         self.complete = False
@@ -134,6 +138,9 @@ class NativeStream:
             if excess > 0 and not (event.finished and excess <= self.connection.sample_rate):
                 raise LiveConflict("Provider progress exceeds submitted audio.")
             await disk_call(self.store.save_event, self.connection.id, ordinal=ordinal, event=event)
+            if event.final_tokens and self._on_final is not None:
+                with suppress(Exception):
+                    self._on_final()
             confirmed = (self.connection.start_sample
                          + event.final_audio_proc_ms * self.connection.sample_rate // 1000)
             self.buffer.confirm(min(confirmed, self.buffer.end))  # rounded-up final millisecond

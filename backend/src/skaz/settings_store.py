@@ -8,7 +8,14 @@ from pydantic import BaseModel, Field
 
 from .db import Database
 from .languages import UsedLanguages
-from .schemas import NativeRecordingMode, Provider, SettingsUpdate, Task, TranscriptionProvider
+from .schemas import (
+    NativeRecordingMode,
+    ProactiveSettings,
+    Provider,
+    SettingsUpdate,
+    Task,
+    TranscriptionProvider,
+)
 
 
 class StoredProfile(BaseModel):
@@ -38,6 +45,8 @@ class StoredSettings(BaseModel):
     #: user-facing way to enable local live finality and the local speech gate;
     #: it stays false for settings documents written before this field existed.
     contextual_local_enabled: bool = False
+    #: Proactive assistant; documents written before it existed load it switched off.
+    proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
     #: The live and media-import transcription provider. Soniox stays the default so
     #: settings written before this field existed keep behaving exactly as before.
     transcription_provider: TranscriptionProvider = "soniox"
@@ -168,4 +177,30 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         merged.import_cost_warning_usd = update.import_cost_warning_usd
     if "embedding_budget_usd" in update.model_fields_set:
         merged.embedding_budget_usd = update.embedding_budget_usd
+    if update.proactive is not None:
+        changes = {key: value for key, value in update.proactive.model_dump(exclude_unset=True).items()
+                   if value is not None}
+        merged.proactive = merged.proactive.model_copy(update=changes)
+        if merged.proactive.aliases:
+            from .proactive_detect import normalise_aliases
+
+            merged.proactive.aliases = normalise_aliases(merged.proactive.aliases)
     return merged
+
+
+class ProactiveNotReady(ValueError):
+    """Enabling the proactive assistant without names or model consent."""
+
+
+def check_proactive(settings: StoredSettings) -> None:
+    proactive = settings.proactive
+    if not proactive.enabled:
+        return
+    if not proactive.aliases:
+        raise ProactiveNotReady(
+            "Add at least one name, nickname or code phrase to enable the proactive assistant."
+        )
+    if not proactive.model_consent:
+        raise ProactiveNotReady(
+            "Allow sending transcript text to the selected Assistant model to enable the proactive assistant."
+        )

@@ -51,6 +51,10 @@ in Notizen fest. KI kann Fehler machen: Quellenlinks erleichtern die Prüfung, g
   einbeziehen. Systemaudio benötigt macOS 14.2+ und die entsprechende Systemberechtigung.
 - **Fragen mit Kontext:** eine Sitzung oder einen größeren Bibliotheksbereich abfragen
   und über Zeitverweise zum Transkript zurückkehren.
+- **Proaktiver Assistent (optional):** erkennt während einer Live-Aufnahme, wenn dich
+  jemand mit einem deiner hinterlegten Namen direkt fragt oder um etwas bittet, und zeigt die
+  Frage wie gehört, ihren Kontext und einen Antwortentwurf nur aus dem Gesagten, mit Verweisen
+  auf das Transkript. Standardmäßig aus; antwortet nie an deiner Stelle.
 - **Bearbeitbare Notizen:** Notizen erzeugen, Markdown in Tabs bearbeiten und exportieren.
 - **Lokale Bibliothek:** Sitzungen gruppieren und Texte optional in einen gewählten
   Ordner spiegeln, etwa für Obsidian.
