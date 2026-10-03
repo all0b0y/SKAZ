@@ -242,6 +242,17 @@ describe('ApiClient request mapping', () => {
     expect(settings.translation_target_language).toBe('en');
   });
 
+  it('renames with the title alone, never resending a status that would trigger a flush', async () => {
+    const { bridge, requests } = fakeBridge(() => ({
+      ok: true,
+      status: 200,
+      data: { id: 's1', title: 'Physics', created_at: 't', status: 'paused', duration_ms: 0 },
+    }));
+    await new ApiClient(bridge).renameSession('s1', 'Physics');
+    expect(requests[0]!.method).toBe('PATCH');
+    expect(requests[0]!.body).toStrictEqual({ title: 'Physics' });
+  });
+
   it('does not include a title when only setting status', async () => {
     const { bridge, requests } = fakeBridge(() => ({
       ok: true,

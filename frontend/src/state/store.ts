@@ -703,7 +703,7 @@ export const useStore = create<AppState>((set, get) => {
   renameSession: async (id, title) => {
     const session = get().sessions.find((s) => s.id === id);
     if (!session) return;
-    const updated = await getClient().renameSession(id, title, session.status);
+    const updated = await getClient().renameSession(id, title);
     set((s) => ({ sessions: s.sessions.map((x) => (x.id === id ? updated : x)) }));
   },
 

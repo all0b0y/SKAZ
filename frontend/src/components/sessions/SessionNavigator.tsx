@@ -286,9 +286,11 @@ export function SessionNavigator() {
         }}
         onDragStart={(e) => startDrag(e, { kind: 'group', id: group.id })}
         onDragOver={(e) => overGroup(e, group.id)} onDrop={(e) => drop(e, group.id)} onDragLeave={() => setHover(null)}>
+        {/* Spaces between the parts keep the tab's accessible name readable ("Study #uni 1");
+            whitespace between inline-flex items is not rendered, so the chip looks the same. */}
         <span className="chip__dot" aria-hidden="true" /><span className="chip__label">{group.name}</span>
-        {group.tag && <span className="chip__tag">#{group.tag}</span>}
-        <span className="chip__count">{sessions.filter((s) => data.membership[s.id] === group.id).length}</span>
+        {group.tag && <>{' '}<span className="chip__tag">#{group.tag}</span></>}
+        {' '}<span className="chip__count">{sessions.filter((s) => data.membership[s.id] === group.id).length}</span>
       </button>)}
     </div>
     <button type="button" className="chip chip--new" title="Create a group of sessions" onClick={() => open({ kind: 'group', id: null })}>
