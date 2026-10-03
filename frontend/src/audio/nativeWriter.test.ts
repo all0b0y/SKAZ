@@ -32,6 +32,17 @@ const chunk = (sequence: number) => ({ sequence, startMs: sequence * 100, endMs:
   wav: encodeWavPcm16Mono(new Float32Array(1600).fill(0.25), 16000) });
 
 describe('native writer at the renderer bridge boundary', () => {
+  it('does not report pending background transcription as lost audio', async () => {
+    const f = fixture();
+    await f.writer.open(16000);
+    await f.writer.store(chunk(0));
+    vi.mocked(f.bridge.endNative).mockResolvedValueOnce({ ok: true, status: 200, data: {
+      saved_samples: 1600, status: 'stopped', transcription_complete: false, transcription_pending: true,
+    } });
+    await f.writer.finish('stop');
+    expect(f.writer.transcriptionIncomplete).toBe(false);
+    expect(f.writer.transcriptionPending).toBe(true);
+  });
   it('appends to an explicitly reopened recording without resetting its clock, including ACK recovery', async () => {
     const f = fixture();
     await f.writer.open(16000);

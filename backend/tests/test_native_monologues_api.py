@@ -21,7 +21,7 @@ def test_speaker_turns_keep_sources_and_do_not_reuse_identity_after_reconnect(
 
     class Speakers(ProviderSocket):
         async def send(self, message: str | bytes) -> None:
-            if isinstance(message, str):
+            if isinstance(message, str) and message:
                 settings.append(json.loads(message))
             elif message:
                 self.audio.append(message)

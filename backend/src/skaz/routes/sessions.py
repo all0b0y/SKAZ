@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 
 from .. import note_store, transcript_monologues
 from .. import repository as repo
+from ..asr_providers import provider_of_model
 from ..audio import InvalidAudio
 from ..gateways import ProviderError, ProviderNotConfigured
 from ..ingestion import ChunkConflict, QueueFull
@@ -122,6 +123,9 @@ async def read_native_status(session_id: str, runtime: RuntimeDep) -> dict[str, 
         "state": stream.state if stream is not None else "inactive",
         "attempt": stream.recovery.attempt if stream is not None else 0,
         "max_attempts": 3,
+        "processing": bool(stream and stream.processing),
+        "background_sessions": [sid for sid, worker in runtime.native_streams.items() if worker.processing],
+        "incomplete": await disk_call(runtime.live_store.last_incomplete, session_id),
         "buffered_audio_ms": (stream.buffer.size_bytes * 500 // stream.connection.sample_rate
                               if stream is not None else 0),
     }
@@ -134,6 +138,8 @@ async def read_native_live(session_id: str, runtime: RuntimeDep) -> dict[str, An
         snapshot = await disk_call(runtime.live_store.snapshot, session_id)
         stream = runtime.native_streams.get(session_id)
         snapshot["transcription"] = stream.state if stream is not None else "inactive"
+        snapshot["processing"] = bool(stream and stream.processing)
+        _describe_provider(snapshot, stream)
         return _live_view(snapshot)
     except LiveConflict as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -152,6 +158,16 @@ _LIVE_INTERNAL_FIELDS = (
 _LIVE_TRANSLATION_FIELDS = (
     "live_translation_projection", "final_translation_tokens", "partial_translation_tokens",
 )
+
+
+def _describe_provider(snapshot: dict[str, Any], stream: Any) -> None:
+    """Which provider transcribes (or last transcribed) this recording, and why it cannot."""
+    connections = snapshot.get("connections") or []
+    last_model = connections[-1].get("model") if connections else None
+    provider = (stream.provider if stream is not None else None) or provider_of_model(last_model)
+    snapshot["transcription_provider"] = provider
+    if stream is not None and stream.state == "unavailable" and stream.failure_reason:
+        snapshot["transcription_detail"] = stream.failure_reason
 
 
 def _live_view(snapshot: dict[str, Any]) -> dict[str, Any]:

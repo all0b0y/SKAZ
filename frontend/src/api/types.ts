@@ -13,6 +13,44 @@ export type ProviderName =
 
 export type TaskKind = 'asr' | 'agent' | 'notes' | 'embedding';
 export type LocalProviderName = 'local-whisper' | 'local-gigachat-mlx';
+/** Anything the local model preparation endpoints manage, including the speaker model. */
+export type LocalModelProviderName = LocalProviderName | 'local-speaker';
+
+/** Who transcribes live speech and imported media. Switching is always explicit. */
+export type TranscriptionProviderId = 'soniox' | 'local-whisper' | 'openai';
+
+/** What a transcription provider really does; the UI states every gap. */
+export interface TranscriptionCapabilities {
+  live: 'streaming' | 'near_streaming' | 'utterance';
+  provisional_text: boolean;
+  file_transcription: boolean;
+  speakers: 'full' | 'approximate' | 'none';
+  translation: 'any' | 'english_only' | 'none';
+  language_detection: 'full' | 'selected_languages';
+  word_timestamps: 'exact' | 'approximate';
+  offline: boolean;
+  requires_cloud_consent: boolean;
+  api_key_provider?: CloudProviderName | null;
+}
+
+export interface TranscriptionModel {
+  id: string;
+  name: string;
+  size_bytes?: number | null;
+  note?: string | null;
+  recommended?: boolean;
+}
+
+export interface TranscriptionProviderInfo {
+  id: TranscriptionProviderId;
+  label: string;
+  capabilities: TranscriptionCapabilities;
+  models: TranscriptionModel[];
+  model?: string | null;
+  ready: boolean;
+  detail?: string | null;
+  limitations: string[];
+}
 export type CloudProviderName = 'openrouter' | 'openai' | 'anthropic' | 'soniox';
 
 export type SessionStatus = 'recording' | 'paused' | 'stopped';
@@ -84,6 +122,13 @@ export interface Settings {
   import_cost_warning_usd?: number | null;
   /** Explicit opt-in for the experimental contextual local mode; off by default. */
   contextual_local_enabled: boolean;
+  /** Live and media-import transcription provider; absent from older backends (= Soniox). */
+  transcription_provider?: TranscriptionProviderId;
+  local_whisper_model?: string;
+  openai_transcription_model?: string;
+  /** Local voice clustering for providers without their own diarization. */
+  speaker_separation?: boolean;
+  transcription_providers?: TranscriptionProviderInfo[];
   /** Proactive assistant (a card when someone asks you something); off by default. */
   proactive?: ProactiveSettings;
 }
@@ -182,6 +227,10 @@ export interface SettingsUpdate {
   clear_import_cost_warning?: boolean;
   /** Omitted keeps the stored value: enabling is always an explicit user action. */
   contextual_local_enabled?: boolean;
+  transcription_provider?: TranscriptionProviderId;
+  local_whisper_model?: string;
+  openai_transcription_model?: string;
+  speaker_separation?: boolean;
   /** Given fields replace the stored proactive settings. */
   proactive?: Partial<ProactiveSettings>;
 }
@@ -235,6 +284,14 @@ export interface ImportCapabilities {
   max_concurrent_imports: number;
   destination: string;
   markdown_enabled: boolean;
+  /** Provider a new import uses; absent from older backends (= Soniox). */
+  provider?: TranscriptionProviderId;
+  provider_label?: string;
+  provider_ready?: boolean;
+  provider_detail?: string | null;
+  /** False when transcription runs on this computer and the file never leaves it. */
+  sends_audio?: boolean;
+  translation?: 'any' | 'english_only' | 'none';
 }
 
 export interface ImportCreated {
@@ -290,7 +347,7 @@ export interface LocalModelHardware {
 }
 
 export interface LocalModelStatus {
-  provider?: LocalProviderName;
+  provider?: LocalModelProviderName;
   model: string;
   state: LocalModelState;
   // Sanitised UI text, present only for the failing states.

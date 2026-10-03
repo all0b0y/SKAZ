@@ -34,7 +34,7 @@ def test_recording_config_survives_pause_restart_and_reaches_provider(
 
     class TranslationSocket(ProviderSocket):
         async def send(self, message: str | bytes) -> None:
-            if isinstance(message, str):
+            if isinstance(message, str) and message:
                 configs.append(json.loads(message))
             elif message:
                 self.audio.append(message)

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { IMPORT_RECORDING_MESSAGE } from '../lib/recordingEligibility';
 import { defaultSessionTitle } from '../lib/time';
 import { ApiClient, ApiError } from '../api/client';
+import { useNativeProcessing, hasBackgroundTranscription } from './nativeProcessing';
 import { forgetTranscript } from '../components/transcript/transcriptCache';
 import { captureSourcesLocked } from './captureSources';
 import type { BackendStatus, BridgeApi } from '../api/bridge';
@@ -10,7 +11,7 @@ import type {
   ChatScope,
   Citation,
   LocalModelStatus,
-  LocalProviderName,
+  LocalModelProviderName,
   LiveAsrCapabilities,
   LiveAsrDraft,
   LiveAsrFragment,
@@ -208,9 +209,9 @@ export interface AppState {
   refreshSettings: () => Promise<void>;
   saveSettings: (update: SettingsUpdate) => Promise<void>;
   loadModels: (provider: string, task: TaskKind) => Promise<ModelInfo[]>;
-  prepareLocalModel: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>;
-  localModelStatus: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>;
-  deleteLocalModel: (provider: LocalProviderName, model: string) => Promise<LocalModelStatus>;
+  prepareLocalModel: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>;
+  localModelStatus: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>;
+  deleteLocalModel: (provider: LocalModelProviderName, model: string) => Promise<LocalModelStatus>;
   refreshLiveCapabilities: () => Promise<void>;
   setNextRecordingMode: (mode: SessionMode) => void;
   changeTranscriptLanguage: (language: string) => Promise<void>;
@@ -288,6 +289,12 @@ let client: ApiClient | null = null;
 let recorder: AudioRecorder | null = null;
 let persistenceQueue: PersistenceQueue | null = null;
 let nativeWriter: NativeAudioWriter | null = null;
+
+function transcriptionUnavailableMessage(detail: string | null): string {
+  return detail
+    ? `Transcription is unavailable: ${detail} Check Settings → Transcription and try recording again.`
+    : 'Transcription is unavailable. Check Settings → Transcription and try recording again.';
+}
 let nativeFailureCleanup: (() => void) | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let signalMeter: SignalMeter | null = null;
@@ -395,6 +402,7 @@ export const useStore = create<AppState>((set, get) => {
       try {
         const writer = nativeWriter?.sessionId === sessionId ? nativeWriter : null;
         if (writer && status !== 'recording') await writer.finish(status === 'paused' ? 'pause' : 'stop');
+        if (writer?.transcriptionPending) useNativeProcessing.getState().pending(sessionId);
         // stream.opened/stream.stopped are already durable lifecycle ACKs.
         // A later read-model refresh must not invalidate a successful Stop.
         const updated = writer
@@ -415,7 +423,7 @@ export const useStore = create<AppState>((set, get) => {
             ? null
             : state.pendingSessionStatusSessionId,
           recorderError: writer?.transcriptionIncomplete
-            ? state.recorderError ?? 'Some audio could not be transcribed. The unconfirmed audio was cleared from memory; confirmed text was preserved.'
+            ? state.recorderError ?? `Some audio could not be transcribed${writer.incompleteDetail ? ` (${writer.incompleteDetail.replace(/\.$/, '')})` : ''}. The unconfirmed audio was cleared from memory; confirmed text was preserved.`
             : options.clearErrorOnSuccess ? null : state.recorderError,
         }));
         acknowledged = true;
@@ -462,6 +470,13 @@ export const useStore = create<AppState>((set, get) => {
       await get().stopRecording();
       const saved = await persistenceQueue?.drain() ?? true;
       const state = get();
+      if (state.activeSessionId && (state.settings?.transcription_provider === 'local-whisper' || hasBackgroundTranscription())) {
+        await useNativeProcessing.getState().refresh(state.activeSessionId);
+      }
+      for (const id of Object.keys(useNativeProcessing.getState().sessions)) {
+        if (useNativeProcessing.getState().sessions[id]?.processing) await useNativeProcessing.getState().refresh(id);
+      }
+      if (hasBackgroundTranscription()) return false;
       return saved && !state.captureIncomplete && ['idle', 'stopped'].includes(state.recorderState)
         && state.queue.pending === 0 && state.queue.failed.length === 0
         && state.pendingSessionStatus === null;
@@ -878,7 +893,9 @@ export const useStore = create<AppState>((set, get) => {
     }
     if (['recording', 'paused', 'processing'].includes(get().recorderState)) return;
     if (get().pendingSessionStatus) {
-      set({ recorderError: 'Confirm the previous backend lifecycle state before recording again.' });
+      const previous = get().pendingSessionStatus === 'stopped' ? 'Stop'
+        : get().pendingSessionStatus === 'paused' ? 'Pause' : 'Record';
+      set({ recorderError: `The previous ${previous} was not confirmed by the backend yet. Use its Retry confirmation button, then record again.` });
       return;
     }
     if (get().queue.pending > 0 || get().queue.failed.length > 0) {
@@ -926,6 +943,23 @@ export const useStore = create<AppState>((set, get) => {
     }
     if (!activeSessionId || stopRequested) return;
     const sessionId = activeSessionId;
+    let captureRate: number | undefined;
+    try {
+      const snapshot = await getClient().getNativeSnapshot(sessionId);
+      if (snapshot.processing) {
+        useNativeProcessing.getState().pending(sessionId);
+        set({ recorderState: 'stopped' });
+        return;
+      }
+      captureRate = snapshot.sample_rate;
+    } catch (error) {
+      // A new session has no native clock yet; every other read failure is real.
+      if (!(error instanceof ApiError && error.status === 404)) {
+        set({ recorderState: 'stopped', recorderError: error instanceof Error ? error.message : String(error) });
+        return;
+      }
+    }
+    if (stopRequested) return;
     recordingSessionId = sessionId;
     nativeFailureCleanup?.();
     let transportOpened = false;
@@ -933,12 +967,14 @@ export const useStore = create<AppState>((set, get) => {
     const writer = new NativeAudioWriter(getClient(), sessionId, (opened) => {
       if (!transportOpened) elapsedOffsetMs = opened.saved_samples * 1000 / opened.sample_rate;
       transportOpened = true;
+      useNativeProcessing.getState().started(sessionId);
     }, true);
     nativeWriter = writer;
     nativeFailureCleanup = getClient().onNativeFailure((failure) => {
       if (!nativeFailureCleanup || nativeWriter !== writer || failure.sessionId !== sessionId) return;
       if (failure.code === 'transcription_failed') {
-        set({ recorderError: 'Transcription failed. Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.' });
+        const reason = failure.reason ? ` ${failure.reason.replace(/\.?$/, '.')}` : '';
+        set({ recorderError: `Transcription failed.${reason} Recording stopped. The unconfirmed audio could not be transcribed and was cleared from memory. Try recording again.` });
         if (!stopRequested) void get().stopRecording();
         return;
       }
@@ -977,7 +1013,7 @@ export const useStore = create<AppState>((set, get) => {
       onReady: async (rate) => {
         await writer.open(rate);
         if (!writer.transcriptionAvailable) {
-          throw new Error('Transcription is unavailable. Check Soniox settings and try recording again.');
+          throw new Error(transcriptionUnavailableMessage(writer.transcriptionDetail));
         }
       },
       onChunk: (chunk: RecordedChunk) => {
@@ -1008,7 +1044,7 @@ export const useStore = create<AppState>((set, get) => {
         if (!get().captureIncomplete) set({ recorderError: 'Microphone disconnected. Captured audio was flushed.' });
         void get().stopRecording();
       },
-    }, { windowSeconds: 0.1 });
+    }, { windowSeconds: 0.1, sampleRate: captureRate });
 
     try {
       const activeRecorder = recorder;
@@ -1126,6 +1162,12 @@ export const useStore = create<AppState>((set, get) => {
       return;
     }
     if (get().recorderState !== 'paused') return;
+    const pausedSessionId = recordingSessionId;
+    if (pausedSessionId) {
+      try { await useNativeProcessing.getState().refresh(pausedSessionId); }
+      catch { set({ recorderError: 'Could not verify background transcription status.' }); return; }
+      if (useNativeProcessing.getState().sessions[pausedSessionId]?.processing) return;
+    }
     const activeRecorder = recorder;
     const sessionId = recordingSessionId;
     const intent = sessionId ? beginSessionStatusIntent(sessionId, 'recording') : null;
@@ -1150,7 +1192,7 @@ export const useStore = create<AppState>((set, get) => {
     try {
       await nativeWriter?.open();
       if (nativeWriter && !nativeWriter.transcriptionAvailable) {
-        set({ recorderError: 'Transcription is unavailable. Check Soniox settings and try recording again.' });
+        set({ recorderError: transcriptionUnavailableMessage(nativeWriter.transcriptionDetail) });
         await get().stopRecording();
         return;
       }

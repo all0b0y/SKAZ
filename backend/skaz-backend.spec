@@ -7,7 +7,9 @@
 # Build:  backend/.venv/bin/pyinstaller --noconfirm --clean backend/skaz-backend.spec
 # Output: backend/dist/skaz-backend/
 
-from PyInstaller.utils.hooks import collect_submodules
+from importlib.util import find_spec
+
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 hiddenimports = [
     # Uvicorn/Starlette resolve their protocol implementations by string name,
@@ -21,16 +23,22 @@ hiddenimports = [
     "cryptography.hazmat.backends.openssl",
 ]
 
-# Local Whisper is an optional extra (faster-whisper + ctranslate2 + onnxruntime
-# ≈ hundreds of MB). Exclude it from the shipped bundle: the product's live path
-# is Soniox, and the local models feature degrades gracefully when the module is
-# absent (local_models.gigachat_runtime_available / capabilities probes).
+# Local Whisper (Settings → Transcription) ships its *runtime* when the backend
+# venv has the 'local-asr' extra: faster-whisper, CTranslate2, ONNX Runtime (Silero
+# VAD and the speaker model), PyAV, tokenizers, huggingface-hub. Model *weights*
+# are never bundled; the user downloads them on demand. A venv without the extra
+# still builds a working Soniox/OpenAI-only backend: Local Whisper then reports
+# "dependency missing" instead of failing.
+datas = []
+binaries = []
+for module in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers", "huggingface_hub"):
+    if find_spec(module) is None:
+        continue
+    hiddenimports += collect_submodules(module)
+    datas += collect_data_files(module)  # faster_whisper/assets/silero_vad_v6.onnx
+    binaries += collect_dynamic_libs(module)
+
 excludes = [
-    "faster_whisper",
-    "ctranslate2",
-    "onnxruntime",
-    "av",
-    "tokenizers",
     "gigachat_audio_mlx",
     "torch",
     "pytest",
@@ -43,8 +51,8 @@ excludes = [
 a = Analysis(
     ["scripts/frozen_entry.py"],
     pathex=["src"],
-    binaries=[],
-    datas=[],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

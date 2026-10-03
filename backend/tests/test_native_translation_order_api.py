@@ -32,7 +32,7 @@ def test_mixed_translation_order_and_status_survive_restart(
 
     class MixedSocket(ProviderSocket):
         async def send(self, message: str | bytes) -> None:
-            if isinstance(message, str):
+            if isinstance(message, str) and message:
                 return
             if message:
                 self.audio.append(message)

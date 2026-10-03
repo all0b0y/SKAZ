@@ -13,6 +13,15 @@ class ProviderError(RuntimeError):
     """The provider was called and did not return a usable answer."""
 
 
+class LiveAsrError(RuntimeError):
+    """A sanitized live-transcription failure; the message is shown to the user as is."""
+
+    def __init__(self, message: str = "Live transcription failed.", *, retryable: bool = False) -> None:
+        super().__init__(message)
+        #: True when reopening the same provider can plausibly succeed.
+        self.retryable = retryable
+
+
 CLOUD_PROVIDERS = frozenset({"openai", "openrouter", "anthropic"})
 
 

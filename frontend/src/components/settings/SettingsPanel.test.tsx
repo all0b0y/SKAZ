@@ -100,7 +100,7 @@ describe('Embedding model assignment', () => {
   });
 });
 
-describe('SettingsPanel transcription provider (fixed to Soniox)', () => {
+describe('SettingsPanel transcription provider (backend without a provider list: Soniox only)', () => {
   it('states Soniox without offering a model or base_url to pick', async () => {
     const user = userEvent.setup();
     render(<SettingsPanel onClose={() => {}} />);

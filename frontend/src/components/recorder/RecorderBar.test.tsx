@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RecorderBar } from './RecorderBar';
 import { useStore } from '../../state/store';
+import { useNativeProcessing } from '../../state/nativeProcessing';
 import type { UploadQueueState } from '../../audio/uploadQueue';
 import { idleMeterSnapshot } from '../../audio/meter';
 import { OPEN_SETTINGS_EVENT } from '../../lib/openSettings';
@@ -21,6 +22,7 @@ const queue = (over: Partial<UploadQueueState> = {}): UploadQueueState => ({
 });
 
 beforeEach(() => {
+  useNativeProcessing.setState({ sessions: {} });
   useStore.setState({
     recorderState: 'idle',
     elapsedMs: 0,
@@ -48,6 +50,26 @@ beforeEach(() => {
 });
 
 describe('RecorderBar', () => {
+  it('blocks only the processing session, and enables Continue after completion', async () => {
+    let processing = true;
+    vi.spyOn(window.skaz, 'request').mockImplementation(async () => ({ ok: true, status: 200,
+      data: { processing, incomplete: false, background_sessions: processing ? ['tail'] : [] } }));
+    useStore.setState({ activeSessionId: 'tail', recorderState: 'stopped',
+      sessions: [{ id: 'tail', title: 'Tail', created_at: '', status: 'stopped', duration_ms: 1000, mode: 'legacy' }] });
+    useNativeProcessing.getState().pending('tail');
+    render(<RecorderBar />);
+    expect(screen.getByText('Processing remaining audio…')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Continue recording' })).toBeDisabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    act(() => useStore.setState({ activeSessionId: 'another' }));
+    expect(screen.getByRole('button', { name: 'Record' })).toBeEnabled();
+    act(() => useStore.setState({ activeSessionId: 'tail' }));
+    processing = false;
+    await act(async () => { await useNativeProcessing.getState().refresh('tail'); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue recording' })).toBeEnabled(), { timeout: 2000 });
+    expect(screen.queryByText('Processing remaining audio…')).not.toBeInTheDocument();
+  });
+
   it('shows the same warning again after a fresh attempt, with Record still enabled', async () => {
     useStore.setState({ recorderError: 'Transcription failed. Try again.' });
     render(<RecorderBar />);

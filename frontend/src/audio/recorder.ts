@@ -147,7 +147,7 @@ export class AudioRecorder {
 
   constructor(
     private readonly callbacks: RecorderCallbacks,
-    private readonly options: { windowSeconds?: number } = {},
+    private readonly options: { windowSeconds?: number; sampleRate?: number } = {},
   ) {
     const seconds = options.windowSeconds ?? WINDOW_SECONDS;
     if (!Number.isFinite(seconds) || seconds <= 0 || seconds > WINDOW_SECONDS) {
@@ -180,7 +180,9 @@ export class AudioRecorder {
       // Both sources or neither: the user asked to record the other side too.
       if (sources.systemAudio) this.systemStream = await openSystemAudio();
       if (this.stopRequested) throw new Error('Recording start was cancelled.');
-      this.context = new AudioContext();
+      // A continued session keeps its original PCM clock even if the device changes.
+      this.context = new AudioContext(this.options.sampleRate === undefined
+        ? undefined : { sampleRate: this.options.sampleRate });
       this.sampleRate = this.context.sampleRate;
       this.timeline = new SampleTimeline(this.sampleRate);
       this.chunker = new WindowChunker(Math.max(1, Math.round((this.options.windowSeconds ?? WINDOW_SECONDS) * this.sampleRate)));

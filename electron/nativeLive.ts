@@ -9,6 +9,11 @@ const integer = (value: unknown): value is number => Number.isSafeInteger(value)
 const sessionIdValid = (value: unknown): value is string => typeof value === 'string' && /^[\w-]{1,128}$/.test(value);
 
 type WireMessage = Record<string, unknown>;
+
+/** Provider text is shown to the user; accept only a short plain string. */
+function boundedText(value: unknown, limit = 400): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= limit ? value : undefined;
+}
 interface Waiter {
   type: string;
   resolve: (message: WireMessage) => void;
@@ -72,7 +77,8 @@ class NativeConnection {
       if (value.type === 'transcription.failed') {
         // ASR has stopped, but the local stream must still drain and acknowledge
         // Stop. Terminating it here would turn a warning into a sticky save error.
-        this.onFailure({ sessionId: this.sessionId, code: 'transcription_failed' });
+        const reason = boundedText(value.reason);
+        this.onFailure({ sessionId: this.sessionId, code: 'transcription_failed', ...(reason ? { reason } : {}) });
         return;
       }
       const pending = this.waiter;
@@ -118,6 +124,8 @@ class NativeConnection {
       saved_samples: message.saved_samples, next_sequence: message.next_sequence,
       transcription: message.transcription as NativeOpened['transcription'],
       ...(message.audio_retained === false ? { audio_retained: false } : {}),
+      ...(boundedText(message.transcription_provider, 32) ? { transcription_provider: boundedText(message.transcription_provider, 32) } : {}),
+      ...(boundedText(message.transcription_detail) ? { transcription_detail: boundedText(message.transcription_detail) } : {}),
     };
   }
 
@@ -167,7 +175,12 @@ class NativeConnection {
         || message.status !== status) { this.fail(); throw failure(); }
       this.phase = 'closed';
       this.socket.close();
-      return { saved_samples: message.saved_samples, transcription_complete: message.transcription_complete, status };
+      const detail = boundedText(message.transcription_detail);
+      return {
+        saved_samples: message.saved_samples, transcription_complete: message.transcription_complete, status,
+        ...(detail ? { transcription_detail: detail } : {}),
+        ...(message.transcription_pending === true ? { transcription_pending: true } : {}),
+      };
     });
     return this.ending;
   }

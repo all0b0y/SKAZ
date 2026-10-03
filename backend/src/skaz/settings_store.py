@@ -8,7 +8,14 @@ from pydantic import BaseModel, Field
 
 from .db import Database
 from .languages import UsedLanguages
-from .schemas import NativeRecordingMode, ProactiveSettings, Provider, SettingsUpdate, Task
+from .schemas import (
+    NativeRecordingMode,
+    ProactiveSettings,
+    Provider,
+    SettingsUpdate,
+    Task,
+    TranscriptionProvider,
+)
 
 
 class StoredProfile(BaseModel):
@@ -40,6 +47,12 @@ class StoredSettings(BaseModel):
     contextual_local_enabled: bool = False
     #: Proactive assistant; documents written before it existed load it switched off.
     proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
+    #: The live and media-import transcription provider. Soniox stays the default so
+    #: settings written before this field existed keep behaving exactly as before.
+    transcription_provider: TranscriptionProvider = "soniox"
+    local_whisper_model: str = "small"
+    openai_transcription_model: str = "whisper-1"
+    speaker_separation: bool = True
 
     def profile(self, task: Task) -> StoredProfile:
         return getattr(self, task)  # type: ignore[no-any-return]
@@ -146,6 +159,10 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         "cloud_consent",
         "contextual_local_enabled",
         "capture_system_audio",
+        "transcription_provider",
+        "local_whisper_model",
+        "openai_transcription_model",
+        "speaker_separation",
     ):
         value = getattr(update, field)
         if value is not None:

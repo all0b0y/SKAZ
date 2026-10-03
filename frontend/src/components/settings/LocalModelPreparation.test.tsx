@@ -1,12 +1,12 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalModelStatus, LocalProviderName } from '../../api/types';
+import type { LocalModelStatus, LocalModelProviderName } from '../../api/types';
 import { useStore } from '../../state/store';
 import { LocalModelPreparation } from './LocalModelPreparation';
 
 const status = (
-  provider: LocalProviderName,
+  provider: LocalModelProviderName,
   model: string,
   state: LocalModelStatus['state'] = 'not_installed',
 ): LocalModelStatus => ({ provider, model, state, error: null, cached: false, shared_cache: false });
@@ -42,7 +42,7 @@ describe('LocalModelPreparation request ordering', () => {
 
   it('enables a newly selected model while an old preparation is pending and ignores its result', async () => {
     const oldPreparation = deferred<LocalModelStatus>();
-    const prepareLocalModel = vi.fn((_provider: LocalProviderName, _model: string) => oldPreparation.promise);
+    const prepareLocalModel = vi.fn((_provider: LocalModelProviderName, _model: string) => oldPreparation.promise);
     useStore.setState({ prepareLocalModel });
     const user = userEvent.setup();
     const view = render(<LocalModelPreparation provider="local-whisper" model="small" />);
@@ -65,7 +65,7 @@ describe('LocalModelPreparation request ordering', () => {
   it('ignores an old mutation error after switching providers and leaves the new selection enabled', async () => {
     const oldPreparation = deferred<LocalModelStatus>();
     useStore.setState({
-      prepareLocalModel: vi.fn((_provider: LocalProviderName, _model: string) => oldPreparation.promise),
+      prepareLocalModel: vi.fn((_provider: LocalModelProviderName, _model: string) => oldPreparation.promise),
     });
     const user = userEvent.setup();
     const view = render(<LocalModelPreparation provider="local-whisper" model="small" />);
@@ -91,7 +91,7 @@ describe('LocalModelPreparation request ordering', () => {
 
   it('ignores a stale initial status reply after the selection changes', async () => {
     const requests = new Map<string, Deferred<LocalModelStatus>>();
-    const localModelStatus = vi.fn((provider: LocalProviderName, model: string) => {
+    const localModelStatus = vi.fn((provider: LocalModelProviderName, model: string) => {
       const request = deferred<LocalModelStatus>();
       requests.set(`${provider}:${model}`, request);
       return request.promise;
@@ -118,7 +118,7 @@ describe('LocalModelPreparation request ordering', () => {
     vi.useFakeTimers();
     const oldPoll = deferred<LocalModelStatus>();
     let smallCalls = 0;
-    const localModelStatus = vi.fn((provider: LocalProviderName, model: string) => {
+    const localModelStatus = vi.fn((provider: LocalModelProviderName, model: string) => {
       if (model === 'small') {
         smallCalls += 1;
         return smallCalls === 1

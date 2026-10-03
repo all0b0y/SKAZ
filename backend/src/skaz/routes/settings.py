@@ -6,8 +6,10 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException
 
+from ..asr_providers import validate_selection
 from ..capabilities import IncompatibleProfile, validate_profile
 from ..catalog import ProviderCatalogs
+from ..gateways import ProviderNotConfigured
 from ..native_io import disk_call, drain_on_cancel
 from ..schemas import Settings, SettingsUpdate
 from ..secrets import MemorySecretStore
@@ -53,6 +55,10 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
             if value:
                 candidates.set(provider, value)
         catalogs = ProviderCatalogs(runtime.http, candidates, runtime.config.data_dir)
+    try:
+        validate_selection(merged)
+    except ProviderNotConfigured as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     for task in TASKS:
         if merged.profile(task) == current.profile(task):
             continue
@@ -61,7 +67,7 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
         except IncompatibleProfile as error:
             raise HTTPException(status_code=400, detail=f"{task}: {error}") from error
     async def save_and_revoke() -> None:
-        remove_soniox = False
+        removed: set[str] = set()
         try:
             # All credential writes are off-loop and cancellation-drained. Once
             # Soniox is deleted, a later provider/DB failure must still revoke it.
@@ -71,7 +77,7 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
                         await disk_call(runtime.secrets.set, provider, value)
                     else:
                         await disk_call(runtime.secrets.delete, provider)
-                        remove_soniox = remove_soniox or provider == "soniox"
+                        removed.add(provider)
                 except Exception:
                     raise HTTPException(
                         status_code=503, detail="Could not update the provider key in secure storage."
@@ -80,10 +86,12 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
         finally:
             runtime.proactive.settings_changed(merged)
             # Key removal must close cloud work even if the subsequent DB write fails.
-            if not merged.cloud_consent or remove_soniox:
-                await asyncio.gather(*(
-                    stream.disable_provider() for stream in list(runtime.native_streams.values())
-                ))
+            # A local provider sends nothing off this computer: consent does not stop it.
+            await asyncio.gather(*(
+                stream.disable_provider() for stream in list(runtime.native_streams.values())
+                if (stream.cloud and not merged.cloud_consent)
+                or (stream.api_key_provider is not None and stream.api_key_provider in removed)
+            ))
 
     # Cancellation after the durable write must still complete cloud shutdown
     # before releasing the lock to a new native open or settings update.
