@@ -466,7 +466,11 @@ async def test_a_microphone_cannot_record_into_an_imported_session(
 
 async def test_an_unfinished_import_waits_for_manual_retry_after_restart(
     config: AppConfig, outbound: FakeHttp, secrets: MemorySecretStore, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A zero poll delay lets a slow runner drain all queued "processing" replies, and
+    # finish the import, before the loop below ever observes it processing.
+    monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (0.01,))
     provider = Provider(outbound)
     secrets.set("soniox", "test-soniox-key")
     provider.queue(*[provider.processing() for _ in range(500)])
@@ -479,10 +483,13 @@ async def test_an_unfinished_import_waits_for_manual_retry_after_restart(
         await client.put("/settings", json={"cloud_consent": True})
         created = await start_import(client, audio_file(tmp_path))
         session_id = created["session"]["id"]
+        status = None
         for _ in range(400):
             await asyncio.sleep(0.01)
-            if (await client.get(f"/imports/{session_id}")).json()["status"] == "processing":
+            status = (await client.get(f"/imports/{session_id}")).json()["status"]
+            if status == "processing":
                 break
+        assert status == "processing"
     # Simulate a hard stop: the process goes away while the provider keeps working.
     await first.state.runtime.imports.close()
     first.state.runtime.close()
