@@ -9,7 +9,7 @@ function connectionText(c: CodexConnection | null): string {
     case 'checking': return 'Checking Codex…';
     case 'signed_out': return `Codex found${c.version ? ` (${c.version})` : ''}, not signed in to ChatGPT`;
     case 'missing': return 'Codex was not found on this computer';
-    case 'incompatible': return `Incompatible Codex version${c.version ? ` ${c.version}` : ''}`;
+    case 'incompatible': return c.error ?? `Codex${c.version ? ` ${c.version}` : ''} cannot be used`;
     case 'error': return `Check failed: ${c.error ?? 'no details'}`;
     default: return 'Not checked';
   }
@@ -81,7 +81,7 @@ export function CodexEnginePanel({ purpose, settings, disabled, onChange }: Code
         </p>
       )}
       {connection?.status === 'incompatible' && (
-        <p className="field__hint">SKAZ does not update Codex itself. A compatible version is required.</p>
+        <p className="field__hint">SKAZ does not update Codex itself. Update Codex, then check again.</p>
       )}
       {connection && !connection.web_available && (
         <p className="field__hint">

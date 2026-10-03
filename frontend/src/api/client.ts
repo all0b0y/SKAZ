@@ -323,8 +323,11 @@ export class ApiClient {
       .then(unwrap);
   }
 
-  renameSession(id: string, title: string, status: SessionStatus): Promise<Session> {
-    return this.setSessionStatus(id, status, { title });
+  /** A rename sends only the title: resending a status would re-run pause/stop side effects. */
+  renameSession(id: string, title: string): Promise<Session> {
+    return this.bridge
+      .request<Session>({ method: 'PATCH', path: `/sessions/${encodeURIComponent(id)}`, body: { title } })
+      .then(unwrap);
   }
 
   deleteSession(id: string): Promise<void> {

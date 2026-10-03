@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -21,6 +22,67 @@ LOGIN_FAILURES = {
     "cancelled": "Login cancelled",
     "timed_out": "Login timed out",
 }
+
+
+# Oldest Codex release whose app-server protocol SKAZ was verified against.
+# Newer releases are accepted; what SKAZ actually reads is shape-checked instead,
+# so a breaking change surfaces as an explicit "incompatible", never a fallback.
+MIN_CODEX_VERSION: tuple[int, int, int] = (0, 149, 1)
+_VERSION = re.compile(r"^codex-cli (\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$")
+
+
+def parse_codex_version(text: str) -> tuple[int, int, int] | None:
+    match = _VERSION.match(text.strip())
+    if match is None:
+        return None
+    return int(match[1]), int(match[2]), int(match[3])
+
+
+def _dotted(version: tuple[int, int, int]) -> str:
+    return ".".join(str(part) for part in version)
+
+
+class UnexpectedCodexReply(Exception):
+    """A Codex reply lacks a field SKAZ reads: the installed version is not usable."""
+
+    def __init__(self, method: str) -> None:
+        self.method = method
+        super().__init__(method)
+
+
+def _account_type(reply: object) -> str | None:
+    """The signed-in account type, or None when signed out; raises on another shape."""
+    if not isinstance(reply, dict) or "account" not in reply:
+        raise UnexpectedCodexReply("account/read")
+    account = reply["account"]
+    if account is None:
+        return None
+    if not isinstance(account, dict) or not isinstance(account.get("type"), str):
+        raise UnexpectedCodexReply("account/read")
+    return str(account["type"])
+
+
+def _model_page(reply: object) -> tuple[list[dict[str, Any]], str | None]:
+    """Visible models of one model/list page and the next cursor; raises on another shape."""
+    if not isinstance(reply, dict) or not isinstance(reply.get("data"), list):
+        raise UnexpectedCodexReply("model/list")
+    cursor = reply.get("nextCursor")
+    if cursor is not None and not isinstance(cursor, str):
+        raise UnexpectedCodexReply("model/list")
+    models: list[dict[str, Any]] = []
+    for model in reply["data"]:
+        if not isinstance(model, dict):
+            raise UnexpectedCodexReply("model/list")
+        efforts = model.get("supportedReasoningEfforts")
+        if (not isinstance(model.get("model"), str) or not isinstance(model.get("displayName"), str)
+                or not isinstance(efforts, list)
+                or not all(isinstance(e, dict) and isinstance(e.get("reasoningEffort"), str)
+                           for e in efforts)):
+            raise UnexpectedCodexReply("model/list")
+        if not model.get("hidden"):
+            models.append({"id": model["model"], "label": model["displayName"],
+                           "efforts": [e["reasoningEffort"] for e in efforts]})
+    return models, cursor
 
 
 class CodexConnection:
@@ -103,26 +165,30 @@ class CodexConnection:
                     if process.returncode is None:
                         process.kill()
                         await process.wait()
-                version = out.decode().strip()
+                version = out.decode(errors="replace").strip()
                 self.view["version"] = version
-                if version != "codex-cli 0.149.1":
-                    self.view.update(status="incompatible", models=[], error="Verified version: 0.149.1")
+                parsed = parse_codex_version(version)
+                if parsed is None:
+                    self.view.update(status="incompatible", models=[],
+                                     error=f"Unrecognised Codex version output: {version[:80]}")
+                    return dict(self.view)
+                if parsed < MIN_CODEX_VERSION:
+                    self.view.update(
+                        status="incompatible", models=[],
+                        error=(f"Codex {_dotted(parsed)} is outdated — version "
+                               f"{_dotted(MIN_CODEX_VERSION)} or newer is required."))
                     return dict(self.view)
                 async with self.rpc() as rpc:
                     account = await rpc.request("account/read", {"refreshToken": False})
-                    if not account.get("account") or account["account"].get("type") != "chatgpt":
+                    if _account_type(account) != "chatgpt":
                         self.view.update(status="signed_out", models=[], error=None)
                         return dict(self.view)
-                    models = []
+                    models: list[dict[str, Any]] = []
                     cursor = None
                     for _ in range(20):
                         page = await rpc.request("model/list", {"cursor": cursor, "limit": 100})
-                        for model in page["data"]:
-                            if not model.get("hidden"):
-                                models.append({"id": model["model"], "label": model["displayName"],
-                                               "efforts": [e["reasoningEffort"]
-                                                           for e in model["supportedReasoningEfforts"]]})
-                        cursor = page.get("nextCursor")
+                        visible, cursor = _model_page(page)
+                        models.extend(visible)
                         if cursor is None:
                             break
                     else:
@@ -130,6 +196,12 @@ class CodexConnection:
                     self.view.update(status="connected", models=models, error=None)
                     # SKAZ only signs in after consent, so a connected account proves it.
                     self._record_consent(True)
+            except UnexpectedCodexReply as error:
+                shown = parse_codex_version(str(self.view["version"] or ""))
+                self.view.update(
+                    status="incompatible", models=[],
+                    error=(f"Codex {_dotted(shown) if shown else 'version'} replied to "
+                           f"{error.method} in an unexpected format; SKAZ cannot use this version."))
             except Exception:
                 self.view.update(status="error", models=[], error="Codex connection failed; no fallback")
             return dict(self.view)
