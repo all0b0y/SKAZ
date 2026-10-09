@@ -453,10 +453,15 @@ async def read_live_asr_scheduler(
 @router.patch("/{session_id}")
 async def patch_session(session_id: str, payload: PatchSessionRequest, runtime: RuntimeDep) -> Session:
     session = _require_session(runtime, session_id)
+    # The legacy tail flush runs only on an actual pause/stop transition: a rename
+    # (even one that resends the current status) must never touch transcription,
+    # and a native recording's transcript is never the legacy writer's to finish.
     if (
         session.mode != "contextual_local"
         and payload.status in ("stopped", "paused")
+        and payload.status != session.status
         and payload.flush_transcription
+        and not await disk_call(repo.has_native_recording, runtime.db, session_id)
     ):
         # Stopping waits for the tail: in-flight chunks finish and failed ones are retried.
         try:

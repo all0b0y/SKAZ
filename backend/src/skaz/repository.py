@@ -307,6 +307,14 @@ def _assert_final_writer_available(
         raise FinalWriterConflict(opposite, requested_writer)
 
 
+def has_native_recording(db: Database, session_id: str) -> bool:
+    """A native session's transcript belongs to the native writer, never the legacy flush."""
+    with db.read() as connection:
+        return connection.execute(
+            "SELECT 1 FROM native_recordings WHERE session_id=?", (session_id,)
+        ).fetchone() is not None
+
+
 def assert_final_writer_available(
     db: Database, session_id: str, requested_writer: FinalWriterKind
 ) -> None:

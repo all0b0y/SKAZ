@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from '../../state/store';
 import { Icon } from '../ui/Icon';
@@ -190,7 +190,9 @@ export function SearchPalette({ open, onClose, onCite }: SearchPaletteProps) {
                         <span className="palette__item-time tabular">{formatRange(segment.start_ms, segment.end_ms)}</span>
                         <span className="palette__item-text">
                           {highlightRuns(segment.text, query).map((run, i) => (
-                            run.match ? <mark key={i}>{run.text}</mark> : <span key={i}>{run.text}</span>
+                            // Plain runs stay text nodes: a wrapping element would make the
+                            // accessible name drop the space before a highlighted word.
+                            run.match ? <mark key={i}>{run.text}</mark> : <Fragment key={i}>{run.text}</Fragment>
                           ))}
                         </span>
                       </button>

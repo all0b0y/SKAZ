@@ -174,7 +174,9 @@ describe('incremental native history', () => {
         // an earlier connection, so the floor is modest (observed 14–113 per seed).
         if (mode === 'translation') expect(reused()).toBe(0);
         else if (!oversized) expect(reused()).toBeGreaterThan(10);
-      });
+        // ~2 s alone: every merge is checked against a full reference rebuild, which
+        // exceeds the 5 s default when the whole suite runs in parallel.
+      }, 30_000);
     }
   }
 

@@ -45,7 +45,9 @@ export function connectionBlockOf(connection: CodexConnection | null): Connectio
     case 'checking': return { text: 'Checking Codex…', fix: 'none' };
     case 'missing': return { text: 'Codex was not found on this computer.', fix: 'settings' };
     case 'incompatible': return {
-      text: `The installed Codex version${connection.version ? ` ${connection.version}` : ''} is incompatible.`,
+      // The backend names the reason: outdated (with the minimum) or an unexpected reply format.
+      text: connection.error
+        ?? `The installed Codex version${connection.version ? ` ${connection.version}` : ''} cannot be used.`,
       fix: 'settings',
     };
     case 'signed_out': return connection.relogin_available
