@@ -1740,7 +1740,7 @@ body.is-resizing-panels {
 }
 
 /* ---- Transcript empty state: the SKAZ tree ---------------------------- */
-/* Static on purpose; the startup screen is where the tree animates. */
+/* The first empty transcript of an app run plays the tree's intro; later ones are still. */
 .transcript-logo {
   display: flex;
   flex-direction: column;
@@ -1752,6 +1752,33 @@ body.is-resizing-panels {
 .transcript-logo__tree {
   width: clamp(104px, 13vw, 148px);
   height: auto;
+}
+.transcript-logo__word {
+  margin: calc(var(--space-4) * -0.5) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: var(--tree-crown);
+}
+/* Roots wait for the intro, the wordmark for its end. */
+.transcript-logo[data-intro='pending'] .tree-mark__roots,
+.transcript-logo[data-intro='pending'] .transcript-logo__word,
+.transcript-logo[data-intro='playing'] .transcript-logo__word { opacity: 0; }
+.transcript-logo[data-intro='done'] .transcript-logo__word {
+  animation: tree-word-in 520ms var(--motion-ease-out) both;
+}
+.tree-intro__sap rect,
+.tree-intro__sparks rect {
+  fill: var(--tree-sap);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.tree-intro__sap rect { opacity: 0; }
+@keyframes tree-word-in {
+  from { opacity: 0; transform: translateY(6px); letter-spacing: 0.28em; }
+  to { opacity: 1; transform: none; letter-spacing: 0.12em; }
 }
 .transcript-logo__hint {
   margin: 0;
@@ -2373,50 +2400,29 @@ body.is-resizing-panels {
 }
 
 /* ---- Startup screen ----------------------------------------------------- */
-/* Voice becomes knowledge: the root keeps the .gate class that smoke tests
- * wait on; colours come from the --tree-* tokens shared with the empty transcript. */
+/* Only an audio track while the local service starts; the root keeps the
+ * .gate class that smoke tests wait on. */
 .startup {
   position: fixed;
   inset: 0;
   z-index: 50;
   display: grid;
   place-items: center;
-}
-/* Ready: the workspace takes input immediately; the tree only finishes its move. */
-.startup[data-state='leaving'] { pointer-events: none; }
-.startup__backdrop {
-  position: absolute;
-  inset: 0;
   background: var(--paper);
 }
+/* Ready: the workspace takes input immediately; the screen only finishes fading. */
+.startup[data-state='leaving'] { pointer-events: none; }
 .startup__stage {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
 }
-.startup__tree {
-  width: clamp(150px, 15vw, 200px);
-  height: auto;
-}
-.startup .tree-mark__roots { transition: fill 450ms ease; }
-.startup .tree-mark__roots rect,
-.startup__sap rect,
-.startup__sparks rect {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-.startup__sap rect,
-.startup__sparks rect { fill: var(--tree-sap); }
-.startup__sap rect { opacity: 0; }
-.startup[data-phase='error'] .tree-mark__roots { fill: var(--warning); }
-
 .startup__wave {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 30px;
+  gap: 5px;
+  height: 44px;
 }
 .startup__wave span {
   width: 4px;
@@ -2425,9 +2431,11 @@ body.is-resizing-panels {
   background: var(--tree-roots);
   transform: scaleY(0.25);
   transform-origin: center;
+  transition: background-color 450ms ease;
 }
+.startup[data-phase='error'] .startup__wave span { background: var(--warning); }
 
-/* Slow-start line and failure details sit below the picture so the tree never jumps. */
+/* The slow-start line and failure details sit below the track so it never jumps. */
 .startup__below {
   position: absolute;
   top: calc(100% + var(--space-5));
@@ -2470,9 +2478,6 @@ body.is-resizing-panels {
   margin-top: var(--space-2);
 }
 
-/* The empty transcript's tree stays hidden until the flying one lands on it. */
-[data-tree-arriving] { visibility: hidden; }
-
 @keyframes startup-fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
@@ -2480,7 +2485,7 @@ body.is-resizing-panels {
 @media (prefers-reduced-motion: reduce) {
   .startup__slow,
   .startup__error { animation: none; }
-  .startup .tree-mark__roots { transition: none; }
+  .startup__wave span { transition: none; }
 }
 
 /* ---- Motion ------------------------------------------------------------- */

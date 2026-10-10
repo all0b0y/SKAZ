@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
-import { SAP } from '../../brand/treeGeometry';
-import { TreeMark } from '../brand/TreeMark';
 import { Button } from '../ui/Button';
-import { fail, handOff, runStartup, settle } from './startupMotion';
+import { fadeAway, flatten, playWave } from './startupMotion';
 
 /** How long a normal start stays silent before one quiet reassurance line appears. */
 export const SLOW_START_MS = 8_000;
-const WAVE_BARS = 23;
+const WAVE_BARS = 27;
 
 type Phase = 'starting' | 'ready' | 'error';
 
 /**
  * The startup screen follows the real backend start; it is not a timed splash.
- * No visible text in a normal start (VoiceOver still hears the status), a quiet
- * line for a slow one, and real actions when it fails. Once the backend is
- * ready it stops taking input at once and hands its tree to the workspace.
+ * Only an audio track while the local service starts (VoiceOver still hears the
+ * status), a quiet line for a slow start, and real actions when it fails. Once
+ * ready it stops taking input at once and fades; the tree's own intro plays in
+ * the empty transcript.
  */
 export function StartupScreen() {
   const backend = useStore((s) => s.backend);
@@ -30,7 +29,6 @@ export function StartupScreen() {
   const [retrying, setRetrying] = useState(false);
   const leavingRef = useRef(false);
   const gateRef = useRef<HTMLDivElement>(null);
-  const treeRef = useRef<SVGSVGElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
 
   // A backend that fails after being ready brings the screen back with its error.
@@ -42,9 +40,8 @@ export function StartupScreen() {
   }, [phase, present]);
 
   useEffect(() => {
-    const svg = treeRef.current;
-    if (!present || phase !== 'starting' || !svg) return undefined;
-    return runStartup(svg, waveRef.current, reduced);
+    if (!present || phase !== 'starting') return undefined;
+    return playWave(waveRef.current, reduced);
   }, [present, phase, reduced]);
 
   useEffect(() => {
@@ -56,18 +53,16 @@ export function StartupScreen() {
   useEffect(() => {
     if (phase !== 'error' || !present) return;
     setRetrying(false);
-    if (treeRef.current) fail(treeRef.current, waveRef.current, reduced);
-  }, [phase, present, reduced]);
+    flatten(waveRef.current);
+  }, [phase, present]);
 
   useEffect(() => {
     if (phase !== 'ready' || leavingRef.current) return;
     leavingRef.current = true;
     setLeaving(true);
     const gate = gateRef.current;
-    const svg = treeRef.current;
-    if (!gate || !svg) { setPresent(false); return; }
-    settle(svg, waveRef.current);
-    void handOff(gate, svg, reduced).then(() => setPresent(false));
+    if (!gate) { setPresent(false); return; }
+    void fadeAway(gate, reduced).then(() => setPresent(false));
   }, [phase, reduced]);
 
   if (!present) return null;
@@ -83,24 +78,10 @@ export function StartupScreen() {
   return (
     <div ref={gateRef} className="gate startup" data-phase={phase} data-state={leaving ? 'leaving' : 'open'}
       aria-hidden={leaving || undefined}>
-      <div className="startup__backdrop" />
       <p className="visually-hidden" role="status">
         {phase === 'error' ? 'The backend didn’t start' : phase === 'ready' ? 'SKAZ is ready' : 'Starting SKAZ…'}
       </p>
       <div className="startup__stage">
-        <TreeMark ref={treeRef} className="startup__tree" aria-hidden="true">
-          <g className="startup__sap">
-            {SAP.trunk.map((cell, index) => (
-              <rect key={`trunk-${index}`} data-part="trunk" x={cell.x - cell.size / 2} y={cell.y - cell.size / 2}
-                width={cell.size} height={cell.size} rx={2} />
-            ))}
-            {SAP.branches.map((cell, index) => (
-              <rect key={`branch-${index}`} data-part="branch" x={cell.x - cell.size / 2} y={cell.y - cell.size / 2}
-                width={cell.size} height={cell.size} rx={2} />
-            ))}
-          </g>
-          <g className="startup__sparks" />
-        </TreeMark>
         <div ref={waveRef} className="startup__wave" aria-hidden="true">
           {Array.from({ length: WAVE_BARS }, (_, index) => <span key={index} />)}
         </div>

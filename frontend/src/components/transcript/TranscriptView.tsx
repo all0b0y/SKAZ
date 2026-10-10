@@ -14,7 +14,7 @@ import { NativeMonologues } from './NativeMonologues';
 import { useTranscriptIssue } from '../../state/transcriptIssue';
 import type { NativeSnapshot } from '../../api/nativeLive';
 import { useEdgeFade } from '../../hooks/useOverflowEdges';
-import { TreeMark } from '../brand/TreeMark';
+import { TranscriptEmptyLogo } from './TranscriptEmptyLogo';
 
 const PROVIDER_LABELS: Record<string, string> = {
   soniox: 'Soniox', 'local-whisper': 'Local Whisper', openai: 'OpenAI',
@@ -49,18 +49,6 @@ function WaitingForWords({ snapshot }: { snapshot: NativeSnapshot | null }) {
   return (
     <div className="panel__center">
       <EmptyState icon="transcript" title="Recording — waiting for first words" hint={status} />
-    </div>
-  );
-}
-
-/** The SKAZ tree shown when a session has no transcript yet and nothing is
- * currently recording. Always static: the startup screen is the only place the
- * tree animates, and it hands its tree over to this one (data-tree-target). */
-function TranscriptEmptyLogo() {
-  return (
-    <div className="transcript-logo">
-      <TreeMark className="transcript-logo__tree" data-tree-target="" />
-      <p className="transcript-logo__hint">Record or open a session to see its transcript here.</p>
     </div>
   );
 }

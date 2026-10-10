@@ -131,13 +131,12 @@ describe('TranscriptView', () => {
     expect(screen.getByRole('img', { name: 'SKAZ' })).toBeInTheDocument();
   });
 
-  it('shows the static SKAZ tree instead of the old wordmark when there is no transcript yet', async () => {
+  it('shows the SKAZ tree and wordmark instead of the old SKAZ AGENT text when there is no transcript yet', async () => {
     useStore.setState({ detail: { segments: [], messages: [], notes: null } });
     render(<TranscriptView focusSegmentId={null} />);
 
     const tree = await screen.findByRole('img', { name: 'SKAZ' });
-    // The startup screen hands its tree over to this one; the empty state itself never animates.
-    expect(tree).toHaveAttribute('data-tree-target');
+    expect(document.querySelector('.transcript-logo__word')).toHaveTextContent('SKAZ');
     expect(tree.querySelectorAll('.tree-mark__roots rect').length).toBeGreaterThan(60);
     expect(screen.queryByText('AGENT')).not.toBeInTheDocument();
     expect(screen.getByText('Record or open a session to see its transcript here.')).toBeInTheDocument();

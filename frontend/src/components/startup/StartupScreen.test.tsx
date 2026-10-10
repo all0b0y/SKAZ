@@ -1,6 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { BridgeApi } from '../../api/bridge';
-import { ROOT_CELLS, SAP } from '../../brand/treeGeometry';
 import { useStore } from '../../state/store';
 import { SLOW_START_MS, StartupScreen } from './StartupScreen';
 
@@ -22,12 +21,11 @@ afterEach(() => {
 });
 
 describe('StartupScreen', () => {
-  it('starts with the tree and the wave only; the status is for VoiceOver', () => {
+  it('shows only an audio track while starting; the status is for VoiceOver', () => {
     const { container } = render(<StartupScreen />);
     expect(container.querySelector('.gate.startup')).not.toBeNull();
-    expect(container.querySelectorAll('.tree-mark__roots rect')).toHaveLength(ROOT_CELLS.length);
-    expect(container.querySelectorAll('.startup__sap rect')).toHaveLength(SAP.trunk.length + SAP.branches.length);
-    expect(container.querySelectorAll('.startup__wave span')).toHaveLength(23);
+    expect(container.querySelectorAll('.startup__wave span')).toHaveLength(27);
+    expect(container.querySelector('svg')).toBeNull();
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('Starting SKAZ…');
     expect(status).toHaveClass('visually-hidden');
