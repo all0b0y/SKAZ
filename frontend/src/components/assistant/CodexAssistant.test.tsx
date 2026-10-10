@@ -197,31 +197,47 @@ describe('Codex chats', () => {
     expect(screen.getByLabelText('Chat scope: Session')).toBeInTheDocument();
   });
 
-  it('offers Group only when the backend says the session can use it, and says why not', async () => {
-    fake.groupScope = 'storage_off';
+  it('changes the scope from the header: an empty chat in place, a chat with history by starting a new one', async () => {
     const user = userEvent.setup();
     await renderPanel();
-    await user.click(screen.getByRole('button', { name: 'New chat' }));
-    let picker = screen.getByRole('dialog', { name: 'Chats' });
-    const group = within(picker).getByRole('button', { name: 'Group' });
-    expect(group).toBeDisabled();
-    expect(group).toHaveAccessibleDescription('Group chats need file mode (Settings → Files) and this session in a group.');
+    const choose = async (from: string, to: string) => {
+      await user.click(screen.getByRole('button', { name: `Chat scope: ${from}` }));
+      await user.click(within(screen.getByRole('group', { name: 'Search scope' })).getByRole('button', { name: to }));
+      await waitFor(() => expect(screen.getByRole('button', { name: `Chat scope: ${to}` })).toBeInTheDocument());
+    };
+    // No chat yet: choosing a scope opens a chat with it.
+    await choose('Session', 'All');
+    expect(fake.chats.map((c) => c.scope)).toEqual(['all']);
+    // Still empty: the same chat takes the new scope.
+    await choose('All', 'Group');
+    expect(fake.chats.map((c) => c.scope)).toEqual(['group']);
 
-    await user.click(within(picker).getByRole('button', { name: 'All' }));
-    await waitFor(() => expect(screen.getByLabelText('Chat scope: All')).toBeInTheDocument());
-    expect(fake.chats.at(-1)!.scope).toBe('all');
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // With history the chat keeps its scope; another one starts a new chat.
+    const first = fake.chats[0]!.id;
+    await act(async () => { await useCodex.getState().send(first, 'What was decided?'); });
+    await act(() => useCodex.getState().openChat(first));
+    await user.click(screen.getByRole('button', { name: 'Chat scope: Group' }));
+    expect(screen.getByText('This chat keeps its scope. Choosing another starts a new chat.')).toBeInTheDocument();
+    await user.click(within(screen.getByRole('group', { name: 'Search scope' })).getByRole('button', { name: 'Session' }));
+    await waitFor(() => expect(fake.chats).toHaveLength(2));
+    expect(fake.chats.find((c) => c.id === first)!.scope).toBe('group');
+    expect(screen.getByRole('button', { name: 'Chat scope: Session' })).toBeInTheDocument();
+  });
 
-    // Membership changes in the sidebar, so opening the list asks the backend again.
+  it('keeps Group unavailable with the reason while the session is in no group', async () => {
     fake.groupScope = 'not_in_group';
-    await user.click(screen.getByRole('button', { name: 'New chat' }));
-    expect(await screen.findByText('This session isn’t in a group. Add it to one in the sidebar to start a Group chat.'))
-      .toBeInTheDocument();
+    const user = userEvent.setup();
+    await renderPanel();
+    await user.click(screen.getByRole('button', { name: 'Chat scope: Session' }));
+    const group = within(screen.getByRole('group', { name: 'Search scope' })).getByRole('button', { name: 'Group' });
+    expect(group).toBeDisabled();
+    expect(group).toHaveAccessibleDescription('This session isn’t in a group. Add it to one in the sidebar to start a Group chat.');
     await user.keyboard('{Escape}');
+    // Joining a group in the sidebar is picked up the next time the menu opens.
     fake.groupScope = 'available';
-    await user.click(screen.getByRole('button', { name: 'New chat' }));
-    picker = screen.getByRole('dialog', { name: 'Chats' });
-    await waitFor(() => expect(within(picker).getByRole('button', { name: 'Group' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Chat scope: Session' }));
+    await waitFor(() => expect(within(screen.getByRole('group', { name: 'Search scope' }))
+      .getByRole('button', { name: 'Group' })).toBeEnabled());
   });
 
   it('creates chats with a fixed scope, lists them by activity, renames and deletes only after confirmation', async () => {

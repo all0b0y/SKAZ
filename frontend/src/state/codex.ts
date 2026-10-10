@@ -82,6 +82,8 @@ export interface CodexStoreState {
   newChat: (scope: CodexScope) => Promise<CodexChat | null>;
   /** Ask again whether Group is usable: membership changes in the sidebar. */
   refreshGroupScope: () => Promise<void>;
+  /** The header's scope menu: an empty chat takes the scope, a chat with history gives way to a new one. */
+  changeScope: (scope: CodexScope) => Promise<void>;
   renameChat: (chatId: string, title: string) => Promise<void>;
   deleteChat: (chatId: string) => Promise<boolean>;
   send: (chatId: string, question: string, confirmedLarge?: boolean) => Promise<SendOutcome>;
@@ -428,6 +430,29 @@ export const useCodex = create<CodexStoreState>((set, get) => {
         if (get().sessionId === sessionId) set({ groupScope: view.group_scope ?? null });
       } catch {
         // Keep the last verdict; creating a Group chat is still checked by the backend.
+      }
+    },
+
+    changeScope: async (scope) => {
+      const chatId = get().selectedChatId;
+      const view = chatId ? get().views[chatId] : undefined;
+      const shown = (chatId ? get().chats.find((c) => c.id === chatId) ?? view?.chat : undefined)?.scope ?? 'session';
+      if (shown === scope) return;
+      // Only a chat known to be empty changes in place; a chat with history keeps its scope.
+      if (!chatId || !view || view.messages.length > 0 || view.tasks.length > 0) {
+        await get().newChat(scope);
+        return;
+      }
+      try {
+        const chat = await client().rescopeChat(chatId, scope);
+        set((s) => ({
+          chats: s.chats.map((c) => (c.id === chatId ? { ...c, ...chat } : c)),
+          views: s.views[chatId] ? { ...s.views, [chatId]: { ...s.views[chatId]!, chat: { ...s.views[chatId]!.chat, ...chat } } } : s.views,
+          error: null,
+        }));
+      } catch (err) {
+        set({ error: message(err) });
+        if (scope === 'group') void get().refreshGroupScope();
       }
     },
 

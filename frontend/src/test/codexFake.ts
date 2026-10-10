@@ -98,6 +98,16 @@ export function fakeCodex(init: Partial<Pick<FakeCodex, 'settings' | 'connection
       if (req.method === 'PATCH') {
         if (typeof body.title === 'string') chat.title = body.title;
         if (body.selected) { fake.selected[chat.session_id] = chat.id; chat.unread = false; }
+        if (typeof body.scope === 'string') {
+          if ((fake.messages[chat.id] ?? []).length > 0 || fake.tasks.some((t) => t.chat_id === chat.id)) {
+            return fail(409, 'This chat already has messages and keeps its scope. Start a new chat instead.');
+          }
+          if (body.scope === 'group' && fake.groupScope !== 'available') {
+            return fail(409, 'This session isn’t in a group. Add it to one in the sidebar to start a Group chat.');
+          }
+          chat.scope = body.scope as CodexChat['scope'];
+          chat.group_id = body.scope === 'group' ? 'g1' : null;
+        }
         return ok({ ...chat });
       }
       if (req.method === 'DELETE') {

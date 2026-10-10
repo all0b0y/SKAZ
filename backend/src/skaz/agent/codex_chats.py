@@ -24,13 +24,17 @@ def now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
-# Why a new Group chat is refused; the renderer shows the same reasons up front.
-GROUP_UNAVAILABLE = {
-    "storage_off": "Group chats need file mode (Settings → Files) and this session in a group.",
-    "not_in_group": (
-        "This session isn’t in a group. Add it to one in the sidebar to start a Group chat."
-    ),
-}
+# Why a Group chat is refused; the renderer shows the same words up front.
+NOT_IN_GROUP = "This session isn’t in a group. Add it to one in the sidebar to start a Group chat."
+
+
+def group_membership(c: sqlite3.Connection) -> dict[str, str | None]:
+    """Session → group id. File mode's layout is authoritative; without it the
+    sidebar's groups, copied here by the app, decide. Empty when neither exists."""
+    row = c.execute("SELECT doc FROM physical_storage WHERE id=1").fetchone()
+    if row is None:
+        row = c.execute("SELECT doc FROM sidebar_groups WHERE id=1").fetchone()
+    return dict(json.loads(row[0])["membership"]) if row else {}
 
 
 class ChatStore:
@@ -64,6 +68,14 @@ class ChatStore:
                 "(SELECT 1 FROM json_each(seen) WHERE value=OLD.id); END",
                 # Catch remove-and-readd between requests, not merely the latest membership view.
                 "CREATE TRIGGER IF NOT EXISTS codex_group_changed AFTER UPDATE OF doc ON physical_storage "
+                "BEGIN UPDATE codex_chats SET revoked=1 WHERE scope='group' AND "
+                "(COALESCE(json_extract(NEW.doc,'$.membership.'||session_id),'') != group_id OR EXISTS "
+                "(SELECT 1 FROM json_each(seen) WHERE "
+                "COALESCE(json_extract(NEW.doc,'$.membership.'||value),'') != group_id)); END",
+                # The same rule for the sidebar's groups while they are the ones that count.
+                "CREATE TRIGGER IF NOT EXISTS codex_sidebar_group_changed "
+                "AFTER UPDATE OF doc ON sidebar_groups "
+                "WHEN NOT EXISTS (SELECT 1 FROM physical_storage WHERE id=1) "
                 "BEGIN UPDATE codex_chats SET revoked=1 WHERE scope='group' AND "
                 "(COALESCE(json_extract(NEW.doc,'$.membership.'||session_id),'') != group_id OR EXISTS "
                 "(SELECT 1 FROM json_each(seen) WHERE "
@@ -128,19 +140,19 @@ class ChatStore:
             ]
 
     def group_scope(self, session_id: str) -> str:
-        """Whether a new chat of this session can use the Group scope, and if not, why."""
+        """Whether a chat of this session can use the Group scope."""
         with self.db.read() as c:
-            return self._group_scope(c, session_id)
+            return "available" if group_membership(c).get(session_id) else "not_in_group"
 
-    @staticmethod
-    def _group_scope(c: sqlite3.Connection, session_id: str) -> str:
-        # Browser-only groups never reach the backend; only file-mode membership counts.
-        row = c.execute("SELECT doc FROM physical_storage WHERE id=1").fetchone()
-        if row is None:
-            return "storage_off"
-        if json.loads(row[0])["membership"].get(session_id) is None:
-            return "not_in_group"
-        return "available"
+    def mirror_sidebar_groups(self, membership: dict[str, str | None]) -> None:
+        """Record the sidebar's groups while file mode is off; file mode keeps its own."""
+        doc = json.dumps({"membership": membership})
+        with self.db.write() as c:
+            if c.execute("SELECT 1 FROM physical_storage WHERE id=1").fetchone():
+                raise ValueError("File mode keeps groups in the library.")
+            # Update first, so the revocation trigger sees every change after the first copy.
+            if c.execute("UPDATE sidebar_groups SET doc=? WHERE id=1", (doc,)).rowcount == 0:
+                c.execute("INSERT INTO sidebar_groups VALUES (1,?)", (doc,))
 
     def _scope(self, c: sqlite3.Connection, chat: dict[str, Any]) -> tuple[str, ...]:
         sid = chat["session_id"]
@@ -151,28 +163,44 @@ class ChatStore:
         ids = tuple(row[0] for row in c.execute("SELECT id FROM sessions ORDER BY id"))
         if chat["scope"] == "all":
             return ids
-        row = c.execute("SELECT doc FROM physical_storage WHERE id=1").fetchone()
-        membership = json.loads(row[0])["membership"] if row else {}
+        membership = group_membership(c)
         group = chat.get("group_id") or membership.get(sid)
         if group is None or membership.get(sid) != group:
             return ()
         return tuple(identity for identity in ids if membership.get(identity) == group)
+
+    def _sources(
+        self, c: sqlite3.Connection, session_id: str, scope: str,
+    ) -> tuple[tuple[str, ...], str | None]:
+        """What a chat of this scope may read and its group, or the reason it cannot."""
+        ids = self._scope(c, {"session_id": session_id, "scope": scope})
+        if not ids:
+            exists = c.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone()
+            raise ValueError(NOT_IN_GROUP if scope == "group" and exists else "Session unavailable")
+        return ids, group_membership(c).get(session_id) if scope == "group" else None
+
+    def rescope(self, chat_id: str, scope: str) -> None:
+        """Give a chat without messages another scope; a chat with history keeps its own."""
+        if scope not in ("session", "group", "all"):
+            raise ValueError("Invalid scope")
+        with self.db.write() as c:
+            chat = self.get(chat_id)
+            if c.execute("SELECT 1 FROM codex_messages WHERE chat_id=? LIMIT 1", (chat_id,)).fetchone():
+                raise ValueError(
+                    "This chat already has messages and keeps its scope. Start a new chat instead."
+                )
+            ids, group = self._sources(c, chat["session_id"], scope)
+            c.execute(
+                "UPDATE codex_chats SET scope=?,group_id=?,seen=?,revoked=0,updated_at=? WHERE id=?",
+                (scope, group, json.dumps(ids), now(), chat_id),
+            )
 
     def create(self, session_id: str, scope: str, *, select: bool = True) -> dict[str, Any]:
         if scope not in ("session", "group", "all"):
             raise ValueError("Invalid scope")
         identity = uuid4().hex
         with self.db.write() as c:
-            chat = {"session_id": session_id, "scope": scope}
-            ids = self._scope(c, chat)
-            if not ids:
-                exists = c.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone()
-                reason = self._group_scope(c, session_id) if scope == "group" and exists else ""
-                raise ValueError(GROUP_UNAVAILABLE.get(reason, "Session unavailable"))
-            group = None
-            if scope == "group":
-                row = c.execute("SELECT doc FROM physical_storage WHERE id=1").fetchone()
-                group = json.loads(row[0])["membership"][session_id]
+            ids, group = self._sources(c, session_id, scope)
             c.execute(
                 "INSERT INTO codex_chats(id,session_id,title,scope,group_id,seen,updated_at) "
                 "VALUES (?,?,'New chat',?,?,?,?)",

@@ -69,6 +69,7 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/storage\/recover$/ },
   { method: 'POST', pattern: /^\/storage\/move-root$/ },
   { method: 'PUT', pattern: /^\/storage\/groups$/ },
+  { method: 'PUT', pattern: /^\/storage\/sidebar-groups$/ },
   { method: 'PUT', pattern: /^\/storage\/root$/ },
   { method: 'PUT', pattern: /^\/settings$/ },
   { method: 'GET', pattern: /^\/models$/ },

@@ -54,5 +54,18 @@ export function useSessionGroups(sessions: Session[]) {
     const next = importLegacyGroups(data, sessions);
     if (next !== data) void commit(next).catch((err: Error) => setError(err.message));
   }, [sessions, data, commit, initial.error, remote]);
+  // Without file mode the sidebar owns its groups; the backend keeps a copy so a
+  // Group chat reads the same groups. Sent once per change, not on every refresh.
+  const mirrored = useRef<string | null>(null);
+  useEffect(() => {
+    if (initial.error || !remote || remote.enabled || remote.pending) return;
+    const payload = JSON.stringify(data.membership);
+    if (payload === mirrored.current) return;
+    mirrored.current = payload;
+    void new ApiClient(window.skaz).mirrorSidebarGroups(data.membership).catch(() => {
+      // Sent again with the next change or start; Group chats keep the last copy until then.
+      if (mirrored.current === payload) mirrored.current = null;
+    });
+  }, [data, remote, initial.error]);
   return { data, commit, error, setError };
 }

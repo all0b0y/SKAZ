@@ -13,7 +13,8 @@ import { CodexPreviewCard } from './CodexPreviewCard';
 import { CodexQueue } from './CodexQueue';
 import { CodexTaskCard } from './CodexTaskCard';
 import { CodexConnectionNotice } from './CodexConnectionNotice';
-import { SCOPE_HINT, SCOPE_LABEL, connectionBlockOf } from './codexLabels';
+import { GROUP_SCOPE_REASON, SCOPE_LABEL, connectionBlockOf } from './codexLabels';
+import { ScopeMenu } from './ScopeMenu';
 
 interface Props {
   onCite: (citation: Citation) => void;
@@ -142,6 +143,7 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
     }));
   };
   const isEmpty = messages.length === 0 && !current && !previews.some((p) => p.status === 'pending');
+  const hasHistory = messages.length > 0 || current !== null;
 
   return (
     <AssistantShell engine={onCodex ? 'codex' : 'api_agent'} head={(
@@ -158,16 +160,18 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
           onRename={(id, title) => void codex().renameChat(id, title)}
           onDelete={(id) => codex().deleteChat(id)}
         />
-        <span className="codex-head__scope" title={SCOPE_HINT[selected?.scope ?? 'session']}
-          aria-label={`Chat scope: ${SCOPE_LABEL[selected?.scope ?? 'session']}`}>
-          {SCOPE_LABEL[selected?.scope ?? 'session']}
-        </span>
+        <ScopeMenu scope={selected?.scope ?? 'session'} disabled={!activeId}
+          label={(name) => `Chat scope: ${name}`} title="Where this chat looks for answers"
+          note={hasHistory ? 'This chat keeps its scope. Choosing another starts a new chat.' : 'Where the assistant looks for answers.'}
+          unavailable={groupScope && groupScope !== 'available' ? { group: GROUP_SCOPE_REASON[groupScope] } : undefined}
+          onOpen={() => void codex().refreshGroupScope()}
+          onChange={(scope) => void codex().changeScope(scope)} />
         <CodexQueue tasks={tasks} sessions={sessions}
           onStop={(id) => void codex().stop(id)} onResume={(id) => void codex().resume(id)} />
       </>
     )}>
       <ConversationThread messages={messages} activeSessionId={activeId} onCite={onCite} empty={isEmpty}
-        hint={askContext ? null : selected ? EMPTY_HINT : 'A new chat uses the Session scope. Group and All are in the chat list.'}
+        hint={askContext ? null : EMPTY_HINT}
         scrollKey={`${selectedChatId}:${messages.length}:${current?.status}:${current?.answer.length}`}>
         {current && current.kind === 'chat'
           && !messages.some((m) => m.role === 'user' && m.content === current.question) && (
