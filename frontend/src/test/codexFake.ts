@@ -1,7 +1,8 @@
 import { vi } from 'vitest';
 import type { BridgeApi, BridgeRequest, JsonResponse } from '../api/bridge';
-import type { AgentView, CodexChat, CodexConnection, CodexPreview, CodexSettings, CodexTask } from '../api/codex';
+import type { AgentView, CodexChat, CodexConnection, CodexPreview, CodexSettings, CodexTask, GroupScope } from '../api/codex';
 import type { Message, Note } from '../api/types';
+import { validateBridgeRequest } from '../../../electron/ipcPolicy';
 
 // Authored in-memory stand-in for the Codex HTTP boundary, shaped after
 // .dev/docs/CODEX-UI-CONTRACT.md. It proves UI mechanics against the contract
@@ -19,6 +20,8 @@ export interface FakeCodex {
   /** Engine verdicts per purpose; omitted from the state like an older backend when unset. */
   agent?: AgentView;
   selected: Record<string, string | null>;
+  /** The backend's verdict on a Group chat for the open session. */
+  groupScope: GroupScope;
   calls: { method: string; path: string; body?: unknown; query?: unknown }[];
   /** Next POST .../messages answers with this error once. */
   failNextSend: { status: number; detail: string } | null;
@@ -36,6 +39,7 @@ export function fakeCodex(init: Partial<Pick<FakeCodex, 'settings' | 'connection
   const fake: FakeCodex = {
     bridge: undefined as unknown as BridgeApi,
     chats: [],
+    groupScope: 'available',
     messages: {},
     tasks: [],
     previews: [],
@@ -63,16 +67,20 @@ export function fakeCodex(init: Partial<Pick<FakeCodex, 'settings' | 'connection
 
   const handle = (req: BridgeRequest): JsonResponse<unknown> => {
     fake.calls.push({ method: req.method, path: req.path, body: req.body, query: req.query });
+    // The main process's gate: a request the real app refuses must fail here too.
+    const refused = validateBridgeRequest(req);
+    if (refused) return fail(0, refused);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const p = req.path;
     let m: RegExpMatchArray | null;
     if (req.method === 'GET' && p === '/codex/state') {
       const sid = String(req.query?.session_id ?? '');
       return ok({ chats: fake.chats.filter((c) => c.session_id === sid), selected_chat_id: fake.selected[sid] ?? null,
-        tasks: fake.tasks.map((t) => ({ ...t })), settings: { ...fake.settings }, connection: { ...fake.connection },
+        group_scope: fake.groupScope, tasks: fake.tasks.map((t) => ({ ...t })), settings: { ...fake.settings }, connection: { ...fake.connection },
         ...(fake.agent ? { agent: fake.agent } : {}) });
     }
     if (req.method === 'POST' && p === '/codex/chats') {
+      if (body.scope === 'group' && fake.groupScope !== 'available') return fail(409, 'This session isn’t in a group.');
       const chat: CodexChat = { id: id('c'), session_id: String(body.session_id), title: 'New chat',
         scope: body.scope as CodexChat['scope'], group_id: body.scope === 'group' ? 'g1' : null,
         revoked: false, unread: false, updated_at: `2026-09-24T10:00:${String(seq).padStart(2, '0')}Z` };
@@ -90,6 +98,16 @@ export function fakeCodex(init: Partial<Pick<FakeCodex, 'settings' | 'connection
       if (req.method === 'PATCH') {
         if (typeof body.title === 'string') chat.title = body.title;
         if (body.selected) { fake.selected[chat.session_id] = chat.id; chat.unread = false; }
+        if (typeof body.scope === 'string') {
+          if ((fake.messages[chat.id] ?? []).length > 0 || fake.tasks.some((t) => t.chat_id === chat.id)) {
+            return fail(409, 'This chat already has messages and keeps its scope. Start a new chat instead.');
+          }
+          if (body.scope === 'group' && fake.groupScope !== 'available') {
+            return fail(409, 'This session isn’t in a group. Add it to one in the sidebar to start a Group chat.');
+          }
+          chat.scope = body.scope as CodexChat['scope'];
+          chat.group_id = body.scope === 'group' ? 'g1' : null;
+        }
         return ok({ ...chat });
       }
       if (req.method === 'DELETE') {

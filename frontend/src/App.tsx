@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from './state/store';
@@ -22,6 +22,11 @@ import type { Citation } from './api/types';
 import type { SectionId } from './components/settings/SettingsPanel';
 import { useCitationFocus } from './hooks/useCitationFocus';
 import { OPEN_SETTINGS_EVENT } from './lib/openSettings';
+import { stripTags } from './lib/sessionTags';
+import { formatTimecode } from './lib/time';
+import { MotionPresence } from './components/ui/MotionPresence';
+import { StartupScreen } from './components/startup/StartupScreen';
+import { useSurfaceMotion } from './hooks/useSurfaceMotion';
 
 type CenterTab = 'transcript' | 'notes';
 
@@ -39,36 +44,9 @@ function PanelSlot({ id, view, children }: { id: PanelId; view: PanelView; child
       data-pane={id}
       data-state={state}
       aria-hidden={state === 'closed' || undefined}
+      {...(state === 'closed' ? { inert: '' } : {})}
     >
       <div className="panel-slot__inner">{children}</div>
-    </div>
-  );
-}
-
-function BackendGate() {
-  const backend = useStore((s) => s.backend);
-  if (backend.phase === 'ready') return null;
-  return (
-    <div className="gate" role="status">
-      <div className="gate__card">
-        <div className={clsx('gate__spinner', backend.phase === 'error' && 'gate__spinner--error')}>
-          <Icon name={backend.phase === 'error' ? 'warning' : 'dot'} size={22} />
-        </div>
-        <h2>
-          {backend.phase === 'error' ? 'The backend didn’t start' : 'Starting SKAZ…'}
-        </h2>
-        <p>
-          {backend.phase === 'error'
-            ? backend.detail ?? 'The local Python service failed to start.'
-            : 'Launching the local transcription service and connecting securely.'}
-        </p>
-        {backend.phase === 'error' && (
-          <p className="gate__hint">
-            Ensure the Python backend is installed (uv sync in backend/). The app stays local — no fake
-            results are shown.
-          </p>
-        )}
-      </div>
     </div>
   );
 }
@@ -78,6 +56,7 @@ export default function App() {
   const theme = useStore((s) => s.theme);
   const ready = useStore((s) => s.ready);
   const activeId = useStore((s) => s.activeSessionId);
+  const activeSession = useStore((s) => s.sessions.find((session) => session.id === s.activeSessionId));
   const settings = useStore((s) => s.settings);
   const imports = useStore((s) => s.imports);
   const trackImport = useStore((s) => s.trackImport);
@@ -91,6 +70,13 @@ export default function App() {
     return () => clearInterval(timer);
   }, [importsRunning]);
   const [tab, setTab] = useState<CenterTab>('transcript');
+  const onboardingOpen = Boolean(ready && settings && !settings.used_languages?.length);
+  const [workspaceEntered, setWorkspaceEntered] = useState(false);
+  useEffect(() => {
+    if (ready && settings?.used_languages?.length) setWorkspaceEntered(true);
+  }, [ready, settings?.used_languages?.length]);
+  const contentRef = useRef<HTMLDivElement>(null);
+  useSurfaceMotion(contentRef, `${activeId ?? 'empty'}:${tab}`, workspaceEntered);
   const [settingsOpen, setSettingsOpen] = useState<false | SectionId>(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const citationFocus = useCitationFocus();
@@ -105,6 +91,15 @@ export default function App() {
     : panels.layout.assistant.overlay ? 'assistant' : null;
 
   useTheme(theme);
+  useEffect(() => {
+    const visibility = () => { document.documentElement.dataset.motionPaused = String(document.hidden); };
+    visibility();
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      document.removeEventListener('visibilitychange', visibility);
+      delete document.documentElement.dataset.motionPaused;
+    };
+  }, []);
 
   useEffect(() => {
     void init();
@@ -170,7 +165,7 @@ export default function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app" data-motion-ready={workspaceEntered ? 'true' : 'false'}>
       <header className="titlebar">
         <TitlebarLeading panels={panels} onOpenSettings={() => setSettingsOpen('system')} />
         <div className="titlebar__group titlebar__group--end">
@@ -194,6 +189,18 @@ export default function App() {
         </PanelSlot>
 
         <section className="center" data-pane="center" aria-label="Transcript and notes">
+          <header className="center__head">
+            <h1 className="center__title" title={activeSession?.title}>
+              {activeSession ? stripTags(activeSession.title) : 'Your workspace'}
+            </h1>
+            <p className="center__meta">
+              {activeSession
+                ? activeSession.duration_ms > 0
+                  ? <><span className="tabular">{formatTimecode(activeSession.duration_ms)}</span> recorded</>
+                  : 'Ready when you are'
+                : 'Select or start a session.'}
+            </p>
+          </header>
           <div className="center__tabs" role="tablist" aria-label="View">
             <button
               role="tab"
@@ -212,7 +219,7 @@ export default function App() {
               <Icon name="notes" size={16} /> Notes
             </button>
           </div>
-          <div className="center__content">
+          <div className="center__content" ref={contentRef}>
             {!activeId ? (
               <div className="panel__center">
                 <p className="loading">Select or start a session.</p>
@@ -261,12 +268,16 @@ export default function App() {
         )}
       </main>
 
-      {settingsOpen && <SettingsPanel initialSection={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+      <MotionPresence open={settingsOpen !== false}>
+        {settingsOpen && <SettingsPanel initialSection={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+      </MotionPresence>
       <WebSearchApproval />
-      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} onCite={onCite} />
-      {!ready && <BackendGate />}
+      <MotionPresence open={searchOpen}>
+        <SearchPalette open onClose={() => setSearchOpen(false)} onCite={onCite} />
+      </MotionPresence>
+      <StartupScreen />
       {/* Only once the backend answered: the language list comes from it. */}
-      {ready && settings && !settings.used_languages?.length && <LanguageOnboarding />}
+      <MotionPresence open={onboardingOpen}><LanguageOnboarding /></MotionPresence>
     </div>
   );
 }

@@ -56,6 +56,8 @@ class CreateChat(StrictModel):
 class UpdateChat(StrictModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     selected: Literal[True] | None = None
+    # Only a chat without messages accepts another scope.
+    scope: Literal["session", "group", "all"] | None = None
 
 
 class SendMessage(StrictModel):

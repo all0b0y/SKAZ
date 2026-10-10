@@ -134,6 +134,12 @@ CREATE TABLE IF NOT EXISTS physical_storage (
     revision INTEGER NOT NULL,
     doc TEXT NOT NULL
 );
+-- The sidebar's groups while file mode is off, copied here by the app so a
+-- Group chat's sources stay backend state (file mode keeps its own above).
+CREATE TABLE IF NOT EXISTS sidebar_groups (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    doc TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS session_locations (
     session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
     path TEXT NOT NULL,

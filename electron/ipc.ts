@@ -184,6 +184,12 @@ export function registerIpc(
     return true;
   });
 
+  // Try again after a failed start; the manager refuses unless the last start failed.
+  ipcMain.handle(CHANNELS.restartBackend, (event) => {
+    if (!senderTrusted(event)) return false;
+    return manager.restart();
+  });
+
   // Fixed destination only: the renderer cannot choose what gets opened.
   ipcMain.handle(CHANNELS.openSystemAudioSettings, async (event) => {
     if (!senderTrusted(event) || !SYSTEM_AUDIO_SETTINGS_URL) return false;

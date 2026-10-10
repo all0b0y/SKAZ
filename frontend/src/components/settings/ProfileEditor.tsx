@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from '../../state/store';
 import { Icon } from '../ui/Icon';
+import { useSurfaceMotion } from '../../hooks/useSurfaceMotion';
 import { ProviderIcon, PROVIDER_LABELS } from './ProviderIcon';
 import { PROVIDERS, needsKey } from './providers';
 import type {
@@ -65,6 +66,8 @@ export function ProfileEditor({
 
   const provider = (draft.provider ?? profile.provider) as ProviderName;
   const model = draft.model ?? profile.model;
+  const surfaceRef = useRef<HTMLElement>(null);
+  useSurfaceMotion(surfaceRef, `${task}:${codexSelected ? 'codex' : provider}`);
 
   // Keep the stored model out of the load effect deps so selecting a model does
   // not re-fetch the catalog; the ref lets the fresh load still detect a custom ID.
@@ -165,7 +168,7 @@ export function ProfileEditor({
   };
 
   return (
-    <section className="profile">
+    <section className="profile" ref={surfaceRef}>
       <header className="profile__head">
         <h4>{label}</h4>
         <p>{description}</p>

@@ -41,10 +41,11 @@ afterEach(() => {
 });
 
 describe('AssistantPanel', () => {
-  it('shows the restored illustration and tagline when there are no messages', async () => {
+  it('shows only the tagline, without an illustration, when there are no messages', async () => {
     await render(<AssistantPanel onCite={vi.fn()} />);
-    expect(screen.getByTestId('assistant-figure')).toBeInTheDocument();
     expect(screen.getByText('More than listening')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-figure')).not.toBeInTheDocument();
+    expect(document.querySelector('.assistant__thread img')).toBeNull();
   });
 
   it('offers only Session / Group / All search scopes with a selected state', async () => {

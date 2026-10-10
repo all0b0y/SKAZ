@@ -22,7 +22,7 @@ Result:
 
 | Step | Command | Produces |
 |---|---|---|
-| 1. Icon | `npm run icon` | `build/icon.icns`, `build/icon.png` |
+| 1. Icon | `npm run icon` | `build/icon.icon`, `build/icon.icns`, `icon/icon.png` |
 | 2. Media tools | `npm run build:media` | `backend/.runtime/media-tools/` |
 | 3. Backend | `npm run build:backend` | `backend/dist/skaz-backend/` |
 | 4. Renderer/main/preload | `npm run build` | `dist/` |
@@ -31,7 +31,8 @@ Result:
 Prerequisites: `npm install`, a populated `backend/.venv` with the Local Whisper
 runtime (`uv sync --project backend --extra local-asr`) and `pyinstaller` installed
 into it (`uv pip install --python backend/.venv/bin/python pyinstaller`), and
-Python 3 with Pillow on the PATH for the icon step.
+Xcode 26 or newer for the icon step (Icon Composer's `ictool`, and `actool`, which
+electron-builder runs to compile the icon).
 
 ## Why the backend is frozen
 
@@ -53,14 +54,21 @@ The spec **includes** the Local Whisper runtime (`faster-whisper`, `ctranslate2`
 
 ## The icon
 
-`scripts/make-icon.py` masks the square source artwork (`icon/icon.png`) into the
-macOS plate: an 824pt superellipse inside a 1024pt canvas plus a soft contact
-shadow, then `iconutil` emits every Retina size into `build/icon.icns`. A raw PNG
-would render as a sharp-cornered square, visibly oversized next to every other
-Dock icon.
+The tree is drawn in code: `frontend/src/brand/treeGeometry.ts` holds the crown,
+trunk and pixel roots, and the app reuses the same geometry. `scripts/make-icon.mts`
+writes it as an Icon Composer document, `build/icon.icon`, with a teal Default
+appearance and a graphite Dark one; macOS 26 also derives Clear and Tinted from its
+layers and picks the variant from System Settings → Appearance → Icon & widget
+style. electron-builder compiles the document into `Assets.car`.
 
-Re-run `npm run icon` after changing the artwork; `build/icon.icns` is generated,
-not hand-maintained.
+The script also renders the Default appearance with Icon Composer's `ictool` on
+Apple's grid (an 824pt plate in a 1024pt canvas): every size goes into
+`build/icon.icns` for the DMG volume icon, and the 1024px image into `icon/icon.png`
+for the README and the Dock during development. Pass `--previews <dir>` to render
+all appearances for review.
+
+Re-run `npm run icon` after changing the geometry or colours; `build/icon.icon` and
+`build/icon.icns` are generated, not hand-maintained.
 
 ## One app, one icon
 

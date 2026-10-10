@@ -140,9 +140,14 @@ export interface PurposeAgentView {
 
 export type AgentView = Record<CodexPurpose, PurposeAgentView>;
 
+/** Whether a chat of a session can use Group: the session must be in one of the sidebar's groups. */
+export type GroupScope = 'available' | 'not_in_group';
+
 export interface CodexState {
   chats: CodexChat[];
   selected_chat_id: string | null;
+  /** Whether a new chat of this session can use Group; absent from an older backend. */
+  group_scope?: GroupScope | null;
   tasks: CodexTask[];
   settings: CodexSettings;
   connection: CodexConnection;
@@ -227,6 +232,12 @@ export class CodexClient {
 
   selectChat(chatId: string): Promise<CodexChat> {
     return this.bridge.request<CodexChat>({ method: 'PATCH', path: `/codex/chats/${enc(chatId)}`, body: { selected: true } })
+      .then(unwrap);
+  }
+
+  /** A chat without messages takes another scope; the backend refuses one with history. */
+  rescopeChat(chatId: string, scope: CodexScope): Promise<CodexChat> {
+    return this.bridge.request<CodexChat>({ method: 'PATCH', path: `/codex/chats/${enc(chatId)}`, body: { scope } })
       .then(unwrap);
   }
 

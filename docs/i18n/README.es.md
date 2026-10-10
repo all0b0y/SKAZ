@@ -1,18 +1,25 @@
 <div align="center">
 
-<img src="../../icon/icon.png" alt="SKAZ" width="120" height="120">
+<img src="../../icon/icon.png" alt="SKAZ" width="128" height="128">
 
 # SKAZ
 
+**Un segundo par de oídos para clases y reuniones.**
+
+[![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2f7c72)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
 ![Alpha](https://img.shields.io/badge/status-alpha-orange)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](../../LICENSE)
 
 [English](../../README.md) · [Русский](README.ru.md) · **Español** · [Deutsch](README.de.md) · [简体中文](README.zh-CN.md)
 
-</div>
+<br>
 
-**Un segundo par de oídos para clases y reuniones.**
+<img src="../images/skaz-demo.webp" alt="Recorrido rápido por SKAZ: transcripción en vivo, respuestas con fuentes, alcance de búsqueda, notas y proveedores de voz" width="880">
+
+<sub>Recorrido rápido · perfil de demostración con datos preparados · <a href="../images/skaz-demo.mp4">Vídeo en Full HD (MP4, 34 s)</a></sub>
+
+</div>
 
 SKAZ es una aplicación de escritorio para macOS que convierte la voz en una
 transcripción legible, te ayuda a recuperar el hilo y reúne preguntas y notas junto a sus fuentes.
@@ -24,16 +31,25 @@ transcripción legible, te ayuda a recuperar el hilo y reúne preguntas y notas 
 
 ## Así se ve
 
-![Transcripción y asistente de SKAZ](../images/transcript.png)
-*Texto agrupado por hablante, con una pregunta, una respuesta y un enlace a su fuente.*
+<table>
+<tr>
+<td width="50%"><img src="../images/transcript.webp" alt="Transcripción en vivo"><br><b>Transcripción en vivo</b><br>La voz se convierte en texto legible, agrupado por hablante, con el chat de la sesión al lado.</td>
+<td width="50%"><img src="../images/sources.webp" alt="Respuestas con fuentes"><br><b>Respuestas con fuentes</b><br>Un enlace a la fuente abre la línea exacta de la transcripción.</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/scope.webp" alt="Alcance de búsqueda"><br><b>Alcance de búsqueda</b><br>Pregunta sobre una sesión, un grupo o toda la biblioteca.</td>
+<td width="50%"><img src="../images/notes.webp" alt="Notas editables"><br><b>Notas editables</b><br>Notas Markdown en pestañas, listas para exportar.</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/providers.webp" alt="Tú eliges el proveedor"><br><b>Tú eliges el proveedor</b><br>Soniox, OpenAI o Local Whisper en este Mac.</td>
+<td width="50%"><img src="../images/light.webp" alt="Claro y oscuro"><br><b>Claro y oscuro</b><br>Sigue a tu Mac, o elige un tema.</td>
+</tr>
+</table>
 
-![Editor de notas de SKAZ](../images/notes.png)
-*Notas Markdown editables junto al chat de la sesión.*
-
-Son capturas de la aplicación en ejecución, no maquetas. La transcripción, la respuesta
-y las notas se escribieron para esta demostración: no son resultados de reconocimiento
-de voz ni de IA. El perfil de demostración no tiene claves API, por lo que muestra un
-aviso de configuración para grabar.
+Son capturas de la aplicación en ejecución, no maquetas. Las transcripciones, respuestas y
+notas son datos de demostración preparados a mano, no resultados reales de reconocimiento de
+voz ni de IA; el recorrido de arriba se montó con estas mismas capturas usando
+[Remotion](https://www.remotion.dev).
 
 ## Para qué sirve
 
@@ -50,7 +66,7 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
   y acceso al original al traducir. Nunca se cambia de proveedor en silencio.
 - **Micrófono y audio del sistema:** selecciona un micrófono y, si quieres, incluye
   el sonido del Mac. El audio del sistema requiere macOS 14.2+ y permiso del sistema.
-- **Preguntas con contexto:** consulta una sesión o un ámbito más amplio de la biblioteca;
+- **Preguntas con contexto:** consulta una sesión, un grupo o toda la biblioteca;
   las referencias con marcas de tiempo te llevan a la transcripción.
 - **Notas editables:** genera notas, edita Markdown en pestañas y expórtalo.
 - **Biblioteca local:** organiza sesiones en grupos y guarda opcionalmente una copia
@@ -62,7 +78,7 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
 
 ## Instalación y primer inicio
 
-Descarga el DMG más reciente desde [GitHub Releases](https://github.com/4IPE/SKAZ/releases/latest)
+Descarga el DMG más reciente desde [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest)
 (Apple Silicon, macOS 13 o posterior), ábrelo, arrastra SKAZ a Applications e iníciala.
 Las versiones alpha aún no están notarizadas: en el primer inicio sigue los pasos de las
 notas de la versión (**Privacy & Security → Open Anyway**). No desactives globalmente las
@@ -121,7 +137,7 @@ Micrófono / audio del sistema / medios → Electron → Python → Soniox | Loc
 
 [Contributing](../../CONTRIBUTING.md) explica la configuración, las pruebas y los PR;
 [Packaging](../PACKAGING.md), la creación de instaladores. El historial de cambios estará en
-[GitHub Releases](https://github.com/4IPE/SKAZ/releases), sin un changelog separado.
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases), sin un changelog separado.
 Los arreglos pequeños pueden enviarse directamente; los cambios grandes se discuten primero.
 
 Las prioridades incluyen la firma y notarización de versiones, la recuperación fiable

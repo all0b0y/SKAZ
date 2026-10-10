@@ -71,7 +71,8 @@ describe('one Assistant appearance for every engine', () => {
     expect(within(form).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Send question']);
     // The old separate look is gone: no «Спросить о записях» title bar, no scope inside the composer.
     expect(screen.queryByRole('heading', { name: 'Ask about your recordings' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('assistant-figure')).toBeInTheDocument();
+    expect(screen.queryByTestId('assistant-figure')).not.toBeInTheDocument();
+    expect(panel.querySelector('.assistant__thread--empty')).not.toBeNull();
     expect(panel.querySelector('.assistant__hint--overlay')).not.toBeNull();
     if (engine === 'api') expect(screen.getByText('Ask about your recordings — answers cite the transcript.')).toBeInTheDocument();
   });

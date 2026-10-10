@@ -125,10 +125,21 @@ describe('TranscriptView', () => {
     });
 
     const view = render(<TranscriptView focusSegmentId={null} />);
-    await screen.findByRole('heading', { name: 'SKAZ AGENT' });
+    await screen.findByRole('img', { name: 'SKAZ' });
 
     expect(view.container.querySelectorAll('.segment')).toHaveLength(0);
-    expect(screen.getByRole('heading', { name: 'SKAZ AGENT' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'SKAZ' })).toBeInTheDocument();
+  });
+
+  it('shows the SKAZ tree and wordmark instead of the old SKAZ AGENT text when there is no transcript yet', async () => {
+    useStore.setState({ detail: { segments: [], messages: [], notes: null } });
+    render(<TranscriptView focusSegmentId={null} />);
+
+    const tree = await screen.findByRole('img', { name: 'SKAZ' });
+    expect(document.querySelector('.transcript-logo__word')).toHaveTextContent('SKAZ');
+    expect(tree.querySelectorAll('.tree-mark__roots rect').length).toBeGreaterThan(60);
+    expect(screen.queryByText('AGENT')).not.toBeInTheDocument();
+    expect(screen.getByText('Record or open a session to see its transcript here.')).toBeInTheDocument();
   });
 
   it('shows the static "waiting for first words" state instead of the logo while actively recording', async () => {
@@ -136,7 +147,7 @@ describe('TranscriptView', () => {
     render(<TranscriptView focusSegmentId={null} />);
     expect(await screen.findByText('Recording — waiting for first words', { selector: '.empty__title' })).toBeInTheDocument();
     expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'SKAZ AGENT' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'SKAZ' })).not.toBeInTheDocument();
   });
 
   it('retains historical draft text but disables source playback when integrity is untrusted', async () => {

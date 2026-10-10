@@ -27,7 +27,7 @@ const REPO_ROOT = isDev ? process.cwd() : path.resolve(thisDir, '..', '..');
 const PRELOAD = path.join(thisDir, '..', 'preload', 'preload.js');
 const RENDERER_HTML = path.join(thisDir, '..', 'renderer', 'index.html');
 // Only meaningful unpackaged: a packaged .app takes its icon from the bundle's
-// .icns, and the repo-relative PNG does not exist inside the bundle.
+// compiled Icon Composer asset, and the repo-relative PNG does not exist inside it.
 const APP_ICON = path.join(REPO_ROOT, 'icon', 'icon.png');
 
 // Exact renderer identity for trust checks. Parsed-equality, never prefix match.

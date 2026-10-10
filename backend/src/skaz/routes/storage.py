@@ -58,6 +58,24 @@ async def update_groups(body: GroupsUpdate, rt: RuntimeDep) -> dict[str, Any]:
         return await disk_call(rt.storage.update_groups, body.data.model_dump(), body.expected_revision)
 
 
+class SidebarGroups(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    membership: dict[str, str | None] = Field(max_length=20_000)
+
+
+@router.put("/sidebar-groups")
+async def mirror_sidebar_groups(body: SidebarGroups, rt: RuntimeDep) -> dict[str, bool]:
+    """The sidebar's groups while file mode is off, so a Group chat's sources stay backend state."""
+    if await disk_call(rt.storage.enabled):
+        raise HTTPException(status_code=409, detail="File mode keeps groups in the library.")
+    async with rt.codex.source_change(membership=body.membership):
+        try:
+            await disk_call(rt.codex.chats.mirror_sidebar_groups, body.membership)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"mirrored": True}
+
+
 @router.post("/recover")
 async def recover_storage(rt: RuntimeDep) -> dict[str, Any]:
     return await disk_call(rt.storage.recover)

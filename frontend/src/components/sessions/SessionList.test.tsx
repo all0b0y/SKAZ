@@ -41,6 +41,13 @@ beforeEach(() => {
   seed([]);
 });
 
+it('makes session creation and utility actions readable without hovering', () => {
+  render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
+  expect(screen.getByRole('button', { name: 'New session' })).toHaveTextContent('New session');
+  expect(screen.getByRole('button', { name: 'Search materials' })).toHaveTextContent('Search');
+  expect(screen.getByRole('button', { name: 'Settings' })).toHaveTextContent('Settings');
+});
+
 it('creates and restores an empty named group with an optional tag', async () => {
   seed([session('s1', 'Lecture')]);
   const user = userEvent.setup();
@@ -344,6 +351,15 @@ describe('Session navigation actions', () => {
 });
 
 describe('SessionList footer', () => {
+  it('keeps keyboard order aligned with the primary action then import', async () => {
+    seed([session('s1', 'A session')]);
+    const user = userEvent.setup();
+    render(<SessionList onOpenSettings={onOpenSettings()} onOpenSearch={onOpenSearch()} />);
+    screen.getByRole('button', { name: 'New session' }).focus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Import audio' })).toHaveFocus();
+  });
+
   it('exposes accessible search and settings buttons', async () => {
     seed([session('s1', 'A session')]);
     const openSearch = vi.fn();

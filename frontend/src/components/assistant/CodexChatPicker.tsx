@@ -1,18 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { clsx } from 'clsx';
-import { isActive, type CodexChat, type CodexScope, type CodexTask } from '../../api/codex';
+import { isActive, type CodexChat, type CodexScope, type CodexTask, type GroupScope } from '../../api/codex';
 import { Icon } from '../ui/Icon';
 import { ContextMenu, ContextMenuItem } from '../ui/ContextMenu';
 import { AnchoredPopover, isInside } from '../ui/AnchoredPopover';
 import { SessionDialog } from '../sessions/SessionOverlays';
 import { byActivity } from '../../state/codex';
-import { SCOPE_HINT, SCOPE_LABEL } from './codexLabels';
+import { GROUP_SCOPE_REASON, SCOPE_HINT, SCOPE_LABEL } from './codexLabels';
 
 interface Props {
   chats: CodexChat[];
   selected: CodexChat | null;
   tasks: CodexTask[];
   disabled: boolean;
+  /** The backend's verdict on Group for this session; null when it does not say (it still decides on create). */
+  groupScope: GroupScope | null;
+  /** The list opened: group membership changes elsewhere, so the verdict is checked again. */
+  onOpen: () => void;
   onSelect: (chatId: string) => void;
   onCreate: (scope: CodexScope) => void;
   onRename: (chatId: string, title: string) => void;
@@ -27,7 +31,9 @@ const SCOPES: CodexScope[] = ['session', 'group', 'all'];
  * then chats by last activity. A running chat shows a live dot, a finished
  * answer not yet seen shows a mark.
  */
-export function CodexChatPicker({ chats, selected, tasks, disabled, onSelect, onCreate, onRename, onDelete }: Props) {
+export function CodexChatPicker({
+  chats, selected, tasks, disabled, groupScope, onOpen, onSelect, onCreate, onRename, onDelete,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState<{ chat: CodexChat; x: number; y: number } | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null);
@@ -36,6 +42,8 @@ export function CodexChatPicker({ chats, selected, tasks, disabled, onSelect, on
   const ref = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const popover = useRef<HTMLDivElement>(null);
+  const reasonId = useId();
+  const groupReason = groupScope && groupScope !== 'available' ? GROUP_SCOPE_REASON[groupScope] : null;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -61,7 +69,7 @@ export function CodexChatPicker({ chats, selected, tasks, disabled, onSelect, on
   return (
     <div className="codex-picker" ref={ref}>
       <button ref={trigger} type="button" className="codex-picker__trigger" aria-haspopup="true" aria-expanded={open}
-        disabled={disabled} onClick={() => setOpen((v) => !v)} title={selected?.title}>
+        disabled={disabled} onClick={() => { if (!open) onOpen(); setOpen(!open); }} title={selected?.title}>
         <span className="codex-picker__title">{selected ? selected.title || 'Untitled' : 'New chat'}</span>
         <Icon name="chevron" size={12} className="codex-picker__chevron" />
       </button>
@@ -72,13 +80,18 @@ export function CodexChatPicker({ chats, selected, tasks, disabled, onSelect, on
             <strong>New chat</strong>
             <small>The scope is fixed per chat. A new chat does not see other chats’ history.</small>
             <div className="assistant__scopes" role="group" aria-label="New chat scope">
-              {SCOPES.map((scope) => (
-                <button key={scope} type="button" className="chip" title={SCOPE_HINT[scope]}
-                  onClick={() => { setOpen(false); onCreate(scope); }}>
-                  {SCOPE_LABEL[scope]}
-                </button>
-              ))}
+              {SCOPES.map((scope) => {
+                const unavailable = scope === 'group' && groupReason !== null;
+                return (
+                  <button key={scope} type="button" className="chip" title={unavailable ? undefined : SCOPE_HINT[scope]}
+                    disabled={unavailable} aria-describedby={unavailable ? reasonId : undefined}
+                    onClick={() => { setOpen(false); onCreate(scope); }}>
+                    {SCOPE_LABEL[scope]}
+                  </button>
+                );
+              })}
             </div>
+            {groupReason && <small id={reasonId} className="codex-picker__reason">{groupReason}</small>}
           </div>
           {chats.length > 0 && (
             <ul className="codex-picker__list" aria-label="Session chats">

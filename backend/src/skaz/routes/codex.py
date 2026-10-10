@@ -44,6 +44,7 @@ async def state(runtime: RuntimeDep, session_id: str | None = None) -> dict[str,
     return {
         "chats": await disk_call(service.chats.list, session_id) if session_id else [],
         "selected_chat_id": await disk_call(service.chats.selected, session_id) if session_id else None,
+        "group_scope": await disk_call(service.chats.group_scope, session_id) if session_id else None,
         "tasks": await disk_call(service.task_views),
         "settings": await disk_call(service.settings),
         "connection": dict(service.connection.view),
@@ -114,6 +115,7 @@ async def chats(session_id: str, runtime: RuntimeDep) -> dict[str, Any]:
         return {
             "chats": await disk_call(runtime.codex.chats.list, session_id),
             "selected_chat_id": await disk_call(runtime.codex.chats.selected, session_id),
+            "group_scope": await disk_call(runtime.codex.chats.group_scope, session_id),
         }
 
 
@@ -128,6 +130,8 @@ async def update_chat(chat_id: str, payload: UpdateChat, runtime: RuntimeDep) ->
     with errors():
         if payload.title is not None:
             await disk_call(runtime.codex.chats.rename, chat_id, payload.title)
+        if payload.scope is not None:
+            await disk_call(runtime.codex.chats.rescope, chat_id, payload.scope)
         if payload.selected:
             await disk_call(runtime.codex.chats.select, chat_id)
         return await disk_call(runtime.codex.chats.get, chat_id)

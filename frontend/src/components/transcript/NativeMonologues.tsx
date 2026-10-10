@@ -144,7 +144,7 @@ export function NativeMonologues({ snapshot, segments, focusSegmentId, videoId }
       const original = target.closest('details');
       if (original) original.open = true;
       locatedSource.current = focusSegmentId;
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target.scrollIntoView({ block: 'center', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }
   }, [focusSegmentId, turns]);
   return <ol ref={list} className="native-monologues" aria-label="Transcript">

@@ -1,36 +1,40 @@
-/*
- * SKAZ design tokens — a white field, black text, graphite accent world.
- * Light is a clean white page; dark is a dim room at night.
- * Theme follows the OS via prefers-color-scheme; a manual override sets
- * data-theme on <html>.
- */
+/* SKAZ workspace: cool graphite surfaces, restrained teal, local type.
+ * UI and reading use Manrope; mono is reserved for time/data, Playfair for branding.
+ * Filled controls use explicit foreground tokens in both themes. */
 
 :root {
-  /* White field light theme */
-  --paper: oklch(100% 0 0);
-  --paper-raised: oklch(100% 0 0);
-  --paper-sunken: oklch(97% 0 0);
-  --edge: oklch(86% 0 0);
-  --edge-strong: oklch(75% 0 0);
+  /* Cool, low-glare light surfaces */
+  --paper: #fafbfa;
+  --paper-raised: #ffffff;
+  --paper-sunken: #f0f3f1;
+  --edge: #dce3de;
+  --edge-strong: #abbab0;
 
-  --ink: oklch(18% 0 0);
-  --ink-soft: oklch(38% 0 0);
-  --ink-faint: oklch(49% 0 0);
+  --ink: #24322d;
+  --ink-soft: #53605b;
+  --ink-faint: #616e66;
 
-  /* One graphite-blue accent replaces every former burgundy/red detail. */
-  --accent: #20202a;
-  --accent-hover: #20202a;
-  --accent-quiet: rgb(32 32 42 / 0.12);
-  --accent-wash: rgb(32 32 42 / 0.08);
-  --live: #20202a;
-  --live-quiet: rgb(32 32 42 / 0.14);
-  --positive: oklch(56% 0.11 150);
-  --warning: oklch(64% 0.13 75);
+  /* One restrained teal accent; foregrounds stay readable in both themes. */
+  --accent: #286b63;
+  --on-accent: #ffffff;
+  --on-live: #ffffff;
+  --accent-hover: #215b55;
+  --accent-quiet: #e2eeeb;
+  --accent-wash: #edf4f2;
+  --live: #286b63;
+  --live-quiet: #e2eeeb;
+  --positive: #2f7158;
+  --warning: #8c641c;
+
+  /* SKAZ tree mark: one-tone crown, roots and sap in paler teals. */
+  --tree-crown: #286b63;
+  --tree-roots: #6fb0a3;
+  --tree-sap: #a8ddd2;
 
   /* Muted session-group palette (hashtag chips). Deliberately one restrained
      family — no rainbow — and readable on white. Group 1 follows the new
-     graphite accent; the remaining groups retain their distinct roles. */
-  --group-1: #20202a; /* graphite blue */
+     teal accent; the remaining groups retain their distinct roles. */
+  --group-1: #286b63; /* teal */
   --group-2: oklch(46% 0.09 250); /* deep blue */
   --group-3: oklch(50% 0.07 145); /* muted green */
   --group-4: oklch(55% 0.01 0); /* neutral gray */
@@ -39,8 +43,8 @@
   --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.05), 0 2px 6px oklch(0% 0 0 / 0.04);
   --shadow-2: 0 4px 10px oklch(0% 0 0 / 0.07), 0 12px 28px oklch(0% 0 0 / 0.06);
 
-  --radius-sm: 7px;
-  --radius: 11px;
+  --radius-sm: 6px;
+  --radius: 10px;
   --radius-lg: 16px;
 
   --space-1: 4px;
@@ -50,23 +54,23 @@
   --space-5: 24px;
   --space-6: 36px;
 
-  --panel-head-h: 52px;
+  --panel-head-h: 56px;
   --panel-foot-h: 80px;
 
-  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-read: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+  --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-read: var(--font-ui);
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Code', Menlo, monospace;
   /* Logo-only display face for the SKAZ wordmark — never used for body text. */
   --font-display: 'Playfair Display', 'Bodoni 72', Didot, Georgia, serif;
 
-  --text-xs: 11.5px;
-  --text-sm: 13px;
-  --text-base: 14.5px;
-  --text-md: 16px;
-  --text-lg: 20px;
-  --text-xl: 27px;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.90625rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.6875rem;
 
-  --dur-fast: 130ms;
+  --dur-fast: 100ms;
   --dur: 220ms;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
@@ -75,27 +79,33 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --paper: oklch(16% 0 0);
-    --paper-raised: oklch(20% 0 0);
-    --paper-sunken: oklch(12% 0 0);
-    --edge: oklch(33% 0 0);
-    --edge-strong: oklch(44% 0 0);
+    --paper: #191f1d;
+    --paper-raised: #202725;
+    --paper-sunken: #141a18;
+    --edge: #34403a;
+    --edge-strong: #58685f;
 
-    --ink: oklch(96% 0 0);
-    --ink-soft: oklch(79% 0 0);
-    --ink-faint: oklch(67% 0 0);
+    --ink: #e7eeeb;
+    --ink-soft: #c0cac5;
+    --ink-faint: #a0aea8;
 
-    /* Contrast-safe tint of the #20202a brand base for dark surfaces. */
-    --accent: #a4a4b2;
-    --accent-hover: #b8b8c4;
-    --accent-quiet: rgb(164 164 178 / 0.18);
-    --accent-wash: rgb(164 164 178 / 0.14);
-    --live: #a4a4b2;
-    --live-quiet: rgb(164 164 178 / 0.18);
-    --positive: oklch(70% 0.12 152);
-    --warning: oklch(76% 0.13 78);
+    /* Pale teal with dark foregrounds on filled controls. */
+    --accent: #87c4b8;
+    --on-accent: #142822;
+    --on-live: #142822;
+    --accent-hover: #a0d5cc;
+    --accent-quiet: #273e38;
+    --accent-wash: #23332f;
+    --live: #87c4b8;
+    --live-quiet: #273e38;
+    --positive: #8ac5a5;
+    --warning: #d8b77a;
 
-    --group-1: #a4a4b2;
+    --tree-crown: #e7eeeb;
+    --tree-roots: #87c4b8;
+    --tree-sap: #2f7c72;
+
+    --group-1: #87c4b8;
     --group-2: oklch(68% 0.1 250);
     --group-3: oklch(70% 0.08 145);
     --group-4: oklch(72% 0.01 0);
@@ -110,24 +120,29 @@
 
 /* Manual dark override (used when user pins dark regardless of OS) */
 :root[data-theme='dark'] {
-  --paper: oklch(16% 0 0);
-  --paper-raised: oklch(20% 0 0);
-  --paper-sunken: oklch(12% 0 0);
-  --edge: oklch(33% 0 0);
-  --edge-strong: oklch(44% 0 0);
-  --ink: oklch(96% 0 0);
-  --ink-soft: oklch(79% 0 0);
-  --ink-faint: oklch(67% 0 0);
-  /* Contrast-safe tint of the #20202a brand base for dark surfaces. */
-  --accent: #a4a4b2;
-  --accent-hover: #b8b8c4;
-  --accent-quiet: rgb(164 164 178 / 0.18);
-  --accent-wash: rgb(164 164 178 / 0.14);
-  --live: #a4a4b2;
-  --live-quiet: rgb(164 164 178 / 0.18);
-  --positive: oklch(70% 0.12 152);
-  --warning: oklch(76% 0.13 78);
-  --group-1: #a4a4b2;
+  --paper: #191f1d;
+  --paper-raised: #202725;
+  --paper-sunken: #141a18;
+  --edge: #34403a;
+  --edge-strong: #58685f;
+  --ink: #e7eeeb;
+  --ink-soft: #c0cac5;
+  --ink-faint: #a0aea8;
+  /* Pale teal with dark foregrounds on filled controls. */
+  --accent: #87c4b8;
+  --on-accent: #142822;
+  --on-live: #142822;
+  --accent-hover: #a0d5cc;
+  --accent-quiet: #273e38;
+  --accent-wash: #23332f;
+  --live: #87c4b8;
+  --live-quiet: #273e38;
+  --positive: #8ac5a5;
+  --warning: #d8b77a;
+  --tree-crown: #e7eeeb;
+  --tree-roots: #87c4b8;
+  --tree-sap: #2f7c72;
+  --group-1: #87c4b8;
   --group-2: oklch(68% 0.1 250);
   --group-3: oklch(70% 0.08 145);
   --group-4: oklch(72% 0.01 0);

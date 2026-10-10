@@ -10,7 +10,7 @@ commitment.
 ## Reporting a vulnerability
 
 The intended channel is **GitHub Private Vulnerability Reporting** for
-[4IPE/SKAZ](https://github.com/4IPE/SKAZ/security).
+[all0b0y/SKAZ](https://github.com/all0b0y/SKAZ/security).
 
 **Private reporting is not enabled yet (checked September 26, 2026). There is
 currently no configured confidential reporting channel.** Until it is enabled,

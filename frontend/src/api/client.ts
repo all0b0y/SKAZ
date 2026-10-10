@@ -89,6 +89,12 @@ export class ApiClient {
       body: { data, expected_revision: revision } }).then(unwrap);
   }
 
+  /** The sidebar's groups while file mode is off, so Group chats read the same groups. */
+  mirrorSidebarGroups(membership: Record<string, string | null>): Promise<void> {
+    return this.bridge.request<{ mirrored: boolean }>({ method: 'PUT', path: '/storage/sidebar-groups',
+      body: { membership } }).then(unwrap).then(() => undefined);
+  }
+
   openNative(sessionId: string, sampleRate: number): Promise<NativeOpened> {
     return this.bridge.openNative(sessionId, sampleRate).then(unwrap);
   }
