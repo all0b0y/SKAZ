@@ -86,6 +86,17 @@ describe('App — a citation jump does not outlive its moment', () => {
   });
 });
 
+describe('App — the workspace identifies the session being read', () => {
+  it('updates the visible session heading when the selected session changes', async () => {
+    const { useStore } = await import('./state/store');
+    render(<App />);
+    expect(screen.getByRole('heading', { level: 1, name: 'S1' })).toBeInTheDocument();
+    act(() => useStore.setState({ activeSessionId: 's2' }));
+    expect(screen.getByRole('heading', { level: 1, name: 'S2' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'S1' })).not.toBeInTheDocument();
+  });
+});
+
 describe('App — notices open Settings on the section that fixes them', () => {
   it('opens the requested section', () => {
     render(<App />);

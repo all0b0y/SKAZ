@@ -22,6 +22,8 @@ import type { Citation } from './api/types';
 import type { SectionId } from './components/settings/SettingsPanel';
 import { useCitationFocus } from './hooks/useCitationFocus';
 import { OPEN_SETTINGS_EVENT } from './lib/openSettings';
+import { stripTags } from './lib/sessionTags';
+import { formatTimecode } from './lib/time';
 
 type CenterTab = 'transcript' | 'notes';
 
@@ -78,6 +80,7 @@ export default function App() {
   const theme = useStore((s) => s.theme);
   const ready = useStore((s) => s.ready);
   const activeId = useStore((s) => s.activeSessionId);
+  const activeSession = useStore((s) => s.sessions.find((session) => session.id === s.activeSessionId));
   const settings = useStore((s) => s.settings);
   const imports = useStore((s) => s.imports);
   const trackImport = useStore((s) => s.trackImport);
@@ -194,6 +197,18 @@ export default function App() {
         </PanelSlot>
 
         <section className="center" data-pane="center" aria-label="Transcript and notes">
+          <header className="center__head">
+            <h1 className="center__title" title={activeSession?.title}>
+              {activeSession ? stripTags(activeSession.title) : 'Your workspace'}
+            </h1>
+            <p className="center__meta">
+              {activeSession
+                ? activeSession.duration_ms > 0
+                  ? <><span className="tabular">{formatTimecode(activeSession.duration_ms)}</span> recorded</>
+                  : 'Ready when you are'
+                : 'Select or start a session.'}
+            </p>
+          </header>
           <div className="center__tabs" role="tablist" aria-label="View">
             <button
               role="tab"

@@ -20,11 +20,6 @@ let page: Page;
 
 const row = (name: string) => page.locator('.session', { hasText: name });
 const openSession = (name: string) => page.locator('.session__select', { hasText: name }).click();
-const lightness = (color: string) => {
-  const match = color.match(/oklch\(([\d.]+)/);
-  if (!match) throw new Error(`not an oklch colour: ${color}`);
-  return Number(match[1]);
-};
 
 test.beforeAll(async () => {
   fs.mkdirSync(shots, { recursive: true });
@@ -237,14 +232,31 @@ test('Jump to live: a solid, contrasting pill in both themes, label unchanged (Â
     const s = await page.evaluate(() => {
       const b = document.querySelector('.transcript__follow')!;
       const cs = getComputedStyle(b);
-      return { bg: cs.backgroundColor, color: cs.color, opacity: cs.opacity, label: b.textContent,
-        page: getComputedStyle(document.querySelector('.center')!).backgroundColor };
+      const pixels = (color: string) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        return [...ctx.getImageData(0, 0, 1, 1).data];
+      };
+      const luminance = (color: string) => pixels(color).slice(0, 3).map((channel) => {
+        const value = channel / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0);
+      const contrast = (a: string, b: string) => {
+        const values = [luminance(a), luminance(b)];
+        return (Math.max(...values) + 0.05) / (Math.min(...values) + 0.05);
+      };
+      const background = getComputedStyle(document.querySelector('.center')!).backgroundColor;
+      return { opacity: cs.opacity, label: b.textContent, alpha: pixels(cs.backgroundColor)[3],
+        pageContrast: contrast(cs.backgroundColor, background), labelContrast: contrast(cs.backgroundColor, cs.color) };
     });
     expect(s.label).toBe('Jump to live');
     expect(s.opacity).toBe('1');
-    expect(s.bg, `${theme}: solid, no alpha`).not.toMatch(/\//);
-    expect(Math.abs(lightness(s.bg) - lightness(s.page)), `${theme}: pill against the page`).toBeGreaterThan(0.6);
-    expect(Math.abs(lightness(s.bg) - lightness(s.color)), `${theme}: label against the pill`).toBeGreaterThan(0.6);
+    expect(s.alpha, `${theme}: solid, no alpha`).toBe(255);
+    expect(s.pageContrast, `${theme}: pill against the page`).toBeGreaterThanOrEqual(4.5);
+    expect(s.labelContrast, `${theme}: label against the pill`).toBeGreaterThanOrEqual(4.5);
     const pill = (await page.locator('.transcript__follow').boundingBox())!;
     const centre = (await page.locator('[data-pane="center"]').boundingBox())!;
     expect(pill.x, `${theme}: pill inside the transcript column`).toBeGreaterThanOrEqual(centre.x);
