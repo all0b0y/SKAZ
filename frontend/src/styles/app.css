@@ -3232,6 +3232,7 @@ body.is-resizing-panels {
   box-shadow: var(--shadow-2);
   z-index: 60;
 }
+.codex-picker__new > .codex-picker__reason { margin: 8px 0 0; color: var(--ink-faint); }
 .codex-picker__new > strong,
 .codex-queue__popover > strong,
 .codex-scope__popover > strong { display: block; font-size: var(--text-sm); }

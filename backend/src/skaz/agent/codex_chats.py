@@ -24,6 +24,15 @@ def now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
+# Why a new Group chat is refused; the renderer shows the same reasons up front.
+GROUP_UNAVAILABLE = {
+    "storage_off": "Group chats need file mode (Settings → Files) and this session in a group.",
+    "not_in_group": (
+        "This session isn’t in a group. Add it to one in the sidebar to start a Group chat."
+    ),
+}
+
+
 class ChatStore:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -118,6 +127,21 @@ class ChatStore:
                 )
             ]
 
+    def group_scope(self, session_id: str) -> str:
+        """Whether a new chat of this session can use the Group scope, and if not, why."""
+        with self.db.read() as c:
+            return self._group_scope(c, session_id)
+
+    @staticmethod
+    def _group_scope(c: sqlite3.Connection, session_id: str) -> str:
+        # Browser-only groups never reach the backend; only file-mode membership counts.
+        row = c.execute("SELECT doc FROM physical_storage WHERE id=1").fetchone()
+        if row is None:
+            return "storage_off"
+        if json.loads(row[0])["membership"].get(session_id) is None:
+            return "not_in_group"
+        return "available"
+
     def _scope(self, c: sqlite3.Connection, chat: dict[str, Any]) -> tuple[str, ...]:
         sid = chat["session_id"]
         if c.execute("SELECT 1 FROM sessions WHERE id=?", (sid,)).fetchone() is None:
@@ -142,7 +166,9 @@ class ChatStore:
             chat = {"session_id": session_id, "scope": scope}
             ids = self._scope(c, chat)
             if not ids:
-                raise ValueError("Session or backend-managed group unavailable")
+                exists = c.execute("SELECT 1 FROM sessions WHERE id=?", (session_id,)).fetchone()
+                reason = self._group_scope(c, session_id) if scope == "group" and exists else ""
+                raise ValueError(GROUP_UNAVAILABLE.get(reason, "Session unavailable"))
             group = None
             if scope == "group":
                 row = c.execute("SELECT doc FROM physical_storage WHERE id=1").fetchone()

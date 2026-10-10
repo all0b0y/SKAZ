@@ -102,3 +102,33 @@ def test_validation_selection_ownership_and_explicit_delete(tmp_path: Path) -> N
         assert store.selected(sid) is None
     finally:
         db.close()
+
+
+def test_group_scope_says_why_a_new_group_chat_is_unavailable(tmp_path: Path) -> None:
+    import json
+
+    db = Database(tmp_path / "db.sqlite")
+    try:
+        sid = repo.create_session(db, "session").id
+        store = ChatStore(db)
+        # Browser-only groups are invisible here: Group needs file mode.
+        assert store.group_scope(sid) == "storage_off"
+        with pytest.raises(ValueError, match="file mode"):
+            store.create(sid, "group")
+
+        def layout(membership: dict[str, str | None]) -> None:
+            doc = json.dumps({"groups": [{"id": "g", "name": "Group"}], "membership": membership})
+            with db.write() as conn:
+                conn.execute("INSERT OR REPLACE INTO physical_storage VALUES (1,0,?)", (doc,))
+
+        layout({sid: None})
+        assert store.group_scope(sid) == "not_in_group"
+        with pytest.raises(ValueError, match="isn’t in a group"):
+            store.create(sid, "group")
+        assert store.create(sid, "all")["scope"] == "all"
+
+        layout({sid: "g"})
+        assert store.group_scope(sid) == "available"
+        assert store.create(sid, "group")["scope"] == "group"
+    finally:
+        db.close()

@@ -1,10 +1,16 @@
-import type { CodexConnection, CodexScope, CodexTask, CodexTaskStatus } from '../../api/codex';
+import type { CodexConnection, CodexScope, CodexTask, CodexTaskStatus, GroupScope } from '../../api/codex';
 
 export const SCOPE_LABEL: Record<CodexScope, string> = { session: 'Session', group: 'Group', all: 'All' };
 export const SCOPE_HINT: Record<CodexScope, string> = {
   session: 'The open recording only',
   group: 'Recordings in the open session’s group',
   all: 'All recordings in the library',
+};
+
+/** Why a new chat of this session cannot use Group; the backend refuses with the same words. */
+export const GROUP_SCOPE_REASON: Record<Exclude<GroupScope, 'available'>, string> = {
+  storage_off: 'Group chats need file mode (Settings → Files) and this session in a group.',
+  not_in_group: 'This session isn’t in a group. Add it to one in the sidebar to start a Group chat.',
 };
 
 export const STATUS_LABEL: Record<CodexTaskStatus, string> = {

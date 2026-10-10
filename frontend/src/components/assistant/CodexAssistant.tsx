@@ -49,6 +49,7 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
   const settings = useCodex((s) => s.settings);
   const connection = useCodex((s) => s.connection);
   const error = useCodex((s) => s.error);
+  const groupScope = useCodex((s) => s.groupScope);
   const engine = useCodex((s) => engineOf(s, 'assistant'));
   const apiBlock = useCodex((s) => apiAgentBlock(s, 'assistant'));
   const codex = useCodex.getState;
@@ -152,6 +153,8 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
           disabled={!activeId}
           onSelect={(id) => void codex().openChat(id)}
           onCreate={newChat}
+          groupScope={groupScope}
+          onOpen={() => void codex().refreshGroupScope()}
           onRename={(id, title) => void codex().renameChat(id, title)}
           onDelete={(id) => codex().deleteChat(id)}
         />
@@ -188,7 +191,8 @@ export function CodexAssistant({ onCite, onOpenSettings }: Props) {
       {revoked && selected && (
         <AssistantNotice role="status"
           text="This chat’s sources changed and access was revoked. The history is read-only."
-          action={{ label: `New chat · ${SCOPE_LABEL[selected.scope]}`, onClick: () => newChat(selected.scope) }} />
+          action={selected.scope === 'group' && groupScope && groupScope !== 'available' ? undefined
+            : { label: `New chat · ${SCOPE_LABEL[selected.scope]}`, onClick: () => newChat(selected.scope) }} />
       )}
       {!revoked && blocked && (
         <CodexConnectionNotice block={block} text={blocked} onOpenSettings={onOpenSettings}

@@ -11,6 +11,7 @@ import {
   type CodexPreview,
   type CodexPurpose,
   type CodexScope,
+  type GroupScope,
   type CodexSettings,
   type CodexTask,
   type AgentView,
@@ -63,6 +64,8 @@ export interface CodexStoreState {
   /** The session whose chat list is loaded. */
   sessionId: string | null;
   chats: CodexChat[];
+  /** The backend's verdict on Group for this session; null when it does not say. */
+  groupScope: GroupScope | null;
   selectedChatId: string | null;
   /** App-wide: every session's tasks, the single visible queue. */
   tasks: CodexTask[];
@@ -77,6 +80,8 @@ export interface CodexStoreState {
   poll: () => Promise<void>;
   openChat: (chatId: string) => Promise<void>;
   newChat: (scope: CodexScope) => Promise<CodexChat | null>;
+  /** Ask again whether Group is usable: membership changes in the sidebar. */
+  refreshGroupScope: () => Promise<void>;
   renameChat: (chatId: string, title: string) => Promise<void>;
   deleteChat: (chatId: string) => Promise<boolean>;
   send: (chatId: string, question: string, confirmedLarge?: boolean) => Promise<SendOutcome>;
@@ -298,6 +303,7 @@ export const useCodex = create<CodexStoreState>((set, get) => {
     agent: null,
     sessionId: null,
     chats: [],
+    groupScope: null,
     selectedChatId: null,
     tasks: [],
     views: {},
@@ -307,7 +313,7 @@ export const useCodex = create<CodexStoreState>((set, get) => {
     loginWatch: LOGIN_IDLE,
 
     load: async (sessionId) => {
-      set({ sessionId, error: null, ...(sessionId !== get().sessionId ? { chats: [], selectedChatId: null } : {}) });
+      set({ sessionId, error: null, ...(sessionId !== get().sessionId ? { chats: [], selectedChatId: null, groupScope: null } : {}) });
       try {
         const state = await client().state(sessionId);
         if (get().sessionId !== sessionId) return;
@@ -319,6 +325,7 @@ export const useCodex = create<CodexStoreState>((set, get) => {
           agent: state.agent ?? null,
           chats: state.chats,
           selectedChatId: state.selected_chat_id,
+          groupScope: state.group_scope ?? null,
         });
         applyTasks(state.tasks);
         // The backend checks a saved sign-in at launch; follow it to its verdict.
@@ -406,7 +413,21 @@ export const useCodex = create<CodexStoreState>((set, get) => {
         return chat;
       } catch (err) {
         set({ error: message(err) });
+        // A refusal means the verdict shown up front was stale.
+        if (scope === 'group') void get().refreshGroupScope();
         return null;
+      }
+    },
+
+    refreshGroupScope: async () => {
+      const sessionId = get().sessionId;
+      if (!sessionId) return;
+      try {
+        // The state read is the one the IPC policy allows; it carries the verdict.
+        const view = await client().state(sessionId);
+        if (get().sessionId === sessionId) set({ groupScope: view.group_scope ?? null });
+      } catch {
+        // Keep the last verdict; creating a Group chat is still checked by the backend.
       }
     },
 

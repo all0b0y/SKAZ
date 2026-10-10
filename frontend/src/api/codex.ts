@@ -140,9 +140,14 @@ export interface PurposeAgentView {
 
 export type AgentView = Record<CodexPurpose, PurposeAgentView>;
 
+/** The backend's verdict on a Group chat for a session: usable, file mode off, or not in a group. */
+export type GroupScope = 'available' | 'storage_off' | 'not_in_group';
+
 export interface CodexState {
   chats: CodexChat[];
   selected_chat_id: string | null;
+  /** Whether a new chat of this session can use Group; absent from an older backend. */
+  group_scope?: GroupScope | null;
   tasks: CodexTask[];
   settings: CodexSettings;
   connection: CodexConnection;
