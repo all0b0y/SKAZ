@@ -35,8 +35,15 @@ extraResources:
 
 asar: true
 
+# Signs SKAZ.app with SKAZ's self-signed certificate (SKAZ_SIGN_IDENTITY) before the
+# DMG and PKG are made; see scripts/sign-mac.cjs and docs/PACKAGING.md → Signing.
+afterPack: scripts/sign-mac.cjs
+
 mac:
   category: public.app-category.productivity
+  # electron-builder only finds trusted identities, so its own signing is off and
+  # the afterPack hook above signs instead.
+  identity: null
   # Icon Composer document: macOS 26 draws its Default/Dark/Clear/Tinted appearances.
   # electron-builder compiles it with actool (Xcode 26+) into Assets.car.
   icon: build/icon.icon

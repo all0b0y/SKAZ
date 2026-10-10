@@ -1,6 +1,6 @@
 {
   "name": "skaz",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Desktop assistant that listens along, transcribes with timestamps, answers about the moment, and keeps notes.",
   "author": "all0b0y",

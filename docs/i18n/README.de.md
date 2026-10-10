@@ -76,11 +76,31 @@ in Notizen fest. KI kann Fehler machen: Quellenlinks erleichtern die Prüfung, g
 
 ## Installation und erster Start
 
-Lade das neueste DMG von [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest)
-herunter (Apple Silicon, macOS 13 oder neuer), öffne es, ziehe SKAZ nach Applications und
-starte die App. Alpha-Builds sind noch nicht notarisiert: Folge beim ersten Start den Schritten
-in den Release-Notes (**Privacy & Security → Open Anyway**). Schalte die Schutzmechanismen von
-macOS nicht systemweit aus. Den aktuellen Code startest du über die [Entwicklungsanleitung](../../CONTRIBUTING.md).
+Füge das im Terminal ein (Apple Silicon, macOS 13 oder neuer):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
+```
+
+Das [Skript](../../install.sh) lädt das neueste Release, prüft die SHA-256-Prüfsumme und die
+Signatur von SKAZ, installiert SKAZ unter „Programme“ und öffnet die App. Zum Aktualisieren führst
+du denselben Befehl aus; Sitzungen, Notizen und Einstellungen bleiben erhalten. SKAZ ist noch nicht
+von Apple notarisiert, öffnet sich so installiert aber ohne die Warnung, dass Apple die App nicht
+überprüfen konnte.
+
+<details>
+<summary>Stattdessen aus dem DMG oder PKG installieren</summary>
+
+Lade `SKAZ-<Version>-arm64.dmg` (oder das `.pkg`-Installationsprogramm) von
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest) herunter, öffne es und ziehe SKAZ nach „Programme“. Beim ersten Start
+meldet macOS, dass SKAZ nicht überprüft werden konnte: Klicke auf **Fertig** und lege die App nicht
+in den Papierkorb. Öffne dann **Systemeinstellungen → Datenschutz & Sicherheit** und klicke neben
+der Meldung zu SKAZ auf **Dennoch öffnen**. Das ist einmal pro heruntergeladenem Build nötig.
+Schalte die Schutzmechanismen von macOS nicht systemweit aus.
+
+</details>
+
+Den aktuellen Code startest du über die [Entwicklungsanleitung](../../CONTRIBUTING.md).
 
 Beim ersten Start:
 
