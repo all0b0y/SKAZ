@@ -52,6 +52,7 @@ GEMINI.md
 backend/build/
 build/icon.icns
 build/icon.png
+build/icon.icon/
 
 # Local credentials and application databases (never public fixtures).
 secrets.key

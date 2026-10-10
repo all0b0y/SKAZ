@@ -37,7 +37,9 @@ asar: true
 
 mac:
   category: public.app-category.productivity
-  icon: build/icon.icns
+  # Icon Composer document: macOS 26 draws its Default/Dark/Clear/Tinted appearances.
+  # electron-builder compiles it with actool (Xcode 26+) into Assets.car.
+  icon: build/icon.icon
   target:
     - target: dmg
       arch:
@@ -64,6 +66,7 @@ mac:
 
 dmg:
   title: SKAZ ${version}
+  # The DMG volume icon still needs .icns.
   icon: build/icon.icns
   # The familiar "drag the app onto Applications" installer window.
   contents:
