@@ -26,6 +26,11 @@
   --positive: #2f7158;
   --warning: #8c641c;
 
+  /* SKAZ tree mark: one-tone crown, roots and sap in paler teals. */
+  --tree-crown: #286b63;
+  --tree-roots: #6fb0a3;
+  --tree-sap: #a8ddd2;
+
   /* Muted session-group palette (hashtag chips). Deliberately one restrained
      family — no rainbow — and readable on white. Group 1 follows the new
      teal accent; the remaining groups retain their distinct roles. */
@@ -96,6 +101,10 @@
     --positive: #8ac5a5;
     --warning: #d8b77a;
 
+    --tree-crown: #e7eeeb;
+    --tree-roots: #87c4b8;
+    --tree-sap: #2f7c72;
+
     --group-1: #87c4b8;
     --group-2: oklch(68% 0.1 250);
     --group-3: oklch(70% 0.08 145);
@@ -130,6 +139,9 @@
   --live-quiet: #273e38;
   --positive: #8ac5a5;
   --warning: #d8b77a;
+  --tree-crown: #e7eeeb;
+  --tree-roots: #87c4b8;
+  --tree-sap: #2f7c72;
   --group-1: #87c4b8;
   --group-2: oklch(68% 0.1 250);
   --group-3: oklch(70% 0.08 145);

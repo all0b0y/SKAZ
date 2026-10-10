@@ -5,7 +5,6 @@ import type { Citation, Message } from '../../api/types';
 import { formatTimecode } from '../../lib/time';
 import { Button } from '../ui/Button';
 import { Icon } from '../ui/Icon';
-import figureUrl from '../../assets/images/chat-elements-girl.webp';
 import { AnswerMarkdown } from './AnswerMarkdown';
 import { useEdgeFade } from '../../hooks/useOverflowEdges';
 
@@ -44,7 +43,7 @@ interface ThreadProps {
   messages: Message[];
   activeSessionId: string | null;
   onCite: (citation: Citation) => void;
-  /** Nothing to show yet: the illustrated empty state with this hint (none while a quote is parked). */
+  /** Nothing to show yet: the tagline empty state with this hint (none while a quote is parked). */
   empty: boolean;
   hint: string | null;
   /** Changes whenever new content should scroll into view. */
@@ -57,14 +56,13 @@ export function ConversationThread({ messages, activeSessionId, onCite, empty, h
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [scrollKey]);
-  // Fade where older messages are scrolled away; the illustrated empty state has none.
+  // Fade where older messages are scrolled away; the empty state has none.
   useEdgeFade(listRef, 'y', !empty);
 
   return (
-    <div className="assistant__thread" ref={listRef}>
+    <div className={clsx('assistant__thread', empty && 'assistant__thread--empty')} ref={listRef}>
       {empty ? (
         <>
-          <img src={figureUrl} alt="" aria-hidden="true" data-testid="assistant-figure" className="assistant__figure" />
           <p className="assistant__tagline">More than listening</p>
           {hint && <p className="assistant__hint assistant__hint--overlay">{hint}</p>}
         </>

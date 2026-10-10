@@ -1327,35 +1327,7 @@ body.is-resizing-panels {
   box-sizing: border-box;
 }
 
-/* Existing brand illustration stays secondary to the task and its hint. */
-.assistant__figure {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 48%;
-  object-fit: contain;
-  object-position: right bottom;
-  opacity: 0.24;
-  mix-blend-mode: multiply;
-  pointer-events: none;
-  user-select: none;
-}
-:root[data-theme='dark'] .assistant__figure {
-  filter: invert(1);
-  mix-blend-mode: screen;
-  opacity: 0.12;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .assistant__figure {
-    filter: invert(1);
-    mix-blend-mode: screen;
-    opacity: 0.12;
-  }
-}
 .assistant__tagline {
-  position: relative;
-  z-index: 2;
   max-width: 20ch;
   margin: 0;
   font-family: var(--font-ui);
@@ -1375,8 +1347,6 @@ body.is-resizing-panels {
   text-align: center;
 }
 .assistant__hint--overlay {
-  position: relative;
-  z-index: 2;
   max-width: 30ch;
   padding: 0;
   margin: 12px 0 0;
@@ -1470,7 +1440,7 @@ body.is-resizing-panels {
   overflow-y: auto;
   padding: var(--space-4);
 }
-.assistant__thread:has(.assistant__figure) {
+.assistant__thread--empty {
   position: relative;
   padding: 32px 24px;
   overflow-y: auto;
@@ -1769,29 +1739,19 @@ body.is-resizing-panels {
   line-height: 1.5;
 }
 
-/* ---- Transcript empty-state wordmark ------------------------------------ */
-/* --font-display is reserved for exactly two places: this logo and Settings. */
+/* ---- Transcript empty state: the SKAZ tree ---------------------------- */
+/* Static on purpose; the startup screen is where the tree animates. */
 .transcript-logo {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-4);
   margin: auto;
   text-align: center;
 }
-.transcript-logo__mark {
-  margin: 0;
-  font-family: var(--font-display);
-  font-weight: 500;
-  font-size: clamp(32px, 5vw, 52px);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-.transcript-logo__skaz {
-  color: var(--ink);
-}
-.transcript-logo__agent {
-  color: var(--accent);
+.transcript-logo__tree {
+  width: clamp(104px, 13vw, 148px);
+  height: auto;
 }
 .transcript-logo__hint {
   margin: 0;
@@ -2276,8 +2236,8 @@ body.is-resizing-panels {
   text-transform: none;
 }
 
-/* --font-display is reserved for exactly two places: the transcript empty
-   state and this quiet wordmark at the foot of the settings nav rail. */
+/* --font-display is reserved for this quiet wordmark at the foot of the
+   settings nav rail; the transcript empty state shows the SKAZ tree instead. */
 .settings-logo {
   margin-top: auto;
   padding-top: var(--space-4);
@@ -3544,3 +3504,8 @@ body.is-resizing-panels {
   padding-left: var(--space-4);
   border-left: 2px solid var(--edge);
 }
+
+/* ---- SKAZ tree mark ------------------------------------------------------ */
+.tree-mark { display: block; overflow: visible; }
+.tree-mark__crown { fill: var(--tree-crown); }
+.tree-mark__roots { fill: var(--tree-roots); }
