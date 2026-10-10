@@ -80,19 +80,20 @@ function useDelayedFlag(active: boolean, delayMs: number): boolean {
   return active && shown;
 }
 
-/** Opening a saved session: the SKAZ wordmark inside a slowly turning arc.
- * Reduced motion swaps the rotation for a gentle pulse (CSS only). */
+/** Reserved reading layout while the real saved-session read is in flight.
+ * No animated shimmer, estimated percentage, or mandatory waiting period. */
 function TranscriptLoading() {
   return (
-    <div className="transcript-loading" role="status" aria-label="Loading transcript">
-      <div className="transcript-loading__ring" aria-hidden="true">
-        <svg className="transcript-loading__arc" viewBox="0 0 120 120">
-          <circle className="transcript-loading__track" cx="60" cy="60" r="54" />
-          <circle className="transcript-loading__sweep" cx="60" cy="60" r="54" pathLength="100" />
-        </svg>
-        <span className="transcript-loading__mark">SKAZ</span>
-      </div>
-      <p className="transcript-loading__hint" aria-hidden="true">Opening transcript…</p>
+    <div className="session-skeleton" role="status" aria-label="Loading transcript">
+      <p className="session-skeleton__label">Opening transcript…</p>
+      {[0, 1, 2].map(row => <div key={row} className="session-skeleton__row" aria-hidden="true">
+        <span className="session-skeleton__time" />
+        <div className="session-skeleton__lines">
+          <span className="session-skeleton__line" />
+          <span className="session-skeleton__line" />
+          <span className="session-skeleton__line" />
+        </div>
+      </div>)}
     </div>
   );
 }
@@ -374,7 +375,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
     if (!focusSegmentId) return;
     const row = rowRefs.current.get(focusSegmentId);
     if (row) {
-      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      row.scrollIntoView({ block: 'center', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
       row.classList.add('segment--flash');
       const timer = setTimeout(() => row.classList.remove('segment--flash'), 1600);
       return () => clearTimeout(timer);
@@ -404,7 +405,7 @@ export function TranscriptView({ focusSegmentId }: TranscriptViewProps) {
       }}>
 
         {opening ? (
-          showLoader ? <div className="panel__center"><TranscriptLoading /></div> : null
+          showLoader ? <TranscriptLoading /> : null
         ) : error ? (
           <div className="panel__center">
             <EmptyState icon="warning" title="Couldn’t load the transcript" hint={error} />

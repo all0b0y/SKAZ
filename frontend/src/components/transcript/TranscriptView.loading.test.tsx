@@ -23,7 +23,7 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.useRealTimers(); });
 
-it('shows nothing for a fast open, then the animated loader after 300 ms', async () => {
+it('keeps fast opens quiet, then reserves reading geometry with an honest skeleton after 300 ms', async () => {
   render(<TranscriptView focusSegmentId={null} />);
   expect(screen.queryByRole('status', { name: 'Loading transcript' })).not.toBeInTheDocument();
   expect(screen.queryByText('Loading transcript…')).not.toBeInTheDocument();
@@ -31,7 +31,9 @@ it('shows nothing for a fast open, then the animated loader after 300 ms', async
   expect(screen.queryByRole('status', { name: 'Loading transcript' })).not.toBeInTheDocument();
   await act(async () => { vi.advanceTimersByTime(1); });
   const loader = screen.getByRole('status', { name: 'Loading transcript' });
-  expect(loader.querySelector('.transcript-loading__arc')).not.toBeNull();
+  expect(loader.querySelectorAll('.session-skeleton__row')).toHaveLength(3);
+  expect(loader.querySelector('.transcript-loading__arc')).toBeNull();
+  expect(screen.queryByRole('progressbar')).toBeNull();
 });
 
 it('never flashes the loader when the session opens within 300 ms', async () => {

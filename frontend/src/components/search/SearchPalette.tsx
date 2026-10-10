@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useStore } from '../../state/store';
 import { Icon } from '../ui/Icon';
+import { usePresenceActive } from '../ui/MotionPresence';
+import { useModalFocus } from '../../hooks/useModalFocus';
 import { formatRange } from '../../lib/time';
 import type { Citation, Segment, Session } from '../../api/types';
 
@@ -46,15 +48,19 @@ export function SearchPalette({ open, onClose, onCite }: SearchPaletteProps) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const present = usePresenceActive();
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalFocus(panelRef, open);
 
   useEffect(() => {
-    if (open) {
+    if (open && present) {
       setQuery('');
       setActiveIndex(0);
       // Autofocus once the overlay mounts.
-      window.setTimeout(() => inputRef.current?.focus(), 0);
+      const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+      return () => window.clearTimeout(timer);
     }
-  }, [open]);
+  }, [open, present]);
 
   const sessionResults = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -122,7 +128,7 @@ export function SearchPalette({ open, onClose, onCite }: SearchPaletteProps) {
   return (
     <div className="palette" role="dialog" aria-modal="true" aria-label="Search materials">
       <button className="palette__scrim" aria-label="Close search" onClick={onClose} />
-      <div className="palette__panel">
+      <div className="palette__panel" ref={panelRef} tabIndex={-1}>
         <div className="palette__search">
           <Icon name="search" size={16} />
           <input

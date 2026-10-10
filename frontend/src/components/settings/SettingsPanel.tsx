@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import { useStore, type ThemeMode } from '../../state/store';
 import { Button } from '../ui/Button';
+import { useSurfaceMotion } from '../../hooks/useSurfaceMotion';
+import { useModalFocus } from '../../hooks/useModalFocus';
 import { Icon, type IconName } from '../ui/Icon';
 import { ProfileEditor } from './ProfileEditor';
 import { ProviderCredentials } from './ProviderCredentials';
@@ -119,6 +121,15 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>(initialSection);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(dialogRef, settings !== null);
+  useSurfaceMotion(contentRef, activeSection, settings !== null);
+  useLayoutEffect(() => {
+    // Each section is a new settings page, not a continuation of the previous
+    // section's scroll offset. Draft state lives above these pages unchanged.
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [activeSection]);
   // One draft for both purposes: Assistant and Notes edit their own keys of the
   // same Codex document, so switching sections or signing in loses neither.
   const [codexDraft, setCodexDraft] = useState<Partial<CodexSettings>>({});
@@ -126,7 +137,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   if (!settings) {
     return (
       <div className="drawer" role="dialog" aria-modal="true" aria-label="Settings">
-        <div className="drawer__panel">
+        <div className="drawer__panel" ref={dialogRef} tabIndex={-1}>
           <p className="loading">Loading settings…</p>
           {settingsError && <p className="profile__note profile__note--warn">{settingsError}</p>}
           <Button variant="ghost" onClick={onClose}>Close</Button>
@@ -249,7 +260,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
   return (
     <div className="drawer" role="dialog" aria-modal="true" aria-label="Settings">
       <button className="drawer__scrim" aria-label="Close settings" onClick={onClose} />
-      <div className="drawer__panel drawer__panel--settings">
+      <div className="drawer__panel drawer__panel--settings" ref={dialogRef} tabIndex={-1}>
         <header className="drawer__head">
           <h2>Settings</h2>
           <button className="drawer__close" onClick={onClose} aria-label="Close">
@@ -279,7 +290,7 @@ export function SettingsPanel({ onClose, initialSection = 'system' }: SettingsPa
             <p className="settings-logo">SKAZ</p>
           </nav>
 
-          <div className="settings-content">
+          <div className="settings-content" ref={contentRef}>
             {activeSection === 'system' && (
               <section className="settings-section">
                 <h3 className="settings-section__title">System</h3>

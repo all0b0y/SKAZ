@@ -1,0 +1,162 @@
+/* SKAZ motion: one first-use sequence, quiet continuity thereafter.
+ * Loaded after surface styles so accessibility also covers their old loops. */
+:root {
+  --motion-enter: 220ms;
+  --motion-exit: 140ms;
+  --motion-first: 400ms;
+  --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-in: cubic-bezier(0.3, 0, 1, 1);
+}
+.motion-presence { display: contents; }
+.motion-presence[data-state='exit'] > * { pointer-events: none; }
+
+/* First availability, not first React render behind the startup/language gate.
+ * Header and recording affordance lead; side context follows. No list-item wave. */
+.app[data-motion-ready='true'] .center__head {
+  animation: skaz-arrive 350ms var(--motion-ease-out);
+}
+.app[data-motion-ready='true'] .center__footer {
+  animation: skaz-arrive var(--motion-first) var(--motion-ease-out) 30ms backwards;
+}
+.app[data-motion-ready='true'] .center__tabs {
+  animation: skaz-arrive 350ms var(--motion-ease-out) 60ms backwards;
+}
+.app[data-motion-ready='true'] .rail__head,
+.app[data-motion-ready='true'] .rail__head-actions,
+.app[data-motion-ready='true'] .assistant__head {
+  animation: skaz-arrive var(--motion-first) var(--motion-ease-out) 80ms backwards;
+}
+
+/* First-run: purpose → choices → confirmation. The scrollable language list
+ * is one stable object; selecting/searching never replays its entrance. */
+.onboarding { animation: skaz-backdrop var(--motion-enter) var(--motion-ease-out); }
+.onboarding__card { animation: skaz-card-in var(--motion-first) var(--motion-ease-out); }
+.onboarding__card h2 { animation: skaz-arrive 350ms var(--motion-ease-out); }
+.onboarding__lead { animation: skaz-arrive 350ms var(--motion-ease-out) 30ms backwards; }
+.onboarding__quick { animation: skaz-arrive 350ms var(--motion-ease-out) 60ms backwards; }
+.onboarding__foot { animation: skaz-arrive 350ms var(--motion-ease-out) 100ms backwards; }
+.onboarding__quick-btn,
+.onboarding__option,
+.settings-nav__item,
+.provider-tabs__tab,
+.segmented button {
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.onboarding__option:has(input:checked) { background: var(--accent-wash); }
+:where(.onboarding__quick-btn, .settings-nav__item, .provider-tabs__tab, .segmented button,
+  .titlebar__btn, .rail__foot-btn, .drawer__close, .tab):active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Bounded arrivals: no whole-screen travel, no elastic modal spring. */
+.drawer__panel { animation: skaz-drawer-in var(--motion-enter) var(--motion-ease-out); }
+.drawer__scrim,
+.palette__scrim,
+.workspace__scrim { animation: skaz-backdrop var(--motion-enter) var(--motion-ease-out); }
+.palette__panel,
+.session-dialog,
+.rewrite { animation: skaz-card-in var(--motion-enter) var(--motion-ease-out); }
+.sources-popover,
+.session-menu,
+.web-search-approval { animation: skaz-arrive 180ms var(--motion-ease-out); }
+.panel-slot--overlay { animation: skaz-side-in var(--motion-enter) var(--motion-ease-out); }
+.panel-slot--overlay.panel-slot--sessions { --motion-side: -16px; }
+.panel-slot--overlay.panel-slot--assistant { --motion-side: 16px; }
+
+/* Dismissal is visual only: inert/aria-hidden and focus cleanup happen first. */
+.motion-presence[data-state='exit'] .drawer__panel {
+  animation: skaz-drawer-out var(--motion-exit) var(--motion-ease-in) both;
+}
+.motion-presence[data-state='exit'] .onboarding__card,
+.motion-presence[data-state='exit'] .palette__panel {
+  animation: skaz-card-out var(--motion-exit) var(--motion-ease-in) both;
+}
+.motion-presence[data-state='exit'] .onboarding,
+.motion-presence[data-state='exit'] .drawer__scrim,
+.motion-presence[data-state='exit'] .palette__scrim,
+.motion-presence[data-state='exit'] .gate {
+  animation: skaz-backdrop-out var(--motion-exit) var(--motion-ease-in) both;
+}
+.motion-presence[data-state='exit'] .onboarding__card > * { animation: none; }
+
+/* Actual startup, not a timed splash. Error stops the spinner. */
+.gate { background: color-mix(in srgb, var(--paper) 96%, transparent); }
+.gate__card { animation: skaz-card-in var(--motion-first) var(--motion-ease-out); }
+.gate__spinner:not(.gate__spinner--error) {
+  position: relative;
+  animation: none;
+  background: transparent;
+}
+.gate__spinner:not(.gate__spinner--error)::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 2px solid var(--edge);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: skaz-busy 1.1s linear infinite;
+}
+
+/* Reserved reading geometry while the real saved transcript is in flight.
+ * Static skeleton: no fake percent, shimmer or minimum loading duration. */
+.session-skeleton {
+  width: min(70ch, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: skaz-arrive var(--motion-enter) var(--motion-ease-out);
+}
+.session-skeleton__label { color: var(--ink-faint); font-size: var(--text-sm); margin: 0; }
+.session-skeleton__row { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: var(--space-3); }
+.session-skeleton__time { width: 36px; height: 10px; margin-top: 5px; border-radius: 3px; background: var(--edge); }
+.session-skeleton__lines { display: flex; flex-direction: column; gap: 12px; }
+.session-skeleton__line { height: 12px; border-radius: 3px; background: var(--paper-sunken); width: 100%; }
+.session-skeleton__line:last-child { width: 68%; }
+.session-skeleton__row:nth-child(3) .session-skeleton__line:last-child { width: 84%; }
+.session-skeleton__row:nth-child(4) .session-skeleton__line:last-child { width: 48%; }
+
+/* Reading and live capture have no ornamental pulsing/bouncing.
+ * Progress indicators retain their actual status; streamed prose is untouched. */
+.session__dot--recording,
+.transcript__pulse,
+.capsule[data-state='recording'] .capsule__dot::after,
+.codex-task__dot--live,
+.msg__bubble--typing span { animation: none; }
+.capsule[data-state='recording'] .capsule__dot::after { opacity: 0; }
+.capsule { animation: skaz-card-in var(--motion-enter) var(--motion-ease-out); }
+.capsule--error { animation: skaz-arrive var(--motion-enter) var(--motion-ease-out); }
+.capsule .btn:hover:not(:disabled) { transform: none; }
+.capsule .btn:active:not(:disabled) { transform: translateY(1px); }
+.capsule__morph svg { animation: skaz-icon-in 180ms var(--motion-ease-out); }
+
+@keyframes skaz-arrive { from { opacity: 0.6; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes skaz-card-in { from { opacity: 0.6; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes skaz-card-out { to { opacity: 0; transform: translateY(4px) scale(0.99); } }
+@keyframes skaz-drawer-in { from { opacity: 0.7; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes skaz-drawer-out { to { opacity: 0; transform: translateX(12px); } }
+@keyframes skaz-side-in { from { opacity: 0.7; transform: translateX(var(--motion-side)); } to { opacity: 1; transform: none; } }
+@keyframes skaz-icon-in { from { opacity: 0.6; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+@keyframes skaz-backdrop { from { opacity: 0; } to { opacity: 1; } }
+@keyframes skaz-backdrop-out { to { opacity: 0; } }
+@keyframes skaz-busy { to { transform: rotate(360deg); } }
+
+/* Infinite effects must really stop, not iterate at .001ms forever.
+ * Covers pseudo-elements and existing surface styles as well as this file. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  :where(.btn, .tab, .onboarding__quick-btn, .provider-tabs__tab, .settings-nav__item,
+    .segmented button, .titlebar__btn, .rail__foot-btn, .drawer__close):active:not(:disabled) {
+    transform: none !important;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* Hidden windows cannot spend work on waiting loops. */
+  html[data-motion-paused='true'] *,
+  html[data-motion-paused='true'] *::before,
+  html[data-motion-paused='true'] *::after { animation-play-state: paused !important; }
+}

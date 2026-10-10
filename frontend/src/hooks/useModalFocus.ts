@@ -1,4 +1,5 @@
 import { useEffect, type RefObject } from 'react';
+import { usePresenceActive } from '../components/ui/MotionPresence';
 
 const FOCUSABLE =
   'input:not(:disabled), button:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]';
@@ -6,8 +7,11 @@ const FOCUSABLE =
 /** Keep keyboard focus inside a modal: focus its first control on open, wrap
  *  Tab / Shift+Tab at its edges, and pull focus back if it lands outside.
  *  Without this an `aria-modal` dialog still lets Tab walk into the app behind it. */
-export function useModalFocus(ref: RefObject<HTMLElement | null>): void {
+export function useModalFocus(ref: RefObject<HTMLElement | null>, enabled = true): void {
+  const present = usePresenceActive();
+  const active = present && enabled;
   useEffect(() => {
+    if (!active) return;
     const panel = ref.current;
     if (!panel) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -33,5 +37,5 @@ export function useModalFocus(ref: RefObject<HTMLElement | null>): void {
       document.removeEventListener('focusin', keepFocus);
       if (previous?.isConnected) previous.focus();
     };
-  }, [ref]);
+  }, [ref, active]);
 }
