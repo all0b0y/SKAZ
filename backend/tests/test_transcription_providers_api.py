@@ -11,6 +11,7 @@ import asyncio
 import json
 import struct
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from skaz import asr_providers, media_tools
+from skaz.app import create_app
+from skaz.config import AppConfig
 from skaz.file_asr import FileTranscript, transcribe_pcm_file
 from skaz.gateways.live_session import LiveAsrSession
 from skaz.gateways.soniox_async import AsyncToken
@@ -32,6 +35,7 @@ from skaz.gateways.whisper_stream import (
 from skaz.live_store import LiveConnection
 from skaz.secrets import MemorySecretStore
 from skaz.settings_store import StoredSettings
+from tests.conftest import FakeHttp
 from tests.test_native_live_ws import AUTH
 from tests.test_whisper_stream import SCRIPT, ScriptedDecoder, ScriptedVad, tone
 
@@ -79,25 +83,36 @@ def scripted_local_opener(
     return open_local
 
 
-def test_settings_describe_every_provider_honestly(app: Any) -> None:
-    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        settings = http.get("/settings", headers=AUTH).json()
-        assert settings["transcription_provider"] == "soniox"  # unchanged default
-        providers = {item["id"]: item for item in settings["transcription_providers"]}
-        assert list(providers) == ["soniox", "local-whisper", "openai"]
-        local = providers["local-whisper"]
-        assert local["capabilities"]["offline"] is True
-        assert local["capabilities"]["requires_cloud_consent"] is False
-        assert local["capabilities"]["speakers"] == "approximate"
-        assert local["capabilities"]["translation"] == "english_only"
-        assert local["ready"] is False and local["detail"]
-        assert local["limitations"]
-        assert {model["id"] for model in local["models"]} >= {"tiny", "small", "large-v3"}
-        small = next(model for model in local["models"] if model["id"] == "small")
-        assert small["recommended"] is True and small["size_bytes"] > 100_000_000
-        assert providers["soniox"]["capabilities"]["speakers"] == "full"
-        assert providers["soniox"]["ready"] is False  # no key, no consent
-        assert providers["openai"]["capabilities"]["provisional_text"] is False
+def test_settings_describe_every_provider_honestly(
+    config: AppConfig, outbound: FakeHttp, tmp_path: Path,
+) -> None:
+    # An empty model cache instead of the developer's shared Hugging Face cache,
+    # where an already downloaded Whisper model would make Local Whisper ready.
+    application = create_app(
+        replace(config, local_model_cache_dir=tmp_path / "models"),
+        secret_store=MemorySecretStore(), http_client=outbound.client(),
+    )
+    try:
+        with TestClient(application, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
+            settings = http.get("/settings", headers=AUTH).json()
+    finally:
+        application.state.runtime.close()
+    assert settings["transcription_provider"] == "soniox"  # unchanged default
+    providers = {item["id"]: item for item in settings["transcription_providers"]}
+    assert list(providers) == ["soniox", "local-whisper", "openai"]
+    local = providers["local-whisper"]
+    assert local["capabilities"]["offline"] is True
+    assert local["capabilities"]["requires_cloud_consent"] is False
+    assert local["capabilities"]["speakers"] == "approximate"
+    assert local["capabilities"]["translation"] == "english_only"
+    assert local["ready"] is False and local["detail"]
+    assert local["limitations"]
+    assert {model["id"] for model in local["models"]} >= {"tiny", "small", "large-v3"}
+    small = next(model for model in local["models"] if model["id"] == "small")
+    assert small["recommended"] is True and small["size_bytes"] > 100_000_000
+    assert providers["soniox"]["capabilities"]["speakers"] == "full"
+    assert providers["soniox"]["ready"] is False  # no key, no consent
+    assert providers["openai"]["capabilities"]["provisional_text"] is False
 
 
 def test_provider_selection_is_saved_and_unknown_models_are_refused(app: Any) -> None:
