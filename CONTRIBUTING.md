@@ -2,7 +2,7 @@
 
 SKAZ is an alpha desktop app. Small bug fixes and documentation improvements
 can go straight to a pull request. For a new feature, a major change or a new
-dependency, open an [issue](https://github.com/4IPE/SKAZ/issues) first and agree
+dependency, open an [issue](https://github.com/all0b0y/SKAZ/issues) first and agree
 on the scope before implementing it. A proposal or PR does not guarantee acceptance.
 
 ## Development setup
@@ -13,7 +13,7 @@ or 22.12+** (Vite's engine requirement), Python **3.11+**, and
 [uv](https://docs.astral.sh/uv/). macOS system-audio capture requires 14.2+.
 
 ```bash
-git clone https://github.com/4IPE/SKAZ.git
+git clone https://github.com/all0b0y/SKAZ.git
 cd SKAZ
 npm ci
 uv sync --project backend

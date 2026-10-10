@@ -1,18 +1,25 @@
 <div align="center">
 
-<img src="../../icon/icon.png" alt="SKAZ" width="120" height="120">
+<img src="../../icon/icon.png" alt="SKAZ" width="128" height="128">
 
 # SKAZ
 
+**课堂与会议中的第二双耳朵。**
+
+[![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2f7c72)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
 ![Alpha](https://img.shields.io/badge/status-alpha-orange)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](../../LICENSE)
 
 [English](../../README.md) · [Русский](README.ru.md) · [Español](README.es.md) · [Deutsch](README.de.md) · **简体中文**
 
-</div>
+<br>
 
-**课堂与会议中的第二双耳朵。**
+<img src="../images/skaz-demo.webp" alt="SKAZ 快速浏览：实时转写、带来源的回答、搜索范围、笔记与语音服务商" width="880">
+
+<sub>快速浏览 · 使用预设数据的演示配置 · <a href="../images/skaz-demo.mp4">全高清视频（MP4，34 秒）</a></sub>
+
+</div>
 
 SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助你找回错过的内容，
 并将提问、笔记与原始转写放在一起。
@@ -23,14 +30,23 @@ SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助�
 
 ## 界面预览
 
-![SKAZ 转写与助手](../images/transcript.png)
-*按说话人整理的转写，旁边是提问、回答及来源链接。*
+<table>
+<tr>
+<td width="50%"><img src="../images/transcript.webp" alt="实时转写"><br><b>实时转写</b><br>语音变成按说话人整理的易读文字，旁边是会话聊天。</td>
+<td width="50%"><img src="../images/sources.webp" alt="带来源的回答"><br><b>带来源的回答</b><br>点击来源链接即可跳到转写中的对应句子。</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/scope.webp" alt="搜索范围"><br><b>搜索范围</b><br>可针对单个会话、一个分组或整个资料库提问。</td>
+<td width="50%"><img src="../images/notes.webp" alt="可编辑的笔记"><br><b>可编辑的笔记</b><br>分标签页编辑 Markdown 笔记，随时导出。</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/providers.webp" alt="自选服务商"><br><b>自选服务商</b><br>Soniox、OpenAI，或在本机运行的 Local Whisper。</td>
+<td width="50%"><img src="../images/light.webp" alt="浅色与深色"><br><b>浅色与深色</b><br>跟随系统，或自行选择主题。</td>
+</tr>
+</table>
 
-![SKAZ 笔记编辑器](../images/notes.png)
-*会话聊天旁的可编辑 Markdown 笔记。*
-
-这些是运行中的应用截图，而非设计稿。转写、回答和笔记均为专门编写的演示数据，
-不是真实语音识别或 AI 生成结果。独立演示配置未设置 API 密钥，因此录音控件会显示设置提示。
+以上均为运行中应用的截图，而非设计稿。转写、回答和笔记均为专门编写的演示数据，
+并非真实的语音识别或 AI 输出；上方的快速浏览由这些截图使用 [Remotion](https://www.remotion.dev) 制作。
 
 ## 为什么使用 SKAZ
 
@@ -44,7 +60,7 @@ SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助�
   仅可翻译为英语）或 OpenAI。按说话人分组，翻译时仍可查看原文。不会在服务之间静默切换。
 - **麦克风与系统音频：** 选择麦克风，也可包含 Mac 播放的声音。
   系统音频采集需要 macOS 14.2+ 及系统授权。
-- **基于上下文提问：** 查询单个会话或更大的资料库范围，通过时间戳引用返回转写。
+- **基于上下文提问：** 查询单个会话、一个分组或整个资料库，通过时间戳引用返回转写。
 - **可编辑笔记：** 生成笔记，在标签页中编辑 Markdown，并导出文件。
 - **本地资料库：** 将会话分组，也可将文本同步输出到指定文件夹，供 Obsidian 等工具使用。
 - **媒体导入（实验性）：** 支持本地音频、视频及 YouTube 导入流程。
@@ -54,7 +70,7 @@ SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助�
 
 ## 安装与首次启动
 
-从 [GitHub Releases](https://github.com/4IPE/SKAZ/releases/latest) 下载最新的 DMG
+从 [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest) 下载最新的 DMG
 （Apple Silicon，macOS 13 或更高版本），打开后将 SKAZ 拖入 Applications 并启动。
 alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的步骤操作
 （**Privacy & Security → Open Anyway**）。不要全局关闭 macOS 的安全保护。
@@ -108,7 +124,7 @@ alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的�
 
 [Contributing](../../CONTRIBUTING.md) 介绍环境设置、测试和 PR；
 [Packaging](../PACKAGING.md) 介绍安装包构建。版本变更将记录在
-[GitHub Releases](https://github.com/4IPE/SKAZ/releases)，不另设 changelog。
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases)，不另设 changelog。
 小修复可直接提交 PR；大型改动请先讨论。
 
 当前重点包括发布签名与公证、长会话的可靠恢复，以及更多真实场景验证。
