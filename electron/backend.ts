@@ -16,6 +16,8 @@ import { app } from 'electron';
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_INTERVAL_MS = 300;
 const SHUTDOWN_GRACE_MS = 4_000;
+/** Added to start failures in development only, where the backend runs from the repo. */
+const DEV_START_HINT = 'Development build: make sure the Python backend is installed (uv sync in backend/).';
 
 export interface BackendHandle {
   port: number;
@@ -59,6 +61,8 @@ export class BackendManager {
   private readonly log: AppLog;
   /** The login shell's PATH, read once per app run; null if it could not be read. */
   private userPath: Promise<string | null> | null = null;
+  /** Set while restart() waits for a stale process to exit. */
+  private restarting = false;
 
   constructor(options: BackendManagerOptions) {
     this.repoRoot = options.repoRoot;
@@ -81,7 +85,7 @@ export class BackendManager {
   }
 
   private setStatus(status: BackendStatus): void {
-    this.status = status;
+    this.status = status.phase === 'error' && !app.isPackaged ? { ...status, hint: DEV_START_HINT } : status;
     // Lifecycle transitions are the most useful diagnostic in the log: they
     // explain a stuck splash screen without exposing any session content.
     this.log.write(
@@ -89,7 +93,7 @@ export class BackendManager {
       'app',
       `backend ${status.phase}${status.detail ? `: ${status.detail}` : ''}`,
     );
-    this.onStatus?.(status);
+    this.onStatus?.(this.status);
   }
 
   private resolveSpawn(port: number): { command: string; args: string[] } {
@@ -190,6 +194,8 @@ export class BackendManager {
     child.on('exit', (code, signalName) => {
       exited = true;
       abort.abort();
+      // A process that restart() already replaced must not report over its successor.
+      if (this.child !== child) return;
       this.child = null;
       if (this.status.phase !== 'stopped') {
         this.setStatus({
@@ -201,6 +207,7 @@ export class BackendManager {
     child.on('error', (err) => {
       exited = true;
       abort.abort();
+      if (this.child !== child) return;
       this.setStatus({
         phase: 'error',
         detail:
@@ -222,14 +229,39 @@ export class BackendManager {
     return handle;
   }
 
+  /**
+   * Start again after a failed start (the startup screen's Try again). Resolves
+   * false when the last start did not fail; progress arrives as status events.
+   */
+  async restart(): Promise<boolean> {
+    if (this.status.phase !== 'error' || this.restarting) return false;
+    this.restarting = true;
+    try {
+      // A start that timed out can leave its process running; it must release its locks first.
+      const stale = this.child;
+      this.child = null;
+      this.handle = null;
+      await this.terminate(stale);
+    } finally {
+      this.restarting = false;
+    }
+    // The app may have started quitting while the stale process was exiting.
+    if (this.getStatus().phase === 'stopped') return false;
+    void this.start().catch(() => undefined);
+    return true;
+  }
+
   async stop(): Promise<void> {
     this.setStatus({ phase: 'stopped' });
     const child = this.child;
     this.child = null;
     this.handle = null;
-    if (!child || child.exitCode !== null) return;
+    await this.terminate(child);
+  }
 
-    await new Promise<void>((resolve) => {
+  private terminate(child: ChildProcess | null): Promise<void> {
+    if (!child || child.exitCode !== null) return Promise.resolve();
+    return new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
         resolve();

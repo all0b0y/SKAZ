@@ -48,6 +48,9 @@ const api: BridgeApi = {
   openLogsFolder(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.openLogsFolder) as Promise<boolean>;
   },
+  restartBackend(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.restartBackend) as Promise<boolean>;
+  },
   chooseStorageRoot(): Promise<string | null> {
     return ipcRenderer.invoke(CHANNELS.chooseStorageRoot) as Promise<string | null>;
   },

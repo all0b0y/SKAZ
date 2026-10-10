@@ -74,29 +74,10 @@
 }
 .motion-presence[data-state='exit'] .onboarding,
 .motion-presence[data-state='exit'] .drawer__scrim,
-.motion-presence[data-state='exit'] .palette__scrim,
-.motion-presence[data-state='exit'] .gate {
+.motion-presence[data-state='exit'] .palette__scrim {
   animation: skaz-backdrop-out var(--motion-exit) var(--motion-ease-in) both;
 }
 .motion-presence[data-state='exit'] .onboarding__card > * { animation: none; }
-
-/* Actual startup, not a timed splash. Error stops the spinner. */
-.gate { background: color-mix(in srgb, var(--paper) 96%, transparent); }
-.gate__card { animation: skaz-card-in var(--motion-first) var(--motion-ease-out); }
-.gate__spinner:not(.gate__spinner--error) {
-  position: relative;
-  animation: none;
-  background: transparent;
-}
-.gate__spinner:not(.gate__spinner--error)::after {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border: 2px solid var(--edge);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: skaz-busy 1.1s linear infinite;
-}
 
 /* Reserved reading geometry while the real saved transcript is in flight.
  * Static skeleton: no fake percent, shimmer or minimum loading duration. */
@@ -139,7 +120,6 @@
 @keyframes skaz-icon-in { from { opacity: 0.6; transform: scale(0.9); } to { opacity: 1; transform: none; } }
 @keyframes skaz-backdrop { from { opacity: 0; } to { opacity: 1; } }
 @keyframes skaz-backdrop-out { to { opacity: 0; } }
-@keyframes skaz-busy { to { transform: rotate(360deg); } }
 
 /* Infinite effects must really stop, not iterate at .001ms forever.
  * Covers pseudo-elements and existing surface styles as well as this file. */

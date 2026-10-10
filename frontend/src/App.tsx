@@ -25,6 +25,7 @@ import { OPEN_SETTINGS_EVENT } from './lib/openSettings';
 import { stripTags } from './lib/sessionTags';
 import { formatTimecode } from './lib/time';
 import { MotionPresence } from './components/ui/MotionPresence';
+import { StartupScreen } from './components/startup/StartupScreen';
 import { useSurfaceMotion } from './hooks/useSurfaceMotion';
 
 type CenterTab = 'transcript' | 'notes';
@@ -46,33 +47,6 @@ function PanelSlot({ id, view, children }: { id: PanelId; view: PanelView; child
       {...(state === 'closed' ? { inert: '' } : {})}
     >
       <div className="panel-slot__inner">{children}</div>
-    </div>
-  );
-}
-
-function BackendGate() {
-  const backend = useStore((s) => s.backend);
-  return (
-    <div className="gate" role="status">
-      <div className="gate__card">
-        <div className={clsx('gate__spinner', backend.phase === 'error' && 'gate__spinner--error')}>
-          <Icon name={backend.phase === 'error' ? 'warning' : 'dot'} size={22} />
-        </div>
-        <h2>
-          {backend.phase === 'error' ? 'The backend didn’t start' : 'Starting SKAZ…'}
-        </h2>
-        <p>
-          {backend.phase === 'error'
-            ? backend.detail ?? 'The local Python service failed to start.'
-            : 'Launching the local transcription service and connecting securely.'}
-        </p>
-        {backend.phase === 'error' && (
-          <p className="gate__hint">
-            Ensure the Python backend is installed (uv sync in backend/). The app stays local — no fake
-            results are shown.
-          </p>
-        )}
-      </div>
     </div>
   );
 }
@@ -301,7 +275,7 @@ export default function App() {
       <MotionPresence open={searchOpen}>
         <SearchPalette open onClose={() => setSearchOpen(false)} onCite={onCite} />
       </MotionPresence>
-      <MotionPresence open={!ready}><BackendGate /></MotionPresence>
+      <StartupScreen />
       {/* Only once the backend answered: the language list comes from it. */}
       <MotionPresence open={onboardingOpen}><LanguageOnboarding /></MotionPresence>
     </div>

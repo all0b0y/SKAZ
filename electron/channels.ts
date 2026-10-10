@@ -11,6 +11,7 @@ export const CHANNELS = {
   uploadAudio: 'backend:uploadAudio',
   bufferAudio: 'backend:bufferAudio',
   status: 'backend:status',
+  restartBackend: 'backend:restart',
   statusEvent: 'backend:status-event',
   readLogs: 'app:read-logs',
   openLogsFolder: 'app:open-logs-folder',

@@ -59,6 +59,8 @@ export interface SharedNote {
 export interface BackendStatus {
   phase: BackendPhase;
   detail?: string;
+  /** Extra guidance for a failed start; development builds only. */
+  hint?: string;
 }
 
 /** Live capture snapshot the renderer pushes to main so a close/quit can be
@@ -103,6 +105,8 @@ export interface BridgeApi {
   readLogs?(): Promise<string>;
   /** Reveal the log directory in the OS file manager. */
   openLogsFolder?(): Promise<boolean>;
+  /** Start the local service again after a failed start; false when there is nothing to retry. */
+  restartBackend?(): Promise<boolean>;
   /** Native folder chooser; returns a candidate only, never writes preferences. */
   chooseStorageRoot?(): Promise<string | null>;
   /** Current backend lifecycle phase. */
