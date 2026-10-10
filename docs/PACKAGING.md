@@ -2,13 +2,15 @@
 
 How the repository turns into a double-clickable macOS installer, and what is
 verified vs. still open. Written for a developer on this machine; the end user
-only ever sees the `.dmg`.
+installs with `install.sh` (the one-line Terminal installer) or the `.dmg`.
 
 ## One command
 
 ```bash
-npm run dist:mac
+SKAZ_SIGN_IDENTITY=<SHA-1 of the «SKAZ» certificate> npm run dist:mac
 ```
+
+Without `SKAZ_SIGN_IDENTITY` the app is signed ad hoc (see [Signing](#signing)).
 
 Result:
 
@@ -134,21 +136,47 @@ from the working directory.
 
 ## Signing
 
-The DMG is built with `hardenedRuntime: true` and
+The app is built with `hardenedRuntime: true` and
 `build/entitlements.mac.plist` (JIT + unsigned executable memory for Electron,
 audio-input for capture, network-client for providers).
 
-The only identity on this machine is an **Apple Development** certificate, which is
-not a Developer ID and cannot be used for distribution. Consequences:
+Releases are signed with SKAZ's own self-signed code-signing certificate, «SKAZ»
+(SHA-1 `9aaf0dac082309848f22aebfdbc43efcba45b13e`, pinned in `install.sh`). It carries
+no personal data, and because the app's designated requirement names that certificate,
+macOS keeps granted permissions (microphone, system audio) across updates.
 
-- On this Mac the app runs.
-- On another Mac Gatekeeper may block the first launch. Check the origin and the
-  release signing notes before using macOS's app-specific Open Anyway option, if
-  available. Do not disable system-wide protection or blindly remove quarantine.
+electron-builder finds identities with `security find-identity -v`, which lists only
+trusted certificates, so it cannot see a self-signed one. `mac.identity` is therefore
+`null`, and the `afterPack` hook `scripts/sign-mac.cjs` signs the app with
+electron-builder's own options (hardened runtime, entitlements for the app and its
+helpers) before the DMG and PKG are made. The first signing asks for access to the key
+in the login keychain; allow it once with **Always Allow**. Check a build with
+`codesign -dvv release/mac-arm64/SKAZ.app`: `Authority=SKAZ`, `TeamIdentifier=not set`.
 
-Proper distribution needs a **Developer ID Application** certificate plus
-notarization (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` in the
-environment; electron-builder notarizes when `mac.notarize` is enabled).
+Without `SKAZ_SIGN_IDENTITY` the app is signed ad hoc. It runs on the build machine,
+but macOS asks for its permissions again after every update, and `install.sh`
+refuses it.
+
+The certificate is not from Apple, so the app is not notarized. On another Mac a DMG
+or PKG downloaded by a browser is blocked on first launch until the user clicks
+**Open Anyway** in **System Settings → Privacy & Security**. `install.sh` downloads with
+curl, which sets no quarantine flag, so its copy opens directly. The PKG is unsigned:
+that would need a Developer ID Installer certificate.
+
+If the certificate is lost, a new one changes the designated requirement: users grant
+permissions once more after the next update, and `install.sh` needs the new SHA-1.
+
+## Releasing
+
+1. Bump the version (`npm version <x.y.z> --no-git-tag-version`), build with
+   `SKAZ_SIGN_IDENTITY`, and check the DMG on a temporary copy with its own profile.
+2. In `release/`, run
+   `shasum -a 256 SKAZ-<x.y.z>-arm64.dmg SKAZ-<x.y.z>-arm64.pkg > SHA256SUMS.txt`.
+   `install.sh` expects exactly these file names.
+3. Publish the DMG, the PKG and `SHA256SUMS.txt` as a regular GitHub release, not a
+   pre-release: `install.sh` resolves `releases/latest`, which skips pre-releases.
+4. Run the published one-liner into a scratch folder:
+   `curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | SKAZ_INSTALL_DIR=<folder> SKAZ_NO_OPEN=1 bash`.
 
 ## Provider API keys
 

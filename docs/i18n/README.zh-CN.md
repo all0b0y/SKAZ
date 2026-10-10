@@ -70,10 +70,26 @@ SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助�
 
 ## 安装与首次启动
 
-从 [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest) 下载最新的 DMG
-（Apple Silicon，macOS 13 或更高版本），打开后将 SKAZ 拖入 Applications 并启动。
-alpha 构建尚未经过 Apple 公证：首次启动时请按发布说明中的步骤操作
-（**Privacy & Security → Open Anyway**）。不要全局关闭 macOS 的安全保护。
+在“终端”中粘贴并运行（Apple Silicon，macOS 13 或更高版本）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
+```
+
+该[脚本](../../install.sh)会下载最新版本，校验 SHA-256 校验和与 SKAZ 的签名，将 SKAZ 安装到“应用程序”并打开。
+更新时运行同一条命令即可，会话、笔记和设置都会保留。SKAZ 尚未经过 Apple 公证，但用这种方式安装后，
+打开时不会再提示 Apple 无法验证该应用。
+
+<details>
+<summary>改用 DMG 或 PKG 安装</summary>
+
+从 [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest) 下载 `SKAZ-<版本>-arm64.dmg`（或 `.pkg` 安装器），打开后将 SKAZ 拖入“应用程序”。
+首次启动时 macOS 会提示无法验证 SKAZ：请点按 **完成**，不要将其移到废纸篓。然后打开
+**系统设置 → 隐私与安全性**，在关于 SKAZ 的提示旁点按 **仍要打开**。每个下载的版本只需操作一次。
+不要全局关闭 macOS 的安全保护。
+
+</details>
+
 如需运行当前代码，请参阅[开发环境设置](../../CONTRIBUTING.md)。
 
 首次启动时：

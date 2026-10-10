@@ -78,11 +78,30 @@ La IA puede equivocarse: los enlaces ayudan a comprobar una respuesta, pero no g
 
 ## Instalación y primer inicio
 
-Descarga el DMG más reciente desde [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest)
-(Apple Silicon, macOS 13 o posterior), ábrelo, arrastra SKAZ a Applications e iníciala.
-Las versiones alpha aún no están notarizadas: en el primer inicio sigue los pasos de las
-notas de la versión (**Privacy & Security → Open Anyway**). No desactives globalmente las
-protecciones de macOS. Para ejecutar el código actual, consulta la [configuración de desarrollo](../../CONTRIBUTING.md).
+Pega esto en Terminal (Apple Silicon, macOS 13 o posterior):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
+```
+
+El [script](../../install.sh) descarga la versión más reciente, comprueba su suma SHA-256 y la
+firma de SKAZ, instala SKAZ en Aplicaciones y la abre. Para actualizar, ejecuta el mismo comando;
+tus sesiones, notas y ajustes se conservan. SKAZ aún no está notarizada por Apple, pero instalada
+así se abre sin el aviso de que Apple no ha podido verificarla.
+
+<details>
+<summary>Instalar desde el DMG o el PKG</summary>
+
+Descarga `SKAZ-<versión>-arm64.dmg` (o el instalador `.pkg`) desde
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest), ábrelo y arrastra SKAZ a Aplicaciones. En el primer inicio macOS indica
+que no ha podido verificar SKAZ: pulsa **Aceptar** y no la muevas a la Papelera. Después abre
+**Ajustes del Sistema → Privacidad y seguridad** y pulsa **Abrir igualmente** junto al mensaje
+sobre SKAZ. Hace falta una vez por cada versión descargada. No desactives globalmente las
+protecciones de macOS.
+
+</details>
+
+Para ejecutar el código actual, consulta la [configuración de desarrollo](../../CONTRIBUTING.md).
 
 En el primer inicio:
 

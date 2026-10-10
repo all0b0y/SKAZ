@@ -81,10 +81,28 @@ help you check an answer; they do not guarantee it is correct.
 
 ## Install and first launch
 
-Download the latest DMG from [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest)
-(Apple Silicon, macOS 13 or later), open it, drag SKAZ to Applications and launch it.
-Alpha builds are not notarized yet: follow the first-launch steps in the release notes
-(**Privacy & Security → Open Anyway**). Do not disable macOS security protections globally.
+Paste this into Terminal (Apple Silicon, macOS 13 or later):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
+```
+
+The [script](install.sh) downloads the latest release, checks its SHA-256 checksum and SKAZ's
+signature, installs SKAZ into Applications and opens it. Run the same command to update; your
+sessions, notes and settings stay where they are. SKAZ is not notarized by Apple yet, and an app
+installed this way opens without the "Apple could not verify…" warning.
+
+<details>
+<summary>Install from the DMG or PKG instead</summary>
+
+Download `SKAZ-<version>-arm64.dmg` (or the `.pkg` installer) from
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest), open it and drag SKAZ to Applications. On the first launch macOS says
+it could not verify SKAZ: click **Done**, not Move to Trash. Then open **System Settings →
+Privacy & Security** and click **Open Anyway** next to the message about SKAZ. This is needed once
+per downloaded build. Do not disable macOS security protections globally.
+
+</details>
+
 To run the current code instead, use [development setup](CONTRIBUTING.md).
 
 On first launch:
