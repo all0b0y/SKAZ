@@ -159,14 +159,29 @@ def _header(placement: FragmentPlacement) -> str | None:
     return f"**Speaker {placement.speaker}** · {stamp}" if placement.speaker else stamp
 
 
+def _paragraph(fragment: Fragment) -> str:
+    header = _header(fragment)
+    body = f"{fragment.text} ^{fragment.block_id}"
+    return f"{header}\n{body}" if header else body
+
+
 def render_source(material_id: str, kind: MaterialKind, fragments: Sequence[Fragment]) -> str:
-    paragraphs = []
-    for fragment in fragments:
-        header = _header(fragment)
-        body = f"{fragment.text} ^{fragment.block_id}"
-        paragraphs.append(f"{header}\n{body}" if header else body)
+    paragraphs = [_paragraph(fragment) for fragment in fragments]
     head = render_frontmatter({"skaz_id": material_id, "kind": kind})
     return head + "\n" + "\n\n".join(paragraphs) + ("\n" if paragraphs else "")
+
+
+def render_appendix(fragments: Sequence[Fragment], *, after_existing: bool) -> str:
+    """The bytes ``render_source`` would add for ``fragments`` at the end of the file.
+
+    ``render_source(existing) + render_appendix(new, after_existing=bool(existing))``
+    equals ``render_source(existing + new)``, so a growing source can be
+    appended to instead of rewritten.
+    """
+    if not fragments:
+        return ""
+    body = "\n\n".join(_paragraph(fragment) for fragment in fragments) + "\n"
+    return "\n" + body if after_existing else body
 
 
 def source_paragraphs(text: str) -> dict[int, str]:

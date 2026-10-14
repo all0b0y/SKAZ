@@ -17,6 +17,7 @@ import pytest
 from skaz.app import create_app
 from skaz.config import AppConfig
 from skaz.gateways.soniox_async import ASYNC_MODEL
+from skaz.import_service import UNBOUNDED_IMPORTS
 from skaz.secrets import MemorySecretStore
 
 from .conftest import TOKEN, FakeHttp
@@ -410,7 +411,9 @@ async def test_capabilities_tell_the_dialog_what_it_may_promise(
     assert body["translation_rate_per_hour_usd"] == 0.15
     assert body["warn_above_usd"] == 0.30
     assert body["cloud_consent"] is True and body["has_api_key"] is True
-    assert body["max_concurrent_imports"] == 1
+    # No queue (KNOWLEDGE-WIKI-RESEARCH "без очередей"): a cloud provider has no
+    # artificial bound, reported to the legacy dialog as an unreachable number.
+    assert body["max_concurrent_imports"] == UNBOUNDED_IMPORTS
     # Markdown projection is off by default: say so instead of inventing a path.
     assert body["markdown_enabled"] is False
     assert "internal storage" in body["destination"]
@@ -429,13 +432,15 @@ async def test_the_cost_warning_threshold_can_be_changed_and_cleared(
 async def test_an_import_cannot_queue_behind_another(
     ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Still never queued — but no longer refused: a second import starts at once beside the first."""
     monkeypatch.setattr("skaz.import_service.POLL_SCHEDULE", (10.0,))
     source = audio_file(tmp_path)
     first = await start_import(ready, source)
     second = await ready.post("/imports", json={"path": str(source), "title": "Second"})
-    assert second.status_code == 409
-    assert len((await ready.get("/sessions")).json()["sessions"]) == 1
+    assert second.status_code == 201, second.text
+    assert len((await ready.get("/sessions")).json()["sessions"]) == 2
     assert (await ready.get(f"/imports/{first['session']['id']}")).status_code == 200
+    assert (await ready.get("/imports")).json()["active_imports"] == 2
 
 
 async def test_a_microphone_cannot_record_into_an_imported_session(

@@ -36,6 +36,10 @@ def start_finalization(runtime: Runtime, session_id: str, stream: NativeStream) 
             runtime.native_tasks.pop(session_id, None)
             runtime.native_streams.pop(session_id, None)
             done.set()
+            # The tail is done (or abandoned): a speech material fed by this session settles.
+            runtime.kb_speech.on_stream_settled(session_id, reason=(
+                (None if stream.connection_complete else stream.incomplete_reason) if stream.finalized
+                else stream.failure_reason or "Transcription of the recording's end was interrupted."))
 
     async def run() -> None:
         nonlocal started

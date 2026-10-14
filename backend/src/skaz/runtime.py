@@ -21,6 +21,7 @@ from .gateways.asr import LocalModelPreparations
 from .import_service import ImportService
 from .ingestion import IngestionService
 from .knowledge.service import KnowledgeService
+from .knowledge.speech import create_speech_service
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
 from .live_scheduler import LiveAsrScheduler
@@ -84,6 +85,8 @@ class Runtime:
         #: File imports. Resumption is started by the app lifespan, not here: a
         #: constructor must not create tasks on a loop it does not own.
         self.imports = ImportService(self)
+        #: Speech → materials (area S2): links recordings/imports to library materials.
+        self.kb_speech = create_speech_service(self)
         #: Written-but-unapplied note passages, held until the user compares them.
         self.note_rewrites = PendingRewrites()
         self.window_asr = WindowAsrPreview(self)

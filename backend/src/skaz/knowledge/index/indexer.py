@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 
 from ..ids import utc_now
 from ..markdown.page import plain_text
+from ..markdown.source import Fragment
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
 from .scanner import KnownPaths, ScannedMaterial, ScannedPage, ScanResult
@@ -62,6 +64,24 @@ def put_material(db: KnowledgeDatabase, material: ScannedMaterial) -> None:
         _put_material(connection, material)
 
 
+def append_fragments(db: KnowledgeDatabase, material_id: str, fragments: Sequence[Fragment]) -> bool:
+    """Index fragments appended after the indexed ones (cost ∝ new fragments).
+
+    Returns ``False`` without writing when the material is not indexed yet;
+    the caller then indexes the whole material with ``put_material``. The rows
+    come from files the caller already wrote durably, so the commit skips the
+    full disk flush (the startup scan rebuilds anything a power loss drops).
+    """
+    with db.write_rebuildable() as connection:
+        if connection.execute("SELECT 1 FROM materials WHERE id = ?", (material_id,)).fetchone() is None:
+            return False
+        last = connection.execute("SELECT COALESCE(MAX(ordinal), 0) FROM fragments WHERE material_id = ?",
+                                  (material_id,)).fetchone()[0]
+        for ordinal, fragment in enumerate(fragments, start=int(last) + 1):
+            _insert_fragment(connection, material_id, ordinal, fragment)
+        return True
+
+
 def put_page(db: KnowledgeDatabase, page: ScannedPage) -> None:
     with db.write() as connection:
         _put_page(connection, page)
@@ -100,14 +120,19 @@ def _put_material(connection: sqlite3.Connection, material: ScannedMaterial) -> 
          json.dumps(manifest.languages, ensure_ascii=False), manifest.created_at),
     )
     for ordinal, fragment in enumerate(files.fragments, start=1):
-        connection.execute(
-            "INSERT INTO fragments(material_id, seg, ordinal, text, start_ms, end_ms, speaker, page, idx) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (material_id, fragment.seg, ordinal, fragment.text, fragment.start_ms, fragment.end_ms,
-             fragment.speaker, fragment.page, fragment.index),
-        )
-        connection.execute("INSERT INTO fragments_fts(text, material_id, seg) VALUES (?, ?, ?)",
-                           (fragment.text, material_id, fragment.seg))
+        _insert_fragment(connection, material_id, ordinal, fragment)
+
+
+def _insert_fragment(connection: sqlite3.Connection, material_id: str, ordinal: int,
+                     fragment: Fragment) -> None:
+    connection.execute(
+        "INSERT INTO fragments(material_id, seg, ordinal, text, start_ms, end_ms, speaker, page, idx) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (material_id, fragment.seg, ordinal, fragment.text, fragment.start_ms, fragment.end_ms,
+         fragment.speaker, fragment.page, fragment.index),
+    )
+    connection.execute("INSERT INTO fragments_fts(text, material_id, seg) VALUES (?, ?, ?)",
+                       (fragment.text, material_id, fragment.seg))
 
 
 def _put_page(connection: sqlite3.Connection, page: ScannedPage) -> None:

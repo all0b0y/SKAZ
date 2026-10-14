@@ -52,12 +52,15 @@ def create_app(
             # Imports outlive the process that started them: a paid job keeps
             # running at the provider, so re-attach instead of abandoning it.
             runtime.imports.resume()
+            # Speech materials interrupted by the last shutdown settle in the background.
+            await runtime.kb_speech.start()
             runtime.codex.start()
             yield
         finally:
             await runtime.codex.close()
             await runtime.imports.close()
             await runtime.stop_native()
+            await runtime.kb_speech.close()
             await runtime.http.aclose()
             runtime.close()
 

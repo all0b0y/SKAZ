@@ -50,6 +50,9 @@ class NativeStream:
         self.failure_reason: str | None = None if opener else unavailable_reason
         #: Why the last finish() could not call the recording completely transcribed.
         self.incomplete_reason: str | None = None
+        #: Whether the last finish() saw *this* connection fully transcribed (earlier
+        #: attempts of the same recording may still have gaps; see ``incomplete_reason``).
+        self.connection_complete = False
         self._wake = asyncio.Event()
         self._overflow = asyncio.Event()
         self._stopping = asyncio.Event()
@@ -254,6 +257,7 @@ class NativeStream:
         snapshot = await disk_call(self.store.snapshot, self.connection.session_id)
         current = snapshot["connections"][-1]
         finished = self.complete and current["final_sample"] == snapshot["saved_samples"]
+        self.connection_complete = finished
         await disk_call(self.store.close, self.connection.id, finished=finished)
         self.finalized = True
         # Complete means the entire saved recording, not just its latest connection.

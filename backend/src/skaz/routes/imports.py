@@ -17,7 +17,7 @@ from .. import repository as repo
 from ..asr_providers import CAPABILITIES, LABELS, OPENAI_RATE_PER_HOUR_USD, readiness
 from ..gateways import LiveAsrError, ProviderNotConfigured
 from ..gateways.soniox_async import SUPPORTED_EXTENSIONS, SonioxAsyncError
-from ..import_service import MAX_CONCURRENT_IMPORTS, ImportRejected, ImportRequest
+from ..import_service import UNBOUNDED_IMPORTS, ImportRejected, ImportRequest, import_limit
 from ..import_store import ImportConflict, ImportRecord
 from ..media_source import InvalidMediaSource, youtube_source
 from ..native_io import disk_call
@@ -67,7 +67,9 @@ async def read_capabilities(runtime: RuntimeDep) -> ImportCapabilities:
         has_api_key=(bool(await disk_call(runtime.api_key, capabilities.api_key_provider))
                      if capabilities.api_key_provider else True),
         active_imports=runtime.imports.active,
-        max_concurrent_imports=MAX_CONCURRENT_IMPORTS,
+        # No queue: only on-device recognition has a protective bound; the legacy
+        # dialog compares with this number, so "no bound" is reported as a huge one.
+        max_concurrent_imports=import_limit(provider) or UNBOUNDED_IMPORTS,
         # Honest about where the result lands: the database always, a folder only
         # when the user turned the Markdown projection on.
         destination=(str(root) if root is not None

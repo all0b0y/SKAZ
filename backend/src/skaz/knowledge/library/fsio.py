@@ -93,5 +93,26 @@ def dump_json(value: Any) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+_ROW_ENCODER = json.JSONEncoder(ensure_ascii=False, separators=(", ", ": "))
+
+
+def dump_json_rows(value: dict[str, Any]) -> bytes:
+    """An object with one key per line and one list item per line.
+
+    Same data as ``dump_json`` and still readable, but each value goes through
+    the C encoder (``indent`` forces the pure-Python one): the fragment table
+    of a three-hour recording is written several times faster.
+    """
+    compact = _ROW_ENCODER.encode
+    lines = []
+    for key, item in value.items():
+        if isinstance(item, list) and item:
+            rows = ",\n    ".join(map(compact, item))
+            lines.append(f"  {compact(key)}: [\n    {rows}\n  ]")
+        else:
+            lines.append(f"  {compact(key)}: {compact(item)}")
+    return ("{\n" + ",\n".join(lines) + "\n}\n").encode("utf-8")
+
+
 def visible_entries(path: Path) -> list[str]:
     return [name for name in os.listdir(path) if name not in IGNORABLE_ENTRIES]
