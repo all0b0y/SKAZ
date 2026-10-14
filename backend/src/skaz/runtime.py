@@ -21,6 +21,8 @@ from .gateways.asr import LocalModelPreparations
 from .import_service import ImportService
 from .ingestion import IngestionService
 from .knowledge.service import KnowledgeService
+from .knowledge.sources.links import ytdlp_probe
+from .knowledge.sources.service import SourceService
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
 from .live_scheduler import LiveAsrScheduler
@@ -68,6 +70,8 @@ class Runtime:
             config.data_dir, documents_dir=config.documents_dir,
             documents_sandbox=config.documents_sandbox,
         )
+        #: Adding documents, links and pasted text to the knowledge library (area S1).
+        self.kb_sources = SourceService(self.kb, video_probe=ytdlp_probe)
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
