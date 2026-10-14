@@ -28,6 +28,7 @@ from .knowledge.mcp import McpServer
 from .knowledge.service import KnowledgeService
 from .knowledge.sources.links import ytdlp_probe
 from .knowledge.sources.service import SourceService
+from .knowledge.wiring import wire as wire_knowledge
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
 from .live_scheduler import LiveAsrScheduler
@@ -75,8 +76,7 @@ class Runtime:
             config.data_dir, documents_dir=config.documents_dir,
             documents_sandbox=config.documents_sandbox,
         )
-        #: Ingest (W1). Engine registry (A2), instruction detector (S1) and decision layer (D1) are
-        #: wired here once those areas land; until then jobs fail with a plain reason, never silently.
+        #: Ingest (W1); its detector/decisions/engines are connected by ``wire_knowledge`` below.
         self.kb_ingest = IngestService(self.kb)
         #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
         self.kb_tools = ToolRegistry(self.kb)
@@ -92,6 +92,12 @@ class Runtime:
         self.kb_decisions = DecisionService(
             self.kb.db, self.kb.settings, data_dir=config.data_dir, http=self.http,
             api_key=lambda: self.secrets.get("openrouter"), activity=self.activity_log,
+        )
+        #: Seams between the knowledge areas (detector, decisions, engines, auto-ingest).
+        #: Engines: Codex only until the engine registry (A2) lands; others resolve to None.
+        self.kb_auto_ingest = wire_knowledge(
+            self.kb, self.kb_ingest, self.kb_sources, self.kb_decisions.layer,
+            {"codex": self.kb_codex},
         )
         self.web_search = WebSearch(self.db, self.secrets)
         self.codex.web_search = self.web_search

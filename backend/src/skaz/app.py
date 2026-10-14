@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -50,6 +51,7 @@ def create_app(
             await disk_call(runtime.session_files.reconcile)
             # Reopen and rescan the connected knowledge library; never creates one.
             await disk_call(runtime.kb.start)
+            runtime.kb_auto_ingest.bind_loop(asyncio.get_running_loop())
             # Imports outlive the process that started them: a paid job keeps
             # running at the provider, so re-attach instead of abandoning it.
             runtime.imports.resume()
