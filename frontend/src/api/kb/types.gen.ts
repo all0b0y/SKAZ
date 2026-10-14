@@ -69,6 +69,37 @@ export interface KbFragmentHit {
   snippet: KbSnippetPart[];
 }
 
+export interface KbJob {
+  id: string;
+  kind: "ingest";
+  material_id: string;
+  state: "running" | "done" | "failed" | "cancelled" | "interrupted";
+  step: "reading" | "writing_notes" | "concepts" | "saving" | "done" | null;
+  label: string;
+  error: string | null;
+  can_retry: boolean;
+  progress: KbJobProgress;
+  journal: KbJobLogEntry[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KbJobLogEntry {
+  at: string;
+  message: string;
+}
+
+export interface KbJobProgress {
+  parts_total: number;
+  parts_done: number;
+  concepts_found: number;
+  blocks_written: number;
+  blocks_dropped: number;
+  blocks_blocked: number;
+  concepts_created: number;
+  concepts_updated: number;
+}
+
 export interface KbLibrary {
   state: "not_configured" | "ready" | "unavailable";
   root: string | null;
@@ -164,6 +195,22 @@ export interface KbSnippetPart {
   match: boolean;
 }
 
+export interface KbWikiSettings {
+  wiki_language: string;
+  wiki_language_chosen: boolean;
+  wiki_engine: "codex" | "claude_code" | "hermes" | null;
+  auto_add_files_links: boolean;
+  auto_add_text: boolean;
+}
+
+/** Only the fields present are changed; ``wiki_engine: null`` returns to the default agent. */
+export interface KbWikiSettingsUpdate {
+  wiki_language?: string | null;
+  wiki_engine?: "codex" | "claude_code" | "hermes" | null;
+  auto_add_files_links?: boolean | null;
+  auto_add_text?: boolean | null;
+}
+
 /** Every /kb route: path and query parameters, JSON body and JSON response. */
 export interface KbEndpoints {
   "GET /kb/folders": {
@@ -193,6 +240,27 @@ export interface KbEndpoints {
     body: never;
     response: void;
     status: 204;
+  };
+  "GET /kb/jobs": {
+    path: Record<string, never>;
+    query: { material_id?: string | null };
+    body: never;
+    response: KbJob[];
+    status: 200;
+  };
+  "GET /kb/jobs/{job_id}": {
+    path: { job_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 200;
+  };
+  "POST /kb/jobs/{job_id}/cancel": {
+    path: { job_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 200;
   };
   "GET /kb/library": {
     path: Record<string, never>;
@@ -229,6 +297,13 @@ export interface KbEndpoints {
     response: KbMaterial;
     status: 200;
   };
+  "POST /kb/materials/{material_id}/ingest": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
+  };
   "GET /kb/notifications": {
     path: Record<string, never>;
     query: { include_dismissed?: boolean };
@@ -248,6 +323,20 @@ export interface KbEndpoints {
     query: { q: string; limit?: number };
     body: never;
     response: KbSearchResults;
+    status: 200;
+  };
+  "GET /kb/settings/wiki": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbWikiSettings;
+    status: 200;
+  };
+  "PUT /kb/settings/wiki": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbWikiSettingsUpdate;
+    response: KbWikiSettings;
     status: 200;
   };
   "GET /kb/wiki/pages": {

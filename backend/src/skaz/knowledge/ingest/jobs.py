@@ -1,0 +1,158 @@
+"""Ingest jobs: rows of the foundation ``jobs`` table plus ``ingest_jobs`` details.
+
+No queue: every job runs on its own. A job that was running when the backend
+stopped is marked ``interrupted`` at the next start and is never resumed
+silently; the user retries it (a new job).
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+from ..ids import new_id, utc_now
+from ..store.database import KnowledgeDatabase
+
+JOB_KIND = "ingest"
+JobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
+JobStep = Literal["reading", "writing_notes", "concepts", "saving", "done"]
+FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted")
+INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the wiki. Retry to start again."
+#: Bounded journal: the status view never grows without limit.
+MAX_JOURNAL = 200
+
+
+@dataclass(frozen=True)
+class JournalEntry:
+    at: str
+    message: str
+
+
+@dataclass(frozen=True)
+class JobRecord:
+    id: str
+    material_id: str
+    state: JobState
+    step: JobStep | None
+    error: str | None
+    created_at: str
+    updated_at: str
+    counters: dict[str, int] = field(default_factory=dict)
+    journal: tuple[JournalEntry, ...] = ()
+
+    @property
+    def finished(self) -> bool:
+        return self.state in FINISHED
+
+    @property
+    def can_retry(self) -> bool:
+        return self.state in ("failed", "cancelled", "interrupted")
+
+    @property
+    def label(self) -> str:
+        """The material status line: Reading / Writing notes / Concepts N / Done."""
+        if self.state == "running":
+            if self.step == "concepts":
+                return f"Concepts {self.counters.get('concepts_found', 0)}"
+            return {"reading": "Reading", "writing_notes": "Writing notes", "saving": "Saving pages",
+                    "done": "Done"}.get(self.step or "reading", "Reading")
+        return {"done": "Done", "failed": "Failed", "cancelled": "Cancelled",
+                "interrupted": "Interrupted"}[self.state]
+
+
+def _record(row: sqlite3.Row) -> JobRecord:
+    journal = tuple(JournalEntry(item["at"], item["message"]) for item in json.loads(row["journal"] or "[]"))
+    return JobRecord(
+        id=row["id"], material_id=row["target_id"], state=row["state"], step=row["step"], error=row["error"],
+        created_at=row["created_at"], updated_at=row["updated_at"],
+        counters={key: int(value) for key, value in json.loads(row["counters"] or "{}").items()},
+        journal=journal,
+    )
+
+
+_SELECT = (
+    "SELECT j.*, COALESCE(d.counters, '{}') AS counters, COALESCE(d.journal, '[]') AS journal "
+    "FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id WHERE j.kind = ?"
+)
+
+
+class JobRepository:
+    def __init__(self, db: KnowledgeDatabase) -> None:
+        self.db = db
+
+    def create(self, material_id: str) -> JobRecord:
+        job_id = new_id("job")
+        now = utc_now()
+        with self.db.write() as connection:
+            connection.execute(
+                "INSERT INTO jobs(id, kind, target_id, state, step, error, created_at, updated_at) "
+                "VALUES (?, ?, ?, 'running', 'reading', NULL, ?, ?)",
+                (job_id, JOB_KIND, material_id, now, now),
+            )
+            connection.execute("INSERT INTO ingest_jobs(job_id) VALUES (?)", (job_id,))
+        record = self.get(job_id)
+        assert record is not None
+        return record
+
+    def get(self, job_id: str) -> JobRecord | None:
+        with self.db.read() as connection:
+            row = connection.execute(f"{_SELECT} AND j.id = ?", (JOB_KIND, job_id)).fetchone()
+        return _record(row) if row else None
+
+    def list_all(self, *, material_id: str | None = None) -> list[JobRecord]:
+        where, params = "", [JOB_KIND]
+        if material_id is not None:
+            where, params = " AND j.target_id = ?", [JOB_KIND, material_id]
+        with self.db.read() as connection:
+            rows = connection.execute(f"{_SELECT}{where} ORDER BY j.created_at DESC, j.rowid DESC",
+                                      params).fetchall()
+        return [_record(row) for row in rows]
+
+    def running_for(self, material_id: str) -> JobRecord | None:
+        return next((job for job in self.list_all(material_id=material_id) if job.state == "running"), None)
+
+    def set_step(self, job_id: str, step: JobStep) -> None:
+        with self.db.write() as connection:
+            connection.execute("UPDATE jobs SET step = ?, updated_at = ? WHERE id = ? AND state = 'running'",
+                               (step, utc_now(), job_id))
+
+    def finish(self, job_id: str, state: JobState, *, error: str | None = None) -> None:
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE jobs SET state = ?, error = ?, "
+                "step = CASE WHEN ? = 'done' THEN 'done' ELSE step END, "
+                "updated_at = ? WHERE id = ? AND state = 'running'",
+                (state, error, state, utc_now(), job_id),
+            )
+
+    def update_counters(self, job_id: str, values: dict[str, int]) -> None:
+        with self.db.write() as connection:
+            row = connection.execute("SELECT counters FROM ingest_jobs WHERE job_id = ?",
+                                     (job_id,)).fetchone()
+            counters: dict[str, Any] = json.loads(row["counters"]) if row else {}
+            counters.update(values)
+            connection.execute("UPDATE ingest_jobs SET counters = ? WHERE job_id = ?",
+                               (json.dumps(counters), job_id))
+            connection.execute("UPDATE jobs SET updated_at = ? WHERE id = ?", (utc_now(), job_id))
+
+    def log(self, job_id: str, message: str) -> None:
+        """Append a code-written line to the job journal (never source or model text)."""
+        with self.db.write() as connection:
+            row = connection.execute("SELECT journal FROM ingest_jobs WHERE job_id = ?", (job_id,)).fetchone()
+            journal: list[dict[str, str]] = json.loads(row["journal"]) if row else []
+            journal.append({"at": utc_now(), "message": message})
+            connection.execute("UPDATE ingest_jobs SET journal = ? WHERE job_id = ?",
+                               (json.dumps(journal[-MAX_JOURNAL:], ensure_ascii=False), job_id))
+
+    def interrupt_running(self) -> list[str]:
+        """Startup: jobs left ``running`` by a previous process become ``interrupted``."""
+        with self.db.write() as connection:
+            ids = [row[0] for row in connection.execute(
+                "SELECT id FROM jobs WHERE kind = ? AND state = 'running'", (JOB_KIND,))]
+            connection.execute(
+                "UPDATE jobs SET state = 'interrupted', error = ?, updated_at = ? "
+                "WHERE kind = ? AND state = 'running'",
+                (INTERRUPTED_REASON, utc_now(), JOB_KIND),
+            )
+        return ids
