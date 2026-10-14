@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from .activity import current_activity
 from .config import AppConfig
 from .knowledge.api import ROUTERS as KB_ROUTERS
+from .knowledge.mcp.router import router as kb_mcp_router
 from .managed_storage import StorageConflict
 from .native_io import disk_call
 from .routes import (
@@ -56,6 +57,7 @@ def create_app(
             yield
         finally:
             await runtime.kb_ingest.close()
+            await runtime.kb_codex.close()
             await runtime.codex.close()
             await runtime.imports.close()
             await runtime.stop_native()
@@ -105,6 +107,8 @@ def create_app(
     app.include_router(logs.router, dependencies=protected)
     for kb_router in KB_ROUTERS:
         app.include_router(kb_router, dependencies=protected)
+    # MCP for agent runs: its own per-run bearer token, never the app token (Host/Origin checked above).
+    app.include_router(kb_mcp_router)
     return app
 
 

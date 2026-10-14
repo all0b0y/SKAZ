@@ -130,7 +130,7 @@ class CodexConnection:
             "TMPDIR": str(self.root / "tmp"), "LANG": "en_US.UTF-8", "PATH": path,
         }
 
-    def rpc(self) -> CodexRpc:
+    def rpc(self, *, max_message_bytes: int = 1024 * 1024) -> CodexRpc:
         if self.binary is None:
             raise ValueError("Check the Codex connection first")
         command = [self.binary, "app-server", "--listen", "stdio://",
@@ -139,7 +139,7 @@ class CodexConnection:
         for feature in DISABLED_FEATURES:
             command.extend(("-c", f"features.{feature}=false"))
         env = self.environment()
-        return CodexRpc(tuple(command), cwd=self.cwd, env=env)
+        return CodexRpc(tuple(command), cwd=self.cwd, env=env, max_message_bytes=max_message_bytes)
 
     async def check(self) -> dict[str, Any]:
         async with self._lock:

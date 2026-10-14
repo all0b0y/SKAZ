@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +34,26 @@ BASE_INSTRUCTIONS = (
     "Cite transcript sources for speaker claims; label your own additions. "
     "Do not use web, shell, filesystem, or subagents."
 )
+
+
+def dynamic_tool(name: str, description: str, input_schema: Mapping[str, Any]) -> dict[str, Any]:
+    """One ``dynamicTools`` entry of ``thread/start``."""
+    return {"type": "function", "name": name, "description": description,
+            "inputSchema": deepcopy(dict(input_schema))}
+
+
+def thread_start_params(
+    *, cwd: Path, model: str | None, base_instructions: str, dynamic_tools: list[dict[str, Any]],
+    disabled_features: Iterable[str] = DISABLED_FEATURES,
+) -> dict[str, Any]:
+    """Isolated ephemeral thread: no environments (files/shell), no approvals, no web, features off."""
+    return {
+        "cwd": str(cwd), **({"model": model} if model else {}), "ephemeral": True,
+        "environments": [], "approvalPolicy": "never",
+        "config": {"web_search": "disabled", **{f"features.{name}": False for name in disabled_features}},
+        "baseInstructions": base_instructions,
+        "dynamicTools": dynamic_tools,
+    }
 
 
 @dataclass(frozen=True)
@@ -84,10 +104,7 @@ class CodexSession:
         self._model = model
         self._effort = effort
         self._input_prefix = input_prefix
-        self._definitions = [{
-            "type": "function", "name": tool.name, "description": tool.description,
-            "inputSchema": deepcopy(tool.input_schema),
-        } for tool in tools]
+        self._definitions = [dynamic_tool(tool.name, tool.description, tool.input_schema) for tool in tools]
         self._handlers = {tool.name: tool.handler for tool in tools}
         self._tool_timeouts = {tool.name: tool.timeout for tool in tools}
         self._timeout = turn_timeout
@@ -131,15 +148,10 @@ class CodexSession:
         try:
             async with asyncio.timeout(self._timeout):
                 if self._thread_id is None:
-                    result = await self._rpc.request("thread/start", {
-                        "cwd": str(self._cwd), "model": self._model, "ephemeral": True,
-                        "environments": [], "approvalPolicy": "never",
-                        "config": {"web_search": "disabled", **{
-                            f"features.{name}": False for name in DISABLED_FEATURES
-                        }},
-                        "baseInstructions": BASE_INSTRUCTIONS,
-                        "dynamicTools": self._definitions,
-                    })
+                    result = await self._rpc.request("thread/start", thread_start_params(
+                        cwd=self._cwd, model=self._model, base_instructions=BASE_INSTRUCTIONS,
+                        dynamic_tools=self._definitions,
+                    ))
                     thread_id = result["thread"]["id"]
                     if not isinstance(thread_id, str) or not thread_id:
                         raise CodexRpcError("Invalid Codex thread")
