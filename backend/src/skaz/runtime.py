@@ -20,6 +20,7 @@ from .db import Database
 from .gateways.asr import LocalModelPreparations
 from .import_service import ImportService
 from .ingestion import IngestionService
+from .knowledge.service import KnowledgeService
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
 from .live_scheduler import LiveAsrScheduler
@@ -62,6 +63,11 @@ class Runtime:
         self.session_files.storage = self.storage
         self.live_store = LiveStore(self.db)
         self.live_store.recover_interrupted()
+        #: Knowledge wiki: its own knowledge.sqlite3; touches Documents only after an explicit connect.
+        self.kb = KnowledgeService(
+            config.data_dir, documents_dir=config.documents_dir,
+            documents_sandbox=config.documents_sandbox,
+        )
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
@@ -200,4 +206,5 @@ class Runtime:
         self.window_asr.close()
         self.local_models.close()
         self.ingestion.close()
+        self.kb.close()
         self.db.close()

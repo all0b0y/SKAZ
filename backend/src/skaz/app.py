@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from .activity import current_activity
 from .config import AppConfig
+from .knowledge.api import ROUTERS as KB_ROUTERS
 from .managed_storage import StorageConflict
 from .native_io import disk_call
 from .routes import (
@@ -46,6 +47,8 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             await disk_call(runtime.session_files.reconcile)
+            # Reopen and rescan the connected knowledge library; never creates one.
+            await disk_call(runtime.kb.start)
             # Imports outlive the process that started them: a paid job keeps
             # running at the provider, so re-attach instead of abandoning it.
             runtime.imports.resume()
@@ -99,6 +102,8 @@ def create_app(
     app.include_router(web_search.router, dependencies=protected)
     app.include_router(models.router, dependencies=protected)
     app.include_router(logs.router, dependencies=protected)
+    for kb_router in KB_ROUTERS:
+        app.include_router(kb_router, dependencies=protected)
     return app
 
 
