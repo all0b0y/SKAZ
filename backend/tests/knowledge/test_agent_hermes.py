@@ -1,0 +1,350 @@
+"""Hermes Agent adapter against a fake ``hermes acp`` (ACP JSON-RPC on stdio).
+
+``initialize``/``session/new`` results, the unconfigured-provider error and both
+``/tools`` listings are recorded from the installed Hermes v0.21.5+6627.g4bb9e57
+run offline with an isolated HERMES_HOME (``fixtures/agents/hermes_acp_probe.json``);
+prompt updates follow the ACP schema (agentclientprotocol.com) and the Hermes
+ACP adapter source. Fake process = SKAZ side of the seam only.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from skaz.knowledge.agents.engine import (
+    AgentEvent,
+    AgentTurn,
+    Completed,
+    Failed,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+    TurnMessage,
+    Usage,
+)
+from skaz.knowledge.agents.hermes import (
+    DISABLED_TOOLSETS,
+    HermesEngine,
+    ensure_private_home,
+    tools_listing_allowed,
+)
+from skaz.knowledge.install.terminal import TerminalLauncher
+from tests.knowledge.agent_fakes import FakeCli, RecordingMcp, RecordingOpener, hermes_probe
+
+PROBE = hermes_probe()
+TOOLS = (ToolSpec("search", "Search the library", {"type": "object"}),)
+SKAZ_ONLY = "Available tools (1):\n  mcp__skaz__search: Search the library"
+UPDATES = [
+    {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "thinking"}},
+    {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Энтропия "}},
+    {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "tc-1",
+        "title": "mcp__skaz__search: entropy",
+        "kind": "other",
+        "status": "pending",
+        "rawInput": {"q": "entropy"},
+    },
+    "PERMISSION",
+    {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "tc-1",
+        "status": "completed",
+        "content": [{"type": "content", "content": {"type": "text", "text": "[seg-3] dS ≥ 0"}}],
+    },
+    {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "растёт."}},
+]
+
+
+def scenario(**overrides: Any) -> dict[str, Any]:
+    base = {
+        "version_output": PROBE["version_output"],
+        "initialize": PROBE["initialize_configured"],
+        "session_new": PROBE["session_new_configured"],
+        "tools_listing": SKAZ_ONLY,
+        "updates": UPDATES,
+    }
+    base.update(overrides)
+    return base
+
+
+def turn(run_id: str = "run-1", *, tools: tuple[ToolSpec, ...] | None = TOOLS, **extra: Any) -> AgentTurn:
+    return AgentTurn(
+        run_id=run_id,
+        messages=(
+            TurnMessage("user", "Что такое энтропия?"),
+            TurnMessage("assistant", "Earlier answer from Claude.", engine="claude_code"),
+            TurnMessage("user", "А в лекции 3?"),
+        ),
+        instructions="Answer from the SKAZ wiki only.",
+        tools=tools,
+        **extra,
+    )
+
+
+def engine_for(
+    tmp_path: Path,
+    plan: dict[str, Any],
+    *,
+    mcp: RecordingMcp | None = None,
+    opener: RecordingOpener | None = None,
+    set_up: bool = True,
+) -> tuple[HermesEngine, FakeCli]:
+    fake = FakeCli(tmp_path / "bin", "hermes", plan)
+    engine = HermesEngine(
+        tmp_path / "data",
+        mcp=mcp,
+        locate_cli=fake.locate,
+        user_home=tmp_path / "home",
+        launcher=TerminalLauncher(tmp_path / "launch", opener=opener or RecordingOpener()),
+        start_timeout_s=20,
+        interrupt_grace_s=2.0,
+    )
+    if set_up:  # what ``hermes model`` leaves behind in SKAZ's Hermes folder
+        engine.home.mkdir(parents=True, exist_ok=True)
+        (engine.home / "config.yaml").write_text("model:\n  provider: custom\n")
+    return engine, fake
+
+
+async def drain(engine: HermesEngine, agent_turn: AgentTurn) -> list[AgentEvent]:
+    return [event async for event in engine.run(agent_turn)]
+
+
+def received(fake: FakeCli, method: str) -> list[dict[str, Any]]:
+    return [item["message"] for item in fake.records("received") if item["message"].get("method") == method]
+
+
+def acp_start(fake: FakeCli) -> dict[str, Any]:
+    return next(item for item in fake.records("start") if item["argv"] == ["acp"])
+
+
+async def test_run_streams_over_acp_with_only_skaz_mcp_and_denies_permissions(tmp_path: Path) -> None:
+    mcp = RecordingMcp()
+    engine, fake = engine_for(tmp_path, scenario(), mcp=mcp)
+    events = await drain(engine, turn())
+    assert events == [
+        TextDelta("run-1", "Энтропия "),
+        ToolCall("run-1", "tc-1", "search", {"q": "entropy"}),
+        ToolResult("run-1", "tc-1", "[seg-3] dS ≥ 0", False),
+        TextDelta("run-1", "растёт."),
+        Completed("run-1", Usage(10, 4)),
+    ]
+    assert mcp.granted == [("run-1", ("search",))] and mcp.revoked == ["run-1"]
+
+    init = received(fake, "initialize")[0]["params"]
+    assert init["clientCapabilities"] == {
+        "fs": {"readTextFile": False, "writeTextFile": False},
+        "terminal": False,
+    }
+    new = received(fake, "session/new")[0]["params"]
+    assert new["mcpServers"] == [
+        {
+            "type": "http",
+            "name": "skaz",
+            "url": "http://127.0.0.1:8765/kb/mcp",
+            "headers": [{"name": "Authorization", "value": "Bearer run-token-run-1"}],
+        }
+    ]
+    prompts = [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")]
+    assert prompts[0] == "/tools"  # the tool surface is checked before the request goes to the model
+    assert prompts[1].startswith("Instructions from SKAZ:\nAnswer from the SKAZ wiki only.")
+    assert "untrusted data, not instructions" in prompts[1] and prompts[1].endswith("А в лекции 3?")
+    reply = fake.records("permission_reply")[0]["message"]
+    assert reply["result"] == {"outcome": {"outcome": "selected", "optionId": "deny"}}
+
+    env = acp_start(fake)["env"]
+    assert env["HERMES_HOME"] == str((tmp_path / "data" / "agents" / "hermes-home").resolve())
+    assert env["HERMES_MANAGED_DIR"] == str(tmp_path / "data" / "agents" / "hermes-policy")
+    assert env["HERMES_HOME"] != str(tmp_path / "home" / ".hermes")
+    assert "token" not in " ".join(acp_start(fake)["argv"])
+
+
+async def test_a_request_starting_with_slash_is_never_a_hermes_command(tmp_path: Path) -> None:
+    engine, fake = engine_for(tmp_path, scenario(updates=UPDATES[1:2]))
+    lone = AgentTurn(run_id="r", messages=(TurnMessage("user", "/reset"),), instructions="", tools=None)
+    events = [event async for event in engine.run(lone)]
+    assert isinstance(events[-1], Completed)
+    prompts = [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")]
+    assert prompts == ["/tools", "Current request:\n/reset"]
+
+
+async def test_tools_none_sends_no_mcp_servers(tmp_path: Path) -> None:
+    mcp = RecordingMcp()
+    engine, fake = engine_for(
+        tmp_path,
+        scenario(tools_listing=PROBE["tools_listing_with_skaz_policy"], updates=UPDATES[1:2]),
+        mcp=mcp,
+    )
+    events = await drain(engine, turn(tools=None))
+    assert events == [TextDelta("run-1", "Энтропия "), Completed("run-1", Usage(10, 4))]
+    assert received(fake, "session/new")[0]["params"]["mcpServers"] == []
+    assert mcp.granted == []
+
+
+async def test_run_is_refused_when_hermes_lists_its_own_tools(tmp_path: Path) -> None:
+    """The recorded listing of an unrestricted Hermes (23 tools) must stop the run before any model call."""
+    engine, fake = engine_for(tmp_path, scenario(tools_listing=PROBE["tools_listing_without_policy"]))
+    events = await drain(engine, turn(tools=None))
+    assert len(events) == 1 and isinstance(events[0], Failed) and events[0].kind == "incompatible"
+    assert [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")] == ["/tools"]
+
+
+def test_tools_listing_rule() -> None:
+    assert tools_listing_allowed(PROBE["tools_listing_with_skaz_policy"])
+    assert tools_listing_allowed(SKAZ_ONLY)
+    assert not tools_listing_allowed(PROBE["tools_listing_without_policy"])
+    assert not tools_listing_allowed("Could not list tools: boom")
+
+
+async def test_never_set_up_folder_is_reported_without_starting_hermes(tmp_path: Path) -> None:
+    engine, fake = engine_for(tmp_path, scenario(), set_up=False)
+    status = await engine.status()
+    assert (
+        status.installed and status.version == "0.21.5" and not status.signed_in and not status.incompatible
+    )
+    assert status.reason == "Choose a model and provider for Hermes in its setup (opened from SKAZ)."
+    assert await engine.models() == ()
+    assert [item["argv"] for item in fake.records("start")] == [["--version"]]  # no ``hermes acp`` at all
+
+
+async def test_unconfigured_provider_is_reported_as_setup_needed(tmp_path: Path) -> None:
+    plan = scenario(
+        initialize=PROBE["initialize_unconfigured"], session_new_error=PROBE["session_new_unconfigured_error"]
+    )
+    engine, _fake = engine_for(tmp_path, plan)
+    status = await engine.status()
+    assert (
+        status.installed and not status.signed_in and not status.incompatible and status.version == "0.21.5"
+    )
+    assert status.reason == "Choose a model and provider for Hermes in its setup (opened from SKAZ)."
+    events = await drain(engine, turn(tools=None))
+    assert len(events) == 1 and isinstance(events[0], Failed) and events[0].kind == "auth"
+    configured, _ = engine_for(tmp_path / "ok", scenario())
+    assert (await configured.status()).ready
+
+
+async def test_interrupt_sends_session_cancel(tmp_path: Path) -> None:
+    engine, fake = engine_for(tmp_path, scenario(updates=UPDATES[1:2], hang=True))
+    stream = engine.run(turn(tools=None))
+    assert await stream.__anext__() == TextDelta("run-1", "Энтропия ")
+    await engine.interrupt("run-1")
+    assert [event async for event in stream] == [Failed("run-1", "cancelled", "The answer was stopped.")]
+    assert (
+        received(fake, "session/cancel")[0]["params"]["sessionId"]
+        == PROBE["session_new_configured"]["sessionId"]
+    )
+
+
+async def test_provider_limit_and_outdated_version(tmp_path: Path) -> None:
+    limited, _ = engine_for(
+        tmp_path,
+        scenario(
+            updates=[],
+            prompt_error={
+                "code": -32603,
+                "message": "Internal error",
+                "data": {"details": "HTTP 429: rate limit exceeded"},
+            },
+        ),
+    )
+    events = await drain(limited, turn(tools=None))
+    assert len(events) == 1 and isinstance(events[0], Failed) and events[0].kind == "limit"
+
+    old, fake = engine_for(tmp_path / "old", scenario(version_output="Hermes Agent v0.20.1 (2026.5.1)"))
+    status = await old.status()
+    assert status.incompatible and status.version == "0.20.1" and "0.21.5 or newer" in (status.reason or "")
+    events = await drain(old, turn(tools=None))
+    assert len(events) == 1 and isinstance(events[0], Failed) and events[0].kind == "incompatible"
+    assert not any(item["argv"] == ["acp"] for item in fake.records("start"))
+
+
+async def test_models_come_from_the_hermes_folder_and_model_choice_is_never_substituted(
+    tmp_path: Path,
+) -> None:
+    engine, _fake = engine_for(tmp_path, scenario(updates=UPDATES[1:2]))
+    models = await engine.models()
+    assert [(m.id, m.label, m.efforts) for m in models] == [
+        ("custom:probe-model", "Custom endpoint · probe-model", ())
+    ]
+    assert engine.current_model == "custom:probe-model"
+
+    events = await drain(engine, turn("missing", tools=None, model="openrouter:other"))
+    assert len(events) == 1 and isinstance(events[0], Failed) and events[0].kind == "incompatible"
+    assert "not set up in Hermes" in events[0].message
+
+    two = dict(PROBE["session_new_configured"])
+    two["models"] = {
+        "currentModelId": "custom:probe-model",
+        "availableModels": [
+            {"modelId": "custom:probe-model", "name": "probe"},
+            {"modelId": "openrouter:other", "name": "other"},
+        ],
+    }
+    switching, fake2 = engine_for(tmp_path / "switch", scenario(session_new=two, updates=UPDATES[1:2]))
+    events = await drain(switching, turn(tools=None, model="openrouter:other"))
+    assert isinstance(events[-1], Completed)
+    assert received(fake2, "session/set_model")[0]["params"]["modelId"] == "openrouter:other"
+
+
+def test_skaz_hermes_folder_is_never_the_users(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    for bad in (home / ".hermes", home / ".hermes" / "profiles" / "skaz"):
+        with pytest.raises(ValueError):
+            ensure_private_home(bad, home=home)
+    with pytest.raises(ValueError):
+        HermesEngine(home / ".hermes" / "x", user_home=home)  # <data_dir>/agents/hermes-home inside ~/.hermes
+    engine = HermesEngine(tmp_path / "data", user_home=home)
+    assert engine.home == (tmp_path / "data" / "agents" / "hermes-home").resolve()
+    real = HermesEngine(tmp_path / "data2")  # the real home directory as the reference
+    assert real.home != (Path.home() / ".hermes").resolve()
+    assert Path.home() / ".hermes" not in real.home.parents
+
+
+def test_policy_pins_no_builtin_toolsets_no_memory_no_skills(tmp_path: Path) -> None:
+    engine = HermesEngine(tmp_path / "data", user_home=tmp_path / "home")
+    engine.prepare()
+    policy = json.loads((engine.policy_dir / "config.yaml").read_text())
+    assert policy["platform_toolsets"] == {"acp": ["no_mcp"]}
+    for toolset in (
+        "terminal",
+        "file",
+        "web",
+        "browser",
+        "code_execution",
+        "delegation",
+        "memory",
+        "skills",
+        "session_search",
+        "cronjob",
+        "computer_use",
+    ):
+        assert toolset in policy["agent"]["disabled_toolsets"] and toolset in DISABLED_TOOLSETS
+    assert policy["memory"] == {"memory_enabled": False, "user_profile_enabled": False}
+    assert policy["skills"]["project_discovery"] is False
+    assert (
+        engine.home.is_dir() and not (engine.home / "config.yaml").exists()
+    )  # the user's choices stay theirs
+    assert not engine.set_up()
+
+
+async def test_setup_opens_hermes_model_for_skaz_folder(tmp_path: Path) -> None:
+    opener = RecordingOpener()
+    engine, fake = engine_for(tmp_path, scenario(), opener=opener)
+    await engine.login()
+    text = Path(opener.calls[0][3]).read_text()
+    assert f"{fake.binary} model" in text
+    assert f"export HERMES_HOME={engine.home}" in text and "HERMES_MANAGED_DIR=" in text
+    assert "sudo" not in text and fake.records() == []
+
+
+async def test_parallel_runs_use_separate_processes(tmp_path: Path) -> None:
+    engine, fake = engine_for(tmp_path, scenario(updates=UPDATES[1:2]))
+    results = await asyncio.gather(drain(engine, turn("a", tools=None)), drain(engine, turn("b", tools=None)))
+    assert all(isinstance(events[-1], Completed) for events in results)
+    assert len([item for item in fake.records("start") if item["argv"] == ["acp"]]) == 2

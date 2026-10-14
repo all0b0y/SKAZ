@@ -55,6 +55,7 @@ def create_app(
             runtime.codex.start()
             yield
         finally:
+            await runtime.kb_agents.aclose()
             await runtime.codex.close()
             await runtime.imports.close()
             await runtime.stop_native()

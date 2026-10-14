@@ -20,6 +20,7 @@ from .db import Database
 from .gateways.asr import LocalModelPreparations
 from .import_service import ImportService
 from .ingestion import IngestionService
+from .knowledge.agents.hub import build_agents_hub
 from .knowledge.service import KnowledgeService
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -68,6 +69,9 @@ class Runtime:
             config.data_dir, documents_dir=config.documents_dir,
             documents_sandbox=config.documents_sandbox,
         )
+        #: Agent engines (Codex, Claude Code, Hermes): statuses, installs, sign-in; nothing runs until asked.
+        self.kb_agents = build_agents_hub(config.data_dir, settings=self.kb.settings,
+                                          codex=self.codex.connection)
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")

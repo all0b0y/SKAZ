@@ -1,0 +1,159 @@
+{
+ "source": "Offline probe of hermes acp (Hermes Agent v0.21.5+6627.g4bb9e57) with an isolated HERMES_HOME, 2026-10-15; paths and session ids replaced.",
+ "initialize_configured": {
+  "agentCapabilities": {
+   "loadSession": true,
+   "promptCapabilities": {
+    "image": true
+   },
+   "sessionCapabilities": {
+    "fork": {},
+    "list": {},
+    "resume": {}
+   }
+  },
+  "agentInfo": {
+   "name": "hermes-agent",
+   "version": "0.21.5"
+  },
+  "authMethods": [
+   {
+    "description": "Authenticate Hermes using the currently configured custom runtime credentials.",
+    "id": "custom",
+    "name": "custom runtime credentials"
+   },
+   {
+    "args": [
+     "--setup"
+    ],
+    "description": "Open Hermes' interactive model/provider setup in a terminal. Use this when Hermes has not been configured on this machine yet.",
+    "id": "hermes-setup",
+    "name": "Configure Hermes provider",
+    "type": "terminal"
+   }
+  ],
+  "protocolVersion": 1
+ },
+ "session_new_configured": {
+  "models": {
+   "availableModels": [
+    {
+     "description": "Provider: Custom endpoint • current",
+     "modelId": "custom:probe-model",
+     "name": "Custom endpoint · probe-model"
+    }
+   ],
+   "currentModelId": "custom:probe-model"
+  },
+  "modes": {
+   "availableModes": [
+    {
+     "description": "Ask before edits.",
+     "id": "default",
+     "name": "Default"
+    },
+    {
+     "description": "Auto-allow workspace and temp-dir edits; still asks for sensitive paths.",
+     "id": "accept_edits",
+     "name": "Accept Edits"
+    },
+    {
+     "description": "Auto-allow file edits for this session except sensitive paths.",
+     "id": "dont_ask",
+     "name": "Don't Ask"
+    }
+   ],
+   "currentModeId": "default"
+  },
+  "sessionId": "00000000-0000-4000-8000-000000000001"
+ },
+ "tools_listing_with_skaz_policy": "No tools available.",
+ "tools_listing_without_policy": "Available tools (23):\n  browser_exec: Drive a real web browser via the Browser Use CLI: `code` runs as full Python ...\n  browser_vault_enter_code: The page asks for a one-time / verification / 2FA code after the password: ca...\n  browser_vault_fill: Fill the CURRENT browser page from a vault handle (see browser_vault_list): a...\n  browser_vault_list: ALWAYS call this first when a page asks for a password, card or address. List...\n  browser_vault_save_login: The current page is a login form and browser_vault_list has no item for its o...\n  browser_vault_unlock: Ask the user to unlock a password manager (1Password or Bitwarden) for this s...\n  delegate_task: Spawn subagents in isolated contexts; each gets its own conversation, termina...\n  execute_code: Run Python that calls Hermes tools programmatically. Use when you need 3+ too...\n  memory: Save durable facts to persistent memory that survive across sessions. Memory ...\n  patch: Targeted find-and-replace edits in files. Use this instead of sed/awk in term...\n  read_file: Read a text file with line numbers and pagination. Use this instead of cat/he...\n  search_files: Search file contents or find files by name. Use this instead of grep/rg/find/...\n  skill_manage: Create, update, or delete skills — your procedural memory for recurring task ...\n  skill_view: Skills allow for loading information about specific tasks and workflows, as w...\n  skills_list: List available skills (name + description). Use skill_view(name) to load full...\n  terminal: Execute shell commands. The host OS, shell, and terminal backend are stated i...\n  vision_analyze: Load an image into the conversation so you can see it. Call it any time the u...\n  web_extract: Extract content from web page URLs. Returns clean page content in markdown/te...\n  web_search: Search the web for information. Returns up to 5 results by default with title...\n  write_file: Write content to a file, completely replacing existing content. Use this inst...\n  tool_search: Search 3 additional tools that are loaded on demand. Takes a list of queries ...\n  tool_describe: Load the full JSON schemas for tools returned by `tool_search`. Required befo...\n  tool_call: Invoke deferred tools. Takes `calls`, an array of {name, arguments} — one ent...",
+ "available_commands_update": {
+  "availableCommands": [
+   {
+    "description": "List available commands",
+    "name": "help"
+   },
+   {
+    "description": "Show current model and provider, or switch models",
+    "input": {
+     "hint": "model name to switch to"
+    },
+    "name": "model"
+   },
+   {
+    "description": "List available tools with descriptions",
+    "name": "tools"
+   },
+   {
+    "description": "Show conversation message counts by role",
+    "name": "context"
+   },
+   {
+    "description": "Clear conversation history",
+    "name": "reset"
+   },
+   {
+    "description": "Compress conversation context",
+    "name": "compress"
+   },
+   {
+    "description": "Inject guidance into the currently running agent turn",
+    "input": {
+     "hint": "guidance for the active turn"
+    },
+    "name": "steer"
+   },
+   {
+    "description": "Queue a prompt to run after the current turn finishes",
+    "input": {
+     "hint": "prompt to run next"
+    },
+    "name": "queue"
+   },
+   {
+    "description": "Show Hermes version",
+    "name": "version"
+   }
+  ],
+  "sessionUpdate": "available_commands_update"
+ },
+ "initialize_unconfigured": {
+  "agentCapabilities": {
+   "loadSession": true,
+   "promptCapabilities": {
+    "image": true
+   },
+   "sessionCapabilities": {
+    "fork": {},
+    "list": {},
+    "resume": {}
+   }
+  },
+  "agentInfo": {
+   "name": "hermes-agent",
+   "version": "0.21.5"
+  },
+  "authMethods": [
+   {
+    "args": [
+     "--setup"
+    ],
+    "description": "Open Hermes' interactive model/provider setup in a terminal. Use this when Hermes has not been configured on this machine yet.",
+    "id": "hermes-setup",
+    "name": "Configure Hermes provider",
+    "type": "terminal"
+   }
+  ],
+  "protocolVersion": 1
+ },
+ "session_new_unconfigured_error": {
+  "code": -32603,
+  "message": "Internal error",
+  "data": {
+   "details": "Hermes is not connected to any AI provider yet. Run `hermes model` to pick one (the free Nous tier needs no API key), type `/login` in chat, or add a key with `hermes auth add <provider>`. (Advanced: put an API key such as OPENROUTER_API_KEY in /tmp/skaz-data/agents/hermes-home/.env.)"
+  }
+ },
+ "version_output": "Hermes Agent v0.21.5+6627.g4bb9e57 (2026.9.24) · upstream 4bb9e57b\nInstall directory: /tmp/home/.hermes/hermes-agent\nInstall method: git\nPython: 3.14.7\nOpenAI SDK: 2.24.0\n"
+}

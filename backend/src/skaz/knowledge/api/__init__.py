@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import folders, library, materials, notifications, search, wiki
+from . import agents, folders, library, materials, notifications, search, wiki
 
 #: Mounted with the bearer-token dependency. Append-only: one line per area.
 ROUTERS: tuple[APIRouter, ...] = (
@@ -13,4 +13,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     wiki.router,
     search.router,
     notifications.router,
+    agents.router,
 )
