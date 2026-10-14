@@ -1,16 +1,15 @@
 import './legacyStorage';
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-import './styles/global.css';
-import './styles/app.css';
-import './styles/motion.css';
+import { chooseInterface } from './kb/uiChoice';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element #root not found');
 
-createRoot(container).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// New interface (Knowledge Wiki) only when asked for: VITE_SKAZ_UI=kb at build time or
+// localStorage['skaz.ui'] = 'kb'. Otherwise the current App, as before. Each interface brings
+// its own global styles, so neither leaks into the other.
+const choice = chooseInterface(import.meta.env.VITE_SKAZ_UI, () => localStorage.getItem('skaz.ui'));
+if (choice === 'kb') {
+  void import('./kb/main').then(({ mount }) => mount(container));
+} else {
+  void import('./legacyMain').then(({ mount }) => mount(container));
+}
