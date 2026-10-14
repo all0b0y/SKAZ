@@ -25,6 +25,8 @@ from .knowledge.agents.tools import ToolRegistry
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
 from .knowledge.service import KnowledgeService
+from .knowledge.sources.links import ytdlp_probe
+from .knowledge.sources.service import SourceService
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
 from .live_scheduler import LiveAsrScheduler
@@ -79,6 +81,8 @@ class Runtime:
         self.kb_tools = ToolRegistry(self.kb)
         self.kb_mcp = McpServer(self.kb_tools, url=f"http://{config.host}:{config.port}/kb/mcp")
         self.kb_codex = CodexEngine(self.codex.connection, self.kb_tools)
+        #: Adding documents, links and pasted text to the knowledge library (area S1).
+        self.kb_sources = SourceService(self.kb, video_probe=ytdlp_probe)
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
