@@ -20,6 +20,9 @@ from .db import Database
 from .gateways.asr import LocalModelPreparations
 from .import_service import ImportService
 from .ingestion import IngestionService
+from .knowledge.agents.codex import CodexEngine
+from .knowledge.agents.tools import ToolRegistry
+from .knowledge.mcp import McpServer
 from .knowledge.service import KnowledgeService
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -68,6 +71,10 @@ class Runtime:
             config.data_dir, documents_dir=config.documents_dir,
             documents_sandbox=config.documents_sandbox,
         )
+        #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
+        self.kb_tools = ToolRegistry(self.kb)
+        self.kb_mcp = McpServer(self.kb_tools, url=f"http://{config.host}:{config.port}/kb/mcp")
+        self.kb_codex = CodexEngine(self.codex.connection, self.kb_tools)
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
