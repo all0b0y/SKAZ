@@ -22,6 +22,7 @@ from .import_service import ImportService
 from .ingestion import IngestionService
 from .knowledge.agents.codex import CodexEngine
 from .knowledge.agents.tools import ToolRegistry
+from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
 from .knowledge.service import KnowledgeService
@@ -87,6 +88,11 @@ class Runtime:
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
         self.http = http_client or httpx.AsyncClient(timeout=config.request_timeout_s)
+        #: Wiki decision layer (System One): provider choice, local llama-server, journal.
+        self.kb_decisions = DecisionService(
+            self.kb.db, self.kb.settings, data_dir=config.data_dir, http=self.http,
+            api_key=lambda: self.secrets.get("openrouter"), activity=self.activity_log,
+        )
         self.web_search = WebSearch(self.db, self.secrets)
         self.codex.web_search = self.web_search
         self.settings_store = SettingsStore(self.db)
@@ -221,5 +227,6 @@ class Runtime:
         self.window_asr.close()
         self.local_models.close()
         self.ingestion.close()
+        self.kb_decisions.kill_now()
         self.kb.close()
         self.db.close()

@@ -55,6 +55,34 @@ export interface KbClassifyLink {
   probe?: boolean;
 }
 
+export interface KbDecisionProviderUpdate {
+  provider: "off" | "openrouter_jev" | "local";
+  cloud_consent?: boolean | null;
+}
+
+export interface KbDecisionStats {
+  decided: number;
+  undecided: number;
+}
+
+export interface KbDecisionTest {
+  provider: "off" | "openrouter_jev" | "local";
+  decided: boolean;
+  answer: string | null;
+  probability: number | null;
+  reason: string | null;
+  elapsed_ms: number;
+}
+
+export interface KbDecisions {
+  provider: "off" | "openrouter_jev" | "local";
+  cloud_consent: boolean;
+  openrouter_key: boolean;
+  cloud_model: string;
+  local: KbLocalDecisions;
+  stats: KbDecisionStats;
+}
+
 export interface KbExcludedFragment {
   seg: number;
   id: string;
@@ -175,6 +203,22 @@ export interface KbLinkInfo {
   duration_ms: number | null;
   supported: boolean;
   note: string | null;
+}
+
+export interface KbLocalDecisions {
+  state: "not_downloaded" | "downloading" | "failed" | "ready" | "running";
+  progress: number | null;
+  downloaded_bytes: number;
+  total_bytes: number;
+  reason: "no_space" | "no_network" | "checksum" | "start_failed" | null;
+  message: string | null;
+  required_bytes: number;
+  model_id: string;
+  model_title: string;
+  model_license: string;
+  model_url: string;
+  server_build: string;
+  server_license: string;
 }
 
 export interface KbMaterial {
@@ -299,6 +343,48 @@ export interface KbWikiSettingsUpdate {
 
 /** Every /kb route: path and query parameters, JSON body and JSON response. */
 export interface KbEndpoints {
+  "GET /kb/decisions": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbDecisions;
+    status: 200;
+  };
+  "DELETE /kb/decisions/local": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbDecisions;
+    status: 200;
+  };
+  "POST /kb/decisions/local/cancel": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbDecisions;
+    status: 200;
+  };
+  "POST /kb/decisions/local/download": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbDecisions;
+    status: 202;
+  };
+  "PUT /kb/decisions/provider": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbDecisionProviderUpdate;
+    response: KbDecisions;
+    status: 200;
+  };
+  "POST /kb/decisions/test": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbDecisionTest;
+    status: 200;
+  };
   "GET /kb/folders": {
     path: Record<string, never>;
     query: Record<string, never>;
