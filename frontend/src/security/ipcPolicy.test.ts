@@ -4,12 +4,15 @@ import { isAllowedExternalUrl, validateBridgeRequest } from '../../../electron/i
 describe('Electron IPC policy', () => {
   it('allows the recording transport and settings, not neighbouring mutations', () => {
     for (const [method, path] of [
-      ['GET', '/settings'], ['PUT', '/settings'], ['GET', '/sessions/a/live'],
-      ['GET', '/sessions/a/live/events'], ['PATCH', '/sessions/a'],
+      ['GET', '/settings'], ['PUT', '/settings'], ['GET', '/sessions/a/live'], ['PATCH', '/sessions/a'],
+      ['GET', '/kb/recordings/a/live'],
     ] as const) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
-      expect(validateBridgeRequest({ method, path: '/sessions/a/live/events' })).not.toBeNull();
+      expect(validateBridgeRequest({ method, path: '/sessions/a/live' })).not.toBeNull();
+      expect(validateBridgeRequest({ method, path: '/kb/recordings/a/live' })).not.toBeNull();
     }
+    // The renderer reads the live text from /kb/recordings/{id}/live; the session's raw event pages are closed.
+    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events' })).not.toBeNull();
     expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events/raw' })).not.toBeNull();
     expect(validateBridgeRequest({ method: 'DELETE', path: '/settings' })).not.toBeNull();
   });

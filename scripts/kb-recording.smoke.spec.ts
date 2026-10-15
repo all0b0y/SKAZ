@@ -257,6 +257,42 @@ for (const outcome of ['acknowledged', 'quit-timeout'] as const) {
   });
 }
 
+test('continuous speech with no pause: the live panel shows the words before any monologue closes', async () => {
+  test.setTimeout(120_000);
+  const run = await launch('skaz-kb-live-', { SKAZ_SMOKE_FAKE_SONIOX: 'words' });
+  try {
+    const { page } = run;
+    await prepare(run);
+    await injectCapture(page, 'normal');
+    await recordButton(page).click();
+    await expect(capsule(page)).toBeVisible();
+    const [materialId] = await recordingIds(page);
+    // One speaker, voiced frames only: 2 s of speech without a single silent frame, so no
+    // monologue can close (pause > 2.5 s, another speaker, or 2 minutes) — the old panel showed nothing here.
+    for (let i = 0; i < 20; i += 1) await emit(page, [true]);
+    const panel = livePanel(page);
+    await expect(panel.locator('.kb-live-final')).toContainText('fixture', { timeout: 10_000 });
+    const text = await material(page, materialId!);
+    expect(text.data.fragments).toEqual([]);  // nothing closed: the words came through the live route
+    await expect(panel.getByText(/Listening/)).toHaveCount(0);
+    await shoot(page, 'live-continuous');
+    // More continuous speech: the same open monologue grows in place, it doesn't restart.
+    const before = (await panel.locator('.kb-live-final').innerText()).split('fixture').length;
+    for (let i = 0; i < 10; i += 1) await emit(page, [true]);
+    await expect.poll(async () => (await panel.locator('.kb-live-final').innerText()).split('fixture').length, { timeout: 10_000 })
+      .toBeGreaterThan(before);
+    await stopRecording(page);
+    // Stop closes it into the material: the same words, shown once.
+    const done = await material(page, materialId!);
+    expect(done.data.fragments).toHaveLength(1);
+    await expect(panel.locator('.kb-live-final')).toHaveCount(0, { timeout: 10_000 });
+    await expect(panel).toContainText('fixture');
+  } finally {
+    await run.close();
+    fs.rmSync(run.profile, { recursive: true, force: true });
+  }
+});
+
 test('provider error: Record says why without a key; recognition stops on its own; Continue recording retries and recovers', async () => {
   test.setTimeout(180_000);
   const control = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-fake-soniox-')), 'mode');

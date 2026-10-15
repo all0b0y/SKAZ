@@ -113,8 +113,52 @@ export interface TranscriptProps {
   sideBySide: boolean;
   target: { seg: number | null; quote: string | null };
   onCorrectionChanged: (change: KbCorrectionChange) => void;
-  /** Live panel: the last, still unstable words (grey). */
-  tail?: string;
+  /**
+   * Live panel: speech after the fragments — final words of monologues not in the material yet
+   * (stable, but not quotable: they have no fragment yet) and the words still being recognised (grey).
+   */
+  live?: LiveSpeech;
+}
+
+export interface LiveSpeech {
+  monologues: ReadonlyArray<{ speaker: string | null; start_ms: number; text: string }>;
+  partial: { speaker: string | null; text: string } | null;
+}
+
+interface LiveBlock { key: string; speaker: string | null; startMs: number | null; final: string[]; partial: string }
+
+/**
+ * Live speech laid out like the material lays out fragments (`monologues`): words of the speaker of
+ * the last block continue that block, another speaker starts a new one. So when the open monologue
+ * closes and becomes a fragment, nothing on screen moves. Undiarised speech (no speaker) always
+ * starts a block of its own, as undiarised fragments do; grey words without a speaker yet continue
+ * the last block.
+ */
+function liveBlocks(live: LiveSpeech | undefined, lastSpeaker: string | null | undefined): { last: LiveBlock; blocks: LiveBlock[] } {
+  const last: LiveBlock = { key: 'last', speaker: lastSpeaker ?? null, startMs: null, final: [], partial: '' };
+  const blocks: LiveBlock[] = [];
+  if (!live) return { last, blocks };
+  const current = () => blocks[blocks.length - 1] ?? (lastSpeaker !== undefined ? last : null);
+  for (const m of live.monologues) {
+    const block = current();
+    if (block && m.speaker !== null && block.speaker === m.speaker) block.final.push(m.text);
+    else blocks.push({ key: `live-${m.start_ms}`, speaker: m.speaker, startMs: m.start_ms, final: [m.text], partial: '' });
+  }
+  if (live.partial) {
+    const block = current();
+    if (block && (live.partial.speaker === null || block.speaker === live.partial.speaker)) block.partial = live.partial.text;
+    else blocks.push({ key: 'live-partial', speaker: live.partial.speaker, startMs: null, final: [], partial: live.partial.text });
+  }
+  return { last, blocks };
+}
+
+function LiveWords({ block }: { block: LiveBlock }) {
+  return (
+    <>
+      {block.final.map((text, i) => <span key={i} className="kb-live-final">{text} </span>)}
+      {block.partial && <span className="kb-tail">{block.partial}</span>}
+    </>
+  );
 }
 
 /** Original fragment text with fixes underlined and the target quote marked. */
@@ -148,10 +192,11 @@ function SpeechText(props: TranscriptProps) {
   const paragraphs = material.translation && !translation ? material.translation.fragments : null;
   const groups = monologues(material.fragments);
   const paragraphMode = paragraphs !== null && view !== 'original';
+  const live = liveBlocks(props.live, groups.length ? groups[groups.length - 1]!.speaker : undefined);
 
   const originalColumn = (
     <div className="kb-spk-list">
-      {groups.map((g) => (
+      {groups.map((g, index) => (
         <div key={g.key} className="kb-spk">
           <div className="kb-spk__head">
             {g.speaker && <span className="kb-spk__speaker" style={{ color: speakerTone(g.speaker) }}>{g.speaker}</span>}
@@ -162,6 +207,7 @@ function SpeechText(props: TranscriptProps) {
               <FragmentSpan key={f.id} fragment={f} props={{ ...props, view: paragraphMode ? 'original' : view === 'both' && sideBySide ? 'original' : view }}
                 translation={paragraphMode ? null : translation} />
             ))}
+            {index === groups.length - 1 && <LiveWords block={live.last} />}
           </p>
           {view === 'both' && !sideBySide && translation && (
             <p className="kb-spk__text kb-spk__text--tr">
@@ -170,11 +216,17 @@ function SpeechText(props: TranscriptProps) {
           )}
         </div>
       ))}
-      {props.tail && (
-        <div className="kb-spk kb-spk--tail">
-          <p className="kb-spk__text"><span className="kb-tail">{props.tail}</span></p>
+      {live.blocks.map((b) => (
+        <div key={b.key} className="kb-spk kb-spk--live">
+          {(b.speaker || b.startMs !== null) && (
+            <div className="kb-spk__head">
+              {b.speaker && <span className="kb-spk__speaker" style={{ color: speakerTone(b.speaker) }}>{b.speaker}</span>}
+              {b.startMs !== null && <span className="kb-spk__time">{formatTime(b.startMs)}</span>}
+            </div>
+          )}
+          <p className="kb-spk__text"><LiveWords block={b} /></p>
         </div>
-      )}
+      ))}
     </div>
   );
 

@@ -510,6 +510,21 @@ export interface KbLinkInfo {
   embedded_video: KbLinkInfo | null;
 }
 
+/** Final speech not in the material yet: the open monologue (or one closed a moment ago). */
+export interface KbLiveMonologue {
+  speaker: string | null;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+/** Words the speech service may still revise; shown greyed, never stored. */
+export interface KbLivePartial {
+  speaker: string | null;
+  text: string;
+  translation: string;
+}
+
 export interface KbLocalDecisions {
   state: "not_downloaded" | "downloading" | "failed" | "ready" | "running";
   progress: number | null;
@@ -775,6 +790,15 @@ export interface KbQuote {
 export interface KbRecordingCreate {
   folder_id?: string | null;
   title?: string | null;
+}
+
+/** ``GET /kb/recordings/{id}/live``: what the live panel shows after the material's fragments. */
+export interface KbRecordingLive {
+  material_id: string;
+  after_seg: number;
+  monologues: KbLiveMonologue[];
+  partial: KbLivePartial | null;
+  stream: string;
 }
 
 export interface KbRef {
@@ -1433,6 +1457,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbSpeechMaterial;
+    status: 200;
+  };
+  "GET /kb/recordings/{material_id}/live": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbRecordingLive;
     status: 200;
   };
   "POST /kb/recordings/{material_id}/pause": {

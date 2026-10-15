@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { BridgeApi } from '../../api/bridge';
+import type { KbRecordingLive } from '../../api/kb/types.gen';
 import type { MeterSnapshot } from '../../audio/meter';
 import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { UiStore } from '../state/ui';
@@ -18,7 +19,7 @@ import { barsFrom, SILENT_BARS, type Bars } from './level';
 export type RecPhase = 'idle' | 'starting' | 'recording' | 'pausing' | 'paused' | 'resuming' | 'finishing';
 export type LiveView = 'original' | 'translation' | 'both';
 export type RecMode = 'transcription' | 'translation';
-/** The recording's live stream as the backend reports it (`transcription` of `/sessions/{id}/live/events`). */
+/** The recording's live stream as the backend reports it (`stream` of `GET /kb/recordings/{id}/live`). */
 export type StreamState = 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive' | 'disabled';
 const STREAM_STATES: ReadonlyArray<StreamState> = ['connecting', 'reconnecting', 'streaming', 'unavailable', 'inactive', 'disabled'];
 
@@ -58,12 +59,16 @@ export interface RecordingData {
   /** Recognition stopped on its own; text is saved; nothing continues by itself. */
   failure: RecFailure | null;
   view: LiveView;
-  /** Stream state while recording (null when not streaming); polled with the unstable tail. */
+  /** Stream state while recording (null when not streaming); polled with the live text. */
   stream: StreamState | null;
   /** The speech service of new recordings (legacy `transcription_provider`): `soniox`, `local-whisper`, … */
   provider: string | null;
-  /** Unstable (not yet final) words of the recording, original and translation. */
-  tail: { original: string; translation: string };
+  /**
+   * The last answer of `GET /kb/recordings/{id}/live`: speech after the material's fragments — the
+   * open monologue's final words and the words still being recognised. Kept after Pause/Stop until
+   * the next recording, so the panel can hand the text over to the material without a gap.
+   */
+  live: KbRecordingLive | null;
 }
 
 export interface RecordingActions {
@@ -99,14 +104,6 @@ interface Deps {
 const LIVE_STATES: ReadonlyArray<RecPhase> = ['recording', 'pausing', 'paused', 'resuming'];
 const SETTLE_TRIES = 60;
 const STREAM_POLL_MS = 1500;
-const NO_TAIL = { original: '', translation: '' };
-
-interface TailPage {
-  transcription?: string;
-  tail: { originals: Array<{ text: string }>; translations: Array<{ text: string }> } | null;
-}
-
-const joined = (parts: Array<{ text: string }> | undefined) => (parts ?? []).map((t) => t.text).join('').trim();
 
 interface LegacySettings {
   transcription_provider?: string;
@@ -138,20 +135,16 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         failed: pending.failed,
       });
     };
-    /** One small page of the session's live events: its stream state and the unstable tail. */
+    /** The live text after the material's fragments and the stream state, in one small answer. */
     const pollStream = async () => {
-      const sessionId = get().sessionId;
-      if (get().phase !== 'recording' || !sessionId) return;
+      const materialId = get().materialId;
+      if (get().phase !== 'recording' || !materialId) return;
       try {
-        const res = await deps.bridge.request<TailPage>({
-          method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live/events`, query: { limit: 1 },
-        });
-        if (get().phase !== 'recording' || get().sessionId !== sessionId) return;
-        if (!res.ok) { set({ tail: NO_TAIL }); return; }
-        const state = STREAM_STATES.find((s) => s === res.data.transcription) ?? null;
-        set({ stream: state, tail: { original: joined(res.data.tail?.originals), translation: joined(res.data.tail?.translations) } });
+        const live = await deps.client.call('GET /kb/recordings/{material_id}/live', { path: { material_id: materialId } });
+        if (get().phase !== 'recording' || get().materialId !== materialId) return;
+        set({ stream: STREAM_STATES.find((s) => s === live.stream) ?? null, live });
       } catch {
-        set({ tail: NO_TAIL });
+        // A missed poll changes nothing on screen; the next one (1.5 s) catches up.
       }
     };
     const tick = (on: boolean) => {
@@ -163,7 +156,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         ticker = setInterval(() => { if (engine) set({ elapsedMs: engine.elapsedMs() }); }, 250);
         poller = setInterval(() => { void pollStream(); }, STREAM_POLL_MS);
       } else {
-        set({ stream: null, tail: NO_TAIL });
+        set({ stream: null });
       }
     };
     const onLevel = (id: number) => (snapshot: MeterSnapshot) => {
@@ -236,7 +229,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       view: 'original',
       stream: null,
       provider: null,
-      tail: NO_TAIL,
+      live: null,
 
       loadOptions: async () => {
         const [defaults, settings] = await Promise.allSettled([
@@ -284,7 +277,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
 
       start: async () => {
         if (get().phase !== 'idle') return;
-        set({ phase: 'starting', startError: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS });
+        set({ phase: 'starting', startError: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
         report();
         let materialId: string | null = null;
         try {
@@ -382,7 +375,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (get().phase !== 'idle') return;
         const failure = get().failure;
         const kept = failure && failure.materialId === materialId ? failure : null;
-        set({ phase: 'starting', startError: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS });
+        set({ phase: 'starting', startError: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
         report();
         let resumed = false;
         try {

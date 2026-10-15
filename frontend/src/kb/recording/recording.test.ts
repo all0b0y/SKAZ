@@ -151,12 +151,41 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
       await vi.advanceTimersByTimeAsync(1600);
       expect(store.getState().stream).toBe('reconnecting');
       expect(store.getState().provider).toBe('soniox');
-      expect(store.getState().tail.original).toBe('So cross-entropy in machine learning is');
+      expect(store.getState().live?.partial?.text).toBe('So cross-entropy in machine learning is');
       fake.world.liveTranscription = 'streaming';
       await vi.advanceTimersByTimeAsync(1600);
       expect(store.getState().stream).toBe('streaming');
       await store.getState().pause();
-      expect(store.getState()).toMatchObject({ stream: null, tail: { original: '', translation: '' } });
+      // The stream is gone; the last live text stays until the material holds it (the panel trims it).
+      expect(store.getState().stream).toBeNull();
+      expect(store.getState().live).not.toBeNull();
+      const first = store.getState().materialId;
+      await store.getState().resume();
+      await store.getState().stop();
+      await store.getState().start();
+      // A new recording never shows the previous one's live text.
+      expect(store.getState().materialId).not.toBe(first);
+      await vi.waitFor(() => expect(store.getState().live?.material_id).toBe(store.getState().materialId));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continuous speech with no pause: the open monologue is in the store within one poll', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { store, fake, routes } = setup();
+      fake.world.liveOpen = 'and the entropy keeps growing while the speaker never stops';
+      await store.getState().start();
+      const id = store.getState().materialId!;
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(routes()).toContain(`GET /kb/recordings/${id}/live`);
+      expect(store.getState().live).toMatchObject({
+        material_id: id, after_seg: 0,
+        monologues: [{ text: 'and the entropy keeps growing while the speaker never stops' }],
+      });
+      // Nothing closed: the material itself is still empty.
+      expect(fake.world.materials.find((m) => m.id === id)?.fragments).toEqual([]);
     } finally {
       vi.useRealTimers();
     }

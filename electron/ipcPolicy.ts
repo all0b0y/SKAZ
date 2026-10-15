@@ -29,12 +29,12 @@ interface Route {
 
 // What the renderer (frontend/src/kb) calls. `[^/]+` is a single id/sequence segment.
 const ROUTES: readonly Route[] = [
-  // Legacy routes the Knowledge Wiki recorder still uses: recording options, the live transcript
-  // of the recording's technical session, and its status fallback (audio/nativeWriter.ts).
+  // Legacy routes the Knowledge Wiki recorder still uses: recording options, the sample clock of
+  // the recording's technical session, and its status fallback (audio/nativeWriter.ts). The live
+  // text itself comes from GET /kb/recordings/{id}/live.
   { method: 'GET', pattern: /^\/settings$/ },
   { method: 'PUT', pattern: /^\/settings$/ },
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/live$/ },
-  { method: 'GET', pattern: /^\/sessions\/[^/]+\/live\/events$/ },
   { method: 'PATCH', pattern: /^\/sessions\/[^/]+$/ },
   // Settings → Privacy → Activity log (F2): the technical activity log, read-only, no text or keys.
   { method: 'GET', pattern: /^\/logs$/ },
@@ -115,6 +115,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/recordings\/[^/]+\/(?:stop|pause|resume)$/ },
   // F2: a recording's own state, so its material offers "Continue recording" only when it may continue.
   { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+$/ },
+  // G: the live panel's text after the material (open monologue + words still being recognised).
+  { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+\/live$/ },
   // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
   { method: 'POST', pattern: /^\/kb\/agents\/codex\/logout$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },

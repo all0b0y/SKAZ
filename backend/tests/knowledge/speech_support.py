@@ -36,6 +36,7 @@ class Recorder:
     saved_samples: int
     next_sequence: int
     ordinal: int = 0
+    final_ms: int = 0
 
     @classmethod
     def open(cls, db: Database, session_id: str, *, mode: str = "transcription",
@@ -54,22 +55,31 @@ class Recorder:
             self.saved_samples += BLOCK
             self.next_sequence += 1
 
-    def say(self, words: Sequence[Word], *, translation: Sequence[tuple[str, str | None]] = ()) -> None:
-        """One provider event with these final words (and optional final translation)."""
-        end = max(word[2] for word in words)
+    def say(self, words: Sequence[Word], *, translation: Sequence[tuple[str, str | None]] = (),
+            partial: Sequence[Word] = (), partial_translation: Sequence[tuple[str, str | None]] = ()) -> None:
+        """One provider event with these final words (and optional final translation), and the
+        replaceable non-final tail that follows them (``partial``)."""
+        end = max(word[2] for word in (*words, *partial))
         self._audio_until(end)
         originals = tuple(SonioxToken(text, start, stop, 0.9, True, "en", speaker)
                           for text, start, stop, speaker in words)
+        drafts = tuple(SonioxToken(text, start, stop, 0.5, False, "en", speaker)
+                       for text, start, stop, speaker in partial)
         translated = tuple(SonioxTranslationToken(text, 0.9, True, "ru", "en", speaker)
                            for text, speaker in translation)
+        draft_translation = tuple(SonioxTranslationToken(text, 0.5, False, "ru", "en", speaker)
+                                  for text, speaker in partial_translation)
         order = None
         if translated:
             order = tuple(
                 [SonioxTokenRef("original", True, index) for index in range(len(originals))]
                 + [SonioxTokenRef("translation", True, index) for index in range(len(translated))]
             )
-        event = SonioxEvent(originals, (), (), end, end, False, final_translation_tokens=translated,
-                            token_order=order)
+        # The provider's final clock never goes back, also for an event that only revises the tail.
+        self.final_ms = max([self.final_ms, *(word[2] for word in words)])
+        event = SonioxEvent(originals, drafts, (), self.final_ms, end, False,
+                            final_translation_tokens=translated,
+                            partial_translation_tokens=draft_translation, token_order=order)
         self.store.save_event(self.connection.id, ordinal=self.ordinal, event=event)
         self.ordinal += 1
 

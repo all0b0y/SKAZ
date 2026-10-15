@@ -103,6 +103,41 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     }
   });
 
+  it('continuous speech with no pause shows within one poll: final words stable, the rest grey, no gap at the handover', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { user, record, fake, services } = await start();
+      fake.world.settings.native_recording_mode = 'transcription';
+      await services.recording.getState().loadOptions();
+      fake.world.liveOpen = 'So the entropy of a closed system';
+      await user.click(record);
+      const live = await screen.findByRole('complementary', { name: 'Live recording' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      // No monologue closed (the material is empty), yet the words are there: stable, then grey.
+      const finalWords = await within(live).findByText('So the entropy of a closed system');
+      expect(finalWords).toHaveClass('kb-live-final');
+      expect(live.querySelector('.kb-tail')).toHaveTextContent('So cross-entropy in machine learning is');
+      expect(within(live).queryByText(/Listening/)).not.toBeInTheDocument();
+
+      // The speaker keeps going and the monologue closes: the answer is a step ahead of the panel's
+      // material. The closed words stay put (never gone, never twice) until the material has them.
+      const id = services.recording.getState().materialId!;
+      const material = fake.world.materials.find((m) => m.id === id)!;
+      const reads = () => fake.calls.filter((c) => c.method === 'GET' && c.path === `/kb/materials/${id}`).length;
+      const before = reads();
+      material.fragments.push({ ...structuredClone(fake.world.materials[0]!.fragments[0]!), id: `${id}-seg-1`, seg: 1,
+        text: 'So the entropy of a closed system never decreases.', speaker: 'Speaker 1', start_ms: 0, end_ms: 9_000 });
+      fake.world.liveOpen = 'Why is that?';
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      await waitFor(() => expect(reads()).toBeGreaterThan(before));
+      await within(live).findByText('Why is that?');
+      expect(live).toHaveTextContent('So the entropy of a closed system never decreases.');
+      expect(live.textContent!.split('So the entropy of a closed system').length - 1).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a dropped speech connection is said in the live panel and the capsule while SKAZ reconnects', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

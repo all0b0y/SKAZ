@@ -15,7 +15,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ...native_io import disk_call
 from ..errors import KnowledgeError
 from ..speech.service import ImportInput, SpeechService, SpeechView
-from .schemas_speech import KbImportCreate, KbRecordingCreate, KbSpeechDefaults, KbSpeechMaterial
+from .schemas_speech import (
+    KbImportCreate,
+    KbLiveMonologue,
+    KbLivePartial,
+    KbRecordingCreate,
+    KbRecordingLive,
+    KbSpeechDefaults,
+    KbSpeechMaterial,
+)
 
 T = TypeVar("T")
 
@@ -58,6 +66,21 @@ async def start_recording(body: KbRecordingCreate, speech: SpeechDep) -> KbSpeec
 @router.get("/kb/recordings/{material_id}")
 async def read_recording(material_id: str, speech: SpeechDep) -> KbSpeechMaterial:
     return material_view(await speech_call(speech.view(material_id)))
+
+
+@router.get("/kb/recordings/{material_id}/live")
+async def read_recording_live(material_id: str, speech: SpeechDep) -> KbRecordingLive:
+    """The live panel's text after the material's fragments: the open monologue's final words
+    and the words still being recognised, plus the recorder's stream state. Poll it."""
+    tail, stream = await speech_call(speech.live(material_id))
+    partial = tail.partial
+    return KbRecordingLive(
+        material_id=material_id, after_seg=tail.after_seg, stream=stream,
+        monologues=[KbLiveMonologue(speaker=item.speaker, start_ms=item.start_ms, end_ms=item.end_ms,
+                                    text=item.text) for item in tail.monologues],
+        partial=KbLivePartial(speaker=partial.speaker, text=partial.text, translation=partial.translation)
+        if partial else None,
+    )
 
 
 @router.post("/kb/recordings/{material_id}/stop")

@@ -1,15 +1,16 @@
-"""Reading finished speech from the legacy recording database, incrementally.
+"""Reading speech from the legacy recording database, incrementally.
 
 Live recordings and imports store final tokens per provider event
 (``native_token_events``, one row per connection/ordinal). Re-reading a
 three-hour recording on every event would cost the whole transcript each
 time, so the reader resumes from the event that holds the last token already
-written to the material and converts tokens exactly as
-``transcript_monologues.tokens_for`` does (sample clock → milliseconds,
-``speaker_number``). Grouping into monologues stays ``monologues.build``.
+written to the material and converts tokens the way the legacy recorder's
+own pages do (sample clock → milliseconds, ``speaker_number``). Grouping into
+monologues stays ``monologues.build``.
 
-Only final original-language tokens are read here; drafts never reach a
-material. Translation is read separately and as a whole (it has no timing).
+Only final original-language tokens reach a material; the replaceable
+non-final tail (``read_draft``) is read only for the live panel. Translation
+is read separately and as a whole (it has no timing).
 """
 from __future__ import annotations
 
@@ -119,6 +120,41 @@ def read_new_tokens(connection: sqlite3.Connection, session_id: str,
                 continue
             found.append(TokenAt(token, row["connection_id"], row["ordinal"]))
     return found
+
+
+@dataclass(frozen=True)
+class Draft:
+    """The replaceable non-final tail of the latest provider connection (never stored in a material)."""
+
+    text: str
+    #: Display number of the first draft word's speaker, when diarisation already numbered it.
+    speaker: int | None
+    translation: str
+
+
+def read_draft(connection: sqlite3.Connection, session_id: str) -> Draft | None:
+    """The current non-final words, or ``None`` when there are none."""
+    row = connection.execute(
+        "SELECT id, draft_json, translation_draft_json FROM asr_connections WHERE session_id = ? "
+        "ORDER BY rowid DESC LIMIT 1", (session_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    originals = json.loads(row["draft_json"] or "[]")
+    translations = json.loads(row["translation_draft_json"] or "[]")
+    text = "".join(str(item.get("text") or "") for item in originals)
+    translation = "".join(str(item.get("text") or "") for item in translations)
+    if not text.strip() and not translation.strip():
+        return None
+    speaker = None
+    provider = next((item.get("speaker") for item in originals if item.get("speaker") is not None), None)
+    if provider is not None:
+        number = connection.execute(
+            "SELECT number FROM native_speakers WHERE connection_id = ? AND provider_id = ?",
+            (row["id"], provider),
+        ).fetchone()
+        speaker = int(number[0]) if number else None
+    return Draft(text, speaker, translation)
 
 
 @dataclass(frozen=True)

@@ -96,6 +96,11 @@ class LegacySpeech:
         # ``recording`` without a live task was interrupted: it continues like a pause.
         return "paused" if status in ("paused", "recording") else "stopped"
 
+    def stream_state(self, session_id: str) -> str:
+        """The recorder's speech stream as ``/sessions/{id}/live`` reports it (``inactive``: none)."""
+        stream = self._runtime.native_streams.get(session_id)
+        return stream.state if stream is not None else "inactive"
+
     # -- imports ------------------------------------------------------------
 
     async def start_import(self, request: ImportRequest) -> ImportRecord:
