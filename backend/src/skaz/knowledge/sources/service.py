@@ -21,7 +21,7 @@ import os
 import shutil
 import stat
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -69,6 +69,9 @@ MAX_PDF_BYTES = 200 * 1024 * 1024
 MAX_TEXT_FILE_BYTES = 64 * 1024 * 1024
 MAX_LINKED_PDF_BYTES = 100 * 1024 * 1024
 EXCLUDED_NOTIFICATION = "excluded_instruction"
+#: One lock for every ``excluded.json`` read-modify-write, shared by all ``SourceService``
+#: instances (speech guards its materials through its own instance).
+_GUARD_LOCK = threading.RLock()
 RESTORE_LABEL = "This isn't an instruction — restore"
 VIDEO_LINK = "This is a video link. Add it with the speech import (audio and video)."
 MEDIA_FILE_LINK = (
@@ -163,7 +166,7 @@ class SourceService:
         self.fetcher = fetcher or SafeFetcher()
         self.video_probe = video_probe
         self._listeners: list[Listener] = []
-        self._lock = threading.RLock()
+        self._lock = _GUARD_LOCK
 
     # -- events ---------------------------------------------------------------
 
@@ -475,19 +478,27 @@ class SourceService:
         self._emit(SourceEvent("fragment_restored", material_id, seg))
         return self.guard_report(material_id)
 
-    def rescan(self, material_id: str) -> GuardReport:
+    def rescan(self, material_id: str, *, segs: Collection[int] | None = None) -> GuardReport:
         """Run the detector again over the material's current fragments (restored texts stay included).
 
         For reprocessing and for materials added by other areas (speech).
-        A new exclusion raises a notification like adding does.
+        ``segs``: only these fragments (speech appended them just now); the
+        other fragments keep their exclusions as they are. A new exclusion
+        raises a notification like adding does.
         """
         with self._lock:
             files = self._material_files(material_id)
             current = self._read_exclusions(files.directory)
-            detections = [detect_instruction(fragment.text) for fragment in files.fragments]
-            excluded = self._exclusions(files.fragments, detections, current)
+            scanned = [item for item in files.fragments if segs is None or item.seg in segs]
+            detections = [detect_instruction(fragment.text) for fragment in scanned]
+            excluded = self._exclusions(scanned, detections, current)
             known = {(item.seg, item.text_hash) for item in current.excluded}
             new = [item for item in excluded if (item.seg, item.text_hash) not in known]
+            if segs is not None:
+                kept = [item for item in current.excluded if item.seg not in segs]
+                if not new and len(kept) + len(excluded) == len(current.excluded):
+                    return self.guard_report(material_id)  # nothing changed: no write
+                excluded = sorted([*kept, *excluded], key=lambda item: item.seg)
             current.excluded = excluded
             if new:
                 current.notification_id = self._notify(material_id, files.title, new)

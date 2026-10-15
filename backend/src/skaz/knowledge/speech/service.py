@@ -17,6 +17,14 @@ attempt (``attempt_error``), not to the material: the text received so far is
 kept and the material is ``ready``; it is ``failed`` only when an attempt
 ended with an error and there is no text at all (PRODUCT: "Recording after a
 transcription error").
+
+Speech is a source like any document (poisoning layer 3, decision 41): every
+projection runs the S1 instruction detector over the fragments it appended,
+and every settle runs it over the whole material before the material is
+``ready`` and before anyone is told it finished — so an instruction said in
+a recording or a video is excluded (``excluded.json`` + notification) before
+a chat or the wiki can read it. If the check fails, the material does not
+become ``ready``; the next settle (or the startup reconcile) checks again.
 """
 from __future__ import annotations
 
@@ -43,6 +51,7 @@ from ..library.names import validate_name
 from ..markdown.source import MaterialStatus, Origin
 from ..markdown.text import name_key
 from ..service import KnowledgeService
+from ..sources.service import SourceService
 from .carriers import IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
 from .legacy import (
     IMPORT_CONFLICT,
@@ -110,9 +119,12 @@ ImportListener = Callable[[str, CarrierKind, str | None], None]
 
 class SpeechService:
     def __init__(self, kb: KnowledgeService, legacy: LegacySpeech, *,
-                 clock: Callable[[], datetime] | None = None) -> None:
+                 clock: Callable[[], datetime] | None = None, guard: SourceService | None = None) -> None:
         self.kb = kb
         self.legacy = legacy
+        #: The S1 source guard (instruction detector, ``excluded.json``, notification). Never optional:
+        #: without one handed in, speech guards through its own ``SourceService`` over the same files.
+        self.guard = guard or SourceService(kb)
         self.carriers = CarrierRepository(kb.db)
         self.projector = SpeechProjector(kb, legacy.read)
         self._clock = clock or (lambda: datetime.now().astimezone())
@@ -219,7 +231,11 @@ class SpeechService:
                 self._live.pop(material_id, None)
 
     async def _project(self, material_id: str, session_id: str, *, final: bool) -> None:
-        await disk_call(self.projector.project, material_id, session_id, final=final)
+        added = await disk_call(self.projector.project, material_id, session_id, final=final)
+        if added:
+            # Right after the append, before the chat or the tools read the new speech as data.
+            await disk_call(functools.partial(self.guard.rescan, material_id,
+                                              segs=frozenset(item.seg for item in added)))
 
     def on_stream_opened(self, session_id: str) -> None:
         self._remember_loop()
@@ -256,6 +272,8 @@ class SpeechService:
         was_ready = before is not None and before.status == "ready"
         await self._project(carrier.material_id, carrier.session_id, final=True)
         await disk_call(self.projector.write_translation, carrier.material_id, carrier.session_id)
+        # The whole material (also speech appended before a crash): ready only once it is checked.
+        await disk_call(self.guard.rescan, carrier.material_id)
         if set_error:
             await disk_call(self.carriers.set_error, carrier.material_id, reason)
         error = reason if set_error else carrier.attempt_error
