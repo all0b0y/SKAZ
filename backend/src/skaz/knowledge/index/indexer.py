@@ -10,7 +10,7 @@ from ..markdown.page import plain_text
 from ..markdown.source import Fragment
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
-from .scanner import KnownPaths, ScannedMaterial, ScannedPage, ScanResult
+from .scanner import KnownPaths, ScannedMaterial, ScannedPage, ScanResult, ScanStopped, StopCheck
 
 #: Tables rebuilt from files, children first (the FTS tables before their rows, so the delete
 #: triggers find nothing left to drop). Corrections and edges belong to their areas, which rebuild
@@ -28,8 +28,11 @@ def known_paths(db: KnowledgeDatabase) -> KnownPaths:
         )
 
 
-def replace_index(db: KnowledgeDatabase, result: ScanResult) -> None:
-    """Make the index equal to a COMPLETE scan; one transaction, so readers never see half."""
+def replace_index(db: KnowledgeDatabase, result: ScanResult, *, stop: StopCheck | None = None) -> None:
+    """Make the index equal to a COMPLETE scan; one transaction, so readers never see half.
+
+    ``stop()`` returning ``True`` between objects (SKAZ is closing) rolls the whole rebuild back.
+    """
     with db.write() as connection:
         for table in _REBUILT:
             connection.execute(f"DELETE FROM {table}")
@@ -37,8 +40,12 @@ def replace_index(db: KnowledgeDatabase, result: ScanResult) -> None:
             _put_folder(connection, folder.id, folder.name, result.folder_paths[folder.id], folder.system,
                         folder.created_at)
         for material in result.materials:
+            if stop is not None and stop():
+                raise ScanStopped
             _put_material(connection, material)
         for page in result.pages:
+            if stop is not None and stop():
+                raise ScanStopped
             _put_page(connection, page)
 
 

@@ -73,6 +73,8 @@ INTERRUPTED_RECORDING = "SKAZ closed before this recording was stopped."
 INTERRUPTED_IMPORT = "The import was interrupted when SKAZ closed. Retry to continue."
 CANCELLED_IMPORT = "The import was cancelled."
 STILL_STREAMING = "The recorder is still streaming. Stop or pause it in the recorder first."
+#: App shutdown waits this long for in-flight projections (``close``); Electron's grace is 4 s.
+CLOSE_WAIT_S = 1.0
 
 
 class SpeechInvalid(KnowledgeError):
@@ -368,11 +370,22 @@ class SpeechService:
             with contextlib.suppress(ValueError):
                 self._remember(self.carriers.add(record.id, session_id, record.kind))
 
-    async def close(self) -> None:
-        """App shutdown: let in-flight projections finish (each is short and crash-safe anyway)."""
+    async def close(self, *, wait_s: float = CLOSE_WAIT_S) -> None:
+        """App shutdown: let in-flight projections finish, up to ``wait_s`` (each is crash-safe).
+
+        Whatever still runs then is named in the log (material ids) and left to finish on its
+        worker thread; the database closes only after the library write lock is free.
+        """
         self._closing = True
+        deadline = asyncio.get_running_loop().time() + wait_s
         while self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+            left = deadline - asyncio.get_running_loop().time()
+            if left <= 0:
+                busy = sorted(material_id for material_id, task in self._live.items() if not task.done())
+                logger.warning("speech close: %d task(s) still running after %.1f s (live materials: %s)",
+                               len(self._tasks), wait_s, ", ".join(busy) or "none")
+                return
+            await asyncio.wait(list(self._tasks), timeout=left)
 
     # -- folders and names ----------------------------------------------------
 

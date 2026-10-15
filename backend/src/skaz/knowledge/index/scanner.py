@@ -83,6 +83,18 @@ class KnownPaths:
 
 T = TypeVar("T")
 
+#: Asked between objects of a long scan or index rebuild; ``True`` stops it (``ScanStopped``).
+StopCheck = Callable[[], bool]
+
+
+class ScanStopped(Exception):
+    """A full scan or rebuild stopped because SKAZ is closing; nothing was replaced."""
+
+
+def _check(stop: StopCheck | None) -> None:
+    if stop is not None and stop():
+        raise ScanStopped
+
 
 def _pick(candidates: Mapping[str, Sequence[T]], known: Mapping[str, str],
           path_of: Callable[[T], str], skipped: list[str]) -> list[T]:
@@ -136,11 +148,12 @@ def read_page(library: Library, path: Path) -> ScannedPage:
     )
 
 
-def scan_library(library: Library, known: KnownPaths | None = None) -> ScanResult:
+def scan_library(library: Library, known: KnownPaths | None = None, *,
+                 stop: StopCheck | None = None) -> ScanResult:
     known = known or KnownPaths()
     result = ScanResult()
     try:
-        _scan(library, known, result)
+        _scan(library, known, result, stop)
     except OSError as error:
         where = error.filename or library.root
         raise LibraryUnavailable(
@@ -149,7 +162,7 @@ def scan_library(library: Library, known: KnownPaths | None = None) -> ScanResul
     return result
 
 
-def _scan(library: Library, known: KnownPaths, result: ScanResult) -> None:
+def _scan(library: Library, known: KnownPaths, result: ScanResult, stop: StopCheck | None) -> None:
     if not library.materials_dir.is_dir() or not library.wiki_dir.is_dir():
         raise LibraryUnavailable(f"The library layout is incomplete: {library.root}")
 
@@ -162,6 +175,7 @@ def _scan(library: Library, known: KnownPaths, result: ScanResult) -> None:
     materials_by_id: dict[str, list[ScannedMaterial]] = defaultdict(list)
     for folder in result.folders:
         for name in sorted(os.listdir(folder.path)):
+            _check(stop)
             directory = folder.path / name
             if name.startswith(".") or not directory.is_dir():
                 continue
@@ -183,6 +197,7 @@ def _scan(library: Library, known: KnownPaths, result: ScanResult) -> None:
         if not directory.is_dir():
             continue
         for name in sorted(os.listdir(directory)):
+            _check(stop)
             path = directory / name
             if name.startswith(".") or not name.endswith(".md") or not path.is_file():
                 continue

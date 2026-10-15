@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -656,6 +657,30 @@ async def test_closing_skaz_leaves_the_question_resumable(env: Env) -> None:
     assert "closed" in message["failure"]["message"] and all_text(message) == "Половина"
     refused = await env.client.post(f"/kb/chats/{chat['id']}/messages", json={"text": "ещё"})
     assert refused.status_code == 409 and refused.json()["code"] == "CLOSING"
+
+
+async def test_closing_with_an_agent_that_ignores_the_stop_saves_the_answer_within_the_deadline(
+        env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shutdown deadline is 2.5 s; a deaf agent used to hold the close for STOP_TIMEOUT_S (10 s),
+    so the deadline cancelled it and the answer kept running after the database closed."""
+    from skaz.knowledge import shutdown
+
+    engine = env.agents.engines["codex"]
+
+    async def deaf(_run_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(engine, "interrupt", deaf)
+    env.agents.scripts["codex"] = lambda _turn: [*text("Половина"), Gate(asyncio.Event())]
+    chat = await env.chat()
+    sent = await env.ask(chat["id"], "Вопрос перед закрытием")
+    await settle(lambda: bool(engine.active_runs()))
+    started = time.monotonic()
+    await env.chats.close()
+    assert time.monotonic() - started < shutdown.DEADLINE_S
+    assert not env.chats.active_runs()
+    message = await env.message(chat["id"], sent["assistant"]["id"])
+    assert message["state"] == "interrupted" and all_text(message) == "Половина"
 
 
 async def test_excluded_fragments_stay_out_of_context_and_citations(env: Env) -> None:

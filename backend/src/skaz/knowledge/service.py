@@ -8,6 +8,7 @@ root makes the library *unavailable* — writes are refused, the index is kept.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from typing import Any, Literal
 
 from .errors import LibraryConflict, LibraryUnavailable, NotFound
 from .index import indexer
-from .index.scanner import ScannedMaterial, read_page, scan_library
+from .index.scanner import ScannedMaterial, ScanStopped, read_page, scan_library
 from .index.search import SearchResults, search
 from .library.layout import read_marker, resolve_library_root
 from .library.library import Library, MaterialFiles
@@ -33,6 +34,8 @@ from .store.repositories import (
     PageRepository,
     SettingsRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 LibraryState = Literal["not_configured", "ready", "unavailable"]
 NOT_CONNECTED = "No library is connected yet."
@@ -238,8 +241,10 @@ class KnowledgeService:
                 raise LibraryUnavailable(SANDBOX_REASON)
             library = Library.open(root, library_id)
             library.ensure_inbox()
-            result = scan_library(library, indexer.known_paths(self.db))
-            indexer.replace_index(self.db, result)
+            result = scan_library(library, indexer.known_paths(self.db), stop=self._closing)
+            indexer.replace_index(self.db, result, stop=self._closing)
+        except ScanStopped:
+            return  # SKAZ is closing: the index stays as it was, the next start scans again
         except LibraryUnavailable as error:
             self._publish(None, error.message)
             return
@@ -430,7 +435,25 @@ class KnowledgeService:
             raise NotFound("Notification not found.")
         return record
 
-    def close(self) -> None:
-        if not self._closed:
-            self._closed = True
-            self.db.close()
+    def _closing(self) -> bool:
+        return self._closed
+
+    def close(self, *, wait_s: float = CLOSE_WAIT_S) -> None:
+        """Refuse new library writes, let the one in progress finish (up to ``wait_s``), close the database.
+
+        A write still running after ``wait_s`` (a stuck disk) keeps the database open: it is left
+        to the OS at exit (SQLite's journal makes that safe) rather than closed under the writer.
+        A running full scan stops between objects and rolls back.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        if not self._state_lock.acquire(timeout=wait_s):
+            logger.warning("knowledge close: a library write still ran after %.1f s; database left open",
+                           wait_s)
+            return
+        try:
+            if not self.db.close(timeout=wait_s):
+                logger.warning("knowledge close: the database stayed busy for %.1f s; left open", wait_s)
+        finally:
+            self._state_lock.release()
