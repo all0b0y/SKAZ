@@ -249,3 +249,30 @@ describe('Other primitives', () => {
       .toBe(454);
   });
 });
+
+describe('EngineBadge (v42 colour brand marks)', () => {
+  it('shows the bundled brand mark, not letters; decorative by default, named on request; sizes 16/20/32', async () => {
+    const { EngineBadge } = await import('./EngineBadge');
+    const { container } = render(
+      <>
+        <EngineBadge engine="codex" size={16} />
+        <EngineBadge engine="claude_code" />
+        <EngineBadge engine="hermes" size={32} label />
+      </>,
+    );
+    const badges = Array.from(container.querySelectorAll<HTMLElement>('.kb-engine'));
+    expect(badges.map((b) => b.textContent)).toEqual(['', '', '']);
+    expect(container.textContent).not.toMatch(/Cx|CC|\bH\b/);
+    const srcs = badges.map((b) => b.querySelector('img')!.getAttribute('src') ?? '');
+    expect(srcs[0]).toMatch(/codex\.svg|^data:image\/svg/);
+    expect(srcs[1]).toMatch(/claude-code\.svg|^data:image\/svg/);
+    expect(srcs[2]).toMatch(/hermes\.png|^data:image\/png/);
+    for (const src of srcs) expect(src).not.toMatch(/^https?:/); // bundled, never fetched (CSP)
+    expect(badges.map((b) => b.style.getPropertyValue('--kb-engine-size'))).toEqual(['16px', '20px', '32px']);
+    // Decorative: hidden with an empty alt; labelled: one image with the agent's name.
+    expect(badges[0]).toHaveAttribute('aria-hidden', 'true');
+    expect(badges[0]!.querySelector('img')).toHaveAttribute('alt', '');
+    expect(screen.getAllByRole('img')).toHaveLength(1);
+    expect(screen.getByRole('img', { name: 'Hermes Agent' })).toBe(badges[2]);
+  });
+});

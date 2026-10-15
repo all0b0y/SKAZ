@@ -43,7 +43,7 @@ function auditExtras(): Extra[] {
     const own = Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
     if (!own) continue;
     const size = parseFloat(getComputedStyle(el).fontSize);
-    if (size < 12 && !el.closest('.kb-badge')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
+    if (size < 12 && !el.closest('.kb-badge, .kb-cn')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
   }
   for (const svg of Array.from(document.querySelectorAll('svg.kb-icon'))) {
     if (visible(svg) && svg.childElementCount === 0) out.push({ kind: 'empty-icon', selector: describe(svg), detail: svg.getAttribute('data-icon') ?? '' });
@@ -67,7 +67,7 @@ function auditExtras(): Extra[] {
     }
   }
   // A source chip keeps its time/page in view and stays inside its pane (long titles shorten instead).
-  for (const chip of Array.from(document.querySelectorAll('.kb-chip'))) {
+  for (const chip of Array.from(document.querySelectorAll('.kb-chip, .kb-srcs__item'))) {
     if (!visible(chip)) continue;
     const pane = chip.closest('[data-pane]');
     const c = chip.getBoundingClientRect();
@@ -164,7 +164,8 @@ test('wiki page: sections, statement labels, chips; expanded; citation opens the
       await check(`wiki-side-${tag}`, v.width === 1440 && theme === 'light');
 
       // Citation → material at that fragment, the checked quote marked, Original shown.
-      await doc().getByRole('button', { name: 'Recording: Lecture 8 — entropy, 08:12' }).first().click();
+      await doc().getByRole('button', { name: 'Source 1: Lecture 8 — entropy' }).first().click();
+      await page.getByRole('dialog', { name: 'Lecture 8 — entropy' }).getByRole('button', { name: 'Open at quote, 08:12' }).click();
       await expect(doc().getByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeVisible();
       await expect(doc().locator('mark.kb-quote')).toHaveText('S equals k times the log of W');
       await check(`material-quote-${tag}`);

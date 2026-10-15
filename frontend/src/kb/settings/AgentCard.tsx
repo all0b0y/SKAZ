@@ -86,6 +86,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {STATE_TEXT[agent.state]}{agent.version && agent.state === 'ready' ? ` · ${agent.version}` : ''}
     </span>
   );
+  const when = <CheckedWhen engine={agent.id} checkedAt={agent.checked_at} />;
   const buttons = running ? (
     <Button size="sm" busy={busy === 'cancel'} onClick={() => void act('cancel')}>Cancel</Button>
   ) : (
@@ -154,6 +155,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     return (
       <div className="kb-agentrow" data-engine={agent.id} data-state={agent.state}>
         <div className="kb-agentrow__line">{status}{buttons}</div>
+        <div className="kb-agentrow__when">{when}</div>
         {details}
       </div>
     );
@@ -161,16 +163,39 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   return (
     <li className="kb-agentcard" data-engine={agent.id} data-state={agent.state}>
       <div className="kb-agentcard__head">
-        <EngineBadge engine={agent.id} />
+        <EngineBadge engine={agent.id} size={32} />
         <b className="kb-agentcard__name">{agent.name}</b>
         <span className="kb-muted kb-agentcard__account">· {ACCOUNT[agent.id]}</span>
         <span className="kb-head__spacer" />
-        {status}
+        <span className="kb-agentcard__st">{status}{when}</span>
         <span className="kb-agentcard__acts">{buttons}</span>
       </div>
       {details}
     </li>
   );
+}
+
+/** "Checked just now" / "Checked 4 min ago" / "Checking…" (minutes tick only while the window is visible). */
+export function checkedText(iso: string, now: number): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const minutes = Math.floor((now - t) / 60_000);
+  if (minutes < 1) return 'Checked just now';
+  if (minutes < 60) return `Checked ${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `Checked ${hours} h ago` : `Checked ${Math.floor(hours / 24)} d ago`;
+}
+
+function CheckedWhen({ engine, checkedAt }: { engine: EngineId; checkedAt: string }) {
+  const checking = useAgents((s) => s.checking[engine] ?? false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => { if (document.visibilityState === 'visible') setNow(Date.now()); }, 30_000);
+    return () => clearInterval(id);
+  }, [checkedAt]);
+  const text = checking ? 'Checking…' : checkedText(checkedAt, now);
+  return text ? <span className="kb-agentcard__checked" aria-live="polite">{text}</span> : null;
 }
 
 /** All three agents; a short honest line when they can't be read. */
@@ -179,7 +204,8 @@ export function AgentCards() {
   const agents = useAgents((s) => s.agents);
   const load = useAgents((s) => s.load);
   const error = useAgents((s) => s.error);
-  useEffect(() => { if (!agents) void store.getState().refresh(); }, [store, agents]);
+  // The agents screen checks by itself when it opens (reads them first if not read yet).
+  useEffect(() => { store.getState().autoCheck('open'); }, [store]);
   if (!agents) {
     return load === 'error' ? (
       <p className="kb-inline-error kb-inline-error--flat" role="alert">

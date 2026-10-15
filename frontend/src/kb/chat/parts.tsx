@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { AnimatePresence, m } from 'motion/react';
-import type { KbCitation, KbConnectionFolder, KbMessagePart, KbPageRef } from '../../api/kb/types.gen';
+import type { KbCitation, KbConnectionFolder, KbPageRef } from '../../api/kb/types.gen';
+import { SourceMarks } from '../cite/SourceMarks';
+import type { InlineSlot } from './Message';
 import { Chip, Icon } from '../ui';
 import { EXIT, SPRING_SMALL } from '../ui/motion';
 import { clock } from '../ui/time';
@@ -25,10 +27,10 @@ export function PageChip({ page, blockId }: { page: KbPageRef; blockId?: string 
   return <Chip kind="wiki" label={page.title} onClick={() => open(pageRef(page, blockId))} />;
 }
 
-export function InlinePart({ part }: { part: KbMessagePart }): ReactNode {
-  if (part.type === 'cite') return <CiteChip citation={part.citation} />;
-  if (part.type === 'page') return <PageChip page={part.page} blockId={part.block_id} />;
-  return null;
+/** An inline slot of an answer: one claim's source numbers, or a wiki page chip. */
+export function InlinePart({ part }: { part: InlineSlot }): ReactNode {
+  if (part.type === 'cites') return <SourceMarks citations={part.citations} />;
+  return <PageChip page={part.page} blockId={part.block_id} />;
 }
 
 /** Colour of a folder by its place in the library (four folder colours, never the only cue). */
@@ -75,7 +77,7 @@ export function ConnectionBlock({ folders, inference, page }: { folders: KbConne
                 <i className={`kb-fdot kb-fdot--${tone(f.folder_id)}`} aria-hidden="true" />
                 <span className="kb-conn__folder" title={f.folder_name}>{f.folder_name}</span>
                 <span className="kb-conn__text">{f.text}</span>
-                <CiteChip citation={f.citation} />
+                <SourceMarks citations={[f.citation]} />
               </m.li>
             ))}
             <m.li className="kb-conn__row kb-conn__row--inference"

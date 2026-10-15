@@ -56,7 +56,6 @@
   color: var(--kb-muted);
   font-size: var(--t-sm);
 }
-.kb-msg--system .kb-engine { min-width: 18px; height: 18px; font-size: 12px; }
 
 /* Answer Markdown (streamed as it comes — no animation, decision 36). */
 .kb-md > * + * { margin-top: 8px; }
@@ -231,7 +230,6 @@
 }
 .kb-picker:hover, .kb-picker[aria-expanded='true'] { background: var(--kb-accent-soft); }
 .kb-picker__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kb-picker .kb-engine { min-width: 18px; height: 18px; font-size: 12px; }
 .kb-effort { color: var(--kb-muted); }
 /* In a narrow centre the effort hides (v39). */
 @container (max-width: 440px) { .kb-effort { display: none; } }

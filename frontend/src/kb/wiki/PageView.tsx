@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { AnswerMarkdown } from '../ui/AnswerMarkdown';
@@ -6,13 +6,15 @@ import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../
 import { useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import {
-  CitationChip, FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, PanelFrameButtons, useAskAbout, useFolderTone,
+  FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, PanelFrameButtons, useAskAbout, useFolderTone,
 } from '../document/parts';
 import { plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
 import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, type ClaimKind } from './blocks';
 import { quoteAttrs, type QuoteSource } from '../ui/Selection';
+import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
+import { indexSources } from '../cite/sources';
 
 const NO_CITES: never[] = [];
 
@@ -126,9 +128,7 @@ function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlo
         <div className="kb-block__body">
           <BlockMarkdown text={block.text} quote={{ source: 'page', id: pageId, block_id: block.id }} />
           {block.citations.length > 0 && (
-            <span className="kb-block__cites">
-              {block.citations.map((c) => <CitationChip key={`${c.material_id}:${c.seg}`} citation={c} />)}
-            </span>
+            <span className="kb-block__cites"><SourceMarks citations={block.citations} /></span>
           )}
         </div>
       )}
@@ -164,6 +164,8 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const sections = groupSections(page.blocks);
+  // Numbers follow the reading order of the whole page, collapsed sections included.
+  const sources = useMemo(() => indexSources(groupSections(page.blocks).flatMap((s) => s.blocks.flatMap((b) => b.citations))), [page.blocks]);
   const toggle = (key: string) => setCollapsed((s) => {
     const next = new Set(s);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -180,29 +182,31 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
       {sections.length === 0 && !noteOpen && (
         <EmptyState icon="wiki" title="This page has no statements yet" compact />
       )}
-      {sections.map((section) => {
-        const open = !collapsed.has(section.key);
-        const title = section.title ?? (section.kind ? CLAIM_LABEL[section.kind] : 'Summary');
-        const headId = `kb-sec-${section.key.replace(/\W+/g, '-')}`;
-        return (
-          <section key={section.key} className={`kb-psec${section.kind ? ` kb-psec--${section.kind}` : ''}`} aria-labelledby={headId}>
-            <h3 className="kb-psec__head" id={headId}>
-              <button type="button" className="kb-psec__toggle" aria-expanded={open} onClick={() => toggle(section.key)}>
-                <Icon name="chevronDown" size={13} className={`kb-psec__chev${open ? '' : ' is-closed'}`} />
-                <span className="kb-psec__title">{title}</span>
-              </button>
-              {section.kind && <ClaimLabel kind={section.kind} />}
-            </h3>
-            {open && (
-              <div className="kb-psec__body">
-                {section.blocks.map((b) => (
-                  <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source'} actions={actions} />
-                ))}
-              </div>
-            )}
-          </section>
-        );
-      })}
+      <SourcesProvider index={sources}>
+        {sections.map((section) => {
+          const open = !collapsed.has(section.key);
+          const title = section.title ?? (section.kind ? CLAIM_LABEL[section.kind] : 'Summary');
+          const headId = `kb-sec-${section.key.replace(/\W+/g, '-')}`;
+          return (
+            <section key={section.key} className={`kb-psec${section.kind ? ` kb-psec--${section.kind}` : ''}`} aria-labelledby={headId}>
+              <h3 className="kb-psec__head" id={headId}>
+                <button type="button" className="kb-psec__toggle" aria-expanded={open} onClick={() => toggle(section.key)}>
+                  <Icon name="chevronDown" size={13} className={`kb-psec__chev${open ? '' : ' is-closed'}`} />
+                  <span className="kb-psec__title">{title}</span>
+                </button>
+                {section.kind && <ClaimLabel kind={section.kind} />}
+              </h3>
+              {open && (
+                <div className="kb-psec__body">
+                  {section.blocks.map((b) => (
+                    <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source'} actions={actions} />
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </SourcesProvider>
       {noteOpen && (
         <section className="kb-psec kb-psec--user_note" aria-label="New note">
           <h3 className="kb-psec__head"><span className="kb-psec__title">My note</span><ClaimLabel kind="user_note" /></h3>
@@ -214,6 +218,7 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
             }} />
         </section>
       )}
+      <SourcesRow index={sources} />
       {(page.related.length > 0 || page.mentioned_in.length > 0) && (
         <footer className="kb-pfoot">
           {page.related.length > 0 && (

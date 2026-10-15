@@ -126,7 +126,8 @@ function useSettingsShortcut() {
 /**
  * Live data of the window: chats (list + answering/new-answer marks) and the notification feed
  * follow the backend by long poll while the library is connected; agents and settings health are
- * read once at start (and again by the screens that change them).
+ * read once at start (and again by the screens that change them); agents are also re-checked when
+ * the window regains focus.
  */
 function useLiveData() {
   const { chats, notifications, agents, settings } = useServices();
@@ -138,6 +139,13 @@ function useLiveData() {
     void s.loadWiki();
     void s.loadSpeech();
   }, [agents, settings]);
+  // Agents are checked again when the window comes back (throttled per agent in the store;
+  // nothing runs while the window is hidden — there is no timer, only this event).
+  useEffect(() => {
+    const onFocus = () => agents.getState().autoCheck('focus');
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [agents]);
   useEffect(() => {
     if (!ready) return undefined;
     void chats.getState().loadList();

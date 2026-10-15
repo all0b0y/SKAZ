@@ -77,9 +77,11 @@
 /* Agent state in a settings row (v21): status and actions right, details under them. */
 .kb-agentrow { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 340px; min-width: 0; }
 .kb-agentrow__line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.kb-agentrow__when { display: flex; justify-content: flex-end; margin-top: -2px; }
+.kb-agentrow__when:empty { display: none; }
 .kb-agentrow .kb-installlog { align-self: stretch; }
 .kb-agentrow .kb-agentcard__note, .kb-agentrow .kb-agentcard__consent { text-align: left; }
-.kb-srow__label .kb-engine { margin-right: 6px; vertical-align: -3px; }
+.kb-srow__label .kb-engine { margin-right: 6px; vertical-align: -5px; }
 
 /* ---- Agent cards (first launch v21 + Accounts & keys) ---- */
 .kb-agentcards { display: flex; flex-direction: column; gap: 8px; width: 100%; }
@@ -89,6 +91,9 @@
 .kb-agentcard__name { white-space: nowrap; }
 .kb-agentcard__account { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-sm); }
 .kb-agentcard__head .kb-status { font-size: var(--t-sm); white-space: nowrap; flex: none; }
+/* "Checked just now": when the status was read; muted, under the status. */
+.kb-agentcard__st { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none; }
+.kb-agentcard__checked { font-size: var(--t-xs); color: var(--kb-muted); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
 .kb-agentcard__reason { color: var(--kb-muted); font-size: var(--t-sm); }
 .kb-agentcard__note { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: var(--kb-r-sm); background: var(--kb-warn-soft); font-size: var(--t-sm); }
 .kb-agentcard__note .kb-icon { color: var(--kb-warn); margin-top: 2px; flex: none; }

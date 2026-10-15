@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { KbAgent } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { Icon } from '../ui';
@@ -6,7 +6,7 @@ import { Popover } from '../ui/Popover';
 import { EngineBadge } from '../ui/EngineBadge';
 import { ENGINE_ORDER, ENGINE_NAME } from '../state/agents';
 import type { AgentChoice } from '../state/chats';
-import { useAgents, useUi } from '../state/context';
+import { useAgents, useServices, useUi } from '../state/context';
 
 const STATE_LABEL: Partial<Record<KbAgent['state'], string>> = {
   not_installed: 'not installed',
@@ -44,6 +44,9 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
   const anchor = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const agents = useAgents((s) => s.agents);
+  const { agents: agentsStore } = useServices();
+  // Opening the menu checks the agents by themselves (throttled in the store).
+  useEffect(() => { if (open) agentsStore.getState().autoCheck('open'); }, [open, agentsStore]);
   const openSettings = useUi((s) => s.openSettings);
   const current = choice ? agents?.agents.find((a) => a.id === choice.engine) : undefined;
   const modelLabel = choice?.model
@@ -64,7 +67,7 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
       <button ref={anchor} type="button" className="kb-picker" aria-haspopup="menu" aria-expanded={open}
         aria-label={`Agent and model: ${choice ? ENGINE_NAME[choice.engine] : 'none'}, ${modelLabel}`}
         onClick={() => setOpen((v) => !v)} data-testid="agent-picker">
-        {choice && <EngineBadge engine={choice.engine} />}
+        {choice && <EngineBadge engine={choice.engine} size={16} />}
         <span className="kb-picker__label">{modelLabel}</span>
         <Icon name="chevronDown" size={12} />
       </button>

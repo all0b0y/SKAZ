@@ -19,12 +19,13 @@ const selectText = (el: Element) => {
 };
 
 describe('One document navigator for chats and documents', () => {
-  it('a source chip in a chat answer opens the material screen on the right at the cited fragment', async () => {
+  it('a source number in a chat answer opens the material screen on the right at the cited fragment', async () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
     await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
     const answer = await screen.findByRole('article', { name: 'Answer' });
-    await user.click(within(answer).getAllByRole('button', { name: 'Recording: Lecture 5, 44:00' })[0]!);
+    await user.click(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' })[0]!);
+    await user.click(within(await screen.findByRole('dialog', { name: 'Lecture 5' })).getByRole('button', { name: /^Open at fragment/ }));
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
     const doc = await screen.findByRole('complementary', { name: 'Document' });
     expect(doc).toHaveAttribute('data-view', 'material');

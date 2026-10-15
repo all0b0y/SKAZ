@@ -378,7 +378,8 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
                      ("skaz_read_material", "Read Лекция 8")]
     turn = env.agents.engines["codex"].turns[-1]
     assert turn.tools is not None and tuple(spec.name for spec in turn.tools) == TOOL_NAMES
-    assert "⟦m:<material_id>:<seg>⟧" in turn.instructions and "skaz-connection" in turn.instructions
+    assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
+    assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions
 
 
