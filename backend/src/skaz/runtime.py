@@ -164,7 +164,6 @@ class Runtime:
             transcript_language=settings.transcript_language,
             output_language=settings.output_language,
             cloud_consent=settings.cloud_consent,
-            contextual_local_enabled=settings.contextual_local_enabled,
             transcription_provider=settings.transcription_provider,
             local_whisper_model=settings.local_whisper_model,
             openai_transcription_model=settings.openai_transcription_model,
