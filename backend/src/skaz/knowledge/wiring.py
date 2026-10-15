@@ -33,6 +33,7 @@ from .mcp.server import McpServer
 from .mcp.tokens import McpRunScope
 from .service import KnowledgeService
 from .sources.guard.detector import Detection, detect_instruction
+from .sources.material_info import wiki_states
 from .sources.service import SourceEvent, SourceService
 from .speech.link_failures import LinkFailures
 from .speech.service import SpeechService
@@ -132,11 +133,23 @@ class AutoIngest:
 
     def wants(self, event: SourceEvent) -> bool:
         if event.kind == "fragment_restored":
-            return True
+            return self._restore_reruns(event.material_id)
         choice = event.to_wiki if event.to_wiki is not None else self._choice(event.material_id)
         if choice is not None:
             return choice
         material = self._kb.material_repo.get(event.material_id)
+        if material is None:
+            return False
+        settings = self._ingest.settings()
+        return settings.auto_add_text if material.kind == "text" else settings.auto_add_files_links
+
+    def _restore_reruns(self, material_id: str) -> bool:
+        """Review L2: a restored fragment re-runs the material only if the wiki has (or tried to add) it,
+        or Settings → Wiki add this kind by themselves — never a material the user kept out."""
+        state = wiki_states(self._kb.db, [material_id]).get(material_id)
+        if state is not None and state.state != "not_in_wiki":
+            return True
+        material = self._kb.material_repo.get(material_id)
         if material is None:
             return False
         settings = self._ingest.settings()
