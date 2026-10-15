@@ -262,10 +262,13 @@ class CodexEngine:
         await rpc.close()
 
     async def close(self) -> None:
+        """App shutdown: every running answer's app-server is stopped at the same time."""
+        rpcs = []
         for run in list(self._runs.values()):
             run.cancelled = True
             if run.rpc is not None:
-                await run.rpc.close()
+                rpcs.append(run.rpc.close())
+        await asyncio.gather(*rpcs, return_exceptions=True)
 
     async def _events(self, turn: AgentTurn) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id

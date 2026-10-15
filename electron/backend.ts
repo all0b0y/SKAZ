@@ -15,6 +15,11 @@ import { app } from 'electron';
 
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_INTERVAL_MS = 300;
+/**
+ * SIGTERM → SIGKILL. The backend stops agent and llama-server processes at once and closes the
+ * knowledge services within 2.5 s (backend/src/skaz/knowledge/shutdown.py DEADLINE_S), leaving the
+ * rest of its shutdown ≥ 1 s; backend/tests/knowledge/test_shutdown.py checks the two stay in step.
+ */
 const SHUTDOWN_GRACE_MS = 4_000;
 /** Added to start failures in development only, where the backend runs from the repo. */
 const DEV_START_HINT = 'Development build: make sure the Python backend is installed (uv sync in backend/).';

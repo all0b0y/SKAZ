@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ...gateways.codex_locate import search_path
+from ..processes import CHILDREN
 
 Version = tuple[int, int, int]
 _SUDO = re.compile(r"(^|[\s;&|()`/])(sudo|doas|su)(\s|$)")
@@ -87,6 +88,7 @@ async def run_capture(argv: Sequence[str], *, env: Mapping[str, str], cwd: Path 
         stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
+    CHILDREN.add(process, group=True)
     try:
         async with asyncio.timeout(timeout):
             out, err = await process.communicate(stdin)
@@ -94,6 +96,7 @@ async def run_capture(argv: Sequence[str], *, env: Mapping[str, str], cwd: Path 
         if process.returncode is None:
             kill_group(process.pid)
             await process.wait()
+        CHILDREN.discard(process)
     return Captured(process.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace"))
 
 

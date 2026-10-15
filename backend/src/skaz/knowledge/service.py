@@ -198,10 +198,15 @@ class KnowledgeService:
                 listener()
 
     def writing(self) -> threading.RLock:
-        """Hold while writing a library file and its index rows.
+        """The one lock for every read-then-write of library files and their index rows.
 
-        A scan (startup, connect, retry) re-reads every file and replaces the index; a write that
-        lands between its read and its replace would be undone in the index. Scans hold the same lock.
+        Held by: the full scan (startup, connect, retry, rescan) from its first read to the index
+        replace and the ``after_scan`` rebuilds; material and folder writes; every wiki page write
+        (ingest, W2 edits, recheck, delete, move — ``IngestService.write_lock`` *is* this lock);
+        the ``Wiki/`` watcher's tick; re-indexing a page on open; the corrections file and its
+        index. A write that landed between another party's read and its write would be undone in
+        the index while the file kept it. Re-entrant (a write may call another write). Hold it only
+        in worker threads (``disk_call``), never across an ``await``.
         """
         return self._state_lock
 
@@ -300,9 +305,10 @@ class KnowledgeService:
     # -- wiki pages ---------------------------------------------------------
 
     def create_page(self, document: PageDocument) -> Path:
-        library = self.require()
-        path = library.create_page(document)
-        indexer.put_page(self.db, read_page(library, path))
+        with self.writing():
+            library = self.require()
+            path = library.create_page(document)
+            indexer.put_page(self.db, read_page(library, path))
         return path
 
     def pages(self, *, kind: str | None = None, folder_id: str | None = None) -> list[PageRecord]:
@@ -315,13 +321,14 @@ class KnowledgeService:
             raise NotFound("Page not found.")
         library = self._library
         if library is not None:
-            try:
-                scanned = read_page(library, library.root / record.rel_path)
-            except (OSError, PageFormatError, UnicodeDecodeError):
-                scanned = None  # the next full scan decides; the indexed copy is shown meanwhile
-            if scanned is not None and scanned.meta.skaz_id == page_id:
-                indexer.put_page(self.db, scanned)
-                record = self.page_repo.get(page_id) or record
+            with self.writing():  # a SKAZ write between this read and put_page would be undone
+                try:
+                    scanned = read_page(library, library.root / record.rel_path)
+                except (OSError, PageFormatError, UnicodeDecodeError):
+                    scanned = None  # the next full scan decides; the indexed copy is shown meanwhile
+                if scanned is not None and scanned.meta.skaz_id == page_id:
+                    indexer.put_page(self.db, scanned)
+                    record = self.page_repo.get(page_id) or record
         return self._page_view(record)
 
     def _page_view(self, record: PageRecord) -> PageView:

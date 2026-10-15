@@ -157,6 +157,7 @@ async def test_speech_settings_read_and_write_the_existing_settings(
         "translate_by_default": False,
         "translation_language": "ru",
         "local_model": {"model": "small", "state": "missing", "progress": None, "reason": None},
+        "cloud_consent": False,
     }
     changed = await api.put(
         "/kb/settings/speech",
@@ -237,6 +238,42 @@ async def test_speech_problems_offer_explicit_fixes_only(
     assert (await api.post("/kb/settings/health/speech-local-model/download")).status_code == 404
     assert (await api.post("/kb/settings/health/speech-soniox-key/download")).status_code == 409
     assert (await api.post("/kb/settings/health/no-such/thing")).status_code == 404
+
+
+async def test_sending_audio_to_soniox_is_allowed_and_revoked_only_by_the_user(
+    api: httpx.AsyncClient,
+) -> None:
+    """Review B2 #6: the consent lives in the existing settings (``cloud_consent``), never implied."""
+    assert (await api.put("/kb/settings/keys/soniox", json={"key": "soniox-test-key"})).status_code == 200
+    consent = problem(await health(api), "speech", "speech-soniox-consent")
+    assert consent is not None and consent["severity"] == "error"
+    assert [(action["id"], action["label"], action["primary"]) for action in consent["actions"]] == [
+        ("allow_soniox", "Allow sending audio to Soniox", True),
+        ("use_local", "Recognise on this Mac", False),
+    ]
+    # Choosing Soniox (again) is not consent.
+    await api.put("/kb/settings/speech", json={"provider": "local_whisper"})
+    chosen = await api.put("/kb/settings/speech", json={"provider": "soniox"})
+    assert chosen.json()["cloud_consent"] is False
+    assert (await api.get("/settings")).json()["cloud_consent"] is False
+
+    allowed = await api.post("/kb/settings/health/speech-soniox-consent/allow_soniox")
+    assert allowed.status_code == 200, allowed.text
+    after = {section["id"]: section for section in allowed.json()["sections"]}
+    assert problem(after, "speech", "speech-soniox-consent") is None
+    assert (await api.get("/settings")).json()["cloud_consent"] is True
+    assert (await api.get("/kb/settings/speech")).json()["cloud_consent"] is True
+    flows = (await api.get("/kb/settings/privacy")).json()["flows"]
+    assert next(flow for flow in flows if flow["where"].startswith("Soniox"))["enabled"]
+
+    revoked = await api.put("/kb/settings/speech", json={"cloud_consent": False})
+    assert revoked.status_code == 200 and revoked.json()["cloud_consent"] is False
+    assert (await api.get("/settings")).json()["cloud_consent"] is False
+    assert problem(await health(api), "speech", "speech-soniox-consent") is not None
+    regranted = await api.put("/kb/settings/speech", json={"cloud_consent": True})
+    assert regranted.json()["cloud_consent"] is True
+    # The action is gone once there is nothing to fix.
+    assert (await api.post("/kb/settings/health/speech-soniox-consent/allow_soniox")).status_code == 404
 
 
 async def test_library_agent_and_decision_problems(app: Any, api: httpx.AsyncClient) -> None:

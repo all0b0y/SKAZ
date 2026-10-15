@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -44,11 +43,12 @@ def _insert(connection: sqlite3.Connection, material_id: str, entries: Sequence[
 
 
 class CorrectionStore:
-    """One material's file at a time, under one lock (read-modify-write is never interleaved)."""
+    """One material's file at a time, under the library's write lock (``KnowledgeService.writing``):
+    read-modify-write is never interleaved, and a library scan's index rebuild never undoes a write."""
 
     def __init__(self, kb: KnowledgeService) -> None:
         self.kb = kb
-        self.lock = threading.RLock()
+        self.lock = kb.writing()
 
     def _directory(self, material_id: str) -> Path:
         record = self.kb.material_repo.get(material_id)
@@ -93,18 +93,19 @@ class CorrectionStore:
 
     def rebuild_index(self) -> None:
         """After a library scan: the table equals the files of the indexed materials."""
-        files: list[CorrectionsFile] = []
-        for record in self.kb.materials():
-            try:
-                data = self.read(record.id)
-            except (CorrectionsUnreadable, NotFound, OSError):
-                continue
-            if data is not None:
-                files.append(data)
-        with self.kb.db.write_rebuildable() as connection:
-            connection.execute("DELETE FROM corrections")
-            for data in files:
-                _insert(connection, data.material_id, data.corrections)
+        with self.lock:  # a correction saved between these reads and the replace would be lost
+            files: list[CorrectionsFile] = []
+            for record in self.kb.materials():
+                try:
+                    data = self.read(record.id)
+                except (CorrectionsUnreadable, NotFound, OSError):
+                    continue
+                if data is not None:
+                    files.append(data)
+            with self.kb.db.write_rebuildable() as connection:
+                connection.execute("DELETE FROM corrections")
+                for data in files:
+                    _insert(connection, data.material_id, data.corrections)
 
     def counts(self, material_id: str) -> dict[str, int]:
         with self.kb.db.read() as connection:
