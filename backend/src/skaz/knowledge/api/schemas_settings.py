@@ -83,6 +83,8 @@ class KbLocalSpeechModel(BaseModel):
     progress: float | None
     #: Why it failed, in plain words.
     reason: str | None
+    #: Approximate size of the model's files (its download size); ``null`` when unknown.
+    size_bytes: int | None
 
 
 class KbSpeechSettings(BaseModel):
@@ -97,6 +99,16 @@ class KbSpeechSettings(BaseModel):
     #: The user allowed sending audio of recordings, imports and dictation to a cloud speech service
     #: (Soniox). The existing settings' ``cloud_consent``; only ever set by the user's own action.
     cloud_consent: bool
+
+
+class KbLocalModelDeleted(BaseModel):
+    """``DELETE /kb/settings/speech/local-model``: what was removed, and the speech settings after it."""
+
+    #: Whether any files of the model were there to remove.
+    deleted: bool
+    #: Bytes freed on this Mac.
+    deleted_bytes: int
+    speech: KbSpeechSettings
 
 
 class KbSpeechSettingsUpdate(_Request):

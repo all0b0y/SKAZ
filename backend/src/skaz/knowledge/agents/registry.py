@@ -146,6 +146,10 @@ class CodexStatusEngine:
     async def login_url(self, consent: bool) -> str:
         return await self.connection.login(consent)
 
+    async def logout(self) -> None:
+        """Codex's own ``account/logout`` in SKAZ's Codex profile (``CodexConnection.logout``)."""
+        await self.connection.logout()
+
 
 def _first_run(target: object) -> FirstRun | None:
     reader = getattr(target, "first_run", None)
@@ -237,6 +241,28 @@ class EngineRegistry:
             message = view.status.reason or f"{view.name} is not ready."
             raise EngineUnavailable(engine, message, view.action or "check")
         return self.engines[engine]
+
+    async def logout(self, engine: EngineId) -> AgentView:
+        """Sign out of an engine whose sign-in SKAZ owns (Codex: SKAZ's ``CODEX_HOME``), then re-check.
+
+        Claude Code and Hermes keep their sign-in in their own apps; SKAZ never removes it.
+        """
+        target: Any = self.engines[engine]
+        name = ENGINE_NAMES[engine]
+        logout = getattr(target, "logout", None)
+        if not callable(logout):
+            raise EngineUnavailable(
+                engine, f"{name} keeps its sign-in in its own app. Sign out there.", "check")
+        self.forget(engine)
+        try:
+            await logout()
+        except ValueError as error:  # SKAZ's own plain reasons ("Check the Codex connection first")
+            detail = str(error).strip() or f"{name} didn't answer"
+            raise EngineUnavailable(engine, f"SKAZ couldn't sign out of {name}: {detail}", "check") from error
+        except Exception as error:  # the engine's own output is not shown: it is not SKAZ's text
+            message = f"SKAZ couldn't sign out of {name}: it didn't answer. Check it and try again."
+            raise EngineUnavailable(engine, message, "check") from error
+        return await self.view(engine, refresh=True)
 
     async def login(self, engine: EngineId, *, consent: bool = False) -> LoginOutcome:
         target: Any = self.engines[engine]

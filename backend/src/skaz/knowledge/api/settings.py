@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Path
 from pydantic import SecretStr, ValidationError
 
 from ...gateways.asr import LocalModelBusy
+from ...local_models import CacheSafetyError
 from ...native_io import disk_call
 from ...routes.deps import RuntimeDep
 from ...routes.settings import update_settings
@@ -23,7 +24,7 @@ from ..settings.about import about
 from ..settings.health import SettingsHealth
 from ..settings.keys import KeyChecks, KeyProvider, KeyStatus
 from ..settings.privacy import privacy_flows
-from ..settings.speech import SpeechSettings, speech_settings, to_legacy
+from ..settings.speech import SpeechSettings, delete_local_model, speech_settings, to_legacy
 from .schemas_settings import (
     KbAbout,
     KbKeyProvider,
@@ -31,6 +32,7 @@ from .schemas_settings import (
     KbKeyStatus,
     KbKeyUpdate,
     KbLicense,
+    KbLocalModelDeleted,
     KbLocalSpeechModel,
     KbPrivacy,
     KbPrivacyFlow,
@@ -135,7 +137,7 @@ def _speech_view(value: SpeechSettings) -> KbSpeechSettings:
         translate_by_default=value.translate_by_default,
         translation_language=value.translation_language,
         local_model=KbLocalSpeechModel(model=model.model, state=model.state, progress=model.progress,
-                                       reason=model.reason),
+                                       reason=model.reason, size_bytes=model.size_bytes),
         cloud_consent=value.cloud_consent,
     )
 
@@ -158,6 +160,22 @@ async def update_speech(body: KbSpeechSettingsUpdate, runtime: RuntimeDep) -> Kb
         raise HTTPException(status_code=422, detail=reason) from error
     await update_settings(update, runtime)
     return _speech_view(await disk_call(speech_settings, runtime))
+
+
+@router.delete("/speech/local-model")
+async def delete_speech_model(runtime: RuntimeDep) -> KbLocalModelDeleted:
+    """Delete the downloaded Whisper model of this Mac (the old "Delete downloaded model")."""
+    try:
+        result = await delete_local_model(runtime)
+    except LocalModelBusy as error:
+        raise HTTPException(status_code=409, detail=(
+            "The speech model is in use or still downloading. Try again when it is free.")) from error
+    except CacheSafetyError as error:
+        raise HTTPException(status_code=409, detail=(
+            "SKAZ didn't delete the model: its folder isn't safe to remove "
+            "(it links outside the model cache).")) from error
+    return KbLocalModelDeleted(deleted=result.deleted, deleted_bytes=result.deleted_bytes,
+                               speech=_speech_view(await disk_call(speech_settings, runtime)))
 
 
 def _speech_update(body: KbSpeechSettingsUpdate) -> SettingsUpdate:

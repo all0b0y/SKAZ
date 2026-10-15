@@ -158,6 +158,7 @@
 .kb-pst.is-link:hover { border-color: var(--kb-muted); }
 .kb-spinner--xs { width: 10px; height: 10px; border-width: 1.5px; }
 .kb-mat__note { font-size: var(--t-sm); color: var(--kb-muted); }
+.kb-mat__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .kb-spk-list { display: flex; flex-direction: column; gap: 10px; }
 .kb-spk { display: flex; flex-direction: column; gap: 2px; }

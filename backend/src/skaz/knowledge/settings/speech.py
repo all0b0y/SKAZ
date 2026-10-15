@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ... import asr_providers
 from ...gateways.asr import LOCAL_ASR_DEPENDENCY_DETAIL
+from ...local_models import local_model_size
 
 if TYPE_CHECKING:  # pragma: no cover
     from ...gateways.asr import LocalModelPreparations
@@ -31,6 +32,15 @@ class LocalModel:
     state: LocalState
     progress: float | None
     reason: str | None
+    #: Approximate size of the model's files (its download size); ``None`` when unknown.
+    size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class LocalModelDeleted:
+    #: Whether any files of the model were there to remove.
+    deleted: bool
+    deleted_bytes: int
 
 
 @dataclass(frozen=True)
@@ -54,6 +64,12 @@ def to_legacy(provider: str) -> str:
 
 def local_model(runtime: Runtime, model: str) -> LocalModel:
     """Missing / downloading (with progress) / ready / failed (with the reason), never loading the model."""
+    found = _local_model(runtime, model)
+    return LocalModel(found.model, found.state, found.progress, found.reason,
+                      local_model_size("local-whisper", model))
+
+
+def _local_model(runtime: Runtime, model: str) -> LocalModel:
     preparations: LocalModelPreparations = runtime.local_models
     # The manager's last report for this checkpoint (it has no public reader; read-only peek).
     reports: dict[str, Any] = getattr(preparations, "_reports", {})
@@ -86,3 +102,16 @@ def speech_settings(runtime: Runtime, stored: StoredSettings | None = None) -> S
         local_model=local_model(runtime, settings.local_whisper_model),
         cloud_consent=settings.cloud_consent,
     )
+
+
+async def delete_local_model(runtime: Runtime) -> LocalModelDeleted:
+    """Remove the downloaded files of the chosen Whisper model (only that model's cache folder).
+
+    The model manager refuses while the model is downloading, being checked or used by a
+    recording (``LocalModelBusy``), and refuses a cache folder that is not safe to remove
+    (``CacheSafetyError``). Recording with Soniox is not affected.
+    """
+    model = runtime.settings_store.load().local_whisper_model
+    preparations: LocalModelPreparations = runtime.local_models
+    result = await preparations.delete("local-whisper", model)
+    return LocalModelDeleted(deleted=result.deleted, deleted_bytes=result.deleted_bytes)

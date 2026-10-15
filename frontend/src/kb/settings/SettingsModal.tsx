@@ -6,10 +6,12 @@ import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
 import {
   AgentRow, AsrRow, BackgroundLinksRow, ChatModelRow, DecisionsRow, DefaultAgentRow, FindLinksNowRow, HealthPlates, KeyRow,
-  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SonioxConsentRow, SpeechLanguagesRow, TranslationRow, VersionRow,
+  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SonioxConsentRow, SpeechLanguagesRow, SpeechModelRow,
+  TranslationRow, VersionRow,
   WikiLanguageRow, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
 import { EngineBadge } from '../ui/EngineBadge';
+import { ActivityLogRow } from './ActivityLog';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -38,6 +40,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'decisions': return <DecisionsRow label={row.label} />;
     case 'asr-service': return <AsrRow label={row.label} />;
     case 'soniox-consent': return <SonioxConsentRow label={row.label} />;
+    case 'speech-model': return <SpeechModelRow />;
     case 'speech-languages': return <SpeechLanguagesRow />;
     case 'translate-default': return <TranslationRow />;
     case 'wiki-language': return <WikiLanguageRow />;
@@ -79,6 +82,8 @@ function RowControl({ row }: { row: RowDef }) {
         <Segmented<TextSize> label="Text size" value={textSize} size="sm" onChange={(v) => prefs.getState().set({ textSize: v })}
           options={[{ value: 's', label: 'S', name: 'Small' }, { value: 'm', label: 'M', name: 'Medium' }, { value: 'l', label: 'L', name: 'Large' }]} />
       );
+    case 'log':
+      return <ActivityLogRow />;
     case 'ui-language':
       return <span className="kb-muted">English</span>;
     case 'version':

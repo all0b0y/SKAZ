@@ -13,6 +13,7 @@ function fakeEngine() {
   let started: CaptureStart | null = null;
   let elapsed = 0;
   let saved = true;
+  let incomplete = false;
   const engine: CaptureEngine = {
     start: vi.fn(async (start, cb) => { started = start; callbacks = cb; calls.push('start'); }),
     pause: vi.fn(async () => { calls.push('pause'); }),
@@ -20,6 +21,7 @@ function fakeEngine() {
     stop: vi.fn(async () => { calls.push('stop'); return saved; }),
     elapsedMs: () => elapsed,
     pending: () => ({ pending: saved ? 0 : 3, failed: 0 }),
+    incomplete: () => incomplete,
   };
   return {
     engine, calls,
@@ -28,6 +30,7 @@ function fakeEngine() {
     fail: (message: string) => callbacks!.onFailure(message),
     setElapsed: (ms: number) => { elapsed = ms; },
     unsaved: () => { saved = false; },
+    flushUnconfirmed: () => { incomplete = true; },
   };
 }
 
@@ -92,7 +95,8 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(store.getState().phase).toBe('recording');
     await store.getState().stop();
     expect(eng.calls).toEqual(['start', 'pause', 'resume', 'stop']);
-    expect(routes().filter((r) => r.includes(id))).toEqual([
+    // Writes only: the stream-state poll reads the session's live events in between.
+    expect(routes().filter((r) => r.includes(id) && !r.startsWith('GET '))).toEqual([
       `POST /kb/recordings/${id}/pause`, `POST /kb/recordings/${id}/resume`, `POST /kb/recordings/${id}/stop`,
     ]);
     expect(store.getState().phase).toBe('idle');
@@ -112,6 +116,52 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(eng.started?.sampleRate).toBe(48000);
   });
 
+  it('a stopped recording continues into the same material, session and sample clock (after a restart too)', async () => {
+    const { store, eng, routes, ui, fake } = setup();
+    await store.getState().start();
+    const { materialId, sessionId } = store.getState();
+    await store.getState().stop();
+    // A fresh store stands for the app after a restart: nothing in memory about that recording.
+    const after = createRecordingStore({
+      client: new KbClient(fake.bridge), bridge: fake.bridge, ui, capture: () => eng.engine, sleep: async () => undefined,
+    });
+    await after.getState().continueRecording(materialId!);
+    expect(after.getState()).toMatchObject({ phase: 'recording', materialId, sessionId, failure: null, startError: null });
+    expect(routes()).toContain(`POST /kb/recordings/${materialId}/resume`);
+    expect(routes()).toContain(`GET /sessions/${sessionId}/live`);
+    expect(eng.started).toMatchObject({ sessionId, sampleRate: 48000 });
+    expect(ui.getState().right).toEqual({ kind: 'live', materialId });
+  });
+
+  it('continuing a recording the backend refuses says why and starts nothing', async () => {
+    const { store, eng } = setup();
+    await store.getState().continueRecording('not-a-recording');
+    expect(store.getState().phase).toBe('idle');
+    expect(store.getState().startError).toMatch(/not a recording/);
+    expect(eng.engine.start).not.toHaveBeenCalled();
+  });
+
+  it('while recording it follows the stream state of the session: reconnecting is said, never hidden', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { store, fake } = setup();
+      await store.getState().loadOptions();
+      await store.getState().start();
+      fake.world.liveTranscription = 'reconnecting';
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(store.getState().stream).toBe('reconnecting');
+      expect(store.getState().provider).toBe('soniox');
+      expect(store.getState().tail.original).toBe('So cross-entropy in machine learning is');
+      fake.world.liveTranscription = 'streaming';
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(store.getState().stream).toBe('streaming');
+      await store.getState().pause();
+      expect(store.getState()).toMatchObject({ stream: null, tail: { original: '', translation: '' } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a failed start says why and leaves nothing recording', async () => {
     const { store, eng } = setup();
     vi.mocked(eng.engine.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
@@ -127,6 +177,20 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     eng.unsaved();
     await expect(store.getState().prepareQuit()).resolves.toBe(false);
     expect(store.getState().phase).toBe('finishing');
+  });
+
+  it('quit barrier: a flush that never confirmed stops and settles, but does not let SKAZ quit silently', async () => {
+    const { store, eng, routes } = setup();
+    await store.getState().start();
+    const id = store.getState().materialId!;
+    eng.flushUnconfirmed();
+    await expect(store.getState().prepareQuit()).resolves.toBe(false);
+    // Everything received is delivered and the material settled; only the last moment is unknown.
+    expect(store.getState().phase).toBe('idle');
+    expect(routes()).toContain(`POST /kb/recordings/${id}/stop`);
+    expect(store.getState().startError).toMatch(/last moment of audio/);
+    // Nothing is left to save: a second quit is the user's informed choice.
+    await expect(store.getState().prepareQuit()).resolves.toBe(true);
   });
 
   it('without a capture pipeline (no native bridge) Record explains instead of pretending', async () => {

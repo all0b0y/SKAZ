@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { KbMaterial } from '../../api/kb/types.gen';
 import { Button, Icon, Spinner } from '../ui';
 import { formatTime } from '../library/materialMeta';
@@ -8,16 +8,13 @@ import { useLibrary, useRecording, useServices } from '../state/context';
 import { languageName } from '../material/MaterialView';
 import { Transcript } from '../material/Transcript';
 import { isLive } from './recordingStore';
-
-interface TailPage {
-  tail: { originals: Array<{ text: string }>; translations: Array<{ text: string }> } | null;
-}
+import { connectionText } from './connection';
 
 const NEAR_BOTTOM = 80;
 
 /** Live transcript on the right while recording (v12–v15): text grows, unstable tail in grey. */
 export function LivePanel({ materialId }: { materialId: string }) {
-  const { client, bridge } = useServices();
+  const { client } = useServices();
   const folders = useLibrary((s) => s.folders);
   const phase = useRecording((s) => s.phase);
   const recMaterial = useRecording((s) => s.materialId);
@@ -25,26 +22,21 @@ export function LivePanel({ materialId }: { materialId: string }) {
   const view = useRecording((s) => s.view);
   const failure = useRecording((s) => s.failure);
   const elapsed = useRecording((s) => s.elapsedMs);
+  const stream = useRecording((s) => s.stream);
+  const provider = useRecording((s) => s.provider);
+  const tails = useRecording((s) => s.tail);
   const { recording } = useServices();
   const mine = recMaterial === materialId;
   const live = mine && (isLive(phase) || phase === 'finishing' || phase === 'starting');
   const { state, reload } = useLoad<KbMaterial>(materialId, async () =>
     await client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }));
-  const [tail, setTail] = useState('');
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
+  // The unstable tail and the stream state come from the recording store's poll of the session.
+  const tail = !live || !sessionId ? '' : view === 'translation' && tails.translation ? tails.translation : tails.original;
+  const reconnect = mine && phase === 'recording' ? connectionText(stream, provider) : null;
 
-  useInterval(live, 1500, () => {
-    reload();
-    if (phase !== 'recording' || !sessionId) { setTail(''); return; }
-    void bridge.request<TailPage>({ method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live/events`, query: { limit: 1 } })
-      .then((res) => {
-        if (!res.ok || !res.data.tail) { setTail(''); return; }
-        const parts = view === 'translation' && res.data.tail.translations.length ? res.data.tail.translations : res.data.tail.originals;
-        setTail(parts.map((t) => t.text).join('').trim());
-      }, () => setTail(''));
-  });
-  useEffect(() => { if (!live) setTail(''); }, [live]);
+  useInterval(live, 1500, reload);
 
   const material = state.value;
   const count = material?.fragments.length ?? 0;
@@ -61,6 +53,7 @@ export function LivePanel({ materialId }: { materialId: string }) {
 
   const failed = failure && failure.materialId === materialId ? failure : null;
   const status = !mine ? null
+    : reconnect ? <span className="kb-live__status kb-live__status--warn" role="status"><span className="kb-spinner kb-spinner--inline" aria-hidden="true" />{reconnect.short}</span>
     : phase === 'recording' ? <span className="kb-live__status">Recording</span>
       : phase === 'paused' || phase === 'pausing' ? <span className="kb-live__status"><span className="kb-pzd" aria-hidden="true" />Paused</span>
         : phase === 'finishing' ? <span className="kb-live__status"><Spinner label="Finishing" size="sm" />Finishing…</span>
@@ -84,6 +77,9 @@ export function LivePanel({ materialId }: { materialId: string }) {
           <article className="kb-doc__article">
             <h2 className="kb-doc__title kb-doc__title--sm">{material.title}</h2>
             {meta && <p className="kb-doc__meta">{meta}</p>}
+            {reconnect?.long && (
+              <p className="kb-live__note" role="note"><Icon name="warning" size={14} />{reconnect.long}</p>
+            )}
             {failed && (
               <div className="kb-lerr" role="alert">
                 <Icon name="warning" size={16} />

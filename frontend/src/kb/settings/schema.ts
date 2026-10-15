@@ -67,6 +67,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound' },
   { id: 'asr-service', section: 'rec', group: 'Recognition', label: 'Service', hint: 'Soniox or on this computer', keywords: 'speech recognition asr whisper soniox' },
   { id: 'soniox-consent', section: 'rec', group: 'Recognition', label: 'Send audio to Soniox', hint: 'Needed for Soniox; you can take it back at any time', keywords: 'privacy consent cloud soniox audio permission' },
+  { id: 'speech-model', section: 'rec', group: 'Recognition', label: 'Speech model on this computer', hint: 'Whisper files for recognition without internet', keywords: 'local whisper offline delete remove disk space download' },
   { id: 'speech-languages', section: 'rec', group: 'Recognition', label: 'Speech languages', hint: 'A hint for recognition', keywords: 'language languages' },
   { id: 'translate-default', section: 'rec', group: 'Recognition', label: 'Default translation', keywords: 'translate language' },
   // Wiki

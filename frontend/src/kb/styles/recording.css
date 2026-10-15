@@ -34,6 +34,7 @@
 .kb-cap--paused.is-open { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kb-warn) 22%, transparent); }
 .kb-cap__time { font-variant-numeric: tabular-nums; font-weight: 700; }
 .kb-cap__folder { color: var(--kb-muted); font-weight: 400; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.kb-cap__folder--warn { color: var(--kb-warn); font-weight: 600; }
 .kb-cap .kb-capsule__div { background: currentColor; opacity: 0.3; }
 .kb-cap .kb-icon { color: var(--kb-muted); }
 .kb-lvl { display: inline-flex; align-items: center; gap: 2px; height: 12px; }
@@ -71,14 +72,19 @@
 .kb-recmenu__go { padding: 8px 8px 4px; display: flex; }
 .kb-recmenu__go .kb-btn { flex: 1; justify-content: center; }
 .kb-recmenu .kb-namefield { padding: 2px 4px; }
-.kb-recerr { display: flex; align-items: flex-start; gap: 8px; padding: 4px; }
+.kb-recerr { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 6px 8px; padding: 4px; }
 .kb-recerr > .kb-icon { color: var(--kb-danger); margin-top: 2px; }
-.kb-recerr p { flex: 1; font-size: var(--t-sm); }
+.kb-recerr p { font-size: var(--t-sm); }
+.kb-recerr__actions, .kb-recerr > .kb-inline-error { grid-column: 2; }
+.kb-recerr__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 /* ---- Live panel ---- */
 .kb-live { position: relative; }
 .kb-live__status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; min-width: 0; overflow: hidden; }
 .kb-live__status--error { color: var(--kb-danger); }
+.kb-live__status--warn { color: var(--kb-warn); }
+.kb-live__note { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; background: var(--kb-warn-soft); color: var(--kb-text); font-size: var(--t-sm); }
+.kb-live__note .kb-icon { flex: none; margin-top: 2px; color: var(--kb-warn); }
 .kb-lerr { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border-radius: var(--kb-r-md); background: var(--kb-danger-soft); }
 .kb-lerr > .kb-icon { color: var(--kb-danger); margin-top: 2px; }
 .kb-lerr p { font-size: var(--t-sm); }

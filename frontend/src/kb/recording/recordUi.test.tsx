@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import type { CaptureCallbacks, CaptureEngine } from './capture';
+import { SystemAudioUnavailable } from '../../audio/recorder';
 
 function engine() {
   let cb: CaptureCallbacks | null = null;
@@ -102,6 +103,28 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     }
   });
 
+  it('a dropped speech connection is said in the live panel and the capsule while SKAZ reconnects', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { user, bar, record, fake } = await start();
+      await user.click(record);
+      const live = await screen.findByRole('complementary', { name: 'Live recording' });
+      fake.world.liveTranscription = 'reconnecting';
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      // Announced as a status, not an alert: recording goes on.
+      expect(within(live).getAllByRole('status').some((el) => el.textContent?.includes('Reconnecting to Soniox…'))).toBe(true);
+      expect(within(live).getByText(/Recording continues/)).toBeInTheDocument();
+      const capsule = within(bar).getByRole('button', { name: /^Recording .*reconnecting to Soniox/ });
+      expect(capsule).toHaveTextContent('Reconnecting…');
+      fake.world.liveTranscription = 'streaming';
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      expect(within(live).queryByText('Reconnecting to Soniox…')).not.toBeInTheDocument();
+      expect(within(bar).getByRole('button', { name: /^Recording/ })).not.toHaveTextContent('Reconnecting');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('recognition stops: the panel says when, keeps the text, offers to continue; the capsule is gone', async () => {
     const { user, bar, record, eng } = await start();
     await user.click(record);
@@ -114,5 +137,69 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     expect(await within(bar).findByRole('button', { name: 'Record' })).toBeInTheDocument();
     await user.click(within(alert).getByRole('button', { name: 'Continue recording' }));
     expect(await within(bar).findByRole('button', { name: /^Recording/ })).toBeInTheDocument();
+  });
+
+  it('a denied microphone says so and opens the microphone pane of System Settings', async () => {
+    const { user, record, eng, fake } = await start();
+    const open = vi.fn(async () => true);
+    Object.assign(fake.bridge, { openSystemAudioSettings: open });
+    vi.mocked(eng.e.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await user.click(record);
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    expect(popover).toHaveTextContent('Microphone access was denied.');
+    await user.click(within(popover).getByRole('button', { name: 'Open System Settings' }));
+    expect(open).toHaveBeenCalledWith('microphone');
+  });
+
+  it('computer sound refused on Resume: the reason shows on the capsule with the screen & system audio pane', async () => {
+    const { user, bar, record, eng, fake } = await start();
+    const open = vi.fn(async () => false);
+    Object.assign(fake.bridge, { openSystemAudioSettings: open });
+    await user.click(record);
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Pause' }));
+    await user.keyboard('{Escape}');
+    vi.mocked(eng.e.resume).mockRejectedValueOnce(new SystemAudioUnavailable('denied'));
+    await user.click(await within(bar).findByRole('button', { name: 'Resume' }));
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    expect(popover).toHaveTextContent('Computer sound wasn’t allowed.');
+    await user.click(within(popover).getByRole('button', { name: 'Open System Settings' }));
+    expect(open).toHaveBeenCalledWith('system-audio');
+    // main answered false (not macOS, or the pane didn't open): said, not swallowed.
+    expect(await within(popover).findByText(/couldn’t be opened/)).toBeInTheDocument();
+  });
+
+  it('without the macOS bridge method there is no System Settings button, only the reason', async () => {
+    const { user, record, eng } = await start();
+    vi.mocked(eng.e.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await user.click(record);
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    expect(popover).toHaveTextContent('Microphone access was denied.');
+    expect(within(popover).queryByRole('button', { name: 'Open System Settings' })).not.toBeInTheDocument();
+  });
+
+  it('a stopped recording offers "Continue recording" in its material; other materials do not', async () => {
+    const { user, bar, record, services, fake } = await start();
+    await user.click(record);
+    const materialId = services.recording.getState().materialId!;
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
+    await within(bar).findByRole('button', { name: 'Record' });
+    // A recording made by SKAZ: its material asks the backend whether it may continue.
+    act(() => services.ui.getState().openDocument({ type: 'material', id: materialId }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    await user.click(await within(doc).findByRole('button', { name: 'Continue recording' }));
+    expect(await within(bar).findByRole('button', { name: /^Recording/ })).toBeInTheDocument();
+    expect(fake.calls.filter((c) => c.path === `/kb/recordings/${materialId}/resume`)).toHaveLength(1);
+    expect(services.recording.getState()).toMatchObject({ phase: 'recording', materialId });
+  });
+
+  it('a recording with no recorder session behind it (seeded, imported) shows no "Continue recording"', async () => {
+    const { services, fake } = await start();
+    act(() => services.ui.getState().openDocument({ type: 'material', id: 'm-lec8' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    await within(doc).findByRole('heading', { level: 2 });
+    await waitFor(() => expect(fake.calls.some((c) => c.method === 'GET' && c.path === '/kb/recordings/m-lec8')).toBe(true));
+    expect(within(doc).queryByRole('button', { name: 'Continue recording' })).not.toBeInTheDocument();
   });
 });

@@ -65,7 +65,7 @@ describe('Electron IPC policy — knowledge library (/kb) routes of the new inte
     const refused: Array<[string, string]> = [
       ['PUT', '/kb/chats/c1'], ['DELETE', '/kb/chats'], ['POST', '/kb/chats/c1/messages/m1/delete'],
       ['PUT', '/kb/settings/keys/github'], ['GET', '/kb/settings/keys/soniox'], ['DELETE', '/kb/settings/keys/soniox'],
-      ['POST', '/kb/agents/other/install'], ['POST', '/kb/agents/codex/logout'], ['DELETE', '/kb/decisions/local'],
+      ['POST', '/kb/agents/other/install'], ['DELETE', '/kb/decisions/local'],
       ['POST', '/kb/materials/m1/excluded/x/restore'], ['POST', '/kb/dictation'], ['POST', '/kb/notifications/n1/delete'],
       ['GET', '/kb/chats/c1/events/x'], ['POST', '/kb/chats/../x/read'],
     ];
@@ -105,6 +105,8 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['GET', '/kb/jobs'], ['GET', '/kb/jobs/j1'], ['GET', '/kb/graph'], ['GET', '/kb/settings/wiki'],
       ['GET', '/kb/recordings/defaults'], ['POST', '/kb/recordings'],
       ['POST', '/kb/recordings/mat_1/stop'], ['POST', '/kb/recordings/mat_1/pause'], ['POST', '/kb/recordings/mat_1/resume'],
+      // F2: the material of a stopped recording reads its state to offer "Continue recording".
+      ['GET', '/kb/recordings/mat_1'],
       ['POST', '/kb/imports'], ['POST', '/kb/chats'],
       // The live tail and recording settings of the existing pipeline.
       ['GET', '/sessions/s1/live/events'], ['GET', '/sessions/s1/live'], ['GET', '/settings'], ['PUT', '/settings'],
@@ -119,8 +121,7 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['POST', '/kb/corrections/c1/delete'], ['GET', '/kb/corrections/c1/revert'],
       ['POST', '/kb/materials/mat_1/excluded/x/restore'], ['POST', '/kb/materials/other'],
       ['DELETE', '/kb/recordings/mat_1'], ['POST', '/kb/recordings/mat_1/delete'],
-      // Reading one recording's state is a backend route no screen calls (I1: the live view polls the session).
-      ['GET', '/kb/recordings/mat_1'],
+      ['GET', '/kb/recordings/mat_1/state'], ['GET', '/kb/recordings/a/b'],
       ['PUT', '/kb/wiki/pages/p1'], ['POST', '/kb/wiki/pages/p1/blocks/c-1/edit'],
       ['GET', '/kb/wiki/pages/a/b'], ['POST', '/kb/graph'], ['DELETE', '/kb/jobs/j1'],
     ];
@@ -186,5 +187,26 @@ describe('Electron IPC policy — /kb rules match the real backend routes (I1)',
 
   it('the shared fake answers only real backend routes', () => {
     expect(FAKE_ROUTES.filter((r) => !backendRoutes.has(r))).toEqual([]);
+  });
+});
+
+describe('Electron IPC policy — restored capabilities (F2)', () => {
+  it('lets Codex sign out and the local speech model be deleted — nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/codex/logout' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/settings/speech/local-model' })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/agents/claude_code/logout'], ['POST', '/kb/agents/hermes/logout'], ['GET', '/kb/agents/codex/logout'],
+      ['DELETE', '/kb/settings/speech'], ['DELETE', '/kb/settings/speech/local-model/x'], ['POST', '/kb/settings/speech/local-model'],
+      ['DELETE', '/kb/decisions/local'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+
+  it('lets the activity log be read, and nothing else under /logs', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/logs' })).toBeNull();
+    for (const [method, path] of [['POST', '/logs'], ['DELETE', '/logs'], ['GET', '/logs/1'], ['GET', '/logs/../settings']] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
   });
 });

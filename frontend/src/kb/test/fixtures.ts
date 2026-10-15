@@ -70,7 +70,7 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
     ] },
     speech: {
       provider: 'soniox', languages: ['ru', 'en'], translate_by_default: true, translation_language: 'ru',
-      local_model: { model: 'whisper-large-v3-turbo', state: 'missing', progress: null, reason: null },
+      local_model: { model: 'whisper-large-v3-turbo', state: 'missing', progress: null, reason: null, size_bytes: 1_620_000_000 },
       cloud_consent: true,
     },
     wiki: {
@@ -98,7 +98,7 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
       { id: 'wiki', state: 'ok', problems: [] },
     ] },
     dictation: { text: 'and how does it relate to a decision tree' },
-    settings: { native_recording_mode: 'translation', translation_target_language: 'ru', input_device_id: null, capture_system_audio: false, used_languages: ['en', 'ru'] },
+    settings: { transcription_provider: 'soniox', native_recording_mode: 'translation', translation_target_language: 'ru', input_device_id: null, capture_system_audio: false, used_languages: ['en', 'ru'] },
     liveTail: 'So cross-entropy in machine learning is',
     failures: {},
     log: [],

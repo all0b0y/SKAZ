@@ -14,7 +14,6 @@ function fakeBridge(handler: (req: BridgeRequest) => JsonResponse<unknown>): {
     }),
     getBackendStatus: vi.fn(async () => ({ phase: 'ready' as const })),
     onBackendStatus: vi.fn(() => () => undefined),
-    platform: 'test',
   } as unknown as BridgeApi;
   return { bridge, requests };
 }

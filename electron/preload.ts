@@ -41,6 +41,12 @@ const api: BridgeApi = {
   openLogsFolder(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.openLogsFolder) as Promise<boolean>;
   },
+  // Only where System Settings has these panes (macOS): elsewhere the button is not offered at all.
+  ...(process.platform === 'darwin' ? {
+    openSystemAudioSettings(pane: 'microphone' | 'system-audio'): Promise<boolean> {
+      return ipcRenderer.invoke(CHANNELS.openSystemAudioSettings, pane) as Promise<boolean>;
+    },
+  } : {}),
   restartBackend(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.restartBackend) as Promise<boolean>;
   },
@@ -77,7 +83,6 @@ const api: BridgeApi = {
     ipcRenderer.on(CHANNELS.prepareQuit, handler);
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
   },
-  platform: process.platform,
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
 };
 

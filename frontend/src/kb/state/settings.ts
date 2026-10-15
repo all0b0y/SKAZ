@@ -33,6 +33,8 @@ export interface SettingsActions {
   checkKey: (provider: KeyProviderId) => Promise<ActionResult>;
   loadSpeech: () => Promise<void>;
   updateSpeech: (patch: KbSpeechSettingsUpdate) => Promise<ActionResult>;
+  /** Delete the downloaded Whisper model; answers the bytes freed. */
+  deleteLocalModel: () => Promise<ActionResult<number>>;
   loadWiki: () => Promise<void>;
   updateWiki: (patch: KbWikiSettingsUpdate) => Promise<ActionResult>;
   loadDecisions: () => Promise<void>;
@@ -88,6 +90,15 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       }),
       loadSpeech: () => read('speech', () => client.call('GET /kb/settings/speech')),
       updateSpeech: (patch) => write('speech', () => client.call('PUT /kb/settings/speech', { body: patch })),
+      deleteLocalModel: async () => {
+        try {
+          const result = await client.call('DELETE /kb/settings/speech/local-model');
+          set({ speech: { value: result.speech, error: null } });
+          return { ok: true, value: result.deleted_bytes };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
       loadWiki: () => read('wiki', () => client.call('GET /kb/settings/wiki')),
       updateWiki: (patch) => write('wiki', () => client.call('PUT /kb/settings/wiki', { body: patch })),
       loadDecisions: () => read('decisions', () => client.call('GET /kb/decisions')),

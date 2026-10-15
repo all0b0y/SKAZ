@@ -69,6 +69,10 @@ export interface FakeWorld {
   settings: Record<string, unknown>;
   /** Unstable words of the live recording (GET /sessions/{id}/live/events → tail). */
   liveTail: string;
+  /** `GET /logs`: the technical activity log (absent = nothing ran yet). */
+  activity?: { entries: Array<Record<string, unknown>>; capacity: number; dropped: number };
+  /** The recording's stream state in the same page (`transcription`); absent = streaming. */
+  liveTranscription?: 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive';
   /** One-off failures: "METHOD /path" → status + detail. */
   failures: Record<string, { status: number; detail: string }>;
   /** Route prefixes this backend lacks (answer 404 "Not Found", as FastAPI does): an older or broken backend. */
@@ -766,6 +770,13 @@ const ROUTES: FakeRoutes = {
     syncSpeechConsent(w);
     return structuredClone(w.speech);
   }],
+  'DELETE /kb/settings/speech/local-model': [200, (w) => {
+    const model = w.speech.local_model;
+    const deleted = model.state === 'ready' || model.state === 'failed';
+    const freed = deleted ? model.size_bytes ?? 0 : 0;
+    w.speech.local_model = { ...model, state: 'missing', progress: null, reason: null };
+    return { deleted, deleted_bytes: freed, speech: structuredClone(w.speech) };
+  }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
   'GET /kb/settings/wiki': [200, (w) => structuredClone(w.wiki)],
@@ -808,6 +819,11 @@ const ROUTES: FakeRoutes = {
     if (a.id === 'codex' && body?.consent !== true) fail(409, 'Confirm the ChatGPT privacy notice first.');
     Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
     return { engine: a.id, method: 'terminal', url: null, message: `${a.name} sign-in opened in Terminal. Come back when it says you’re signed in.` };
+  }],
+  'POST /kb/agents/codex/logout': [200, (w) => {
+    const a = findAgent(w, 'codex');
+    Object.assign(a, { state: 'signed_out', signed_in: false, reason: 'Sign in with ChatGPT to use Codex.', action: 'login', models: [], current_model: null });
+    return structuredClone(a);
   }],
   'POST /kb/agents/{engine}/install': [202, (w, { path, body }) => {
     const a = findAgent(w, path.engine);
@@ -902,6 +918,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
   const { method, path } = req;
   if (method === 'GET' && path === '/settings') return w.settings;
   if (method === 'PUT' && path === '/settings') { Object.assign(w.settings, req.body); return w.settings; }
+  if (method === 'GET' && path === '/logs') return w.activity ?? { entries: [], capacity: 256, dropped: 0 };
   let m = /^\/sessions\/([^/]+)\/live$/.exec(path);
   if (m && method === 'GET') return { session_id: m[1], sample_rate: 48000, saved_samples: 0, next_sequence: 0, transcription: 'inactive', connections: [], gaps: [] };
   m = /^\/sessions\/([^/]+)\/live\/events$/.exec(path);
@@ -909,7 +926,10 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
     // The live recording grows: every read adds the next sentence of the lecture as final text.
     const material = w.materials.find((x) => `s-${x.id}` === m![1]);
     if (material && material.status === 'recording') growLive(material);
-    return { tail: { originals: [{ text: w.liveTail }], translations: [{ text: 'Получается, что cross-entropy в машинном обучении —' }], stream: [] }, events: [] };
+    return {
+      tail: { originals: [{ text: w.liveTail }], translations: [{ text: 'Получается, что cross-entropy в машинном обучении —' }], stream: [] }, events: [],
+      transcription: w.liveTranscription ?? 'streaming',
+    };
   }
   return undefined;
 }

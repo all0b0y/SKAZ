@@ -3,7 +3,7 @@ import type { BridgeApi } from '../../api/bridge';
 import type { MeterSnapshot } from '../../audio/meter';
 import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { UiStore } from '../state/ui';
-import { captureErrorText, type CaptureEngine, type CaptureFactory } from './capture';
+import { captureErrorText, capturePermission, type CaptureEngine, type CaptureFactory, type PrivacyPane } from './capture';
 import { barsFrom, SILENT_BARS, type Bars } from './level';
 
 /**
@@ -18,6 +18,9 @@ import { barsFrom, SILENT_BARS, type Bars } from './level';
 export type RecPhase = 'idle' | 'starting' | 'recording' | 'pausing' | 'paused' | 'resuming' | 'finishing';
 export type LiveView = 'original' | 'translation' | 'both';
 export type RecMode = 'transcription' | 'translation';
+/** The recording's live stream as the backend reports it (`transcription` of `/sessions/{id}/live/events`). */
+export type StreamState = 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive' | 'disabled';
+const STREAM_STATES: ReadonlyArray<StreamState> = ['connecting', 'reconnecting', 'streaming', 'unavailable', 'inactive', 'disabled'];
 
 export interface RecOptions {
   folderId: string | null;
@@ -50,9 +53,17 @@ export interface RecordingData {
   optionsLoaded: boolean;
   /** Why Record/Continue didn't start (shown by the capsule). */
   startError: string | null;
+  /** The macOS privacy setting that fixes `startError` (microphone / screen & system audio), if any. */
+  startPermission: PrivacyPane | null;
   /** Recognition stopped on its own; text is saved; nothing continues by itself. */
   failure: RecFailure | null;
   view: LiveView;
+  /** Stream state while recording (null when not streaming); polled with the unstable tail. */
+  stream: StreamState | null;
+  /** The speech service of new recordings (legacy `transcription_provider`): `soniox`, `local-whisper`, … */
+  provider: string | null;
+  /** Unstable (not yet final) words of the recording, original and translation. */
+  tail: { original: string; translation: string };
 }
 
 export interface RecordingActions {
@@ -62,6 +73,8 @@ export interface RecordingActions {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<boolean>;
+  /** Continue a paused/stopped recording into the same material and session (also after a restart). */
+  continueRecording: (materialId: string) => Promise<void>;
   continueAfterFailure: () => Promise<void>;
   setView: (view: LiveView) => void;
   clearStartError: () => void;
@@ -85,8 +98,18 @@ interface Deps {
 
 const LIVE_STATES: ReadonlyArray<RecPhase> = ['recording', 'pausing', 'paused', 'resuming'];
 const SETTLE_TRIES = 60;
+const STREAM_POLL_MS = 1500;
+const NO_TAIL = { original: '', translation: '' };
+
+interface TailPage {
+  transcription?: string;
+  tail: { originals: Array<{ text: string }>; translations: Array<{ text: string }> } | null;
+}
+
+const joined = (parts: Array<{ text: string }> | undefined) => (parts ?? []).map((t) => t.text).join('').trim();
 
 interface LegacySettings {
+  transcription_provider?: string;
   native_recording_mode?: string;
   translation_target_language?: string;
   input_device_id?: string | null;
@@ -101,6 +124,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let engine: CaptureEngine | null = null;
   let ticker: ReturnType<typeof setInterval> | null = null;
+  let poller: ReturnType<typeof setInterval> | null = null;
   let attempt = 0;
 
   const store = createStore<RecordingData & RecordingActions>()((set, get) => {
@@ -114,10 +138,33 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         failed: pending.failed,
       });
     };
+    /** One small page of the session's live events: its stream state and the unstable tail. */
+    const pollStream = async () => {
+      const sessionId = get().sessionId;
+      if (get().phase !== 'recording' || !sessionId) return;
+      try {
+        const res = await deps.bridge.request<TailPage>({
+          method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live/events`, query: { limit: 1 },
+        });
+        if (get().phase !== 'recording' || get().sessionId !== sessionId) return;
+        if (!res.ok) { set({ tail: NO_TAIL }); return; }
+        const state = STREAM_STATES.find((s) => s === res.data.transcription) ?? null;
+        set({ stream: state, tail: { original: joined(res.data.tail?.originals), translation: joined(res.data.tail?.translations) } });
+      } catch {
+        set({ tail: NO_TAIL });
+      }
+    };
     const tick = (on: boolean) => {
       if (ticker) clearInterval(ticker);
+      if (poller) clearInterval(poller);
       ticker = null;
-      if (on) ticker = setInterval(() => { if (engine) set({ elapsedMs: engine.elapsedMs() }); }, 250);
+      poller = null;
+      if (on) {
+        ticker = setInterval(() => { if (engine) set({ elapsedMs: engine.elapsedMs() }); }, 250);
+        poller = setInterval(() => { void pollStream(); }, STREAM_POLL_MS);
+      } else {
+        set({ stream: null, tail: NO_TAIL });
+      }
     };
     const onLevel = (id: number) => (snapshot: MeterSnapshot) => {
       if (id === attempt && get().phase === 'recording') set({ bars: barsFrom(snapshot) });
@@ -168,6 +215,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       if (id !== attempt) return;
       set({ phase: 'recording', elapsedMs: engine.elapsedMs() });
       tick(true);
+      void pollStream();
       report();
     };
 
@@ -183,8 +231,12 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       options: { folderId: null, deviceId: '', systemAudio: false, mode: 'transcription', target: 'en' },
       optionsLoaded: false,
       startError: null,
+      startPermission: null,
       failure: null,
       view: 'original',
+      stream: null,
+      provider: null,
+      tail: NO_TAIL,
 
       loadOptions: async () => {
         const [defaults, settings] = await Promise.allSettled([
@@ -195,6 +247,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (defaults.status === 'fulfilled' && get().options.folderId === null) patch.folderId = defaults.value.folder_id;
         if (settings.status === 'fulfilled' && settings.value.ok) {
           const s = settings.value.data;
+          if (s.transcription_provider) set({ provider: s.transcription_provider });
           patch.mode = s.native_recording_mode === 'translation' ? 'translation' : 'transcription';
           patch.target = s.translation_target_language || 'en';
           patch.deviceId = s.input_device_id ?? '';
@@ -231,7 +284,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
 
       start: async () => {
         if (get().phase !== 'idle') return;
-        set({ phase: 'starting', startError: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS });
+        set({ phase: 'starting', startError: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS });
         report();
         let materialId: string | null = null;
         try {
@@ -256,7 +309,10 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           await engine?.stop().catch(() => false);
           engine = null;
           if (materialId) await settle(materialId, 'stop');
-          set({ phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error), bars: SILENT_BARS });
+          set({
+            phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error),
+            startPermission: materialId ? capturePermission(error) : null, bars: SILENT_BARS,
+          });
           report();
         }
       },
@@ -280,14 +336,15 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       resume: async () => {
         const { phase, materialId } = get();
         if (phase !== 'paused' || !engine || !materialId) return;
-        set({ phase: 'resuming', startError: null });
+        set({ phase: 'resuming', startError: null, startPermission: null });
         try {
           await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
           await engine.resume(sources());
           set({ phase: 'recording' });
           tick(true);
+          void pollStream();
         } catch (error) {
-          set({ phase: 'paused', startError: captureErrorText(error) });
+          set({ phase: 'paused', startError: captureErrorText(error), startPermission: capturePermission(error) });
         }
         report();
       },
@@ -299,7 +356,8 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         tick(false);
         set({ phase: 'finishing', bars: SILENT_BARS });
         report();
-        const saved = await (engine?.stop() ?? Promise.resolve(true)).catch(() => false);
+        const current = engine;
+        const saved = await (current?.stop() ?? Promise.resolve(true)).catch(() => false);
         if (!saved) {
           // Unsaved audio: keep the quit guard (main warns before closing) and say so.
           set({ startError: 'Some audio isn’t saved yet. SKAZ keeps it and will not quit silently.' });
@@ -308,37 +366,63 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         }
         engine = null;
         await settle(materialId, 'stop');
-        set({ phase: 'idle', bars: SILENT_BARS });
+        // The capture graph never confirmed its last flush: what arrived is saved, the final
+        // moment may be missing. The quit guard hears it, so SKAZ never quits over it silently.
+        const complete = !(current?.incomplete?.() ?? false);
+        set({
+          phase: 'idle', bars: SILENT_BARS,
+          ...(complete ? {} : { startError: 'The last moment of audio before stopping couldn’t be confirmed. Everything received is saved.' }),
+        });
         report();
         deps.onMaterialsChanged?.();
-        return true;
+        return complete;
       },
 
-      continueAfterFailure: async () => {
+      continueRecording: async (materialId) => {
+        if (get().phase !== 'idle') return;
         const failure = get().failure;
-        const sessionId = get().sessionId;
-        if (!failure || get().phase !== 'idle' || !sessionId) return;
-        set({ phase: 'starting', startError: null, failure: null, materialId: failure.materialId });
+        const kept = failure && failure.materialId === materialId ? failure : null;
+        set({ phase: 'starting', startError: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS });
+        report();
+        let resumed = false;
         try {
-          await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: failure.materialId } });
-          const live = await deps.bridge.request<{ sample_rate?: number }>({
-            method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live`,
+          // The backend checks the material is a recording that may continue (not running, not finishing).
+          const speech = await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
+          resumed = true;
+          const live = await deps.bridge.request<{ sample_rate?: number; recording_mode?: string }>({
+            method: 'GET', path: `/sessions/${encodeURIComponent(speech.session_id)}/live`,
           });
-          deps.ui.getState().openLive(failure.materialId);
-          await begin(sessionId, live.ok ? live.data.sample_rate : undefined);
+          const translation = live.ok && live.data.recording_mode === 'translation';
+          set({
+            materialId, sessionId: speech.session_id, title: speech.title,
+            chatId: get().materialId === materialId ? get().chatId : null,
+            view: translation ? 'translation' : 'original',
+            options: { ...get().options, folderId: speech.folder_id },
+          });
+          deps.ui.getState().openLive(materialId);
+          // The session keeps its PCM clock: capture continues at the sample rate it started with.
+          await begin(speech.session_id, live.ok ? live.data.sample_rate : undefined);
         } catch (error) {
           tick(false);
           attempt += 1;
           await engine?.stop().catch(() => false);
           engine = null;
-          await settle(failure.materialId, 'stop');
-          set({ phase: 'idle', failure, startError: captureErrorText(error) });
+          if (resumed) await settle(materialId, 'stop');
+          set({
+            phase: 'idle', failure: kept, startError: resumed ? captureErrorText(error) : errorText(error),
+            startPermission: resumed ? capturePermission(error) : null, bars: SILENT_BARS,
+          });
           report();
         }
       },
 
+      continueAfterFailure: async () => {
+        const failure = get().failure;
+        if (failure) await get().continueRecording(failure.materialId);
+      },
+
       setView: (view) => set({ view }),
-      clearStartError: () => set({ startError: null }),
+      clearStartError: () => set({ startError: null, startPermission: null }),
 
       prepareQuit: async () => {
         if (get().phase === 'idle') return true;

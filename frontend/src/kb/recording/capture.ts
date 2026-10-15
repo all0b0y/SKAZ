@@ -33,6 +33,8 @@ export interface CaptureEngine {
   resume(sources: CaptureSources): Promise<void>;
   /** Stops capture and waits for local saving; false = audio is still unsaved (keep the quit guard). */
   stop(): Promise<boolean>;
+  /** The last flush of the capture graph never confirmed: its final moment may be missing. */
+  incomplete?(): boolean;
   /** Recording time of this attempt plus what the session already had. */
   elapsedMs(): number;
   /** Unsent audio, for the quit guard in main. */
@@ -42,6 +44,16 @@ export interface CaptureEngine {
 export type CaptureFactory = () => CaptureEngine;
 
 type NativeBridge = Pick<BridgeApi, 'request' | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure'>;
+
+/** Which macOS privacy setting would fix this capture error ("Open System Settings"), if any. */
+export type PrivacyPane = 'microphone' | 'system-audio';
+
+export function capturePermission(error: unknown): PrivacyPane | null {
+  if (error instanceof SystemAudioUnavailable) return error.reason === 'denied' ? 'system-audio' : null;
+  const message = error instanceof Error ? error.message : String(error);
+  const name = (error as { name?: string } | null)?.name ?? '';
+  return name === 'NotAllowedError' || /denied|not allowed|permission/i.test(message) ? 'microphone' : null;
+}
 
 export function captureErrorText(error: unknown): string {
   if (error instanceof SystemAudioUnavailable) {
@@ -64,6 +76,7 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
   let queue: PersistenceQueue | null = null;
   let offsetMs = 0;
   let unlisten: (() => void) | null = null;
+  let incomplete = false;
 
   return {
     async start({ sessionId, sources, sampleRate }, callbacks) {
@@ -103,6 +116,7 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
           if (snapshot) callbacks.onLevel(snapshot);
         },
         onError: (message) => callbacks.onFailure(message),
+        onCaptureIncomplete: () => { incomplete = true; },
         onDisconnected: () => callbacks.onFailure('The microphone was disconnected. Captured audio was saved.'),
         onSystemAudioLost: () => callbacks.onFailure('Computer sound stopped; the microphone part is saved.'),
       }, { windowSeconds: 0.1, sampleRate });
@@ -132,6 +146,9 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
         unlisten = null;
       }
       return saved;
+    },
+    incomplete() {
+      return incomplete;
     },
     elapsedMs() {
       return offsetMs + (recorder?.elapsedMs() ?? 0);

@@ -50,7 +50,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     return store.getState().followInstall(agent.id, taskId);
   }, [store, agent.id, taskId, install?.task.state]);
 
-  const act = async (what: 'install' | 'update' | 'prepare' | 'login' | 'check' | 'cancel') => {
+  const act = async (what: 'install' | 'update' | 'prepare' | 'login' | 'check' | 'cancel' | 'logout') => {
     setBusy(what);
     setMessage(null);
     const s = store.getState();
@@ -60,6 +60,9 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     } else if (what === 'cancel') {
       const r = await s.cancelInstall(agent.id);
       if (!r.ok) setMessage({ text: r.error, error: true });
+    } else if (what === 'logout') {
+      const r = await s.logoutCodex();
+      setMessage(r.ok ? { text: 'Signed out of Codex in SKAZ. Codex in other apps stays signed in.', error: false } : { text: r.error, error: true });
     } else if (what === 'login') {
       const r = await s.login(agent.id, consent || undefined);
       if (!r.ok) setMessage({ text: r.error, error: true });
@@ -93,6 +96,10 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       )}
       {action !== 'check' && (
         <Button size="sm" variant="quiet" busy={busy === 'check'} onClick={() => void act('check')}>Check</Button>
+      )}
+      {/* Only Codex signs in inside SKAZ (its own Codex profile); the others sign out in their own apps. */}
+      {agent.id === 'codex' && agent.signed_in && (
+        <Button size="sm" variant="quiet" busy={busy === 'logout'} onClick={() => void act('logout')}>Sign out</Button>
       )}
     </>
   );
