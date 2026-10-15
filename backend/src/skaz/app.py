@@ -63,6 +63,7 @@ def create_app(
             yield
         finally:
             await runtime.kb_wiki.close()
+            await runtime.kb_chats.close()
             await runtime.kb_ingest.close()
             await runtime.kb_codex.close()
             await runtime.kb_decisions.aclose()

@@ -5,11 +5,13 @@ from fastapi import APIRouter
 
 from . import (
     agents,
+    chats,
     decisions,
     folders,
     ingest,
     library,
     materials,
+    mentions,
     notifications,
     search,
     sources,
@@ -32,4 +34,6 @@ ROUTERS: tuple[APIRouter, ...] = (
     agents.router,
     materials.corrections_router,
     wiki.graph_router,
+    chats.router,
+    mentions.router,
 )

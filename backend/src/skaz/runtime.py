@@ -23,6 +23,7 @@ from .ingestion import IngestionService
 from .knowledge.agents.codex import CodexEngine
 from .knowledge.agents.hub import build_agents_hub
 from .knowledge.agents.tools import ToolRegistry
+from .knowledge.chats import ChatService
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
@@ -108,6 +109,9 @@ class Runtime:
         )
         #: The wiki after ingest (W2): corrections, discrepancies, edits, deletion, connections, graph.
         self.kb_wiki = wire_wiki(WikiService(self.kb, self.kb_ingest))
+        #: General chats (C1): answers through the engine registry with the SKAZ tools, no queues.
+        self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
+                                    text_layer=lambda: self.kb_ingest.text_layer)
         self.web_search = WebSearch(self.db, self.secrets)
         self.codex.web_search = self.web_search
         self.settings_store = SettingsStore(self.db)

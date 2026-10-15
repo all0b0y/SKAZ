@@ -101,6 +101,82 @@ export interface KbBlockUpdate {
   text: string;
 }
 
+export interface KbChat {
+  id: string;
+  title: string;
+  pinned: boolean;
+  engine: "codex" | "claude_code" | "hermes";
+  model: string | null;
+  effort: string | null;
+  created_at: string;
+  updated_at: string;
+  last_preview: string;
+  recording_material_id: string | null;
+  folder_ids: string[];
+  state: "idle" | "answering";
+  unread: boolean;
+  messages: KbMessage[];
+  cursor: number;
+}
+
+export interface KbChatCreate {
+  title?: string | null;
+  engine?: "codex" | "claude_code" | "hermes" | null;
+  model?: string | null;
+  effort?: string | null;
+  recording_material_id?: string | null;
+}
+
+/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part. */
+export interface KbChatEvent {
+  seq: number;
+  type: "message" | "delta" | "part" | "state" | "title";
+  message_id: string | null;
+  text?: string | null;
+  part?: KbMessagePart | null;
+  message?: KbMessage | null;
+}
+
+export interface KbChatEvents {
+  events: KbChatEvent[];
+  cursor: number;
+}
+
+export interface KbChatExport {
+  file_name: string;
+  markdown: string;
+}
+
+/** Chats changed since the cursor (all chats when the cursor is unknown to the server). */
+export interface KbChatListEvents {
+  chats: KbChatSummary[];
+  cursor: number;
+}
+
+export interface KbChatPatch {
+  title?: string | null;
+  pinned?: boolean | null;
+  engine?: "codex" | "claude_code" | "hermes" | null;
+  model?: string | null;
+  effort?: string | null;
+}
+
+export interface KbChatSummary {
+  id: string;
+  title: string;
+  pinned: boolean;
+  engine: "codex" | "claude_code" | "hermes";
+  model: string | null;
+  effort: string | null;
+  created_at: string;
+  updated_at: string;
+  last_preview: string;
+  recording_material_id: string | null;
+  folder_ids: string[];
+  state: "idle" | "answering";
+  unread: boolean;
+}
+
 export interface KbCitation {
   material_id: string;
   seg: number;
@@ -112,9 +188,28 @@ export interface KbCitation {
   quote?: string | null;
 }
 
+export interface KbCitePart {
+  type: "cite";
+  citation: KbCitation;
+}
+
 export interface KbClassifyLink {
   url: string;
   probe?: boolean;
+}
+
+export interface KbConnectionFolder {
+  folder_id: string;
+  folder_name: string;
+  text: string;
+  citation: KbCitation;
+}
+
+export interface KbConnectionPart {
+  type: "connection";
+  folders: KbConnectionFolder[];
+  inference: string;
+  page: KbPageRef | null;
 }
 
 export interface KbCorrection {
@@ -191,6 +286,12 @@ export interface KbExcludedFragment {
   location: KbFragmentLocation;
   text_hash: string;
   detected_at: string;
+}
+
+export interface KbFailure {
+  kind: "limit" | "auth" | "incompatible" | "network" | "cancelled" | "other";
+  message: string;
+  retry_at: string | null;
 }
 
 export interface KbFolder {
@@ -424,6 +525,35 @@ export interface KbMaterialUpdate {
   folder_id?: string | null;
 }
 
+export interface KbMentions {
+  pages: KbPageRef[];
+  materials: KbRef[];
+  chats: KbRef[];
+}
+
+export interface KbMessage {
+  id: string;
+  seq: number;
+  role: "user" | "assistant" | "system";
+  created_at: string;
+  engine: "codex" | "claude_code" | "hermes" | null;
+  model: string | null;
+  state: "streaming" | "done" | "interrupted" | "failed" | "cancelled";
+  parts: KbMessagePart[];
+  failure: KbFailure | null;
+  saved_page_id: string | null;
+  input: KbMessageInput | null;
+}
+
+export interface KbMessageInput {
+  text: string;
+  mentions: KbRef[];
+  quotes: KbQuote[];
+  attachments: string[];
+}
+
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart;
+
 export interface KbNotification {
   id: string;
   kind: string;
@@ -458,6 +588,11 @@ export interface KbNotificationsRead {
   up_to_seq: number;
 }
 
+export interface KbOpenContext {
+  open_page_id?: string | null;
+  open_material_id?: string | null;
+}
+
 export interface KbOrigin {
   type: "recording" | "file" | "url" | "paste";
   url: string | null;
@@ -488,6 +623,12 @@ export interface KbPageHit {
   matched_alias: string | null;
 }
 
+export interface KbPagePart {
+  type: "page";
+  page: KbPageRef;
+  block_id: string | null;
+}
+
 export interface KbPageRef {
   id: string;
   kind: "concept" | "note" | "folder" | "analysis";
@@ -505,9 +646,25 @@ export interface KbPageSummary {
   language: string;
 }
 
+/** A quote token in the question. ``source: "chat"`` is an earlier AI answer: context, not evidence. */
+export interface KbQuote {
+  source: "page" | "material" | "chat";
+  id: string;
+  block_id?: string | null;
+  seg?: number | null;
+  message_id?: string | null;
+  text: string;
+}
+
 export interface KbRecordingCreate {
   folder_id?: string | null;
   title?: string | null;
+}
+
+export interface KbRef {
+  type: "page" | "material" | "chat";
+  id: string;
+  title: string;
 }
 
 export interface KbRescanResult {
@@ -530,6 +687,19 @@ export interface KbSearchResults {
   fragments: KbFragmentHit[];
   blocks: KbBlockHit[];
   pages: KbPageHit[];
+}
+
+export interface KbSend {
+  text: string;
+  mentions?: KbRef[];
+  quotes?: KbQuote[];
+  attachments?: string[];
+  context?: KbOpenContext;
+}
+
+export interface KbSendResult {
+  user: KbMessage;
+  assistant: KbMessage;
 }
 
 export interface KbSnippetPart {
@@ -563,6 +733,17 @@ export interface KbSubjectRef {
   id: string;
   block_id: string | null;
   seg: number | null;
+}
+
+export interface KbTextPart {
+  type: "text";
+  text: string;
+}
+
+export interface KbToolPart {
+  type: "tool";
+  name: string;
+  label: string;
 }
 
 export interface KbWikiSettings {
@@ -634,6 +815,111 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbAgentLogin | null;
     response: KbAgentLoginResult;
+    status: 200;
+  };
+  "GET /kb/chats": {
+    path: Record<string, never>;
+    query: { q?: string | null; filter?: "all" | "pinned" | "recording"; folder_id?: string | null; limit?: number };
+    body: never;
+    response: KbChatSummary[];
+    status: 200;
+  };
+  "POST /kb/chats": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbChatCreate | null;
+    response: KbChat;
+    status: 201;
+  };
+  "GET /kb/chats/events": {
+    path: Record<string, never>;
+    query: { after?: number; wait?: number };
+    body: never;
+    response: KbChatListEvents;
+    status: 200;
+  };
+  "GET /kb/chats/{chat_id}": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChat;
+    status: 200;
+  };
+  "PATCH /kb/chats/{chat_id}": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: KbChatPatch;
+    response: KbChatSummary;
+    status: 200;
+  };
+  "DELETE /kb/chats/{chat_id}": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: void;
+    status: 204;
+  };
+  "GET /kb/chats/{chat_id}/events": {
+    path: { chat_id: string };
+    query: { after?: number; wait?: number };
+    body: never;
+    response: KbChatEvents;
+    status: 200;
+  };
+  "GET /kb/chats/{chat_id}/export": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChatExport;
+    status: 200;
+  };
+  "POST /kb/chats/{chat_id}/messages": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: KbSend;
+    response: KbSendResult;
+    status: 202;
+  };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/regenerate": {
+    path: { chat_id: string; message_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSendResult;
+    status: 202;
+  };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/resume": {
+    path: { chat_id: string; message_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSendResult;
+    status: 202;
+  };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/save": {
+    path: { chat_id: string; message_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageRef;
+    status: 200;
+  };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/stop": {
+    path: { chat_id: string; message_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMessage;
+    status: 200;
+  };
+  "POST /kb/chats/{chat_id}/read": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: void;
+    status: 204;
+  };
+  "POST /kb/chats/{chat_id}/save": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageRef;
     status: 200;
   };
   "POST /kb/corrections/{correction_id}/accept": {
@@ -915,6 +1201,13 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/mentions": {
+    path: Record<string, never>;
+    query: { q?: string; limit?: number };
+    body: never;
+    response: KbMentions;
+    status: 200;
   };
   "GET /kb/notifications": {
     path: Record<string, never>;
