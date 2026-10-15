@@ -5,6 +5,9 @@ hashed every indexed page each time to see whether the wiki changed.
 """
 from __future__ import annotations
 
+import pytest
+
+from skaz.knowledge.index import indexer
 from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiki.graph import GraphIndex
@@ -35,3 +38,25 @@ def test_the_signature_hashes_the_pages_only_after_the_index_changed(ready: Know
     finally:
         with ready.db.read() as connection:
             connection.set_trace_callback(None)
+
+
+def test_opening_a_page_reindexes_it_only_after_its_file_changed(ready: KnowledgeService,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review M6: every GET /kb/wiki/pages/{id} re-indexed the page (fsync + FTS) under the write lock."""
+    _page(ready, 1)
+    record = ready.page_repo.get("pg-1")
+    assert record is not None
+    written: list[str] = []
+    real_put = indexer.put_page
+    monkeypatch.setattr(indexer, "put_page", lambda db, page: (written.append(page.meta.skaz_id),
+                                                                real_put(db, page))[1])
+    for _ in range(3):
+        assert ready.page("pg-1").entries[0].text == "Statement 1."
+    assert written == []
+    path = ready.library_root / record.rel_path  # edited in Obsidian
+    edited = path.read_text(encoding="utf-8").replace("Statement 1.", "Statement one.")
+    path.write_text(edited, encoding="utf-8")
+    assert ready.page("pg-1").entries[0].text == "Statement one."
+    assert written == ["pg-1"]
+    ready.page("pg-1")
+    assert written == ["pg-1"]

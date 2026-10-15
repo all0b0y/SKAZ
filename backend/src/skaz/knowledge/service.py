@@ -8,6 +8,7 @@ root makes the library *unavailable* — writes are refused, the index is kept.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 from collections.abc import Callable, Sequence
@@ -380,7 +381,7 @@ class KnowledgeService:
         if record is None:
             raise NotFound("Page not found.")
         library = self._library
-        if library is not None:
+        if library is not None and self._file_changed(library, record):
             with self.writing():  # a SKAZ write between this read and put_page would be undone
                 try:
                     scanned = read_page(library, library.root / record.rel_path)
@@ -390,6 +391,16 @@ class KnowledgeService:
                     indexer.put_page(self.db, scanned)
                     record = self.page_repo.get(page_id) or record
         return self._page_view(record)
+
+    @staticmethod
+    def _file_changed(library: Library, record: PageRecord) -> bool:
+        """Whether the page file differs from the indexed copy (an outside edit since): opening a page
+        re-reads and re-indexes it only then, not on every open (no fsync and FTS pass per open)."""
+        try:
+            data = (library.root / record.rel_path).read_bytes()
+        except OSError:
+            return True  # gone or unreadable: the locked path below decides, as before
+        return hashlib.sha256(data).hexdigest() != record.file_sha256
 
     def _page_view(self, record: PageRecord) -> PageView:
         blocks = self.page_repo.blocks(record.id)
