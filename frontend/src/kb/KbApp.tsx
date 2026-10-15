@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BackendStatus } from '../api/bridge';
-import { Banner, Button, Spinner } from './ui';
+import { LoadingTree } from '../brand/LoadingTree';
+import { Banner, Button } from './ui';
 import { MotionProvider } from './ui/motion';
 import { KbServicesProvider, useLibrary, usePrefs, useServices, useUi, type KbServices } from './state/context';
 import { Shell } from './shell/Shell';
@@ -25,31 +26,68 @@ function ThemeSync() {
   return null;
 }
 
-/** The local service starts with the window; wait for it honestly, show its own error otherwise. */
+/** How long the startup screen stays over the ready app while it fades out (its CSS is 0.42 s). */
+const GATE_FADE_MS = 450;
+
+/**
+ * The local service starts with the window; wait for it honestly, show its own error otherwise.
+ * The startup screen is the tree (LoadingTree); the app mounts the moment the service is ready
+ * and the tree fades out over it.
+ */
 function BackendGate({ children }: { children: ReactNode }) {
   const { bridge } = useServices();
   const [status, setStatus] = useState<BackendStatus | null>(bridge.getBackendStatus ? null : { phase: 'ready' });
+  /** Bumped on every new start after a failure, so the animation begins from its first frame. */
+  const [attempt, setAttempt] = useState(0);
+  /** The startup screen has finished fading out over the app. */
+  const [gone, setGone] = useState(status?.phase === 'ready');
+  const phase = status?.phase ?? 'starting';
+  const failed = phase === 'error' || phase === 'stopped';
+  const previous = useRef(phase);
   useEffect(() => {
     if (!bridge.getBackendStatus) return undefined;
     let live = true;
-    void bridge.getBackendStatus().then((s) => { if (live) setStatus(s); });
-    const off = bridge.onBackendStatus?.((s) => setStatus(s));
+    // An event is newer than the first answer if it comes first: the answer must not undo it.
+    let heard = false;
+    void bridge.getBackendStatus().then((s) => { if (live && !heard) setStatus(s); });
+    const off = bridge.onBackendStatus?.((s) => { heard = true; setStatus(s); });
     return () => { live = false; off?.(); };
   }, [bridge]);
-  if (status?.phase === 'ready') return <>{children}</>;
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = phase;
+    if (phase === 'starting' && (before === 'error' || before === 'stopped')) setAttempt((n) => n + 1);
+    if (phase !== 'ready') {
+      setGone(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setGone(true), GATE_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+  const retry = () => {
+    setStatus({ phase: 'starting' });
+    void bridge.restartBackend?.().then((restarted) => {
+      // Nothing to retry (the start had not failed after all): show where it really is.
+      if (!restarted) void bridge.getBackendStatus?.().then(setStatus);
+    });
+  };
   return (
-    <div className="kb-gate" data-testid="backend-gate">
-      {status?.phase === 'error' || status?.phase === 'stopped' ? (
-        <div className="kb-gate__box">
+    <>
+      {phase === 'ready' ? children : null}
+      {phase === 'ready' && gone ? null : (
+        <LoadingTree phase={failed ? 'error' : phase === 'ready' ? 'ready' : 'starting'} attempt={attempt}>
           <Banner tone="error" title="SKAZ couldn’t start its local service."
-            actions={bridge.restartBackend ? <Button variant="fill" icon="retry" onClick={() => void bridge.restartBackend?.()}>Try again</Button> : undefined}>
-            {status.detail ?? ''}
+            actions={bridge.restartBackend || bridge.openLogsFolder ? (
+              <>
+                {bridge.restartBackend && <Button variant="fill" icon="retry" onClick={retry}>Try again</Button>}
+                {bridge.openLogsFolder && <Button icon="folder" onClick={() => void bridge.openLogsFolder?.()}>Open logs folder</Button>}
+              </>
+            ) : undefined}>
+            {status?.detail ?? ''}
           </Banner>
-        </div>
-      ) : (
-        <Spinner label="Starting SKAZ" />
+        </LoadingTree>
       )}
-    </div>
+    </>
   );
 }
 
