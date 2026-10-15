@@ -15,8 +15,8 @@ from typing import Any
 import httpx
 import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, ToolCall
-from skaz.knowledge.agents.fake import Gate, ScriptItem
+from skaz.knowledge.agents.engine import AgentTurn, EngineId, ModelOption, ToolCall
+from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.agents.tools import TOOL_NAMES
 from skaz.knowledge.chats.service import ChatService
 from skaz.knowledge.markdown.page import parse_page
@@ -238,6 +238,57 @@ async def test_model_and_effort_changes_are_recorded_and_checked(env: Env) -> No
     assert all_text(last) == "Model changed to Fake model"
     await env.answered(chat["id"], "Вопрос")
     assert env.agents.engines["codex"].turns[-1].model == "fake-model"
+
+
+def with_models(env: Env, engine_id: EngineId, *models: ModelOption) -> None:
+    script = env.agents.scripts
+    env.agents.engines[engine_id] = FakeEngine(engine_id, script=lambda turn: script[engine_id](turn),
+                                               models=models)
+    install(env.runtime, env.agents)
+
+
+async def test_effort_is_checked_against_the_model_that_will_answer(env: Env) -> None:
+    """``model=None`` means the agent's default model (the first it lists): effort is checked against it."""
+    with_models(env, "codex", ModelOption("fast", "Fast", ("low", "high"), "low"),
+                ModelOption("deep", "Deep", ("medium", "xhigh")))
+    refused = await env.client.post("/kb/chats", json={"effort": "xhigh"})
+    assert refused.status_code == 422 and "xhigh" in refused.json()["detail"]
+    assert (await env.client.get("/kb/chats")).json() == []
+    assert (await env.client.post("/kb/chats", json={"effort": "high"})).status_code == 201
+    chat = await env.chat(model="deep", effort="xhigh")
+    switched = await env.client.patch(f"/kb/chats/{chat['id']}", json={"model": None})
+    assert switched.status_code == 422  # back to the default model, which has no "xhigh"
+    # A model without effort levels takes no effort.
+    with_models(env, "codex", ModelOption("plain", "Plain"))
+    plain = await env.client.post("/kb/chats", json={"model": "plain", "effort": "high"})
+    assert plain.status_code == 422 and "effort" in plain.json()["detail"]
+
+
+async def test_an_unknown_model_is_refused_also_when_the_agent_lists_none(env: Env) -> None:
+    env.agents.missing("hermes", "Hermes Agent is not installed.")
+    install(env.runtime, env.agents)
+    refused = await env.client.post("/kb/chats", json={"engine": "hermes", "model": "made-up"})
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["code"] == "AGENT_UNAVAILABLE" and refused.json()["engine"] == "hermes"
+    assert (await env.client.get("/kb/chats")).json() == []
+    with_models(env, "codex")  # ready, but no models reported
+    empty = await env.client.post("/kb/chats", json={"model": "fake-model"})
+    assert empty.status_code == 409 and empty.json()["code"] == "AGENT_UNAVAILABLE"
+
+
+async def test_a_model_check_that_fails_refuses_instead_of_skipping(env: Env) -> None:
+    registry = env.runtime.kb_agents.registry
+
+    async def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("registry down")
+
+    registry.view = broken
+    refused = await env.client.post("/kb/chats", json={"model": "fake-model", "effort": "high"})
+    assert refused.status_code == 409, refused.text
+    body = refused.json()
+    assert body["code"] == "AGENT_UNAVAILABLE" and body["action"] == "check"
+    assert "registry" not in body["detail"]
+    assert (await env.client.get("/kb/chats")).json() == []
 
 
 async def test_limit_interrupts_and_resume_answers_again(env: Env) -> None:
