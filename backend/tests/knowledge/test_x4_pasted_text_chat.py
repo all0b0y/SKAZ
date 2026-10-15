@@ -63,7 +63,8 @@ async def test_a_long_paste_is_a_text_material_read_in_full_with_checked_quotes(
 
     request = agents.engines["codex"].turns[-1].messages[-1].content
     assert "The user attached this material to the question:" in request
-    assert PARAGRAPHS[0] in request and "read them with skaz_read_material" in request
+    # A pasted text of this size fits the current-message attachment budget (X5): all of it is in the prompt.
+    assert PARAGRAPHS[0] in request and PARAGRAPHS[-1] in request and "skaz_read_material" not in request
 
     # The rest is one tool call away: paging skaz_read_material yields every paragraph verbatim.
     tools, read, start = ToolRegistry(runtime.kb), [], 1
