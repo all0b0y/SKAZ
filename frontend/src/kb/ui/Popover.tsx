@@ -40,7 +40,7 @@ export function Popover({
     if (!anchor || !pop) return;
     const a = anchor.getBoundingClientRect();
     const p = pop.getBoundingClientRect();
-    setPos(placePopup(a, { width: p.width, height: p.height }, placement, boundaryFor(anchor)));
+    setPos(placePopup(a, { width: p.width, height: p.height }, placement, boundaryFor(anchor, { placement })));
   }, [open, placement, anchorRef]);
 
   useEffect(() => {

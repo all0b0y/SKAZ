@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import {
   Banner, Button, Chip, EmptyState, Icon, ICON_NAMES, ICON_STROKE, Menu, Modal, Segmented, Spinner, Switch, TextField,
 } from './index';
-import { placePopup } from './geometry';
+import { boundaryFor, placePopup } from './geometry';
 
 describe('Icon', () => {
   it('is decorative by default: hidden from assistive tech, Lucide stroke 1.25', () => {
@@ -247,5 +247,56 @@ describe('Other primitives', () => {
       .toEqual({ left: 192, top: 46 });
     expect(placePopup({ left: 110, top: 560, right: 140, bottom: 590 }, { width: 120, height: 100 }, 'bottom-start', bounds).top)
       .toBe(454);
+  });
+});
+
+describe('popup bounds (X7: rail tooltips sat on top of the icon)', () => {
+  /** A 52 px rail column at the left of a 1200 × 800 window, with one 36 px button in it. */
+  function rail() {
+    const pane = document.createElement('nav');
+    pane.dataset.pane = 'rail';
+    const button = document.createElement('button');
+    pane.append(button);
+    document.body.append(pane);
+    pane.getBoundingClientRect = () => ({ left: 0, top: 0, right: 52, bottom: 800, width: 52, height: 800, x: 0, y: 0, toJSON: () => ({}) });
+    vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1200);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
+    return { button, done: () => { pane.remove(); vi.restoreAllMocks(); } };
+  }
+
+  it('a popup placed out of its column (right) is bounded by the window, not the column', () => {
+    const { button, done } = rail();
+    expect(boundaryFor(button, { placement: 'right' })).toEqual({ left: 0, top: 0, right: 1200, bottom: 800 });
+    done();
+  });
+
+  it('tooltips are bounded by the window whatever their placement', () => {
+    const { button, done } = rail();
+    expect(boundaryFor(button, { placement: 'bottom', scope: 'window' })).toEqual({ left: 0, top: 0, right: 1200, bottom: 800 });
+    done();
+  });
+
+  it('a menu opening inside its column still stays in the column', () => {
+    const { button, done } = rail();
+    expect(boundaryFor(button, { placement: 'bottom-start' })).toEqual({ left: 0, top: 0, right: 52, bottom: 800 });
+    done();
+  });
+
+  it('a popup placed to the right never covers its anchor, even in a narrow box', () => {
+    const anchor = { left: 8, top: 100, right: 44, bottom: 136 };
+    const column = { left: 0, top: 0, right: 52, bottom: 800 };
+    // Pulled back into a 52 px box it would land on the icon: it flips or stays beside it instead.
+    const placed = placePopup(anchor, { width: 70, height: 24 }, 'right', column);
+    const covers = placed.left < anchor.right && placed.left + 70 > anchor.left;
+    expect(covers).toBe(false);
+    // In the window it sits to the right with the usual gap, centred on the icon.
+    expect(placePopup(anchor, { width: 70, height: 24 }, 'right', { left: 0, top: 0, right: 1200, bottom: 800 }))
+      .toEqual({ left: 50, top: 106 });
+  });
+
+  it('near the right edge of the window a right popup flips to the left of its anchor', () => {
+    const anchor = { left: 1150, top: 100, right: 1186, bottom: 136 };
+    expect(placePopup(anchor, { width: 100, height: 24 }, 'right', { left: 0, top: 0, right: 1200, bottom: 800 }))
+      .toEqual({ left: 1044, top: 106 });
   });
 });

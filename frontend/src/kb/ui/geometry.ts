@@ -10,10 +10,26 @@ export type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' 
 const GAP = 6;
 const MARGIN = 8;
 
-/** The box a popup must stay inside: the anchor's column when it has one, else the window. */
-export function boundaryFor(anchor: Element): Rect {
-  const pane = anchor.closest('[data-pane]');
+/** Placements that point out of the anchor's column: such a popup lives outside it by design. */
+const OUT_OF_PANE: ReadonlySet<Placement> = new Set(['right']);
+
+export interface BoundaryOptions {
+  placement?: Placement;
+  /**
+   * `pane` (menus, popovers): stay inside the anchor's column. `window`: tooltips and other hints
+   * that may cross columns — a tooltip next to a 52 px rail icon must not be pulled back over it.
+   */
+  scope?: 'pane' | 'window';
+}
+
+/**
+ * The box a popup must stay inside: the anchor's column for a menu that opens inside it, the
+ * window for tooltips and for any popup whose placement points out of the column.
+ */
+export function boundaryFor(anchor: Element, { placement, scope = 'pane' }: BoundaryOptions = {}): Rect {
   const view = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  if (scope === 'window' || (placement && OUT_OF_PANE.has(placement))) return view;
+  const pane = anchor.closest('[data-pane]');
   if (!pane) return view;
   const r = pane.getBoundingClientRect();
   if (r.width < 2) return view;
@@ -71,7 +87,15 @@ export function placePopup(
     const above = anchor.top - GAP - size.height;
     if (above >= bounds.top + MARGIN) top = above;
   }
-  left = Math.min(Math.max(left, bounds.left + MARGIN), Math.max(bounds.left + MARGIN, bounds.right - MARGIN - size.width));
+  if (placement === 'right') {
+    // Beside the anchor or not at all on top of it: flip to its left when the right has no room;
+    // when neither side fits, stay beside it rather than cover what was hovered.
+    const fitsRight = left + size.width <= bounds.right - MARGIN;
+    const leftSide = anchor.left - GAP - size.width;
+    if (!fitsRight && leftSide >= bounds.left + MARGIN) left = leftSide;
+  } else {
+    left = Math.min(Math.max(left, bounds.left + MARGIN), Math.max(bounds.left + MARGIN, bounds.right - MARGIN - size.width));
+  }
   top = Math.min(Math.max(top, bounds.top + MARGIN), Math.max(bounds.top + MARGIN, bounds.bottom - MARGIN - size.height));
   return { left: Math.round(left), top: Math.round(top) };
 }
