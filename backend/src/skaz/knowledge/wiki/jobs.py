@@ -24,6 +24,7 @@ from ..ingest.jobs import (
     JobState,
     JobStep,
 )
+from ..logsafe import error_note
 from .agent import WikiJobFailed
 
 logger = logging.getLogger(__name__)
@@ -94,8 +95,8 @@ class WikiJobs:
             error = failure.message
         except OSError as failure:
             error = f"SKAZ couldn't use the library folder: {failure.strerror or failure}."
-        except Exception:
-            logger.exception("wiki job %s failed", job_id)
+        except Exception as failure:  # ids and types only: a message can carry a title (logsafe)
+            logger.error("wiki job %s failed: %s", job_id, error_note(failure))
         finally:
             try:
                 self.jobs.finish(job_id, state, error=error, error_code=code if state == "failed" else None)

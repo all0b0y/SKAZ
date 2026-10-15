@@ -25,6 +25,7 @@ import signal
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from .logsafe import error_note
 from .processes import CHILDREN, ChildProcesses
 
 logger = logging.getLogger(__name__)
@@ -71,8 +72,8 @@ async def close_knowledge(runtime: KnowledgeRuntime, *, deadline_s: float = DEAD
             await closer()
         except asyncio.CancelledError:
             raise
-        except Exception:  # one service failing to close never keeps the others open
-            logger.exception("closing %s failed", name)
+        except Exception as error:  # one service failing to close never keeps the others open
+            logger.error("closing %s failed: %s", name, error_note(error))
 
     tasks = [asyncio.create_task(close(name, closer), name=f"kb-close-{name}") for name, closer in closers]
     try:

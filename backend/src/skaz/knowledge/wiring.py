@@ -24,6 +24,7 @@ from .agents.mcp_access import McpAccess as EngineMcpAccess
 from .agents.registry import ENGINE_IDS
 from .decisions.protocol import Answer, DeciderId, DecisionLayer, Question, Undecided
 from .ingest.service import IngestService
+from .logsafe import error_note
 from .mcp.server import McpServer
 from .mcp.tokens import McpRunScope
 from .service import KnowledgeService
@@ -127,9 +128,10 @@ class AutoIngest:
     async def _start(self, material_id: str) -> None:
         try:
             await self._ingest.request_ingest(material_id)
-        except Exception:
+        except Exception as error:
             # Busy (already running) or not ready: the user can still press "Add to wiki".
-            log.info("Automatic ingest of %s did not start", material_id, exc_info=True)
+            # Ids and types only: the reason can name the material (logsafe).
+            log.info("Automatic ingest of %s did not start: %s", material_id, error_note(error))
 
 
 def engine_resolver(engines: Mapping[EngineId, AgentEngine],

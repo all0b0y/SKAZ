@@ -20,6 +20,7 @@ from ...native_io import disk_call
 from ..agents.registry import EngineUnavailable
 from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
+from ..logsafe import error_note
 from ..service import KnowledgeService
 from .jobs import AGENT_UNAVAILABLE, INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState
 from .protocols import (
@@ -217,8 +218,8 @@ class IngestService:
             error = failure.message
         except OSError as failure:
             error = f"SKAZ couldn't use the library folder: {failure.strerror or failure}."
-        except Exception:
-            logger.exception("ingest job %s failed", job_id)
+        except Exception as failure:  # ids and types only: a message can carry a title (logsafe)
+            logger.error("ingest job %s failed: %s", job_id, error_note(failure))
         finally:
             try:
                 self.jobs.finish(job_id, state, error=error or None,
@@ -236,8 +237,8 @@ class IngestService:
                 break
             try:
                 listener(material_id, record)
-            except Exception:  # a listener's failure never changes the finished job
-                logger.exception("ingest listener failed for job %s", job_id)
+            except Exception as failure:  # a listener's failure never changes the finished job
+                logger.error("ingest listener failed for job %s: %s", job_id, error_note(failure))
 
     def _notify_blocked(self, job_id: str, active: _Active) -> None:
         run = active.run
