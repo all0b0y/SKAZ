@@ -35,6 +35,7 @@ from .gateways.soniox_async import (
 )
 from .import_store import UNSETTLED, ImportConflict, ImportRecord, ImportSource, ImportStore, digest_file
 from .import_temp import ImportTemp
+from .knowledge.logsafe import error_note
 from .media_source import PLATFORM_LABELS, video_source
 from .native_io import disk_call
 
@@ -105,8 +106,9 @@ class ImportService:
         for listener in self._listeners:
             try:
                 listener(session_id)
-            except Exception:  # a listener never breaks an import
-                logger.exception("Import listener failed")
+            except Exception as error:  # a listener never breaks an import
+                # Ids and types only: the message/traceback can quote a file name or recognised text.
+                logger.error("Import listener failed for %s: %s", session_id, error_note(error))
 
     @property
     def active(self) -> int:
