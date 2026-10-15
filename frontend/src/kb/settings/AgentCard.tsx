@@ -161,7 +161,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   return (
     <li className="kb-agentcard" data-engine={agent.id} data-state={agent.state}>
       <div className="kb-agentcard__head">
-        <EngineBadge engine={agent.id} />
+        <EngineBadge engine={agent.id} size={32} />
         <b className="kb-agentcard__name">{agent.name}</b>
         <span className="kb-muted kb-agentcard__account">· {ACCOUNT[agent.id]}</span>
         <span className="kb-head__spacer" />

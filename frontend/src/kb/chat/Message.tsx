@@ -240,7 +240,7 @@ export function SystemMessage({ message }: { message: KbMessage }) {
   const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
   return (
     <p className="kb-msg kb-msg--system" role="note">
-      {message.engine && <EngineBadge engine={message.engine} />}
+      {message.engine && <EngineBadge engine={message.engine} size={16} />}
       <span>{text}</span>
     </p>
   );

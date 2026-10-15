@@ -64,7 +64,7 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
       <button ref={anchor} type="button" className="kb-picker" aria-haspopup="menu" aria-expanded={open}
         aria-label={`Agent and model: ${choice ? ENGINE_NAME[choice.engine] : 'none'}, ${modelLabel}`}
         onClick={() => setOpen((v) => !v)} data-testid="agent-picker">
-        {choice && <EngineBadge engine={choice.engine} />}
+        {choice && <EngineBadge engine={choice.engine} size={16} />}
         <span className="kb-picker__label">{modelLabel}</span>
         <Icon name="chevronDown" size={12} />
       </button>

@@ -1,4 +1,4 @@
-import { expect, test, chromium, type Browser, type Page } from '@playwright/test';
+import { expect, test, chromium, type Browser, type Locator, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
@@ -76,14 +76,28 @@ async function seed() {
   }, { SEMINAR, BLACKROCK });
 }
 
-async function open(theme: 'light' | 'dark') {
+async function open(theme: 'light' | 'dark', query = '') {
   await page.setViewportSize({ width: 1440, height: 860 });
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
-  await page.goto(`${base}/src/kb/test/harness.html`);
+  await page.goto(`${base}/src/kb/test/harness.html${query}`);
   await page.evaluate(() => localStorage.clear());
-  await page.goto(`${base}/src/kb/test/harness.html`);
+  await page.goto(`${base}/src/kb/test/harness.html${query}`);
+  if (query.includes('onboarding=1')) return;
   await expect(page.getByRole('navigation', { name: 'Sections' })).toBeVisible({ timeout: 30_000 });
   await seed();
+}
+
+/** Every agent mark on screen is the bundled image at its size, no letters. */
+async function marks(expected: number[], root: Locator = page.locator('body')) {
+  // Wait for the bundled images to decode before measuring them.
+  await expect.poll(() => root.locator('.kb-engine:visible img').evaluateAll((imgs) =>
+    imgs.every((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0))).toBe(true);
+  const got = await root.locator('.kb-engine:visible').evaluateAll((els) => els.map((el) => ({
+    size: Math.round(el.getBoundingClientRect().width), text: el.textContent ?? '',
+    loaded: (el.querySelector('img') as HTMLImageElement | null)?.naturalWidth ?? 0,
+  })));
+  expect(got.map((m) => m.size)).toEqual(expected);
+  for (const m of got) { expect(m.text).toBe(''); expect(m.loaded).toBeGreaterThan(0); }
 }
 
 async function check(name: string) {
@@ -176,6 +190,32 @@ for (const theme of THEMES) {
     await page.getByRole('button', { name: 'Expand to the centre' }).click();
     await page.mouse.move(2, 300);
     await check(`wiki-page-wide-1440-${theme}`);
+  });
+}
+
+for (const theme of THEMES) {
+  test(`agent marks: composer 16, agent menu 20, Settings rows 20, first-launch cards 32 — 1440 ${theme}`, async () => {
+    await open(theme);
+    await page.getByRole('region', { name: 'Chats' }).getByRole('button', { name: /Why is there a logarithm/ }).click();
+    await marks([16]);
+    await page.getByTestId('agent-picker').click();
+    await expect(page.getByRole('menu', { name: 'Agent and model' })).toBeVisible();
+    await marks([16, 20, 20, 20]);
+    await check(`logos-composer-menu-1440-${theme}`);
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Meta+Comma');
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await settings.getByRole('navigation').getByRole('button', { name: /^Accounts & keys/ }).click();
+    await expect(settings.locator('.kb-engine')).toHaveCount(3);
+    await marks([20, 20, 20], settings);
+    await check(`logos-settings-1440-${theme}`);
+    await page.keyboard.press('Escape');
+    await open(theme, '?onboarding=1');
+    const dialog = page.getByRole('dialog', { name: 'Welcome to SKAZ' });
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await expect(dialog.locator('.kb-engine')).toHaveCount(3);
+    await marks([32, 32, 32], dialog);
+    await check(`logos-onboarding-1440-${theme}`);
   });
 }
 

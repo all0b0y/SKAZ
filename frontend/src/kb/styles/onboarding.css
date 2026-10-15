@@ -65,24 +65,22 @@
 .kb-ob__foot { display: flex; align-items: center; gap: 10px; flex: none; padding-top: 6px; }
 .kb-ob__spacer { flex: 1; }
 
-/* Agent badges (as in v21): two-letter marks, not brand logos. */
+/* Agent marks (v42): colour brand marks, one rounded tile + hairline ring for all three. */
 .kb-engine {
+  --kb-engine-size: 20px;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 4px;
-  border-radius: 5px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #fff;
   flex: none;
+  width: var(--kb-engine-size);
+  height: var(--kb-engine-size);
+  border-radius: 23%;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kb-text) 16%, transparent);
+  vertical-align: middle;
 }
-.kb-engine--codex { background: #3a4240; }
-.kb-engine--claude { background: #a4532f; }
-.kb-engine--hermes { background: var(--kb-fill); color: var(--kb-on-fill); }
+.kb-engine img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* Claude Code's mark is a bare glyph: inset it like the Codex glyph sits on its own plate. */
+.kb-engine--claude img { padding: 9%; }
 
 /* ---- Illustration (118px, outline style) ---- */
 .kb-art {
