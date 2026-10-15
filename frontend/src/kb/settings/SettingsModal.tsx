@@ -1,31 +1,23 @@
-import { Fragment, useId, useRef, useState, type ReactNode } from 'react';
-import { Banner, Button, Icon, Modal, PathText, Segmented, Switch } from '../ui';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
 import { usePrefs, useLibrary, useServices, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
-import { LanguagePicker, TranslationSelect } from './Languages';
+import {
+  AgentRow, AsrRow, BackgroundLinksRow, ChatModelRow, DecisionsRow, DefaultAgentRow, FindLinksNowRow, HealthPlates, KeyRow,
+  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SpeechLanguagesRow, TranslationRow, VersionRow,
+  WikiLanguageRow, WikiModelRow, WikiSwitchRow,
+} from './LiveRows';
+import { EngineBadge } from '../ui/EngineBadge';
+import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
 
-const NOT_YET = 'Not connected yet';
-
-/** Visible, honest "not here yet": a muted label, optionally next to a disabled control. */
-function Pending({ children }: { children?: ReactNode }) {
-  return (
-    <>
-      {children}
-      <span className="kb-pending"><Icon name="error" size={13} />{NOT_YET}</span>
-    </>
-  );
-}
-
-const AGENTS = [
-  { value: 'codex', label: 'Codex' },
-  { value: 'claude', label: 'Claude Code' },
-  { value: 'hermes', label: 'Hermes Agent' },
-] as const;
-
+/**
+ * The control of one settings row: live backend data where the route exists (S3/W2/B7 via
+ * `LiveRows`), an honest "Not connected yet" where it does not — never a dummy button.
+ */
 function RowControl({ row }: { row: RowDef }) {
   const { prefs } = useServices();
   const theme = usePrefs((s) => s.theme);
@@ -33,30 +25,26 @@ function RowControl({ row }: { row: RowDef }) {
   const library = useLibrary((s) => s.library);
   const setLibrarySetupOpen = useUi((s) => s.setLibrarySetupOpen);
   switch (row.id) {
-    case 'default-agent':
-      return <Pending><Segmented label={row.label} value={'' as string} options={AGENTS} onChange={() => undefined} disabled size="sm" /></Pending>;
-    case 'decisions':
-      return (
-        <Pending>
-          <Segmented label={row.label} value={'' as string} disabled size="sm" onChange={() => undefined}
-            options={[{ value: 'cloud', label: 'OpenRouter · Jev' }, { value: 'local', label: 'On this computer' }]} />
-        </Pending>
-      );
-    case 'asr-service':
-      return (
-        <Pending>
-          <Segmented label={row.label} value={'' as string} disabled size="sm" onChange={() => undefined}
-            options={[{ value: 'soniox', label: 'Soniox' }, { value: 'local', label: 'On this computer' }]} />
-        </Pending>
-      );
-    case 'system-audio':
-    case 'auto-files':
-    case 'auto-text':
-      return <Pending><Switch label={row.label} checked={false} disabled onChange={() => undefined} /></Pending>;
-    case 'speech-languages':
-      return <LanguagePicker />;
-    case 'translate-default':
-      return <TranslationSelect />;
+    case 'agent-codex': return <AgentRow engine="codex" />;
+    case 'agent-claude': return <AgentRow engine="claude_code" />;
+    case 'agent-hermes': return <AgentRow engine="hermes" />;
+    case 'key-openrouter': return <KeyRow provider="openrouter" />;
+    case 'key-soniox': return <KeyRow provider="soniox" />;
+    case 'local-whisper': return <LocalWhisperRow />;
+    case 'local-decisions': return <LocalDecisionsRow />;
+    case 'default-agent': return <DefaultAgentRow label={row.label} />;
+    case 'chat-model': return <ChatModelRow />;
+    case 'wiki-model': return <WikiModelRow label={row.label} />;
+    case 'decisions': return <DecisionsRow label={row.label} />;
+    case 'asr-service': return <AsrRow label={row.label} />;
+    case 'speech-languages': return <SpeechLanguagesRow />;
+    case 'translate-default': return <TranslationRow />;
+    case 'wiki-language': return <WikiLanguageRow />;
+    case 'auto-files': return <WikiSwitchRow field="auto_add_files_links" label={row.label} />;
+    case 'auto-text': return <WikiSwitchRow field="auto_add_text" label={row.label} />;
+    case 'auto-fix': return <WikiSwitchRow field="auto_corrections" label={row.label} />;
+    case 'bg-links': return <BackgroundLinksRow label={row.label} />;
+    case 'links-now': return <FindLinksNowRow />;
     case 'lib-folder':
       if (library?.state === 'ready' || library?.state === 'unavailable') {
         return (
@@ -73,13 +61,13 @@ function RowControl({ row }: { row: RowDef }) {
         </>
       );
     case 'p-soniox':
-      return <span className="kb-muted">sound of recordings, when Soniox is chosen</span>;
+      return <PrivacyRow rowId={row.id} fallback="sound of recordings, when Soniox is chosen" />;
     case 'p-agent':
-      return <span className="kb-muted">material text in your questions and while building the wiki</span>;
+      return <PrivacyRow rowId={row.id} fallback="material text in your questions and while building the wiki" />;
     case 'p-openrouter':
-      return <span className="kb-muted">only if you choose it</span>;
+      return <PrivacyRow rowId={row.id} fallback="only if you choose it" />;
     case 'p-local':
-      return <span className="kb-muted">everything else</span>;
+      return <PrivacyRow rowId={row.id} fallback="everything else" />;
     case 'theme':
       return (
         <Segmented<ThemePref> label="Theme" value={theme} size="sm" onChange={(v) => prefs.getState().set({ theme: v })}
@@ -93,7 +81,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'ui-language':
       return <span className="kb-muted">English</span>;
     case 'version':
-      return <span className="kb-muted">SKAZ {appVersion}</span>;
+      return <VersionRow fallback={appVersion} />;
     case 'github':
       return (
         <a className="kb-link" href="https://github.com/all0b0y/SKAZ" target="_blank" rel="noreferrer noopener">
@@ -101,16 +89,18 @@ function RowControl({ row }: { row: RowDef }) {
         </a>
       );
     default:
-      return <Pending />;
+      return <NotYet />;
   }
 }
+
+const ENGINE_OF_ROW: Record<string, EngineId | undefined> = { 'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes' };
 
 function Row({ row }: { row: RowDef }) {
   const labelId = useId();
   return (
     <div className="kb-srow" data-row={row.id} role="group" aria-labelledby={labelId}>
       <div className="kb-srow__text">
-        <div id={labelId} className="kb-srow__label">{row.label}</div>
+        <div id={labelId} className="kb-srow__label">{ENGINE_OF_ROW[row.id] && <EngineBadge engine={ENGINE_OF_ROW[row.id]!} />}{row.label}</div>
         {row.hint && <div className="kb-srow__hint">{row.hint}</div>}
       </div>
       <div className="kb-srow__control"><RowControl row={row} /></div>
@@ -173,6 +163,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
   return (
     <>
       {section === 'storage' && <StorageBanner />}
+      <HealthPlates section={section} />
       {groupsOf(rows).map((g, i) => (
         <section key={`${g.title}-${i}`} className="kb-sgroup" aria-label={g.title || undefined}>
           {g.title && <h4 className="kb-sgroup__title">{g.title}</h4>}
@@ -182,9 +173,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
       {section === 'models' && (
         <p className="kb-snote"><Icon name="warning" size={14} />If the chosen model is unavailable, SKAZ says so and never switches to another on its own.</p>
       )}
-      {(section === 'rec') && (
-        <p className="kb-snote kb-snote--quiet"><Icon name="about" size={14} />Languages and translation are kept on this computer for now.</p>
-      )}
+      {section === 'about' && <Licenses />}
     </>
   );
 }
@@ -196,6 +185,21 @@ export function SettingsModal() {
   const close = useUi((s) => s.closeSettings);
   const setSection = useUi((s) => s.setSettingsSection);
   const problems = useProblems();
+  const { settings, agents } = useServices();
+
+  // Fresh live data each time the window opens (cheap reads; the backend owns the truth).
+  useEffect(() => {
+    if (!open) return;
+    const s = settings.getState();
+    void s.loadHealth();
+    void s.loadKeys();
+    void s.loadSpeech();
+    void s.loadWiki();
+    void s.loadDecisions();
+    void s.loadPrivacy();
+    void s.loadAbout();
+    void agents.getState().refresh();
+  }, [open, settings, agents]);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement | null>(null);
   const results = query.trim() ? searchRows(query) : null;

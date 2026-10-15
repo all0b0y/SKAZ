@@ -2,14 +2,16 @@ import { render } from '@testing-library/react';
 import { KbApp } from '../KbApp';
 import { createServices } from '../state/context';
 import { PREFS_KEY, type Prefs } from '../state/prefs';
-import { createFakeBridge, type FakeKbState } from './fakeBridge';
+import type { CaptureFactory } from '../recording/capture';
+import { createFakeBridge } from './fakeBridge';
+import type { FakeWorld } from './fakeKb';
 
-/** Render the whole new interface on a fake bridge, with stored prefs seeded first. */
-export function renderKb(options: { state?: FakeKbState; prefs?: Partial<Prefs> } = {}) {
+/** Render the whole new interface on a fake bridge over one world, with stored prefs seeded first. */
+export function renderKb(options: { world?: FakeWorld; prefs?: Partial<Prefs>; capture?: CaptureFactory | null } = {}) {
   localStorage.clear();
   localStorage.setItem(PREFS_KEY, JSON.stringify({ onboardingDone: true, ...options.prefs }));
-  const fake = createFakeBridge(options.state);
-  const services = createServices(fake.bridge, localStorage);
+  const fake = createFakeBridge(options.world);
+  const services = createServices(fake.bridge, localStorage, { capture: options.capture ?? null });
   const view = render(<KbApp services={services} />);
   return { ...view, fake, services };
 }

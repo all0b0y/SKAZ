@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, ShareMenu, type IpcMainInvokeEvent } from 'electron';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CHANNELS } from './channels';
@@ -9,6 +9,7 @@ import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeL
 import type { BackendManager } from './backend';
 import { audioUploadPath, requestTimeoutMs, shareFileName, validateAudioUpload, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
+import { kbBridgeHandlers } from './kbBridge';
 import type {
   AudioFileChoice,
   AudioUploadMeta,
@@ -17,7 +18,7 @@ import type {
   JsonResponse,
   SharedNote,
 } from '../frontend/src/api/bridge';
-import { AUDIO_EXTENSIONS } from '../frontend/src/api/bridge';
+import { AUDIO_EXTENSIONS, MATERIAL_EXTENSIONS } from '../frontend/src/api/bridge';
 
 /** Private scratch for shared notes, cleared on quit. */
 let shareDirectory: string | null = null;
@@ -167,6 +168,42 @@ export function registerIpc(
     } finally {
       sharing = false;
     }
+  });
+
+  // Knowledge interface (API-B2 §5): dictation clip → POST /kb/dictation with this run's token;
+  // chat export through the native save dialog; material files through the native chooser.
+  const kb = kbBridgeHandlers({
+    handle: () => manager.getHandle(),
+    fetch: (input, init) => fetch(input, init),
+    showSaveDialog: async (options) => {
+      const owner = BrowserWindow.getFocusedWindow();
+      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options);
+    },
+    showOpenDialog: async (options) => {
+      const owner = BrowserWindow.getFocusedWindow();
+      const props = options.properties as Array<'openFile' | 'multiSelections'>;
+      return owner ? dialog.showOpenDialog(owner, { ...options, properties: props })
+        : dialog.showOpenDialog({ ...options, properties: props });
+    },
+    writeTextFile: (path, text) => writeFileSync(path, text, { encoding: 'utf8' }),
+    fileSize: (path) => {
+      try { const st = statSync(path); return st.isFile() ? st.size : null; } catch { return null; }
+    },
+    documentsDir: app.getPath('documents'),
+    downloadsDir: app.getPath('downloads'),
+    materialExtensions: MATERIAL_EXTENSIONS,
+  });
+  ipcMain.handle(CHANNELS.dictate, (event, wav: unknown, language: unknown) => {
+    if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
+    return kb.dictate(wav, language);
+  });
+  ipcMain.handle(CHANNELS.saveTextFile, (event, file: unknown) => {
+    if (!senderTrusted(event)) return { saved: false };
+    return kb.saveTextFile(file);
+  });
+  ipcMain.handle(CHANNELS.chooseMaterialFiles, (event) => {
+    if (!senderTrusted(event)) return [];
+    return kb.chooseMaterialFiles();
   });
 
   // Read-only tail of the app log. No session content reaches this file, so

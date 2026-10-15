@@ -5,6 +5,7 @@
 // bridge can therefore only reach the loopback backend, nothing else.
 
 import type { NativeAudioMeta, NativeFailure, NativeOpened, NativeSaved, NativeStopped } from './nativeLive';
+import type { KbDictation } from './kb/types.gen';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -71,7 +72,38 @@ export interface CaptureState {
   failed: number;
 }
 
+/** Text recognised from one dictation clip (`POST /kb/dictation`, generated `KbDictation`); nothing is stored. */
+export type DictationResult = KbDictation;
+
+/** A text file the user saves through the native dialog (chat export as `.md`). */
+export interface TextFileSave {
+  suggested_name: string;
+  text: string;
+}
+
+/** A material file picked in the native chooser. Only identity crosses IPC; the backend reads it. */
+export interface MaterialFileChoice {
+  path: string;
+  name: string;
+  size: number;
+}
+
+/** File types the "+ Material" chooser offers: documents, text, audio and video. */
+export const MATERIAL_EXTENSIONS = [
+  'pdf', 'txt', 'md', 'markdown', 'rtf', 'html', 'htm', 'epub',
+  ...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v',
+] as const;
+
 export interface BridgeApi {
+  /**
+   * Dictation into the message field: one PCM16 mono WAV clip (≤ 120 s, ≤ 8 MB) is posted by main to
+   * `POST /kb/dictation` with the run's authorization. The answer is text only.
+   */
+  dictate?(wav: ArrayBuffer, language?: string): Promise<JsonResponse<DictationResult>>;
+  /** Native save dialog for a text file; `saved: false` when the user cancelled. */
+  saveTextFile?(file: TextFileSave): Promise<{ saved: boolean; path?: string }>;
+  /** Native chooser for material files (PDF, text, audio, video); empty when cancelled. */
+  chooseMaterialFiles?(): Promise<MaterialFileChoice[]>;
   /** Native PCM lifecycle, authenticated and bounded in Electron main. */
   openNative(sessionId: string, sampleRate: number): Promise<JsonResponse<NativeOpened>>;
   sendNativeAudio(sessionId: string, meta: NativeAudioMeta, pcm: ArrayBuffer): Promise<JsonResponse<NativeSaved>>;

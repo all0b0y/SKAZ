@@ -2,23 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
-import { computeLayout } from './layout';
-import { notConfiguredState } from '../test/fakeBridge';
+import { computeLayout, RAIL_W } from './layout';
+import { unconfiguredWorld } from '../test/fakeBridge';
 
 describe('Window shell', () => {
-  it('shows title bar, 88px rail with labelled sections, side panel, chat centre; no document panel', async () => {
+  it('shows title bar, narrow icon rail (v39) with named sections, search and settings, side panel, chat centre; no document panel', async () => {
     renderKb();
     const rail = await screen.findByRole('navigation', { name: 'Sections' });
-    for (const label of ['Chats', 'Materials', 'Wiki', 'Graph', 'Notifications', 'Settings']) {
-      expect(within(rail).getByText(label)).toBeInTheDocument();
+    // Icons only (summary v39): names are accessible names and tooltips; the graph lives under Wiki.
+    for (const label of [/^Chats/, /^Materials/, /^Wiki/, /^Notifications/, /^Search/, /^Settings/]) {
+      expect(within(rail).getByRole('button', { name: label })).toBeInTheDocument();
     }
+    expect(within(rail).queryByText('Chats')).not.toBeInTheDocument();
+    expect(RAIL_W).toBe(52);
     expect(screen.getByTestId('titlebar')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Chats' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument();
-    // The recording capsule and "+ Material" exist but are inactive with a reason (U3).
-    expect(screen.getByTestId('record-capsule')).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByTestId('add-material')).toHaveAttribute('aria-disabled', 'true');
+    // U3: "Record | Folder ▾" and "+ Material" work once the library is ready.
+    expect(screen.getByTestId('record-capsule')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    expect(within(screen.getByTestId('record-capsule')).getByRole('button', { name: 'Record' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('collapses the side panel to the rail and opens it again from a rail item; the choice is kept', async () => {
@@ -42,7 +46,7 @@ describe('Window shell', () => {
     renderKb();
     const bell = await screen.findByRole('button', { name: /Notifications/ });
     await waitFor(() => expect(bell).toHaveTextContent('1'));
-    expect(bell).toHaveAccessibleName('Notifications, 1 not dismissed');
+    expect(bell).toHaveAccessibleName('Notifications, 1 unread');
   });
 
   it('opens a material on the right, expands it over the centre and closes it', async () => {
@@ -101,7 +105,7 @@ describe('Window shell', () => {
 
   it('the library-not-connected screen leads to the library step of first launch', async () => {
     const user = userEvent.setup();
-    renderKb({ state: notConfiguredState(), prefs: { section: 'materials' } });
+    renderKb({ world: unconfiguredWorld(), prefs: { section: 'materials' } });
     await user.click(await screen.findByRole('button', { name: 'Choose where to keep it' }));
     const dialog = await screen.findByRole('dialog', { name: 'Library' });
     expect(within(dialog).getByTestId('library-path')).toHaveTextContent('/Users/me/Documents/SKAZ');
@@ -116,7 +120,7 @@ describe('Column layout', () => {
   it('fits every column at 960, 1024 and 1440 px with the document open', () => {
     for (const windowWidth of [960, 1024, 1440]) {
       const l = computeLayout({ windowWidth, sideOpen: true, sideWidth: 248, docOpen: true, docExpanded: false, rightWidth: 400 });
-      const used = 88 + l.side + 340 + (l.right ?? 0);
+      const used = RAIL_W + l.side + 340 + (l.right ?? 0);
       expect(used, `width ${windowWidth}`).toBeLessThanOrEqual(windowWidth);
       expect(l.side).toBeGreaterThanOrEqual(200);
       expect(l.right!).toBeGreaterThanOrEqual(320);

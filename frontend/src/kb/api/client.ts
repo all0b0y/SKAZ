@@ -1,10 +1,10 @@
 // Typed client for the new /kb/* routes over the existing preload bridge (window.skaz.request).
-// Paths, queries, bodies and responses come from the generated contract (types.gen.ts), so a
-// backend change that breaks the frontend fails `npm run typecheck`.
+// Paths, queries, bodies and responses come from the generated contract (types.gen.ts, made from
+// the backend OpenAPI schema), so a backend change that breaks the frontend fails `npm run typecheck`.
 
 import type { BridgeApi, HttpMethod } from '../../api/bridge';
 import type {
-  KbEndpoints, KbFolder, KbLibrary, KbMaterial, KbMaterialSummary, KbNotification, KbRoute,
+  KbEndpoints, KbFolder, KbLibrary, KbMaterial, KbMaterialSummary, KbNotificationFeed,
 } from '../../api/kb/types.gen';
 
 /** A failed /kb request: HTTP status and the backend's plain-English reason, shown to the user as is. */
@@ -15,21 +15,23 @@ export class KbApiError extends Error {
   }
 }
 
-type Spec<R extends KbRoute> = KbEndpoints[R];
+export type AnyRoute = keyof KbEndpoints;
+
+type Spec<R extends AnyRoute> = KbEndpoints[R];
 type QueryValue = string | number | boolean | undefined;
 
-interface CallOptions<R extends KbRoute> {
+interface CallOptions<R extends AnyRoute> {
   path?: Spec<R>['path'];
   query?: Partial<Spec<R>['query']>;
   body?: Spec<R>['body'];
 }
 
 /** Fill `{param}` segments; every value is percent-encoded so it stays one path segment. */
-export function buildPath(template: string, params: Record<string, string> | undefined): string {
+export function buildPath(template: string, params: Record<string, string | number> | undefined): string {
   return template.replace(/\{([^}]+)\}/g, (_, key: string) => {
     const value = params?.[key];
     if (value === undefined || value === '') throw new Error(`Missing path parameter: ${key}`);
-    return encodeURIComponent(value);
+    return encodeURIComponent(String(value));
   });
 }
 
@@ -46,7 +48,7 @@ function cleanQuery(query: Record<string, unknown> | undefined): Record<string, 
 export class KbClient {
   constructor(private readonly bridge: Pick<BridgeApi, 'request'>) {}
 
-  async call<R extends KbRoute>(route: R, options: CallOptions<R> = {}): Promise<Spec<R>['response']> {
+  async call<R extends AnyRoute>(route: R, options: CallOptions<R> = {}): Promise<Spec<R>['response']> {
     const space = route.indexOf(' ');
     const method = route.slice(0, space) as HttpMethod;
     const template = route.slice(space + 1);
@@ -81,7 +83,10 @@ export class KbClient {
     return this.call('GET /kb/materials/{material_id}', { path: { material_id: id } });
   }
 
-  notifications(): Promise<KbNotification[]> { return this.call('GET /kb/notifications'); }
+  /** Long poll: `after` = last seen cursor, `wait` = seconds at most (omitted = answer at once). */
+  notifications(after?: number, wait?: number): Promise<KbNotificationFeed> {
+    return this.call('GET /kb/notifications', { query: { after, wait } });
+  }
 }
 
 /** Plain-English text for any failure, for showing in place. */

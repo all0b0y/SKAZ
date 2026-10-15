@@ -1,8 +1,11 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import { Button, Icon, Modal, PathText } from '../ui';
 import { EXIT, SPRING_LARGE } from '../ui/motion';
-import { useLibrary } from '../state/context';
+import { useAgents, useLibrary, useServices, useSettings } from '../state/context';
+import type { KbAgents, KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
+import { AgentCards } from '../settings/AgentCard';
+import { AsrRow, KeyRow, LocalWhisperRow } from '../settings/LiveRows';
 import { LanguagePicker, TranslationSelect } from '../settings/Languages';
 import { LibraryPlace, useLibraryChoice } from './LibraryStep';
 import { StepArt, type SummaryTone } from './StepArt';
@@ -13,31 +16,10 @@ const LABELS: Record<Exclude<Step, 'summary'>, string> = {
   lang: 'Languages', agent: 'Agent', speech: 'Speech', library: 'Library',
 };
 const SKIPPABLE: ReadonlySet<Step> = new Set(['agent', 'speech', 'library']);
-const LATER = 'Available after setup in Settings';
 
 function Heading({ id, children }: { id: string; children: ReactNode }) {
   return <h2 id={id} className="kb-ob__title">{children}</h2>;
 }
-
-function ChoiceCard({ badge, name, account, describedBy }: { badge: ReactNode; name: string; account: string; describedBy: string }) {
-  return (
-    <li className="kb-ob__card">
-      <div className="kb-ob__card-head">
-        {badge}
-        <b>{name}</b>
-        <span className="kb-muted">· {account}</span>
-      </div>
-      <div className="kb-ob__card-foot">
-        <span className="kb-pending"><Icon name="error" size={13} />{LATER}</span>
-        <Button size="sm" disabled aria-describedby={describedBy}>Set up</Button>
-      </div>
-    </li>
-  );
-}
-
-const Engine = ({ k, text }: { k: 'codex' | 'claude' | 'hermes'; text: string }) => (
-  <span className={`kb-engine kb-engine--${k}`} aria-hidden="true">{text}</span>
-);
 
 export interface StatusLine {
   label: string;
@@ -46,22 +28,42 @@ export interface StatusLine {
 }
 
 /** Honest first-launch summary: only what real answers say is ready gets a check. */
-export function summaryLines(library: { state: string; root: string | null } | null): StatusLine[] {
+export function summaryLines(
+  library: { state: string; root: string | null } | null,
+  agents: KbAgents | null = null,
+  speech: { settings: KbSpeechSettings | null; keys: KbKeys | null } = { settings: null, keys: null },
+): StatusLine[] {
   const lib: StatusLine = library?.state === 'ready'
     ? { label: 'Library', tone: 'ok', text: library.root ?? 'Connected' }
     : library?.state === 'unavailable'
       ? { label: 'Library', tone: 'err', text: 'Folder unavailable — see Settings → Storage' }
       : { label: 'Library', tone: 'warn', text: 'Not connected — choose a place in Settings → Storage' };
-  return [
-    { label: 'Speech recognition', tone: 'warn', text: 'Not connected yet' },
-    { label: 'Chat and wiki', tone: 'warn', text: 'Not connected yet — no agent is set up' },
-    lib,
-  ];
+  const ready = agents?.agents.filter((a) => a.state === 'ready') ?? [];
+  const chosen = agents?.agents.find((a) => a.id === agents.default);
+  const agent: StatusLine = !agents
+    ? { label: 'Chat and wiki', tone: 'warn', text: 'Agents couldn’t be checked — see Settings → Accounts & keys' }
+    : chosen?.state === 'ready'
+      ? { label: 'Chat and wiki', tone: 'ok', text: `${chosen.name}${chosen.version ? ` ${chosen.version}` : ''}` }
+      : ready.length
+        ? { label: 'Chat and wiki', tone: 'ok', text: ready.map((a) => a.name).join(', ') }
+        : { label: 'Chat and wiki', tone: 'warn', text: 'No agent is connected — chat and wiki wait for one' };
+  const sp = speech.settings;
+  const soniox = speech.keys?.providers.find((p) => p.id === 'soniox');
+  const rec: StatusLine = !sp
+    ? { label: 'Speech recognition', tone: 'warn', text: 'Not checked' }
+    : sp.provider === 'soniox'
+      ? soniox?.configured && soniox.valid !== false
+        ? { label: 'Speech recognition', tone: 'ok', text: 'Soniox' }
+        : { label: 'Speech recognition', tone: 'warn', text: 'Soniox — no working key yet' }
+      : sp.local_model.state === 'ready'
+        ? { label: 'Speech recognition', tone: 'ok', text: 'On this computer' }
+        : { label: 'Speech recognition', tone: 'warn', text: 'On this computer — the model isn’t downloaded yet' };
+  return [rec, agent, lib];
 }
 
 /**
  * First launch (decisions 32/33): steps one by one — Languages → Agent → Speech → Library → Summary.
- * Agent and Speech have no backend yet: their actions are inactive and say so.
+ * Agent and Speech show the real state from the backend and fix it in place.
  */
 export function Onboarding({ open, onFinish }: { open: boolean; onFinish: () => void }) {
   const [index, setIndex] = useState(0);
@@ -69,11 +71,19 @@ export function Onboarding({ open, onFinish }: { open: boolean; onFinish: () => 
   const library = useLibrary((s) => s.library);
   const choice = useLibraryChoice();
   const titleId = useId();
-  const laterId = useId();
+  const agents = useAgents((s) => s.agents);
+  const speechSettings = useSettings((s) => s.speech.value);
+  const keys = useSettings((s) => s.keys.value);
+  const { settings } = useServices();
+  useEffect(() => {
+    if (!open) return;
+    void settings.getState().loadSpeech();
+    void settings.getState().loadKeys();
+  }, [open, settings]);
 
   const next = () => setIndex((i) => Math.min(STEPS.length - 1, i + 1));
   const back = () => setIndex((i) => Math.max(0, i - 1));
-  const lines = summaryLines(library);
+  const lines = summaryLines(library, agents, { settings: speechSettings, keys });
   const tones = lines.map((l) => l.tone) as [SummaryTone, SummaryTone, SummaryTone];
   const libReady = library?.state === 'ready';
 
@@ -127,25 +137,29 @@ export function Onboarding({ open, onFinish }: { open: boolean; onFinish: () => 
                 <p className="kb-ob__lead">
                   The agent answers in chat and builds the wiki. It works through your own account; you can change it in Settings.
                 </p>
-                <ul className="kb-ob__cards">
-                  <ChoiceCard badge={<Engine k="codex" text="Cx" />} name="Codex" account="ChatGPT subscription" describedBy={laterId} />
-                  <ChoiceCard badge={<Engine k="claude" text="CC" />} name="Claude Code" account="Claude subscription or Anthropic key" describedBy={laterId} />
-                  <ChoiceCard badge={<Engine k="hermes" text="H" />} name="Hermes Agent" account="Models and keys from Hermes settings" describedBy={laterId} />
-                </ul>
-                <p id={laterId} className="kb-ob__small">
-                  Connecting agents isn’t available in this version yet. Without an agent, recording and materials work; chat and wiki don’t.
-                </p>
+                <AgentCards />
+                <p className="kb-ob__small">Without an agent, recording and materials work; chat and wiki wait for one.</p>
               </>
             )}
             {step === 'speech' && (
               <>
                 <Heading id={titleId}>How should speech be recognised?</Heading>
-                <p className="kb-ob__lead">You can change it later.</p>
-                <ul className="kb-ob__cards">
-                  <ChoiceCard badge={<Icon name="waveform" size={16} />} name="Soniox" account="Live recording with translation. Needs a key; audio goes to Soniox." describedBy={laterId} />
-                  <ChoiceCard badge={<Icon name="system" size={16} />} name="On this computer" account="No internet, audio stays on the Mac. Slower, no live translation." describedBy={laterId} />
-                </ul>
-                <p id={laterId} className="kb-ob__small">Setting up recognition isn’t available in this version yet.</p>
+                <p className="kb-ob__lead">Soniox: live recording with translation, needs a key, audio goes to Soniox. On this computer: no internet, slower, no live translation.</p>
+                <div className="kb-srow">
+                  <div className="kb-srow__text"><div className="kb-srow__label">Service</div></div>
+                  <div className="kb-srow__control"><AsrRow label="Service" /></div>
+                </div>
+                {speechSettings?.provider === 'local_whisper' ? (
+                  <div className="kb-srow">
+                    <div className="kb-srow__text"><div className="kb-srow__label">Speech model</div></div>
+                    <div className="kb-srow__control"><LocalWhisperRow /></div>
+                  </div>
+                ) : (
+                  <div className="kb-srow">
+                    <div className="kb-srow__text"><div className="kb-srow__label">Soniox key</div></div>
+                    <div className="kb-srow__control"><KeyRow provider="soniox" /></div>
+                  </div>
+                )}
               </>
             )}
             {step === 'library' && (

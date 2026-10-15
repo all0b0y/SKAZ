@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
-import { notConfiguredState, readyState } from '../test/fakeBridge';
+import { unconfiguredWorld, baseWorld, without } from '../test/fakeBridge';
 import { summaryLines } from './Onboarding';
 
 const currentStep = (dialog: HTMLElement) =>
@@ -11,7 +11,7 @@ const currentStep = (dialog: HTMLElement) =>
 describe('First launch', () => {
   it('goes Languages → Agent → Speech → Library → Summary; languages are saved', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: notConfiguredState(), prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: without(unconfiguredWorld()), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     expect(currentStep(dialog)).toBe('lang');
     // Without reduced motion the illustration is animated (the still frame is tested separately).
@@ -27,11 +27,9 @@ describe('First launch', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     expect(currentStep(dialog)).toBe('agent');
     expect(within(dialog).getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument();
-    // No backend for agents yet: every action is inactive and says why.
-    const setups = within(dialog).getAllByRole('button', { name: 'Set up' });
-    expect(setups).toHaveLength(3);
-    for (const b of setups) expect(b).toBeDisabled();
-    expect(within(dialog).getAllByText('Available after setup in Settings')).toHaveLength(3);
+    // This backend has no /kb/agents: the step says so honestly, with a retry, and offers no fake setup.
+    expect(await within(dialog).findByText(/Agents couldn’t be checked/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Set up' })).not.toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('button', { name: 'Back' }));
     expect(currentStep(dialog)).toBe('lang');
@@ -48,8 +46,8 @@ describe('First launch', () => {
 
     const rows = within(dialog).getAllByRole('listitem').filter((li) => li.hasAttribute('data-tone'));
     expect(rows.map((r) => [r.textContent, r.getAttribute('data-tone')])).toEqual([
-      ['Speech recognitionNot connected yet', 'warn'],
-      ['Chat and wikiNot connected yet — no agent is set up', 'warn'],
+      ['Speech recognitionNot checked', 'warn'],
+      ['Chat and wikiAgents couldn’t be checked — see Settings → Accounts & keys', 'warn'],
       ['Library/Users/me/Documents/SKAZ', 'ok'],
     ]);
     await user.click(within(dialog).getByRole('button', { name: 'Open SKAZ' }));
@@ -59,7 +57,7 @@ describe('First launch', () => {
 
   it('choosing another folder sends that path; a refusal stays on the step in the backend’s words', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: notConfiguredState(), prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: unconfiguredWorld(), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 2; i += 1) await user.click(within(dialog).getByRole('button', { name: 'Skip' }));
@@ -76,7 +74,7 @@ describe('First launch', () => {
 
   it('skipping the library is reported honestly: no check where nothing is ready', async () => {
     const user = userEvent.setup();
-    renderKb({ state: notConfiguredState(), prefs: { onboardingDone: false } });
+    renderKb({ world: without(unconfiguredWorld()), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 3; i += 1) await user.click(within(dialog).getByRole('button', { name: 'Skip' }));
@@ -88,7 +86,7 @@ describe('First launch', () => {
 
   it('a library that is already connected is not created again', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: readyState(), prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: baseWorld(), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 2; i += 1) await user.click(within(dialog).getByRole('button', { name: 'Skip' }));

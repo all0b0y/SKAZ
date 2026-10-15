@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KbApiError, KbClient, buildPath } from '../api/client';
-import { createFakeBridge } from '../test/fakeBridge';
+import { baseWorld, createFakeBridge } from '../test/fakeBridge';
 import { renderKb } from '../test/renderKb';
 
 describe('KbClient over the preload bridge', () => {
@@ -70,7 +70,7 @@ describe('Library side panel on real /kb answers', () => {
     const folders = within(side).getByRole('list', { name: 'Folders' });
     expect(await within(folders).findByRole('button', { name: /^Machine learning/ })).toBeInTheDocument();
     expect(within(side).queryByRole('textbox', { name: 'New folder name' })).not.toBeInTheDocument();
-    expect(fake.state.folders.map((f) => f.name)).toContain('Machine learning');
+    expect(fake.world.folders.map((f) => f.name)).toContain('Machine learning');
   });
 
   it('renames a folder from its menu; Inbox has no menu', async () => {
@@ -90,7 +90,7 @@ describe('Library side panel on real /kb answers', () => {
   it('deletes only an empty folder; a non-empty one is marked and refused', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ prefs: { section: 'materials' } });
-    fake.state.folders.push({ id: 'empty', name: 'Empty one', system: false, material_count: 0, created_at: '2026-10-14T00:00:00Z' });
+    fake.world.folders.push({ id: 'empty', name: 'Empty one', system: false, material_count: 0, created_at: '2026-10-14T00:00:00Z' });
     const side = await screen.findByRole('region', { name: 'Materials' });
     await within(side).findByRole('button', { name: 'Folder actions: Empty one' });
 
@@ -103,7 +103,7 @@ describe('Library side panel on real /kb answers', () => {
     await user.click(within(side).getByRole('button', { name: 'Folder actions: Empty one' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
     await waitFor(() => expect(within(side).queryByRole('button', { name: /Empty one/ })).not.toBeInTheDocument());
-    expect(fake.state.folders.map((f) => f.id)).not.toContain('empty');
+    expect(fake.world.folders.map((f) => f.id)).not.toContain('empty');
   });
 
   it('opens a folder: its materials come from /kb/materials?folder_id=…', async () => {
@@ -122,7 +122,8 @@ describe('Library side panel on real /kb answers', () => {
   it('an unavailable library is an error with the backend reason, never an empty library', async () => {
     renderKb({
       prefs: { section: 'materials' },
-      state: {
+      world: {
+        ...baseWorld(),
         library: { state: 'unavailable', root: '/Volumes/USB/SKAZ', suggested_root: '/Users/me/Documents/SKAZ', reason: 'The library folder is missing.', library_id: 'lib1' },
         folders: [], materials: [], notifications: [],
       },

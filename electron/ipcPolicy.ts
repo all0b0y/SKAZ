@@ -142,7 +142,70 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/materials$/ },
   { method: 'GET', pattern: /^\/kb\/materials\/[^/]+$/ },
   { method: 'GET', pattern: /^\/kb\/notifications$/ },
+  // Package 2, U2 (chat, composer, ⌘K, notifications, settings, first launch). Ids are one segment;
+  // engines and key providers are fixed lists. No route here takes a file path except the composer's
+  // "+" (POST /kb/materials/file, /kb/imports), whose path comes from the native chooser and is
+  // confined by the backend like every other material file.
+  { method: 'GET', pattern: /^\/kb\/chats$/ },
+  { method: 'POST', pattern: /^\/kb\/chats$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/events$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+$/ },
+  { method: 'PATCH', pattern: /^\/kb\/chats\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/events$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/(?:stop|regenerate|resume|save)$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/(?:save|read)$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/export$/ },
+  { method: 'GET', pattern: /^\/kb\/mentions$/ },
+  { method: 'POST', pattern: /^\/kb\/notifications\/[^/]+\/(?:resolve|dismiss)$/ },
+  { method: 'POST', pattern: /^\/kb\/notifications\/read$/ },
+  { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/corrections$/ },
+  { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/excluded$/ },
+  { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/excluded\/\d+\/restore$/ },
+  { method: 'GET', pattern: /^\/kb\/search$/ },
+  { method: 'GET', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/settings\/(?:health|keys|speech|privacy|about|wiki)$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/(?:speech|wiki)$/ },
+  { method: 'POST', pattern: /^\/kb\/settings\/health\/[^/]+\/[^/]+$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/keys\/(?:openrouter|soniox|openai)$/ },
+  { method: 'POST', pattern: /^\/kb\/settings\/keys\/(?:openrouter|soniox|openai)\/check$/ },
+  { method: 'POST', pattern: /^\/kb\/wiki\/connections\/find$/ },
+  { method: 'GET', pattern: /^\/kb\/agents$/ },
+  { method: 'PUT', pattern: /^\/kb\/agents\/default$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes)\/(?:check|install|login)$/ },
+  { method: 'GET', pattern: /^\/kb\/agents\/install\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/install\/[^/]+\/cancel$/ },
+  { method: 'GET', pattern: /^\/kb\/decisions$/ },
+  { method: 'PUT', pattern: /^\/kb\/decisions\/provider$/ },
+  { method: 'POST', pattern: /^\/kb\/decisions\/local\/(?:download|cancel)$/ },
+  { method: 'POST', pattern: /^\/kb\/materials\/(?:file|link|text)$/ },
+  { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/ingest$/ },
+  { method: 'POST', pattern: /^\/kb\/imports$/ },
+  { method: 'POST', pattern: /^\/kb\/links\/classify$/ },
+  // U3 (package 2): wiki page list and block edits, rename/move/delete with preview, all recognition
+  // fixes, jobs, graph, recordings. Shared routes are listed once, in the U2 block above.
+  { method: 'GET', pattern: /^\/kb\/wiki\/pages$/ },
+  { method: 'POST', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks$/ },
+  { method: 'PUT', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+\/recheck$/ },
+  { method: 'PATCH', pattern: /^\/kb\/materials\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/materials\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/delete-preview$/ },
+  { method: 'POST', pattern: /^\/kb\/corrections\/[^/]+\/(?:revert|accept|keep|reapply)$/ },
+  { method: 'GET', pattern: /^\/kb\/jobs$/ },
+  { method: 'GET', pattern: /^\/kb\/jobs\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/graph$/ },
+  { method: 'GET', pattern: /^\/kb\/recordings\/defaults$/ },
+  { method: 'POST', pattern: /^\/kb\/recordings$/ },
+  { method: 'POST', pattern: /^\/kb\/recordings\/[^/]+\/(?:stop|pause|resume)$/ },
 ];
+
+/** The knowledge-library (/kb) rules, for the test that checks them against the backend's routes. */
+export function kbRouteRules(): ReadonlyArray<{ method: HttpMethod; pattern: RegExp }> {
+  return ROUTES.filter((r) => r.pattern.source.startsWith('^\\/kb\\/'));
+}
 
 /** True only for links safe to hand to the OS browser via shell.openExternal. */
 export function isAllowedExternalUrl(rawUrl: string): boolean {
