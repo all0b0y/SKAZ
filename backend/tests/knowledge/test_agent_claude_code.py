@@ -276,7 +276,7 @@ async def test_interrupt_sends_sigint_and_ends_with_cancelled(tmp_path: Path) ->
     await engine.interrupt("run-1")
     rest = [event async for event in stream]
     assert rest == [Failed("run-1", "cancelled", "The answer was stopped.")]
-    for _ in range(50):
+    for _ in range(200):  # up to 10 s: the fake CLI records the signal from its own process (slow under load)
         if fake.records("sigint"):
             break
         await asyncio.sleep(0.05)

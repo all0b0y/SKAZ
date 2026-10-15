@@ -234,7 +234,8 @@ async def test_local_decider_starts_the_server_answers_and_stops_when_idle(tmp_p
         process = local._process
         assert process is not None
         await until(lambda: local.status().state == "ready", timeout=5)
-        assert process.returncode is not None
+        # ``ready`` flips as soon as the stop begins; the process is reaped a moment later (slow under load).
+        await until(lambda: process.returncode is not None, timeout=5)
     finally:
         await local.aclose()
 
