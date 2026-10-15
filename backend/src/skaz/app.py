@@ -52,6 +52,8 @@ def create_app(
             # Reopen and rescan the connected knowledge library; never creates one.
             await disk_call(runtime.kb.start)
             runtime.kb_auto_ingest.bind_loop(asyncio.get_running_loop())
+            # Outside edits of Wiki/ (every 2 s) and background connections when the user allowed them.
+            await runtime.kb_wiki.start()
             # Imports outlive the process that started them: a paid job keeps
             # running at the provider, so re-attach instead of abandoning it.
             runtime.imports.resume()
@@ -60,6 +62,7 @@ def create_app(
             runtime.codex.start()
             yield
         finally:
+            await runtime.kb_wiki.close()
             await runtime.kb_ingest.close()
             await runtime.kb_codex.close()
             await runtime.kb_decisions.aclose()

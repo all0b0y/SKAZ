@@ -30,7 +30,8 @@ from .knowledge.service import KnowledgeService
 from .knowledge.sources.links import ytdlp_probe
 from .knowledge.sources.service import SourceService
 from .knowledge.speech import create_speech_service
-from .knowledge.wiring import McpGrants
+from .knowledge.wiki.service import WikiService
+from .knowledge.wiring import McpGrants, wire_wiki
 from .knowledge.wiring import wire as wire_knowledge
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -105,6 +106,8 @@ class Runtime:
             self.kb, self.kb_ingest, self.kb_sources, self.kb_decisions.layer,
             self.kb_agents.registry.engines, self.kb_agents.registry.default,
         )
+        #: The wiki after ingest (W2): corrections, discrepancies, edits, deletion, connections, graph.
+        self.kb_wiki = wire_wiki(WikiService(self.kb, self.kb_ingest))
         self.web_search = WebSearch(self.db, self.secrets)
         self.codex.web_search = self.web_search
         self.settings_store = SettingsStore(self.db)

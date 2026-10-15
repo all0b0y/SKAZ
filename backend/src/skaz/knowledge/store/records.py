@@ -93,6 +93,14 @@ class NotificationRecord:
     requires_action: bool
     created_at: str
     dismissed_at: str | None
+    #: Monotonic change cursor: set on creation and bumped by every change (resolve, dismiss).
+    seq: int = 0
+    #: What a click opens: ``{"type": "material"|"page"|"chat", "id", "block_id"?, "seg"?}``.
+    subject: dict[str, Any] | None = None
+    resolved_at: str | None = None
+    #: The id of the action the user chose.
+    resolution: str | None = None
+    read_at: str | None = None
 
 
 @dataclass(frozen=True)

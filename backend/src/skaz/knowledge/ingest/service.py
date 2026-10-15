@@ -12,14 +12,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ...native_io import disk_call
 from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..service import KnowledgeService
-from .jobs import INTERRUPTED_REASON, JobRecord, JobRepository, JobState
-from .protocols import ConceptUpdateHook, EngineResolver, IdentityTextLayer, InstructionDetector, TextLayer
+from .jobs import INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState
+from .protocols import (
+    ConceptUpdateHook,
+    EngineResolver,
+    IdentityTextLayer,
+    InstructionDetector,
+    RecognitionCheck,
+    TextLayer,
+)
 from .runner import BLOCKED_KIND, IngestCancelled, IngestFailed, IngestRun, Limits
 from .settings import WikiSettings, read_settings, update_settings
 from .writer import WikiWriter
@@ -46,6 +54,7 @@ class JobNotCancellable(KnowledgeError):
 @dataclass
 class _Active:
     material_id: str
+    kind: JobKind = "ingest"
     task: asyncio.Task[None] | None = None
     run: IngestRun | None = None
     cancel_requested: bool = False
@@ -65,8 +74,14 @@ class IngestService:
         self.decisions = decisions
         self.text_layer: TextLayer = text_layer or IdentityTextLayer()
         self.hook = hook
+        #: Area W2: the recognition check before the notes (speech only); ``None`` skips the step.
+        self.recognition: RecognitionCheck | None = None
+        #: Called with ``(material_id, job)`` after a job finished ``done`` (W2: overview, connections).
+        self.finished_listeners: list[Callable[[str, JobRecord], None]] = []
         self.limits = limits or Limits()
         self._writer = WikiWriter(kb, threading.Lock())
+        #: The one lock for writing wiki files; W2 page edits take it too, so writes never interleave.
+        self.write_lock = self._writer.lock
         self._active: dict[str, _Active] = {}
         self._closing = False
         self.recovered = self.jobs.interrupt_running()
@@ -78,9 +93,12 @@ class IngestService:
 
     def update_settings(self, *, language: str | None = None, engine: str | None = None,
                         clear_engine: bool = False, auto_add_files_links: bool | None = None,
-                        auto_add_text: bool | None = None) -> WikiSettings:
+                        auto_add_text: bool | None = None, background_connections: bool | None = None,
+                        auto_corrections: bool | None = None) -> WikiSettings:
         return update_settings(self.kb.settings, language=language, engine=engine, clear_engine=clear_engine,
-                               auto_add_files_links=auto_add_files_links, auto_add_text=auto_add_text)
+                               auto_add_files_links=auto_add_files_links, auto_add_text=auto_add_text,
+                               background_connections=background_connections,
+                               auto_corrections=auto_corrections)
 
     # -- jobs ---------------------------------------------------------------
 
@@ -93,19 +111,23 @@ class IngestService:
     def list_jobs(self, *, material_id: str | None = None) -> list[JobRecord]:
         return self.jobs.list_all(material_id=material_id)
 
-    async def request_ingest(self, material_id: str) -> JobRecord:
-        """Start adding a material to the wiki now; returns the running job."""
+    async def request_ingest(self, material_id: str, *, kind: JobKind = "ingest") -> JobRecord:
+        """Start adding a material to the wiki now; returns the running job.
+
+        ``kind="refresh"`` is the same work started by SKAZ after a recognition
+        correction changed the text the wiki was built from.
+        """
         if self._closing:
             raise IngestBusy("SKAZ is closing. Retry after it starts again.")
         if any(active.material_id == material_id for active in self._active.values()):
             raise IngestBusy()
-        reservation = _Active(material_id)
+        reservation = _Active(material_id, kind)
         self._active[f"pending-{id(reservation)}"] = reservation
         try:
             self.kb.require()
             if await disk_call(self.kb.material_repo.get, material_id) is None:
                 raise NotFound("Material not found.")
-            job = await disk_call(self.jobs.create, material_id)
+            job = await disk_call(lambda: self.jobs.create(material_id, kind=kind))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)
         self._active[job.id] = reservation
@@ -164,6 +186,7 @@ class IngestService:
                 kb=self.kb, jobs=self.jobs, job_id=job_id, material_id=active.material_id, engine=engine,
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
                 writer=self._writer, hook=self.hook, language=settings.language, limits=self.limits,
+                recognition=self.recognition,
             )
             active.run.cancel_requested = active.cancel_requested
             await active.run.execute()
@@ -189,6 +212,18 @@ class IngestService:
                 self._notify_blocked(job_id, active)
             finally:
                 self._active.pop(job_id, None)
+            if state == "done":
+                self._tell_finished(job_id, active.material_id)
+
+    def _tell_finished(self, job_id: str, material_id: str) -> None:
+        record = self.jobs.get(job_id)
+        for listener in list(self.finished_listeners):
+            if record is None:
+                break
+            try:
+                listener(material_id, record)
+            except Exception:  # a listener's failure never changes the finished job
+                logger.exception("ingest listener failed for job %s", job_id)
 
     def _notify_blocked(self, job_id: str, active: _Active) -> None:
         run = active.run

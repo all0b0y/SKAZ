@@ -9,7 +9,7 @@ root makes the library *unavailable* — writes are refused, the index is kept.
 from __future__ import annotations
 
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -115,6 +115,8 @@ class KnowledgeService:
         self.notification_repo = NotificationRepository(self.db)
         #: Buttons and handlers of notifications that need a decision; areas register their kinds.
         self.notification_actions = NotificationActions()
+        #: Called after every full library scan (W2 rebuilds the corrections index and graph edges).
+        self.after_scan: list[Callable[[], None]] = []
         self._library: Library | None = None
         self._reason: str | None = None
         self._state_lock = threading.RLock()
@@ -192,6 +194,8 @@ class KnowledgeService:
                 self._reason = f"SKAZ can't use the library folder: {error.strerror or error}."
                 return
             self._library, self._reason = library, None
+            for listener in list(self.after_scan):
+                listener()
 
     def require(self) -> Library:
         library = self._library
@@ -337,9 +341,9 @@ class KnowledgeService:
         return search(self.db, query, limit=limit)
 
     def notify(self, kind: str, title: str, *, body: str = "", payload: dict[str, Any] | None = None,
-               requires_action: bool = False) -> NotificationRecord:
+               requires_action: bool = False, subject: dict[str, Any] | None = None) -> NotificationRecord:
         return self.notification_repo.add(kind, title, body=body, payload=payload,
-                                          requires_action=requires_action)
+                                          requires_action=requires_action, subject=subject)
 
     def notifications(self, *, include_dismissed: bool = False) -> list[NotificationRecord]:
         return self.notification_repo.list_all(include_dismissed=include_dismissed)

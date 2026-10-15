@@ -62,14 +62,16 @@ async def test_add_text_exclude_and_restore(kb_client: httpx.AsyncClient) -> Non
     [excluded] = guard["excluded"]
     assert excluded["seg"] == 2 and excluded["id"] == "seg-2"
     assert excluded["location"] == {"index": 1, "page": None, "start_ms": None, "label": "paragraph 2"}
-    notices = (await kb_client.get("/kb/notifications")).json()
+    notices = (await kb_client.get("/kb/notifications")).json()["items"]
     assert [n["kind"] for n in notices] == ["excluded_instruction"]
+    assert notices[0]["subject"] == {"type": "material", "id": material["id"], "block_id": None, "seg": None}
+    assert [action["id"] for action in notices[0]["actions"]] == ["open_material"]
     restore_path = notices[0]["payload"]["items"][0]["restore"]["path"]
     restored = await kb_client.post(restore_path)
     assert restored.status_code == 200
     assert restored.json()["excluded"] == [] and restored.json()["restored"][0]["seg"] == 2
     assert (await kb_client.post(restore_path)).status_code == 404
-    assert (await kb_client.get("/kb/notifications")).json() == []
+    assert (await kb_client.get("/kb/notifications")).json()["items"] == []
     assert (await kb_client.get("/kb/materials/mat-missing/excluded")).status_code == 404
 
 

@@ -25,7 +25,7 @@ IngestDep = Annotated[IngestService, Depends(get_ingest)]
 def job_view(record: JobRecord) -> KbJob:
     counters = record.counters
     return KbJob.model_validate({
-        "id": record.id, "kind": "ingest", "material_id": record.material_id, "state": record.state,
+        "id": record.id, "kind": record.kind, "material_id": record.material_id, "state": record.state,
         "step": record.step, "label": record.label, "error": record.error, "can_retry": record.can_retry,
         "progress": KbJobProgress(**{name: counters.get(name, 0) for name in KbJobProgress.model_fields}),
         "journal": [KbJobLogEntry(at=entry.at, message=entry.message) for entry in record.journal],
@@ -37,7 +37,8 @@ def settings_view(settings: WikiSettings) -> KbWikiSettings:
     return KbWikiSettings.model_validate({
         "wiki_language": settings.language, "wiki_language_chosen": settings.language_chosen,
         "wiki_engine": settings.engine, "auto_add_files_links": settings.auto_add_files_links,
-        "auto_add_text": settings.auto_add_text,
+        "auto_add_text": settings.auto_add_text, "background_connections": settings.background_connections,
+        "auto_corrections": settings.auto_corrections,
     })
 
 
@@ -80,5 +81,6 @@ async def update_wiki_settings(body: KbWikiSettingsUpdate, ingest: IngestDep) ->
         ingest.update_settings, language=body.wiki_language, engine=body.wiki_engine,
         clear_engine="wiki_engine" in fields and body.wiki_engine is None,
         auto_add_files_links=body.auto_add_files_links, auto_add_text=body.auto_add_text,
+        background_connections=body.background_connections, auto_corrections=body.auto_corrections,
     )
     return settings_view(settings)

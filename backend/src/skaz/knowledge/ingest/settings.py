@@ -14,6 +14,8 @@ WIKI_LANGUAGE = "wiki_language"
 WIKI_ENGINE = "wiki_engine"
 AUTO_ADD_FILES_LINKS = "auto_add_files_links"
 AUTO_ADD_TEXT = "auto_add_text"
+BACKGROUND_CONNECTIONS = "background_connections"
+AUTO_CORRECTIONS = "auto_corrections"
 DEFAULT_LANGUAGE = "en"
 ENGINE_IDS = ("codex", "claude_code", "hermes")
 _LANGUAGE = re.compile(r"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
@@ -34,6 +36,10 @@ class WikiSettings:
     #: Decision 15: files and links go to the wiki by default, pasted text does not.
     auto_add_files_links: bool
     auto_add_text: bool
+    #: Decision 5: background "Find connections" only with the user's permission (off by default).
+    background_connections: bool = False
+    #: Decision 3: confident recognition corrections are applied automatically (on by default).
+    auto_corrections: bool = True
 
 
 def read_settings(repo: SettingsRepository) -> WikiSettings:
@@ -45,12 +51,15 @@ def read_settings(repo: SettingsRepository) -> WikiSettings:
         engine=engine if engine in ENGINE_IDS else None,
         auto_add_files_links=bool(repo.get(AUTO_ADD_FILES_LINKS, True)),
         auto_add_text=bool(repo.get(AUTO_ADD_TEXT, False)),
+        background_connections=bool(repo.get(BACKGROUND_CONNECTIONS, False)),
+        auto_corrections=bool(repo.get(AUTO_CORRECTIONS, True)),
     )
 
 
 def update_settings(repo: SettingsRepository, *, language: str | None = None, engine: str | None = None,
                     clear_engine: bool = False, auto_add_files_links: bool | None = None,
-                    auto_add_text: bool | None = None) -> WikiSettings:
+                    auto_add_text: bool | None = None, background_connections: bool | None = None,
+                    auto_corrections: bool | None = None) -> WikiSettings:
     if language is not None:
         if not _LANGUAGE.match(language):
             raise InvalidSetting("Use a language code such as en or ru.")
@@ -65,4 +74,8 @@ def update_settings(repo: SettingsRepository, *, language: str | None = None, en
         repo.set(AUTO_ADD_FILES_LINKS, auto_add_files_links)
     if auto_add_text is not None:
         repo.set(AUTO_ADD_TEXT, auto_add_text)
+    if background_connections is not None:
+        repo.set(BACKGROUND_CONNECTIONS, background_connections)
+    if auto_corrections is not None:
+        repo.set(AUTO_CORRECTIONS, auto_corrections)
     return read_settings(repo)

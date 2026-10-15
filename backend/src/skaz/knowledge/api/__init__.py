@@ -30,4 +30,6 @@ ROUTERS: tuple[APIRouter, ...] = (
     decisions.router,
     speech.router,
     agents.router,
+    materials.corrections_router,
+    wiki.graph_router,
 )

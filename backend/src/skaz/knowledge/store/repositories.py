@@ -221,7 +221,19 @@ class PageRepository:
 
 def _notification(row: sqlite3.Row) -> NotificationRecord:
     return NotificationRecord(row["id"], row["kind"], row["title"], row["body"], json.loads(row["payload"]),
-                              bool(row["requires_action"]), row["created_at"], row["dismissed_at"])
+                              bool(row["requires_action"]), row["created_at"], row["dismissed_at"],
+                              seq=row["seq"], subject=json.loads(row["subject"]) if row["subject"] else None,
+                              resolved_at=row["resolved_at"], resolution=row["resolution"],
+                              read_at=row["read_at"])
+
+
+def _subject_of(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Kinds raised without a subject open their material (``payload.material_id``), if any."""
+    material_id = (payload or {}).get("material_id")
+    return {"type": "material", "id": material_id} if isinstance(material_id, str) and material_id else None
+
+
+_NEXT_SEQ = "(SELECT COALESCE(MAX(seq), 0) + 1 FROM notifications)"
 
 
 class NotificationRepository:
@@ -229,18 +241,62 @@ class NotificationRepository:
         self.db = db
 
     def add(self, kind: str, title: str, *, body: str = "", payload: dict[str, Any] | None = None,
-            requires_action: bool = False) -> NotificationRecord:
+            requires_action: bool = False, subject: dict[str, Any] | None = None) -> NotificationRecord:
         notification_id = new_id("ntf")
+        subject = subject if subject is not None else _subject_of(payload)
         with self.db.write() as connection:
             connection.execute(
-                "INSERT INTO notifications(id, kind, title, body, payload, requires_action, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO notifications(id, kind, title, body, payload, requires_action, created_at, seq, "
+                f"subject) VALUES (?, ?, ?, ?, ?, ?, ?, {_NEXT_SEQ}, ?)",
                 (notification_id, kind, title, body, json.dumps(payload or {}, ensure_ascii=False),
-                 int(requires_action), utc_now()),
+                 int(requires_action), utc_now(),
+                 json.dumps(subject, ensure_ascii=False) if subject is not None else None),
             )
         record = self.get(notification_id)
         assert record is not None
         return record
+
+    def cursor(self) -> int:
+        """The highest ``seq``: every change since a cursor has a larger one."""
+        with self.db.read() as connection:
+            return int(connection.execute("SELECT COALESCE(MAX(seq), 0) FROM notifications").fetchone()[0])
+
+    def changed_after(self, after: int) -> list[NotificationRecord]:
+        """Notifications created or changed after ``after`` (dismissed ones included), newest first."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM notifications WHERE seq > ? ORDER BY created_at DESC, rowid DESC", (after,),
+            ).fetchall()
+        return [_notification(row) for row in rows]
+
+    def counters(self) -> tuple[int, int]:
+        """(unread, open decisions) among notifications that are not dismissed."""
+        with self.db.read() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(SUM(read_at IS NULL), 0) AS unread, "
+                "COALESCE(SUM(requires_action = 1 AND resolved_at IS NULL), 0) AS open "
+                "FROM notifications WHERE dismissed_at IS NULL",
+            ).fetchone()
+        return int(row["unread"]), int(row["open"])
+
+    def resolve(self, notification_id: str, resolution: str) -> NotificationRecord | None:
+        """Record the chosen action once; ``None`` when it does not exist. Never overwrites a resolution."""
+        with self.db.write() as connection:
+            connection.execute(
+                f"UPDATE notifications SET resolved_at = ?, resolution = ?, seq = {_NEXT_SEQ} "
+                "WHERE id = ? AND resolved_at IS NULL",
+                (utc_now(), resolution, notification_id),
+            )
+        return self.get(notification_id)
+
+    def mark_read(self, up_to_seq: int) -> int:
+        """Everything up to ``up_to_seq`` is read; returns how many became read."""
+        with self.db.write() as connection:
+            cursor = connection.execute(
+                "UPDATE notifications SET read_at = ? WHERE read_at IS NULL AND seq <= ?",
+                (utc_now(), up_to_seq),
+            )
+            return cursor.rowcount
 
     def get(self, notification_id: str) -> NotificationRecord | None:
         with self.db.read() as connection:
@@ -258,7 +314,8 @@ class NotificationRepository:
     def dismiss(self, notification_id: str) -> NotificationRecord | None:
         with self.db.write() as connection:
             connection.execute(
-                "UPDATE notifications SET dismissed_at = COALESCE(dismissed_at, ?) WHERE id = ?",
+                f"UPDATE notifications SET dismissed_at = ?, seq = {_NEXT_SEQ} "
+                "WHERE id = ? AND dismissed_at IS NULL",
                 (utc_now(), notification_id),
             )
         return self.get(notification_id)

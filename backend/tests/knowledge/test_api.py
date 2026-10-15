@@ -103,10 +103,11 @@ async def test_materials_pages_search_notifications(kb_app: Any, kb_client: http
     assert (await kb_client.get("/kb/search", params={"q": "x", "limit": 0})).status_code == 422
 
     feed = (await kb_client.get("/kb/notifications")).json()
-    assert [item["kind"] for item in feed] == ["discrepancy"]
-    dismissed = (await kb_client.post(f"/kb/notifications/{feed[0]['id']}/dismiss")).json()
+    assert [item["kind"] for item in feed["items"]] == ["discrepancy"]
+    assert feed["requires_action"] == 1 and feed["unread"] == 1
+    dismissed = (await kb_client.post(f"/kb/notifications/{feed['items'][0]['id']}/dismiss")).json()
     assert dismissed["dismissed_at"] is not None
-    assert (await kb_client.get("/kb/notifications")).json() == []
+    assert (await kb_client.get("/kb/notifications")).json()["items"] == []
     assert (await kb_client.post("/kb/notifications/ntf-missing/dismiss")).status_code == 404
 
 

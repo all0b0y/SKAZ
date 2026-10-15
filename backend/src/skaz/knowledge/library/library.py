@@ -455,6 +455,55 @@ class Library:
             updated = manifest.model_copy(update={"status": status})
             write_atomic(directory / MATERIAL_MANIFEST, dump_json(updated.model_dump()))
 
+    def move_material(self, material_id: str, *, title: str | None = None, folder_id: str | None = None,
+                      hint: str | None = None) -> MaterialFiles:
+        """Rename and/or move a material (W2): directory, source file and manifest, or nothing at all.
+
+        A name taken in the target folder is refused (FILESYSTEM-LIBRARY-SPEC
+        14–15, 34). The directory moves with one exclusive rename; when the
+        source file rename or the manifest write fails, the directory and file
+        are put back, so no half-renamed material is left.
+        """
+        with self._lock:
+            current_folder, directory, raw = self._locate(material_id, hint)
+            try:
+                manifest = MaterialManifest.model_validate(raw)
+            except ValidationError as error:
+                raise ValueError("Unreadable material manifest.") from error
+            clean = validate_name(title) if title is not None else directory.name
+            folder = self.folder(folder_id or current_folder)
+            target = folder.path / clean
+            if target == directory and clean == manifest.title:
+                return self.load_material(directory, folder.id)
+            same_entry = folder.path == directory.parent and name_key(clean) == name_key(directory.name)
+            if not same_entry:
+                self._assert_free(folder.path, clean)
+            source = self.source_file(directory, manifest)
+            if same_entry:
+                os.rename(directory, target)  # only case/normalisation changes
+            else:
+                self._publish(directory, target)
+            fsync_dir(directory.parent)
+            moved_source = target / source.name
+            new_source = target / f"{clean}.md"
+            renamed = False
+            try:
+                if moved_source.name != new_source.name:
+                    if name_key(moved_source.name) == name_key(new_source.name):
+                        os.rename(moved_source, new_source)
+                    else:
+                        rename_exclusive(moved_source, new_source)
+                    renamed = True
+                updated = manifest.model_copy(update={"title": clean, "folder": folder.id})
+                write_atomic(target / MATERIAL_MANIFEST, dump_json_rows(updated.model_dump()))
+            except BaseException:
+                if renamed:
+                    os.rename(new_source, moved_source)
+                os.rename(target, directory)
+                fsync_dir(directory.parent)
+                raise
+            return self.load_material(target, folder.id)
+
     # -- pages --------------------------------------------------------------
 
     def page_directory(self, kind: str) -> Path:
@@ -481,3 +530,21 @@ class Library:
                 return False
             write_atomic(path, text.encode("utf-8"))
             return True
+
+    def rename_page(self, path: Path, title: str) -> Path:
+        """Give a page file a new human name in its folder (W2); a taken name is refused, never replaced."""
+        clean = validate_name(title)
+        with self._lock:
+            target = path.with_name(f"{clean}.md")
+            if target.name == path.name:
+                return path
+            if name_key(target.name) == name_key(path.name):
+                os.rename(path, target)
+            else:
+                self._assert_free(path.parent, target.name)
+                try:
+                    rename_exclusive(path, target)
+                except FileExistsError as error:
+                    raise NameTaken() from error
+            fsync_dir(path.parent)
+            return target
