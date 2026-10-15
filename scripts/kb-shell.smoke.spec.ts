@@ -185,9 +185,6 @@ test.beforeAll(async ({}, testInfo) => {
   page.on('pageerror', (err) => consoleErrors.push(String(err)));
   await page.waitForLoadState('domcontentloaded');
   await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase), { timeout: 60_000 }).toBe('ready');
-  await page.evaluate(() => localStorage.setItem('skaz.ui', 'kb'));
-  await page.reload();
-  await page.waitForLoadState('domcontentloaded');
 });
 
 test.afterAll(async ({}, testInfo) => {
@@ -196,7 +193,7 @@ test.afterAll(async ({}, testInfo) => {
   await close?.();
 });
 
-test('new interface is chosen by the flag; Inter and Unbounded are loaded locally', async () => {
+test('the Knowledge Wiki interface starts by default; Inter and Unbounded are loaded locally', async () => {
   await expect(page.locator('html[data-kb-ui]')).toHaveCount(1, { timeout: 30_000 });
   await expect(page.getByRole('dialog', { name: 'Welcome to SKAZ' })).toBeVisible({ timeout: 30_000 });
   const fonts = await page.evaluate(async () => {

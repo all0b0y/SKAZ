@@ -1,16 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseInterface } from '../uiChoice';
 import { DEFAULT_PREFS, PREFS_KEY, createPrefsStore, readPrefs } from './prefs';
-
-describe('Interface choice (main.tsx)', () => {
-  it('starts the new interface only for an explicit "kb"', () => {
-    expect(chooseInterface('kb', () => null)).toBe('kb');
-    expect(chooseInterface(undefined, () => 'kb')).toBe('kb');
-    expect(chooseInterface(undefined, () => null)).toBe('legacy');
-    expect(chooseInterface('', () => 'KB')).toBe('legacy');
-    expect(chooseInterface(undefined, () => { throw new Error('storage blocked'); })).toBe('legacy');
-  });
-});
 
 describe('Renderer prefs of the new interface', () => {
   it('falls back to defaults for anything missing, unknown or out of range', () => {

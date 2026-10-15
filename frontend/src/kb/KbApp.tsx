@@ -133,12 +133,12 @@ function Workspace() {
   );
 }
 
-/** Entry of the new interface (Knowledge Wiki). Chosen in main.tsx by VITE_SKAZ_UI / localStorage. */
 function QuitAnswer() {
   useQuitAnswer();
   return null;
 }
 
+/** Entry of the interface (Knowledge Wiki), mounted by main.tsx. */
 export function KbApp({ services }: { services?: KbServices }) {
   return (
     <KbServicesProvider services={services}>

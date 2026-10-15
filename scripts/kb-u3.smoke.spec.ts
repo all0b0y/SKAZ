@@ -129,7 +129,6 @@ test.beforeAll(async ({}, testInfo) => {
   await context.grantPermissions(['microphone'], { origin });
   await context.addInitScript({ content: fake });
   await context.addInitScript(() => {
-    localStorage.setItem('skaz.ui', 'kb');
     if (!localStorage.getItem('skaz.kb.prefs')) localStorage.setItem('skaz.kb.prefs', JSON.stringify({ onboardingDone: true, section: 'materials', sideOpen: true }));
   });
   page = await context.newPage();
