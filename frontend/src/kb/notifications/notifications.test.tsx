@@ -3,6 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { b2State } from '../test/fakeB2';
+import { openTarget } from '../state/document';
 
 const openFeed = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('button', { name: /^Notifications/ }));
@@ -49,7 +50,7 @@ describe('Notification feed', () => {
     const { services } = renderKb({ b2: b2State() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: /^New connection across 3 folders/ }));
-    expect(services.ui.getState().doc).toMatchObject({ type: 'page', id: 'p-entropy' });
+    expect(openTarget(services.ui.getState())).toMatchObject({ type: 'page', id: 'p-entropy' });
   });
 });
 
@@ -104,7 +105,7 @@ describe('Decision window', () => {
     await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/corrections/k2/keep')).toBe(true));
     expect(within(dialog).getByRole('button', { name: 'Accept all' })).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Open transcript' }));
-    expect(services.ui.getState().doc).toMatchObject({ type: 'material', id: 'm1' });
+    expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm1' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '2 doubtful corrections' })).not.toBeInTheDocument());
   });
 

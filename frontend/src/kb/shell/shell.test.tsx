@@ -19,9 +19,10 @@ describe('Window shell', () => {
     expect(screen.getByRole('region', { name: 'Chats' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Chat' })).toBeInTheDocument();
     expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument();
-    // The recording capsule and "+ Material" exist but are inactive with a reason (U3).
-    expect(screen.getByTestId('record-capsule')).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByTestId('add-material')).toHaveAttribute('aria-disabled', 'true');
+    // U3: "Record | Folder ▾" and "+ Material" work once the library is ready.
+    expect(screen.getByTestId('record-capsule')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    expect(within(screen.getByTestId('record-capsule')).getByRole('button', { name: 'Record' })).not.toHaveAttribute('aria-disabled');
   });
 
   it('collapses the side panel to the rail and opens it again from a rail item; the choice is kept', async () => {

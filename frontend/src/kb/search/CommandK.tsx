@@ -130,7 +130,7 @@ export function CommandK() {
     close();
     if ('chat' in hit.open) {
       chats.getState().open(hit.open.chat);
-      ui.getState().setCenterView('chat');
+      ui.getState().showCenter('chat');
     } else {
       ui.getState().openDocument(hit.open.doc);
     }
@@ -139,7 +139,7 @@ export function CommandK() {
     if (!query) return;
     close();
     chats.getState().open(null);
-    ui.getState().setCenterView('chat');
+    ui.getState().showCenter('chat');
     composer.getState().push([{ kind: 'text', text: query }], { focus: true, send: true });
   };
 

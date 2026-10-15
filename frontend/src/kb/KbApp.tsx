@@ -2,14 +2,14 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { BackendStatus } from '../api/bridge';
 import { Banner, Button, Spinner } from './ui';
 import { MotionProvider } from './ui/motion';
-import { KbServicesProvider, usePrefs, useServices, useUi, type KbServices } from './state/context';
+import { KbServicesProvider, useLibrary, usePrefs, useServices, useUi, type KbServices } from './state/context';
 import { Shell } from './shell/Shell';
 import { SettingsModal } from './settings/SettingsModal';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
 import { CommandK } from './search/CommandK';
 import { DecisionModal } from './notifications/DecisionModal';
 import { SelectionToolbar } from './ui/Selection';
-import { useLibrary } from './state/context';
+import { AddMaterialModal } from './materials/AddMaterialModal';
 
 /** Mirror theme and text size onto <html>, where the tokens read them. */
 function ThemeSync() {
@@ -54,13 +54,15 @@ function BackendGate({ children }: { children: ReactNode }) {
 }
 
 /**
- * Quit barrier: main asks the renderer to save before closing and waits for an answer. This
- * interface holds no unsaved capture (recording arrives with U3), so it answers "saved" at once —
- * without an answer main would wait 30 s and then warn about unsaved audio that does not exist.
+ * Quit barrier: main asks the renderer to save before closing and waits for an answer. Without a
+ * recording there is nothing unsaved and the answer is immediate; a running or paused recording
+ * is stopped first and the answer says whether its audio reached local storage (false = main
+ * keeps warning instead of losing audio). Chat answers live in the backend (it ends them itself
+ * on shutdown — 409 CLOSING), so they hold nothing unsaved in this window.
  */
 function useQuitAnswer() {
-  const { bridge } = useServices();
-  useEffect(() => bridge.onPrepareQuit?.(async () => true), [bridge]);
+  const { bridge, recording } = useServices();
+  useEffect(() => bridge.onPrepareQuit?.(() => recording.getState().prepareQuit()), [bridge, recording]);
 }
 
 function useSettingsShortcut() {
@@ -126,6 +128,7 @@ function Workspace() {
       <SelectionToolbar />
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
+      <AddMaterialModal />
     </>
   );
 }

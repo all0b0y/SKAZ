@@ -2,6 +2,9 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { BridgeApi } from '../../api/bridge';
 import { KbClient } from '../api/client';
+import { KbU3Client } from '../api/b2-u3';
+import { nativeCapture, type CaptureFactory } from '../recording/capture';
+import { createRecordingStore, type RecordingActions, type RecordingData, type RecordingStore } from '../recording/recordingStore';
 import { createAgentsStore, type AgentsActions, type AgentsData, type AgentsStore } from './agents';
 import { createChatsStore, type ChatsActions, type ChatsData, type ChatsStore } from './chats';
 import { createComposerBus, type ComposerBus, type ComposerBusState } from './composer';
@@ -13,16 +16,23 @@ import { createPrefsStore, type Prefs, type PrefsActions, type PrefsStore } from
 import { createSettingsStore, type SettingsActions, type SettingsData, type SettingsStore } from './settings';
 import { createUiStore, type UiState, type UiStore } from './ui';
 
-export type KbBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi,
-  'chooseStorageRoot' | 'getBackendStatus' | 'onBackendStatus' | 'restartBackend' | 'onPrepareQuit'
-  | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder'>>;
+/** Bridge methods the new interface uses when the host has them (Electron); tests pass a subset. */
+type OptionalBridge = 'chooseStorageRoot' | 'getBackendStatus' | 'onBackendStatus' | 'restartBackend' | 'onPrepareQuit'
+  | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder'
+  | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure' | 'reportCaptureState'
+  | 'chooseAudioFile' | 'systemAudioSupported';
+
+export type KbBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi, OptionalBridge>>;
 
 export interface KbServices {
   bridge: KbBridge;
   client: KbClient;
+  /** Package-2 routes of the U3 screens (see api/b2-u3.ts). */
+  u3: KbU3Client;
   prefs: PrefsStore;
   library: LibraryStore;
   ui: UiStore;
+  recording: RecordingStore;
   chats: ChatsStore;
   notifications: NotificationsStore;
   agents: AgentsStore;
@@ -36,14 +46,35 @@ function safeStorage(): Storage | null {
   try { return window.localStorage; } catch { return null; }
 }
 
-export function createServices(bridge: KbServices['bridge'], storage: Storage | null = safeStorage()): KbServices {
+/** The real capture pipeline when the bridge has the native audio methods (Electron), else none. */
+function defaultCapture(bridge: KbServices['bridge']): CaptureFactory | null {
+  const { openNative, sendNativeAudio, endNative, onNativeFailure } = bridge;
+  if (!openNative || !sendNativeAudio || !endNative || !onNativeFailure) return null;
+  return () => nativeCapture(bridge as Parameters<typeof nativeCapture>[0]);
+}
+
+export function createServices(
+  bridge: KbServices['bridge'],
+  storage: Storage | null = safeStorage(),
+  options: { capture?: CaptureFactory | null } = {},
+): KbServices {
   const client = new KbClient(bridge);
+  const u3 = new KbU3Client(bridge);
+  const ui = createUiStore();
+  const library = createLibraryStore(client);
+  const recording = createRecordingStore({
+    u3, bridge, ui,
+    capture: options.capture !== undefined ? options.capture : defaultCapture(bridge),
+    onMaterialsChanged: () => { void library.getState().loadContent(); },
+  });
   return {
     bridge,
     client,
+    u3,
     prefs: createPrefsStore(storage),
-    library: createLibraryStore(client),
-    ui: createUiStore(),
+    library,
+    ui,
+    recording,
     chats: createChatsStore(client),
     notifications: createNotificationsStore(client),
     agents: createAgentsStore(client),
@@ -78,6 +109,10 @@ export function useLibrary<T>(selector: (state: LibraryData & LibraryActions) =>
 
 export function useUi<T>(selector: (state: UiState) => T): T {
   return useStore(useServices().ui, selector);
+}
+
+export function useRecording<T>(selector: (state: RecordingData & RecordingActions) => T): T {
+  return useStore(useServices().recording, selector);
 }
 
 export function useChats<T>(selector: (state: ChatsData & ChatsActions) => T): T {

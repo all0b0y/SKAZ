@@ -11,6 +11,7 @@ import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
 import { clearEditor, insertText, insertToken, isEmpty, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
+import { openTarget } from '../state/document';
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; started: number } | { phase: 'transcribing' };
 
@@ -56,7 +57,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const folders = useLibrary((s) => s.folders);
   const wiki = useSettings((s) => s.wiki.value);
   const speech = useSettings((s) => s.speech.value);
-  const doc = useUi((s) => s.doc);
+  const doc = useUi(openTarget);
   const focusTick = useComposerBus((s) => s.focusTick);
   const queued = useComposerBus((s) => s.queue.length);
   const mentions = useMentions(mention ? mention.query : null);

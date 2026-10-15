@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { usePrefs, useServices, useUi } from '../state/context';
 import { RIGHT_MAX, RIGHT_MIN, SIDE_MAX, SIDE_MIN } from '../state/prefs';
+import { AllMaterials } from '../materials/AllMaterials';
 import { ChatCenter } from './ChatCenter';
 import { DocPanel } from './DocPanel';
 import { CENTER_MIN, RAIL_W, computeLayout } from './layout';
@@ -19,22 +20,30 @@ function useWindowWidth(): number {
   return width;
 }
 
+/** Preferred width of the graph panel. */
+const GRAPH_W = 560;
+
 /**
  * Window shell (decision 13): title bar, icon rail, collapsible left panel, chat in the centre,
  * document panel on the right only when something is open. Header heights are fixed; the rail
- * and the composer do not move when sections or panels change.
+ * and the composer do not move when sections or panels change. "All materials" takes the centre
+ * instead of the chat (decision 25); the right panel shows a page, a material, the graph or the
+ * live recording (see state/document.ts).
  */
 export function Shell() {
   const { prefs } = useServices();
   const sideOpen = usePrefs((s) => s.sideOpen);
   const sideWidth = usePrefs((s) => s.sideWidth);
   const rightWidth = usePrefs((s) => s.rightWidth);
-  const doc = useUi((s) => s.doc);
+  const right = useUi((s) => s.right);
+  const center = useUi((s) => s.center);
   const docExpanded = useUi((s) => s.docExpanded);
   const windowWidth = useWindowWidth();
 
+  // The graph asks for a wide panel (v4/v5); it still yields to the centre minimum.
+  const wanted = right?.kind === 'graph' ? Math.max(rightWidth, GRAPH_W) : rightWidth;
   const layout = computeLayout({
-    windowWidth, sideOpen, sideWidth, docOpen: doc !== null, docExpanded, rightWidth,
+    windowWidth, sideOpen, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
   });
   const available = windowWidth - RAIL_W;
   const sideMax = Math.max(SIDE_MIN, Math.min(SIDE_MAX, available - CENTER_MIN - (layout.right ?? 0)));
@@ -59,8 +68,9 @@ export function Shell() {
             />
           </>
         )}
-        <ChatCenter hidden={!layout.centerVisible} />
-        {doc !== null && (
+        <ChatCenter hidden={!layout.centerVisible || center === 'materials'} />
+        {center === 'materials' && <AllMaterials hidden={!layout.centerVisible} />}
+        {right !== null && (
           <>
             {layout.right !== null && (
               <Resizer
@@ -73,7 +83,7 @@ export function Shell() {
                 onChange={(px) => prefs.getState().setRightWidth(px)}
               />
             )}
-            <DocPanel doc={doc} expanded={docExpanded} width={layout.right ?? 0} />
+            <DocPanel view={right} expanded={docExpanded} width={layout.right ?? 0} />
           </>
         )}
       </div>

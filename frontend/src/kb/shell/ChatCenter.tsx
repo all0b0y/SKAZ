@@ -7,7 +7,7 @@ import { useUi } from '../state/context';
  * while an expanded document takes the centre, so the message field keeps its text.
  */
 export function ChatCenter({ hidden }: { hidden: boolean }) {
-  const view = useUi((s) => s.centerView);
+  const view = useUi((s) => s.center);
   if (view === 'allChats' && !hidden) return <AllChats />;
   return <ChatView hidden={hidden} />;
 }

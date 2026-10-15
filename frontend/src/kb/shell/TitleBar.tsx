@@ -1,17 +1,18 @@
 import { Icon, IconButton } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
-import { useLibrary, usePrefs, useServices } from '../state/context';
+import { RecordControls } from '../recording/RecordControls';
+import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
 
 /**
  * Window title bar (38px, draggable; 80px left for the macOS traffic lights).
- * Holds the panel toggle, the place of the recording capsule "Record | Folder ▾" and "+ Material".
- * Recording and adding materials arrive with U3: both are visibly inactive with a reason.
+ * Holds the panel toggle, the recording control "Record | Folder ▾" (a capsule while recording —
+ * the only place that shows a recording is running) and "+ Material".
  */
 export function TitleBar() {
   const { prefs } = useServices();
   const sideOpen = usePrefs((s) => s.sideOpen);
-  const folders = useLibrary((s) => s.folders);
-  const inbox = folders.find((f) => f.system)?.name ?? 'Inbox';
+  const ready = useLibrary((s) => s.library?.state === 'ready');
+  const setAddOpen = useUi((s) => s.setAddMaterialOpen);
   return (
     <header className="kb-titlebar" data-testid="titlebar">
       <div className="kb-titlebar__group">
@@ -25,17 +26,10 @@ export function TitleBar() {
       </div>
       <div className="kb-titlebar__drag" />
       <div className="kb-titlebar__group">
-        <Tooltip text="Recording isn’t connected yet" describes>
-          <button type="button" className="kb-capsule" aria-disabled="true" data-testid="record-capsule"
-            onClick={(event) => event.preventDefault()}>
-            <span className="kb-capsule__main"><Icon name="mic" size={14} />Record</span>
-            <span className="kb-capsule__div" aria-hidden="true" />
-            <span className="kb-capsule__folder">{inbox}<Icon name="chevronDown" size={12} /></span>
-          </button>
-        </Tooltip>
-        <Tooltip text="Adding materials isn’t connected yet" describes>
-          <button type="button" className="kb-pill" aria-disabled="true" data-testid="add-material"
-            onClick={(event) => event.preventDefault()}>
+        <RecordControls />
+        <Tooltip text={ready ? 'Add files, links or text' : 'Connect the library first'} describes>
+          <button type="button" className="kb-pill" aria-disabled={!ready || undefined} data-testid="add-material"
+            aria-haspopup="dialog" onClick={() => { if (ready) setAddOpen(true); }}>
             <Icon name="plus" size={14} />Material
           </button>
         </Tooltip>

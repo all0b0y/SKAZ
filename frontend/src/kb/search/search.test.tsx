@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { b2State } from '../test/fakeB2';
 import { toHits } from './CommandK';
+import { openTarget } from '../state/document';
 
 const openK = async () => {
   await screen.findByRole('navigation', { name: 'Sections' });
@@ -45,7 +46,7 @@ describe('⌘K', () => {
     expect(first).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).not.toBeInTheDocument());
-    expect(services.ui.getState().doc).toMatchObject({ type: 'page', id: 'p-entropy' });
+    expect(openTarget(services.ui.getState())).toMatchObject({ type: 'page', id: 'p-entropy' });
   });
 
   it('⌘Enter asks the agent: a new chat with the query sent', async () => {

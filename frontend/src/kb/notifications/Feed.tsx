@@ -19,7 +19,7 @@ export function useOpenNotification() {
     if (!n.subject) return;
     if (n.subject.type === 'chat') {
       chats.getState().open(n.subject.id);
-      ui.getState().setCenterView('chat');
+      ui.getState().showCenter('chat');
       return;
     }
     const ref = subjectRef(n.subject);

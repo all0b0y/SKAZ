@@ -22,7 +22,7 @@ function useOpenChat() {
   const { chats, ui } = useServices();
   return (id: string | null) => {
     chats.getState().open(id);
-    ui.getState().setCenterView('chat');
+    ui.getState().showCenter('chat');
   };
 }
 
@@ -32,17 +32,17 @@ export function ChatList() {
   const load = useChats((s) => s.listLoad);
   const error = useChats((s) => s.listError);
   const currentId = useChats((s) => s.currentId);
-  const centerView = useUi((s) => s.centerView);
+  const center = useUi((s) => s.center);
   const { chats } = useServices();
   const openChat = useOpenChat();
-  const setCenterView = useUi((s) => s.setCenterView);
+  const showCenter = useUi((s) => s.showCenter);
 
   const pinned = list.filter((c) => c.pinned);
   const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
   const groups = groupBy(rest, (c) => dayBucket(c.updated_at));
 
   const row = (c: KbChatSummary) => {
-    const current = centerView === 'chat' && c.id === currentId;
+    const current = center === 'chat' && c.id === currentId;
     return (
       <li key={c.id}>
         <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
@@ -57,7 +57,7 @@ export function ChatList() {
 
   return (
     <div className="kb-side__scroll">
-      <button type="button" className={`kb-row kb-row--action${centerView === 'chat' && currentId === null ? ' is-current' : ''}`}
+      <button type="button" className={`kb-row kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
         onClick={() => openChat(null)}>
         <Icon name="newChat" size={16} className="kb-row__icon" />
         <span className="kb-row__text">New chat</span>
@@ -87,8 +87,8 @@ export function ChatList() {
         </section>
       ))}
       {list.length > 0 && (
-        <button type="button" className={`kb-row kb-row--more${centerView === 'allChats' ? ' is-current' : ''}`}
-          onClick={() => setCenterView('allChats')} aria-current={centerView === 'allChats' ? 'page' : undefined}>
+        <button type="button" className={`kb-row kb-row--more${center === 'allChats' ? ' is-current' : ''}`}
+          onClick={() => showCenter('allChats')} aria-current={center === 'allChats' ? 'page' : undefined}>
           <span className="kb-row__text">All chats · {list.length}</span>
         </button>
       )}
@@ -102,7 +102,7 @@ type Filter = 'all' | 'pinned' | 'recording';
 export function AllChats() {
   const { client } = useServices();
   const openChat = useOpenChat();
-  const setCenterView = useUi((s) => s.setCenterView);
+  const showCenter = useUi((s) => s.showCenter);
   const total = useChats((s) => s.list.length);
   const listVersion = useChats((s) => s.list);
   const folders = useLibrary((s) => s.folders);
@@ -136,7 +136,7 @@ export function AllChats() {
         <h1 className="kb-head__title">All chats <span className="kb-head__count">{total}</span></h1>
         <span className="kb-head__spacer" />
         <Button size="sm" variant="fill" icon="newChat" onClick={() => openChat(null)}>New chat</Button>
-        <IconButton icon="close" label="Back to the chat" onClick={() => setCenterView('chat')} />
+        <IconButton icon="close" label="Back to the chat" onClick={() => showCenter('chat')} />
       </header>
       <div className="kb-allchats__tools">
         <div className="kb-searchfield">

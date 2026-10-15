@@ -4,7 +4,7 @@ import {
   CircleDot, Command, Download, Ellipsis, ExternalLink, FileMusic, FileText, FileVideoCamera, Folder, FolderPlus,
   Globe, Inbox, Info, Languages, Library, Link, MessagesSquare, Mic, Minimize2, Maximize2, Monitor, Moon,
   PanelLeft, Paperclip, Pencil, Pin, Play, Plus, Quote, RotateCw, Search, Settings, ShieldCheck, Square,
-  SquarePen, Sun, Trash2, TriangleAlert, Type, Upload, Waypoints, X, Palette, HardDrive, Sparkles, Bell,
+  SquarePen, Sun, Trash2, Pause, LayoutList, LayoutGrid, TriangleAlert, Type, Upload, Waypoints, X, Palette, HardDrive, Sparkles, Bell,
   ArrowUpDown, BookPlus, ChevronUp, Clock, Copy, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
 } from 'lucide-react';
@@ -93,6 +93,10 @@ const ICONS = {
   ready: FileCheck,
   fixes: WandSparkles,
   shield: ShieldAlert,
+  // Package 2 (U3): recording, all materials
+  pause: Pause,
+  table: LayoutList,
+  cards: LayoutGrid,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;
 
 export type IconName = keyof typeof ICONS;

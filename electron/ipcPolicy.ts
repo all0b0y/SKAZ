@@ -161,7 +161,6 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/notifications\/[^/]+\/(?:resolve|dismiss)$/ },
   { method: 'POST', pattern: /^\/kb\/notifications\/read$/ },
   { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/corrections$/ },
-  { method: 'POST', pattern: /^\/kb\/corrections\/[^/]+\/(?:accept|keep)$/ },
   { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/excluded$/ },
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/excluded\/\d+\/restore$/ },
   { method: 'GET', pattern: /^\/kb\/search$/ },
@@ -184,6 +183,24 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/ingest$/ },
   { method: 'POST', pattern: /^\/kb\/imports$/ },
   { method: 'POST', pattern: /^\/kb\/links\/classify$/ },
+  // U3 (package 2): wiki page list and block edits, rename/move/delete with preview, all recognition
+  // fixes, jobs, graph, recordings. Shared routes are listed once, in the U2 block above.
+  { method: 'GET', pattern: /^\/kb\/wiki\/pages$/ },
+  { method: 'POST', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks$/ },
+  { method: 'PUT', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+\/recheck$/ },
+  { method: 'PATCH', pattern: /^\/kb\/materials\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/materials\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/delete-preview$/ },
+  { method: 'POST', pattern: /^\/kb\/corrections\/[^/]+\/(?:revert|accept|keep|reapply)$/ },
+  { method: 'GET', pattern: /^\/kb\/jobs$/ },
+  { method: 'GET', pattern: /^\/kb\/jobs\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/graph$/ },
+  { method: 'GET', pattern: /^\/kb\/recordings\/defaults$/ },
+  { method: 'POST', pattern: /^\/kb\/recordings$/ },
+  { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/recordings\/[^/]+\/(?:stop|pause|resume)$/ },
 ];
 
 /** True only for links safe to hand to the OS browser via shell.openExternal. */

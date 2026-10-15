@@ -74,7 +74,7 @@ export function DecisionModal() {
     const title = s?.type === 'page' ? String((current.payload as Partial<KbDiscrepancyPayload>).page_title ?? current.title)
       : String((current.payload as { material_title?: string }).material_title ?? current.title);
     chats.getState().open(null);
-    ui.getState().setCenterView('chat');
+    ui.getState().showCenter('chat');
     composer.getState().push([
       ...(s && s.type !== 'chat' ? [{ kind: 'mention' as const, ref: { type: s.type, id: s.id, title } }] : []),
       { kind: 'text', text: `${current.title}. ${current.body} — what do you make of it?` },

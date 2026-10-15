@@ -1,0 +1,28 @@
+/* Graph of connections (v4/v5): canvas + card of the selected node + legend. */
+
+.kb-head--graph { gap: 8px; }
+.kb-graph__title { font-size: var(--t-base); font-weight: 600; white-space: nowrap; flex: none; }
+.kb-graph__count { font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.kb-graph { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.kb-graph__wrap { position: relative; flex: 1; min-height: 160px; overflow: hidden; display: flex; }
+.kb-graph__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.kb-graph__canvas:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: -2px; border-radius: 0; }
+.kb-graph__hint { position: absolute; left: 12px; bottom: 8px; color: var(--kb-muted); font-size: var(--t-xs); pointer-events: none; }
+.kb-graph__msg { padding: 14px; width: 100%; }
+.kb-gcard { flex: none; border-top: 1px solid var(--kb-line); padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kb-gcard__row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.kb-gcard__title { font-size: var(--t-base); overflow-wrap: anywhere; }
+.kb-graph__legend {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 6px 14px 8px;
+  border-top: 1px solid var(--kb-line);
+  font-size: var(--t-xs);
+  color: var(--kb-muted);
+}
+.kb-graph__key { display: inline-flex; align-items: center; gap: 5px; }
+.kb-ringdot { width: 8px; height: 8px; border-radius: 50%; background: var(--kb-muted); box-shadow: 0 0 0 2px var(--kb-pane), 0 0 0 3.5px var(--kb-muted); margin: 0 3px; }
+.kb-dashline { width: 16px; border-top: 1.5px dashed var(--kb-muted); }

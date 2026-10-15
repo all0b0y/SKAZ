@@ -5,6 +5,7 @@ import { renderKb } from '../test/renderKb';
 import { b2State } from '../test/fakeB2';
 import { InlineMarkdown } from './Markdown';
 import { plainText, toBlocks } from './Message';
+import { openTarget } from '../state/document';
 
 const side = () => screen.getByRole('region', { name: 'Chats' });
 
@@ -34,9 +35,9 @@ describe('Chats in the side panel', () => {
     expect(within(answer).getByText('Shannon entropy').tagName).toBe('STRONG');
     // Chips are shapes with an icon and a label, not colour only.
     await user.click(within(answer).getAllByRole('button', { name: 'Wiki page: Entropy' })[0]!);
-    expect(services.ui.getState().doc).toMatchObject({ type: 'page', id: 'p-entropy' });
+    expect(openTarget(services.ui.getState())).toMatchObject({ type: 'page', id: 'p-entropy' });
     await user.click(within(answer).getAllByRole('button', { name: 'Recording: Lecture 5, 44:00' })[0]!);
-    expect(services.ui.getState().doc).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
+    expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
     expect(screen.getByRole('complementary', { name: 'Document' })).toBeInTheDocument();
 
     const pill = within(answer).getByRole('button', { name: /Connection · 3 folders/ });
@@ -92,7 +93,7 @@ describe('Chats in the side panel', () => {
 
     await user.click(more);
     await user.click(screen.getByRole('menuitem', { name: 'Save to wiki as analysis' }));
-    await waitFor(() => expect(services.ui.getState().doc).toMatchObject({ type: 'page', id: 'p-c1' }));
+    await waitFor(() => expect(openTarget(services.ui.getState())).toMatchObject({ type: 'page', id: 'p-c1' }));
 
     await user.click(more);
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
