@@ -278,6 +278,27 @@
 .kb-attachment__wiki input { accent-color: var(--kb-fill); }
 .kb-attachment__x { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--kb-r-xs); color: var(--kb-muted); }
 .kb-attachment__x:hover { background: var(--kb-accent-soft); color: var(--kb-text); }
+/* A long paste kept as a card: its name opens a read-only preview. */
+.kb-attachment__open { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.kb-attachment__open:hover { text-decoration: underline; text-underline-offset: 2px; }
+.kb-attachment__open:focus-visible { outline: 2px solid color-mix(in srgb, var(--kb-text) 40%, transparent); outline-offset: 2px; border-radius: var(--kb-r-xs); }
+.kb-attachment__act.kb-iconbtn { width: 20px; height: 20px; color: var(--kb-muted); }
+.kb-pastepop { display: flex; flex-direction: column; gap: 8px; padding: 6px; }
+.kb-pastepop__head { font-size: var(--t-sm); font-weight: 600; }
+.kb-pastepop__body {
+  max-height: min(360px, 50vh);
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-bg);
+  color: var(--kb-text);
+  font-size: var(--t-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kb-pastepop__body:focus-visible { outline: 2px solid color-mix(in srgb, var(--kb-text) 30%, transparent); outline-offset: 0; }
 .kb-attachform { display: flex; flex-direction: column; gap: 8px; padding: 4px; }
 .kb-attachform__label { font-size: var(--t-sm); font-weight: 600; }
 .kb-attachform__input {

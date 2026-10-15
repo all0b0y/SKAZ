@@ -11,6 +11,7 @@ import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
 import { clearEditor, insertText, insertToken, isEmpty, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
+import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { openTarget } from '../state/document';
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; started: number } | { phase: 'transcribing' };
@@ -48,6 +49,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const [dictation, setDictation] = useState<Dictation>({ phase: 'idle' });
   const [hover, setHover] = useState<{ text: string; left: number; top: number } | null>(null);
   const captureRef = useRef<Capture | null>(null);
+  /** The card of the paste just made: ⌘Z right after it puts the text into the field instead. */
+  const lastPaste = useRef<string | null>(null);
 
   const open = useChats((s) => (chatId ? s.chats[chatId]?.chat ?? null : null));
   const answering = isAnswering(open);
@@ -100,6 +103,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     // A new chat starts with an empty field and no attachments.
     if (editorRef.current) clearEditor(editorRef.current);
     setAttachments([]);
+    lastPaste.current = null;
     setError(null);
     refresh();
   }, [chatId, refresh]);
@@ -144,13 +148,37 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     const root = editorRef.current;
     if (!root || sending) return;
     const value = serialize(root);
-    const ready = attachments.filter((a) => a.state === 'ready' && a.materialId);
-    if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !ready.length) return;
+    // Long pastes are cards until now: they become pasted-text materials only with the message.
+    const unsaved = attachments.filter((a) => a.text !== undefined && !a.materialId);
+    if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
+      && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
     if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
     if (!agentReady) { setError(`${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`); return; }
     if (answering) return;
     setSending(true);
     setError(null);
+    let list = attachments;
+    if (unsaved.length) {
+      if (!inboxId) { setSending(false); setError('Connect the library first.'); return; }
+      lastPaste.current = null;
+      const keys = new Set(unsaved.map((a) => a.key));
+      setAttachments((now) => now.map((a) => (keys.has(a.key) ? { ...a, state: 'adding', error: null } : a)));
+      const saved = await Promise.all(unsaved.map((a) => addMaterial(client, 'text', a.text!, inboxId).then(
+        (id) => ({ key: a.key, id, error: null }),
+        (e: unknown) => ({ key: a.key, id: null, error: errorText(e) }),
+      )));
+      const byKey = new Map(saved.map((r) => [r.key, r]));
+      const settle = (a: Attachment): Attachment => {
+        const r = byKey.get(a.key);
+        if (!r) return a;
+        return r.id ? { ...a, state: 'ready', materialId: r.id, error: null } : { ...a, state: 'failed', error: r.error };
+      };
+      list = list.map(settle);
+      setAttachments((now) => now.map(settle));
+      const failed = saved.find((r) => !r.id);
+      if (failed) { setSending(false); setError(`The pasted text couldn’t be saved: ${failed.error}`); return; }
+    }
+    const ready = list.filter((a) => a.state === 'ready' && a.materialId);
     const input: KbMessageInput = { text: value.text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!) };
     const context = doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {};
     const result = await chats.getState().send(input, context);
@@ -166,10 +194,28 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     }
     clearEditor(root);
     setAttachments([]);
+    lastPaste.current = null;
+    refresh();
+  };
+
+  /** Put a pasted-text card back into the field as plain text. */
+  const pasteAsText = (key: string) => {
+    const root = editorRef.current;
+    const card = attachments.find((a) => a.key === key);
+    if (!root || card?.text === undefined) return;
+    lastPaste.current = null;
+    setAttachments((list) => list.filter((a) => a.key !== key));
+    root.focus({ preventScroll: true });
+    insertText(root, card.text);
     refresh();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (lastPaste.current && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      pasteAsText(lastPaste.current);
+      return;
+    }
     if (mention && (mentions.options.length > 0)) {
       if (event.key === 'ArrowDown') { event.preventDefault(); setActive((i) => (i + 1) % mentions.options.length); return; }
       if (event.key === 'ArrowUp') { event.preventDefault(); setActive((i) => (i - 1 + mentions.options.length) % mentions.options.length); return; }
@@ -191,6 +237,16 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     // Only plain text comes in: no foreign markup in the field.
     event.preventDefault();
     const text = event.clipboardData.getData('text/plain');
+    if (isLongPaste(text)) {
+      // Too long for the field: a "Pasted text" card, like "+" → Paste text ("In wiki" off — decision 15).
+      const key = attachmentKey();
+      setAttachments((list) => [...list, {
+        key, name: pastedName(text), source: 'text', state: 'ready', materialId: null, error: null, inWiki: false, text,
+      }]);
+      lastPaste.current = key;
+      return;
+    }
+    lastPaste.current = null;
     if (editorRef.current) insertText(editorRef.current, text);
     refresh();
   };
@@ -244,7 +300,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   const placeholderShown = empty && dictation.phase === 'idle';
   const popupOpen = mention !== null;
-  const canSend = !empty || attachments.some((a) => a.state === 'ready');
+  const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
 
   return (
     <div className="kb-composer" data-testid="composer">
@@ -254,7 +310,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       )}
       <AttachmentChips items={attachments} autoWiki={autoWiki}
         onToggleWiki={(key) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, inWiki: !a.inWiki } : a)))}
-        onRemove={(key) => setAttachments((list) => list.filter((a) => a.key !== key))} />
+        onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
+        renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
       <div className="kb-editor-wrap">
         {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{placeholder}</span>}
         <div
@@ -270,7 +327,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
           aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
           aria-autocomplete="list"
           data-testid="message-input"
-          onInput={refresh}
+          onInput={() => { lastPaste.current = null; refresh(); }}
           onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') refresh(); }}
           onMouseUp={refresh}
           onKeyDown={onKeyDown}
