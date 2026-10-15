@@ -8,8 +8,11 @@ import type {
   BridgeApi,
   BridgeRequest,
   CaptureState,
+  DictationResult,
   JsonResponse,
+  MaterialFileChoice,
   SharedNote,
+  TextFileSave,
 } from '../frontend/src/api/bridge';
 
 // The only object exposed to the renderer. Context isolation is on and node
@@ -41,6 +44,15 @@ const api: BridgeApi = {
     wav: ArrayBuffer,
   ): Promise<JsonResponse<T>> {
     return ipcRenderer.invoke(CHANNELS.bufferAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
+  },
+  dictate(wav: ArrayBuffer, language?: string): Promise<JsonResponse<DictationResult>> {
+    return ipcRenderer.invoke(CHANNELS.dictate, wav, language) as Promise<JsonResponse<DictationResult>>;
+  },
+  saveTextFile(file: TextFileSave): Promise<{ saved: boolean; path?: string }> {
+    return ipcRenderer.invoke(CHANNELS.saveTextFile, { suggested_name: file.suggested_name, text: file.text }) as Promise<{ saved: boolean; path?: string }>;
+  },
+  chooseMaterialFiles(): Promise<MaterialFileChoice[]> {
+    return ipcRenderer.invoke(CHANNELS.chooseMaterialFiles) as Promise<MaterialFileChoice[]>;
   },
   readLogs(): Promise<string> {
     return ipcRenderer.invoke(CHANNELS.readLogs) as Promise<string>;

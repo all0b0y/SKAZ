@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react';
-import { EmptyState, Icon } from '../ui';
-import { Tooltip } from '../ui/Tooltip';
+import { EmptyState, Icon, IconButton } from '../ui';
 import { LibraryPanel } from '../library/LibraryPanel';
-import { useLibrary, usePrefs } from '../state/context';
+import { ChatList } from '../chat/ChatList';
+import { NotificationsFeed } from '../notifications/Feed';
+import { usePrefs, useServices, useUi } from '../state/context';
 import type { Section } from '../state/prefs';
 
 const TITLES: Record<Section, string> = {
@@ -16,74 +16,40 @@ const TITLES: Record<Section, string> = {
 /** Expandable left panel. Its header keeps one height for every section. */
 export function SidePanel({ width }: { width: number }) {
   const section = usePrefs((s) => s.section);
+  const setCenterView = useUi((s) => s.setCenterView);
   return (
     <section id="kb-side" className="kb-side" data-pane="side" aria-label={TITLES[section]} style={{ width }}>
       <header className="kb-head kb-head--side">
         <h2 className="kb-side__title">{TITLES[section]}</h2>
+        <span className="kb-head__spacer" />
+        {section === 'chats' && <IconButton icon="search" label="Find in chats" size="sm" onClick={() => setCenterView('allChats')} />}
       </header>
       <div className="kb-side__body" data-section={section}>
-        {section === 'chats' && <ChatsSection />}
+        {section === 'chats' && <ChatList />}
         {section === 'materials' && <LibraryPanel />}
-        {section === 'wiki' && (
-          <EmptyState icon="wiki" title="Wiki pages">
-            Concepts, notes and analyses built from your materials will be listed here.
-          </EmptyState>
-        )}
-        {section === 'graph' && (
-          <EmptyState icon="graph" title="Graph of connections">
-            How concepts connect across your folders will open from here.
-          </EmptyState>
-        )}
-        {section === 'notifications' && <NotificationsSection />}
+        {(section === 'wiki' || section === 'graph') && <WikiSection />}
+        {section === 'notifications' && <NotificationsFeed />}
       </div>
     </section>
   );
 }
 
-function DisabledRow({ icon, children, reason }: { icon: 'newChat'; children: ReactNode; reason: string }) {
+/** Wiki list arrives with U3; the graph is reached from here (v39), not from the rail. */
+function WikiSection() {
+  const { prefs } = useServices();
+  const section = usePrefs((s) => s.section);
   return (
-    <Tooltip text={reason} describes>
-      <button type="button" className="kb-row kb-row--action" aria-disabled="true" onClick={(e) => e.preventDefault()}>
-        <Icon name={icon} size={16} className="kb-row__icon" />
-        <span className="kb-row__text">{children}</span>
+    <div className="kb-side__scroll">
+      <button type="button" className={`kb-row${section === 'graph' ? ' is-current' : ''}`}
+        aria-current={section === 'graph' ? 'page' : undefined} onClick={() => prefs.getState().set({ section: 'graph' })}>
+        <Icon name="graph" size={16} className="kb-row__icon" />
+        <span className="kb-row__text">Graph of connections</span>
       </button>
-    </Tooltip>
-  );
-}
-
-function ChatsSection() {
-  return (
-    <div className="kb-side__scroll">
-      <DisabledRow icon="newChat" reason="Chat isn’t connected yet">New chat</DisabledRow>
-      <EmptyState icon="chats" title="No chats yet" compact>
-        Pinned chats and chats by date will be listed here.
-      </EmptyState>
-    </div>
-  );
-}
-
-function NotificationsSection() {
-  const list = useLibrary((s) => s.notifications);
-  const library = useLibrary((s) => s.library);
-  if (library?.state !== 'ready') {
-    return <EmptyState icon="bell" title="No notifications" compact>Connect the library first.</EmptyState>;
-  }
-  if (list === null) {
-    return <EmptyState icon="bell" title="Notifications couldn’t be read" compact />;
-  }
-  if (list.length === 0) {
-    return <EmptyState icon="bell" title="Nothing needs your attention" compact />;
-  }
-  return (
-    <div className="kb-side__scroll">
-      <ul className="kb-list" aria-label="Notifications">
-        {list.map((n) => (
-          <li key={n.id} className="kb-row kb-row--static">
-            <Icon name={n.requires_action ? 'warning' : 'bell'} size={16} className="kb-row__icon" />
-            <span className="kb-row__text">{n.title}</span>
-          </li>
-        ))}
-      </ul>
+      {section === 'graph' ? (
+        <EmptyState icon="graph" title="Graph of connections" compact>How concepts connect across your folders will open from here.</EmptyState>
+      ) : (
+        <EmptyState icon="wiki" title="Wiki pages" compact>Concepts, notes and analyses built from your materials will be listed here.</EmptyState>
+      )}
     </div>
   );
 }

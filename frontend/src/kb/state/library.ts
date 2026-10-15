@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbFolder, KbLibrary, KbMaterialSummary, KbNotification } from '../../api/kb/types.gen';
+import type { KbFolder, KbLibrary, KbMaterialSummary } from '../../api/kb/types.gen';
 import { errorText, type KbClient } from '../api/client';
 
 export type Load = 'idle' | 'loading' | 'ready' | 'error';
@@ -22,14 +22,11 @@ export interface LibraryData {
   folderMaterials: KbMaterialSummary[];
   folderLoad: Load;
   folderError: string | null;
-  /** Notifications that are not dismissed (bell counter); null = could not be read. */
-  notifications: KbNotification[] | null;
 }
 
 export interface LibraryActions {
   loadLibrary: () => Promise<void>;
   loadContent: () => Promise<void>;
-  loadNotifications: () => Promise<void>;
   connect: (path: string | null) => Promise<ActionResult<KbLibrary>>;
   retry: () => Promise<ActionResult<KbLibrary>>;
   createFolder: (name: string) => Promise<ActionResult<KbFolder>>;
@@ -63,14 +60,13 @@ export function createLibraryStore(client: KbClient): LibraryStore {
     folderMaterials: [],
     folderLoad: 'idle',
     folderError: null,
-    notifications: null,
 
     loadLibrary: async () => {
       set({ libraryLoad: 'loading', libraryError: null });
       try {
         const library = await client.library();
         set({ library, libraryLoad: 'ready' });
-        if (library.state === 'ready') await Promise.all([get().loadContent(), get().loadNotifications()]);
+        if (library.state === 'ready') await get().loadContent();
       } catch (error) {
         set({ libraryLoad: 'error', libraryError: errorText(error) });
       }
@@ -86,20 +82,11 @@ export function createLibraryStore(client: KbClient): LibraryStore {
       }
     },
 
-    loadNotifications: async () => {
-      try {
-        const list = await client.notifications();
-        set({ notifications: list.filter((n) => n.dismissed_at === null) });
-      } catch {
-        set({ notifications: null });
-      }
-    },
-
     connect: async (path) => {
       try {
         const library = await client.connectLibrary(path);
         set({ library, libraryLoad: 'ready', libraryError: null });
-        if (library.state === 'ready') await Promise.all([get().loadContent(), get().loadNotifications()]);
+        if (library.state === 'ready') await get().loadContent();
         return { ok: true, value: library };
       } catch (error) {
         return { ok: false, error: errorText(error) };

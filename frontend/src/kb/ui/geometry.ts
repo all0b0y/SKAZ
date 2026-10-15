@@ -5,7 +5,7 @@ export interface Rect {
   bottom: number;
 }
 
-export type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' | 'right' | 'bottom';
+export type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' | 'right' | 'bottom' | 'top';
 
 const GAP = 6;
 const MARGIN = 8;
@@ -53,12 +53,20 @@ export function placePopup(
       left = anchor.left + (anchor.right - anchor.left - size.width) / 2;
       top = anchor.bottom + GAP;
       break;
+    case 'top':
+      left = anchor.left + (anchor.right - anchor.left - size.width) / 2;
+      top = anchor.top - GAP - size.height;
+      break;
     case 'bottom-start':
     default:
       left = anchor.left;
       top = anchor.bottom + GAP;
   }
-  // Flip vertically when there is no room below.
+  // Flip vertically when there is no room above (message field) or below.
+  if (top < bounds.top + MARGIN && placement.startsWith('top')) {
+    const below = anchor.bottom + GAP;
+    if (below + size.height <= bounds.bottom - MARGIN) top = below;
+  }
   if (top + size.height > bounds.bottom - MARGIN && placement.startsWith('bottom')) {
     const above = anchor.top - GAP - size.height;
     if (above >= bounds.top + MARGIN) top = above;
