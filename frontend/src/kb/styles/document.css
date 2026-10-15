@@ -170,6 +170,12 @@
 .kb-pst.is-link:hover { border-color: var(--kb-muted); }
 .kb-spinner--xs { width: 10px; height: 10px; border-width: 1.5px; }
 .kb-mat__note { font-size: var(--t-sm); color: var(--kb-muted); }
+/* Header of a material: title, one muted meta line, one row of status chips (same height, so
+   their words share a baseline), then the excluded-fragments line. */
+.kb-mat__head { display: flex; flex-direction: column; gap: 4px; padding-bottom: 6px; }
+.kb-mat__head .kb-pipe { margin-top: 6px; }
+.kb-mat__head .kb-excl { margin-top: 2px; }
+.kb-pipe .kb-btn--sm { height: 24px; padding: 0 8px; }
 .kb-mat__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .kb-spk-list { display: flex; flex-direction: column; gap: 10px; }
@@ -185,7 +191,7 @@
 .kb-colhead { font-size: var(--t-xs); font-weight: 600; color: var(--kb-muted); margin-bottom: 4px; }
 .kb-tr-paras { display: flex; flex-direction: column; gap: 8px; }
 .kb-seg-frag { border-radius: 3px; }
-.kb-seg-frag[data-targeted], .kb-art__p[data-targeted] { background: color-mix(in srgb, var(--kb-accent) 7%, transparent); transition: background-color 1.6s ease 0.8s; }
+.kb-seg-frag[data-targeted], .kb-mtext__p[data-targeted] { background: color-mix(in srgb, var(--kb-accent) 7%, transparent); transition: background-color 1.6s ease 0.8s; }
 .kb-quote {
   background: color-mix(in srgb, var(--kb-folder-1) 22%, transparent);
   color: inherit;
@@ -214,8 +220,33 @@
 .kb-fixcard__reason { font-size: var(--t-sm); color: var(--kb-muted); }
 .kb-fixcard__actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.kb-art { display: flex; flex-direction: column; gap: 10px; }
-.kb-art__p { line-height: 1.6; overflow-wrap: anywhere; border-radius: 3px; }
+.kb-mtext { display: flex; flex-direction: column; gap: 10px; }
+.kb-mtext__p { line-height: 1.6; overflow-wrap: anywhere; border-radius: 3px; }
+
+/* An excluded fragment (decision 41) keeps its place in the text: quiet, labelled, at the text's
+   own left edge; the rule sits in the gutter so nothing shifts. */
+.kb-excluded { position: relative; color: var(--kb-muted); }
+.kb-excluded::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--kb-warn) 60%, transparent);
+}
+.kb-seg-frag.kb-excluded { display: block; margin: 4px 0; }
+.kb-xtag {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--kb-muted-strong);
+}
+.kb-xtag .kb-icon { color: var(--kb-warn); flex: none; }
 .kb-arturl {
   display: flex;
   align-items: center;

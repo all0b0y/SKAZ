@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { KbCorrection, KbCorrectionChange, KbFragment, KbMaterial } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
-import { Button, Popover } from '../ui';
+import { Button, Icon, Popover } from '../ui';
 import { formatTime } from '../library/materialMeta';
 import { plural } from '../document/text';
 import { useServices } from '../state/context';
@@ -113,6 +113,8 @@ export interface TranscriptProps {
   sideBySide: boolean;
   target: { seg: number | null; quote: string | null };
   onCorrectionChanged: (change: KbCorrectionChange) => void;
+  /** Segments the guard left out as instructions to an AI (decision 41): shown in place, marked. */
+  excluded?: ReadonlySet<number>;
   /**
    * Live panel: speech after the fragments — final words of monologues not in the material yet
    * (stable, but not quotable: they have no fragment yet) and the words still being recognised (grey).
@@ -161,6 +163,21 @@ function LiveWords({ block }: { block: LiveBlock }) {
   );
 }
 
+/**
+ * The mark of an excluded fragment: it stays where it was in the text, quiet and labelled, so the
+ * reader sees what the wiki left out. Not offered for quoting into a chat (it is an instruction).
+ */
+function ExcludedTag() {
+  return (
+    <span className="kb-xtag">
+      <Icon name="privacy" size={12} />
+      <span>Excluded · instruction to an AI</span>
+    </span>
+  );
+}
+
+const isExcluded = (props: TranscriptProps, seg: number) => props.excluded?.has(seg) ?? false;
+
 /** Original fragment text with fixes underlined and the target quote marked. */
 function FragmentText({ fragment, props }: { fragment: KbFragment; props: TranscriptProps }) {
   const fixes = props.corrections.filter((c) => fragment.corrections.includes(c.id) || c.seg === fragment.seg);
@@ -173,6 +190,14 @@ function FragmentSpan({ fragment, props, translation }: { fragment: KbFragment; 
   const showOriginal = props.view !== 'translation' || !translation;
   const showTranslation = props.view !== 'original' && translation !== null;
   const targeted = props.target.seg === fragment.seg;
+  if (isExcluded(props, fragment.seg)) {
+    return (
+      <span className={`kb-seg-frag kb-excluded${targeted ? ' is-target' : ''}`} data-seg={fragment.seg} data-target-key={`seg-${fragment.seg}`} data-excluded="">
+        <ExcludedTag />
+        {showOriginal ? <FragmentText fragment={fragment} props={props} /> : (translated ?? fragment.text)}{' '}
+      </span>
+    );
+  }
   return (
     <span className={`kb-seg-frag${targeted ? ' is-target' : ''}`} data-seg={fragment.seg} data-target-key={`seg-${fragment.seg}`}>
       {showOriginal && (
@@ -267,15 +292,29 @@ function SpeechText(props: TranscriptProps) {
   return originalColumn;
 }
 
+/** One paragraph of a text or a PDF page; an excluded one keeps its place, marked. */
+function Paragraph({ fragment: f, props }: { fragment: KbFragment; props: TranscriptProps }) {
+  const target = props.target.seg === f.seg ? ' is-target' : '';
+  if (isExcluded(props, f.seg)) {
+    return (
+      <p className={`kb-mtext__p kb-excluded${target}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`} data-excluded="">
+        <ExcludedTag />
+        <FragmentText fragment={f} props={props} />
+      </p>
+    );
+  }
+  return (
+    <p className={`kb-mtext__p${target}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
+      {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
+      <FragmentText fragment={f} props={props} />
+    </p>
+  );
+}
+
 function PlainText(props: TranscriptProps) {
   return (
-    <div className="kb-art">
-      {props.material.fragments.map((f) => (
-        <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
-          {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
-          <FragmentText fragment={f} props={props} />
-        </p>
-      ))}
+    <div className="kb-mtext">
+      {props.material.fragments.map((f) => <Paragraph key={f.id} fragment={f} props={props} />)}
     </div>
   );
 }
@@ -286,12 +325,7 @@ function PdfPages(props: TranscriptProps) {
       {byPage(props.material.fragments).map((page, i) => (
         <section key={`${page.page}-${i}`} className="kb-pdfpage" aria-label={page.page !== null ? `Page ${page.page}` : 'Page'}>
           {page.page !== null && <span className="kb-pdfpage__n">p. {page.page}</span>}
-          {page.fragments.map((f) => (
-            <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
-          {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
-              <FragmentText fragment={f} props={props} />
-            </p>
-          ))}
+          {page.fragments.map((f) => <Paragraph key={f.id} fragment={f} props={props} />)}
         </section>
       ))}
     </div>
