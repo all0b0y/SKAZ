@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -16,29 +15,12 @@ from .activity import current_activity
 from .config import AppConfig
 from .knowledge.api import ROUTERS as KB_ROUTERS
 from .knowledge.mcp.router import router as kb_mcp_router
-from .managed_storage import StorageConflict
 from .native_io import disk_call
 from .routes import health, live, logs, sessions, settings
 from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
 from .security import local_access_error, require_token
-
-logger = logging.getLogger(__name__)
-
-
-def _recover_storage(runtime: Runtime) -> None:
-    """Finish a managed-storage operation a crash interrupted (the old interface had a button).
-
-    While one is pending every new recording session is refused, so the app tries once at
-    start; an operation that still cannot finish is logged and keeps blocking, as before.
-    """
-    if runtime.storage.pending() is None:
-        return
-    try:
-        runtime.storage.recover()
-    except (StorageConflict, OSError) as error:
-        logger.warning("Interrupted storage operation could not be finished: %s", type(error).__name__)
 
 
 def create_app(
@@ -52,8 +34,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
-            await disk_call(_recover_storage, runtime)
-            await disk_call(runtime.session_files.reconcile)
             # Reopen and rescan the connected knowledge library; never creates one.
             await disk_call(runtime.kb.start)
             runtime.kb_auto_ingest.bind_loop(asyncio.get_running_loop())
@@ -81,12 +61,6 @@ def create_app(
 
     app = FastAPI(title="SKAZ backend", version="0.1.0", lifespan=lifespan)
     app.state.runtime = runtime
-
-    @app.exception_handler(StorageConflict)
-    async def storage_conflict(_request: Request, _error: StorageConflict) -> JSONResponse:
-        return JSONResponse(status_code=409, content={
-            "detail": "Storage needs attention. Pause recording and check storage recovery.",
-        })
 
     @app.middleware("http")
     async def local_only(

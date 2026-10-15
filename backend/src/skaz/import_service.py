@@ -199,7 +199,6 @@ class ImportService:
             used_languages=languages,
             declared_duration_ms=duration,
         )
-        await disk_call(self._runtime.storage.ensure_import_directory, request.session_id)
         self._spawn(record)
         return record
 
@@ -314,7 +313,6 @@ class ImportService:
             await self._fail(session_id, str(error))
 
     async def _execute(self, record: ImportRecord) -> None:
-        await disk_call(self._runtime.storage.ensure_import_directory, record.session_id)
         if import_provider(record.model) != "soniox":
             await self._execute_direct(record)
             return
@@ -353,7 +351,6 @@ class ImportService:
             self.store.apply_transcript, session_id, tokens=transcript.tokens,
             audio_duration_ms=job.audio_duration_ms or 0,
         )
-        await disk_call(self._runtime.session_files.project, session_id)
         self._runtime.mark_verified(
             "asr", "soniox", record.model, "Transcribed an imported audio file through this installation",
         )
@@ -377,7 +374,6 @@ class ImportService:
             self.store.apply_transcript, session_id, tokens=transcript.tokens,
             audio_duration_ms=transcript.duration_ms,
         )
-        await disk_call(self._runtime.session_files.project, session_id)
         self._runtime.mark_verified(
             "asr", provider, record.model.partition("/")[2],
             f"Transcribed an imported audio file with {LABELS[provider]} through this installation",

@@ -72,8 +72,6 @@ class AppConfig:
     #: Optional application-owned Hugging Face cache. None preserves the existing
     #: shared cache so already-prepared Whisper checkpoints keep working.
     local_model_cache_dir: Path | None = None
-    #: Explicit read-only override; otherwise use the opt-in persisted preference.
-    session_files_root: Path | None = None
     documents_dir: Path = field(default_factory=lambda: Path.home() / "Documents")
     documents_sandbox: Path | None = None
 
@@ -104,11 +102,6 @@ class AppConfig:
             documents_dir=Path(os.environ.get(
                 "SKAZ_DOCUMENTS_DIR", str(Path.home() / "Documents"),
             )),
-            session_files_root=(
-                Path(value).expanduser()
-                if (value := os.environ.get("SKAZ_SESSION_FILES_ROOT", "").strip())
-                else None
-            ),
             extra_allowed_origins=origins,
             local_speech_gate=_boolean_env("SKAZ_LOCAL_SPEECH_GATE"),
             live_finality_enabled=_boolean_env("SKAZ_LIVE_FINALITY"),

@@ -2,8 +2,8 @@
 
 The HTTP routes that created, listed, read and deleted sessions belonged to the
 old interface and are gone. The Knowledge Wiki creates a recording's session
-through managed storage (``LegacySpeech.create_recording_session``), an import's
-through the repository (``LegacySpeech.create_import_session``), reads them
+(``LegacySpeech.create_recording_session``) and an import's
+(``LegacySpeech.create_import_session``) through the repository, reads them
 through the repository and deletes them through ``routes.sessions.delete_session``.
 These helpers call exactly those paths, so the recording/import tests keep
 exercising the code the product runs.
@@ -39,7 +39,7 @@ def runtime_of(target: Any) -> Runtime:
 
 def create_session(target: Any, title: str = "Untitled session") -> str:
     """A recording's technical session, created the way the Knowledge Wiki recorder creates it."""
-    return runtime_of(target).storage.create(title.strip() or "Untitled session", "legacy").id
+    return repo.create_session(runtime_of(target).db, title.strip() or "Untitled session", "legacy").id
 
 
 def create_import_session(target: Any, title: str) -> str:
@@ -113,14 +113,3 @@ async def adelete_status(target: Any, session_id: str) -> tuple[int, str]:
         return error.status_code, str(error.detail)
     return 200, ""
 
-
-def project(target: Any, session_id: str) -> dict[str, Any]:
-    """Write the session's Markdown files now, as a pause, stop or finished import does."""
-    result: dict[str, Any] = runtime_of(target).session_files.project(session_id)
-    return result
-
-
-def files_status(target: Any, session_id: str) -> dict[str, Any]:
-    """The persisted outcome of the session's last Markdown projection."""
-    result: dict[str, Any] = runtime_of(target).session_files.status(session_id)
-    return result

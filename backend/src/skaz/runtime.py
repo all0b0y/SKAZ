@@ -34,11 +34,9 @@ from .knowledge.wiki.service import WikiService
 from .knowledge.wiring import McpGrants, wire_speech, wire_wiki
 from .knowledge.wiring import wire as wire_knowledge
 from .live_store import LiveStore
-from .managed_storage import ManagedStorage
 from .native_stream import NativeStream
 from .schemas import CLOUD_PROVIDERS, Settings, Task
 from .secrets import FileSecretStore, SecretStore
-from .session_files import SessionFiles
 from .settings_store import TASKS, SettingsStore, StoredSettings
 from .verifications import note
 
@@ -60,13 +58,6 @@ class Runtime:
         self.db = Database(config.db_path)
         #: The Codex app-server sign-in/connection the knowledge agents run on (areas A1/A2).
         self.codex_connection = CodexConnection(config.data_dir / "codex" / "account")
-        self.session_files = SessionFiles(
-            self.db, config.session_files_root, data_dir=config.data_dir,
-            suggested_root=config.documents_dir / "SKAZ",
-            allowed_root=config.documents_sandbox,
-        )
-        self.storage = ManagedStorage(self.db, self.session_files, config.audio_dir)
-        self.session_files.storage = self.storage
         self.live_store = LiveStore(self.db)
         self.live_store.recover_interrupted()
         #: Knowledge wiki: its own knowledge.sqlite3; touches Documents only after an explicit connect.

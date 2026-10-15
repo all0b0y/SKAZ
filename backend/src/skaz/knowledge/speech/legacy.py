@@ -61,8 +61,8 @@ class LegacySpeech:
     # -- sessions -----------------------------------------------------------
 
     def create_recording_session(self, title: str) -> str:
-        """The same path ``POST /sessions`` uses (managed storage decides where it lives)."""
-        return self._runtime.storage.create(title, "legacy").id
+        """A database row only: the knowledge library is the material's one store (B4)."""
+        return repo.create_session(self._runtime.db, title, "legacy").id
 
     def create_import_session(self, title: str) -> str:
         """The same call the legacy ``POST /imports`` route makes."""

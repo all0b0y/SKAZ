@@ -192,7 +192,6 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                 break
             complete = await stream.finish()
             await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
-            await disk_call(runtime.session_files.project, session_id)
             settled = True
             completed_owner = runtime.native_tasks.pop(session_id)
             runtime.native_streams.pop(session_id, None)

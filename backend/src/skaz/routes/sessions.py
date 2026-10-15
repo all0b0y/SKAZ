@@ -20,7 +20,6 @@ from ..native_event_pages import EventCursorConflict, EventPageTooLarge, read_ev
 from ..native_io import disk_call, drain_on_cancel
 from ..native_page_projection import read_projected_page
 from ..schemas import PatchSessionRequest, Session
-from ..session_files import FileDeletionBlocked
 from .deps import RuntimeDep
 
 if TYPE_CHECKING:
@@ -148,32 +147,24 @@ async def patch_session(session_id: str, payload: PatchSessionRequest, runtime: 
     updated = repo.update_session(runtime.db, session_id, status=payload.status, title=payload.title)
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' does not exist.")
-    if payload.status in ("stopped", "paused"):
-        await disk_call(runtime.session_files.project, session_id)
     return updated
 
 
 async def delete_session(session_id: str, runtime: Runtime) -> None:
-    """Stop capture/imports of one session and remove its files and rows (speech area only)."""
+    """Stop capture/imports of one session and remove its rows (speech area only).
+
+    A technical session never has files of its own: the knowledge library holds the
+    material, and an old version's ``Documents/SKAZ`` is never touched (B4).
+    """
     async def remove() -> None:
         await runtime.imports.prepare_delete(session_id)
         await runtime.stop_native(session_id)
         try:
             await disk_call(_require_session, runtime, session_id)
-            try:
-                if runtime.storage.enabled():
-                    await disk_call(runtime.storage.delete, session_id)
-                else:
-                    await disk_call(runtime.session_files.delete_session, session_id)
-            except FileDeletionBlocked as error:
-                raise HTTPException(status_code=409, detail=(
-                    "Session was not deleted: Markdown files need attention. "
-                    "Preserve external/conflict/recovery files outside the session folder "
-                    "and retry. If the files root changed, restore the previous root first."
-                )) from error
-
+            await disk_call(repo.delete_session, runtime.db, session_id)
         finally:
             runtime.native_closing.discard(session_id)
+
 
     # Concurrent callers join the same deletion.
     # A later, separate request still gets the usual missing-session response.
