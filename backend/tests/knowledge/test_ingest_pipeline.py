@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -432,6 +434,36 @@ async def test_close_interrupts_running_jobs(ready: KnowledgeService) -> None:
     await settle(lambda: bool(wiki.engine.active_runs()))
     await ingest.close()
     assert ingest.job(job.id).state == "interrupted"
+
+
+async def test_a_request_that_races_close_starts_nothing(ready: KnowledgeService,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """close() while a request is between its checks and its task: no job outlives the service."""
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    wiki = ScriptedWiki(notes=[NOTES_OK], gate=asyncio.Event())
+    ingest = service_for(ready, wiki)
+    loop = asyncio.get_running_loop()
+    create = ingest.jobs.create
+    closing: list[asyncio.Task[None]] = []
+    closed = threading.Event()
+
+    def start_closing() -> None:
+        closing.append(loop.create_task(ingest.close()))
+        loop.call_soon(closed.set)  # close() has begun by then
+
+    def create_while_closing(*args: Any, **kwargs: Any) -> Any:
+        # The app shuts down while the job row is being written (on a worker thread).
+        loop.call_soon_threadsafe(start_closing)
+        assert closed.wait(5)
+        return create(*args, **kwargs)
+
+    monkeypatch.setattr(ingest.jobs, "create", create_while_closing)
+    with pytest.raises(IngestBusy):
+        await ingest.request_ingest(material_id)
+    await asyncio.gather(*closing)
+    assert not [task for task in asyncio.all_tasks() if task.get_name().startswith("ingest-")]
+    assert [job.state for job in ingest.jobs.list_all(material_id=material_id)] == ["interrupted"]
+    assert wiki.engine.turns == []
 
 
 async def test_long_source_is_cut_into_parts_covering_every_fragment(ready: KnowledgeService) -> None:

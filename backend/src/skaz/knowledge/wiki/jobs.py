@@ -60,6 +60,10 @@ class WikiJobs:
         if self._closing:
             raise WikiBusy("SKAZ is closing. Retry after it starts again.")
         job = await disk_call(lambda: self.jobs.create(target, kind=kind, step=step))
+        if self._closing:
+            # close() ran while the job row was being written: start nothing after it.
+            await disk_call(self.jobs.finish, job.id, "interrupted", error=WIKI_INTERRUPTED_REASON)
+            raise WikiBusy("SKAZ is closing. Retry after it starts again.")
         task = asyncio.create_task(self._run(job.id, work), name=f"wiki-{kind}-{job.id}")
         self._tasks[job.id] = (kind, target, task)
         return job

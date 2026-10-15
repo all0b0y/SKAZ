@@ -134,6 +134,11 @@ class IngestService:
             job = await disk_call(lambda: self.jobs.create(material_id, kind=kind))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)
+        if self._closing:
+            # close() ran while this request was on a worker thread: it could not see a task to
+            # stop, so none may start now — the job ends as an interrupted one.
+            await disk_call(self.jobs.finish, job.id, "interrupted", error=INTERRUPTED_REASON)
+            raise IngestBusy("SKAZ is closing. Retry after it starts again.")
         self._active[job.id] = reservation
         reservation.task = asyncio.create_task(self._run(job.id, reservation), name=f"ingest-{job.id}")
         return job
