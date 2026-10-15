@@ -78,7 +78,7 @@ describe('Message field', () => {
     expect(picker).toHaveAccessibleName(/Claude Code/);
   });
 
-  it('"+" → File: saved to Materials (Inbox) at once, "In wiki" on by default; the message carries its id', async () => {
+  it('"+" → File: saved to Materials (Inbox) at once and held; "In wiki" on from Settings, sent at send; the message carries its id', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
@@ -86,15 +86,33 @@ describe('Message field', () => {
     await user.click(screen.getByRole('menuitem', { name: 'File…' }));
     const chips = await screen.findByRole('list', { name: 'Attachments' });
     expect(within(chips).getByText('paper.pdf')).toBeInTheDocument();
-    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/materials/file', body: { path: '/Users/me/Downloads/paper.pdf', folder_id: 'inbox' } })));
-    // Settings → Wiki adds files automatically: the switch shows it and can't be turned off here.
+    // Held out of the wiki until the message is sent: the switch decides then (decision 15).
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/materials/file', body: { path: '/Users/me/Downloads/paper.pdf', folder_id: 'inbox', to_wiki: false } })));
+    // Settings → Wiki add files automatically: that is the default, and it stays switchable.
     const inWiki = within(chips).getByRole('checkbox', { name: 'In wiki' });
     expect(inWiki).toBeChecked();
-    expect(inWiki).toBeDisabled();
+    expect(inWiki).toBeEnabled();
     await user.click(input);
     await user.keyboard('Summarise it{Enter}');
     await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.stringMatching(/^m-new/)] }));
+    await waitFor(() => expect(fake.calls.some((c) => /\/kb\/materials\/m-new\d+\/ingest/.test(c.path))).toBe(true));
     expect(screen.queryByRole('list', { name: 'Attachments' })).not.toBeInTheDocument();
+  });
+
+  it('"+" → File with Settings adding files automatically: unticking "In wiki" keeps it out of the wiki', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
+    await user.click(screen.getByRole('menuitem', { name: 'File…' }));
+    const chips = await screen.findByRole('list', { name: 'Attachments' });
+    await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/materials/file')).toBe(true));
+    await user.click(within(chips).getByRole('checkbox', { name: 'In wiki' }));
+    expect(within(chips).getByRole('checkbox', { name: 'In wiki' })).not.toBeChecked();
+    await user.click(input);
+    await user.keyboard('Summarise it{Enter}');
+    await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.stringMatching(/^m-new/)] }));
+    expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
   });
 
   it('"+" → Paste text: "In wiki" is off by default and switching it on sends the material to the wiki', async () => {

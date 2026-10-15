@@ -97,8 +97,18 @@ class CurrentDecisions:
         return await layer.ask_many(questions)
 
 
+#: Settings key of the user's "to wiki" choice for a speech material still being imported (decision 15).
+CHOICE_KEY = "wiki.add_choice."
+
+
 class AutoIngest:
-    """Starts ingest from source events, which may fire on any thread."""
+    """Starts ingest from source events, which may fire on any thread.
+
+    Decision 15: the "to wiki" switch of a new file, link or text is the user's, whatever Settings →
+    Wiki says (the settings only give its default). Documents carry the choice in their event; an
+    audio/video import finishes later, so its choice is kept (``remember``) until it does — in the
+    knowledge settings, so an import resumed after a restart still follows it.
+    """
 
     def __init__(self, kb: KnowledgeService, ingest: IngestService) -> None:
         self._kb = kb
@@ -108,9 +118,24 @@ class AutoIngest:
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
+    def remember(self, material_id: str, to_wiki: bool | None) -> None:
+        """The user's choice for a material that becomes ready later (speech import, video link)."""
+        if to_wiki is not None:
+            self._kb.settings.set(CHOICE_KEY + material_id, to_wiki)
+
+    def _choice(self, material_id: str) -> bool | None:
+        value = self._kb.settings.get(CHOICE_KEY + material_id)
+        if value is None:
+            return None
+        self._kb.settings.set(CHOICE_KEY + material_id, None)
+        return value is True
+
     def wants(self, event: SourceEvent) -> bool:
         if event.kind == "fragment_restored":
             return True
+        choice = event.to_wiki if event.to_wiki is not None else self._choice(event.material_id)
+        if choice is not None:
+            return choice
         material = self._kb.material_repo.get(event.material_id)
         if material is None:
             return False

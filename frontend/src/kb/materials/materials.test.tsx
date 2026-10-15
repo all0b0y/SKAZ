@@ -90,11 +90,11 @@ describe('+ Material (v11, decisions 15–16)', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
     expect(fake.calls.find((c) => c.path === '/kb/imports')?.body).toEqual({
-      url: 'https://www.youtube.com/watch?v=abc', folder_id: 'phys', translate: true, language: 'en',
+      url: 'https://www.youtube.com/watch?v=abc', folder_id: 'phys', translate: true, language: 'en', to_wiki: true,
     });
   });
 
-  it('pasted text goes to the wiki only when asked; switching it on adds it once ready', async () => {
+  it('pasted text goes to the wiki only when asked; the switch travels with the add request', async () => {
     const user = userEvent.setup();
     const { fake } = await ready();
     await user.click(screen.getByTestId('add-material'));
@@ -109,8 +109,26 @@ describe('+ Material (v11, decisions 15–16)', () => {
     await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), 'math');
     await user.click(within(dialog).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
-    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toEqual({ text: 'Seminar notes: the log makes entropy additive.', folder_id: 'math' });
-    await waitFor(() => expect(fake.calls.some((c) => /^\/kb\/materials\/m-new\d+\/ingest$/.test(c.path))).toBe(true));
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toEqual({ text: 'Seminar notes: the log makes entropy additive.', folder_id: 'math', to_wiki: true });
+    // The backend adds it once it is ready (AutoIngest honours the flag): no separate request.
+    expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
+  });
+
+  it('with Settings adding files and links automatically, switching "Add to wiki" off is honoured (decision 15)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    const wikiSwitch = within(dialog).getByRole('switch', { name: 'Add to wiki after processing' });
+    expect(wikiSwitch).toBeChecked();
+    await user.click(wikiSwitch);
+    expect(wikiSwitch).not.toBeChecked();
+    expect(within(dialog).queryByText(/can’t hold it back/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.find((c) => c.path === '/kb/imports')?.body).toMatchObject({ to_wiki: false });
   });
 
   it('dropped files are listed with their type; one that fails stays with the reason', async () => {

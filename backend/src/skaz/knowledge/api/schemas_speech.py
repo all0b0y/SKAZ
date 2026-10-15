@@ -36,6 +36,9 @@ class KbImportCreate(_Request):
     language: str | None = Field(default=None, min_length=2, max_length=8)
     #: The same video was imported before: import it again anyway.
     allow_duplicate: bool = False
+    #: Decision 15: add this material to the wiki once it is ready (``true``), keep it out
+    #: (``false``), or let Settings → Wiki decide (``null``).
+    to_wiki: bool | None = None
 
 
 class KbSpeechMaterial(BaseModel):
