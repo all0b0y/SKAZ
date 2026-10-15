@@ -1,4 +1,9 @@
-"""Real process-death recovery through HTTP and isolated filesystem boundaries."""
+"""Real process-death recovery on isolated filesystem boundaries.
+
+Projection is driven through ``SessionFiles.project`` (what a pause, stop or finished
+import runs); the files/notes routes of the old interface are gone, and so is the
+session-Notes crash case.
+"""
 from __future__ import annotations
 
 import subprocess
@@ -6,7 +11,6 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-import httpx
 import pytest
 from starlette.testclient import TestClient
 
@@ -14,8 +18,8 @@ from skaz.app import create_app
 from skaz.config import AppConfig
 from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
+from tests.sessions_support import create_session, files_status, project, session_detail
 from tests.test_native_live_ws import AUTH
-from tests.test_session_files_api import seed_note
 
 # No graceful cleanup: terminate immediately after a real publication syscall.
 CRASH_WRITER = r'''
@@ -37,8 +41,6 @@ class CrashConnection(sqlite3.Connection):
     crash_on_commit = False
     def execute(self, sql, *args, **kwargs):
         if phase == "manifest" and sql.startswith("INSERT OR REPLACE INTO file_projections"):
-            self.crash_on_commit = True
-        if phase == "note_commit" and sql.lstrip().startswith("UPDATE notes SET"):
             self.crash_on_commit = True
         return super().execute(sql, *args, **kwargs)
     def commit(self):
@@ -78,13 +80,8 @@ with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) a
     ctypes.CDLL = crash_library
     os.link = crash_link
     os.fsync = crash_fsync
-    auth = {"Authorization": "Bearer test-token"}
-    if phase == "note_commit":
-        response = http.patch(f"/sessions/{sys.argv[3]}/notes/{sys.argv[5]}", headers=auth,
-                              json={"expected_revision": 1, "content": "Durable edit before crash"})
-    else:
-        response = http.post(f"/sessions/{sys.argv[3]}/files", headers=auth)
-    raise RuntimeError(f"Crash boundary not reached: {response.status_code}")
+    result = app.state.runtime.session_files.project(sys.argv[3])
+    raise RuntimeError(f"Crash boundary not reached: {result['state']}")
 '''
 
 
@@ -105,10 +102,10 @@ def test_process_death_at_publication_is_reported_and_retry_preserves_files(
 ) -> None:
     assert config.session_files_root is not None
     with open_client(config, outbound) as http:
-        sid = http.post("/sessions", json={"title": "Before crash"}).json()["id"]
+        sid = create_session(http, "Before crash")
         directory = config.session_files_root / "Ungrouped" / sid
         if phase != "first":
-            assert http.post(f"/sessions/{sid}/files").json()["state"] == "ready"
+            assert project(http, sid)["state"] == "ready"
         http.patch(f"/sessions/{sid}", json={"title": "After crash"}).raise_for_status()
         if phase == "conflict":
             (directory / "Transcript.md").write_text("External author version")
@@ -120,27 +117,27 @@ def test_process_death_at_publication_is_reported_and_retry_preserves_files(
     assert child.returncode == 73, child.stderr
     before = {p.name: p.read_bytes() for p in directory.iterdir()}
     with open_client(config, outbound) as http:
-        recovered = http.get(f"/sessions/{sid}/files").json()
+        recovered = files_status(http, sid)
         assert recovered["state"] in ("pending", "conflict"), recovered
         assert {p.name: p.read_bytes() for p in directory.iterdir()} == before
         if phase not in ("first", "manifest"):
             assert recovered["conflicts"]
-        result = http.post(f"/sessions/{sid}/files").json()
+        result = project(http, sid)
         assert result["state"] in ("ready", "conflict"), result
         for name, body in before.items():
             if phase == "prepared" and name == "Transcript.md":
                 continue  # the manifest still owns the old canonical version
             assert (directory / name).read_bytes() == body
         assert "After crash" in (directory / result["files"][0]["path"]).read_text()
-        again = http.post(f"/sessions/{sid}/files").json()
+        again = project(http, sid)
         assert again["conflicts"] == result["conflicts"]
         after_retry = {p.name: p.read_bytes() for p in directory.iterdir()}
     with open_client(config, outbound) as http:
-        status = http.get(f"/sessions/{sid}/files").json()
+        status = files_status(http, sid)
         assert status["state"] == result["state"]
         assert status["conflicts"] == result["conflicts"]
         assert {p.name: p.read_bytes() for p in directory.iterdir()} == after_retry
-        assert http.get(f"/sessions/{sid}").json()["session"]["title"] == "After crash"
+        assert session_detail(http, sid)["session"]["title"] == "After crash"
     assert outbound.requests == []
 
 
@@ -148,42 +145,17 @@ def test_restart_invalidates_projection_when_source_changed_before_export(
     config: AppConfig, outbound: FakeHttp,
 ) -> None:
     with open_client(config, outbound) as http:
-        sid = http.post("/sessions", json={"title": "Projected"}).json()["id"]
-        assert http.post(f"/sessions/{sid}/files").json()["state"] == "ready"
+        sid = create_session(http, "Projected")
+        assert project(http, sid)["state"] == "ready"
         http.patch(f"/sessions/{sid}", json={"title": "Not projected"}).raise_for_status()
     assert config.session_files_root is not None
     target = config.session_files_root / "Ungrouped" / sid / "Transcript.md"
     original = target.read_bytes()
     with open_client(config, outbound) as http:
-        assert http.get(f"/sessions/{sid}/files").json()["state"] == "pending"
+        assert files_status(http, sid)["state"] == "pending"
         assert target.read_bytes() == original
-        assert http.post(f"/sessions/{sid}/files").json()["state"] == "ready"
+        assert project(http, sid)["state"] == "ready"
         assert "Not projected" in target.read_text()
-    assert outbound.requests == []
-
-
-async def test_note_commit_before_process_death_is_recoverable_without_generation(
-    client: httpx.AsyncClient, config: AppConfig, outbound: FakeHttp,
-) -> None:
-    sid, nid = await seed_note(client, outbound)
-    assert config.session_files_root is not None
-    target = config.session_files_root / "Ungrouped" / sid / f"Note-{nid}.md"
-    original = target.read_bytes()
-    child = subprocess.run(
-        [sys.executable, "-c", CRASH_WRITER,
-         str(config.data_dir), str(config.session_files_root), sid, "note_commit", nid],
-        capture_output=True, text=True, timeout=20, cwd=Path(__file__).resolve().parents[1],
-    )
-    assert child.returncode == 73, child.stderr
-    outbound.requests.clear()
-    with open_client(config, outbound) as http:
-        assert http.get(f"/sessions/{sid}/files").json()["state"] == "pending"
-        note = http.get(f"/sessions/{sid}/notes").json()["notes"][0]
-        assert note["content"] == "Durable edit before crash"
-        assert note["revision"] == 2
-        assert target.read_bytes() == original
-        assert http.post(f"/sessions/{sid}/files").json()["state"] == "ready"
-        assert "Durable edit before crash" in target.read_text()
     assert outbound.requests == []
 
 
@@ -192,8 +164,8 @@ def test_restart_rejects_unsafe_recovery_artifact_without_following_or_deleting(
     config: AppConfig, outbound: FakeHttp, tmp_path: Path, kind: str,
 ) -> None:
     with open_client(config, outbound) as http:
-        sid = http.post("/sessions", json={"title": "Safe"}).json()["id"]
-        assert http.post(f"/sessions/{sid}/files").json()["state"] == "ready"
+        sid = create_session(http, "Safe")
+        assert project(http, sid)["state"] == "ready"
     assert config.session_files_root is not None
     directory = config.session_files_root / "Ungrouped" / sid
     artifact = directory / f"Transcript.recovery-{'a' * 32}.md"
@@ -207,10 +179,10 @@ def test_restart_rejects_unsafe_recovery_artifact_without_following_or_deleting(
         artifact.mkdir()
     original = (directory / "Transcript.md").read_bytes()
     with open_client(config, outbound) as http:
-        for response in (http.get(f"/sessions/{sid}/files"), http.post(f"/sessions/{sid}/files")):
-            assert response.json()["state"] == "error"
-            assert "Private" not in response.text
-            assert str(outside) not in response.text
+        for result in (files_status(http, sid), project(http, sid)):
+            assert result["state"] == "error"
+            assert "Private" not in str(result)
+            assert str(outside) not in str(result)
         assert (directory / "Transcript.md").read_bytes() == original
         assert outside.read_text() == "Private external data"
         assert artifact.exists()
@@ -221,15 +193,15 @@ def test_startup_does_not_create_directories_or_scan_unknown_sessions(
 ) -> None:
     assert config.session_files_root is not None
     with open_client(config, outbound) as http:
-        sid = http.post("/sessions", json={"title": "Not exported"}).json()["id"]
+        sid = create_session(http, "Not exported")
     with open_client(config, outbound) as http:
-        assert http.get(f"/sessions/{sid}/files").json()["state"] == "pending"
+        assert files_status(http, sid)["state"] == "pending"
         assert not config.session_files_root.exists()
     unknown = config.session_files_root / "Ungrouped" / ("b" * 32)
     unknown.mkdir(parents=True)
     artifact = unknown / f"Transcript.recovery-{'c' * 32}.md"
     artifact.write_text("Unrelated external file")
     with open_client(config, outbound) as http:
-        assert http.get(f"/sessions/{sid}/files").json()["state"] == "pending"
+        assert files_status(http, sid)["state"] == "pending"
         assert artifact.read_text() == "Unrelated external file"
         assert not (unknown.parent / sid).exists()

@@ -1,25 +1,25 @@
-"""Codex discovery from a GUI-launched process, auto-check and one-click re-login.
+"""Codex discovery from a GUI-launched process, connection check and one-click re-login.
 
-Authored fixtures only: fake executables in a temp dir, no real Codex, login or model.
-"""
+Authored fixtures only: fake executables in a temp dir, no real Codex, login or model."""
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import stat
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from skaz.agent.codex_dispatcher import CodexDispatcher
-from skaz.agent.codex_runtime import CodexRuntime
-from skaz.agent.snapshot_queue import SnapshotTask
-from skaz.db import Database
 from skaz.gateways import codex_connection
 from skaz.gateways.codex_connection import CodexConnection
 from skaz.gateways.codex_locate import USER_PATH_ENV, locate_codex
+
+
+def _returning(rpc: Any) -> Callable[[], Any]:
+    """Stand in for ``CodexConnection.rpc``: hand out the scripted RPC fake."""
+    return lambda: rpc
 
 
 def _exe(path: Path, body: str = "#!/bin/sh\nexit 0\n") -> Path:
@@ -127,7 +127,7 @@ class _Rpc:
 async def test_relogin_needs_no_checkbox_after_a_connected_account(tmp_path: Path) -> None:
     connection = CodexConnection(tmp_path / "account")
     rpc = _Rpc()
-    connection.rpc = lambda: rpc  # type: ignore[assignment,method-assign,return-value]
+    connection.rpc = _returning(rpc)  # type: ignore[assignment,method-assign]
     connection.view.update(status="signed_out")
     with pytest.raises(ValueError, match="consent"):
         await connection.login(False)
@@ -143,7 +143,7 @@ async def test_relogin_needs_no_checkbox_after_a_connected_account(tmp_path: Pat
 async def test_explicit_sign_out_asks_for_consent_again(tmp_path: Path) -> None:
     connection = CodexConnection(tmp_path / "account")
     rpc = _Rpc()
-    connection.rpc = lambda: rpc  # type: ignore[assignment,method-assign,return-value]
+    connection.rpc = _returning(rpc)  # type: ignore[assignment,method-assign]
     connection._record_consent(True)
     await connection.logout()
     assert rpc.requests == ["account/logout"]
@@ -156,115 +156,3 @@ async def test_explicit_sign_out_asks_for_consent_again(tmp_path: Path) -> None:
 # --- automatic checks -----------------------------------------------------------------
 
 
-def _runtime(tmp_path: Path) -> tuple[Database, CodexRuntime, list[str]]:
-    db = Database(tmp_path / "app.sqlite")
-    service = CodexRuntime(db, tmp_path / "codex")
-    checks: list[str] = []
-
-    async def check() -> dict[str, Any]:
-        checks.append("check")
-        service.connection.view.update(status="connected")
-        return dict(service.connection.view)
-
-    service.connection.check = check  # type: ignore[method-assign]
-    return db, service, checks
-
-
-@pytest.mark.asyncio
-async def test_start_checks_when_codex_is_chosen(tmp_path: Path) -> None:
-    db, service, checks = _runtime(tmp_path)
-    with db.write() as c:
-        c.execute("INSERT OR REPLACE INTO codex_settings VALUES(1,?)",
-                  (json.dumps({"assistant_enabled": True}),))
-    try:
-        service.start()
-        await asyncio.wait_for(asyncio.shield(service._connection_check), 2)  # type: ignore[arg-type]
-        assert checks == ["check"]
-        assert service.connection.view["status"] == "connected"
-    finally:
-        await service.close()
-        db.close()
-
-
-@pytest.mark.asyncio
-async def test_start_checks_a_saved_sign_in_even_if_not_chosen(tmp_path: Path) -> None:
-    db, service, checks = _runtime(tmp_path)
-    auth = tmp_path / "codex" / "account" / "profile" / "auth.json"
-    auth.parent.mkdir(parents=True)
-    auth.write_text("{}")
-    try:
-        service.start()
-        await asyncio.wait_for(asyncio.shield(service._connection_check), 2)  # type: ignore[arg-type]
-        assert checks == ["check"]
-    finally:
-        await service.close()
-        db.close()
-
-
-@pytest.mark.asyncio
-async def test_start_does_not_touch_codex_when_unused(tmp_path: Path) -> None:
-    db, service, checks = _runtime(tmp_path)
-    try:
-        service.start()
-        await asyncio.sleep(0)
-        assert checks == [] and service._connection_check is None
-        assert service.connection.view["status"] == "unchecked"
-    finally:
-        await service.close()
-        db.close()
-
-
-@pytest.mark.asyncio
-async def test_recheck_is_single_flight(tmp_path: Path) -> None:
-    db, service, checks = _runtime(tmp_path)
-    gate = asyncio.Event()
-
-    async def slow() -> dict[str, Any]:
-        checks.append("check")
-        await gate.wait()
-        return {}
-
-    service.connection.check = slow  # type: ignore[method-assign]
-    try:
-        service.recheck_connection()
-        service.recheck_connection()
-        await asyncio.sleep(0)
-        assert checks == ["check"]
-        gate.set()
-        await asyncio.wait_for(asyncio.shield(service._connection_check), 2)  # type: ignore[arg-type]
-    finally:
-        await service.close()
-        db.close()
-
-
-class _Queue:
-    def __init__(self) -> None:
-        self.status = "running"
-        self.paused = 0
-
-    def checkpoint(self, *_: Any) -> None: ...
-    def get(self, _task_id: str) -> SnapshotTask:
-        return SnapshotTask("t", "c", ("s",), "q", "m", self.status, None, "", None)
-
-    def pause(self, _task_id: str) -> None:
-        self.paused += 1
-        self.status = "paused"
-
-
-class _FailingRunner:
-    async def __aenter__(self) -> None:
-        raise RuntimeError("401 from provider")
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
-
-
-@pytest.mark.asyncio
-async def test_failed_run_triggers_a_connection_recheck() -> None:
-    queue = _Queue()
-    calls: list[str] = []
-    dispatcher = CodexDispatcher(queue, lambda _task: _FailingRunner(),  # type: ignore[arg-type,return-value]
-                                 on_interrupted=lambda: calls.append("recheck"))
-    await dispatcher._execute(queue.get("t"))
-    assert queue.paused == 1
-    assert calls == ["recheck"]

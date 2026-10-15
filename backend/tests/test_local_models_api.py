@@ -1,4 +1,9 @@
-"""Explicit local-ASR model preparation, driven through the public HTTP API.
+"""Explicit local-ASR model preparation (``LocalModelPreparations.start``).
+
+The model routes of the old interface are gone; the Knowledge Wiki starts a
+download from the speech health action (``knowledge/settings/health.py``) and shows
+the state the manager reports (``knowledge/settings/speech.py`` reads it), so these
+tests drive ``start`` the same way and read that same state.
 
 MECHANISM ONLY. The faster-whisper loader is monkeypatched in every test here, so
 nothing is ever downloaded and no checkpoint is ever loaded. These tests prove the
@@ -16,7 +21,7 @@ import httpx
 import pytest
 
 from skaz.gateways import asr as asr_gateway
-from tests.conftest import make_wav
+from tests.sessions_support import runtime_of
 
 
 @dataclass
@@ -63,61 +68,31 @@ def loader(monkeypatch: pytest.MonkeyPatch) -> FakeLoader:
     return fake
 
 
-async def _poll(client: httpx.AsyncClient, model: str, *, until: set[str]) -> dict[str, object]:
-    """Poll the status endpoint the way the UI does, with a bounded number of tries."""
+def report(client: httpx.AsyncClient, model: str) -> tuple[str, str | None] | None:
+    """The manager's last report for a checkpoint, as the speech settings read it."""
+    known = runtime_of(client).local_models._reports.get(f"local-whisper:{model}")
+    return None if known is None else (known[0], known[1])
+
+
+async def _poll(client: httpx.AsyncClient, model: str, *, until: set[str]) -> tuple[str, str | None]:
+    """Wait for the background preparation with a bounded number of tries."""
     for _ in range(200):
-        payload = (await client.get("/models/local/status", params={"model": model})).json()
-        if payload["state"] in until:
-            return dict(payload)
+        known = report(client, model)
+        if known is not None and known[0] in until:
+            return known
         await asyncio.sleep(0.01)
     raise AssertionError(f"model {model} never reached {until}")
-
-
-@pytest.mark.parametrize(
-    "unknown",
-    ["../../../etc/passwd", "/tmp/weights", "openai/whisper-large-v3", "", "small "],
-)
-async def test_unknown_model_id_is_rejected_before_any_loader_call(
-    client: httpx.AsyncClient, loader: FakeLoader, unknown: str
-) -> None:
-    prepare = await client.post("/models/local/prepare", json={"model": unknown})
-    status = await client.get("/models/local/status", params={"model": unknown})
-
-    assert prepare.status_code == 400
-    assert status.status_code == 400
-    assert loader.calls == []
-
-
-async def test_status_reports_not_installed_without_downloading_anything(
-    client: httpx.AsyncClient, loader: FakeLoader
-) -> None:
-    response = await client.get("/models/local/status", params={"model": "small"})
-
-    assert response.status_code == 200
-    body = response.json()
-    assert {key: body[key] for key in ("model", "state", "error")} == {
-        "model": "small",
-        "state": "not_installed",
-        "error": None,
-    }
-    # A status probe may only ever load from local files.
-    assert loader.calls == [("small", False)]
 
 
 async def test_prepare_downloads_then_verifies_a_local_load_before_ready(
     client: httpx.AsyncClient, loader: FakeLoader
 ) -> None:
-    started = await client.post("/models/local/prepare", json={"model": "small"})
-    assert started.status_code == 200
-    assert started.json()["state"] == "installing"
+    started = await runtime_of(client).local_models.start("small")
+    assert started[0] == "installing"
 
     final = await _poll(client, "small", until={"ready", "error", "dependency_missing"})
 
-    assert {key: final[key] for key in ("model", "state", "error")} == {
-        "model": "small",
-        "state": "ready",
-        "error": None,
-    }
+    assert final == ("ready", None)
     # Downloading is not enough: "ready" requires a second, network-free load.
     assert loader.calls == [("small", True), ("small", False)]
 
@@ -127,21 +102,25 @@ async def test_second_preparation_of_another_model_is_rejected_while_one_runs(
 ) -> None:
     loader.loop = asyncio.get_running_loop()
     loader.gate = asyncio.Event()
+    preparations = runtime_of(client).local_models
 
-    first = await client.post("/models/local/prepare", json={"model": "small"})
-    assert first.json()["state"] == "installing"
-    conflict = await client.post("/models/local/prepare", json={"model": "medium"})
-    same = await client.post("/models/local/prepare", json={"model": "small"})
+    first = await preparations.start("small")
+    assert first[0] == "installing"
+    with pytest.raises(asr_gateway.LocalModelBusy) as conflict:
+        await preparations.start("medium")
+    same = await preparations.start("small")
 
-    assert conflict.status_code == 409
-    assert "small" in conflict.json()["detail"]
-    assert same.status_code == 200 and same.json()["state"] == "installing"
-    other_status = await client.get("/models/local/status", params={"model": "medium"})
-    assert other_status.json()["state"] != "installing"
+    assert "small" in conflict.value.active
+    assert same[0] == "installing"
+    assert report(client, "medium") is None
+    for _ in range(200):  # the download step runs in the background task
+        if loader.calls:
+            break
+        await asyncio.sleep(0.01)
     assert [call for call in loader.calls if call[1]] == [("small", True)]
 
     loader.gate.set()
-    assert (await _poll(client, "small", until={"ready", "error"}))["state"] == "ready"
+    assert (await _poll(client, "small", until={"ready", "error"}))[0] == "ready"
 
 
 async def test_missing_faster_whisper_is_its_own_state_not_a_generic_error(
@@ -149,13 +128,11 @@ async def test_missing_faster_whisper_is_its_own_state_not_a_generic_error(
 ) -> None:
     monkeypatch.setattr(asr_gateway, "local_asr_available", lambda: False)
 
-    prepare = await client.post("/models/local/prepare", json={"model": "small"})
+    state, error = await runtime_of(client).local_models.start("small")
 
-    assert prepare.status_code == 200
-    body = prepare.json()
-    assert body["state"] == "dependency_missing"
-    assert "faster-whisper" in (body["error"] or "")
-    assert "local-asr" in (body["error"] or "")
+    assert state == "dependency_missing"
+    assert "faster-whisper" in (error or "")
+    assert "local-asr" in (error or "")
     # A missing dependency is never fixed by downloading weights.
     assert loader.calls == []
 
@@ -164,35 +141,15 @@ async def test_download_failure_reports_error_without_leaking_exception_text(
     client: httpx.AsyncClient, loader: FakeLoader
 ) -> None:
     loader.download_error = OSError(
-        "failed writing /Users/secret/.cache/huggingface/token PRIVATE_TRACE Authorization: Bearer abc"
+        "failed writing /Users/secret/.cache/huggingface/token PRIVATE_TRACE Authorization: Bearer ***"
     )
 
-    await client.post("/models/local/prepare", json={"model": "small"})
-    final = await _poll(client, "small", until={"ready", "error"})
-    raw = (await client.get("/models/local/status", params={"model": "small"})).text
+    await runtime_of(client).local_models.start("small")
+    state, error = await _poll(client, "small", until={"ready", "error"})
+    speech = (await client.get("/kb/settings/speech")).text
 
-    assert final["state"] == "error"
-    assert final["error"]
+    assert state == "error"
+    assert error
     for leak in ("PRIVATE_TRACE", "Authorization", "Bearer", ".cache/huggingface"):
-        assert leak not in raw
-
-
-async def test_transcription_never_gains_a_download_path(
-    client: httpx.AsyncClient, loader: FakeLoader
-) -> None:
-    """Preparing a model must not make the normal ASR path able to download."""
-    await client.post("/models/local/prepare", json={"model": "small"})
-    assert (await _poll(client, "small", until={"ready", "error"}))["state"] == "ready"
-    loader.calls.clear()
-    loader.downloaded.clear()  # the transcription path must fail rather than fetch weights
-
-    session = (await client.post("/sessions", json={"title": "local asr"})).json()
-    upload = await client.post(
-        f"/sessions/{session['id']}/audio",
-        params={"sequence": 0, "start_ms": 0, "end_ms": 1000},
-        content=make_wav(1.0),
-        headers={"Content-Type": "audio/wav"},
-    )
-
-    assert upload.status_code == 400
-    assert loader.calls == [("small", False)]
+        assert leak not in error
+        assert leak not in speech

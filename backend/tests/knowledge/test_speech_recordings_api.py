@@ -21,6 +21,7 @@ from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.speech.service import INTERRUPTED_RECORDING, STILL_STREAMING
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp
+from tests.sessions_support import session_count
 
 from .speech_support import AsyncSoniox, Recorder, ScriptedSoniox, Step, sentence
 
@@ -271,8 +272,7 @@ def test_creating_a_recording_checks_folder_and_name(http: TestClient) -> None:
     assert taken.status_code == 409
     assert http.post("/kb/recordings", headers=AUTH, json={"title": "a/b"}).status_code == 422
     assert http.post("/kb/recordings", headers=AUTH, json={"folder_id": "fld-nope"}).status_code == 404
-    sessions = http.get("/sessions", headers=AUTH).json()["sessions"]
-    assert len(sessions) == 2  # refused requests left no session behind
+    assert session_count(http) == 2  # refused requests left no session behind
     imported = http.post(f"/kb/recordings/{first.json()['material_id']}/stop", headers=AUTH)
     assert imported.status_code == 200
 

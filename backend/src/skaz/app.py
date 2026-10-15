@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -17,24 +18,27 @@ from .knowledge.api import ROUTERS as KB_ROUTERS
 from .knowledge.mcp.router import router as kb_mcp_router
 from .managed_storage import StorageConflict
 from .native_io import disk_call
-from .routes import (
-    agent,
-    asr,
-    codex,
-    health,
-    imports,
-    live,
-    logs,
-    models,
-    sessions,
-    settings,
-    storage,
-    web_search,
-)
+from .routes import health, live, logs, sessions, settings
 from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
 from .security import local_access_error, require_token
+
+logger = logging.getLogger(__name__)
+
+
+def _recover_storage(runtime: Runtime) -> None:
+    """Finish a managed-storage operation a crash interrupted (the old interface had a button).
+
+    While one is pending every new recording session is refused, so the app tries once at
+    start; an operation that still cannot finish is logged and keeps blocking, as before.
+    """
+    if runtime.storage.pending() is None:
+        return
+    try:
+        runtime.storage.recover()
+    except (StorageConflict, OSError) as error:
+        logger.warning("Interrupted storage operation could not be finished: %s", type(error).__name__)
 
 
 def create_app(
@@ -48,6 +52,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
+            await disk_call(_recover_storage, runtime)
             await disk_call(runtime.session_files.reconcile)
             # Reopen and rescan the connected knowledge library; never creates one.
             await disk_call(runtime.kb.start)
@@ -59,7 +64,6 @@ def create_app(
             runtime.imports.resume()
             # Speech materials interrupted by the last shutdown settle in the background.
             await runtime.kb_speech.start()
-            runtime.codex.start()
             yield
         finally:
             await runtime.kb_wiki.close()
@@ -68,7 +72,7 @@ def create_app(
             await runtime.kb_codex.close()
             await runtime.kb_decisions.aclose()
             await runtime.kb_agents.aclose()
-            await runtime.codex.close()
+            await runtime.codex_connection.close()
             await runtime.imports.close()
             await runtime.stop_native()
             await runtime.kb_speech.close()
@@ -106,15 +110,10 @@ def create_app(
     # WebSocket authentication is explicit in the route, not the HTTP dependency.
     app.include_router(live.router)
     protected = [Depends(require_token)]
+    # Legacy routes the Knowledge Wiki still calls: recording options (/settings), the live
+    # transcript of a recording and its status fallback (/sessions/{id}/live…, PATCH).
     app.include_router(settings.router, dependencies=protected)
-    app.include_router(storage.router, dependencies=protected)
-    app.include_router(asr.router, dependencies=protected)
     app.include_router(sessions.router, dependencies=protected)
-    app.include_router(imports.router, dependencies=protected)
-    app.include_router(agent.router, dependencies=protected)
-    app.include_router(codex.router, dependencies=protected)
-    app.include_router(web_search.router, dependencies=protected)
-    app.include_router(models.router, dependencies=protected)
     app.include_router(logs.router, dependencies=protected)
     for kb_router in KB_ROUTERS:
         app.include_router(kb_router, dependencies=protected)

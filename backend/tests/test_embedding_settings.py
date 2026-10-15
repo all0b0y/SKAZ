@@ -26,18 +26,6 @@ async def test_embedding_profile_defaults_and_independent_roundtrip(
     assert not any(request.method == "POST" for request in outbound.requests)
 
 
-async def test_embedding_picker_uses_dedicated_catalog(client: httpx.AsyncClient, outbound: FakeHttp) -> None:
-    outbound.json_route("GET", "openrouter.ai/api/v1/embeddings/models", {"data": [{
-        "id": "openai/text-embedding-3-small", "name": "Embedding small",
-        "architecture": {"input_modalities": ["text"], "output_modalities": ["embeddings"]},
-    }, {"id": "not-an-embedding", "architecture": {"output_modalities": ["text"]}}]})
-    response = await client.get("/models", params={"provider": "openrouter", "task": "embedding"})
-    assert response.status_code == 200
-    assert [m["id"] for m in response.json()["models"]] == ["openai/text-embedding-3-small"]
-    assert not response.json()["models"][0]["verified"]
-    assert all("/embeddings/models" in str(r.url) for r in outbound.requests)
-
-
 async def test_rejects_wrong_provider_and_chat_model_without_persisting(
     client: httpx.AsyncClient, outbound: FakeHttp,
 ) -> None:

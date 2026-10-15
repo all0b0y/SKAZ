@@ -8,18 +8,14 @@ import os
 import httpx
 
 from .activity import ActivityLog
-from .agent.api_agent import ApiAgentEngine
-from .agent.codex_runtime import CodexRuntime
-from .agent.note_rewrite import PendingRewrites
-from .agent.retrieval import EmbeddingIndex
 from .asr_providers import describe_providers
 from .capabilities import describe
 from .catalog import ProviderCatalogs
 from .config import AppConfig, adopt_legacy_database
 from .db import Database
 from .gateways.asr import LocalModelPreparations
+from .gateways.codex_connection import CodexConnection
 from .import_service import ImportService
-from .ingestion import IngestionService
 from .knowledge.agents.codex import CodexEngine
 from .knowledge.agents.hub import build_agents_hub
 from .knowledge.agents.tools import ToolRegistry
@@ -37,9 +33,6 @@ from .knowledge.speech.dictation import Dictation
 from .knowledge.wiki.service import WikiService
 from .knowledge.wiring import McpGrants, wire_speech, wire_wiki
 from .knowledge.wiring import wire as wire_knowledge
-from .live_asr import LiveAsrDraftService
-from .live_fragments import LiveAsrFragmentService
-from .live_scheduler import LiveAsrScheduler
 from .live_store import LiveStore
 from .managed_storage import ManagedStorage
 from .native_stream import NativeStream
@@ -48,8 +41,6 @@ from .secrets import FileSecretStore, SecretStore
 from .session_files import SessionFiles
 from .settings_store import TASKS, SettingsStore, StoredSettings
 from .verifications import note
-from .web_search import WebSearch
-from .window_asr import WindowAsrPreview
 
 
 class Runtime:
@@ -67,9 +58,8 @@ class Runtime:
         self.config = config
         self.activity_log = ActivityLog(config.activity_log_capacity)
         self.db = Database(config.db_path)
-        self.codex = CodexRuntime(self.db, config.data_dir / "codex")
-        self.embedding_index = EmbeddingIndex(self.db)
-        self.embedding_lock = asyncio.Lock()
+        #: The Codex app-server sign-in/connection the knowledge agents run on (areas A1/A2).
+        self.codex_connection = CodexConnection(config.data_dir / "codex" / "account")
         self.session_files = SessionFiles(
             self.db, config.session_files_root, data_dir=config.data_dir,
             suggested_root=config.documents_dir / "SKAZ",
@@ -89,12 +79,12 @@ class Runtime:
         #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
         self.kb_tools = ToolRegistry(self.kb)
         self.kb_mcp = McpServer(self.kb_tools, url=f"http://{config.host}:{config.port}/kb/mcp")
-        self.kb_codex = CodexEngine(self.codex.connection, self.kb_tools)
+        self.kb_codex = CodexEngine(self.codex_connection, self.kb_tools)
         #: Adding documents, links and pasted text to the knowledge library (area S1).
         self.kb_sources = SourceService(self.kb, video_probe=ytdlp_probe)
         #: Agent engines (Codex, Claude Code, Hermes): statuses, installs, sign-in; nothing runs until asked.
         self.kb_agents = build_agents_hub(config.data_dir, settings=self.kb.settings,
-                                          codex=self.codex.connection, codex_engine=self.kb_codex,
+                                          codex=self.codex_connection, codex_engine=self.kb_codex,
                                           mcp=McpGrants(self.kb_mcp))
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
@@ -115,15 +105,8 @@ class Runtime:
         #: General chats (C1): answers through the engine registry with the SKAZ tools, no queues.
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer)
-        self.web_search = WebSearch(self.db, self.secrets)
-        self.codex.web_search = self.web_search
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
-        self.codex.api_agents = ApiAgentEngine(
-            settings=self.settings_store.load, api_key=self.api_key, http=self.http,
-            catalogs=self.catalogs, timeout=config.request_timeout_s,
-        )
-        self.ingestion = IngestionService(self)
         #: File imports. Resumption is started by the app lifespan, not here: a
         #: constructor must not create tasks on a loop it does not own.
         self.imports = ImportService(self)
@@ -132,12 +115,6 @@ class Runtime:
         self.kb_speech.on_finished(self.kb_auto_ingest.material_finished)
         #: ``link_failed`` notifications and their actions (area S3).
         self.kb_link_failures = wire_speech(self.kb, self.kb_speech)
-        #: Written-but-unapplied note passages, held until the user compares them.
-        self.note_rewrites = PendingRewrites()
-        self.window_asr = WindowAsrPreview(self)
-        self.live_asr = LiveAsrDraftService(self.window_asr, self)
-        self.live_fragments = LiveAsrFragmentService(self)
-        self.live_scheduler = LiveAsrScheduler(self)
         self._close_started = False
         self.native_tasks: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}
         self.native_streams: dict[str, NativeStream] = {}
@@ -157,30 +134,6 @@ class Runtime:
 
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
-
-    @property
-    def contextual_local_enabled(self) -> bool:
-        """The persisted explicit opt-in for the experimental contextual local mode.
-
-        Reading it never enables anything: the value is written only by an explicit
-        settings update, so it also survives a restart without re-enabling itself.
-        """
-        return self.settings_store.load().contextual_local_enabled
-
-    @property
-    def live_finality_enabled(self) -> bool:
-        """Effective stable-prefix finalization for the contextual local path."""
-        return self.config.live_finality_enabled or self.contextual_local_enabled
-
-    @property
-    def local_speech_gate(self) -> bool:
-        """Effective speech-presence gate for the contextual local window decoder.
-
-        The legacy per-chunk path deliberately keeps reading
-        ``config.local_speech_gate`` so the opt-in never changes legacy/cloud
-        transcription behaviour.
-        """
-        return self.config.local_speech_gate or self.contextual_local_enabled
 
     def settings_view(self, stored: StoredSettings | None = None) -> Settings:
         """Sanitised settings for the API: keys reported as presence only, honest verified flags."""
@@ -248,17 +201,7 @@ class Runtime:
         if self._close_started:
             return
         self._close_started = True
-        pending = self.live_scheduler.close()
-        if pending is not None:
-            pending.add_done_callback(lambda _task: self._finish_close())
-            return
-        self._finish_close()
-
-    def _finish_close(self) -> None:
-        self.codex.close_storage()
-        self.window_asr.close()
         self.local_models.close()
-        self.ingestion.close()
         self.kb_decisions.kill_now()
         self.kb.close()
         self.db.close()

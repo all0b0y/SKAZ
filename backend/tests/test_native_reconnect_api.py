@@ -9,6 +9,7 @@ from starlette.testclient import TestClient
 from skaz import native_recovery
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
+from tests.sessions_support import create_session, live_status, session_detail
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -31,7 +32,7 @@ def test_initial_transient_failure_retries_without_losing_captured_audio(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Recovery"}).json()["id"]
+        sid = create_session(http, "Recovery")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -69,7 +70,7 @@ def test_timeout_or_full_buffer_ends_recovery_and_clears_pcm(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Bound"}).json()["id"]
+        sid = create_session(http, "Bound")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -78,7 +79,7 @@ def test_timeout_or_full_buffer_ends_recovery_and_clears_pcm(
                     ws.send_bytes(packet(n, n * 8000, 8000))
                     assert ws.receive_json()["type"] == "audio.saved"
             assert ws.receive_json()["type"] == "transcription.failed"
-            status = http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()
+            status = live_status(http, sid)
             assert status["buffered_audio_ms"] == 0
             assert status["state"] == "unavailable"
             assert calls == (1 if overflow else 3)
@@ -106,19 +107,19 @@ def test_stop_or_pause_cancels_connect_and_clears_audio(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Cancel"}).json()["id"]
+        sid = create_session(http, "Cancel")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
             ws.send_bytes(packet(0, 0))
             assert ws.receive_json()["type"] == "audio.saved"
-            assert http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()["buffered_audio_ms"] == 100
+            assert live_status(http, sid)["buffered_audio_ms"] == 100
             ws.send_json({"type": "end", "action": action})
             result = ws.receive_json()
             assert result["transcription_complete"] is False
             assert result["status"] == ("paused" if action == "pause" else "stopped")
         assert cancelled.is_set() and calls == 1
-        assert http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()["buffered_audio_ms"] == 0
+        assert live_status(http, sid)["buffered_audio_ms"] == 0
 
 
 @pytest.mark.parametrize("code,expected_calls", [(503, 3), (401, 1), (402, 1), (403, 1)])
@@ -139,7 +140,7 @@ def test_retry_exhaustion_and_terminal_errors(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Failure"}).json()["id"]
+        sid = create_session(http, "Failure")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -164,7 +165,7 @@ def test_midstream_replays_only_unconfirmed_audio_at_original_time(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Replay"}).json()["id"]
+        sid = create_session(http, "Replay")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -187,7 +188,7 @@ def test_midstream_replays_only_unconfirmed_audio_at_original_time(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["transcription_complete"] is True
         assert b"".join(second.audio) == packet(0, 0)[20 + 1600:]
-        detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+        detail = session_detail(http, sid)
         assert [(s["text"], s["start_ms"], s["end_ms"]) for s in detail["segments"]] == [
             ("Before", 0, 50), ("Hello", 50, 100),
         ]

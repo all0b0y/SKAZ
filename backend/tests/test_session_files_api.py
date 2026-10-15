@@ -1,4 +1,10 @@
-"""Filesystem output observed through session/notes HTTP, with isolated real disk."""
+"""Markdown projection of a recording's session onto isolated real disk.
+
+The files/notes routes of the old interface are gone: projection runs when the
+recorder pauses or stops (``PATCH /sessions/{id}``) and on the paths that call
+``SessionFiles.project`` directly; session Notes no longer exist, so their file
+tests went with them.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +27,14 @@ from skaz.app import create_app
 from skaz.config import AppConfig
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
-from tests.conftest import FakeHttp, chat_completion, make_wav
+from tests.conftest import FakeHttp
+from tests.sessions_support import (
+    adelete,
+    create_session,
+    files_status,
+    project,
+    session_gone,
+)
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -35,12 +48,10 @@ def config(tmp_path: Path) -> AppConfig:
 async def test_pause_projects_transcript_without_generating_notes(
     client: httpx.AsyncClient, config: AppConfig, outbound: FakeHttp,
 ) -> None:
-    sid = (await client.post("/sessions", json={"title": "../Lecture <script>"})).json()["id"]
+    sid = create_session(client, "../Lecture <script>")
     paused = await client.patch(f"/sessions/{sid}", json={"status": "paused"})
     assert paused.status_code == 200, paused.text
-    status = await client.get(f"/sessions/{sid}/files")
-    assert status.status_code == 200, status.text
-    assert status.json()["state"] == "ready"
+    assert files_status(client, sid)["state"] == "ready"
     assert config.session_files_root is not None
     directory = config.session_files_root / "Ungrouped" / sid
     transcript = (directory / "Transcript.md").read_text()
@@ -51,69 +62,11 @@ async def test_pause_projects_transcript_without_generating_notes(
     assert not (config.session_files_root / "Lecture <script>").exists()
 
 
-async def seed_note(client: httpx.AsyncClient, outbound: FakeHttp) -> tuple[str, str]:
-    (await client.put("/settings", json={
-        "cloud_consent": True,
-        "provider_keys": {"openai": "fixture-only"},
-        "asr": {"provider": "openai", "model": "whisper-1"},
-        "notes": {"provider": "openai", "model": "gpt-4o-mini"},
-    })).raise_for_status()
-    sid = (await client.post("/sessions", json={"title": "Lecture"})).json()["id"]
-    outbound.json_route("POST", "audio/transcriptions", {"text": "Original evidence."})
-    response = await client.post(f"/sessions/{sid}/audio", params={
-        "sequence": 0, "start_ms": 0, "end_ms": 1000,
-    }, content=make_wav(), headers={"Content-Type": "audio/wav"})
-    assert response.status_code == 200, response.text
-    outbound.json_route("POST", "chat/completions", chat_completion("First note [P1]"))
-    note = await client.post(f"/sessions/{sid}/notes", json={})
-    assert note.status_code == 200, note.text
-    return sid, str(note.json()["id"])
-
-
-async def test_independent_notes_edit_and_external_conflict(
-    client: httpx.AsyncClient, config: AppConfig, outbound: FakeHttp,
-) -> None:
-    sid, nid = await seed_note(client, outbound)
-    assert config.session_files_root is not None
-    directory = config.session_files_root / "Ungrouped" / sid
-    note_file = directory / f"Note-{nid}.md"
-    original = note_file.read_text()
-    assert "First note" in original
-    assert "[P1]" not in original, "labels are grounding, never part of the document"
-    detail = (await client.get(f"/sessions/{sid}")).json()
-    segment = detail["segments"][0]["id"]
-    assert f"Transcript.md#segment-{segment}" in original
-    transcript = (directory / "Transcript.md").read_text()
-    assert f'id="segment-{segment}"' in transcript
-    assert "00:00:00.000" in transcript
-    assert "Original evidence" in transcript
-    second = (await client.post(f"/sessions/{sid}/notes", json={})).json()["id"]
-    assert second != nid
-    assert len(list(directory.glob("Note-*.md"))) == 2
-    path = f"/sessions/{sid}/notes/{nid}"
-    (await client.patch(path, json={"expected_revision": 1, "content": "Edited"})).raise_for_status()
-    assert "Edited" in note_file.read_text()
-    assert (await client.get(path + "/history")).status_code == 404
-    assert list(directory.glob("*history*")) == []
-    note_file.write_text("External author's changes", encoding="utf-8")
-    response = await client.patch(path, json={"expected_revision": 2, "content": "New app text"})
-    assert response.status_code == 200, response.text
-    assert note_file.read_text() == "External author's changes"
-    status = (await client.get(f"/sessions/{sid}/files")).json()
-    assert status["state"] == "conflict"
-    conflict = next(f for f in status["files"] if f["state"] == "conflict")
-    assert "New app text" in (directory / conflict["path"]).read_text()
-    # Selected by id, not by position: the list is ordered by last edit, so the
-    # note just written is now first. The claim here is about its content.
-    listing = (await client.get(path.rsplit("/", 1)[0])).json()["notes"]
-    assert next(n for n in listing if n["id"] == nid)["content"] == "New app text"
-
-
 @pytest.mark.parametrize("target", ["root", "group", "session", "transcript", "hardlink"])
 async def test_projection_rejects_links_without_touching_external_data(
     client: httpx.AsyncClient, config: AppConfig, tmp_path: Path, target: str,
 ) -> None:
-    sid = (await client.post("/sessions", json={"title": "Safe"})).json()["id"]
+    sid = create_session(client, "Safe")
     assert config.session_files_root is not None
     root = config.session_files_root
     directory = root / "Ungrouped" / sid
@@ -133,7 +86,7 @@ async def test_projection_rejects_links_without_touching_external_data(
             (directory / "Transcript.md").hardlink_to(external)
     paused = await client.patch(f"/sessions/{sid}", json={"status": "paused"})
     assert paused.status_code == 200
-    status = (await client.get(f"/sessions/{sid}/files")).json()
+    status = files_status(client, sid)
     assert status["state"] == "error"
     assert str(outside) not in str(status)
     assert external.read_text() == "Never touch"
@@ -143,45 +96,29 @@ async def test_projection_rejects_links_without_touching_external_data(
 async def test_unknown_file_is_not_adopted_or_overwritten_and_get_is_read_only(
     client: httpx.AsyncClient, config: AppConfig,
 ) -> None:
-    sid = (await client.post("/sessions", json={"title": "Safe"})).json()["id"]
+    sid = create_session(client, "Safe")
     assert config.session_files_root is not None
     directory = config.session_files_root / "Ungrouped" / sid
-    status = (await client.get(f"/sessions/{sid}/files")).json()
+    status = files_status(client, sid)
     assert status["state"] == "pending"
     assert not directory.exists()
     directory.mkdir(parents=True)
     target = directory / "Transcript.md"
     target.write_text("External before first projection")
-    result = (await client.post(f"/sessions/{sid}/files")).json()
+    result = project(client, sid)
     assert result["state"] == "conflict"
     assert target.read_text() == "External before first projection"
     assert "No stable transcript" in (directory / result["files"][0]["path"]).read_text()
-    assert (await client.post("/sessions/missing/files")).status_code == 404
-    again = (await client.post(f"/sessions/{sid}/files")).json()
+    again = project(client, sid)
     assert again["files"][0]["path"] == result["files"][0]["path"]
     assert len(list(directory.glob("*.md"))) == 2
-
-
-async def test_note_sources_link_to_preserved_app_transcript_on_conflict(
-    client: httpx.AsyncClient, config: AppConfig, outbound: FakeHttp,
-) -> None:
-    sid, nid = await seed_note(client, outbound)
-    assert config.session_files_root is not None
-    directory = config.session_files_root / "Ungrouped" / sid
-    (directory / "Transcript.md").write_text("External replacement without source anchors")
-    result = (await client.post(f"/sessions/{sid}/files")).json()
-    projected = next(f for f in result["files"] if f["name"] == "Transcript.md")
-    assert projected["state"] == "conflict"
-    note = (directory / f"Note-{nid}.md").read_text()
-    assert f']({projected["path"]}#segment-' in note
-    assert "](Transcript.md#" not in note
 
 
 async def test_external_replace_at_atomic_publish_boundary_is_preserved(
     client: httpx.AsyncClient, config: AppConfig, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sid = (await client.post("/sessions", json={"title": "Before"})).json()["id"]
-    (await client.post(f"/sessions/{sid}/files")).raise_for_status()
+    sid = create_session(client, "Before")
+    project(client, sid)
     assert config.session_files_root is not None
     directory = config.session_files_root / "Ungrouped" / sid
     target = directory / "Transcript.md"
@@ -221,47 +158,14 @@ async def test_external_replace_at_atomic_publish_boundary_is_preserved(
 
     monkeypatch.setattr(os, "replace", racing_replace)
     monkeypatch.setattr(ctypes, "CDLL", racing_library)
-    result = (await client.post(f"/sessions/{sid}/files")).json()
+    result = project(client, sid)
     assert fired
     assert result["state"] == "conflict"
     assert any("External text saved at the rename boundary" in p.read_text()
                for p in directory.glob("*.md"))
-    again = (await client.post(f"/sessions/{sid}/files")).json()
+    again = project(client, sid)
     assert again["state"] == "conflict"  # retry cannot silently dismiss saved external data
     assert again["conflicts"] == result["conflicts"]
-
-
-async def test_failed_file_flush_keeps_previous_file_and_committed_note_then_retry(
-    client: httpx.AsyncClient, config: AppConfig, outbound: FakeHttp, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sid, nid = await seed_note(client, outbound)
-    assert config.session_files_root is not None
-    directory = config.session_files_root / "Ungrouped" / sid
-    note_file = directory / f"Note-{nid}.md"
-    previous = note_file.read_bytes()
-    original_fsync = os.fsync
-
-    def failed_flush(descriptor: int) -> None:
-        if stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise OSError("Sensitive path must not appear in API")
-        original_fsync(descriptor)
-
-    with monkeypatch.context() as patcher:
-        patcher.setattr(os, "fsync", failed_flush)
-        edited = await client.patch(f"/sessions/{sid}/notes/{nid}", json={
-            "content": "Saved in database", "expected_revision": 1,
-        })
-        assert edited.status_code == 200, edited.text
-        assert edited.json()["revision"] == 2
-        assert note_file.read_bytes() == previous
-        status = (await client.get(f"/sessions/{sid}/files")).json()
-        assert status["state"] == "error"
-        assert "Sensitive" not in str(status)
-        assert list(directory.glob("*.recovery-*.md")) == []
-    result = (await client.post(f"/sessions/{sid}/files")).json()
-    assert result["state"] == "ready"
-    assert "Saved in database" in note_file.read_text()
-    assert len(list(directory.glob("Note-*.md"))) == 1
 
 
 def test_native_pause_waits_for_tail_and_restart_keeps_manifest(
@@ -285,7 +189,7 @@ def test_native_pause_waits_for_tail_and_restart_keeps_manifest(
     app = create_app(config, secret_store=secrets, http_client=outbound.client())
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True}).raise_for_status()
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Native"}).json()["id"]
+        sid = create_session(http, "Native")
         assert config.session_files_root is not None
         directory = config.session_files_root / "Ungrouped" / sid
         target = directory / "Transcript.md"
@@ -304,7 +208,7 @@ def test_native_pause_waits_for_tail_and_restart_keeps_manifest(
                     break
                 assert time.monotonic() < deadline, snapshot
                 time.sleep(0.01)
-            http.post(f"/sessions/{sid}/files", headers=AUTH).raise_for_status()
+            project(http, sid)
             assert "Hello" not in target.read_text()
             assert "Unstable draft" not in target.read_text()
             ws.send_json({"type": "end", "action": "pause"})
@@ -314,12 +218,12 @@ def test_native_pause_waits_for_tail_and_restart_keeps_manifest(
         assert outbound.requests == []  # no notes generation
     reopened = create_app(config, secret_store=secrets, http_client=outbound.client())
     with TestClient(reopened, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        assert http.get(f"/sessions/{sid}/files", headers=AUTH).json()["state"] == "ready"
-        result = http.post(f"/sessions/{sid}/files", headers=AUTH).json()
+        assert files_status(http, sid)["state"] == "ready"
+        result = project(http, sid)
         assert result["files"][0]["state"] == "unchanged"
         assert http.get(f"/sessions/{sid}/audio/0", headers=AUTH).status_code == 404
         target.write_text("External after restart")
-        result = http.post(f"/sessions/{sid}/files", headers=AUTH).json()
+        result = project(http, sid)
         assert result["state"] == "conflict"
         assert target.read_text() == "External after restart"
         assert "Hello" in (directory / result["files"][0]["path"]).read_text()
@@ -328,7 +232,7 @@ def test_native_pause_waits_for_tail_and_restart_keeps_manifest(
 async def test_delete_waits_for_inflight_file_publication(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sid = (await client.post("/sessions", json={"title": "Delete during export"})).json()["id"]
+    sid = create_session(client, "Delete during export")
     entered, release = threading.Event(), threading.Event()
     original_fsync = os.fsync
 
@@ -339,16 +243,16 @@ async def test_delete_waits_for_inflight_file_publication(
         original_fsync(descriptor)
 
     monkeypatch.setattr(os, "fsync", delayed_flush)
-    exporting = asyncio.create_task(client.post(f"/sessions/{sid}/files"))
-    deleting: asyncio.Task[httpx.Response] | None = None
+    exporting = asyncio.create_task(asyncio.to_thread(project, client, sid))
+    deleting: asyncio.Task[None] | None = None
     try:
         assert await asyncio.to_thread(entered.wait, 5)
-        deleting = asyncio.create_task(client.delete(f"/sessions/{sid}"))
+        deleting = asyncio.create_task(adelete(client, sid))
         completed, _ = await asyncio.wait({deleting}, timeout=0.1)
         assert not completed  # deletion cannot orphan a manifest write
     finally:
         release.set()
         results = await asyncio.gather(exporting, *([deleting] if deleting else []),
                                        return_exceptions=True)
-    assert all(isinstance(r, httpx.Response) and r.status_code == 200 for r in results), results
-    assert (await client.get(f"/sessions/{sid}/files")).status_code == 404
+    assert not any(isinstance(r, BaseException) for r in results), results
+    assert session_gone(client, sid)

@@ -208,3 +208,9 @@ async def test_updates_languages_and_consent(client: httpx.AsyncClient) -> None:
     assert body["output_language"] == "en"
     assert body["cloud_consent"] is True
     assert body["transcript_language"] == "auto"
+
+
+async def test_unknown_settings_fields_are_still_rejected(client: httpx.AsyncClient) -> None:
+    # Moved from the removed contextual-local tests: an unknown field is refused, not ignored.
+    response = await client.put("/settings", json={"contextual_local": True})
+    assert response.status_code == 422

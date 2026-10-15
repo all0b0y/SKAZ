@@ -24,6 +24,7 @@ from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.speech.service import CANCELLED_IMPORT, INTERRUPTED_IMPORT
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp
+from tests.sessions_support import adelete, get_session, session_count
 
 from .speech_support import AsyncSoniox
 
@@ -120,7 +121,7 @@ async def fragments(api: httpx.AsyncClient, material_id: str) -> list[tuple[str,
 
 
 async def test_two_imports_run_side_by_side_and_cancel_independently(
-    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path,
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
 ) -> None:
     soniox.hold_all = True
     first = await api.post("/kb/imports", json={"path": media(tmp_path, "Lecture A.m4a")})
@@ -141,7 +142,8 @@ async def test_two_imports_run_side_by_side_and_cancel_independently(
     assert cancelled.json()["status"] == "failed" and cancelled.json()["error"] == CANCELLED_IMPORT
     # The other import is untouched and still running.
     assert (await api.get(f"/kb/imports/{b['material_id']}")).json()["import_state"] == "running"
-    assert (await api.get(f"/sessions/{a['session_id']}")).status_code == 404
+    # A cancelled import's technical session is deleted with it.
+    assert get_session(speech_app, a["session_id"]) is None
 
     soniox.hold.clear()
     done = await until(api, b["material_id"], status="ready")
@@ -151,13 +153,14 @@ async def test_two_imports_run_side_by_side_and_cancel_independently(
 
 
 async def test_deleting_one_imports_session_leaves_the_other_running(
-    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path,
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
 ) -> None:
     soniox.hold_all = True
     a = (await api.post("/kb/imports", json={"path": media(tmp_path, "Left.m4a")})).json()
     b = (await api.post("/kb/imports", json={"path": media(tmp_path, "Right.m4a")})).json()
     await until(api, a["material_id"], import_stage="processing")
-    assert (await api.delete(f"/sessions/{a['session_id']}")).status_code == 200
+    # The deletion path the speech area uses (``LegacySpeech.delete_session``).
+    await adelete(speech_app, a["session_id"])
     gone = await until(api, a["material_id"], status="failed")
     assert gone["error"] == CANCELLED_IMPORT
     assert (await api.get(f"/kb/imports/{b['material_id']}")).json()["import_state"] == "running"
@@ -180,9 +183,9 @@ async def test_imports_go_to_the_last_used_folder(api: httpx.AsyncClient, tmp_pa
 
 
 async def test_requests_are_checked_before_anything_starts(
-    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path,
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
 ) -> None:
-    sessions_before = len((await api.get("/sessions")).json()["sessions"])
+    sessions_before = session_count(speech_app)
     cases = [
         ({"path": "relative.m4a"}, 400),
         ({"path": media(tmp_path, "notes.txt")}, 400),
@@ -196,7 +199,7 @@ async def test_requests_are_checked_before_anything_starts(
     await api.post("/kb/imports", json={"path": media(tmp_path, "Same.m4a")})
     taken = await api.post("/kb/imports", json={"path": media(tmp_path, "same.m4a")})
     assert taken.status_code == 409 and "already exists" in taken.json()["detail"]
-    assert len((await api.get("/sessions")).json()["sessions"]) == sessions_before + 1
+    assert session_count(speech_app) == sessions_before + 1
     assert len(soniox.jobs) <= 1
 
 
@@ -266,7 +269,6 @@ async def test_on_device_recognition_is_bounded_with_a_reason_not_queued(
     monkeypatch.setattr(media_tools, "decode_pcm16k", decode)
     monkeypatch.setattr("skaz.import_service.transcribe_import", transcribe)
     assert (await api.put("/settings", json={"transcription_provider": "local-whisper"})).status_code == 200
-    assert (await api.get("/imports")).json()["max_concurrent_imports"] == MAX_LOCAL_RECOGNITIONS
 
     started = [await api.post("/kb/imports", json={"path": media(tmp_path, f"local {index}.m4a")})
                for index in range(MAX_LOCAL_RECOGNITIONS)]

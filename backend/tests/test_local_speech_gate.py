@@ -1,29 +1,24 @@
 """Bounded whole-window speech-presence gate for the local Whisper adapter.
 
-The detector and model are stubbed in mechanism tests.  The persistence test uses
-the real HTTP, SQLite repository, and filesystem path so rejected audio remains
-independently playable even when no transcript segment is produced.
+The detector and model are stubbed in mechanism tests. The HTTP tests that drove the
+gate through the removed chunk-upload route went with that route.
 """
 
 from __future__ import annotations
 
 import builtins
 import sys
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import httpx
 import pytest
 
-from skaz.app import create_app
 from skaz.audio import parse_wav
 from skaz.config import AppConfig
 from skaz.gateways import ProviderError, ProviderNotConfigured
 from skaz.gateways import asr as asr_gateway
-from skaz.secrets import MemorySecretStore
-from tests.conftest import TOKEN, FakeHttp, make_wav
+from tests.conftest import TOKEN, make_wav
 
 
 class FakeEngine:
@@ -220,48 +215,6 @@ async def test_missing_numpy_uses_local_asr_dependency_error(
     assert str(caught.value) == asr_gateway.LOCAL_ASR_DEPENDENCY_DETAIL
 
 
-@pytest.mark.parametrize("gate", [False, True])
-@pytest.mark.parametrize("dependency", ["numpy", "faster_whisper"])
-async def test_missing_local_asr_dependency_is_safe_api_error(
-    config: AppConfig,
-    outbound: FakeHttp,
-    monkeypatch: pytest.MonkeyPatch,
-    gate: bool,
-    dependency: str,
-) -> None:
-    application = create_app(
-        replace(config, local_speech_gate=gate),
-        secret_store=MemorySecretStore(),
-        http_client=outbound.client(),
-    )
-    monkeypatch.setattr(asr_gateway.LocalWhisperTranscriber, "_models", {})
-    _block_import(monkeypatch, dependency)
-
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=application),
-            base_url="http://127.0.0.1:8765",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        ) as client:
-            created = await client.post("/sessions", json={"title": "missing local dependency"})
-            response = await client.post(
-                f"/sessions/{created.json()['id']}/audio",
-                params={"sequence": 0, "start_ms": 0, "end_ms": 250},
-                content=make_wav(0.25),
-                headers={"Content-Type": "audio/wav"},
-            )
-    finally:
-        application.state.runtime.close()
-
-    expected_detail = (
-        asr_gateway.LOCAL_SPEECH_GATE_DEPENDENCY_DETAIL
-        if gate and dependency == "faster_whisper"
-        else asr_gateway.LOCAL_ASR_DEPENDENCY_DETAIL
-    )
-    assert response.status_code == 400
-    assert response.json() == {"detail": expected_detail}
-
-
 async def test_disabled_gate_preserves_existing_decoder_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -286,45 +239,3 @@ async def test_disabled_gate_preserves_existing_decoder_path(
     assert decoder_samples.tolist() == pytest.approx(expected)
     assert kwargs["vad_filter"] is False
     assert kwargs["language"] is None
-
-
-async def test_gated_silence_has_no_segment_or_audio_playback(
-    config: AppConfig,
-    outbound: FakeHttp,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    gated_config = replace(config, local_speech_gate=True)
-    decoder = FakeEngine(fail_if_called=True)
-    monkeypatch.setattr(asr_gateway, "detect_speech_presence", lambda _samples: False, raising=False)
-    monkeypatch.setattr(asr_gateway, "load_local_whisper", lambda *_args, **_kwargs: decoder)
-    application = create_app(
-        gated_config,
-        secret_store=MemorySecretStore(),
-        http_client=outbound.client(),
-    )
-    body = make_wav(0.25, sample_rate=44_100)
-
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=application),
-            base_url="http://127.0.0.1:8765",
-            headers={"Authorization": f"Bearer {TOKEN}"},
-        ) as client:
-            created = await client.post("/sessions", json={"title": "controlled silence"})
-            session_id = str(created.json()["id"])
-            uploaded = await client.post(
-                f"/sessions/{session_id}/audio",
-                params={"sequence": 0, "start_ms": 0, "end_ms": 250},
-                content=body,
-                headers={"Content-Type": "audio/wav"},
-            )
-            playback = await client.get(f"/sessions/{session_id}/audio/0")
-            detail = await client.get(f"/sessions/{session_id}")
-    finally:
-        application.state.runtime.close()
-
-    assert uploaded.status_code == 200, uploaded.text
-    assert uploaded.json()["segments"] == []
-    assert detail.json()["segments"] == []
-    assert playback.status_code == 404
-    assert decoder.calls == []

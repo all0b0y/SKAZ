@@ -13,6 +13,7 @@ from skaz.config import AppConfig
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
+from tests.sessions_support import create_session, session_detail
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -61,7 +62,7 @@ def test_mixed_translation_order_and_status_survive_restart(
             "native_recording_mode": "translation", "translation_target_language": "de",
             "cloud_consent": True,
         }).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Mixed"}).json()["id"]
+        sid = create_session(http, "Mixed")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -108,7 +109,7 @@ def test_mixed_translation_order_and_status_survive_restart(
         ]
         assert [turn["passthrough_token_ids"] for turn in turns] == [[], [stream[3]["id"]], []]
         assert projection["unassigned_translation_token_ids"] == []
-        detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+        detail = session_detail(http, sid)
         assert "".join(s["text"] for s in detail["segments"]) == "Good morningJaThanks"
     app = create_app(config, secret_store=secrets, http_client=outbound.client())
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:

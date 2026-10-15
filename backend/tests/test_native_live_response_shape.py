@@ -21,6 +21,7 @@ from skaz.config import AppConfig
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
+from tests.sessions_support import create_session
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -78,7 +79,7 @@ def _record(
             "native_recording_mode": mode, "translation_target_language": "de",
             "cloud_consent": True,
         }).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": mode}).json()["id"]
+        sid = create_session(http, mode)
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()

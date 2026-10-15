@@ -8,7 +8,6 @@ transcript stored in the same shape (tokens, speakers, segments) as Soniox.
 from __future__ import annotations
 
 import asyncio
-import json
 import struct
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
@@ -23,6 +22,7 @@ from skaz import asr_providers, media_tools
 from skaz.app import create_app
 from skaz.config import AppConfig
 from skaz.file_asr import FileTranscript, transcribe_pcm_file
+from skaz.gateways import ProviderNotConfigured
 from skaz.gateways.live_session import LiveAsrSession
 from skaz.gateways.soniox_async import AsyncToken
 from skaz.gateways.whisper_stream import (
@@ -32,10 +32,13 @@ from skaz.gateways.whisper_stream import (
     StreamSettings,
     WhisperStreamSession,
 )
+from skaz.import_service import ImportRequest
+from skaz.knowledge.speech.legacy import LegacySpeech
 from skaz.live_store import LiveConnection
 from skaz.secrets import MemorySecretStore
 from skaz.settings_store import StoredSettings
 from tests.conftest import FakeHttp
+from tests.sessions_support import create_session, live_status, runtime_of, session_detail
 from tests.test_native_live_ws import AUTH
 from tests.test_whisper_stream import SCRIPT, ScriptedDecoder, ScriptedVad, tone
 
@@ -47,7 +50,7 @@ def pcm_packet(sequence: int, start: int, pcm: bytes) -> bytes:
 def wait_background(http: TestClient, sid: str) -> None:
     assert http.portal is not None
     for _ in range(200):
-        status = http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()
+        status = live_status(http, sid)
         if not status["processing"]:
             assert status["incomplete"] is False
             return
@@ -138,7 +141,7 @@ def test_local_stream_keeps_the_transcript_shape_with_speakers_and_no_cloud_cons
     audio = tone(8, SCRIPT)
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Offline"}).json()["id"]
+        sid = create_session(http, "Offline")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
             opened = ws.receive_json()
@@ -161,7 +164,7 @@ def test_local_stream_keeps_the_transcript_shape_with_speakers_and_no_cloud_cons
         by_speaker = {token["text"]: token["speaker_number"] for token in live["final_tokens"]}
         assert by_speaker[" Hello"] == 1 and by_speaker[" Second"] == 2
         assert live["connections"][0]["model"] == "local-whisper/small"
-        segments = http.get(f"/sessions/{sid}", headers=AUTH).json()["segments"]
+        segments = session_detail(http, sid)["segments"]
         # One segment per confirmed delta, exactly as Soniox final deltas are stored.
         assert [segment["text"] for segment in segments] == [
             " Hello world.", " This is", " a test.", " Second part.",
@@ -180,7 +183,7 @@ def test_local_stream_without_a_downloaded_model_fails_with_a_reason_not_a_fallb
         http.put("/settings", headers=AUTH, json={
             "transcription_provider": "local-whisper", "cloud_consent": True,
         })
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Missing"}).json()["id"]
+        sid = create_session(http, "Missing")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
             assert ws.receive_json()["transcription"] == "connecting"
@@ -200,7 +203,7 @@ def test_unsupported_live_translation_is_reported_before_recording(
             "transcription_provider": "openai", "cloud_consent": True,
             "native_recording_mode": "translation", "translation_target_language": "de",
         })
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Translate"}).json()["id"]
+        sid = create_session(http, "Translate")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
             opened = ws.receive_json()
@@ -214,7 +217,7 @@ def test_cloud_provider_needs_consent_and_its_own_key(app: Any, secrets: MemoryS
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"transcription_provider": "openai", "cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "No key"}).json()["id"]
+        sid = create_session(http, "No key")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
             opened = ws.receive_json()
@@ -233,7 +236,7 @@ def test_revoking_cloud_consent_does_not_stop_an_on_device_stream(
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH,
                  json={"transcription_provider": "local-whisper", "cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Private"}).json()["id"]
+        sid = create_session(http, "Private")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
             assert ws.receive_json()["transcription"] == "connecting"
@@ -320,25 +323,25 @@ async def test_local_import_is_stored_like_soniox_and_needs_no_cloud(
     monkeypatch.setattr("skaz.import_service.transcribe_import", transcribe)
     saved = await client.put("/settings", json={"transcription_provider": "local-whisper"})
     assert saved.status_code == 200
-    capabilities = (await client.get("/imports")).json()
-    assert capabilities["provider"] == "local-whisper" and capabilities["sends_audio"] is False
-    assert capabilities["provider_ready"] is True and capabilities["rate_per_hour_usd"] == 0
     source = tmp_path / "lecture.m4a"
     source.write_bytes(b"\x00\x01" * 2048)
-    response = await client.post("/imports", json={"path": str(source), "title": "Лекция",
-                                                   "declared_duration_ms": 2_500})
-    assert response.status_code == 201, response.text
-    sid = response.json()["session"]["id"]
+    # The import bridge the Knowledge Wiki uses (no cloud consent or key is asked for).
+    speech = LegacySpeech(runtime_of(client))
+    sid = speech.create_import_session("Лекция")
+    await speech.start_import(ImportRequest(session_id=sid, path=source, translate=False,
+                                            declared_duration_ms=2_500))
+    status = None
     for _ in range(400):
         await asyncio.sleep(0.01)
-        state = (await client.get(f"/imports/{sid}")).json()
-        if state["status"] in ("completed", "failed"):
+        record = runtime_of(client).imports.store.get(sid)
+        status = record.status if record else None
+        if status in ("completed", "failed"):
             break
-    assert state["status"] == "completed", state
+    assert status == "completed", record
     assert calls == [("local-whisper/small", None)]
     live = (await client.get(f"/sessions/{sid}/live")).json()
     assert [speaker["number"] for speaker in live["speakers"]] == [1, 2]
-    detail = (await client.get(f"/sessions/{sid}")).json()
+    detail = session_detail(client, sid)
     assert [segment["text"] for segment in detail["segments"]] == [" Добрый день", " Отвечаю"]
 
 
@@ -351,10 +354,13 @@ async def test_import_refuses_translation_a_provider_cannot_do(
                                         "translation_target_language": "de"})
     source = tmp_path / "lecture.m4a"
     source.write_bytes(b"\x00\x01" * 2048)
-    response = await client.post("/imports", json={"path": str(source), "title": "x", "translate": True})
-    assert response.status_code == 409
-    assert "English only" in response.json()["detail"]
-    assert json.loads(json.dumps((await client.get("/sessions")).json()))["sessions"] == []
+    speech = LegacySpeech(runtime_of(client))
+    sid = speech.create_import_session("x")
+    with pytest.raises(ProviderNotConfigured) as refused:
+        await speech.start_import(ImportRequest(session_id=sid, path=source, translate=True,
+                                                declared_duration_ms=None))
+    assert "English only" in str(refused.value)
+    assert runtime_of(client).imports.store.get(sid) is None
 
 
 def test_local_stream_is_complete_after_a_tail_that_is_not_a_whole_millisecond(
@@ -365,7 +371,7 @@ def test_local_stream_is_complete_after_a_tail_that_is_not_a_whole_millisecond(
     audio = tone(2, [(" Hello", 0.5, 0.9)], rate=rate)
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Tail"}).json()["id"]
+        sid = create_session(http, "Tail")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": rate})
             assert ws.receive_json()["transcription"] == "connecting"
@@ -410,7 +416,7 @@ def test_stop_is_acknowledged_promptly_while_a_local_model_is_still_loading(
     try:
         with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
             http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-            sid = http.post("/sessions", headers=AUTH, json={"title": "Quick stop"}).json()["id"]
+            sid = create_session(http, "Quick stop")
             with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
                 ws.send_json({"type": "open", "sample_rate": SAMPLE_RATE})
                 assert ws.receive_json()["transcription"] == "connecting"

@@ -1,4 +1,10 @@
-"""Physical storage through HTTP and real filesystem/SQLite boundaries."""
+"""Managed physical storage on real filesystem/SQLite boundaries.
+
+The layout, group and root-move routes of the old interface are gone. What
+remains live is an install whose earlier version switched the physical layout on:
+the recorder still creates sessions in it, the speech area deletes them, and an
+operation interrupted by a crash is recovered when the app starts.
+"""
 from __future__ import annotations
 
 import os
@@ -6,13 +12,14 @@ import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 import httpx
 import pytest
 
 from skaz.config import AppConfig
-from tests.conftest import FakeHttp, make_wav
+from skaz.managed_storage import StorageConflict
+from tests.conftest import FakeHttp
+from tests.sessions_support import adelete, create_session, runtime_of, session_gone
 from tests.test_session_files_recovery_api import open_client
 
 
@@ -22,66 +29,28 @@ def config(tmp_path: Path) -> AppConfig:
                    session_files_root=tmp_path / "files")
 
 
-async def enable(client: httpx.AsyncClient) -> None:
-    response = await client.post("/storage/layout")
-    assert response.status_code == 200, response.text
-    assert response.json()["enabled"]
+def enable_managed(target: object) -> None:
+    """The state an earlier version left after the user switched the physical layout on."""
+    assert runtime_of(target).storage.enable()["enabled"]
 
 
-async def seed(client: httpx.AsyncClient) -> tuple[str, bytes]:
-    await enable(client)
-    sid = (await client.post("/sessions", json={"title": "Original"})).json()["id"]
-    body = make_wav(.1)
-    result = await client.post(f"/sessions/{sid}/audio/buffer?sequence=0&start_ms=0&end_ms=100", content=body)
-    assert result.status_code == 201, result.text
-    result = await client.post(f"/sessions/{sid}/files")
-    assert result.json()["state"] == "ready", result.text
-    return sid, body
+def seed(target: object) -> str:
+    enable_managed(target)
+    sid = create_session(target, "Original")
+    assert runtime_of(target).session_files.project(sid)["state"] == "ready"
+    return sid
 
 
-def groups(sid: str, *, grouped: bool = True) -> dict[str, Any]:
-    return {"version": 1, "groups": [{"id": "a" * 32, "name": "Study", "tag": "study"}] if grouped else [],
-            "membership": {sid: "a" * 32 if grouped else None}}
-
-
-async def test_physical_groups_move_text_without_audio_and_keep_session(
+async def test_delete_removes_database_files_and_journal(
     client: httpx.AsyncClient, config: AppConfig,
 ) -> None:
     assert config.session_files_root is not None
-    sid, _body = await seed(client)
-    source = config.session_files_root / "Ungrouped" / sid
-    assert not (source / "audio").exists()
-    assert (source / "Transcript.md").is_file()
-    assert not (config.audio_dir / sid).exists()
-    result = await client.put("/storage/groups", json={"data": groups(sid), "expected_revision": 0})
-    assert result.status_code == 200, result.text
-    target = config.session_files_root / ("Group-" + "a" * 32) / sid
-    assert not source.exists()
-    assert not (target / "audio").exists()
-    assert (target / "Transcript.md").is_file()
-    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
-    assert (await client.post(f"/sessions/{sid}/files")).json()["state"] == "ready"
-    result = await client.put(
-        "/storage/groups", json={"data": groups(sid, grouped=False), "expected_revision": 1}
-    )
-    assert result.status_code == 200, result.text
-    assert not target.parent.exists()
-    assert not (source / "audio").exists()
-    assert (source / "Transcript.md").is_file()
-    assert (await client.get(f"/sessions/{sid}")).status_code == 200
-
-
-async def test_delete_removes_database_audio_and_journal(
-    client: httpx.AsyncClient, config: AppConfig,
-) -> None:
-    assert config.session_files_root is not None
-    sid, _ = await seed(client)
-    result = await client.delete(f"/sessions/{sid}")
-    assert result.status_code == 200, result.text
-    assert (await client.get(f"/sessions/{sid}")).status_code == 404
+    sid = seed(client)
+    await adelete(client, sid)
+    assert session_gone(client, sid)
     assert not (config.session_files_root / "Ungrouped" / sid).exists()
     assert list((config.session_files_root / "Ungrouped").iterdir()) == []
-    assert (await client.get("/storage/layout")).json()["pending"] is None
+    assert runtime_of(client).storage.pending() is None
 
 
 @pytest.mark.parametrize("kind", ["external", "unknown", "symlink", "hardlink"])
@@ -89,7 +58,7 @@ async def test_delete_preserves_unowned_text_and_database(
     client: httpx.AsyncClient, config: AppConfig, kind: str,
 ) -> None:
     assert config.session_files_root is not None
-    sid, _ = await seed(client)
+    sid = seed(client)
     directory = config.session_files_root / "Ungrouped" / sid
     original = directory / "Transcript.md"
     outside = config.data_dir / "external.wav"
@@ -104,61 +73,29 @@ async def test_delete_preserves_unowned_text_and_database(
             original.symlink_to(outside)
         else:
             original.hardlink_to(outside)
-    response = await client.delete(f"/sessions/{sid}")
-    assert response.status_code == 409
-    assert str(config.data_dir) not in response.text
-    assert (await client.get(f"/sessions/{sid}")).status_code == 200
+    # Managed deletion refuses with StorageConflict (the app maps it to 409 for HTTP callers).
+    with pytest.raises(StorageConflict) as refused:
+        await adelete(client, sid)
+    assert str(config.data_dir) not in str(refused.value)
+    assert not session_gone(client, sid)
     assert outside.read_bytes() == b"External original"
     assert directory.exists()
 
 
-async def test_stale_groups_and_colliding_destination_do_not_move(
-    client: httpx.AsyncClient, config: AppConfig,
-) -> None:
-    assert config.session_files_root is not None
-    sid, _body = await seed(client)
-    payload = {"data": groups(sid), "expected_revision": 4}
-    assert (await client.put("/storage/groups", json=payload)).status_code == 409
-    dest = config.session_files_root / ("Group-" + "a" * 32)
-    dest.mkdir()
-    (dest / "external.txt").write_text("Untouched")
-    payload["expected_revision"] = 0
-    response = await client.put("/storage/groups", json=payload)
-    assert response.status_code == 409, response.text
-    assert (dest / "external.txt").read_text() == "Untouched"
-    assert (await client.get(f"/sessions/{sid}/audio/0")).status_code == 404
-
-
-async def test_switch_requires_empty_database_and_never_deletes_old_session(
-    client: httpx.AsyncClient,
-) -> None:
-    sid = (await client.post("/sessions", json={"title": "Keep me"})).json()["id"]
-    assert (await client.post("/storage/layout")).status_code == 409
-    assert (await client.get(f"/sessions/{sid}")).status_code == 200
-    assert not (await client.get("/storage/layout")).json()["enabled"]
-
-
-@pytest.mark.parametrize("boundary", ["move", "quarantine", "capture", "unlink", "db"])
-def test_real_process_death_recovery(config: AppConfig, boundary: str) -> None:
+@pytest.mark.parametrize("boundary", ["quarantine", "capture", "unlink", "db"])
+def test_process_death_during_delete_is_recovered_at_the_next_start(config: AppConfig, boundary: str) -> None:
     assert config.session_files_root is not None
     with open_client(config, FakeHttp()) as client:
-        assert client.post("/storage/layout").status_code == 200
-        sid = client.post("/sessions", json={"title": "Crash"}).json()["id"]
-        body = make_wav(0.1)
-        assert (
-            client.post(
-                f"/sessions/{sid}/audio/buffer?sequence=0&start_ms=0&end_ms=100", content=body
-            ).status_code
-            == 201
-        )
-        assert client.post(f"/sessions/{sid}/files").status_code == 200
+        sid = seed(client)
     script = r"""
 import os, sys
 from pathlib import Path
 from dataclasses import replace
 from contextlib import contextmanager
 from skaz.config import AppConfig
+from skaz.managed_storage import StorageConflict
 from skaz import managed_storage as storage
+from tests.sessions_support import delete
 from tests.test_session_files_recovery_api import open_client
 config = replace(
     AppConfig(token="test-token", data_dir=Path(sys.argv[1])),
@@ -167,7 +104,7 @@ config = replace(
 sid, boundary = sys.argv[3:5]
 from tests.conftest import FakeHttp
 with open_client(config, FakeHttp()) as client:
-    if boundary in ("move", "quarantine"):
+    if boundary == "quarantine":
         original = storage._rename
         def fail(*args, **kwargs):
             original(*args, **kwargs)
@@ -200,13 +137,7 @@ with open_client(config, FakeHttp()) as client:
             if deleted:
                 os._exit(73)
         db.write = fail
-    if boundary == "move":
-        client.put("/storage/groups", json={"expected_revision": 0, "data": {
-            "version": 1, "groups": [{"id": "a"*32, "name": "Study", "tag": ""}],
-            "membership": {sid: "a"*32},
-        }})
-    else:
-        client.delete("/sessions/"+sid)
+    delete(client, sid)
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(config.data_dir), str(config.session_files_root), sid, boundary],
@@ -221,16 +152,10 @@ with open_client(config, FakeHttp()) as client:
         timeout=30,
     )
     assert result.returncode == 73, result.stderr
+    # Starting the app finishes the interrupted operation; nothing waits for a button any more.
     with open_client(config, FakeHttp()) as client:
-        assert client.get("/storage/layout").json()["pending"] is not None
-        assert client.post("/sessions", json={"title": "Blocked"}).status_code == 409
-        recovered = client.post("/storage/recover")
-        assert recovered.status_code == 200, recovered.text
-        assert client.get("/storage/layout").json()["pending"] is None
-        if boundary == "move":
-            assert client.get(f"/sessions/{sid}/audio/0").status_code == 404
-            assert client.get(f"/sessions/{sid}").json()["session"]["title"] == "Crash"
-        else:
-            assert client.get(f"/sessions/{sid}").status_code == 404
-            assert list((config.session_files_root / "Ungrouped").iterdir()) == []
-        assert client.post("/storage/recover").status_code == 200
+        assert runtime_of(client).storage.pending() is None
+        assert session_gone(client, sid)
+        assert list((config.session_files_root / "Ungrouped").iterdir()) == []
+        # New recordings are not blocked by the crash.
+        assert not session_gone(client, create_session(client, "After the crash"))

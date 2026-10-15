@@ -13,6 +13,7 @@ from skaz.config import AppConfig
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
+from tests.sessions_support import create_session, session_detail
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -57,7 +58,7 @@ def test_live_translation_order_replacement_finalization_and_request_isolation(
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"native_recording_mode": "translation",
             "translation_target_language": "de", "cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Live translation"}).json()["id"]
+        sid = create_session(http, "Live translation")
         for request in range(2):
             with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
                 ws.send_json({"type": "open", "sample_rate": 16000})
@@ -90,7 +91,7 @@ def test_live_translation_order_replacement_finalization_and_request_isolation(
                     for token in projection["translation_tokens"]:
                         assert not {"segment_id", "start_ms", "end_ms", "start_sample", "end_sample"} & (
                             token.keys())
-                    detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+                    detail = session_detail(http, sid)
                     assert "".join(s["text"] for s in detail["segments"]) == "Hello jaThanks" * (request + 1)
                 ws.send_json({"type": "end", "action": "pause"})
                 assert ws.receive_json()["type"] == "stream.stopped"

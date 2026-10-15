@@ -15,13 +15,14 @@ from starlette.testclient import TestClient
 
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
+from tests.sessions_support import create_session
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
 
 def test_submillisecond_tail_is_saved_exactly_and_resume_keeps_samples(app: Any) -> None:
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Short tail"}).json()["id"]
+        sid = create_session(http, "Short tail")
         url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
@@ -41,7 +42,7 @@ def test_submillisecond_tail_is_saved_exactly_and_resume_keeps_samples(app: Any)
             assert ws.receive_json()["saved_samples"] == 16
             ws.send_json({"type": "end"})
             assert ws.receive_json()["saved_samples"] == 16
-        assert http.get(f"/sessions/{sid}/audio", headers=AUTH).status_code == 405
+        assert http.get(f"/sessions/{sid}/audio", headers=AUTH).status_code == 404
         assert http.get(f"/sessions/{sid}/live", headers=AUTH).json()["saved_samples"] == 16
         assert not list(app.state.runtime.config.audio_dir.rglob("*.wav"))
 
@@ -68,7 +69,7 @@ def test_revoking_consent_warns_to_stop_capture_but_allows_tail_drain(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Revoke"}).json()["id"]
+        sid = create_session(http, "Revoke")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -123,7 +124,7 @@ def test_consent_write_settles_before_cancel_or_unrelated_update(
     saved, release, finished = Event(), Event(), Event()
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Cancel revoke"}).json()["id"]
+        sid = create_session(http, "Cancel revoke")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -213,7 +214,7 @@ def test_native_cloud_consent_gates_provider_but_not_local_saving(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": consent}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Consent"}).json()["id"]
+        sid = create_session(http, "Consent")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["transcription"] == ("connecting" if consent else "unavailable")

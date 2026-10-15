@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
+from tests.sessions_support import create_session
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -39,7 +40,7 @@ def test_stop_accepts_soniox_final_processing_block_not_extra_audio(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Final block"}).json()["id"]
+        sid = create_session(http, "Final block")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -81,7 +82,7 @@ def test_silent_provider_acknowledges_within_three_second_grace_and_allows_next_
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Bounded stop"}).json()["id"]
+        sid = create_session(http, "Bounded stop")
         url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})

@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
+from tests.sessions_support import adelete, session_gone
 from tests.test_native_event_pages_api import recording
 
 
@@ -32,6 +33,5 @@ async def test_native_session_renames_and_deletes_after_pause_or_stop(
     assert resent.status_code == 200, resent.text
     assert resent.json()["title"] == "Lecture 4"
 
-    deleted = await client.delete(f"/sessions/{sid}")
-    assert deleted.status_code == 200, deleted.text
-    assert (await client.get(f"/sessions/{sid}")).status_code == 404
+    await adelete(client, sid)
+    assert session_gone(client, sid)
