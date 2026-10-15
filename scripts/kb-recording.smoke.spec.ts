@@ -42,11 +42,16 @@ async function bridge<T>(page: Page, method: string, reqPath: string, body?: unk
 /** First launch done through the real routes: the library in the isolated Documents, a placeholder Soniox key, consent. */
 async function prepare(run: Running, { key = true }: { key?: boolean } = {}) {
   const { page, profile } = run;
-  const settings = await bridge(page, 'PUT', '/settings', {
-    cloud_consent: true, used_languages: ['ru', 'en'], transcription_provider: 'soniox', native_recording_mode: 'transcription',
-    ...(key ? { provider_keys: { soniox: 'smoke-fixture-key' } } : {}),
-  });
+  // The window may only set recording options on the legacy route (electron/ipcPolicy.ts); consent,
+  // provider and key go through the routes the Settings dialogs use.
+  const settings = await bridge(page, 'PUT', '/settings', { native_recording_mode: 'transcription' });
   expect(settings.ok, settings.detail).toBe(true);
+  const speech = await bridge(page, 'PUT', '/kb/settings/speech', { provider: 'soniox', languages: ['ru', 'en'], cloud_consent: true });
+  expect(speech.ok, speech.detail).toBe(true);
+  if (key) {
+    const stored = await bridge(page, 'PUT', '/kb/settings/keys/soniox', { key: 'smoke-fixture-key' });
+    expect(stored.ok, stored.detail).toBe(true);
+  }
   const library = await bridge(page, 'POST', '/kb/library', { path: path.join(profile, 'Documents', 'SKAZ') });
   expect(library.ok, library.detail).toBe(true);
   await page.evaluate(() => localStorage.setItem('skaz.kb.prefs', JSON.stringify({ onboardingDone: true, theme: 'system' })));
