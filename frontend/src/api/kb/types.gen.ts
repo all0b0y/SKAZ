@@ -390,7 +390,7 @@ export interface KbGraphNode {
 }
 
 export interface KbHiddenFinding {
-  kind: "unicode_tags" | "bidi_control" | "zero_width_run" | "variation_selector_run" | "interlinear_annotation" | "hidden_html" | "html_comment" | "hidden_pdf_text";
+  kind: "unicode_tags" | "bidi_control" | "zero_width_run" | "variation_selector_run" | "interlinear_annotation" | "hidden_html" | "html_comment" | "hidden_pdf_text" | "unreadable_pdf_text";
   detail: string;
   original: string;
   index: number | null;
@@ -578,6 +578,7 @@ export interface KbMaterial {
   translation: KbTranslation | null;
   wiki: KbMaterialWiki;
   excluded_count: number;
+  unreadable_pages?: number[];
 }
 
 export interface KbMaterialAdded {

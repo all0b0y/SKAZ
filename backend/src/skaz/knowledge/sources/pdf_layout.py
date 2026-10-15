@@ -25,6 +25,8 @@ from typing import Any
 from pypdf import PageObject
 from pypdf.errors import PyPdfError
 
+from .pdf_glyphs import judge, shift_text
+
 SAME_LINE_EM = 0.45
 SPACE_GAP_EM = 0.2
 NEW_LINE_BACK_EM = 1.0
@@ -168,10 +170,40 @@ class _Collector:
             self.runs.append(Run(piece, x, line_y, points * scale_y, end, font))
 
 
-def page_runs(page: PageObject) -> list[Run]:
+@dataclass
+class PageRuns:
+    runs: list[Run]
+    #: Text of fonts that couldn't be read (one entry per font), left out of ``runs``.
+    unreadable: list[str] = field(default_factory=list)
+    #: Runs decoded by a constant glyph shift (``pdf_glyphs``).
+    decoded: int = 0
+
+
+def page_runs(page: PageObject) -> PageRuns:
     collector = _Collector()
     page.extract_text(visitor_text=collector.visit)
-    return collector.runs
+    return repair(collector.runs)
+
+
+def repair(runs: list[Run]) -> PageRuns:
+    """Judge each font's text on the page as a whole: keep it, decode it, or leave it out."""
+    by_font: dict[int, list[Run]] = {}
+    for run in runs:
+        by_font.setdefault(id(run.font), []).append(run)
+    dropped: set[int] = set()
+    unreadable: list[str] = []
+    decoded = 0
+    for font_runs in by_font.values():
+        joined = " ".join(run.text for run in font_runs)
+        verdict = judge(joined, font_runs[0].font)
+        if verdict.action == "decoded":
+            for run in font_runs:
+                run.text = shift_text(run.text, verdict.shift)
+            decoded += len(font_runs)
+        elif verdict.action == "unreadable":
+            dropped.update(id(run) for run in font_runs)
+            unreadable.append(" ".join(joined.split()))
+    return PageRuns([run for run in runs if id(run) not in dropped], unreadable, decoded)
 
 
 def build_lines(runs: list[Run]) -> list[Line]:
@@ -230,25 +262,34 @@ def paragraph_breaks(lines: list[Line]) -> list[bool]:
     return breaks
 
 
-def page_text(page: PageObject) -> str:
-    """The page's visible text: one line per rebuilt line, a blank line between paragraphs."""
+@dataclass(frozen=True)
+class PageText:
+    #: One line per rebuilt line, a blank line between paragraphs.
+    text: str
+    unreadable: list[str] = field(default_factory=list)
+    decoded: int = 0
+
+
+def page_text(page: PageObject) -> PageText:
+    """The page's text in reading lines, with unreadable fonts left out (reported separately)."""
     try:
-        lines = build_lines(page_runs(page))
+        found = page_runs(page)
+        lines = build_lines(found.runs)
     except (PyPdfError, KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError):
-        return page.extract_text()
+        return PageText(page.extract_text())
     breaks = paragraph_breaks(lines)
     out: list[str] = []
     for line, new_paragraph in zip(lines, breaks, strict=True):
         if new_paragraph:
             out.append("")
         out.append(line.text)
-    return "\n".join(out)
+    return PageText("\n".join(out), found.unreadable, found.decoded)
 
 
 def largest_text(page: PageObject) -> str | None:
     """The page's biggest text (a title candidate): lines within 5 % of the largest size."""
     try:
-        lines = build_lines(page_runs(page))
+        lines = build_lines(page_runs(page).runs)
     except (PyPdfError, KeyError, ValueError, TypeError, AttributeError, ZeroDivisionError):
         return None
     if not lines:

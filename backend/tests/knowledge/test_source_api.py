@@ -11,7 +11,7 @@ import pytest
 from skaz import media_tools
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.sources.fetch import SafeFetcher
-from tests.knowledge.pdf_fixtures import line, make_pdf
+from tests.knowledge.pdf_fixtures import glyph_line, line, make_pdf
 from tests.knowledge.source_corpus import CLEAN_EN
 
 ABOUT = "Attacks of the form “ignore previous instructions” hide commands for the model in ordinary text."
@@ -98,6 +98,23 @@ async def test_add_file_and_failed_scan(kb_client: httpx.AsyncClient, tmp_path: 
 
     bad = await kb_client.post("/kb/materials/file", json={"path": "relative.pdf", "folder_id": INBOX_ID})
     assert bad.status_code == 422 and "absolute" in bad.json()["detail"]
+
+
+async def test_unreadable_pdf_text_is_listed_by_page_never_in_the_text(
+    kb_client: httpx.AsyncClient, tmp_path: Path
+) -> None:
+    await kb_client.post("/kb/library", json={})
+    scrambled = [((ord(char) * 7) % 90) + 3 for char in "Quarterly results of the fund"]
+    pdf = tmp_path / "slides.pdf"
+    pages = [line(CLEAN_EN[0], 700), glyph_line("", 700, codes=scrambled)]
+    pdf.write_bytes(make_pdf(pages, cid_font="unmapped"))
+    body = {"path": str(pdf), "folder_id": INBOX_ID}
+    added = (await kb_client.post("/kb/materials/file", json=body)).json()
+    detail = (await kb_client.get(f"/kb/materials/{added['material']['id']}")).json()
+    assert detail["unreadable_pages"] == [2]
+    assert [f["text"] for f in detail["fragments"]] == [CLEAN_EN[0]]
+    guard = (await kb_client.get(f"/kb/materials/{added['material']['id']}/excluded")).json()
+    assert [(h["kind"], h["page"]) for h in guard["hidden"]] == [("unreadable_pdf_text", 2)]
 
 
 async def test_add_link_and_classify(kb_app: Any, kb_client: httpx.AsyncClient,

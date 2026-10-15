@@ -31,14 +31,93 @@ def _image(writer: PdfWriter) -> object:
     return writer._add_object(image)
 
 
+GLYPH_SHIFT = 29
+
+
+def _cid_font(writer: PdfWriter, *, mapped: bool) -> object:
+    descriptor = writer._add_object(
+        DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/FontDescriptor"),
+                NameObject("/FontName"): NameObject("/ABCDEF+ArialMT"),
+                NameObject("/Flags"): NumberObject(4),
+                NameObject("/FontBBox"): ArrayObject([NumberObject(v) for v in (-665, -325, 2000, 1040)]),
+                NameObject("/ItalicAngle"): NumberObject(0),
+                NameObject("/Ascent"): NumberObject(905),
+                NameObject("/Descent"): NumberObject(-212),
+                NameObject("/CapHeight"): NumberObject(716),
+                NameObject("/StemV"): NumberObject(80),
+            }
+        )
+    )
+    descendant = writer._add_object(
+        DictionaryObject(
+            {
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/CIDFontType2"),
+                NameObject("/BaseFont"): NameObject("/ABCDEF+ArialMT"),
+                NameObject("/CIDSystemInfo"): DictionaryObject(
+                    {
+                        NameObject("/Registry"): TextStringObject("Adobe"),
+                        NameObject("/Ordering"): TextStringObject("Identity"),
+                        NameObject("/Supplement"): NumberObject(0),
+                    }
+                ),
+                NameObject("/FontDescriptor"): descriptor,
+                NameObject("/CIDToGIDMap"): NameObject("/Identity"),
+                NameObject("/DW"): NumberObject(556),
+            }
+        )
+    )
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type0"),
+            NameObject("/BaseFont"): NameObject("/ABCDEF+ArialMT"),
+            NameObject("/Encoding"): NameObject("/Identity-H"),
+            NameObject("/DescendantFonts"): ArrayObject([descendant]),
+        }
+    )
+    if mapped:
+        ranges = f"<0003> <00e2> <{0x0003 + GLYPH_SHIFT:04x}>"
+        cmap = DecodedStreamObject()
+        cmap.set_data(
+            (
+                "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+                "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+                "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+                f"0 beginbfrange\nendbfrange\n1 beginbfrange\n{ranges}\nendbfrange\n"
+                "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
+            ).encode()
+        )
+        font[NameObject("/ToUnicode")] = writer._add_object(cmap)
+    return writer._add_object(font)
+
+
+def glyph_line(
+    text: str, y: int, *, size: int = 12, prefix: str = "", codes: list[int] | None = None
+) -> bytes:
+    """A line in ``/F2`` as a literal string of two-byte glyph codes (Unicode − 29, or ``codes``)."""
+    numbers = codes if codes is not None else [ord(char) - GLYPH_SHIFT for char in text]
+    raw = b"".join(number.to_bytes(2, "big") for number in numbers)
+    literal = raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
+    body = b"BT /F2 %d Tf %s 72 %d Td (" % (size, prefix.encode(), y) + literal + b") Tj ET"
+    return (b"q " + body + b" Q\n") if prefix else body + b"\n"
+
+
 def make_pdf(
     pages: list[bytes],
     *,
     title: str | None = None,
     image: bool = False,
     forms: dict[str, bytes] | None = None,
+    cid_font: str | None = None,
 ) -> bytes:
     """One page per content stream. ``image`` adds ``/Im1`` (a 1×1 image) to every page's resources.
+
+    ``cid_font`` adds ``/F2``, a two-byte (Identity-H) TrueType font whose codes are glyph numbers
+    = Unicode − 29, like a subset Arial: ``"mapped"`` with a ToUnicode map, ``"unmapped"`` without
+    one (what such a font prints without its map is the user's "+6(8QLYHUVLW\\" for "HSE University").
     """
     writer = PdfWriter()
     font = writer._add_object(
@@ -52,6 +131,8 @@ def make_pdf(
         )
     )
     fonts = DictionaryObject({NameObject("/F1"): font})
+    if cid_font is not None:
+        fonts[NameObject("/F2")] = _cid_font(writer, mapped=cid_font == "mapped")
     for content in pages:
         page = writer.add_blank_page(612, 792)
         xobjects = DictionaryObject()

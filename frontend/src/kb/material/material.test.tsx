@@ -94,6 +94,19 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(within(web.doc).getByText('https://example.org/cross-entropy-explained')).toBeInTheDocument();
   });
 
+  it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {
+    const world = docWorld();
+    const tb = world.materials.find((m) => m.id === 'm-tb')!;
+    tb.unreadable_pages = [2, 5];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-tb' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'Unreadable text in the PDF' });
+    expect(note).toHaveTextContent('Unreadable text in the PDF (pages 2, 5)');
+    expect(note).toHaveTextContent('left out of the material');
+  });
+
   it('a failed link says why and offers nothing it cannot do', async () => {
     const { doc } = await openMaterial('m-habr');
     expect(within(doc).getByText('Couldn’t read')).toBeInTheDocument();

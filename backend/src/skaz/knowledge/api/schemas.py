@@ -135,6 +135,9 @@ class KbMaterial(KbMaterialSummary):
     wiki: KbMaterialWiki
     #: Fragments kept out of processing as instructions for an AI ("excluded fragments: N").
     excluded_count: int
+    #: PDF pages with text SKAZ couldn't read (a font without a usable character map): that text
+    #: is left out of the material — never sent to agents, never quoted.
+    unreadable_pages: list[int] = Field(default_factory=list)
 
 
 class KbPageSummary(BaseModel):

@@ -41,7 +41,7 @@ from ..errors import KnowledgeError
 from .fragments import Paragraph, sanitize_title
 from .guard import Finding, clean_invisible, strip_invisible
 from .guard.findings import visible_repr
-from .pdf_layout import largest_text, page_text
+from .pdf_layout import PageText, largest_text, page_text
 
 NO_TEXT_LAYER = "This PDF has no text layer (scanned pages). OCR isn't supported yet."
 ONLY_HIDDEN_TEXT = "This PDF has no visible text: all of its text is hidden, and hidden text isn't added."
@@ -263,7 +263,7 @@ class _Analyzer:
         depth: int = 0,
     ) -> None:
         report = self.result.streams.setdefault(key, _StreamReport())
-        operations = ContentStream(contents, self.reader).operations
+        operations = ContentStream(contents, self.reader, "bytes").operations
         stack: list[_GState] = []
         marked: list[bool] = []
         tm: Matrix = IDENTITY
@@ -397,14 +397,16 @@ def _filtered(
     return result
 
 
-def _variant_text(reader: PdfReader, page_number: int, analysis: _PageAnalysis, keep_hidden: bool) -> str:
+def _variant_text(
+    reader: PdfReader, page_number: int, analysis: _PageAnalysis, keep_hidden: bool
+) -> PageText:
     writer = PdfWriter()
     page = writer.add_page(reader.pages[page_number])
     for key, report in analysis.streams.items():
         if not report.hidden and not keep_hidden:
             continue
         if key == ():
-            stream = ContentStream(page.get_contents(), writer)
+            stream = ContentStream(page.get_contents(), writer, "bytes")
             stream.operations = _filtered(stream.operations, report.hidden, keep_hidden)
             page.replace_contents(stream)
             continue
@@ -419,7 +421,7 @@ def _variant_text(reader: PdfReader, page_number: int, analysis: _PageAnalysis, 
             target = target.get_object() if target is not None else None
             resources = target.get("/Resources", resources) if target is not None else None
         if isinstance(target, StreamObject):
-            stream = ContentStream(target, writer)
+            stream = ContentStream(target, writer, "bytes")
             stream.operations = _filtered(stream.operations, report.hidden, keep_hidden)
             target.set_data(stream.get_data())
     return page_text(page)
@@ -487,7 +489,7 @@ def _largest_line(reader: PdfReader, analysis: _PageAnalysis) -> str | None:
     if analysis.hidden_count:
         report = analysis.streams.get(())
         if report is not None:
-            stream = ContentStream(page.get_contents(), writer)
+            stream = ContentStream(page.get_contents(), writer, "bytes")
             stream.operations = _filtered(stream.operations, report.hidden, keep_hidden=False)
             page.replace_contents(stream)
     text = largest_text(page)
@@ -503,6 +505,15 @@ def _hidden_finding(text: str, page: int, reasons: list[str]) -> Finding | None:
         page=page,
         original=visible_repr(" ".join(removed.split())),
         detail="Removed hidden PDF text (" + ", ".join(reasons) + ").",
+    )
+
+
+def _unreadable_finding(text: str, page: int) -> Finding:
+    return Finding(
+        kind="unreadable_pdf_text",
+        page=page,
+        original=visible_repr(text),
+        detail=f"Unreadable text in the PDF (page {page}): its font has no usable character map.",
     )
 
 
@@ -546,7 +557,7 @@ def extract_pdf(data: bytes) -> PdfExtraction:
             if analysis.hidden_count and not ocr_layer:
                 visible = _variant_text(reader, number, analysis, keep_hidden=False)
                 hidden = _variant_text(reader, number, analysis, keep_hidden=True)
-                finding = _hidden_finding(hidden, number + 1, analysis.reasons())
+                finding = _hidden_finding(hidden.text, number + 1, analysis.reasons())
                 if finding is not None:
                     findings.append(finding)
                     any_hidden = True
@@ -558,7 +569,8 @@ def extract_pdf(data: bytes) -> PdfExtraction:
                 )
         except (PyPdfError, KeyError, ValueError, TypeError, AttributeError, RecursionError) as error:
             raise PdfRejected(f"SKAZ can't read page {number + 1} of this PDF.") from error
-        cleaned = clean_invisible(visible, page=number + 1)
+        findings.extend(_unreadable_finding(text, number + 1) for text in visible.unreadable)
+        cleaned = clean_invisible(visible.text, page=number + 1)
         findings.extend(cleaned.findings)
         for text in _paragraphs(cleaned.text):
             paragraphs.append(Paragraph(text, page=number + 1))

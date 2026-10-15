@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from skaz.knowledge.sources.pdf import NO_TEXT_LAYER, ONLY_HIDDEN_TEXT, PdfRejected, extract_pdf
-from tests.knowledge.pdf_fixtures import line, make_pdf, word_by_word
+from tests.knowledge.pdf_fixtures import glyph_line, line, make_pdf, word_by_word
 
 BODY = (
     "Entropy measures the number of microscopic states compatible with a macrostate. "
@@ -174,3 +174,50 @@ def test_hidden_words_are_still_removed_from_a_word_per_object_page() -> None:
     extraction = extract_pdf(make_pdf([content]))
     assert [p.text for p in extraction.paragraphs] == [WORDY_PARAGRAPHS[1]]
     assert [f.kind for f in extraction.findings] == ["hidden_pdf_text"]
+
+
+HSE = "HSE University | Graduate School of Business"
+WHITE_LINE = line("White words nobody sees.", 640, prefix="1 1 1 rg")
+
+
+def test_two_byte_text_survives_the_hidden_layer_removal() -> None:
+    # User bug 1016-4: taking the white text out re-read the page with its two-byte strings decoded
+    # as UTF-16, so a correctly mapped font came out as glyph numbers ("+6(8QLYHUVLW\\…").
+    data = make_pdf([glyph_line(HSE, 700) + line(BODY, 660) + WHITE_LINE], cid_font="mapped")
+    extraction = extract_pdf(data)
+    assert [p.text for p in extraction.paragraphs] == [HSE, BODY]
+    assert [f.kind for f in extraction.findings] == ["hidden_pdf_text"]
+
+
+@pytest.mark.parametrize("hidden", [False, True], ids=["plain page", "with hidden text"])
+def test_a_font_without_a_unicode_map_shifted_by_a_constant_is_decoded(hidden: bool) -> None:
+    content = glyph_line(HSE, 700) + line(BODY, 660) + (WHITE_LINE if hidden else b"")
+    extraction = extract_pdf(make_pdf([content], cid_font="unmapped"))
+    assert [p.text for p in extraction.paragraphs] == [HSE, BODY]
+    assert [f.kind for f in extraction.findings] == (["hidden_pdf_text"] if hidden else [])
+
+
+def test_unreadable_text_is_left_out_and_recorded_never_kept_as_garbage() -> None:
+    # Glyph numbers without any map and without a constant shift: nothing can read them.
+    scrambled = [((ord(char) * 7) % 90) + 3 for char in "Quarterly results of the fund"]
+    content = line(BODY, 700) + glyph_line("", 680, codes=scrambled)
+    extraction = extract_pdf(make_pdf([line("First page.", 700), content], cid_font="unmapped"))
+    assert [(p.text, p.page) for p in extraction.paragraphs] == [("First page.", 1), (BODY, 2)]
+    [finding] = extraction.findings
+    assert finding.kind == "unreadable_pdf_text" and finding.page == 2
+    assert finding.detail == "Unreadable text in the PDF (page 2): its font has no usable character map."
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ARCHAIC: INTRICACY AND DECEIT",
+        "WWF, UNEP FI, PRI, CDP, TCFD",
+        "x = 3 + (y * 2) / 4",
+        "Section 2.3 (pp. 31-34)",
+        "1. Challenge Traditional Financial Management Primacy",
+    ],
+)
+def test_ordinary_text_is_never_taken_for_garbage(text: str) -> None:
+    extraction = extract_pdf(make_pdf([line(text, 700)]))
+    assert [p.text for p in extraction.paragraphs] == [text] and extraction.findings == []

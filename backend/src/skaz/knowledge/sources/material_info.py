@@ -162,6 +162,30 @@ def excluded_count(material_dir: Path) -> int:
         return 0
 
 
+#: The intake record of a source (``sources/service.py``): extractor, failure, hidden findings.
+INTAKE_FILE = "intake.json"
+
+
+def unreadable_pages(material_dir: Path) -> list[int]:
+    """PDF pages with text SKAZ couldn't read (left out of the material, ``unreadable_pdf_text``)."""
+    try:
+        intake = read_json(material_dir / SERVICE_DIR / INTAKE_FILE)
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, UnicodeDecodeError):
+        log.warning("The intake record of %s can't be read", _material_id(material_dir))
+        return []
+    hidden = intake.get("hidden") if isinstance(intake, dict) else None
+    pages = {
+        item["page"]
+        for item in (hidden if isinstance(hidden, list) else [])
+        if isinstance(item, dict)
+        and item.get("kind") == "unreadable_pdf_text"
+        and isinstance(item.get("page"), int)
+    }
+    return sorted(pages)
+
+
 def _material_id(material_dir: Path) -> str:
     """The material's id for a log line (its folder is named after its title, which is never logged)."""
     try:

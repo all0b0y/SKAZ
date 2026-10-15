@@ -61,11 +61,11 @@ from .intake import (
     prepare_text_file,
 )
 from .links import LinkInfo, VideoProbe, classify_link, classify_offline, domain_of
+from .material_info import INTAKE_FILE
 from .paths import given_path, resolved_file
 
 log = logging.getLogger(__name__)
 
-INTAKE_FILE = "intake.json"
 MAX_PDF_BYTES = 200 * 1024 * 1024
 MAX_TEXT_FILE_BYTES = 64 * 1024 * 1024
 MAX_LINKED_PDF_BYTES = 100 * 1024 * 1024

@@ -9,6 +9,7 @@ import { useScrollTarget } from '../document/useScrollTarget';
 import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import { ExcludedFragments } from './ExcludedFragments';
+import { UnreadableText } from './UnreadableText';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
@@ -215,6 +216,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             {addError && <p className="kb-inline-error" role="alert">{addError}</p>}
             {note && <p className="kb-mat__note" role="status">{note}</p>}
             <ExcludedFragments materialId={material.id} count={material.excluded_count} onRestored={reload} />
+            <UnreadableText pages={material.unreadable_pages ?? []} />
             {hasTranslation && (
               <Segmented label="Show" size="sm" value={view} options={viewOptions} onChange={setView} />
             )}

@@ -17,6 +17,7 @@ from ..sources.material_info import (
     Translation,
     excluded_count,
     read_translation,
+    unreadable_pages,
     wiki_states,
 )
 from ..store.records import MaterialRecord
@@ -80,7 +81,8 @@ def _translation_view(translation: Translation | None) -> KbTranslation | None:
 
 
 def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, folder_name: str,
-                wiki: MaterialWiki, translation: Translation | None, excluded: int) -> KbMaterial:
+                wiki: MaterialWiki, translation: Translation | None, excluded: int,
+                unreadable: Sequence[int] = ()) -> KbMaterial:
     """The material with the applied recognition corrections (W2) and its wiki/translation state (S3)."""
     origin = None
     if detail.origin is not None:
@@ -109,6 +111,7 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
         "fragments": fragments,
         "correction_counts": KbCorrectionCounts(applied=applied, doubtful=doubtful),
         "translation": _translation_view(translation), "wiki": _wiki_view(wiki), "excluded_count": excluded,
+        "unreadable_pages": list(unreadable),
     })
 
 
@@ -118,7 +121,7 @@ def material_view(kb: KnowledgeService, material_id: str,
     record = kb.material_repo.get(material_id)
     folder = kb.folder_repo.get(detail.folder_id)
     wiki = wiki_states(kb.db, [material_id]).get(material_id, NOT_IN_WIKI)
-    translation, excluded = None, 0
+    translation, excluded, unreadable = None, 0, list[int]()
     try:
         library = kb.require()
     except LibraryUnavailable:
@@ -127,8 +130,9 @@ def material_view(kb: KnowledgeService, material_id: str,
         directory = library.root / record.rel_dir
         translation = read_translation(directory)
         excluded = excluded_count(directory)
+        unreadable = unreadable_pages(directory)
     return detail_view(detail, corrections, folder_name=folder.name if folder else "", wiki=wiki,
-                       translation=translation, excluded=excluded)
+                       translation=translation, excluded=excluded, unreadable=unreadable)
 
 
 def _material(kb: KbDep, wiki: WikiService, material_id: str) -> KbMaterial:
