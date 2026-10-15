@@ -4,8 +4,6 @@
 // of the fields the UI relies on.
 
 export type SessionStatus = 'recording' | 'paused' | 'stopped';
-export type SessionMode = 'legacy' | 'contextual_local';
-export type NativeRecordingMode = 'transcription' | 'translation' | 'audio_only';
 
 /** Optional PATCH /sessions/{id} lifecycle controls. Omission preserves legacy flushing. */
 export interface SessionStatusOptions {
@@ -19,7 +17,6 @@ export interface Session {
   created_at: string;
   status: SessionStatus;
   duration_ms: number;
-  mode: SessionMode;
   origin?: 'live' | 'import';
 }
 

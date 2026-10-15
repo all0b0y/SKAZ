@@ -83,7 +83,6 @@ const api: BridgeApi = {
     ipcRenderer.on(CHANNELS.prepareQuit, handler);
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
   },
-  platform: process.platform,
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
 };
 

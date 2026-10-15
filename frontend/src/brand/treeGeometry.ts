@@ -18,8 +18,6 @@ export const GROUND = 608;
 export const DEEP = 944;
 /** Finer grid for the sap that runs inside the trunk and crown. */
 export const SAP_GRID = 26;
-/** Tight box around crown + roots for in-app rendering. */
-export const TREE_VIEWBOX = '140 70 744 890';
 
 type Point = readonly [number, number];
 interface Curve { readonly p0: Point; readonly c: Point; readonly p1: Point }

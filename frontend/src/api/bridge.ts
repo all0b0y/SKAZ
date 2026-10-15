@@ -108,7 +108,6 @@ export interface BridgeApi {
   reportCaptureState?(state: CaptureState): void;
   /** Main requests Stop/drain; only the boolean save outcome is returned. */
   onPrepareQuit?(listener: () => Promise<boolean>): () => void;
-  readonly platform: string;
   /** Whether this OS can capture whole-system audio (macOS 14.2+, Windows). */
   readonly systemAudioSupported?: boolean;
 }
