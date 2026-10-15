@@ -9,6 +9,7 @@ changed key is never shown as checked.
 from __future__ import annotations
 
 import hashlib
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,6 +31,9 @@ CHECK_URLS: dict[KeyProvider, str] = {
 }
 CHECK_TIMEOUT_S = 15.0
 _STORE_KEY = "settings.keys.check."
+_SALT_KEY = "settings.keys.fingerprint_salt"
+#: PBKDF2 rounds for a fingerprint: computed once per key and process (memoised).
+FINGERPRINT_ROUNDS = 100_000
 
 
 class KeyCheckFailed(KnowledgeError):
@@ -50,9 +54,13 @@ class KeyStatus:
     valid: bool | None
 
 
-def fingerprint(key: str) -> str:
-    """Identifies *which* key was checked; not reversible and too short to be a key stand-in."""
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+def fingerprint(key: str, salt: bytes) -> str:
+    """Identifies *which* key was checked: PBKDF2-HMAC-SHA256 with this installation's secret salt.
+
+    Not reversible, salted per installation (the same key gives different fingerprints
+    on two Macs) and slow to brute-force; too short to stand in for the key.
+    """
+    return hashlib.pbkdf2_hmac("sha256", key.encode("utf-8"), salt, FINGERPRINT_ROUNDS).hex()[:32]
 
 
 class KeyChecks:
@@ -61,13 +69,27 @@ class KeyChecks:
         self._settings = settings
         self._api_key = api_key
         self._http = http
+        self._fingerprints: dict[str, str] = {}
+
+    def _salt(self) -> bytes:
+        stored = self._settings.get(_SALT_KEY)
+        if isinstance(stored, str) and len(stored) == 64:
+            return bytes.fromhex(stored)
+        salt = secrets.token_bytes(32)
+        self._settings.set(_SALT_KEY, salt.hex())
+        return salt
+
+    def _fingerprint(self, key: str) -> str:
+        if key not in self._fingerprints:
+            self._fingerprints[key] = fingerprint(key, self._salt())
+        return self._fingerprints[key]
 
     def status(self, provider: KeyProvider) -> KeyStatus:
         key = self._api_key(provider)
         if not key:
             return KeyStatus(provider, False, None, None)
         record: Any = self._settings.get(_STORE_KEY + provider)
-        if isinstance(record, dict) and record.get("fingerprint") == fingerprint(key):
+        if isinstance(record, dict) and record.get("fingerprint") == self._fingerprint(key):
             return KeyStatus(provider, True, record.get("checked_at"), bool(record.get("valid")))
         return KeyStatus(provider, True, None, None)
 
@@ -95,5 +117,5 @@ class KeyChecks:
             raise KeyCheckFailed(f"{LABELS[provider]} didn't answer the check now. Try again later.")
         checked_at = datetime.now(UTC).isoformat(timespec="seconds")
         self._settings.set(_STORE_KEY + provider,
-                           {"fingerprint": fingerprint(key), "checked_at": checked_at, "valid": valid})
+                           {"fingerprint": self._fingerprint(key), "checked_at": checked_at, "valid": valid})
         return KeyStatus(provider, True, checked_at, valid)
