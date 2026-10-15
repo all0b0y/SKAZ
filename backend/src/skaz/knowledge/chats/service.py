@@ -36,12 +36,13 @@ from ..agents.engine import (
     ToolCall,
     TurnMessage,
 )
-from ..agents.registry import ENGINE_NAMES, EngineRegistry
+from ..agents.registry import ENGINE_NAMES, EngineRegistry, EngineUnavailable
 from ..agents.tools import ToolRegistry
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..ingest.settings import read_settings
+from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..service import KnowledgeService
 from .analysis import AnalysisWriter, Section
@@ -264,19 +265,35 @@ class ChatService:
         return ChatView(chat, "idle", (), self._feed(chat.id).cursor)
 
     async def _check_model(self, engine: EngineId, model: str | None, effort: str | None) -> None:
-        """A model/effort the agent reports as unknown is refused (never replaced by another one)."""
+        """Refuse a model/effort the agent doesn't offer — never skip the check, never pick another one.
+
+        ``model=None`` is the agent's default model: the one chosen in the agent
+        itself, else the first it lists (what the composer shows). When the
+        agent's models can't be read now, the request fails with the agent's
+        reason and a fixing action (``AGENT_UNAVAILABLE``) instead of passing.
+        """
         if model is None and effort is None:
             return
+        name = ENGINE_NAMES[engine]
         try:
             view = await self.registry.view(engine)
-        except Exception:
-            return  # the agent can't be checked now; the run itself refuses an unknown model
-        name = ENGINE_NAMES[engine]
-        if model is not None and view.models and model not in {option.id for option in view.models}:
+        except Exception as error:
+            log.warning("Checking the models of %s failed (%s)", engine, type(error).__name__)
+            raise EngineUnavailable(engine, f"SKAZ couldn't check {name}'s models. Try again.",
+                                    "check") from error
+        if not view.models:
+            reason = view.status.reason if view.state != "ready" and view.status.reason else (
+                f"{name} didn't list its models, so SKAZ can't check this choice. Check {name} again.")
+            raise EngineUnavailable(engine, reason, view.action or "check")
+        ids = [option.id for option in view.models]
+        if model is not None and model not in ids:
             raise ChatInvalid(f"{name} has no model “{model}”. Choose one of its models.")
-        option = next((option for option in view.models if option.id == model), None)
-        if effort is not None and option is not None and option.efforts and effort not in option.efforts:
-            raise ChatInvalid(f"This model of {name} has no “{effort}” effort level.")
+        chosen = model or (view.current_model if view.current_model in ids else ids[0])
+        option = next(option for option in view.models if option.id == chosen)
+        if effort is not None and effort not in option.efforts:
+            if not option.efforts:
+                raise ChatInvalid(f"{option.label} of {name} has no effort levels. Leave the effort unset.")
+            raise ChatInvalid(f"{option.label} of {name} has no “{effort}” effort level.")
 
     async def patch(self, chat_id: str, changes: Mapping[str, Any]) -> ChatView:
         chat = await self._chat(chat_id)
@@ -480,8 +497,8 @@ class ChatService:
             terminal = Failed(run.run_id, "cancelled", STOPPED)
             with contextlib.suppress(Exception):
                 await run.engine.interrupt(run.run_id)
-        except Exception:
-            log.exception("Chat answer %s failed", run.run_id)
+        except Exception as error:
+            log.error("Chat answer %s failed: %s", run.run_id, error_note(error))
             terminal = Failed(run.run_id, "other", UNEXPECTED)
         finally:
             closer = getattr(stream, "aclose", None)
@@ -556,8 +573,8 @@ class ChatService:
                     if message.parts:
                         updates["last_preview"] = preview(message.parts)
                 await disk_call(self.repo.save_message, message, updates)
-        except Exception:
-            log.exception("Saving the end of chat answer %s failed", run.run_id)
+        except Exception as error:
+            log.error("Saving the end of chat answer %s failed: %s", run.run_id, error_note(error))
         finally:
             if self._runs.get(run.chat_id) is run:
                 del self._runs[run.chat_id]
@@ -596,8 +613,8 @@ class ChatService:
         except TimeoutError:
             task.cancel()  # the engine ignored the interrupt: stop waiting for it
             await asyncio.gather(task, return_exceptions=True)
-        except Exception:
-            log.exception("Stopping chat answer %s failed", run.run_id)
+        except Exception as error:
+            log.error("Stopping chat answer %s failed: %s", run.run_id, error_note(error))
 
     async def close(self) -> None:
         self._closing = True

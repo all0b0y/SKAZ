@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from ..library.layout import SERVICE_DIR
+from ..library.fsio import read_json
+from ..library.layout import MATERIAL_MANIFEST, SERVICE_DIR
 from ..markdown.frontmatter import FrontmatterError, split_frontmatter
 from ..store.database import KnowledgeDatabase
 from .guard.visibility import ExclusionsUnreadable, read_excluded
@@ -115,13 +116,13 @@ def read_translation(material_dir: Path) -> Translation | None:
     path = material_dir / SERVICE_DIR / TRANSLATION_FILE
     try:
         if path.stat().st_size > MAX_TRANSLATION_BYTES:
-            log.warning("Translation of %s is too large to show inline", material_dir.name)
+            log.warning("Translation of %s is too large to show inline", _material_id(material_dir))
             return None
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
     except (OSError, UnicodeDecodeError):
-        log.warning("Translation of %s can't be read", material_dir.name)
+        log.warning("Translation of %s can't be read", _material_id(material_dir))
         return None
     try:
         _raw, fields, body = split_frontmatter(text)
@@ -150,5 +151,14 @@ def excluded_count(material_dir: Path) -> int:
     try:
         return len(read_excluded(material_dir))
     except ExclusionsUnreadable:
-        log.warning("Exclusions of %s can't be read", material_dir.name)
+        log.warning("Exclusions of %s can't be read", _material_id(material_dir))
         return 0
+
+
+def _material_id(material_dir: Path) -> str:
+    """The material's id for a log line (its folder is named after its title, which is never logged)."""
+    try:
+        value = read_json(material_dir / MATERIAL_MANIFEST).get("id")
+    except (OSError, ValueError, UnicodeDecodeError, AttributeError):
+        return "a material with an unreadable manifest"
+    return value if isinstance(value, str) else "a material without an id"

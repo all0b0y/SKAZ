@@ -243,6 +243,25 @@ def test_files_from_the_app_data_folder_are_refused(sources: SourceService) -> N
         sources.add_file(inside, INBOX_ID)
 
 
+def test_a_symlink_into_a_hidden_folder_or_the_app_data_is_refused(sources: SourceService,
+                                                                    tmp_path: Path) -> None:
+    """The hidden-folder and data checks look at where the file really is, after links are followed."""
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / ".hidden" / "notes.txt").write_text("hidden text")
+    (tmp_path / "into-hidden.txt").symlink_to(tmp_path / ".hidden" / "notes.txt")
+    with pytest.raises(SourceRejected, match="hidden folders"):
+        sources.add_file(tmp_path / "into-hidden.txt", INBOX_ID)
+    (sources.kb.data_dir / "secret.txt").write_text("app data")
+    (tmp_path / "into-data.txt").symlink_to(sources.kb.data_dir / "secret.txt")
+    with pytest.raises(SourceRejected, match="own data folder"):
+        sources.add_file(tmp_path / "into-data.txt", INBOX_ID)
+    # A link to a file in an ordinary folder the user chose still works.
+    (tmp_path / "Lectures").mkdir()
+    (tmp_path / "Lectures" / "waves.txt").write_text("Waves carry energy.")
+    (tmp_path / "waves-link.txt").symlink_to(tmp_path / "Lectures" / "waves.txt")
+    assert sources.add_file(tmp_path / "waves-link.txt", INBOX_ID).status == "ready"
+
+
 ARTICLE = f"""<html><head><title>Boiling - Science blog</title>
 <meta property="og:title" content="Why water boils at 100 °C"></head><body>
 <nav>Menu</nav><article><h1>Why water boils</h1>

@@ -10,7 +10,7 @@ import hashlib
 import secrets
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 #: A token outlives no run; this cap only bounds a run whose owner forgot to revoke.
@@ -55,10 +55,6 @@ class McpTokens:
             self._grants[self._digest(token)] = _Grant(scope, self._clock() + self._ttl_s)
         return token
 
-    def revoke(self, token: str) -> None:
-        with self._lock:
-            self._grants.pop(self._digest(token), None)
-
     def revoke_run(self, run_id: str) -> None:
         with self._lock:
             for key in [key for key, grant in self._grants.items() if grant.scope.run_id == run_id]:
@@ -83,16 +79,8 @@ class McpTokens:
             grant.calls += 1
             return grant.calls <= self._max_calls
 
-    def active_runs(self) -> set[str]:
-        with self._lock:
-            self._sweep()
-            return {grant.scope.run_id for grant in self._grants.values()}
-
     def _sweep(self) -> None:
         now = self._clock()
         for key in [key for key, grant in self._grants.items() if grant.expires_at <= now]:
             del self._grants[key]
 
-
-def scope_for(run_id: str, tool_names: Iterable[str]) -> McpRunScope:
-    return McpRunScope(run_id, frozenset(tool_names))
