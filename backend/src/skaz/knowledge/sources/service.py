@@ -35,6 +35,7 @@ from ..library.fsio import dump_json, fsync_dir, read_json, write_atomic
 from ..library.layout import SERVICE_DIR
 from ..library.library import MaterialFiles
 from ..library.names import validate_name
+from ..logsafe import error_note
 from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
@@ -178,8 +179,9 @@ class SourceService:
         for listener in list(self._listeners):
             try:
                 listener(event)
-            except Exception:
-                log.exception("Source event listener failed for %s", event.kind)
+            except Exception as error:
+                log.error("Source event listener failed for %s of %s: %s", event.kind, event.material_id,
+                          error_note(error))
 
     # -- adding ----------------------------------------------------------------
 
@@ -308,7 +310,7 @@ class SourceService:
             if not prepared.failure:
                 self.kb.set_material_status(material_id, "ready")
         except (OSError, KnowledgeError, ValidationError) as error:
-            log.exception("Finishing material %s failed", material_id)
+            log.error("Finishing material %s failed: %s", material_id, error_note(error))
             with contextlib.suppress(OSError, KnowledgeError):
                 self.kb.set_material_status(material_id, "failed")
             raise KnowledgeError(

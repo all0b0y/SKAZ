@@ -48,6 +48,7 @@ from ..errors import KnowledgeError, NameTaken, NotFound
 from ..library.layout import STAGING_PATH
 from ..library.library import INBOX_ID
 from ..library.names import validate_name
+from ..logsafe import error_note
 from ..markdown.source import MaterialStatus, Origin
 from ..markdown.text import name_key
 from ..service import KnowledgeService
@@ -179,8 +180,9 @@ class SpeechService:
 
     def _finished(self, task: asyncio.Task[Any]) -> None:
         self._tasks.discard(task)
-        if not task.cancelled() and task.exception() is not None:
-            logger.warning("Speech material work failed", exc_info=task.exception())
+        error = None if task.cancelled() else task.exception()
+        if error is not None:
+            logger.warning("Speech material work failed: %s", error_note(error))
 
     async def _guarded(self, material_id: str, work: Callable[[], Awaitable[None]]) -> None:
         """Serialise per material; a missing/unavailable library is not an error here."""
@@ -188,7 +190,7 @@ class SpeechService:
             try:
                 await work()
             except (KnowledgeError, OSError, ValueError) as error:
-                logger.warning("Speech material %s not updated: %s", material_id, error)
+                logger.warning("Speech material %s not updated: %s", material_id, error_note(error))
 
     async def _set_status(self, material_id: str, status: MaterialStatus) -> None:
         record = await disk_call(self.kb.material_repo.get, material_id)
@@ -288,8 +290,9 @@ class SpeechService:
             for listener in list(self._finished_listeners):
                 try:
                     listener(carrier.material_id)
-                except Exception:
-                    logger.exception("Speech finished listener failed for %s", carrier.material_id)
+                except Exception as problem:
+                    logger.error("Speech finished listener failed for %s: %s", carrier.material_id,
+                                 error_note(problem))
 
     def on_finished(self, listener: Callable[[str], None]) -> None:
         """Subscribe to finished speech materials (used to add them to the wiki)."""
@@ -303,8 +306,9 @@ class SpeechService:
         for listener in list(self._import_listeners):
             try:
                 listener(carrier.material_id, carrier.kind, error)
-            except Exception:
-                logger.exception("Speech import listener failed for %s", carrier.material_id)
+            except Exception as problem:
+                logger.error("Speech import listener failed for %s: %s", carrier.material_id,
+                             error_note(problem))
 
     async def _reconcile_import(self, carrier: Carrier) -> None:
         status = await disk_call(self.legacy.import_status, carrier.session_id)

@@ -42,6 +42,7 @@ from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..ingest.settings import read_settings
+from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..service import KnowledgeService
 from .analysis import AnalysisWriter, Section
@@ -496,8 +497,8 @@ class ChatService:
             terminal = Failed(run.run_id, "cancelled", STOPPED)
             with contextlib.suppress(Exception):
                 await run.engine.interrupt(run.run_id)
-        except Exception:
-            log.exception("Chat answer %s failed", run.run_id)
+        except Exception as error:
+            log.error("Chat answer %s failed: %s", run.run_id, error_note(error))
             terminal = Failed(run.run_id, "other", UNEXPECTED)
         finally:
             closer = getattr(stream, "aclose", None)
@@ -572,8 +573,8 @@ class ChatService:
                     if message.parts:
                         updates["last_preview"] = preview(message.parts)
                 await disk_call(self.repo.save_message, message, updates)
-        except Exception:
-            log.exception("Saving the end of chat answer %s failed", run.run_id)
+        except Exception as error:
+            log.error("Saving the end of chat answer %s failed: %s", run.run_id, error_note(error))
         finally:
             if self._runs.get(run.chat_id) is run:
                 del self._runs[run.chat_id]
@@ -612,8 +613,8 @@ class ChatService:
         except TimeoutError:
             task.cancel()  # the engine ignored the interrupt: stop waiting for it
             await asyncio.gather(task, return_exceptions=True)
-        except Exception:
-            log.exception("Stopping chat answer %s failed", run.run_id)
+        except Exception as error:
+            log.error("Stopping chat answer %s failed: %s", run.run_id, error_note(error))
 
     async def close(self) -> None:
         self._closing = True
