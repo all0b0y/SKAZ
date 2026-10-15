@@ -13,16 +13,25 @@ exited leader's id may already belong to someone else.
 """
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
 import threading
 from dataclasses import dataclass
+from typing import Protocol
+
+
+class Child(Protocol):
+    """``asyncio.subprocess.Process`` or ``subprocess.Popen``."""
+
+    @property
+    def pid(self) -> int: ...
+    @property
+    def returncode(self) -> int | None: ...
 
 
 @dataclass(frozen=True)
 class _Child:
-    process: asyncio.subprocess.Process
+    process: Child
     #: Started with ``start_new_session=True``: signal its whole process group.
     group: bool
 
@@ -32,12 +41,12 @@ class ChildProcesses:
         self._children: dict[int, _Child] = {}
         self._lock = threading.Lock()
 
-    def add(self, process: asyncio.subprocess.Process, *, group: bool) -> None:
+    def add(self, process: Child, *, group: bool) -> None:
         with self._lock:
             self._prune()
             self._children[id(process)] = _Child(process, group)
 
-    def discard(self, process: asyncio.subprocess.Process | None) -> None:
+    def discard(self, process: Child | None) -> None:
         if process is None:
             return
         with self._lock:

@@ -86,6 +86,9 @@ if args == ["--version"]:
     sys.exit(0)
 if args == ["model"]:
     sys.exit(0)
+if args[:1] == ["sessions"]:  # documented session management: `hermes sessions delete <id> --yes`, `prune`
+    record("sessions", args=args[1:], home=os.environ.get("HERMES_HOME"))
+    sys.exit(SCENARIO.get("sessions_exit", 0))
 assert args == ["acp"], args
 if SCENARIO.get("stubborn"):
     stubborn()
