@@ -24,7 +24,13 @@ from ..settings.about import about
 from ..settings.health import SettingsHealth
 from ..settings.keys import KeyChecks, KeyProvider, KeyStatus
 from ..settings.privacy import privacy_flows
-from ..settings.speech import SpeechSettings, UnknownLocalModel, delete_local_model, speech_settings, to_legacy
+from ..settings.speech import (
+    SpeechSettings,
+    UnknownLocalModel,
+    delete_local_model,
+    speech_settings,
+    to_legacy,
+)
 from .schemas_settings import (
     KbAbout,
     KbKeyProvider,

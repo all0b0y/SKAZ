@@ -9,7 +9,8 @@ import httpx
 from skaz.local_models import LOCAL_WHISPER_REPOSITORIES
 
 
-async def test_an_unknown_whisper_model_is_refused_in_plain_words(kb_app: Any, kb_client: httpx.AsyncClient) -> None:
+async def test_an_unknown_whisper_model_is_refused_in_plain_words(
+        kb_app: Any, kb_client: httpx.AsyncClient) -> None:
     # The legacy settings update already refuses it in plain words (kept as it is).
     refused = await kb_client.put("/settings", json={"local_whisper_model": "giant"})
     assert refused.status_code == 400, refused.text
@@ -23,7 +24,8 @@ async def test_an_unknown_whisper_model_is_refused_in_plain_words(kb_app: Any, k
 async def test_a_stored_unknown_model_does_not_break_the_speech_settings(
         kb_app: Any, kb_client: httpx.AsyncClient) -> None:
     runtime = kb_app.state.runtime
-    runtime.settings_store.save(runtime.settings_store.load().model_copy(update={"local_whisper_model": "giant"}))
+    stored = runtime.settings_store.load().model_copy(update={"local_whisper_model": "giant"})
+    runtime.settings_store.save(stored)
     view = await kb_client.get("/kb/settings/speech")
     assert view.status_code == 200, view.text
     assert view.json()["local_model"]["state"] != "ready"

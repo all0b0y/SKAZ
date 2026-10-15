@@ -79,7 +79,7 @@ async def test_the_flag_over_http(kb_app: Any, kb_client: httpx.AsyncClient) -> 
 
 async def test_auto_ingest_keeps_a_reference_to_the_task_it_starts(ready: KnowledgeService) -> None:
     """Review Low: a bare ``loop.create_task`` may be collected mid-run; AutoIngest holds it until done."""
-    ingest, sources = wired(ready, wiki_with_notes())
+    ingest, _sources = wired(ready, wiki_with_notes())
     from skaz.knowledge.wiring import AutoIngest
 
     auto = AutoIngest(ready, ingest)
