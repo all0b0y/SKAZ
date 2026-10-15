@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
-import { AnswerMarkdown } from '../../components/assistant/AnswerMarkdown';
+import { AnswerMarkdown } from '../ui/AnswerMarkdown';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';

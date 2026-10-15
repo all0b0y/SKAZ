@@ -1,6 +1,6 @@
 /**
  * Geometry of the SKAZ tree mark, shared by the app icon generator
- * (`scripts/make-icon.mts`) and the in-app tree (`components/brand`).
+ * (`scripts/make-icon.mts`).
  *
  * Coordinates live on a 1024-unit square canvas. The crown and trunk are one
  * solid silhouette; the roots are grid-snapped squares that shrink and thin

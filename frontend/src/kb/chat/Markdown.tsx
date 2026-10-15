@@ -2,11 +2,11 @@ import { Fragment, type ReactNode } from 'react';
 import { GFM, parser as baseParser } from '@lezer/markdown';
 
 /**
- * Safe Markdown for answers — the same approach as the old UI's AnswerMarkdown
- * (frontend/src/components/assistant/AnswerMarkdown.tsx): the GFM parser the app already ships
+ * Safe Markdown for answers — the same approach as AnswerMarkdown (kb/ui/AnswerMarkdown.tsx, used
+ * for wiki page blocks): the GFM parser the app already ships
  * (@lezer/markdown) walked into React elements. Raw HTML is shown as text, images are not loaded,
  * links open only for http(s). Adapted (not imported) because answers here carry inline parts —
- * source and page chips — inside a paragraph, which the old renderer cannot place.
+ * source and page chips — inside a paragraph, which AnswerMarkdown cannot place.
  */
 const parser = baseParser.configure(GFM);
 type SyntaxNode = ReturnType<typeof parser.parse>['topNode'];
