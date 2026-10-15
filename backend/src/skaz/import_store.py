@@ -50,10 +50,6 @@ ImportStatus = Literal[
 #: Statuses a restart must pick back up rather than leave stranded.
 UNSETTLED: tuple[ImportStatus, ...] = ("queued", "downloading", "preparing", "uploading", "processing")
 
-#: Digest of an unreadable source is impossible, but an import must still record
-#: which file it came from; this marks an identity we could not compute.
-UNKNOWN_DIGEST = ""
-
 
 class ImportConflict(ValueError):
     """Invalid transition, unknown import, or a transcript that does not fit."""

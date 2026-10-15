@@ -167,10 +167,6 @@ def _ytdlp_args(platform: VideoPlatform, retries: int = 2) -> list[str]:
     return [*argv, "--socket-timeout", "20", "--retries", str(retries)]
 
 
-def _youtube_args() -> list[str]:
-    return _ytdlp_args("youtube")
-
-
 async def video_info(url: str, *, timeout: float = 120) -> dict[str, Any]:
     """Raw yt-dlp metadata of one video on a supported host (no download). The one metadata call."""
     source = video_source(url)

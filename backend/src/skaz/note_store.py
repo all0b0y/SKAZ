@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
-import unicodedata
 from datetime import UTC, datetime
 
 from .db import Database
@@ -12,7 +10,6 @@ from .schemas import Citation, Note
 
 # None denotes unknown historical provenance; manual edits retain it verbatim.
 KEEP_SOURCE_REVISION = -1
-TITLE_LIMIT = 120
 
 
 def _now() -> str:
@@ -25,29 +22,6 @@ class NoteMissing(ValueError):
 
 class NoteConflict(ValueError):
     pass
-
-
-class BlankTitle(ValueError):
-    """A name that sanitises to nothing is refused, keeping the previous one."""
-
-
-def sanitise_title(raw: str) -> str:
-    """Reduce a typed name to one safe line, or refuse it.
-
-    The note's name reaches a filesystem through the projected Markdown, so path
-    separators, control characters and a trailing ``.md`` are stripped rather than
-    trusted. A value that ends up empty is not stored at all: the user who clears
-    the field gets the previous name back instead of an unnamed note.
-    """
-    collapsed = re.sub(r"\s+", " ", raw.replace("/", " ").replace("\\", " "))
-    printable = "".join(c for c in collapsed if unicodedata.category(c) != "Cc")
-    cleaned = printable.strip()
-    while cleaned.lower().endswith(".md"):
-        cleaned = cleaned[: -len(".md")].strip()
-    cleaned = cleaned.strip(" .").strip()
-    if not cleaned:
-        raise BlankTitle("A note name cannot be empty.")
-    return cleaned[:TITLE_LIMIT].strip()
 
 
 def source_revision(connection: sqlite3.Connection, session_id: str) -> int:

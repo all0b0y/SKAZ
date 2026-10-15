@@ -7,23 +7,29 @@ import pytest
 
 from skaz import repository as repo
 from skaz.db import Database
-from skaz.schemas import Segment
+
+
+def write_segment(db: Database, session_id: str, text: str) -> None:
+    """A recording's commit: replace the session's one segment."""
+    with db.write() as connection:
+        connection.execute("DELETE FROM segments WHERE session_id = ?", (session_id,))
+        connection.execute(
+            "INSERT INTO segments(id, session_id, sequence, start_ms, end_ms, text, created_at)"
+            " VALUES (?, ?, 0, 0, 1000, ?, 'now')",
+            (f"{session_id}-{text}", session_id, text),
+        )
 
 
 def test_pinned_read_allows_recording_commits_and_keeps_one_revision(tmp_path: Path) -> None:
     db = Database(tmp_path / "live.sqlite")
     try:
         sid = repo.create_session(db, "Live").id
-        repo.replace_chunk_segments(db, sid, 0, [
-            Segment(id="before", start_ms=0, end_ms=1000, text="Before."),
-        ])
+        write_segment(db, sid, "Before.")
         with ThreadPoolExecutor(max_workers=1) as worker:
             with db.write() as connection:
                 connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             with db.snapshot_read() as source:
-                result = worker.submit(repo.replace_chunk_segments, db, sid, 0, [
-                    Segment(id="after", start_ms=0, end_ms=1000, text="After."),
-                ])
+                result = worker.submit(write_segment, db, sid, "After.")
                 result.result(timeout=2)
                 # First access to segments is AFTER the write: pinning must happen at entry.
                 assert source.execute("SELECT text FROM segments").fetchone()[0] == "Before."

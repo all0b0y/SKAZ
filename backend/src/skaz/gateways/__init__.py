@@ -25,14 +25,6 @@ class LiveAsrError(RuntimeError):
 CLOUD_PROVIDERS = frozenset({"openai", "openrouter", "anthropic"})
 
 
-def require_cloud_consent(provider: str, cloud_consent: bool, material: str) -> None:
-    """Block before a gateway can transmit user audio or text."""
-    if provider in CLOUD_PROVIDERS and not cloud_consent:
-        raise ProviderNotConfigured(
-            f"Sending {material} to {provider} requires cloud consent; enable it in settings."
-        )
-
-
 #: Statuses worth a bounded retry later; everything else needs a settings or model change.
 RETRYABLE_HTTP_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 522, 524, 529})
 

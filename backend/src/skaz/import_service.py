@@ -53,18 +53,11 @@ MAX_WAIT_S = 6 * 60 * 60
 #: many Local Whisper recognitions (imports plus live streams) may run at once;
 #: the next one is refused with a reason, never queued. Cloud imports are unbounded.
 MAX_LOCAL_RECOGNITIONS = 4
-#: What the legacy capabilities payload reports for a provider without a bound.
-UNBOUNDED_IMPORTS = 2**31 - 1
 LOCAL_BUSY = (f"{MAX_LOCAL_RECOGNITIONS} on-device transcriptions are already running on this computer. "
               "Wait for one to finish, or use a cloud provider.")
 DUPLICATE_VIDEO = "This video already has a session. Open it or confirm Transcribe again."
 #: Transport failures tolerated in a row before the import is called failed.
 MAX_TRANSPORT_FAILURES = 30
-
-
-def import_limit(provider: str) -> int | None:
-    """The protective bound for concurrent imports of ``provider``; ``None`` = none."""
-    return MAX_LOCAL_RECOGNITIONS if provider == "local-whisper" else None
 
 
 class ImportRejected(ValueError):

@@ -7,8 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_DATA_DIR = Path.home() / ".skaz" / "dev" / "data"
-#: Data folder written before the product was renamed; adopted on first start.
-LEGACY_DATA_DIR = Path.home() / ".audiohelper"
 LEGACY_DB_NAME = "audiohelper.sqlite3"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"", "0", "false", "no", "off"})
