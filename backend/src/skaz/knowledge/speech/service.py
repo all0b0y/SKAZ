@@ -108,6 +108,8 @@ class SpeechView:
     import_stage: str | None
     #: The last attempt's problem in plain English (text received so far is kept).
     error: str | None
+    #: How much audio the recording/import has (``None``: not known yet).
+    duration_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -699,4 +701,5 @@ class SpeechService:
             folder_id=record.folder_id, status=record.status, fragment_count=record.fragment_count,
             created_at=record.created_at, recording_state=recording_state, import_state=import_state,
             import_stage=import_stage, error=carrier.attempt_error,
+            duration_ms=await disk_call(self.legacy.duration_ms, carrier.session_id),
         )

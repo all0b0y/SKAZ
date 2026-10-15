@@ -62,6 +62,8 @@ class KbSpeechMaterial(BaseModel):
     import_stage: str | None
     #: The last attempt's problem in plain English; text received before it is kept.
     error: str | None
+    #: How much audio there is, in ms (``null``: not known yet).
+    duration_ms: int | None = None
 
 
 class KbSpeechDefaults(BaseModel):

@@ -107,6 +107,35 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(note).toHaveTextContent('left out of the material');
   });
 
+  it('a recording with no recognised speech says so, offers Delete, and cannot go to the wiki', async () => {
+    // User bug 1016-2: an empty recording looked like any material and failed in the wiki.
+    const world = docWorld();
+    const lec7 = world.materials.find((m) => m.id === 'm-lec7')!;
+    const empty = { ...structuredClone(lec7), id: 'm-empty', title: 'Recording Oct 16, 2026 00.08', fragments: [], fragment_count: 0,
+      translation: null, wiki: materialWiki('not_in_wiki'), wiki_state: 'not_in_wiki' as const };
+    world.materials.push(empty);
+    world.recordings['m-empty'] = {
+      material_id: 'm-empty', session_id: 's-empty', kind: 'recording', title: empty.title, folder_id: empty.folder_id, status: 'ready',
+      fragment_count: 0, created_at: empty.created_at, recording_state: 'stopped', import_state: null, import_stage: null, error: null,
+      duration_ms: 42_000,
+    };
+    const user = userEvent.setup();
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-empty' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'No speech' });
+    expect(note).toHaveTextContent('No speech was recognised in this recording');
+    await waitFor(() => expect(note).toHaveTextContent('Length 00:42'));
+    expect(within(doc).queryByText('This material has no text.')).not.toBeInTheDocument();
+    const add = within(doc).getByRole('button', { name: 'Add to wiki' });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription('No speech was recognised, so there is nothing to add.');
+    await user.click(within(note).getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog', { name: /Delete/ })).toBeInTheDocument();
+    expect(r.fake.calls.some((c) => c.path === '/kb/materials/m-empty/ingest')).toBe(false);
+  });
+
   it('a failed link says why and offers nothing it cannot do', async () => {
     const { doc } = await openMaterial('m-habr');
     expect(within(doc).getByText('Couldn’t read')).toBeInTheDocument();

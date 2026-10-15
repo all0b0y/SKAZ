@@ -10,6 +10,7 @@ import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import { ExcludedFragments } from './ExcludedFragments';
 import { UnreadableText } from './UnreadableText';
+import { isWithoutSpeech, NoSpeech } from './NoSpeech';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
@@ -220,7 +221,9 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             {hasTranslation && (
               <Segmented label="Show" size="sm" value={view} options={viewOptions} onChange={setView} />
             )}
-            {material.fragments.length === 0 ? (
+            {isWithoutSpeech(material) ? (
+              <NoSpeech material={material} onDelete={() => setDialog('delete')} />
+            ) : material.fragments.length === 0 ? (
               <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>
             ) : (
               <Transcript material={material} corrections={data.corrections} view={hasTranslation ? view : 'original'}

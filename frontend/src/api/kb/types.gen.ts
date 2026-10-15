@@ -892,6 +892,7 @@ export interface KbSpeechMaterial {
   import_state: "running" | "completed" | "failed" | "interrupted" | "cancelled" | null;
   import_stage: string | null;
   error: string | null;
+  duration_ms?: number | null;
 }
 
 export interface KbSpeechSettings {

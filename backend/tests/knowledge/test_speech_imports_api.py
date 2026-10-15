@@ -20,6 +20,7 @@ from skaz.config import AppConfig
 from skaz.file_asr import FileTranscript
 from skaz.gateways.soniox_async import AsyncToken
 from skaz.import_service import LOCAL_BUSY, MAX_LOCAL_RECOGNITIONS
+from skaz.knowledge.ingest.service import NO_SPEECH_FILE
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.speech.service import CANCELLED_IMPORT, INTERRUPTED_IMPORT
 from skaz.secrets import MemorySecretStore
@@ -448,3 +449,21 @@ async def test_a_ticked_import_that_finishes_at_once_goes_to_the_wiki(
         api, speech_app, monkeypatch, tmp_path, to_wiki=True, settings_add=False)
     assert started == [material_id]
     assert speech_app.state.runtime.kb.settings.get(CHOICE_KEY + material_id) is None
+
+
+async def test_an_import_without_speech_is_ready_without_text_and_never_goes_to_the_wiki(
+    api: httpx.AsyncClient, speech_app: Any, soniox: AsyncSoniox, tmp_path: Path,
+) -> None:
+    """User bug 1016-2 for imports: an empty transcription is no wiki failure, nothing is started."""
+    speech_app.state.runtime.kb_ingest.update_settings(auto_add_files_links=True)
+    soniox.tokens = []
+    body = {"path": media(tmp_path, "Silence.m4a"), "to_wiki": True}
+    created = (await api.post("/kb/imports", json=body)).json()
+    material_id = created["material_id"]
+    done = await until(api, material_id, status="ready")
+    assert done["fragment_count"] == 0 and done["error"] is None and done["duration_ms"] == 2_500
+    await asyncio.sleep(0.1)
+    assert (await api.get("/kb/jobs", params={"material_id": material_id})).json() == []
+    refused = await api.post(f"/kb/materials/{material_id}/ingest")
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == NO_SPEECH_FILE

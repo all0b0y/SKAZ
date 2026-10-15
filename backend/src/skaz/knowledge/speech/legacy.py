@@ -78,6 +78,11 @@ class LegacySpeech:
         session = repo.get_session(self._runtime.db, session_id)
         return session.status if session else None
 
+    def duration_ms(self, session_id: str) -> int | None:
+        """The audio length the session has stored (recordings: accepted audio; imports: the file)."""
+        session = repo.get_session(self._runtime.db, session_id)
+        return session.duration_ms if session else None
+
     def mark_session(self, session_id: str, status: Literal["paused", "stopped"]) -> None:
         repo.update_session(self._runtime.db, session_id, status=status)
 
