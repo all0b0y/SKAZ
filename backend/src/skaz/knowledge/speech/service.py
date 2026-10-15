@@ -51,6 +51,7 @@ from ..library.names import validate_name
 from ..markdown.source import MaterialStatus, Origin
 from ..markdown.text import name_key
 from ..service import KnowledgeService
+from ..sources.paths import given_path, resolved_file
 from ..sources.service import SourceService
 from .carriers import IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
 from .legacy import (
@@ -491,15 +492,17 @@ class SpeechService:
                 assert metadata is not None
                 title = str(metadata["title"])
         else:
-            if not path.is_absolute():
-                raise SpeechInvalid("The file path must be absolute.")
+            path = given_path(path, SpeechInvalid)
             try:
                 kind = file_kind(path)
             except UnsupportedMedia as error:
                 raise SpeechInvalid(str(error)) from error
+            # Same rules as documents, where the file really is; the import reads that place.
+            picked = path
+            path, _info = await disk_call(resolved_file, picked, self.kb.data_dir, SpeechInvalid)
             url = None
-            origin = Origin(type="file", file_name=path.name)
-            title = request.title or path.stem
+            origin = Origin(type="file", file_name=picked.name)
+            title = request.title or picked.stem
         clean = validate_name(title[:200])
         await disk_call(self._assert_free, folder, clean)
         session_id = await disk_call(self.legacy.create_import_session, clean)

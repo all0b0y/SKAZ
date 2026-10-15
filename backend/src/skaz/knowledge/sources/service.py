@@ -19,7 +19,6 @@ import contextlib
 import logging
 import os
 import shutil
-import stat
 import threading
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
@@ -61,6 +60,7 @@ from .intake import (
     prepare_text_file,
 )
 from .links import LinkInfo, VideoProbe, classify_link, classify_offline, domain_of
+from .paths import given_path, resolved_file
 
 log = logging.getLogger(__name__)
 
@@ -257,38 +257,16 @@ class SourceService:
         return await classify_link(url, self.fetcher, video_probe=self.video_probe if probe else None)
 
     def _checked_file(self, raw: str | Path) -> Path:
-        """The file path from the open dialog: absolute, a readable regular file of a supported type.
-
-        The backend can't prove the path came from the dialog (the renderer
-        forwards it); it refuses what a dialog would never return: relative
-        paths, hidden folders, the app's own data, devices and other types.
-        """
-        text = str(raw)
-        if "\x00" in text or not text:
-            raise SourceRejected("Choose a file to add.")
-        path = Path(text)
-        if not path.is_absolute():
-            raise SourceRejected("The file path must be absolute.")
-        if any(part.startswith(".") for part in path.parts[1:]):
-            raise SourceRejected("Files inside hidden folders can't be added.")
+        """The file path from the open dialog: absolute, a readable regular file of a supported type,
+        not in a hidden folder or SKAZ's own data — checked where the file really is (``paths``)."""
+        path = given_path(raw, SourceRejected)
         suffix = path.suffix.lower()
         if suffix not in PDF_EXTENSIONS | TEXT_EXTENSIONS:
             raise SourceRejected(
                 "SKAZ adds PDF, Markdown (.md) and text (.txt) files here. "
                 "Audio and video go through the speech import."
             )
-        try:
-            resolved = path.resolve(strict=True)
-            info = resolved.stat()
-        except (OSError, RuntimeError) as error:
-            raise SourceRejected("This file doesn't exist any more or can't be opened.") from error
-        data_dir = self.kb.data_dir.resolve()
-        if resolved == data_dir or data_dir in resolved.parents:
-            raise SourceRejected("Files from SKAZ's own data folder can't be added.")
-        if not stat.S_ISREG(info.st_mode):
-            raise SourceRejected("Choose a regular file.")
-        if not os.access(resolved, os.R_OK):
-            raise SourceRejected("SKAZ isn't allowed to read this file.")
+        resolved, info = resolved_file(path, self.kb.data_dir, SourceRejected)
         limit = MAX_PDF_BYTES if suffix in PDF_EXTENSIONS else MAX_TEXT_FILE_BYTES
         if info.st_size > limit:
             raise SourceRejected(f"This file is larger than {limit // (1024 * 1024)} MB.")
