@@ -241,7 +241,7 @@ class ChatService:
     async def create(self, *, title: str | None = None, engine: EngineId | None = None,
                      model: str | None = None, effort: str | None = None,
                      recording_material_id: str | None = None) -> ChatView:
-        chosen: EngineId = engine or self.registry.default()
+        chosen: EngineId = engine if engine is not None else await disk_call(self.registry.default)
         await self._check_model(chosen, model, effort)
         folder_ids: tuple[str, ...] = ()
         title_auto = True

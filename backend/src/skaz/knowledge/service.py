@@ -36,6 +36,9 @@ from .store.repositories import (
 
 LibraryState = Literal["not_configured", "ready", "unavailable"]
 NOT_CONNECTED = "No library is connected yet."
+CLOSING = "SKAZ is closing."
+#: ``close()`` waits this long for a library write in progress before closing the database.
+CLOSE_WAIT_S = 1.5
 SANDBOX_REASON = "Development libraries must stay inside their profile Documents folder."
 
 
@@ -46,6 +49,8 @@ class LibraryView:
     suggested_root: str
     reason: str | None
     library_id: str | None
+    #: A full scan (startup, retry, connect) is rebuilding the index; what is shown may be a step behind.
+    indexing: bool = False
 
 
 @dataclass(frozen=True)
@@ -120,21 +125,34 @@ class KnowledgeService:
         self._library: Library | None = None
         self._reason: str | None = None
         self._state_lock = threading.RLock()
+        #: Guards the state snapshot ``view()`` reads; never held across a disk or database wait.
+        self._view_lock = threading.Lock()
+        stored = self.library_state.get()
+        self._stored: tuple[str, str] | None = (stored.root, stored.library_id) if stored else None
+        self._indexing = False
         self._closed = False
 
     # -- library state ------------------------------------------------------
 
     def view(self) -> LibraryView:
-        with self._state_lock:
-            stored = self.library_state.get()
-            library = self._library
-            if stored is None:
-                return LibraryView("not_configured", None, str(self.suggested_root()), None, None)
-            if library is None:
-                return LibraryView("unavailable", stored.root, str(self.suggested_root()),
-                                   self._reason or NOT_CONNECTED, stored.library_id)
-            return LibraryView("ready", str(library.root), str(self.suggested_root()), None,
-                               library.library_id)
+        """The library state; never waits for a write or a scan (a snapshot under a light lock)."""
+        with self._view_lock:
+            stored, library, reason, indexing = self._stored, self._library, self._reason, self._indexing
+        suggested = str(self.suggested_root())
+        if stored is None:
+            return LibraryView("not_configured", None, suggested, None, None)
+        if library is None:
+            return LibraryView("unavailable", stored[0], suggested, reason or NOT_CONNECTED, stored[1],
+                               indexing)
+        return LibraryView("ready", str(library.root), suggested, None, library.library_id, indexing)
+
+    def _publish(self, library: Library | None, reason: str | None) -> None:
+        with self._view_lock:
+            self._library, self._reason = library, reason
+
+    def _set_indexing(self, indexing: bool) -> None:
+        with self._view_lock:
+            self._indexing = indexing
 
     def suggested_root(self) -> Path:
         """Where ``connect(None)`` would put the library; reads the folder, never writes."""
@@ -145,12 +163,37 @@ class KnowledgeService:
 
     def start(self) -> None:
         """Startup scan: reopen the connected library, if any. Never creates one."""
-        self.rescan()
+        if self.open_connected():
+            self.rescan()
+
+    def open_connected(self) -> bool:
+        """The quick half of the startup: reopen the connected library and serve the index it had.
+
+        Returns whether a full scan should follow (``rescan``, in the background at app start);
+        meanwhile ``view()`` says ``indexing``. Never creates a library, never waits for a writer.
+        """
+        stored = self._stored
+        if stored is None or self._closed:
+            return False
+        root, library_id = Path(stored[0]), stored[1]
+        try:
+            if not self._inside_sandbox(root):
+                raise LibraryUnavailable(SANDBOX_REASON)
+            library = Library.open(root, library_id)
+        except LibraryUnavailable as error:
+            self._publish(None, error.message)
+            return True  # the scan reports the same, or finds the folder back
+        except OSError as error:
+            self._publish(None, f"SKAZ can't use the library folder: {error.strerror or error}.")
+            return True
+        with self._view_lock:
+            self._library, self._reason, self._indexing = library, None, True
+        return True
 
     def rescan(self) -> None:
-        stored = self.library_state.get()
+        stored = self._stored
         if stored is not None:
-            self._open_and_scan(Path(stored.root), stored.library_id)
+            self._open_and_scan(Path(stored[0]), stored[1])
 
     def retry(self) -> LibraryView:
         self.rescan()
@@ -167,6 +210,8 @@ class KnowledgeService:
         with self._state_lock:
             library = Library.create(root) if read_marker(root) is None else Library.open(root, None)
             self.library_state.set(str(root), library.library_id)
+            with self._view_lock:
+                self._stored = (str(root), library.library_id)
             self._open_and_scan(root, library.library_id)
         return self.view()
 
@@ -179,23 +224,31 @@ class KnowledgeService:
 
     def _open_and_scan(self, root: Path, library_id: str) -> None:
         with self._state_lock:
+            if self._closed:
+                return
+            self._set_indexing(True)
             try:
-                if not self._inside_sandbox(root):
-                    raise LibraryUnavailable(SANDBOX_REASON)
-                library = Library.open(root, library_id)
-                library.ensure_inbox()
-                result = scan_library(library, indexer.known_paths(self.db))
-                indexer.replace_index(self.db, result)
-            except LibraryUnavailable as error:
-                self._library, self._reason = None, error.message
-                return
-            except OSError as error:
-                self._library = None
-                self._reason = f"SKAZ can't use the library folder: {error.strerror or error}."
-                return
-            self._library, self._reason = library, None
-            for listener in list(self.after_scan):
-                listener()
+                self._scan(root, library_id)
+            finally:
+                self._set_indexing(False)
+
+    def _scan(self, root: Path, library_id: str) -> None:
+        try:
+            if not self._inside_sandbox(root):
+                raise LibraryUnavailable(SANDBOX_REASON)
+            library = Library.open(root, library_id)
+            library.ensure_inbox()
+            result = scan_library(library, indexer.known_paths(self.db))
+            indexer.replace_index(self.db, result)
+        except LibraryUnavailable as error:
+            self._publish(None, error.message)
+            return
+        except OSError as error:
+            self._publish(None, f"SKAZ can't use the library folder: {error.strerror or error}.")
+            return
+        self._publish(library, None)
+        for listener in list(self.after_scan):
+            listener()
 
     def writing(self) -> threading.RLock:
         """The one lock for every read-then-write of library files and their index rows.
@@ -211,6 +264,8 @@ class KnowledgeService:
         return self._state_lock
 
     def require(self) -> Library:
+        if self._closed:
+            raise LibraryUnavailable(CLOSING)  # a write that had not started by shutdown never starts
         library = self._library
         if library is None:
             raise LibraryUnavailable(self._reason or NOT_CONNECTED)

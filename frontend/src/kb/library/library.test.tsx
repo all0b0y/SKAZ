@@ -133,4 +133,21 @@ describe('Library side panel on real /kb answers', () => {
     expect(alert).toHaveTextContent('Library folder is unavailable. The library folder is missing. Nothing was deleted.');
     expect(within(side).queryByText(/No materials/)).not.toBeInTheDocument();
   });
+
+  it('says the library is indexing while the backend rescans it, then shows what the scan found', async () => {
+    const world = { ...baseWorld() };
+    world.library = { ...world.library, indexing: true };
+    const { fake } = renderKb({ prefs: { section: 'materials' }, world });
+    const side = await screen.findByRole('region', { name: 'Materials' });
+    expect(await within(side).findByTestId('library-indexing')).toHaveTextContent('Indexing the library…');
+    // The previous index is shown meanwhile.
+    expect(await within(side).findByTestId('all-materials')).toHaveTextContent('All materials · 3');
+    const reads = () => fake.calls.filter((c) => c.method === 'GET' && c.path === '/kb/library').length;
+    const before = reads();
+    fake.world.library = { ...fake.world.library, indexing: false };
+    fake.world.materials = fake.world.materials.slice(1);
+    await waitFor(() => expect(within(side).queryByTestId('library-indexing')).not.toBeInTheDocument(), { timeout: 4000 });
+    expect(reads()).toBe(before + 1); // one read at a time, and none once indexing ended
+    await waitFor(() => expect(within(side).getByTestId('all-materials')).toHaveTextContent('All materials · 2'));
+  });
 });

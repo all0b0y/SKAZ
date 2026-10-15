@@ -131,13 +131,14 @@ async def test_the_app_lifespan_starts_the_sweep_after_the_library_opened(kb_app
                                                                           monkeypatch: Any) -> None:
     runtime = kb_app.state.runtime
     order: list[str] = []
-    real_start = runtime.kb.start
+    real_open = runtime.kb.open_connected
 
-    def start_library() -> None:
-        real_start()
+    def open_library() -> bool:
+        opened: bool = real_open()
         order.append("library")
+        return opened
 
-    monkeypatch.setattr(runtime.kb, "start", start_library)
+    monkeypatch.setattr(runtime.kb, "open_connected", open_library)
     monkeypatch.setattr(type(runtime.kb_agents), "start", lambda _self: order.append("agents"))
     async with kb_app.router.lifespan_context(kb_app):
         assert order == ["library", "agents"]

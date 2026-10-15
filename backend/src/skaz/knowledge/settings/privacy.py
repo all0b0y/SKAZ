@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ...native_io import disk_call
 from ..agents.engine import EngineId
 from ..agents.registry import ENGINE_IDS
 
@@ -32,6 +33,10 @@ AGENT_DESTINATIONS: dict[EngineId, str] = {
 
 
 async def privacy_flows(runtime: Runtime) -> list[Flow]:
+    return await disk_call(_flows, runtime)  # settings files and database reads: off the event loop
+
+
+def _flows(runtime: Runtime) -> list[Flow]:
     settings = runtime.settings_store.load()
     provider = settings.transcription_provider
     cloud = settings.cloud_consent

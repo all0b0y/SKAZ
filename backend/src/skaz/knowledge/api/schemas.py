@@ -28,6 +28,8 @@ class KbLibrary(BaseModel):
     #: Plain-English reason when ``state`` is ``unavailable``.
     reason: str | None
     library_id: str | None
+    #: A full scan is rebuilding the index (app start, retry): lists and search may be a step behind.
+    indexing: bool = False
 
 
 class KbLibraryConnect(_Request):

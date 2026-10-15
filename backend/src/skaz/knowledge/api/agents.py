@@ -6,6 +6,7 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ...gateways.codex_connection import MIN_CODEX_VERSION
+from ...native_io import disk_call
 from ..agents.claude_code import MIN_CLAUDE_VERSION
 from ..agents.engine import EngineId
 from ..agents.hermes import MIN_HERMES_VERSION
@@ -86,7 +87,8 @@ def task_view(task: InstallTask, after: int) -> KbInstallTask:
 @router.get("")
 async def list_agents(hub: HubDep) -> KbAgents:
     views = await hub.registry.views()
-    return KbAgents(agents=[agent_view(hub, view) for view in views], default=hub.registry.default())
+    default = await disk_call(hub.registry.default)  # a database read: off the event loop
+    return KbAgents(agents=[agent_view(hub, view) for view in views], default=default)
 
 
 @router.put("/default")

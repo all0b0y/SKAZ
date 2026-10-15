@@ -28,7 +28,7 @@ async def test_kb_routes_require_the_token(kb_app: Any) -> None:
 async def test_library_lifecycle_and_folders(kb_client: httpx.AsyncClient, documents: Path) -> None:
     library = (await kb_client.get("/kb/library")).json()
     assert library == {"state": "not_configured", "root": None, "suggested_root": str(documents / "SKAZ"),
-                       "reason": None, "library_id": None}
+                       "reason": None, "library_id": None, "indexing": False}
     assert (await kb_client.post("/kb/folders", json={"name": "Физика"})).status_code == 503
 
     connected = (await kb_client.post("/kb/library", json={})).json()

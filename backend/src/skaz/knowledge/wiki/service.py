@@ -455,7 +455,7 @@ class WikiService:
 
     async def tick(self) -> JobRecord | None:
         """Start background "Find connections" when the user allowed it, SKAZ is idle and the wiki changed."""
-        if not self.ingest.settings().background_connections:
+        if not (await disk_call(self.ingest.settings)).background_connections:  # a database read
             return None
         if self.ingest.active_jobs() or self.busy:
             self._touch()

@@ -285,3 +285,4 @@ p.kb-row--static { margin-top: 4px; }
 /* ---- Backend gate ---- */
 .kb-gate { height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--kb-bg); }
 .kb-gate__box { width: min(440px, calc(100vw - 48px)); }
+.kb-side__note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px 12px 8px; font-size: 12px; }

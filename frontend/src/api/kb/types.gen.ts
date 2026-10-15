@@ -485,6 +485,7 @@ export interface KbLibrary {
   suggested_root: string;
   reason: string | null;
   library_id: string | null;
+  indexing?: boolean;
 }
 
 export interface KbLibraryConnect {

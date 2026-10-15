@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -14,6 +15,7 @@ from fastapi.responses import JSONResponse
 from .activity import current_activity
 from .config import AppConfig
 from .knowledge.api import ROUTERS as KB_ROUTERS
+from .knowledge.logsafe import error_note
 from .knowledge.mcp.router import router as kb_mcp_router
 from .knowledge.shutdown import close_knowledge
 from .native_io import disk_call
@@ -22,6 +24,18 @@ from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
 from .security import local_access_error, require_token
+
+logger = logging.getLogger(__name__)
+
+#: The startup library scan runs in the background; the app waits this long for a small library
+#: before it starts answering (``/health``), never for the whole scan of a large one.
+STARTUP_SCAN_WAIT_S = 1.0
+
+
+def _log_scan_failure(task: asyncio.Task[None]) -> None:
+    error = None if task.cancelled() else task.exception()
+    if error is not None:
+        logger.error("startup library scan failed: %s", error_note(error))
 
 
 def create_app(
@@ -35,8 +49,14 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
-            # Reopen and rescan the connected knowledge library; never creates one.
-            await disk_call(runtime.kb.start)
+            # Reopen the connected knowledge library (never creates one) and rescan it in the
+            # background: the app answers meanwhile and the library says "indexing" (Electron
+            # gives the backend 30 s to answer /health; a large library takes longer to scan).
+            if await disk_call(runtime.kb.open_connected):
+                scan = asyncio.create_task(disk_call(runtime.kb.rescan), name="kb-startup-scan")
+                scan.add_done_callback(_log_scan_failure)
+                app.state.kb_startup_scan = scan
+                await asyncio.wait({scan}, timeout=STARTUP_SCAN_WAIT_S)
             runtime.kb_auto_ingest.bind_loop(asyncio.get_running_loop())
             # Outside edits of Wiki/ (every 2 s) and background connections when the user allowed them.
             await runtime.kb_wiki.start()
