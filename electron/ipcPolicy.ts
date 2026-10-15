@@ -128,6 +128,20 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/codex\/previews$/ },
   { method: 'POST', pattern: /^\/codex\/previews\/[^/]+\/apply$/ },
   { method: 'POST', pattern: /^\/codex\/previews\/[^/]+\/discard$/ },
+  // Knowledge library (new interface, frontend/src/kb). Only what the renderer uses: library
+  // place, folders (create / rename / delete empty), material list + one material, notification
+  // count. Ids are one path segment; nothing here reaches a file path chosen by the renderer
+  // except POST /kb/library, which the backend confines to the documents sandbox.
+  { method: 'GET', pattern: /^\/kb\/library$/ },
+  { method: 'POST', pattern: /^\/kb\/library$/ },
+  { method: 'POST', pattern: /^\/kb\/library\/retry$/ },
+  { method: 'GET', pattern: /^\/kb\/folders$/ },
+  { method: 'POST', pattern: /^\/kb\/folders$/ },
+  { method: 'PATCH', pattern: /^\/kb\/folders\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/folders\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/materials$/ },
+  { method: 'GET', pattern: /^\/kb\/materials\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/notifications$/ },
 ];
 
 /** True only for links safe to hand to the OS browser via shell.openExternal. */

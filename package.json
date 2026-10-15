@@ -28,6 +28,8 @@
     "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.7.2",
     "clsx": "^2.1.1",
+    "lucide-react": "^1.57.0",
+    "motion": "^14.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "simple-icons": "^16.33.0",

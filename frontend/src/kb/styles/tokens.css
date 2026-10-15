@@ -1,0 +1,153 @@
+/*
+ * SKAZ design tokens — palette "Graphite on milk" (decision 35, palettes4.json → graphitemilk,
+ * summary v39: dark folder 3 is #b8d07a). The accent equals the text colour, so links, mentions
+ * and quote chips are told apart by shape (chip / underline), never by colour alone.
+ *
+ * Theme: follows the system unless html[data-theme] forces light or dark.
+ * Text size: html[data-text-size] = s | m | l (scale Б·14 is "m"; nothing below 12px).
+ */
+
+html[data-kb-ui] {
+  /* Light (default) */
+  --kb-bg: #f9f8f3;
+  --kb-pane: #fffffb;
+  --kb-side: #f0eee6;
+  --kb-rail: #e8e6df;
+  --kb-line: #dddedb;
+  --kb-text: #2c2e31;
+  --kb-muted: #686969;
+  /* Muted text on the darker rail/segment grounds: #686969 gives 4.41 on #e8e6df, this 4.83. */
+  --kb-muted-strong: #626363;
+  --kb-accent: #2c2e31;
+  --kb-accent-soft: #e6e6e3;
+  --kb-danger: #b3261e;
+  --kb-danger-soft: #f5e3de;
+  --kb-warn: #8a5a00;
+  --kb-warn-soft: #ede6d5;
+  --kb-folder-1: #2f62b0;
+  --kb-folder-2: #7046b8;
+  --kb-folder-3: #5a7420;
+  --kb-folder-4: #11746a;
+  --kb-fill: #2c2e31;
+  --kb-on-fill: #f9f8f3;
+  --kb-fill-border: #2c2e31;
+  --kb-badge-text: #ffffff;
+  --kb-scrim: rgba(10, 14, 13, 0.38);
+  --kb-scrim-strong: rgba(10, 14, 13, 0.55);
+  --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.18);
+  --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --kb-art-tint: color-mix(in srgb, var(--kb-accent) 6%, transparent);
+  color-scheme: light;
+
+  /* Type: Inter for everything, Unbounded 600/700 for headings */
+  --kb-font: 'SKAZ Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --kb-font-display: 'SKAZ Unbounded', 'SKAZ Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --kb-font-mono: ui-monospace, Menlo, monospace;
+
+  /* Scale Б·14 (app-v27/v28) */
+  --t-xs: 12px;
+  --t-sm: 12.5px;
+  --t-base: 14px;
+  --t-md: 15px;
+  --t-lg: 17px;
+  --t-xl: 20px;
+  --t-xxl: 26px;
+
+  /* Radii, spacing (4px rhythm), fixed chrome heights */
+  --kb-r-xs: 5px;
+  --kb-r-sm: 7px;
+  --kb-r-md: 9px;
+  --kb-r-lg: 12px;
+  --kb-r-xl: 14px;
+  --kb-r-pill: 999px;
+  --kb-s-1: 4px;
+  --kb-s-2: 8px;
+  --kb-s-3: 12px;
+  --kb-s-4: 16px;
+  --kb-s-5: 20px;
+  --kb-s-6: 24px;
+  --kb-titlebar-h: 38px;
+  --kb-head-h: 46px;
+  --kb-rail-w: 88px;
+  --kb-icon: 16px;
+  --kb-icon-lg: 20px;
+}
+
+html[data-kb-ui][data-text-size='s'] {
+  --t-xs: 12px;
+  --t-sm: 12px;
+  --t-base: 13px;
+  --t-md: 14px;
+  --t-lg: 16px;
+  --t-xl: 19px;
+  --t-xxl: 24px;
+}
+
+html[data-kb-ui][data-text-size='l'] {
+  --t-xs: 12px;
+  --t-sm: 13px;
+  --t-base: 14.5px;
+  --t-md: 16px;
+  --t-lg: 18px;
+  --t-xl: 21px;
+  --t-xxl: 27px;
+}
+
+/* Dark — inversion of the pair (#1E1F21 / #F9F8F3). Declared twice: system and forced. */
+@media (prefers-color-scheme: dark) {
+  html[data-kb-ui]:not([data-theme='light']) {
+    --kb-bg: #1e1f21;
+    --kb-pane: #2c2e31;
+    --kb-side: #191a1c;
+    --kb-rail: #222325;
+    --kb-line: #555658;
+    --kb-text: #f9f8f3;
+    --kb-muted: #a7a7a5;
+    --kb-muted-strong: #a7a7a5;
+    --kb-accent: #f9f8f3;
+    --kb-accent-soft: #555658;
+    --kb-danger: #ff8a80;
+    --kb-danger-soft: #473a3b;
+    --kb-warn: #f0c060;
+    --kb-warn-soft: #494438;
+    --kb-folder-1: #8fb4f2;
+    --kb-folder-2: #bfa4f4;
+    --kb-folder-3: #b8d07a;
+    --kb-folder-4: #f59ad6;
+    --kb-fill: #f9f8f3;
+    --kb-on-fill: #2c2e31;
+    --kb-fill-border: #f9f8f3;
+    --kb-badge-text: #2c2e31;
+    --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
+    --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+}
+
+html[data-kb-ui][data-theme='dark'] {
+  --kb-bg: #1e1f21;
+  --kb-pane: #2c2e31;
+  --kb-side: #191a1c;
+  --kb-rail: #222325;
+  --kb-line: #555658;
+  --kb-text: #f9f8f3;
+  --kb-muted: #a7a7a5;
+  --kb-muted-strong: #a7a7a5;
+  --kb-accent: #f9f8f3;
+  --kb-accent-soft: #555658;
+  --kb-danger: #ff8a80;
+  --kb-danger-soft: #473a3b;
+  --kb-warn: #f0c060;
+  --kb-warn-soft: #494438;
+  --kb-folder-1: #8fb4f2;
+  --kb-folder-2: #bfa4f4;
+  --kb-folder-3: #b8d07a;
+  --kb-folder-4: #f59ad6;
+  --kb-fill: #f9f8f3;
+  --kb-on-fill: #2c2e31;
+  --kb-fill-border: #f9f8f3;
+  --kb-badge-text: #2c2e31;
+  --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+}
