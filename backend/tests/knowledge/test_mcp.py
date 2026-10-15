@@ -313,3 +313,29 @@ def test_no_token_carrying_dataclass_shows_its_token() -> None:
                         checked.append(f"{name}.{item.name}")
                         assert item.repr is False, f"{name}.{item.name} is shown in repr"
     assert "McpAccess.token" in checked
+
+
+class _CountingBody:
+    """A chunked request body (no Content-Length) that counts how much of it the server read."""
+
+    def __init__(self, chunks: int, size: int = 64 * 1024) -> None:
+        self.chunks, self.size, self.read = chunks, size, 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for _ in range(self.chunks):
+            self.read += 1
+            yield b"x" * self.size
+
+
+async def test_a_body_without_a_valid_token_is_never_read(http: httpx.AsyncClient) -> None:
+    body = _CountingBody(64)  # 4 MB, chunked
+    response = await http.post("/kb/mcp", headers=legacy_headers("not-a-token"), content=body)
+    assert response.status_code == 401
+    assert body.read <= 1  # the transport may hand over the first chunk; the router reads none
+
+
+async def test_a_chunked_body_is_cut_at_the_limit(http: httpx.AsyncClient, mcp: McpServer) -> None:
+    body = _CountingBody(64)  # 4 MB, no Content-Length to refuse it by
+    response = await http.post("/kb/mcp", headers=legacy_headers(full_token(mcp)), content=body)
+    assert response.status_code == 413
+    assert body.read <= 256 // 64 + 2  # read until just past the 256 KB limit, not the 4 MB
