@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
@@ -85,6 +85,44 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
     expect(await within(bar).findByRole('button', { name: 'Record' })).toBeInTheDocument();
     expect(eng.e.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('a quick hover then click keeps the control row open (no stale state closes it)', async () => {
+    const { user, bar, record } = await start();
+    await user.click(record);
+    const capsule = await within(bar).findByRole('button', { name: /^Recording/ });
+    const wrap = within(bar).getByTestId('record-capsule');
+    // Both events before React re-renders: the click must see the row the hover just opened.
+    act(() => {
+      fireEvent.mouseEnter(wrap);
+      fireEvent.click(capsule);
+    });
+    expect(await screen.findByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+    expect(capsule).toHaveAttribute('aria-expanded', 'true');
+    // The click pinned it: leaving the capsule no longer closes it.
+    act(() => { fireEvent.mouseLeave(wrap); });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(screen.getByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+    // A second click closes it.
+    await user.click(capsule);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Recording controls' })).not.toBeInTheDocument());
+  });
+
+  it('hover opens the row and leaving closes it; a click while it is open by hover pins it', async () => {
+    const { user, bar, record } = await start();
+    await user.click(record);
+    const capsule = await within(bar).findByRole('button', { name: /^Recording/ });
+    const wrap = within(bar).getByTestId('record-capsule');
+    act(() => { fireEvent.mouseEnter(wrap); });
+    expect(await screen.findByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+    act(() => { fireEvent.mouseLeave(wrap); });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Recording controls' })).not.toBeInTheDocument());
+    act(() => { fireEvent.mouseEnter(wrap); });
+    await screen.findByRole('dialog', { name: 'Recording controls' });
+    await user.click(capsule);
+    act(() => { fireEvent.mouseLeave(wrap); });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(screen.getByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
   });
 
   it('the live panel grows with final text, keeps the unstable tail grey, and follows the end', async () => {

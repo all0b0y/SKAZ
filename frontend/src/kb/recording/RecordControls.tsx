@@ -169,8 +169,16 @@ export function RecordControls() {
   const right = useUi((s) => s.right);
   const [menuOpen, setMenuOpen] = useState(false);
   const [rowOpen, setRowOpen] = useState(false);
+  // The control row's truth for event handlers: a hover and a click can arrive before React
+  // re-renders, so handlers read these refs, never the `rowOpen` of their render.
+  const rowOpenNow = useRef(false);
   const rowByHover = useRef(false);
   const hoverTimer = useRef<number | undefined>(undefined);
+  const setRow = (open: boolean, byHover = false) => {
+    rowOpenNow.current = open;
+    rowByHover.current = open && byHover;
+    setRowOpen(open);
+  };
   const recordRef = useRef<HTMLButtonElement | null>(null);
   const folderRef = useRef<HTMLButtonElement | null>(null);
   const capsuleRef = useRef<HTMLButtonElement | null>(null);
@@ -184,6 +192,10 @@ export function RecordControls() {
   const live = isLive(phase);
   const paused = phase === 'paused' || phase === 'pausing';
   const reconnecting = phase === 'recording' && stream === 'reconnecting';
+  // A recording that ends (Stop, failure) leaves no row behind for the next one.
+  useEffect(() => {
+    if (!live) { window.clearTimeout(hoverTimer.current); rowOpenNow.current = false; rowByHover.current = false; setRowOpen(false); }
+  }, [live]);
 
   if (phase === 'finishing') {
     return (
@@ -194,10 +206,10 @@ export function RecordControls() {
   }
 
   if (live) {
-    const hoverOpen = () => { window.clearTimeout(hoverTimer.current); if (!rowOpen) { rowByHover.current = true; setRowOpen(true); } };
+    const hoverOpen = () => { window.clearTimeout(hoverTimer.current); if (!rowOpenNow.current) setRow(true, true); };
     const hoverClose = () => {
       window.clearTimeout(hoverTimer.current);
-      if (rowByHover.current) hoverTimer.current = window.setTimeout(() => setRowOpen(false), 350);
+      if (rowByHover.current) hoverTimer.current = window.setTimeout(() => { if (rowByHover.current) setRow(false); }, 350);
     };
     return (
       <span className="kb-capwrap" onMouseEnter={hoverOpen} onMouseLeave={hoverClose} data-testid="record-capsule">
@@ -209,10 +221,10 @@ export function RecordControls() {
           aria-expanded={rowOpen}
           aria-label={`${paused ? 'Paused' : 'Recording'} ${formatTime(elapsed)}, folder ${folderName}${reconnecting ? `, reconnecting to ${speechServiceName(provider)}` : ''}. Recording controls`}
           onClick={() => {
+            window.clearTimeout(hoverTimer.current);
             // Opened by hovering: a click pins it open instead of closing it under the pointer.
-            if (rowOpen && rowByHover.current) { rowByHover.current = false; window.clearTimeout(hoverTimer.current); return; }
-            rowByHover.current = false;
-            setRowOpen((v) => !v);
+            if (rowOpenNow.current && rowByHover.current) { rowByHover.current = false; return; }
+            setRow(!rowOpenNow.current);
           }}
         >
           {paused ? <span className="kb-pzd" aria-hidden="true" /> : <Bars />}
@@ -226,7 +238,7 @@ export function RecordControls() {
             onClick={() => void recording.getState().resume()}>Resume</Button>
         )}
         <StartErrorPopover anchorRef={capsuleRef} />
-        <Popover open={rowOpen} onClose={() => setRowOpen(false)} anchorRef={capsuleRef} label="Recording controls"
+        <Popover open={rowOpen} onClose={() => setRow(false)} anchorRef={capsuleRef} label="Recording controls"
           placement="bottom-end" className="kb-capctl" autoFocus={!rowByHover.current}>
           <div className="kb-capctl__row" onMouseEnter={hoverOpen} onMouseLeave={hoverClose}>
             {paused ? (
@@ -237,7 +249,7 @@ export function RecordControls() {
                 onClick={() => void recording.getState().pause()}><Icon name="pause" size={14} /></button>
             )}
             <button type="button" className="kb-cbtn kb-cbtn--stop" aria-label="Stop"
-              onClick={() => { setRowOpen(false); void recording.getState().stop(); }}><Icon name="stop" size={14} /></button>
+              onClick={() => { setRow(false); void recording.getState().stop(); }}><Icon name="stop" size={14} /></button>
             <span className="kb-capctl__sep" aria-hidden="true" />
             <Segmented label="Show" size="sm" value={view} options={VIEW_OPTIONS} onChange={(v) => recording.getState().setView(v)} />
             {materialId && right?.kind !== 'live' && (
