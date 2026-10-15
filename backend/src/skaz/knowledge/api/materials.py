@@ -89,7 +89,9 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
     fragments: list[KbFragment]
     if corrections is None:  # no wiki service (tests of the index alone): the recognised text as is
         fragments = [KbFragment(id=f.id, seg=f.seg, text=f.text, start_ms=f.start_ms, end_ms=f.end_ms,
-                                speaker=f.speaker, page=f.page, index=f.index) for f in detail.fragments]
+                                speaker=f.speaker, page=f.page, index=f.index, original_text=None,
+                                corrections=[])
+                     for f in detail.fragments]
         applied = doubtful = 0
     else:
         fragments = [
@@ -110,7 +112,8 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
     })
 
 
-def material_view(kb: KnowledgeService, material_id: str, corrections: WikiService | None = None) -> KbMaterial:
+def material_view(kb: KnowledgeService, material_id: str,
+                  corrections: WikiService | None = None) -> KbMaterial:
     detail = kb.material(material_id)
     record = kb.material_repo.get(material_id)
     folder = kb.folder_repo.get(detail.folder_id)
