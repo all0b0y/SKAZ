@@ -6,6 +6,11 @@ check as ingest (layer 4: verbatim quotes of existing fragments) and the
 output guard (layer 5). Then the block becomes the agent's again — also when
 the user had edited it — with the same id and kind. A failed check leaves the
 block exactly as it was.
+
+Fragments excluded as instructions for an AI (layer 3, ``excluded.json``)
+are not sources here either: they are not sent to the model, and a quote
+from one is not accepted (it is not among the fragments the check knows).
+An exclusion list that can't be read hides that material (fail closed).
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from ..ingest.checks import MIN_QUOTE_CHARS, clean_text
 from ..ingest.prompts import instructions_for
 from ..markdown.page import Block, Cite, PageDocument, parse_page
 from ..markdown.text import format_timestamp, normalize_text, quote_in_fragment
+from ..sources.guard.visibility import ExclusionsUnreadable, excluded_segs
 from .agent import AgentCaller, WikiJobFailed
 from .context import WikiContext
 from .pages_io import page_path, reindex, rewrite
@@ -27,6 +33,11 @@ from .prompts import RECHECK_INSTRUCTIONS, RECHECK_SCHEMA, RecheckOut
 from .statements import statement_text
 
 MAX_FRAGMENTS = 12
+NO_SOURCES = "The sources of this statement are no longer in the library."
+ONLY_EXCLUDED = (
+    "The sources of this statement were excluded as instructions for an AI, so the agent can't recheck it. "
+    "Restore the fragment in the material if it isn't an instruction."
+)
 
 Log = Callable[[str], Awaitable[None]]
 
@@ -65,9 +76,13 @@ class Recheck:
             record = self.ctx.kb.material_repo.get(material_id)
             if record is None:
                 continue
+            try:
+                hidden = excluded_segs(self.ctx.kb, material_id)
+            except ExclusionsUnreadable:
+                continue  # can't tell which fragments are excluded: none of this material is shown
             fragments = []
             for fragment in self.ctx.kb.material_repo.fragments(material_id):
-                if fragment.seg in segs:
+                if fragment.seg in segs and fragment.seg not in hidden:
                     label = (
                         format_timestamp(fragment.start_ms)
                         if fragment.start_ms is not None
@@ -79,11 +94,18 @@ class Recheck:
                 result.append((material_id, record.title, fragments))
         return result
 
+    def _any_cited_present(self, block: Block) -> bool:
+        """Whether some cited fragment still exists (then it is hidden, not gone)."""
+        repo = self.ctx.kb.material_repo
+        return any(fragment.seg == cite.seg
+                   for cite in block.cites for fragment in repo.fragments(cite.material_id))
+
     async def run(self, page_id: str, block_id: str, caller: AgentCaller, log: Log) -> None:
         block, language = await disk_call(self.target, page_id, block_id)
         sources = await disk_call(self._sources, block)
         if not sources:
-            raise WikiJobFailed("The sources of this statement are no longer in the library.")
+            present = await disk_call(self._any_cited_present, block)
+            raise WikiJobFailed(ONLY_EXCLUDED if present else NO_SOURCES)
         lines = [untrusted_block("statement to recheck", statement_text(block.body))]
         for number, (_material_id, title, fragments) in enumerate(sources, start=1):
             body = "\n\n".join(
