@@ -182,6 +182,22 @@ async def test_imports_go_to_the_last_used_folder(api: httpx.AsyncClient, tmp_pa
     assert missing.status_code == 404
 
 
+async def test_import_without_cloud_consent_is_refused_and_leaves_no_session_behind(
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
+) -> None:
+    assert (await api.put("/settings", json={"cloud_consent": False})).status_code == 200
+    sessions_before = session_count(speech_app)
+
+    refused = await api.post("/kb/imports", json={"path": media(tmp_path, "Lecture.m4a")})
+
+    assert refused.status_code == 409, refused.text
+    assert "consent" in refused.json()["detail"].lower()
+    assert session_count(speech_app) == sessions_before
+    active = await api.get("/kb/imports/active")
+    assert active.status_code == 200 and active.json() == []
+    assert soniox.jobs == []
+
+
 async def test_requests_are_checked_before_anything_starts(
     api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
 ) -> None:
