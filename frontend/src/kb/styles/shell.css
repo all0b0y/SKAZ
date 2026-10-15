@@ -53,7 +53,7 @@
 /* ---- Body ---- */
 .kb-body { flex: 1; display: flex; min-height: 0; min-width: 0; position: relative; }
 
-/* ---- Rail (summary v39: 52px, icons only; names live in tooltips) ---- */
+/* ---- Rail (summary v39: 52px, icons only; names slide out on hover/focus, v43 B) ---- */
 .kb-rail {
   width: var(--kb-rail-w);
   flex: none;
@@ -92,6 +92,45 @@
 .kb-rail__item.is-active:hover { background: transparent; }
 .kb-rail__item .kb-badge { top: -2px; right: -4px; }
 .kb-rail__item .kb-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 2px var(--kb-rail); }
+
+/* Names slide out of the button (v43 B): the highlight extends to the right over the next column
+   and shows the name beside the icon — one shape; the active item keeps its filled colours.
+   The rail paints above the columns after it so the name is never covered. */
+.kb-rail { position: relative; z-index: 6; }
+.kb-rail__label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 9px;
+  border-radius: var(--kb-r-md);
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+  animation: kb-rail-reveal 160ms ease-out both;
+}
+.kb-rail__label > .kb-icon { flex: none; }
+.kb-rail__item.is-active .kb-rail__label { background: var(--kb-fill); color: var(--kb-on-fill); }
+.kb-rail__hint { color: var(--kb-muted); font-size: var(--t-xs); font-weight: 400; }
+.kb-rail__item.is-active .kb-rail__hint { color: inherit; opacity: 0.6; }
+.kb-rail__item .kb-dot { z-index: 2; }
+/* The unread count moves into the name ("5 unread") while it is out. */
+.kb-rail__item[data-labelled] .kb-badge { visibility: hidden; }
+/* The keyboard ring follows the shape: around the name while it is out. */
+.kb-rail__item[data-labelled]:focus-visible { outline: none; }
+.kb-rail__item[data-labelled]:focus-visible .kb-rail__label { outline: 2px solid var(--kb-accent); outline-offset: -2px; }
+@keyframes kb-rail-reveal {
+  from { clip-path: inset(0 100% 0 0 round var(--kb-r-md)); }
+  to { clip-path: inset(0 0 0 0 round var(--kb-r-md)); }
+}
+@media (prefers-reduced-motion: reduce) { .kb-rail__label { animation: none; } }
 
 /* ---- Shared column header (46px) ---- */
 .kb-head {

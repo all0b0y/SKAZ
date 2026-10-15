@@ -163,6 +163,46 @@ test.afterAll(async () => {
 });
 
 for (const theme of THEMES) {
+  test(`rail names slide out beside the icon (v43 B) — 1440 ${theme}`, async () => {
+    await open(theme);
+    const rail = page.getByRole('navigation', { name: 'Sections' });
+    const check = async (name: string, button: ReturnType<typeof rail.getByRole>, text: string | RegExp) => {
+      const label = button.getByTestId('rail-label');
+      await expect(label).toBeVisible();
+      await expect(label).toHaveText(text);
+      await page.waitForTimeout(250);
+      const geo = await label.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const b = el.parentElement!.getBoundingClientRect();
+        const railBox = el.closest('nav')!.getBoundingClientRect();
+        // The name ignores the pointer; let it be hit-tested for this one probe.
+        (el as HTMLElement).style.pointerEvents = 'auto';
+        const top = document.elementFromPoint(r.right - 6, r.top + r.height / 2);
+        (el as HTMLElement).style.pointerEvents = '';
+        return { left: r.left, buttonLeft: b.left, right: r.right, railRight: railBox.right, onTop: !!top && el.contains(top) || top === el };
+      });
+      // One shape: it starts where the button starts and reaches out of the rail, nothing covers it.
+      expect(Math.abs(geo.left - geo.buttonLeft)).toBeLessThanOrEqual(1);
+      expect(geo.right).toBeGreaterThan(geo.railRight + 20);
+      expect(geo.onTop).toBe(true);
+      await page.screenshot({ path: path.join(shots, `${name}.png`), clip: { x: 0, y: 0, width: 360, height: 860 } });
+    };
+    const chats = rail.getByRole('button', { name: /^Chats/ });
+    await chats.hover();
+    await check(`rail-active-${theme}`, chats, 'Chats');
+    const bell = rail.getByRole('button', { name: /^Notifications/ });
+    await bell.hover();
+    await check(`rail-hover-${theme}`, bell, /^Notifications(\d+ unread)?$/);
+    await page.mouse.move(700, 400);
+    await expect(rail.getByTestId('rail-label')).toHaveCount(0);
+    // Keyboard: focus shows the name at once, with the shortcut muted.
+    await bell.focus();
+    await page.keyboard.press('Tab');
+    const search = rail.getByRole('button', { name: 'Search' });
+    await expect(search).toBeFocused();
+    await check(`rail-focus-${theme}`, search, 'Search⌘K');
+  });
+
   test(`material pages read as documents — 1440 ${theme}`, async () => {
     await open(theme);
     await openMaterial('m-b5', 'B5 · Городской бюджет');
