@@ -10,8 +10,3 @@ export function systemAudioSupported(platform: string, systemVersion: string): b
   const [major = 0, minor = 0] = systemVersion.split('.').map((part) => Number.parseInt(part, 10) || 0);
   return major > 14 || (major === 14 && minor >= 2);
 }
-
-/** Privacy pane holding "Screen & System Audio Recording" (macOS only). */
-export const SYSTEM_AUDIO_SETTINGS_URL: string | null = process.platform === 'darwin'
-  ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
-  : null;

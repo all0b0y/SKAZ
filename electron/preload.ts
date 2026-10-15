@@ -3,7 +3,6 @@ import { CHANNELS } from './channels';
 import { systemAudioSupported } from './systemAudio';
 import type {
   AudioFileChoice,
-  AudioUploadMeta,
   BackendStatus,
   BridgeApi,
   BridgeRequest,
@@ -11,7 +10,6 @@ import type {
   DictationResult,
   JsonResponse,
   MaterialFileChoice,
-  SharedNote,
   TextFileSave,
 } from '../frontend/src/api/bridge';
 
@@ -31,20 +29,6 @@ const api: BridgeApi = {
   request<T = unknown>(req: BridgeRequest): Promise<JsonResponse<T>> {
     return ipcRenderer.invoke(CHANNELS.request, req) as Promise<JsonResponse<T>>;
   },
-  uploadAudio<T = unknown>(
-    sessionId: string,
-    meta: AudioUploadMeta,
-    wav: ArrayBuffer,
-  ): Promise<JsonResponse<T>> {
-    return ipcRenderer.invoke(CHANNELS.uploadAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
-  },
-  bufferAudio<T = unknown>(
-    sessionId: string,
-    meta: AudioUploadMeta,
-    wav: ArrayBuffer,
-  ): Promise<JsonResponse<T>> {
-    return ipcRenderer.invoke(CHANNELS.bufferAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
-  },
   dictate(wav: ArrayBuffer, language?: string): Promise<JsonResponse<DictationResult>> {
     return ipcRenderer.invoke(CHANNELS.dictate, wav, language) as Promise<JsonResponse<DictationResult>>;
   },
@@ -53,9 +37,6 @@ const api: BridgeApi = {
   },
   chooseMaterialFiles(): Promise<MaterialFileChoice[]> {
     return ipcRenderer.invoke(CHANNELS.chooseMaterialFiles) as Promise<MaterialFileChoice[]>;
-  },
-  readLogs(): Promise<string> {
-    return ipcRenderer.invoke(CHANNELS.readLogs) as Promise<string>;
   },
   openLogsFolder(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.openLogsFolder) as Promise<boolean>;
@@ -72,10 +53,7 @@ const api: BridgeApi = {
   droppedMediaFile(file: File): AudioFileChoice | null {
     const path = webUtils.getPathForFile(file);
     // Sandboxed preloads cannot import Node path/url. Metadata is read by the backend.
-    return path ? { path, name: file.name, url: '' } : null;
-  },
-  shareNote(note: SharedNote): Promise<boolean> {
-    return ipcRenderer.invoke(CHANNELS.shareNote, note) as Promise<boolean>;
+    return path ? { path, name: file.name } : null;
   },
   getBackendStatus(): Promise<BackendStatus> {
     return ipcRenderer.invoke(CHANNELS.status) as Promise<BackendStatus>;
@@ -88,9 +66,6 @@ const api: BridgeApi = {
   reportCaptureState(state: CaptureState): void {
     ipcRenderer.send(CHANNELS.captureState, state);
   },
-  reportCodexActivity(activeTasks: number): void {
-    ipcRenderer.send(CHANNELS.codexActivity, activeTasks);
-  },
   onPrepareQuit(listener) {
     const handler = (_event: unknown, id: unknown): void => {
       if (!Number.isSafeInteger(id)) return;
@@ -101,14 +76,6 @@ const api: BridgeApi = {
     };
     ipcRenderer.on(CHANNELS.prepareQuit, handler);
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
-  },
-  onQuitCancelled(listener) {
-    const handler = (): void => listener();
-    ipcRenderer.on(CHANNELS.cancelQuit, handler);
-    return () => ipcRenderer.removeListener(CHANNELS.cancelQuit, handler);
-  },
-  openSystemAudioSettings(): Promise<boolean> {
-    return ipcRenderer.invoke(CHANNELS.openSystemAudioSettings) as Promise<boolean>;
   },
   platform: process.platform,
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),

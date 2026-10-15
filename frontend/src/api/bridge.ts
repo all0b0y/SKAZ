@@ -21,41 +21,19 @@ export type JsonResponse<T> =
   | { ok: true; status: number; data: T }
   | { ok: false; status: number; detail: string };
 
-export type BinaryResponse =
-  | { ok: true; status: number; data: ArrayBuffer }
-  | { ok: false; status: number; detail: string };
-
-export interface AudioUploadMeta {
-  sequence: number;
-  startMs: number;
-  endMs: number;
-}
-
 /** Containers Soniox documents for automatic format detection on file input. */
 export const AUDIO_EXTENSIONS = [
   'aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm',
 ] as const;
 
 /** A file the user picked for import. Only the identity crosses IPC: the audio
- * itself is read by the backend from this path, never streamed through the
- * renderer. ``url`` exists so the renderer can read the duration from the
- * container metadata and price the import honestly before anything is sent. */
+ * itself is read by the backend from this path, never streamed through the renderer. */
 export interface AudioFileChoice {
   path: string;
   name: string;
-  url: string;
 }
 
 export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped';
-
-/** One note offered to the share sheet: its file name (without extension) and clean text. */
-export interface SharedNote {
-  fileName: string;
-  content: string;
-  /** Window coordinates the share menu opens at. */
-  x: number;
-  y: number;
-}
 
 export interface BackendStatus {
   phase: BackendPhase;
@@ -111,30 +89,9 @@ export interface BridgeApi {
   onNativeFailure(listener: (failure: NativeFailure) => void): () => void;
   /** Proxy a JSON request to the backend with auth attached by main. */
   request<T = unknown>(req: BridgeRequest): Promise<JsonResponse<T>>;
-  /** Upload one standalone PCM16 mono WAV window for a session. */
-  uploadAudio<T = unknown>(
-    sessionId: string,
-    meta: AudioUploadMeta,
-    wav: ArrayBuffer,
-  ): Promise<JsonResponse<T>>;
-  /** Bounded transient input for live ASR; never a durable recording. */
-  bufferAudio<T = unknown>(
-    sessionId: string,
-    meta: AudioUploadMeta,
-    wav: ArrayBuffer,
-  ): Promise<JsonResponse<T>>;
   /** Native picker for one audio file to import. Null when cancelled. */
   chooseAudioFile(): Promise<AudioFileChoice | null>;
   droppedMediaFile?(file: File): AudioFileChoice | null;
-  /**
-   * Hand one note to the macOS share sheet as a `.md` file, opened at the given
-   * point of the window. The text is written to a private temporary file only for
-   * the share; nothing in the session folder changes. Resolves false when the
-   * platform has no share sheet or the request was refused.
-   */
-  shareNote?(note: SharedNote): Promise<boolean>;
-  /** Tail of the desktop app log file (no session content is written there). */
-  readLogs?(): Promise<string>;
   /** Reveal the log directory in the OS file manager. */
   openLogsFolder?(): Promise<boolean>;
   /** Start the local service again after a failed start; false when there is nothing to retry. */
@@ -147,16 +104,11 @@ export interface BridgeApi {
   onBackendStatus(listener: (status: BackendStatus) => void): () => void;
   /** Report live capture state to main (one-way) so close/quit can be guarded. */
   reportCaptureState?(state: CaptureState): void;
-  /** Report how many Codex tasks are still active (one-way) so quit can warn first. */
-  reportCodexActivity?(activeTasks: number): void;
   /** Main requests Stop/drain; only the boolean save outcome is returned. */
   onPrepareQuit?(listener: () => Promise<boolean>): () => void;
-  onQuitCancelled?(listener: () => void): () => void;
   readonly platform: string;
   /** Whether this OS can capture whole-system audio (macOS 14.2+, Windows). */
   readonly systemAudioSupported?: boolean;
-  /** Open the OS privacy pane where system-audio recording is granted. */
-  openSystemAudioSettings?(): Promise<boolean>;
 }
 
 declare global {

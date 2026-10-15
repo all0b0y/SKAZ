@@ -1,185 +1,70 @@
 import { describe, expect, it } from 'vitest';
-import {
-  isAllowedExternalUrl,
-  audioUploadPath,
-  validateAudioUpload,
-  validateBridgeRequest,
-} from '../../../electron/ipcPolicy';
+import { isAllowedExternalUrl, validateBridgeRequest } from '../../../electron/ipcPolicy';
 
 describe('Electron IPC policy', () => {
-  it('allows only search settings, pending read and explicit approval; no direct search endpoint', () => {
-    for (const [method, path] of [['GET', '/web-search/settings'], ['PUT', '/web-search/settings'],
-      ['GET', '/web-search/pending'], ['POST', '/web-search/requests/id/decision']] as const) {
-      expect(validateBridgeRequest({ method, path })).toBeNull();
-    }
-    for (const [method, path] of [['POST', '/web-search/search'], ['POST', '/web-search/pending'],
-      ['GET', '/web-search/requests/id/decision'], ['DELETE', '/web-search/settings']] as const) {
-      expect(validateBridgeRequest({ method, path })).not.toBeNull();
-    }
-  });
-  it('allows read-only native event pages, not adjacent or mutating routes', () => {
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events' })).toBeNull();
+  it('allows the recording transport and settings, not neighbouring mutations', () => {
+    for (const [method, path] of [
+      ['GET', '/settings'], ['PUT', '/settings'], ['GET', '/sessions/a/live'],
+      ['GET', '/sessions/a/live/events'], ['PATCH', '/sessions/a'],
+    ] as const) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
       expect(validateBridgeRequest({ method, path: '/sessions/a/live/events' })).not.toBeNull();
     }
     expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/live/events/raw' })).not.toBeNull();
-  });
-  it('allows only GET and PUT of the root preference, not arbitrary file access', () => {
-    for (const method of ['GET', 'PUT']) {
-      expect(validateBridgeRequest({ method, path: '/storage/root' })).toBeNull();
-    }
-    for (const method of ['POST', 'DELETE', 'PATCH']) {
-      expect(validateBridgeRequest({ method, path: '/storage/root' })).not.toBeNull();
-    }
-    expect(validateBridgeRequest({ method: 'GET', path: '/storage/root/file' })).not.toBeNull();
-  });
-  it('allows only session-scoped file status and explicit projection, never filesystem operations', () => {
-    for (const method of ['GET', 'POST']) {
-      expect(validateBridgeRequest({ method, path: '/sessions/a/files' })).toBeNull();
-    }
-    for (const method of ['PATCH', 'PUT', 'DELETE']) {
-      expect(validateBridgeRequest({ method, path: '/sessions/a/files' })).toMatch(/not allowed/i);
-    }
-    for (const path of ['/files', '/sessions/a/files/delete', '/sessions/a/files/../../settings']) {
-      expect(validateBridgeRequest({ method: 'POST', path })).not.toBeNull();
-    }
-  });
-  it('opens only http and https external links', () => {
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/files/preserve' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/files/preserve' })).not.toBeNull();
-    expect(isAllowedExternalUrl('https://example.com/help')).toBe(true);
-    expect(isAllowedExternalUrl('http://example.com/help')).toBe(true);
-    expect(isAllowedExternalUrl('file:///etc/passwd')).toBe(false);
-    expect(isAllowedExternalUrl('javascript:alert(1)')).toBe(false);
-    expect(isAllowedExternalUrl('skaz://settings')).toBe(false);
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/settings' })).not.toBeNull();
   });
 
-  it('allows only documented method/path pairs', () => {
-    expect(validateBridgeRequest({ method: 'GET', path: '/settings' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/ask', body: { question: 'x' } })).toBeNull();
-    expect(validateBridgeRequest({ method: 'DELETE', path: '/settings' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'GET', path: 'http://evil.test/settings' })).toMatch(/path/i);
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/%2e%2e/settings' })).toMatch(/path/i);
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/audio' })).not.toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/audio/0' })).not.toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/notes/n/history' })).not.toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/audio', body: {} })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/asr/live/capabilities' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/asr/live' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/asr/live/scheduler' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/live/advance', body: { through_sequence: 3 } })).toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/live/update', body: {} })).toMatch(/not allowed/i);
-  });
-
-  it('allows every import route the dialog and panel call', () => {
-    // Regression guard: the bridge allow-list is the one place where a missing
-    // route makes the whole feature fail silently at runtime.
-    expect(validateBridgeRequest({ method: 'GET', path: '/imports' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/imports/active' })).toBeNull();
-    expect(validateBridgeRequest({
-      method: 'POST', path: '/imports', body: { path: '/a/b.m4a', title: 'x', translate: false },
-    })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/imports/s1' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/imports/s1/cancel' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/imports/s1/retry' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'DELETE', path: '/imports/s1' })).toBeNull();
-    // Neighbouring shapes stay closed.
-    expect(validateBridgeRequest({ method: 'PUT', path: '/imports/s1' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'POST', path: '/imports/s1/start' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'GET', path: '/imports/s1/../settings' })).toMatch(/path/i);
-  });
-
-  // Regression: the renderer calls these four routes (NotesPanel "create note",
-  // TranscriptView fragment load/edit/accept). They were missing from the
-  // allow-list, so note creation failed and the live transcript stayed empty.
-  it('allows note creation and the live fragment routes the renderer actually calls', () => {
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/notes/empty' })).toBeNull();
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/asr/fragments' })).toBeNull();
-    expect(
-      validateBridgeRequest({ method: 'PUT', path: '/sessions/a/asr/fragments/f1/text', body: { text: 'x' } }),
-    ).toBeNull();
-    expect(
-      validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/fragments/f1/accept', body: {} }),
-    ).toBeNull();
-    // Neighbouring shapes stay closed.
-    expect(validateBridgeRequest({ method: 'GET', path: '/sessions/a/notes/empty' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/notes/n1/text' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/asr/fragments/f1' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/asr/fragments' })).toMatch(/not allowed/i);
-  });
-
-  it('allows soft deletion of one note and nothing adjacent', () => {
-    expect(validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/notes/n1' })).toBeNull();
-    // Deleting every note of a session is not an action the renderer may take.
-    expect(validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/notes' })).toMatch(/not allowed/i);
-    expect(
-      validateBridgeRequest({ method: 'DELETE', path: '/sessions/a/notes/n1/history' }),
-    ).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'PUT', path: '/sessions/a/notes/n1' })).toMatch(/not allowed/i);
-  });
-
-  it('bounds JSON bodies and audio upload metadata/body size', () => {
-    expect(
-      validateBridgeRequest({ method: 'PUT', path: '/settings', body: { model: 'x'.repeat(70_000) } }),
-    ).toMatch(/body/i);
-    expect(validateAudioUpload('s1', { sequence: 0, startMs: 0, endMs: 5_000 }, new ArrayBuffer(44))).toBeNull();
-    expect(validateAudioUpload('../s', { sequence: 0, startMs: 0, endMs: 1 }, new ArrayBuffer(44))).toMatch(/session/i);
-    expect(validateAudioUpload('s1', { sequence: -1, startMs: 0, endMs: 1 }, new ArrayBuffer(44))).toMatch(/sequence/i);
-    expect(validateAudioUpload('s1', { sequence: 0, startMs: 2, endMs: 1 }, new ArrayBuffer(44))).toMatch(/time/i);
-    expect(validateAudioUpload('s1', { sequence: 0, startMs: 2, endMs: 2 }, new ArrayBuffer(44))).toMatch(/time/i);
-    expect(validateAudioUpload('s1', { sequence: 0, startMs: 0, endMs: 31_000 }, new ArrayBuffer(44))).toMatch(/duration/i);
-  });
-
-  it('does not expose persistence-only POST through the generic JSON bridge', () => {
-    expect(validateBridgeRequest({ method: 'POST', path: '/sessions/a/audio/buffer', body: {} })).toMatch(/not allowed/i);
-  });
-
-  it('routes the narrow binary channels only to their exact POST targets', () => {
-    expect(audioUploadPath('session / one', 'store')).toBe('/sessions/session%20%2F%20one/audio/buffer');
-    expect(audioUploadPath('session / one', 'transcribe')).toBe('/sessions/session%20%2F%20one/audio');
-  });
-
-  // See .runtime/asr-local-contract.md: these are the UI-facing local-checkpoint
-  // status/preparation endpoints. The renderer bridge must actually be allowed to
-  // reach them — a store/API-client mock in the React suite cannot prove that;
-  // this is the real allow-list enforced in main (ipc.ts).
-  it('allows the local model preparation routes and rejects everything not in the contract', () => {
-    expect(validateBridgeRequest({ method: 'GET', path: '/models/local/status' })).toBeNull();
-    expect(
-      validateBridgeRequest({ method: 'POST', path: '/models/local/prepare', body: { model: 'small' } }),
-    ).toBeNull();
-    // Wrong method for each route.
-    expect(validateBridgeRequest({ method: 'GET', path: '/models/local/prepare' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'POST', path: '/models/local/status' })).toMatch(/not allowed/i);
-    expect(
-      validateBridgeRequest({
-        method: 'DELETE',
-        path: '/models/local',
-        body: { provider: 'local-whisper', model: 'small', confirmation_model: 'small' },
-      }),
-    ).toBeNull();
-    expect(validateBridgeRequest({ method: 'POST', path: '/models/local/delete' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'POST', path: '/models/local' })).toMatch(/not allowed/i);
-    expect(validateBridgeRequest({ method: 'GET', path: '/models/local/status/../../health' })).toMatch(/path/i);
-  });
-
-  it('allows exactly the Codex contract routes, each with its own method', () => {
-    const allowed: [string, string][] = [
+  it('closes the replaced session, notes, search, upload, storage and Codex APIs', () => {
+    // These used to be allowed. Knowledge Wiki has its own narrow /kb contract now.
+    for (const [method, path] of [
+      ['GET', '/web-search/settings'], ['PUT', '/web-search/settings'],
+      ['GET', '/web-search/pending'], ['POST', '/web-search/requests/id/decision'],
+      ['POST', '/web-search/search'], ['GET', '/storage/root'], ['PUT', '/storage/root'],
+      ['GET', '/sessions/a/files'], ['POST', '/sessions/a/files'],
+      ['POST', '/sessions/a/files/preserve'], ['POST', '/sessions/a/ask'],
+      ['POST', '/sessions/a/audio'], ['POST', '/sessions/a/audio/buffer'],
+      ['GET', '/sessions/a/audio'], ['GET', '/sessions/a/audio/0'],
+      ['GET', '/sessions/a/notes/n/history'], ['POST', '/sessions/a/notes/empty'],
+      ['DELETE', '/sessions/a/notes/n1'], ['PATCH', '/sessions/a/notes/n1'],
+      ['GET', '/asr/live/capabilities'], ['GET', '/sessions/a/asr/live'],
+      ['GET', '/sessions/a/asr/live/scheduler'], ['POST', '/sessions/a/asr/live/advance'],
+      ['GET', '/sessions/a/asr/fragments'], ['PUT', '/sessions/a/asr/fragments/f1/text'],
+      ['POST', '/sessions/a/asr/fragments/f1/accept'], ['GET', '/imports'],
+      ['GET', '/imports/active'], ['POST', '/imports'], ['GET', '/imports/s1'],
+      ['POST', '/imports/s1/cancel'], ['POST', '/imports/s1/retry'], ['DELETE', '/imports/s1'],
+      ['GET', '/models/local/status'], ['POST', '/models/local/prepare'], ['DELETE', '/models/local'],
       ['GET', '/codex/state'], ['POST', '/codex/chats'], ['GET', '/codex/chats/c1'],
-      ['PATCH', '/codex/chats/c1'], ['DELETE', '/codex/chats/c1'], ['POST', '/codex/chats/c1/messages'],
-      ['POST', '/codex/tasks/t1/stop'], ['POST', '/codex/tasks/t1/resume'],
-      ['POST', '/codex/sessions/s1/notes'], ['PUT', '/codex/settings'],
-      ['POST', '/codex/connection/check'], ['POST', '/codex/connection/login'],
-      ['POST', '/codex/connection/logout'], ['GET', '/codex/previews'],
-      ['POST', '/codex/previews/p1/apply'], ['POST', '/codex/previews/p1/discard'],
-    ];
-    for (const [method, path] of allowed) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
-    const rejected: [string, string][] = [
-      ['GET', '/codex/connection/login'], ['GET', '/codex/settings'], ['DELETE', '/codex/tasks/t1'],
-      ['POST', '/codex/tasks/t1/run'], ['POST', '/codex/shell'], ['GET', '/codex/credentials'],
-      ['POST', '/codex/chats/c1/messages/extra'], ['PUT', '/codex/previews/p1/apply'],
-      ['GET', '/codex/chats/c1/../../settings'],
-    ];
-    for (const [method, path] of rejected) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+      ['PATCH', '/codex/chats/c1'], ['DELETE', '/codex/chats/c1'],
+      ['POST', '/codex/chats/c1/messages'], ['POST', '/codex/tasks/t1/stop'],
+      ['POST', '/codex/tasks/t1/resume'], ['POST', '/codex/sessions/s1/notes'],
+      ['PUT', '/codex/settings'], ['POST', '/codex/connection/check'],
+      ['POST', '/codex/connection/login'], ['POST', '/codex/connection/logout'],
+      ['GET', '/codex/previews'], ['POST', '/codex/previews/p1/apply'],
+      ['POST', '/codex/previews/p1/discard'], ['POST', '/codex/shell'], ['GET', '/codex/credentials'],
+    ] as const) expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toMatch(/not allowed/);
+  });
+
+  it('opens only http and https external links', () => {
+    for (const url of ['https://example.com/help', 'http://example.com/help']) {
+      expect(isAllowedExternalUrl(url)).toBe(true);
+    }
+    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'skaz://settings', 'not a URL']) {
+      expect(isAllowedExternalUrl(url)).toBe(false);
+    }
+  });
+
+  it('rejects traversal, absolute URLs and control characters', () => {
+    for (const path of ['http://evil.test/settings', '/kb/materials/../settings',
+      '/kb/materials/%2e%2e/settings', '/kb/materials/a\\b', '/kb/materials/a\n']) {
+      expect(validateBridgeRequest({ method: 'GET', path })).toMatch(/path/);
+    }
+  });
+
+  it('bounds ordinary JSON and rejects non-serializable bodies', () => {
+    expect(validateBridgeRequest({ method: 'PUT', path: '/settings',
+      body: { model: 'x'.repeat(70_000) } })).toMatch(/body/);
+    const body: { self?: unknown } = {};
+    body.self = body;
+    expect(validateBridgeRequest({ method: 'PUT', path: '/settings', body })).toMatch(/serializable/);
   });
 });

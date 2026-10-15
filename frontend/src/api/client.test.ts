@@ -12,9 +12,6 @@ function fakeBridge(handler: (req: BridgeRequest) => JsonResponse<unknown>): {
       requests.push(req);
       return handler(req) as JsonResponse<never>;
     }),
-    uploadAudio: vi.fn(async () => ({ ok: true as const, status: 200, data: { duplicate: false, segments: [] } })),
-    bufferAudio: vi.fn(async () => ({ ok: true as const, status: 201, data: { sequence: 0, duplicate: false } })),
-    fetchAudio: vi.fn(async () => ({ ok: true as const, status: 200, data: new ArrayBuffer(4) })),
     getBackendStatus: vi.fn(async () => ({ phase: 'ready' as const })),
     onBackendStatus: vi.fn(() => () => undefined),
     platform: 'test',

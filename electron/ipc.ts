@@ -1,36 +1,15 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, ShareMenu, type IpcMainInvokeEvent } from 'electron';
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import { CHANNELS } from './channels';
-import { SYSTEM_AUDIO_SETTINGS_URL } from './systemAudio';
 import { NativeLiveClient } from './nativeLive';
 import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeLive';
 import type { BackendManager } from './backend';
-import { audioUploadPath, requestTimeoutMs, shareFileName, validateAudioUpload, validateBridgeRequest } from './ipcPolicy';
+import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
-import type {
-  AudioFileChoice,
-  AudioUploadMeta,
-  BridgeRequest,
-  HttpMethod,
-  JsonResponse,
-  SharedNote,
-} from '../frontend/src/api/bridge';
+import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
 import { AUDIO_EXTENSIONS, MATERIAL_EXTENSIONS } from '../frontend/src/api/bridge';
-
-/** Private scratch for shared notes, cleared on quit. */
-let shareDirectory: string | null = null;
-function shareRoot(): string {
-  if (!shareDirectory) {
-    shareDirectory = mkdtempSync(join(app.getPath('temp'), 'skaz-share-'));
-    app.once('will-quit', () => {
-      if (shareDirectory) rmSync(shareDirectory, { recursive: true, force: true });
-    });
-  }
-  return shareDirectory;
-}
 
 // Registers the request-scoped IPC handlers. Every call is proxied to the
 // loopback backend with the per-run bearer token attached here in main, so the
@@ -39,7 +18,6 @@ function shareRoot(): string {
 // window before doing anything.
 
 const ALLOWED_METHODS: readonly HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const REQUEST_TIMEOUT_MS = 120_000;
 
 /** A window-id getter so the guard tracks the current main window lazily. */
 type ExpectedWebContentsId = () => number | null;
@@ -137,36 +115,11 @@ export function registerIpc(
       if (!chosen) return null;
       // The renderer needs a playable URL only to read the duration from the
       // container metadata; the bytes themselves are never sent through IPC.
-      return { path: chosen, name: basename(chosen), url: pathToFileURL(chosen).href };
+      return { path: chosen, name: basename(chosen) };
     } catch {
       throw new Error('The file dialog is unavailable.');
     } finally {
       choosingAudio = false;
-    }
-  });
-
-  let sharing = false;
-  ipcMain.handle(CHANNELS.shareNote, async (event, note: SharedNote): Promise<boolean> => {
-    if (!senderTrusted(event) || sharing || process.platform !== 'darwin') return false;
-    const owner = BrowserWindow.fromWebContents(event.sender);
-    const name = shareFileName(note);
-    if (!owner || !name) return false;
-    sharing = true;
-    try {
-      // A private per-share directory: the file keeps the note's own name for the
-      // recipient, and two shares of same-named notes never collide. It lives
-      // only as long as the app does; the session folder is never touched.
-      const directory = mkdtempSync(join(shareRoot(), 'note-'));
-      const file = join(directory, name);
-      writeFileSync(file, note.content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-      const x = Number.isFinite(note.x) ? Math.round(note.x) : undefined;
-      const y = Number.isFinite(note.y) ? Math.round(note.y) : undefined;
-      new ShareMenu({ filePaths: [file] }).popup({ window: owner, x, y });
-      return true;
-    } catch {
-      return false;
-    } finally {
-      sharing = false;
     }
   });
 
@@ -206,13 +159,6 @@ export function registerIpc(
     return kb.chooseMaterialFiles();
   });
 
-  // Read-only tail of the app log. No session content reaches this file, so
-  // exposing it to the renderer adds no new disclosure surface.
-  ipcMain.handle(CHANNELS.readLogs, (event) => {
-    if (!senderTrusted(event)) return '';
-    return manager.getLog().read();
-  });
-
   ipcMain.handle(CHANNELS.openLogsFolder, async (event) => {
     if (!senderTrusted(event)) return false;
     const log = manager.getLog();
@@ -225,13 +171,6 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.restartBackend, (event) => {
     if (!senderTrusted(event)) return false;
     return manager.restart();
-  });
-
-  // Fixed destination only: the renderer cannot choose what gets opened.
-  ipcMain.handle(CHANNELS.openSystemAudioSettings, async (event) => {
-    if (!senderTrusted(event) || !SYSTEM_AUDIO_SETTINGS_URL) return false;
-    await shell.openExternal(SYSTEM_AUDIO_SETTINGS_URL);
-    return true;
   });
 
   ipcMain.handle(CHANNELS.request, async (event, req: BridgeRequest): Promise<JsonResponse<unknown>> => {
@@ -253,7 +192,7 @@ export function registerIpc(
           ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
         },
         body: hasBody ? JSON.stringify(req.body) : undefined,
-        signal: AbortSignal.timeout(requestTimeoutMs(req)),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
       const text = await res.text();
@@ -263,78 +202,6 @@ export function registerIpc(
       return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
     }
   });
-
-  ipcMain.handle(
-    CHANNELS.uploadAudio,
-    async (
-      event,
-      sessionId: string,
-      meta: AudioUploadMeta,
-      wav: ArrayBuffer,
-    ): Promise<JsonResponse<unknown>> => {
-      if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
-      const handle = manager.getHandle();
-      if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
-      const uploadError = validateAudioUpload(sessionId, meta, wav);
-      if (uploadError) return { ok: false, status: 0, detail: uploadError };
-      try {
-        const url = buildUrl(handle.port, audioUploadPath(sessionId, 'transcribe'), {
-          sequence: meta.sequence,
-          start_ms: meta.startMs,
-          end_ms: meta.endMs,
-        });
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${handle.token}`,
-            'Content-Type': 'audio/wav',
-          },
-          body: Buffer.from(wav),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
-        return { ok: true, status: res.status, data: (await res.json()) as unknown };
-      } catch (err) {
-        return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
-
-  ipcMain.handle(
-    CHANNELS.bufferAudio,
-    async (
-      event,
-      sessionId: string,
-      meta: AudioUploadMeta,
-      wav: ArrayBuffer,
-    ): Promise<JsonResponse<unknown>> => {
-      if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
-      const handle = manager.getHandle();
-      if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
-      const uploadError = validateAudioUpload(sessionId, meta, wav);
-      if (uploadError) return { ok: false, status: 0, detail: uploadError };
-      try {
-        const url = buildUrl(handle.port, audioUploadPath(sessionId, 'store'), {
-          sequence: meta.sequence,
-          start_ms: meta.startMs,
-          end_ms: meta.endMs,
-        });
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${handle.token}`,
-            'Content-Type': 'audio/wav',
-          },
-          body: Buffer.from(wav),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-        if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
-        return { ok: true, status: res.status, data: (await res.json()) as unknown };
-      } catch (err) {
-        return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
 
   return native;
 }
