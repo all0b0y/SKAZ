@@ -16,6 +16,7 @@ import httpx
 from skaz.knowledge.corrections.offer import OFFER_KEY, OFFER_KIND, AutoFixesOffer, size_label
 from skaz.knowledge.decisions.local import LOCAL_MODEL
 from skaz.knowledge.decisions.service import DecisionService
+from skaz.knowledge.markdown.source import MaterialKind
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiring import CurrentDecisions
 
@@ -160,6 +161,28 @@ async def test_download_starts_the_model_download_and_selects_local_when_done(
     await offer.settle()
     assert decisions.provider() == "local" and decisions.ready()
     assert ready.settings.get(OFFER_KEY) == "accepted"
+
+
+async def test_imported_speech_also_brings_the_offer_once_in_total(
+        ready: KnowledgeService, tmp_path: Path) -> None:
+    """X5 (X2 Q2): the first finished imported audio/video/link offers it too — once in total."""
+    speech: tuple[MaterialKind, ...] = ("audio", "video", "video_link")
+    for kind in speech:
+        ready.settings.set(OFFER_KEY, None)
+        offer, _decisions, _manager = offer_for(ready, tmp_path / kind, register=False)
+        imported = add_material(ready, "Физика", f"Импорт {kind}", SPEECH, kind=kind)
+        assert offer.offer_once(imported), kind
+        assert ready.settings.get(OFFER_KEY) == "shown"
+        # After an import offered it, neither a recording nor another import offers it again.
+        assert not offer.offer_once(add_material(ready, "Физика", f"Лекция после {kind}", SPEECH))
+        assert not offer.offer_once(add_material(ready, "Физика", f"Ещё импорт {kind}", SPEECH, kind=kind))
+    assert len(offers(ready)) == 3  # one per reset above, never two in a row
+    documents: tuple[MaterialKind, ...] = ("text", "pdf", "web")
+    for kind in documents:
+        ready.settings.set(OFFER_KEY, None)
+        offer, _decisions, _manager = offer_for(ready, tmp_path / kind, register=False)
+        document = add_material(ready, "Физика", f"Документ {kind}", SPEECH, kind=kind)
+        assert not offer.offer_once(document), kind
 
 
 def test_size_label() -> None:

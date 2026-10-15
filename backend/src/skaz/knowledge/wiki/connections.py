@@ -7,6 +7,11 @@ drops it); the writing agent then states connections that rest on numbered
 statements of *both* pages. SKAZ writes each one as an agent ``connection``
 block with the checked citations of those statements and a link to the other
 page — which is also a ``connection`` edge of the graph.
+
+One answer's connections are written to the page in one ``disk_call`` (one
+rewrite, one reindex, one graph refresh): a cancel — the app quitting at its
+deadline — never leaves part of an update, since ``disk_call`` lets a started
+write finish (``native_io.drain_on_cancel``) and nothing is written between calls.
 """
 
 from __future__ import annotations
@@ -108,7 +113,7 @@ class Connections:
             await log(f"The connection search for “{page.title}” was not in the expected format; skipped.")
             return 0
         others = [item for _record, items in candidates for item in items]
-        written = 0
+        found_set: list[tuple[PageRecord, str, list[Statement], list[Statement]]] = []
         for found in answer.connections:
             if not 1 <= found.page <= len(candidates):
                 continue
@@ -122,40 +127,50 @@ class Connections:
             text = clean_text(found.text)
             if not mine or not theirs or not text or self.ctx.flagged(text):
                 continue
-            if await disk_call(self._write, page_id, target, text, mine, theirs):
-                written += 1
+            found_set.append((target, text, mine, theirs))
+        written = await disk_call(self._write, page_id, found_set) if found_set else 0
         if written:
             await log(f"“{page.title}”: {written} connection(s) written.")
         return written
 
-    def _write(
-        self,
-        page_id: str,
-        target: PageRecord,
-        text: str,
-        mine: Sequence[Statement],
-        theirs: Sequence[Statement],
-    ) -> bool:
+    def _block(self, target: PageRecord, text: str, mine: Sequence[Statement],
+               theirs: Sequence[Statement]) -> Block | None:
         citations = self.ctx.citations()
         cites_mine = citations.verified(cite for item in mine for cite in item.cites)
         cites_theirs = citations.verified(cite for item in theirs for cite in item.cites)
         if not cites_mine or not cites_theirs:
-            return False  # one side's quote no longer holds: no connection without both sides
+            return None  # one side's quote no longer holds: no connection without both sides
         cites: tuple[Cite, ...] = (*cites_mine, *cites_theirs)
         link = f"[[{target.rel_path.removesuffix('.md')}|{target.title}]]"
         body = " ".join([text, *citations.links(cites), link])
-        block = Block.create(f"c-link-{uuid4().hex[:12]}", "connection", body, cites=cites)
+        return Block.create(f"c-link-{uuid4().hex[:12]}", "connection", body, cites=cites)
+
+    def _write(
+        self,
+        page_id: str,
+        found: Sequence[tuple[PageRecord, str, Sequence[Statement], Sequence[Statement]]],
+    ) -> int:
+        """All connections of one answer in one rewrite of the page; how many were written."""
         with self.ctx.write_lock:
             library, path = page_path(self.ctx.kb, page_id)
-            if self.ctx.graph.connected(page_id, target.id):
-                return False
+            blocks: list[Block] = []
+            targets: set[str] = set()
+            for target, text, mine, theirs in found:
+                if target.id in targets or self.ctx.graph.connected(page_id, target.id):
+                    continue  # one connection per pair, never a second one
+                block = self._block(target, text, mine, theirs)
+                if block is not None:
+                    blocks.append(block)
+                    targets.add(target.id)
+            if not blocks:
+                return 0
 
             def build(document: PageDocument) -> PageDocument:
                 parts = list(document.parts)
-                insert_into_section(parts, "connection", document.meta.language or "en", [block])
+                insert_into_section(parts, "connection", document.meta.language or "en", blocks)
                 return replace(document, parts=spaced(parts))
 
             changed = rewrite(library, path, build)
             reindex(self.ctx.kb, library, path)
             self.ctx.graph.refresh()
-            return changed
+            return len(blocks) if changed else 0

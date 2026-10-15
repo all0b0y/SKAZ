@@ -41,7 +41,8 @@ describe('Live settings (package 2)', () => {
     expect(await within(codex).findByText(/Connected · 1\.0\.0/)).toBeInTheDocument();
     const hermes = row(dialog, 'Hermes Agent');
     expect(within(hermes).getByText('Not installed')).toBeInTheDocument();
-    expect(within(hermes).getByRole('note')).toHaveTextContent('~1.5 GB');
+    expect(within(hermes).getByRole('note')).toHaveTextContent('Nothing starts until you press Check.');
+    expect(within(hermes).getByRole('note')).not.toHaveTextContent(/GB|download|prepar/i);
     await user.click(within(hermes).getByRole('button', { name: 'Install' }));
     expect(await within(hermes).findByLabelText('Install log')).toHaveTextContent('Downloading Hermes Agent…');
     expect(within(hermes).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -159,10 +160,30 @@ describe('Live settings (package 2)', () => {
     expect(row(dialog, 'Version')).toHaveTextContent('SKAZ 0.3.0 · kb-dev');
     expect(within(dialog).getByRole('link', { name: 'lucide-react' })).toBeInTheDocument();
   });
+
+  it('Hermes first check (X5): one Check button starts the check, no download wording', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const hermesAgent = world.agents.agents.find((a) => a.id === 'hermes')!;
+    Object.assign(hermesAgent, { state: 'unavailable', installed: true, version: '0.21.5', action: 'first_check',
+      reason: "SKAZ checks once that Hermes Agent runs with SKAZ's own Hermes folder before first use. Press Check when you're ready." });
+    const { fake } = renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const hermes = row(dialog, 'Hermes Agent');
+    expect(hermes).not.toHaveTextContent(/GB|Prepar/);
+    // One "Check" (the first check); "look again" makes no sense before it ran.
+    const checks = within(hermes).getAllByRole('button', { name: 'Check' });
+    expect(checks).toHaveLength(1);
+    await user.click(checks[0]!);
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/hermes/install', body: { action: 'first_check' } })));
+    expect(await within(hermes).findByRole('status')).toHaveTextContent('Checking…');
+    expect(within(hermes).getByLabelText('Install log')).toHaveTextContent('Checking Hermes Agent…');
+  });
 });
 
 describe('First launch, step "Agent" (v21)', () => {
-  it('three cards with the real state; Hermes warns about preparing; the summary is honest', async () => {
+  it('three cards with the real state; Hermes says it is checked once first; the summary is honest', async () => {
     const user = userEvent.setup();
     const state = unconfiguredWorld();
     state.agents.agents.find((a) => a.id === 'codex')!.state = 'signed_out';
@@ -174,7 +195,7 @@ describe('First launch, step "Agent" (v21)', () => {
     const byEngine = (e: string) => cards.find((c) => c.getAttribute('data-engine') === e)!;
     expect(byEngine('claude_code')).toHaveTextContent('Connected');
     expect(byEngine('hermes')).toHaveTextContent('Not installed');
-    expect(within(byEngine('hermes')).getByRole('note')).toHaveTextContent('~1.5 GB');
+    expect(within(byEngine('hermes')).getByRole('note')).toHaveTextContent("SKAZ's own Hermes folder");
     // Codex sign-in needs the ChatGPT privacy consent first.
     const codex = byEngine('codex');
     await user.click(within(codex).getByRole('checkbox'));

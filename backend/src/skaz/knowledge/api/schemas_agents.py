@@ -6,9 +6,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 KbEngineId = Literal["codex", "claude_code", "hermes"]
+#: ``preparing``: Hermes' first check is running (wire name kept; it no longer downloads anything).
 KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
-KbAgentAction = Literal["install", "update", "login", "check", "prepare"]
-KbInstallAction = Literal["install", "update", "prepare"]
+#: ``first_check``: Hermes' one-time check with SKAZ's own folder; ``check``: look at the state again.
+KbAgentAction = Literal["install", "update", "login", "check", "first_check"]
+KbInstallAction = Literal["install", "update", "first_check"]
 KbInstallState = Literal["running", "succeeded", "failed", "cancelled"]
 
 
@@ -33,11 +35,11 @@ class KbAgentInstallInfo(BaseModel):
 
 
 class KbAgentFirstRun(BaseModel):
-    """Hermes prepares its own environment once (B10); nothing starts until the user asks."""
+    """Hermes is checked once with SKAZ's own folder (B10); nothing starts until the user asks."""
 
-    required_bytes: int
-    prepared: bool
-    #: "Hermes is preparing its environment (~1.5 GB, a few minutes)."
+    #: The one-time check passed; SKAZ may start Hermes.
+    checked: bool
+    #: What the check does (shown on the card before it runs).
     note: str
 
 
@@ -58,10 +60,10 @@ class KbAgent(BaseModel):
     #: The model chosen inside the agent (Hermes: in SKAZ's own Hermes folder).
     current_model: str | None
     install: KbAgentInstallInfo
-    #: The running install/update/prepare task, if any.
+    #: The running install/update/first-check task, if any.
     install_task: str | None
     checked_at: str
-    #: Agents that prepare an environment on first use (Hermes); ``null`` for the others.
+    #: Agents SKAZ starts only after a one-time check (Hermes); ``null`` for the others.
     first_run: KbAgentFirstRun | None
 
 
@@ -76,7 +78,7 @@ class KbAgentDefault(_Request):
 
 
 class KbInstallStart(_Request):
-    #: ``prepare``: Hermes' one-time environment preparation (~1.5 GB), only on this explicit request.
+    #: ``first_check``: Hermes' one-time check with SKAZ's own folder, only on this explicit request.
     action: KbInstallAction = "install"
 
 

@@ -121,10 +121,15 @@ class ImportInput:
     allow_duplicate: bool = False
     #: Video metadata the caller already fetched (``media_tools.video_metadata``); spares a second probe.
     metadata: dict[str, Any] | None = None
+    #: The user's "to wiki" choice (decision 15); ``None``: Settings → Wiki decide. Kept before the
+    #: import can finish, so the wiki sees it at completion however fast the import is (X5).
+    to_wiki: bool | None = None
 
 
 #: ``(material_id, kind, error)`` — an import failed (``error`` set) or runs again (``error`` is None).
 ImportListener = Callable[[str, CarrierKind, str | None], None]
+#: ``(material_id, to_wiki)`` — keeps an import's "to wiki" choice until it finishes (a disk write).
+WikiChoiceStore = Callable[[str, bool], None]
 
 
 class SpeechService:
@@ -149,6 +154,7 @@ class SpeechService:
         #: Called with a material id when speech settled finished (Stop or a completed import,
         #: not a Pause): the wiki may process it now.
         self._finished_listeners: list[Callable[[str], None]] = []
+        self._wiki_choices: WikiChoiceStore | None = None
         self._import_listeners: list[ImportListener] = []
         legacy.add_listeners(on_event=self._on_event_saved, on_import=self._on_import_changed)
 
@@ -305,6 +311,10 @@ class SpeechService:
     def on_finished(self, listener: Callable[[str], None]) -> None:
         """Subscribe to finished speech materials (used to add them to the wiki)."""
         self._finished_listeners.append(listener)
+
+    def keep_wiki_choices(self, store: WikiChoiceStore) -> None:
+        """Where an import's "to wiki" choice waits for its end (``AutoIngest.remember``)."""
+        self._wiki_choices = store
 
     def on_import_state(self, listener: ImportListener) -> None:
         """Subscribe to import failures and restarts (used for ``link_failed`` notifications)."""
@@ -564,6 +574,9 @@ class SpeechService:
         except BaseException:
             await self.legacy.cancel_import(session_id)
             raise
+        if request.to_wiki is not None and self._wiki_choices is not None:
+            # Before the link: until it exists no "finished" event can fire for this material.
+            await disk_call(self._wiki_choices, material_id, request.to_wiki)
         carrier = await disk_call(self._link, material_id, session_id, kind, folder)
         # The import may have finished before the link existed; its hook found no carrier.
         await self._guarded(material_id, lambda: self._reconcile_import(carrier))
@@ -571,7 +584,7 @@ class SpeechService:
 
     async def add_video_link(self, url: str, folder_id: str | None, title: str | None, *,
                              language: str | None = None, translate: bool = False,
-                             avoid_title: str | None = None) -> SpeechView:
+                             avoid_title: str | None = None, to_wiki: bool | None = None) -> SpeechView:
         """A video link added as material (``POST /kb/materials/link``): checked, then imported.
 
         The video's details are read first, so a playlist, a private, 18+ or live
@@ -592,7 +605,7 @@ class SpeechService:
             chosen = f"{chosen[:190]} (video)"
         return await self.start_import(ImportInput(url=link.url, folder_id=folder_id, title=chosen,
                                                    translate=translate, language=language,
-                                                   metadata=metadata))
+                                                   metadata=metadata, to_wiki=to_wiki))
 
     async def _import(self, material_id: str) -> Carrier:
         carrier = await disk_call(self.carriers.get, material_id)

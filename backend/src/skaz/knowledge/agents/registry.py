@@ -30,8 +30,11 @@ ENGINE_NAMES: dict[EngineId, str] = {"codex": "Codex", "claude_code": "Claude Co
 DEFAULT_ENGINE_KEY = "agents.default_engine"
 #: A new library starts with Codex, the engine SKAZ already used (A-n in the report).
 DEFAULT_ENGINE: EngineId = "codex"
+#: ``preparing``: Hermes' first check is running (wire name kept from the time it downloaded an
+#: environment; the composer's agent picker reads it).
 AgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
-AgentAction = Literal["install", "update", "login", "check", "prepare"]
+#: ``first_check``: Hermes' one-time check with SKAZ's own folder (B10); ``check``: look at the state again.
+AgentAction = Literal["install", "update", "login", "check", "first_check"]
 LoginMethod = Literal["terminal", "browser"]
 
 
@@ -52,13 +55,13 @@ class SettingsStore(Protocol):
 
 @dataclass(frozen=True)
 class FirstRun:
-    """An agent that prepares its own environment on first use (Hermes, decision B10)."""
+    """An agent SKAZ starts only after the user's one-time check (Hermes, decision B10)."""
 
-    required_bytes: int
-    #: The user's ``prepare`` task finished; SKAZ may start the agent.
-    prepared: bool
-    #: Set up and waiting only for the preparation: the action is ``prepare``.
+    #: The user's ``first_check`` task passed; SKAZ may start the agent.
+    checked: bool
+    #: Set up and waiting only for the check: the action is ``first_check``.
     needed: bool
+    #: What the check does, shown before it runs.
     note: str
 
 
@@ -220,7 +223,7 @@ class EngineRegistry:
         state, action = classify(status, check_failed=failed)
         first_run = _first_run(target)
         if first_run is not None and first_run.needed and state in ("signed_out", "unavailable"):
-            state, action = "unavailable", "prepare"
+            state, action = "unavailable", "first_check"
         models: tuple[ModelOption, ...] = ()
         if state == "ready":
             try:

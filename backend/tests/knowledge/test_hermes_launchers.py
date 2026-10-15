@@ -135,8 +135,8 @@ async def run_task(tmp_path: Path, action: str, *,
     return task, engine, user, executor
 
 
-async def test_prepare_and_the_acp_check_run_in_skaz_folder_on_the_users_store(tmp_path: Path) -> None:
-    for action in ("prepare", "update"):
+async def test_first_check_and_acp_check_run_in_skaz_folder_on_the_users_store(tmp_path: Path) -> None:
+    for action in ("first_check", "update"):
         task, engine, user, executor = await run_task(tmp_path / action, action, honour=True)
         assert task.state == "succeeded", task.reason
         check = next(step for step in executor.started if step["argv"][1:] == ["acp", "--check"])
@@ -147,10 +147,10 @@ async def test_prepare_and_the_acp_check_run_in_skaz_folder_on_the_users_store(t
 
 
 async def test_an_installer_step_that_repoints_the_launcher_fails_and_is_undone(tmp_path: Path) -> None:
-    task, engine, user, _executor = await run_task(tmp_path, "prepare", honour=False)
+    task, engine, user, _executor = await run_task(tmp_path, "first_check", honour=False)
     assert (task.state, task.reason) == ("failed", TAMPERED)
     assert user.snapshot() == user.original
-    assert not engine.prepared()
+    assert not engine.checked()
 
 
 def test_watch_removes_a_store_built_in_skaz_folder(tmp_path: Path) -> None:

@@ -105,9 +105,11 @@ class Runtime:
         #: Speech → materials (area S2): links recordings/imports to library materials.
         self.kb_speech = create_speech_service(self)
         self.kb_speech.on_finished(self.kb_auto_ingest.material_finished)
+        #: Decision 15: an import's "to wiki" choice is kept before the import can finish (X5).
+        self.kb_speech.keep_wiki_choices(self.kb_auto_ingest.remember)
         #: ``link_failed`` notifications and their actions (area S3).
         self.kb_link_failures = wire_speech(self.kb, self.kb_speech)
-        #: One-time "turn on automatic fixes" offer at the first finished recording (X2-8).
+        #: One-time "turn on automatic fixes" offer at the first finished speech material (X2-8, X5).
         self.kb_fixes_offer = wire_fixes_offer(self.kb, self.kb_speech, self.kb_decisions)
         self._close_started = False
         self.native_tasks: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}

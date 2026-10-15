@@ -850,7 +850,7 @@ const ROUTES: FakeRoutes = {
     const action = body?.action ?? (a.state === 'outdated' ? 'update' : 'install');
     const task: KbInstallTask = {
       id: `t${++w.seq}`, engine: a.id, action, state: 'running',
-      lines: [{ seq: 1, text: action === 'prepare' ? `Preparing ${a.name}…` : `Downloading ${a.name}…`, at: stamp(w) }], cursor: 1, dropped: 0,
+      lines: [{ seq: 1, text: action === 'first_check' ? `Checking ${a.name}…` : `Downloading ${a.name}…`, at: stamp(w) }], cursor: 1, dropped: 0,
       reason: null, version: null, install: a.install, started_at: stamp(w), finished_at: null,
     };
     w.installTasks[task.id] = task;

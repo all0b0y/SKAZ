@@ -25,9 +25,9 @@ class AgentsHub:
     installs: InstallManager
 
     def state(self, view: AgentView) -> tuple[AgentState, AgentAction | None]:
-        """The view's state, or ``preparing`` while the agent's first-run preparation runs (B10)."""
+        """The view's state, or ``preparing`` while the agent's first check runs (B10)."""
         running = self.installs.running_for(view.engine)
-        if running is not None and running.action == "prepare":
+        if running is not None and running.action == "first_check":
             return "preparing", None
         return view.state, view.action
 
@@ -35,7 +35,7 @@ class AgentsHub:
         """App start, once the library is open: background housekeeping of the agents.
 
         Hermes deletes what earlier runs left in its session store (a quit mid-answer, a delete
-        that failed) — only when the user prepared it (B10); returns at once.
+        that failed) — only after the user's first check (B10); returns at once.
         """
         hermes = self.registry.engines.get("hermes")
         if isinstance(hermes, HermesEngine):
@@ -78,7 +78,7 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
             folder = await target.install_dir() if isinstance(target, HermesEngine) and located else None
             values["install_dir"] = str(folder or (user_home or Path.home()) / ".hermes" / "hermes-agent")
             if isinstance(target, HermesEngine):
-                # The first start prepares SKAZ's own Hermes folder, never ~/.hermes (B10).
+                # Every SKAZ start of Hermes uses SKAZ's own Hermes folder, never ~/.hermes (B10).
                 target.prepare()
                 values["hermes_home"] = str(target.home)
                 values["hermes_policy"] = str(target.policy_dir)
@@ -88,8 +88,8 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
 
     def after_steps(engine: EngineId, action: Action) -> None:
         target = registry.engine(engine)
-        if action == "prepare" and isinstance(target, HermesEngine):
-            target.mark_prepared()
+        if action == "first_check" and isinstance(target, HermesEngine):
+            target.mark_checked()
         registry.forget(engine)
 
     def watch_step(engine: EngineId, env: Mapping[str, str]) -> StepWatch | None:

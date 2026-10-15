@@ -42,11 +42,13 @@ it. Every invocation therefore also gets ``HERMES_RUNTIME_DIR`` = the user's own
 store and runs under :class:`~.hermes_launchers.LauncherWatch` (see that module
 for the exact Hermes source lines).
 
-First start (decision B10): the first ``hermes acp`` in a new Hermes folder
-prepares Hermes' own environment (~1.5 GB, a few minutes). With
-``first_run_gate`` (the app's engine) SKAZ never starts ACP — not for a status
-check, models or a run — until the user ran the ``prepare`` task
-(``install/recipes.py``), which leaves ``hermes-prepared.json`` beside the folder.
+First check (decision B10, revised in X5): before ``HERMES_RUNTIME_DIR`` the first
+``hermes acp`` in a new Hermes folder built Hermes' own environment there (~1.5 GB).
+On the user's own store nothing is downloaded any more, but SKAZ still never starts
+ACP on its own with ``first_run_gate`` (the app's engine) — not for a status check,
+models or a run — until the user ran the ``first_check`` task (``install/recipes.py``:
+``hermes acp --check`` with SKAZ's folder, under the launcher watch), which leaves
+``hermes-checked.json`` beside the folder (an earlier ``hermes-prepared.json`` counts).
 """
 from __future__ import annotations
 
@@ -68,7 +70,6 @@ from pathlib import Path
 from typing import Any
 
 from ...native_io import disk_call
-from ..install.recipes import HERMES_PREPARE_BYTES
 from ..install.system import (
     Located,
     LocateFn,
@@ -117,16 +118,23 @@ SETUP_AUTH_METHOD = "hermes-setup"
 NO_TOOLS_LISTING = "No tools available."
 SETUP_TITLE = "SKAZ opened the Hermes model setup for SKAZ's own Hermes folder."
 LIMITS_NOT_APPLIED = "Hermes did not apply SKAZ's tool limits, so SKAZ stopped the run. Update Hermes."
-PREPARED_FILE = "hermes-prepared.json"
+CHECKED_FILE = "hermes-checked.json"
+#: Left by SKAZ versions that called the first check "preparing the environment".
+LEGACY_PREPARED_FILE = "hermes-prepared.json"
 #: Session ids SKAZ created in its Hermes folder and has not deleted yet.
 HISTORY_FILE = "hermes-sessions.json"
 #: Review Low: an id Hermes refuses to delete this many times (one try per run end / app start) is
 #: given up, and so is one older than the TTL — never retried on every start forever.
 MAX_DELETE_ATTEMPTS = 5
 HISTORY_TTL_S = 30 * 24 * 3600
-PREPARING_NOTE = "Hermes is preparing its environment (~1.5 GB, a few minutes)."
-PREPARE_FIRST = ("Hermes prepares its environment once before first use (~1.5 GB, a few minutes). "
-                 "Start it from SKAZ when you're ready.")
+#: Shown while the first check runs.
+CHECKING_NOTE = "SKAZ is checking that Hermes Agent runs with SKAZ's own Hermes folder."
+#: The reason while the check hasn't run: SKAZ starts nothing until the user asks.
+FIRST_CHECK = ("SKAZ checks once that Hermes Agent runs with SKAZ's own Hermes folder before first use. "
+               "Press Check when you're ready.")
+#: The card's note before the check (what it does and doesn't do).
+FIRST_CHECK_NOTE = ("The check starts Hermes once with SKAZ's own Hermes folder, on the Hermes you "
+                    "installed. Your ~/.hermes stays untouched. Nothing starts until you press Check.")
 #: Every toolset Hermes ships (core + platform + known plugin toolsets), all disabled for SKAZ.
 DISABLED_TOOLSETS = (
     "a2a", "browser", "clarify", "code_execution", "computer_use", "context_engine", "cronjob",
@@ -244,7 +252,7 @@ class HermesEngine:
         root = data_dir / "agents"
         self.agents_dir = root
         self.home = ensure_private_home(root / "hermes-home", home=user_home)
-        self.prepared_marker = root / PREPARED_FILE
+        self.checked_marker = root / CHECKED_FILE
         self.history_file = root / HISTORY_FILE
         self._gate = first_run_gate
         self.policy_dir = root / "hermes-policy"
@@ -278,19 +286,20 @@ class HermesEngine:
         temporary.write_text(json.dumps(HERMES_POLICY, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, target)
 
-    def prepared(self) -> bool:
-        """The first start (Hermes' own environment) was done by the user's ``prepare`` task."""
-        return not self._gate or self.prepared_marker.is_file()
+    def checked(self) -> bool:
+        """The user's ``first_check`` passed (or an earlier SKAZ's ``prepare``); SKAZ may start Hermes."""
+        return (not self._gate or self.checked_marker.is_file()
+                or (self.agents_dir / LEGACY_PREPARED_FILE).is_file())
 
     def first_run(self) -> FirstRun:
-        return FirstRun(HERMES_PREPARE_BYTES, self.prepared(),
-                        needed=self._gate and self.set_up() and not self.prepared(), note=PREPARING_NOTE)
+        return FirstRun(self.checked(), needed=self._gate and self.set_up() and not self.checked(),
+                        note=FIRST_CHECK_NOTE)
 
-    def mark_prepared(self) -> None:
-        self.prepared_marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        temporary = self.prepared_marker.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"prepared": True}) + "\n", encoding="utf-8")
-        os.replace(temporary, self.prepared_marker)
+    def mark_checked(self) -> None:
+        self.checked_marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = self.checked_marker.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"checked": True}) + "\n", encoding="utf-8")
+        os.replace(temporary, self.checked_marker)
 
     def set_up(self) -> bool:
         """``hermes model`` has written a configuration into SKAZ's Hermes folder (contents are not read)."""
@@ -367,10 +376,10 @@ class HermesEngine:
                                         f"{dotted(MIN_HERMES_VERSION)} or newer is required. Update it."))
         if not self.set_up():
             # Never start Hermes for a folder nobody set up: the first ``hermes acp`` in a new
-            # HERMES_HOME may prepare Hermes' own runtime. The user starts that from "Set up".
+            # HERMES_HOME is never started before it is set up; the user starts that from "Set up".
             return EngineStatus("hermes", installed=True, version=shown, reason=NO_PROVIDER)
-        if not self.prepared():
-            return EngineStatus("hermes", installed=True, version=shown, reason=PREPARE_FIRST)
+        if not self.checked():
+            return EngineStatus("hermes", installed=True, version=shown, reason=FIRST_CHECK)
         self._sweep_once()
         try:
             async with self._acp(located, self.runs_dir / "status") as (_connection, initialized):
@@ -388,7 +397,7 @@ class HermesEngine:
     async def models(self) -> Sequence[ModelOption]:
         """What is set up in SKAZ's Hermes folder; empty until a provider is chosen there."""
         located = self._locate("hermes")
-        if located is None or not self.set_up() or not self.prepared():
+        if located is None or not self.set_up() or not self.checked():
             return ()
         work = self.runs_dir / f"models-{uuid.uuid4().hex}"
         try:
@@ -500,11 +509,11 @@ class HermesEngine:
     async def sweep_history(self) -> None:
         """Start of SKAZ: delete what earlier runs left in Hermes' store (a quit mid-answer, a failed delete).
 
-        Never starts Hermes before the user prepared it (B10) — nothing can be stored before that.
+        Never starts Hermes before the user's first check (B10) — nothing can be stored before that.
         """
         self._swept = True
         located = self._locate("hermes")
-        if located is None or not self.prepared() or not (self.set_up() or self.pending_history()):
+        if located is None or not self.checked() or not (self.set_up() or self.pending_history()):
             return
         running = {active.session_id for active in self._runs.values()}
         await self._forget([item for item in self.pending_history() if item not in running])
@@ -539,11 +548,11 @@ class HermesEngine:
         return process.returncode, out.decode(errors="replace")
 
     def sweep_at_start(self) -> bool:
-        """App start: sweep in the background if Hermes is prepared; never starts it before (B10).
+        """App start: sweep in the background if Hermes was checked; never starts it before (B10).
 
-        An unprepared Hermes holds nothing of SKAZ's yet; its first use after preparing sweeps.
+        An unchecked Hermes holds nothing of SKAZ's yet; its first use after the check sweeps.
         """
-        if not self.prepared():
+        if not self.checked():
             return False
         self._sweep_once()
         return True
@@ -662,8 +671,8 @@ class HermesEngine:
             if located is None:
                 yield Failed(run_id, "incompatible", NOT_INSTALLED)
                 return
-            if not self.prepared():
-                yield Failed(run_id, "other", PREPARE_FIRST)
+            if not self.checked():
+                yield Failed(run_id, "other", FIRST_CHECK)
                 return
             self._sweep_once()
             try:

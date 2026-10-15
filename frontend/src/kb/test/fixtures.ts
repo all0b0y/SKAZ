@@ -58,7 +58,7 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
           ],
         }),
         agent('hermes', 'Hermes Agent', 'not_installed', {
-          first_run: { required_bytes: 1_500_000_000, prepared: false, note: 'Hermes is preparing its environment (~1.5 GB, a few minutes).' },
+          first_run: { checked: false, note: "The check starts Hermes once with SKAZ's own Hermes folder, on the Hermes you installed. Your ~/.hermes stays untouched. Nothing starts until you press Check." },
         }),
       ],
     },

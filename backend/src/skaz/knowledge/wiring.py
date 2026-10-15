@@ -9,8 +9,9 @@
   MCP tokens of the A1 server (``McpGrants``).
 * The wiki after ingest (W2): recognition corrections and their check, the
   discrepancy hook, notification actions (``wire_wiki``).
-* The first finished recording offers the local decision model once, when no
-  decision provider is chosen (``corrections/offer.py``, user decision X2-8).
+* The first finished speech material (a recording or an imported audio/video
+  file or link) offers the local decision model once, when no decision provider
+  is chosen (``corrections/offer.py``, user decision X2-8, X5).
 * A new material (S1 documents, S2 finished speech — never a paused
   recording) is added to the wiki when the wiki settings say so (decision
   15), and a restored fragment re-runs its material (decision 41).
@@ -107,7 +108,8 @@ class AutoIngest:
 
     Decision 15: the "to wiki" switch of a new file, link or text is the user's, whatever Settings →
     Wiki says (the settings only give its default). Documents carry the choice in their event; an
-    audio/video import finishes later, so its choice is kept (``remember``) until it does — in the
+    audio/video import finishes later, so its choice is kept (``remember``, called by the speech
+    service from ``ImportInput.to_wiki`` before the import can finish) until it does — in the
     knowledge settings, so an import resumed after a restart still follows it.
     """
 
@@ -230,7 +232,7 @@ def wire_speech(kb: KnowledgeService, speech: SpeechService) -> LinkFailures:
 
 def wire_fixes_offer(kb: KnowledgeService, speech: SpeechService,
                      decisions: DecisionService) -> AutoFixesOffer:
-    """X2-8: the one-time "turn on automatic fixes" offer at the first finished recording."""
+    """X2-8: the one-time "turn on automatic fixes" offer at the first finished speech material."""
     offer = AutoFixesOffer(kb, decisions)
     offer.register()
     speech.on_finished(offer.material_finished)

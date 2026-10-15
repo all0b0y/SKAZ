@@ -88,13 +88,13 @@ async def test_quitting_stops_every_agent_and_llama_server_process_within_the_gr
             claude_cli = FakeCli(tmp_path / "bin", "claude", {"stubborn": True, "hang": True, "stream": []})
             claude._locate = claude_cli.locate
             tasks.append(asyncio.create_task(_drain(claude.run(_turn("run-claude")))))
-            # Hermes over ACP, prepared and busy.
+            # Hermes over ACP, checked and busy.
             hermes = runtime.kb_agents.registry.engine("hermes")
             assert isinstance(hermes, HermesEngine)
             hermes_cli = FakeCli(tmp_path / "bin", "hermes", hermes_scenario(stubborn=True, hang=True))
             hermes._locate = hermes_cli.locate
             hermes.prepare()
-            hermes.mark_prepared()
+            hermes.mark_checked()
             tasks.append(asyncio.create_task(_drain(hermes.run(_turn("run-hermes")))))
             # llama-server launched and still loading its model (not healthy yet).
             server: list[asyncio.subprocess.Process] = []
