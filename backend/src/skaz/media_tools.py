@@ -1,4 +1,10 @@
-"""Bounded cancellable media tools. No shell, browser cookies or user config."""
+"""Bounded cancellable media tools. No shell, browser cookies or user config.
+
+Video links come from the host table of ``media_source`` (YouTube, VK Video,
+RuTube, Vimeo — decision 40): one public video, canonical URL, ``yt-dlp
+--no-playlist``. Refusals are plain fixed sentences (playlist, private or
+sign-in, 18+, live, unavailable); raw tool output never leaves this module.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -6,13 +12,15 @@ import contextlib
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .media_source import youtube_source
+from .media_source import PLATFORM_LABELS, VideoPlatform, VideoSource, video_source, youtube_source
 
 MAX_DURATION_MS = 300 * 60 * 1000
 MAX_MEDIA_BYTES = 2 * 1024 * 1024 * 1024
@@ -39,7 +47,16 @@ def tool_path(name: str) -> str:
     raise MediaError(f"Media tool {name} is unavailable. Install an updated SKAZ build.")
 
 
-async def run_tool(argv: list[str], *, timeout: float = 120, max_output: int = 2_000_000) -> str:
+#: Maps a failed tool's stderr to one of a few fixed user-facing sentences (never the text itself).
+Explain = Callable[[str], str | None]
+GENERIC_FAILURE = (
+    "Media tool failed. The source may be unavailable, require sign-in, "
+    "or use an unsupported format. Try a local media file."
+)
+
+
+async def run_tool(argv: list[str], *, timeout: float = 120, max_output: int = 2_000_000,
+                   explain: Explain | None = None) -> str:
     try:
         process = await asyncio.create_subprocess_exec(
             *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -62,12 +79,10 @@ async def run_tool(argv: list[str], *, timeout: float = 120, max_output: int = 2
     readers = [asyncio.create_task(read(process.stdout)), asyncio.create_task(read(process.stderr))]
     try:
         async with asyncio.timeout(timeout):
-            stdout, _stderr = await asyncio.gather(*readers)
+            stdout, stderr = await asyncio.gather(*readers)
             if await process.wait() != 0:
-                raise MediaError(
-                    "Media tool failed. The source may be unavailable, require sign-in, "
-                    "or use an unsupported format. Try a local media file."
-                )
+                reason = explain(stderr.decode("utf-8", errors="replace")) if explain else None
+                raise MediaError(reason or GENERIC_FAILURE)
             return stdout.decode("utf-8", errors="replace")
     except TimeoutError as error:
         raise MediaError("Media processing timed out. Try again or choose a local file.") from error
@@ -91,28 +106,113 @@ def _duration(value: Any) -> int:
     return round(seconds * 1000)
 
 
+PLAYLIST = "This is a playlist. Paste a link to a single video."
+LIVE = "This is a live stream. SKAZ can add the video after the broadcast is over."
+UPCOMING = "This broadcast hasn't started yet."
+POST_LIVE = "This broadcast has just ended and isn't processed yet. Try again later."
+PRIVATE = "This video is private or needs a sign-in. SKAZ can only add public videos."
+ADULT = "This video is age-restricted (18+). SKAZ can't add it."
+UNAVAILABLE = "This video is unavailable: it was removed, is blocked in your region, or the link is wrong."
+UNREACHABLE = "SKAZ couldn't reach the video site. Check the internet connection and try again."
+#: yt-dlp error wording → the honest reason. Order matters: the first match wins.
+_FAILURES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"confirm your age|age[- ]restricted|inappropriate for some users|18\+", re.I), ADULT),
+    (re.compile(r"private video|video is private|members[- ]only|only available to (?:members|subscribers)"
+                r"|log(?:ged)? in|sign in|requires authentication|password", re.I), PRIVATE),
+    (re.compile(r"live event will begin|premieres? in|upcoming", re.I), UPCOMING),
+    (re.compile(r"is live|live stream|currently live|is_live", re.I), LIVE),
+    (re.compile(r"playlist", re.I), PLAYLIST),
+    (re.compile(r"video unavailable|not available|has been removed|does not exist|no longer available"
+                r"|http error 40[34]|not found|blocked", re.I), UNAVAILABLE),
+    (re.compile(r"unable to download|failed to resolve|name resolution|timed out|connection|network"
+                r"|http error 5\d\d|ssl", re.I), UNREACHABLE),
+)
+
+
+def explain_video_failure(stderr: str) -> str | None:
+    """The honest reason behind a failed yt-dlp call, or ``None`` (generic message)."""
+    errors = [line for line in stderr.splitlines() if "ERROR" in line] or stderr.splitlines()[-5:]
+    text = "\n".join(errors)
+    for pattern, reason in _FAILURES:
+        if pattern.search(text):
+            return reason
+    return None
+
+
+def video_refusal(info: Mapping[str, Any]) -> str | None:
+    """Why the video described by yt-dlp metadata can't be added, or ``None`` when it can."""
+    if info.get("_type") in ("playlist", "multi_video"):
+        return PLAYLIST
+    live = info.get("live_status")
+    if info.get("is_live") or live == "is_live":
+        return LIVE
+    if info.get("is_upcoming") or live == "is_upcoming":
+        return UPCOMING
+    if live == "post_live":
+        return POST_LIVE
+    if info.get("availability") in ("private", "needs_auth", "premium_only", "subscriber_only"):
+        return PRIVATE
+    age = info.get("age_limit")
+    if isinstance(age, (int, float)) and not isinstance(age, bool) and age >= 18:
+        return ADULT
+    return None
+
+
+def _ytdlp_args(platform: VideoPlatform, retries: int = 2) -> list[str]:
+    """yt-dlp without config, plugins, cookies or playlists; YouTube also needs the bundled deno."""
+    argv = [tool_path("yt-dlp"), "--ignore-config", "--no-plugin-dirs", "--no-playlist",
+            "--no-warnings", "--no-progress"]
+    if platform == "youtube":
+        argv += ["--no-remote-components", "--js-runtimes", f"deno:{tool_path('deno')}"]
+    return [*argv, "--socket-timeout", "20", "--retries", str(retries)]
+
+
 def _youtube_args() -> list[str]:
-    deno = tool_path("deno")
-    return [tool_path("yt-dlp"), "--ignore-config", "--no-plugin-dirs", "--no-playlist",
-            "--no-warnings", "--no-progress", "--no-remote-components",
-            "--js-runtimes", f"deno:{deno}", "--socket-timeout", "20", "--retries", "2"]
+    return _ytdlp_args("youtube")
+
+
+async def video_info(url: str, *, timeout: float = 120) -> dict[str, Any]:
+    """Raw yt-dlp metadata of one video on a supported host (no download). The one metadata call."""
+    source = video_source(url)
+    raw = await run_tool([*_ytdlp_args(source.platform), "--skip-download", "--dump-single-json", "--",
+                          source.url], timeout=timeout, explain=explain_video_failure)
+    try:
+        info = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise MediaError(f"{source.label} returned unreadable video information.") from error
+    if not isinstance(info, dict):
+        raise MediaError(f"{source.label} returned unreadable video information.")
+    return info
+
+
+async def _metadata(source: VideoSource) -> dict[str, Any]:
+    info = await video_info(source.url)
+    refusal = video_refusal(info)
+    if refusal is not None:
+        raise MediaError(refusal)
+    if source.platform == "youtube" and info.get("id") != source.video_id:
+        raise MediaError(f"{source.label} returned information about another video.")
+    if info.get("availability") not in (None, "public", "unlisted"):
+        raise MediaError("Only available, finished public videos can be imported.")
+    return {"url": source.url, "video_id": source.video_id, "platform": source.platform,
+            "title": str(info.get("title") or f"{PLATFORM_LABELS[source.platform]} video")[:200],
+            "duration_ms": _duration(info.get("duration"))}
 
 
 async def youtube_metadata(url: str) -> dict[str, Any]:
     source = youtube_source(url)
-    raw = await run_tool([*_youtube_args(), "--skip-download", "--dump-single-json", "--", source.url])
-    try:
-        info = json.loads(raw)
-        if (not isinstance(info, dict) or info.get("id") != source.video_id
-                or info.get("_type", "video") != "video"
-                or info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming", "post_live")
-                or info.get("availability") not in (None, "public", "unlisted")):
-            raise MediaError("Only available, finished public videos can be imported.")
-        return {"url": source.url, "video_id": source.video_id,
-                "title": str(info.get("title") or "YouTube video")[:200],
-                "duration_ms": _duration(info.get("duration"))}
-    except (json.JSONDecodeError, AttributeError) as error:
-        raise MediaError("YouTube returned unreadable video information.") from error
+    return await _metadata(VideoSource("youtube", source.video_id, source.url))
+
+
+async def video_metadata(url: str) -> dict[str, Any]:
+    """Title and duration of one public, finished video on YouTube, VK Video, RuTube or Vimeo.
+
+    YouTube keeps going through ``youtube_metadata`` (the legacy import's own entry point).
+    """
+    source = video_source(url)
+    if source.platform == "youtube":
+        return await youtube_metadata(source.url)
+    return await _metadata(source)
 
 
 async def local_metadata(path: Path) -> dict[str, Any]:
@@ -130,13 +230,14 @@ async def local_metadata(path: Path) -> dict[str, Any]:
 
 
 async def download_audio(url: str, directory: Path) -> Path:
-    source = youtube_source(url)
-    await youtube_metadata(source.url)
+    """The best audio track of one video on a supported host (``--no-playlist``, at most 2 GiB)."""
+    source = video_source(url)
+    await video_metadata(source.url)
     await run_tool([
-        *_youtube_args(), "--max-filesize", str(MAX_MEDIA_BYTES), "-f", "bestaudio",
+        *_ytdlp_args(source.platform), "--max-filesize", str(MAX_MEDIA_BYTES), "-f", "bestaudio/best",
         "--match-filter", "!is_live & !is_upcoming & duration <= 18000",
         "--output", str(directory / "download.%(ext)s"), "--", source.url,
-    ], timeout=3600)
+    ], timeout=3600, explain=explain_video_failure)
     files = [p for p in directory.glob("download.*") if p.suffix not in (".part", ".ytdl")]
     if len(files) != 1 or files[0].stat().st_size > MAX_MEDIA_BYTES:
         raise MediaError("No usable audio track was downloaded.")

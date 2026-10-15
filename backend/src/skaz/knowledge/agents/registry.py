@@ -30,8 +30,8 @@ ENGINE_NAMES: dict[EngineId, str] = {"codex": "Codex", "claude_code": "Claude Co
 DEFAULT_ENGINE_KEY = "agents.default_engine"
 #: A new library starts with Codex, the engine SKAZ already used (A-n in the report).
 DEFAULT_ENGINE: EngineId = "codex"
-AgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable"]
-AgentAction = Literal["install", "update", "login", "check"]
+AgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
+AgentAction = Literal["install", "update", "login", "check", "prepare"]
 LoginMethod = Literal["terminal", "browser"]
 
 
@@ -51,6 +51,18 @@ class SettingsStore(Protocol):
 
 
 @dataclass(frozen=True)
+class FirstRun:
+    """An agent that prepares its own environment on first use (Hermes, decision B10)."""
+
+    required_bytes: int
+    #: The user's ``prepare`` task finished; SKAZ may start the agent.
+    prepared: bool
+    #: Set up and waiting only for the preparation: the action is ``prepare``.
+    needed: bool
+    note: str
+
+
+@dataclass(frozen=True)
 class AgentView:
     engine: EngineId
     name: str
@@ -61,6 +73,7 @@ class AgentView:
     #: The model chosen in the agent itself (Hermes: in SKAZ's Hermes folder); None if not applicable.
     current_model: str | None
     checked_at: str
+    first_run: FirstRun | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +147,14 @@ class CodexStatusEngine:
         return await self.connection.login(consent)
 
 
+def _first_run(target: object) -> FirstRun | None:
+    reader = getattr(target, "first_run", None)
+    if not callable(reader):
+        return None
+    info = reader()
+    return info if isinstance(info, FirstRun) else None
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -193,6 +214,9 @@ class EngineRegistry:
             failed = True
             status = EngineStatus(engine, installed=False, reason=f"SKAZ couldn't check {name}. Try again.")
         state, action = classify(status, check_failed=failed)
+        first_run = _first_run(target)
+        if first_run is not None and first_run.needed and state in ("signed_out", "unavailable"):
+            state, action = "unavailable", "prepare"
         models: tuple[ModelOption, ...] = ()
         if state == "ready":
             try:
@@ -202,7 +226,7 @@ class EngineRegistry:
                 models = ()
         current = getattr(target, "current_model", None)
         return AgentView(engine, name, status, state, action, models,
-                         current if isinstance(current, str) else None, _now())
+                         current if isinstance(current, str) else None, _now(), first_run)
 
     async def require(self, engine: EngineId) -> AgentEngine:
         """The engine for a run, or a plain error with the fixing action. Never another engine."""

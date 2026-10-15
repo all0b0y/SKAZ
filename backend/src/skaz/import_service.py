@@ -35,7 +35,7 @@ from .gateways.soniox_async import (
 )
 from .import_store import UNSETTLED, ImportConflict, ImportRecord, ImportSource, ImportStore, digest_file
 from .import_temp import ImportTemp
-from .media_source import youtube_source
+from .media_source import PLATFORM_LABELS, video_source
 from .native_io import disk_call
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -154,7 +154,7 @@ class ImportService:
         video_id: str | None = None
         try:
             if request.url:
-                video_id = youtube_source(request.url).video_id
+                video_id = video_source(request.url).video_id
                 if video_id in self._videos_admitting:
                     raise ImportConflict(DUPLICATE_VIDEO)
                 self._videos_admitting.add(video_id)
@@ -179,15 +179,17 @@ class ImportService:
             await disk_call(check_import, self._runtime, settings, translate=request.translate)
         duration = request.declared_duration_ms
         if request.url:
-            youtube = youtube_source(request.url)
+            # Any host of the video table (decision 40). The stored kind stays "youtube":
+            # it means "a video link" to the legacy store and archive (A-n in the S3 report).
+            video = video_source(request.url)
             if not request.allow_duplicate and bool(
-                await disk_call(self.store.matching_video, youtube.video_id)
+                await disk_call(self.store.matching_video, video.video_id)
             ):
                 raise ImportConflict(DUPLICATE_VIDEO)
-            info = request.metadata or await media_tools.youtube_metadata(youtube.url)
+            info = request.metadata or await media_tools.video_metadata(video.url)
             duration = info["duration_ms"]
-            source = ImportSource("", info["title"], 0, 0, "", "youtube", youtube.url,
-                                  youtube.video_id, True)
+            title = str(info.get("title") or f"{PLATFORM_LABELS[video.platform]} video")
+            source = ImportSource("", title, 0, 0, "", "youtube", video.url, video.video_id, True)
         else:
             source = await disk_call(_describe_source, request.path)
             if request.prepare_media:

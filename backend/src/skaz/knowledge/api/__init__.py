@@ -6,12 +6,14 @@ from fastapi import APIRouter
 from . import (
     agents,
     decisions,
+    dictation,
     folders,
     ingest,
     library,
     materials,
     notifications,
     search,
+    settings,
     sources,
     speech,
     wiki,
@@ -30,4 +32,6 @@ ROUTERS: tuple[APIRouter, ...] = (
     decisions.router,
     speech.router,
     agents.router,
+    settings.router,
+    dictation.router,
 )

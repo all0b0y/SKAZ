@@ -125,4 +125,4 @@ class LegacySpeech:
         return status is not None and status.state == "running"
 
     async def video_metadata(self, url: str) -> dict[str, Any]:
-        return await media_tools.youtube_metadata(url)
+        return await media_tools.video_metadata(url)

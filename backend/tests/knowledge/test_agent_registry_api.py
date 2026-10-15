@@ -197,6 +197,7 @@ async def test_agents_api(agents_client: Any, kb_client: httpx.AsyncClient) -> N
         },
         "install_task": None,
         "checked_at": "-",
+        "first_run": None,  # only Hermes prepares its own environment (B10, area S3)
     }
     assert by_id["hermes"]["action"] == "install" and by_id["hermes"]["min_version"] == "0.21.5"
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ...gateways.codex_connection import CodexConnection
-from ..install.recipes import RECIPES
+from ..install.recipes import RECIPES, Action
 from ..install.runner import Executor
 from ..install.system import LocateFn, locate
 from ..install.tasks import InstallManager
@@ -15,13 +15,20 @@ from .claude_code import ClaudeCodeEngine
 from .engine import AgentEngine, EngineId, EngineStatus
 from .hermes import HermesEngine
 from .mcp_access import McpAccessProvider
-from .registry import CodexStatusEngine, EngineRegistry, SettingsStore
+from .registry import AgentAction, AgentState, AgentView, CodexStatusEngine, EngineRegistry, SettingsStore
 
 
 @dataclass
 class AgentsHub:
     registry: EngineRegistry
     installs: InstallManager
+
+    def state(self, view: AgentView) -> tuple[AgentState, AgentAction | None]:
+        """The view's state, or ``preparing`` while the agent's first-run preparation runs (B10)."""
+        running = self.installs.running_for(view.engine)
+        if running is not None and running.action == "prepare":
+            return "preparing", None
+        return view.state, view.action
 
     async def aclose(self) -> None:
         await self.installs.aclose()
@@ -43,7 +50,7 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
             "claude_code": ClaudeCodeEngine(agents_dir / "claude-code", mcp=mcp, locate_cli=finder,
                                             launcher=launcher),
             "hermes": HermesEngine(data_dir, mcp=mcp, locate_cli=finder, launcher=launcher,
-                                   user_home=user_home),
+                                   user_home=user_home, first_run_gate=True),
         }
     registry = EngineRegistry(engines, settings)
 
@@ -59,7 +66,19 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
             target = registry.engine("hermes")
             folder = await target.install_dir() if isinstance(target, HermesEngine) and located else None
             values["install_dir"] = str(folder or (user_home or Path.home()) / ".hermes" / "hermes-agent")
+            if isinstance(target, HermesEngine):
+                # The first start prepares SKAZ's own Hermes folder, never ~/.hermes (B10).
+                target.prepare()
+                values["hermes_home"] = str(target.home)
+                values["hermes_policy"] = str(target.policy_dir)
         return values
 
-    installs = InstallManager(agents_dir / "install", verify=verify, resolve=resolve, executor=executor)
+    def after_steps(engine: EngineId, action: Action) -> None:
+        target = registry.engine(engine)
+        if action == "prepare" and isinstance(target, HermesEngine):
+            target.mark_prepared()
+        registry.forget(engine)
+
+    installs = InstallManager(agents_dir / "install", verify=verify, resolve=resolve, executor=executor,
+                              after_steps=after_steps)
     return AgentsHub(registry, installs)

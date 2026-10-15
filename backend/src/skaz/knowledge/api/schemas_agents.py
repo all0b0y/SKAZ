@@ -6,8 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 KbEngineId = Literal["codex", "claude_code", "hermes"]
-KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable"]
-KbAgentAction = Literal["install", "update", "login", "check"]
+KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
+KbAgentAction = Literal["install", "update", "login", "check", "prepare"]
+KbInstallAction = Literal["install", "update", "prepare"]
 KbInstallState = Literal["running", "succeeded", "failed", "cancelled"]
 
 
@@ -31,6 +32,15 @@ class KbAgentInstallInfo(BaseModel):
     checked_on: str
 
 
+class KbAgentFirstRun(BaseModel):
+    """Hermes prepares its own environment once (B10); nothing starts until the user asks."""
+
+    required_bytes: int
+    prepared: bool
+    #: "Hermes is preparing its environment (~1.5 GB, a few minutes)."
+    note: str
+
+
 class KbAgent(BaseModel):
     id: KbEngineId
     name: str
@@ -48,9 +58,11 @@ class KbAgent(BaseModel):
     #: The model chosen inside the agent (Hermes: in SKAZ's own Hermes folder).
     current_model: str | None
     install: KbAgentInstallInfo
-    #: The running install/update task, if any.
+    #: The running install/update/prepare task, if any.
     install_task: str | None
     checked_at: str
+    #: Agents that prepare an environment on first use (Hermes); ``null`` for the others.
+    first_run: KbAgentFirstRun | None
 
 
 class KbAgents(BaseModel):
@@ -64,7 +76,8 @@ class KbAgentDefault(_Request):
 
 
 class KbInstallStart(_Request):
-    action: Literal["install", "update"] = "install"
+    #: ``prepare``: Hermes' one-time environment preparation (~1.5 GB), only on this explicit request.
+    action: KbInstallAction = "install"
 
 
 class KbInstallLine(BaseModel):
@@ -76,7 +89,7 @@ class KbInstallLine(BaseModel):
 class KbInstallTask(BaseModel):
     id: str
     engine: KbEngineId
-    action: Literal["install", "update"]
+    action: KbInstallAction
     state: KbInstallState
     #: Log lines after the requested ``after`` cursor.
     lines: list[KbInstallLine]

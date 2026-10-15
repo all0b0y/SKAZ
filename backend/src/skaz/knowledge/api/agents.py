@@ -18,6 +18,7 @@ from ..install.tasks import InstallTask
 from .schemas_agents import (
     KbAgent,
     KbAgentDefault,
+    KbAgentFirstRun,
     KbAgentInstallInfo,
     KbAgentLogin,
     KbAgentLoginResult,
@@ -56,10 +57,14 @@ def _install_info(recipe: Recipe) -> KbAgentInstallInfo:
 def agent_view(hub: AgentsHub, view: AgentView) -> KbAgent:
     status = view.status
     running = hub.installs.running_for(view.engine)
+    state, action = hub.state(view)
+    first = view.first_run
     return KbAgent(
-        id=view.engine, name=view.name, state=view.state, installed=status.installed, version=status.version,
+        id=view.engine, name=view.name, state=state, installed=status.installed, version=status.version,
         min_version=MIN_VERSIONS[view.engine], signed_in=status.signed_in, incompatible=status.incompatible,
-        reason=status.reason, action=view.action,
+        reason=first.note if state == "preparing" and first is not None else status.reason, action=action,
+        first_run=(KbAgentFirstRun(required_bytes=first.required_bytes, prepared=first.prepared,
+                                   note=first.note) if first is not None else None),
         models=[KbAgentModel(id=m.id, label=m.label, efforts=list(m.efforts), default_effort=m.default_effort)
                 for m in view.models],
         current_model=view.current_model, install=_install_info(hub.installs.recipes[view.engine]),

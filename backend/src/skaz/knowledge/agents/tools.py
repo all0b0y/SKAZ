@@ -9,6 +9,10 @@ is data for the agent, never instructions (poisoning layer 6).
 
 Engines get exactly the same set and schemas: MCP lists :meth:`ToolRegistry.specs`
 and Codex turns the same specs into ``dynamicTools``.
+
+Fragments the instruction detector excluded (``excluded.json``, decision 41)
+are never returned — not by reading, search or quotes; restored ones are
+(``sources.guard.visibility``). The agent only learns their ``seg`` numbers.
 """
 from __future__ import annotations
 
@@ -26,6 +30,7 @@ from ..markdown.page import PAGE_KINDS, PageKind
 from ..markdown.source import MATERIAL_KINDS, MaterialKind
 from ..markdown.text import format_timestamp, name_key
 from ..service import KnowledgeService
+from ..sources.guard.visibility import UNREADABLE, ExclusionsUnreadable, excluded_segs
 from ..store.records import FolderRecord, FragmentRecord, MaterialRecord, PageRecord
 from .engine import ToolSpec
 from .prompting import untrusted_block
@@ -277,6 +282,37 @@ def _page(kb: KnowledgeService, args: ReadPageArgs) -> PageRecord:
     return matches[0]
 
 
+EXCLUDED_NOTE = ("Fragments {segs} were excluded: they read like instructions for an AI. "
+                 "Their text is not available.")
+EXCLUDED_FRAGMENT = ("This fragment was excluded: it reads like instructions for an AI. "
+                     "Its text is not available.")
+
+
+def _excluded(kb: KnowledgeService, material_id: str) -> frozenset[int]:
+    """Excluded fragments of a material; an unreadable list hides the material's text (fail closed)."""
+    try:
+        return excluded_segs(kb, material_id)
+    except ExclusionsUnreadable as error:
+        raise ToolInputError(UNREADABLE) from error
+
+
+class _Hidden:
+    """Per-call cache: may this fragment be shown? (unreadable lists hide the whole material)."""
+
+    def __init__(self, kb: KnowledgeService) -> None:
+        self.kb = kb
+        self._known: dict[str, frozenset[int] | None] = {}
+
+    def __call__(self, material_id: str, seg: int) -> bool:
+        if material_id not in self._known:
+            try:
+                self._known[material_id] = excluded_segs(self.kb, material_id)
+            except ExclusionsUnreadable:
+                self._known[material_id] = None
+        hidden = self._known[material_id]
+        return hidden is None or seg in hidden
+
+
 def _folder_names(kb: KnowledgeService) -> dict[str, str]:
     return {folder.id: folder.name for folder in kb.folders()}
 
@@ -332,6 +368,7 @@ def _read_page(kb: KnowledgeService, args: ReadPageArgs) -> dict[str, Any]:
     blocks = kb.page_repo.blocks(page.id)
     keys = {(cite.material_id, cite.seg) for block in blocks for cite in block.citations}
     fragments = kb.material_repo.fragment_map(keys)
+    hidden = _Hidden(kb)
     entries = []
     for index, block in enumerate(blocks[args.from_entry:], start=args.from_entry):
         cites = []
@@ -339,7 +376,9 @@ def _read_page(kb: KnowledgeService, args: ReadPageArgs) -> dict[str, Any]:
             found = fragments.get((cite.material_id, cite.seg))
             item: dict[str, Any] = {"ref": f"{cite.material_id}:seg-{cite.seg}",
                                     "available": found is not None}
-            if cite.quote:
+            if found is not None and hidden(cite.material_id, cite.seg):
+                item["excluded"] = True  # the quote is text of an excluded fragment
+            elif cite.quote:
                 item["quote"] = cite.quote
             if found is not None:
                 fragment, title = found
@@ -368,8 +407,9 @@ def _search(kb: KnowledgeService, args: SearchArgs) -> dict[str, Any]:
     folder = _folder(kb, args.folder)
     kinds = set(args.kinds) if args.kinds else None
     filtered = kinds is not None or folder is not None
-    # Filters apply after FTS ranking, so ask for more hits than shown when filtering.
-    results = search(kb.db, args.query, limit=200 if filtered else args.limit)
+    # Filters (and hiding excluded fragments) apply after FTS ranking: ask for more hits than shown.
+    results = search(kb.db, args.query, limit=200 if filtered else min(200, args.limit * 3))
+    hidden = _Hidden(kb)
     material_folders: dict[str, str] = {}
     page_records: dict[str, PageRecord | None] = {}
 
@@ -399,7 +439,8 @@ def _search(kb: KnowledgeService, args: SearchArgs) -> dict[str, Any]:
          **({"time": format_timestamp(hit.start_ms)} if hit.start_ms is not None else {}),
          **({"page": hit.page} if hit.page is not None else {}),
          "snippet": _highlight(hit.snippet)}
-        for hit in results.fragments if material_ok(hit.material_id, hit.material_kind)
+        for hit in results.fragments
+        if material_ok(hit.material_id, hit.material_kind) and not hidden(hit.material_id, hit.seg)
     ][: args.limit]
     blocks = [
         {"page_id": hit.page_id, "page_title": hit.page_title, "page_kind": hit.page_kind,
@@ -424,6 +465,7 @@ def _material_head(record: MaterialRecord, folders: Mapping[str, str]) -> dict[s
 
 def _read_material(kb: KnowledgeService, args: ReadMaterialArgs) -> dict[str, Any]:
     record = _material(kb, args.material_id)
+    excluded = _excluded(kb, record.id)
     fragments = kb.material_repo.fragments(record.id)
     if args.around_ms is not None:
         if record.kind not in TIMED_KINDS:
@@ -436,7 +478,12 @@ def _read_material(kb: KnowledgeService, args: ReadMaterialArgs) -> dict[str, An
         low = args.from_seg or 1
         high = args.to_seg if args.to_seg is not None else math.inf
         selected = [f for f in fragments if low <= f.seg <= high]
+    left_out = sorted(f.seg for f in selected if f.seg in excluded)
+    selected = [f for f in selected if f.seg not in excluded]
     payload: dict[str, Any] = {"material": _material_head(record, _folder_names(kb))}
+    if left_out:
+        payload["excluded_segs"] = left_out
+        payload["excluded_note"] = EXCLUDED_NOTE.format(segs=", ".join(map(str, left_out)))
     chosen, cut = _fit("skaz_read_material", payload, "fragments", [_fragment(f) for f in selected],
                        TEXT_MAX_OUTPUT_BYTES)
     payload["fragments"] = chosen
@@ -477,7 +524,9 @@ def _recent_speech(kb: KnowledgeService, args: RecentSpeechArgs) -> dict[str, An
     record = _material(kb, args.material_id)
     if record.kind not in TIMED_KINDS:
         raise ToolInputError("This material is not a recording or video; use skaz_read_material.")
-    fragments = [f for f in kb.material_repo.fragments(record.id) if f.start_ms is not None]
+    excluded = _excluded(kb, record.id)
+    fragments = [f for f in kb.material_repo.fragments(record.id)
+                 if f.start_ms is not None and f.seg not in excluded]
     payload: dict[str, Any] = {"material": _material_head(record, _folder_names(kb)),
                                "requested_minutes": args.minutes,
                                "still_recording": record.status == "recording"}
@@ -505,7 +554,10 @@ def _recent_speech(kb: KnowledgeService, args: RecentSpeechArgs) -> dict[str, An
 
 def _get_fragment(kb: KnowledgeService, args: GetFragmentArgs) -> dict[str, Any]:
     record = _material(kb, args.material_id)
-    fragments = kb.material_repo.fragments(record.id)
+    excluded = _excluded(kb, record.id)
+    if args.seg in excluded:
+        raise ToolInputError(EXCLUDED_FRAGMENT)
+    fragments = [f for f in kb.material_repo.fragments(record.id) if f.seg not in excluded]
     for position, fragment in enumerate(fragments):
         if fragment.seg == args.seg:
             payload: dict[str, Any] = {

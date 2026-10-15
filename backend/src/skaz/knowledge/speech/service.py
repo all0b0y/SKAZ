@@ -24,7 +24,10 @@ import asyncio
 import contextlib
 import functools
 import logging
+import os
+import shutil
 import threading
+import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,6 +37,7 @@ from typing import Any, Literal
 from ...import_service import ImportRequest
 from ...native_io import disk_call
 from ..errors import KnowledgeError, NameTaken, NotFound
+from ..library.layout import STAGING_PATH
 from ..library.library import INBOX_ID
 from ..library.names import validate_name
 from ..markdown.source import MaterialStatus, Origin
@@ -96,6 +100,12 @@ class ImportInput:
     translate: bool = False
     language: str | None = None
     allow_duplicate: bool = False
+    #: Video metadata the caller already fetched (``media_tools.video_metadata``); spares a second probe.
+    metadata: dict[str, Any] | None = None
+
+
+#: ``(material_id, kind, error)`` — an import failed (``error`` set) or runs again (``error`` is None).
+ImportListener = Callable[[str, CarrierKind, str | None], None]
 
 
 class SpeechService:
@@ -117,6 +127,7 @@ class SpeechService:
         #: Called with a material id when speech settled finished (Stop or a completed import,
         #: not a Pause): the wiki may process it now.
         self._finished_listeners: list[Callable[[str], None]] = []
+        self._import_listeners: list[ImportListener] = []
         legacy.add_listeners(on_event=self._on_event_saved, on_import=self._on_import_changed)
 
     # -- plumbing -----------------------------------------------------------
@@ -265,6 +276,17 @@ class SpeechService:
         """Subscribe to finished speech materials (used to add them to the wiki)."""
         self._finished_listeners.append(listener)
 
+    def on_import_state(self, listener: ImportListener) -> None:
+        """Subscribe to import failures and restarts (used for ``link_failed`` notifications)."""
+        self._import_listeners.append(listener)
+
+    def _emit_import(self, carrier: Carrier, error: str | None) -> None:
+        for listener in list(self._import_listeners):
+            try:
+                listener(carrier.material_id, carrier.kind, error)
+            except Exception:
+                logger.exception("Speech import listener failed for %s", carrier.material_id)
+
     async def _reconcile_import(self, carrier: Carrier) -> None:
         status = await disk_call(self.legacy.import_status, carrier.session_id)
         if status is None:
@@ -274,6 +296,7 @@ class SpeechService:
         elif status.state == "running":
             await disk_call(self.carriers.set_error, carrier.material_id, None)
             await self._set_status(carrier.material_id, "processing")
+            self._emit_import(carrier, None)
         elif status.state == "completed":
             await self._settle(carrier, None, True)
         else:
@@ -281,6 +304,8 @@ class SpeechService:
                      "cancelled": CANCELLED_IMPORT}.get(status.state, status.error or "The import failed.")
             await disk_call(self.carriers.set_error, carrier.material_id, error)
             await self._set_status(carrier.material_id, "failed")
+            if status.state == "failed":
+                self._emit_import(carrier, error)
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -438,11 +463,14 @@ class SpeechService:
             url: str | None = link.url
             origin = Origin(type="url", url=link.url)
             title = request.title
-            if not title:
+            metadata = request.metadata
+            if metadata is None and not title:
                 try:
                     metadata = await self.legacy.video_metadata(link.url)
                 except IMPORT_INVALID as error:
                     raise SpeechInvalid(str(error)) from error
+            if not title:
+                assert metadata is not None
                 title = str(metadata["title"])
         else:
             if not path.is_absolute():
@@ -482,6 +510,31 @@ class SpeechService:
         await self._guarded(material_id, lambda: self._reconcile_import(carrier))
         return await self.view(material_id)
 
+    async def add_video_link(self, url: str, folder_id: str | None, title: str | None, *,
+                             language: str | None = None, translate: bool = False,
+                             avoid_title: str | None = None) -> SpeechView:
+        """A video link added as material (``POST /kb/materials/link``): checked, then imported.
+
+        The video's details are read first, so a playlist, a private, 18+ or live
+        video is refused with its reason before anything is created.
+        ``avoid_title``: the article added from the same page (mode ``both``) —
+        the video then gets its own name instead of colliding with it.
+        """
+        try:
+            link = classify_video_link(url)
+        except UnsupportedMedia as error:
+            raise SpeechInvalid(str(error)) from error
+        try:
+            metadata = await self.legacy.video_metadata(link.url)
+        except IMPORT_INVALID as error:
+            raise SpeechInvalid(str(error)) from error
+        chosen = (title or "").strip() or str(metadata["title"])
+        if avoid_title is not None and name_key(chosen) == name_key(avoid_title):
+            chosen = f"{chosen[:190]} (video)"
+        return await self.start_import(ImportInput(url=link.url, folder_id=folder_id, title=chosen,
+                                                   translate=translate, language=language,
+                                                   metadata=metadata))
+
     async def _import(self, material_id: str) -> Carrier:
         carrier = await disk_call(self.carriers.get, material_id)
         if carrier is None or not carrier.is_import:
@@ -507,6 +560,43 @@ class SpeechService:
         await self._guarded(material_id, lambda: self._reconcile_import(carrier))
         return await self.view(material_id)
 
+    async def discard_failed_import(self, material_id: str) -> None:
+        """Remove an import that failed before any text arrived (``link_failed`` → Delete).
+
+        Only such a material: it has no fragments, so nothing in the wiki can cite
+        it. Anything else is deleted through the general material deletion (W2).
+        """
+        carrier = await self._import(material_id)
+        status = await disk_call(self.legacy.import_status, carrier.session_id)
+        if status is not None and status.state in ("running", "completed"):
+            raise SpeechConflict("Only an import that failed can be deleted here.")
+        record = await disk_call(self.kb.material_repo.get, material_id)
+        if record is None:
+            raise NotFound("Material not found.")
+        if record.fragment_count:
+            raise SpeechConflict("This material already has text. Delete it from the material page.")
+        if status is not None:
+            await self.legacy.delete_session(carrier.session_id)
+        async with self._lock(material_id):
+            await disk_call(self._remove_material, material_id, record.rel_dir)
+
+    def _remove_material(self, material_id: str, rel_dir: str) -> None:
+        library = self.kb.require()
+        directory = library.locate_material(material_id, hint=rel_dir)
+        area = library.root / STAGING_PATH
+        area.mkdir(parents=True, exist_ok=True)
+        doomed = area / f"delete-{uuid.uuid4().hex}"
+        os.rename(directory, doomed)
+        shutil.rmtree(doomed, ignore_errors=True)
+        with self.kb.db.write() as connection:
+            connection.execute("DELETE FROM fragments_fts WHERE material_id = ?", (material_id,))
+            connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+        self.carriers.remove(material_id)
+        with self._map_lock:
+            if self._by_session is not None:
+                self._by_session = {key: value for key, value in self._by_session.items()
+                                    if value != material_id}
+
     async def retry_import(self, material_id: str) -> SpeechView:
         carrier = await self._import(material_id)
         try:
@@ -515,6 +605,7 @@ class SpeechService:
             raise SpeechConflict(str(error)) from error
         except IMPORT_INVALID as error:
             raise SpeechInvalid(str(error)) from error
+        self._emit_import(carrier, None)  # a new attempt: its own failure is news again
         await self._guarded(material_id, lambda: self._reconcile_import(carrier))
         return await self.view(material_id)
 

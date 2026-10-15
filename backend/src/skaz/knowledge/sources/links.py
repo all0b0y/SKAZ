@@ -57,6 +57,8 @@ class LinkInfo:
     supported: bool = True
     #: A plain-English remark for the UI (why unsupported, a failed metadata check…).
     note: str | None = None
+    #: A page that embeds one video from a supported host: the UI asks text / video / both.
+    embedded_video: LinkInfo | None = None
 
 
 def domain_of(url: str) -> str:
@@ -109,28 +111,50 @@ def classify_offline(value: str) -> LinkInfo | None:
 
 
 def interpret_video_info(info: Mapping[str, Any]) -> tuple[str | None, int | None]:
-    """Honest refusals from downloader metadata (yt-dlp JSON); ``(title, duration_ms)`` otherwise."""
-    if info.get("_type") in ("playlist", "multi_video"):
-        raise LinkRejected("This is a playlist. Paste a link to a single video.")
-    live = info.get("live_status")
-    if info.get("is_live") or live == "is_live":
-        raise LinkRejected("This is a live stream. SKAZ can add the video after the broadcast is over.")
-    if live == "is_upcoming":
-        raise LinkRejected("This broadcast hasn't started yet.")
-    if live == "post_live":
-        raise LinkRejected("This broadcast has just ended and isn't processed yet. Try again later.")
-    availability = info.get("availability")
-    if availability in ("private", "needs_auth", "premium_only", "subscriber_only"):
-        raise LinkRejected("This video is private or needs a sign-in. SKAZ can only add public videos.")
-    age = info.get("age_limit")
-    if isinstance(age, (int, float)) and age >= 18:
-        raise LinkRejected("This video is age-restricted (18+). SKAZ can't add it.")
+    """Honest refusals from downloader metadata (yt-dlp JSON); ``(title, duration_ms)`` otherwise.
+
+    The refusal wording is the speech import's own (``media_tools.video_refusal``).
+    """
+    refusal = media_tools.video_refusal(info)
+    if refusal is not None:
+        raise LinkRejected(refusal)
     duration = info.get("duration")
     duration_ms = None
     if isinstance(duration, (int, float)) and math.isfinite(duration) and duration > 0:
         duration_ms = round(duration * 1000)
     title = info.get("title")
     return (sanitize_title(str(title)) if title else None), duration_ms
+
+
+_IFRAME = re.compile(r"<iframe\s[^>]*>", re.IGNORECASE)
+_NOCOOKIE = re.compile(r"^https?://(?:www\.)?youtube-nocookie\.com/", re.IGNORECASE)
+#: Embedded players looked at, at most (a page with many videos is a gallery, not an article's video).
+MAX_EMBEDS = 20
+
+
+def embedded_video(html: str, base_url: str, og: Mapping[str, str]) -> LinkInfo | None:
+    """The first video from a supported host the page embeds (OpenGraph video, then ``<iframe>``s).
+
+    Each candidate passes the same strict single-video check as a pasted link;
+    anything else (other players, playlists, channels) is ignored.
+    """
+    candidates = [og.get(key, "") for key in ("og:video:secure_url", "og:video:url", "og:video")]
+    for tag in _IFRAME.findall(html)[:MAX_EMBEDS]:
+        attrs = _attributes(tag)
+        candidates.append(attrs.get("src") or attrs.get("data-src") or "")
+    for raw in candidates:
+        if not raw:
+            continue
+        address = _NOCOOKIE.sub("https://www.youtube.com/", urljoin(base_url, raw.strip()))
+        if match_video_host(address) is None:
+            continue
+        try:
+            source = video_source(address)
+        except InvalidMediaSource:
+            continue
+        return LinkInfo("video", source.url, domain_of(source.url), _video_label(source.label, None),
+                        platform=source.platform, video_id=source.video_id)
+    return None
 
 
 _META = re.compile(r"<meta\s[^>]*>", re.IGNORECASE)
@@ -224,6 +248,10 @@ async def _classify_fetched(url: str, fetched: Fetched, fetcher: SafeFetcher) ->
     html = decode_html(fetched.body, fetched.charset)
     head = read_head(html)
     title = sanitize_title(head.title) if head.title else None
+    player = embedded_video(html, fetched.url, head.og)
+    if player is not None:
+        # The page shows a video SKAZ can add: its text, the video, or both (the UI asks).
+        return LinkInfo("site", url, domain, f"{domain} · article", title=title, embedded_video=player)
     og_type = head.og.get("og:type", "").lower()
     if og_type.startswith("video") or "og:video" in head.og or "og:video:url" in head.og:
         duration = _seconds(head.og.get("video:duration") or head.og.get("og:video:duration"))
@@ -271,25 +299,7 @@ async def _oembed(url: str, fetcher: SafeFetcher) -> dict[str, Any]:
 async def ytdlp_probe(url: str) -> Mapping[str, Any]:
     """Video metadata from the bundled yt-dlp (no download, no cookies, no config, one video).
 
-    The flags mirror the speech import's own yt-dlp call (``media_tools``),
-    which stays the only place that downloads.
+    The same call the speech import makes (``media_tools.video_info``), which
+    stays the only place that runs yt-dlp.
     """
-    argv = [
-        media_tools.tool_path("yt-dlp"),
-        "--ignore-config",
-        "--no-plugin-dirs",
-        "--no-playlist",
-        "--no-warnings",
-        "--no-progress",
-        "--socket-timeout",
-        "20",
-        "--retries",
-        "1",
-    ]
-    if match_video_host(url) == "youtube":
-        argv += ["--no-remote-components", "--js-runtimes", f"deno:{media_tools.tool_path('deno')}"]
-    raw = await media_tools.run_tool([*argv, "--skip-download", "--dump-single-json", "--", url], timeout=45)
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("Unreadable video information.")
-    return data
+    return await media_tools.video_info(url, timeout=45)

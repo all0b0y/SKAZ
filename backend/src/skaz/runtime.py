@@ -27,10 +27,13 @@ from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
 from .knowledge.service import KnowledgeService
+from .knowledge.settings.health import SettingsHealth
+from .knowledge.settings.keys import KeyChecks
 from .knowledge.sources.links import ytdlp_probe
 from .knowledge.sources.service import SourceService
 from .knowledge.speech import create_speech_service
-from .knowledge.wiring import McpGrants
+from .knowledge.speech.dictation import Dictation
+from .knowledge.wiring import McpGrants, wire_speech
 from .knowledge.wiring import wire as wire_knowledge
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -120,6 +123,8 @@ class Runtime:
         #: Speech → materials (area S2): links recordings/imports to library materials.
         self.kb_speech = create_speech_service(self)
         self.kb_speech.on_finished(self.kb_auto_ingest.material_finished)
+        #: ``link_failed`` notifications and their actions (area S3).
+        self.kb_link_failures = wire_speech(self.kb, self.kb_speech)
         #: Written-but-unapplied note passages, held until the user compares them.
         self.note_rewrites = PendingRewrites()
         self.window_asr = WindowAsrPreview(self)
@@ -137,6 +142,11 @@ class Runtime:
         self.allow_model_download = os.environ.get("SKAZ_ALLOW_MODEL_DOWNLOAD", "") == "1"
         #: The explicit "prepare this checkpoint" path; separate from the toggle above.
         self.local_models = LocalModelPreparations(config.local_model_cache_dir)
+        #: Dictation from the composer (area S3): recognised with the chosen service, never stored.
+        self.kb_dictation = Dictation(self)
+        #: New settings (area S3): key checks and the problem list over the existing stores.
+        self.kb_keys = KeyChecks(self.kb.settings, self.api_key, self.http)
+        self.kb_settings_health = SettingsHealth(self, self.kb_keys)
 
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
