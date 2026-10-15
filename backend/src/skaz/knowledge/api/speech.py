@@ -25,7 +25,6 @@ from .schemas_speech import (
     KbSpeechDefaults,
     KbSpeechMaterial,
 )
-from .sources import remember_wiki_choice
 
 T = TypeVar("T")
 
@@ -110,13 +109,11 @@ async def resume_recording(material_id: str, speech: SpeechDep) -> KbSpeechMater
 
 
 @router.post("/kb/imports", status_code=201)
-async def start_import(body: KbImportCreate, speech: SpeechDep, request: Request) -> KbSpeechMaterial:
+async def start_import(body: KbImportCreate, speech: SpeechDep) -> KbSpeechMaterial:
     view = await speech_call(speech.start_import(ImportInput(
         path=body.path, url=body.url, folder_id=body.folder_id, title=body.title, translate=body.translate,
-        language=body.language, allow_duplicate=body.allow_duplicate,
+        language=body.language, allow_duplicate=body.allow_duplicate, to_wiki=body.to_wiki,
     )))
-    # Decision 15: the choice waits for the end of the import (see ``remember_wiki_choice``).
-    remember_wiki_choice(request, view.material_id, body.to_wiki)
     return material_view(view)
 
 

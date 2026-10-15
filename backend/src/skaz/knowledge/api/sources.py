@@ -39,17 +39,6 @@ def get_speech(request: Request) -> SpeechService:
     return cast(SpeechService, request.app.state.runtime.kb_speech)
 
 
-def remember_wiki_choice(request: Request, material_id: str, to_wiki: bool | None) -> None:
-    """Decision 15: a video becomes ready after its import; its "to wiki" choice waits for that.
-
-    Called right after the import started, without yielding to the loop first (one settings row):
-    the import is still transcribing then, so its "finished" event comes after the choice is kept.
-    """
-    auto = getattr(request.app.state.runtime, "kb_auto_ingest", None)
-    if auto is not None and to_wiki is not None:
-        auto.remember(material_id, to_wiki)
-
-
 async def _summary(sources: SourceService, material_id: str) -> KbMaterialSummary:
     record = await kb_call(sources.kb.material_repo.get, material_id)
     if record is None:
@@ -151,8 +140,10 @@ def _http(error: KnowledgeError) -> HTTPException:
 
 async def _video(speech: SpeechService, payload: KbAddLink, url: str, *,
                  title: str | None, avoid_title: str | None = None) -> SpeechView:
+    # Decision 15: the "to wiki" choice travels with the import and is kept before it can finish.
     return await speech.add_video_link(url, payload.folder_id, title, language=payload.language,
-                                       translate=payload.translate, avoid_title=avoid_title)
+                                       translate=payload.translate, avoid_title=avoid_title,
+                                       to_wiki=payload.to_wiki)
 
 
 @router.post("/kb/materials/link", status_code=201)
@@ -165,7 +156,6 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
         offline = classify_offline(payload.url)
         if offline is not None and offline.kind == "video":
             view = await _video(speech, payload, offline.url, title=payload.title)
-            remember_wiki_choice(request, view.material_id, payload.to_wiki)
             return KbMaterialAdded(material=await _summary(sources, view.material_id), excluded_count=0,
                                    hidden_count=0, failure_reason=None, video=None, video_failure_reason=None)
         embedded: LinkInfo | None = None
@@ -177,7 +167,6 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
         if payload.mode == "video":
             assert embedded is not None
             view = await _video(speech, payload, embedded.url, title=payload.title)
-            remember_wiki_choice(request, view.material_id, payload.to_wiki)
             return KbMaterialAdded(material=await _summary(sources, view.material_id), excluded_count=0,
                                    hidden_count=0, failure_reason=None, video=None, video_failure_reason=None)
         result = await sources.add_link(payload.url, payload.folder_id, payload.title,
@@ -195,7 +184,6 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
     # Mode "both": the article is added; the video follows, and its own refusal doesn't undo the article.
     try:
         view = await _video(speech, payload, embedded.url, title=None, avoid_title=result.title)
-        remember_wiki_choice(request, view.material_id, payload.to_wiki)
     except KnowledgeError as error:
         return added.model_copy(update={"video_failure_reason": error.message})
     return added.model_copy(update={"video": await _summary(sources, view.material_id)})

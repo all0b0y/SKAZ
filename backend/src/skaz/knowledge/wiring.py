@@ -108,7 +108,8 @@ class AutoIngest:
 
     Decision 15: the "to wiki" switch of a new file, link or text is the user's, whatever Settings →
     Wiki says (the settings only give its default). Documents carry the choice in their event; an
-    audio/video import finishes later, so its choice is kept (``remember``) until it does — in the
+    audio/video import finishes later, so its choice is kept (``remember``, called by the speech
+    service from ``ImportInput.to_wiki`` before the import can finish) until it does — in the
     knowledge settings, so an import resumed after a restart still follows it.
     """
 

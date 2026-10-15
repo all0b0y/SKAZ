@@ -389,3 +389,62 @@ async def test_a_translated_import_writes_translation_md_beside_the_original(
     translation = root / "Materials" / "Inbox" / "Greeting" / ".skaz" / "translation.md"
     content = translation.read_text(encoding="utf-8")
     assert "**Speaker 1**\nПривет" in content and "^seg" not in content
+
+
+async def _import_finishing_before_the_route_returns(
+    api: httpx.AsyncClient, speech_app: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *,
+    to_wiki: bool, settings_add: bool,
+) -> tuple[str, list[str]]:
+    """The import completes inside ``start_import`` (a short file on a fast service): its "finished"
+    event reaches AutoIngest before the HTTP route returns."""
+    runtime = speech_app.state.runtime
+    runtime.kb_ingest.update_settings(auto_add_files_links=settings_add)
+    legacy = runtime.kb_speech.legacy
+    original = legacy.start_import
+
+    async def start_then_finish(request: Any) -> None:
+        await original(request)
+        for _ in range(500):
+            status = legacy.import_status(request.session_id)
+            if status is not None and status.state == "completed":
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("the scripted import never completed")
+
+    monkeypatch.setattr(legacy, "start_import", start_then_finish)
+    started: list[str] = []
+
+    async def record(material_id: str) -> None:
+        started.append(material_id)
+
+    monkeypatch.setattr(runtime.kb_auto_ingest, "_start", record)
+    response = await api.post("/kb/imports", json={"path": media(tmp_path, "short.m4a"), "to_wiki": to_wiki})
+    assert response.status_code == 201, response.text
+    material_id = response.json()["material_id"]
+    await until(api, material_id, status="ready")
+    await asyncio.sleep(0.05)
+    return material_id, started
+
+
+async def test_an_unticked_import_that_finishes_at_once_stays_out_of_the_wiki(
+    api: httpx.AsyncClient, speech_app: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """X5 (X2 Q3): the choice travels in ``ImportInput``; it is kept before the import can finish."""
+    from skaz.knowledge.wiring import CHOICE_KEY
+
+    material_id, started = await _import_finishing_before_the_route_returns(
+        api, speech_app, monkeypatch, tmp_path, to_wiki=False, settings_add=True)
+    assert started == []  # Settings add files by themselves, but the user unticked this one
+    # Used up at completion: no choice is left behind for a material that already finished.
+    assert speech_app.state.runtime.kb.settings.get(CHOICE_KEY + material_id) is None
+
+
+async def test_a_ticked_import_that_finishes_at_once_goes_to_the_wiki(
+    api: httpx.AsyncClient, speech_app: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from skaz.knowledge.wiring import CHOICE_KEY
+
+    material_id, started = await _import_finishing_before_the_route_returns(
+        api, speech_app, monkeypatch, tmp_path, to_wiki=True, settings_add=False)
+    assert started == [material_id]
+    assert speech_app.state.runtime.kb.settings.get(CHOICE_KEY + material_id) is None
