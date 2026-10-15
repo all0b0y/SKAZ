@@ -52,6 +52,7 @@ from ..logsafe import error_note
 from ..markdown.source import MaterialStatus, Origin
 from ..markdown.text import name_key
 from ..service import KnowledgeService
+from ..sources.fragments import sanitize_title
 from ..sources.paths import given_path, resolved_file
 from ..sources.service import SourceService
 from .carriers import IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
@@ -124,6 +125,15 @@ class ImportInput:
     #: The user's "to wiki" choice (decision 15); ``None``: Settings → Wiki decide. Kept before the
     #: import can finish, so the wiki sees it at completion however fast the import is (X5).
     to_wiki: bool | None = None
+
+
+def derived_title(raw: object, fallback: str) -> str:
+    """A name SKAZ takes from the video's details or the file name: cleaned, never refused.
+
+    Characters a name can't hold are replaced (``sanitize_title``); a name the
+    user typed still goes through ``validate_name`` and is refused with a reason.
+    """
+    return sanitize_title(str(raw) if raw else None) or fallback
 
 
 #: ``(material_id, kind, error)`` — an import failed (``error`` set) or runs again (``error`` is None).
@@ -538,7 +548,7 @@ class SpeechService:
                     raise SpeechInvalid(str(error)) from error
             if not title:
                 assert metadata is not None
-                title = str(metadata["title"])
+                title = derived_title(metadata.get("title"), "Video")
         else:
             path = given_path(path, SpeechInvalid)
             try:
@@ -550,7 +560,7 @@ class SpeechService:
             path, _info = await disk_call(resolved_file, picked, self.kb.data_dir, SpeechInvalid)
             url = None
             origin = Origin(type="file", file_name=picked.name)
-            title = request.title or picked.stem
+            title = request.title or derived_title(picked.stem, "Video" if kind == "video" else "Audio")
         clean = validate_name(title[:200])
         await disk_call(self._assert_free, folder, clean)
         session_id = await disk_call(self.legacy.create_import_session, clean)
@@ -600,7 +610,7 @@ class SpeechService:
             metadata = await self.legacy.video_metadata(link.url)
         except IMPORT_INVALID as error:
             raise SpeechInvalid(str(error)) from error
-        chosen = (title or "").strip() or str(metadata["title"])
+        chosen = (title or "").strip() or derived_title(metadata.get("title"), "Video")
         if avoid_title is not None and name_key(chosen) == name_key(avoid_title):
             chosen = f"{chosen[:190]} (video)"
         return await self.start_import(ImportInput(url=link.url, folder_id=folder_id, title=chosen,

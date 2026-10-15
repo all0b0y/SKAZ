@@ -344,3 +344,50 @@ async def test_delete_material_removes_only_a_failed_empty_import(
         json={"url": "https://vimeo.com/76979871", "folder_id": INBOX_ID, "title": "Vimeo talk"},
     )
     assert again.status_code == 201, again.text
+
+
+#: The title from the user's report (7-title.png): yt-dlp gives it with "?", which a name can't hold.
+REPORTED = "Почему фондовый рынок США стал ПОМОЙКОЙ?"
+
+
+async def test_a_video_title_skaz_reads_is_cleaned_not_refused(
+    api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(TITLES, "youtube", REPORTED)
+    monkeypatch.setitem(TITLES, "vimeo", 'Part 1/2: "why?" <draft> #1')
+    # The Add material dialog sends a plain video link to the speech import without a title.
+    imported = await api.post("/kb/imports", json={"url": "https://youtu.be/dQw4w9WgXcQ"})
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["title"] == "Почему фондовый рынок США стал ПОМОЙКОЙ"
+    vimeo = {"url": "https://vimeo.com/76979871", "folder_id": INBOX_ID}
+    linked = await api.post("/kb/materials/link", json=vimeo)
+    assert linked.status_code == 201, linked.text
+    assert linked.json()["material"]["title"] == "Part 1-2 - 'why' draft 1"
+
+
+async def test_a_video_title_the_user_typed_is_still_refused_with_the_reason(api: httpx.AsyncClient) -> None:
+    typed = await api.post("/kb/imports", json={"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Why?"})
+    assert typed.status_code == 422 and "can't contain ?" in typed.json()["detail"]
+    linked = await api.post(
+        "/kb/materials/link",
+        json={"url": "https://vimeo.com/76979871", "folder_id": INBOX_ID, "title": "A|B"},
+    )
+    assert linked.status_code == 422 and "can't contain |" in linked.json()["detail"]
+    assert (await api.get("/kb/materials")).json() == []
+
+
+async def test_a_corrected_link_takes_the_cleaned_video_title(
+    app: Any, api: httpx.AsyncClient, media: FakeMedia, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kb = app.state.runtime.kb
+    media.download_error = media_tools.UNAVAILABLE
+    vimeo = {"url": "https://vimeo.com/76979871", "folder_id": INBOX_ID}
+    added = (await api.post("/kb/materials/link", json=vimeo)).json()["material"]
+    await until(api, added["id"], status="failed")
+    card = next(item for item in kb.notifications() if item.kind == LINK_FAILED)
+    media.download_error = None
+    monkeypatch.setitem(TITLES, "rutube", REPORTED)
+    handler = kb.notification_actions.handler(LINK_FAILED)
+    await handler(kb, card, "fix_url", "https://rutube.ru/video/c6cc4d620b1d4338901770a44b3e82f4/")
+    titles = [item["title"] for item in (await api.get("/kb/materials")).json()]
+    assert titles == ["Почему фондовый рынок США стал ПОМОЙКОЙ"]
