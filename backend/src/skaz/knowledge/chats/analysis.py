@@ -5,6 +5,8 @@ keeps links to the primary sources the answer cited, but a statement becomes
 ``from_source`` only when the answer named the exact words and they are still
 verbatim in the fragment (layer 4); everything else is an ``explanation``.
 A connection is a ``connection`` block only with two such checked sides.
+A name that is taken is refused (no date or "(2)" appended, FILESYSTEM-
+LIBRARY-SPEC 14–15): the page is named after the question, else the chat.
 Model text is made inert for the page format, and a page that reads like
 instructions to an AI is not saved at all (layer 5). An analysis page is
 never a source itself: its claims cite materials, never other pages.
@@ -16,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ..errors import KnowledgeError, NameRejected, NameTaken
-from ..ids import new_id, utc_now
+from ..ids import new_id
 from ..ingest.checks import clean_text, clean_title
 from ..ingest.pages import PageRef, SourceRef, spaced
 from ..markdown.page import Block, BlockKind, Cite, Heading, PageDocument, PageMeta
@@ -36,6 +38,7 @@ _PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 INSTRUCTION_REFUSAL = ("This answer contains text that reads like instructions to an AI, "
                        "so SKAZ won't put it in the wiki.")
 NOTHING_TO_SAVE = "There is nothing to save from this chat yet."
+BAD_NAME = "SKAZ can't name a wiki page after this chat. Rename the chat, then save again."
 
 
 class AnalysisRefused(KnowledgeError):
@@ -235,28 +238,38 @@ class AnalysisWriter:
                 folders.setdefault(material.folder_id, None)
         base = PageMeta(skaz_id=new_id("pg"), kind="analysis", title="", language=self.language,
                         folders=tuple(folders), sources=sources, extra={"skaz_chat": chat_id})
-        for title in _title_candidates(titles):
+        candidates = _title_candidates(titles)
+        taken: list[str] = []
+        for title in candidates:
             _refuse_instructions(title)
             meta = PageMeta(skaz_id=base.skaz_id, kind="analysis", title=title, language=base.language,
                             folders=base.folders, sources=base.sources, extra=base.extra)
             try:
                 self.kb.create_page(PageDocument(meta=meta, parts=spaced(parts)))
-            except (NameTaken, NameRejected):
+            except NameTaken:
+                taken.append(title)
+                continue
+            except NameRejected:
                 continue
             record = self.kb.page_repo.get(meta.skaz_id)
             if record is not None:
                 return record
-        raise NameTaken("A wiki page with this name already exists. Rename the chat and save again.")
+        if taken:
+            raise NameTaken(name_taken(taken[0]))
+        raise AnalysisRefused(BAD_NAME)
+
+
+def name_taken(title: str) -> str:
+    return f"A wiki page named “{title}” already exists. Rename the chat or that page, then save again."
 
 
 def _title_candidates(titles: Sequence[str]) -> list[str]:
-    stamp = utc_now().replace("T", " ").removesuffix("Z")
+    """The page's natural names in order (the question, then the chat's name) — never a date or "(2)"."""
     out: list[str] = []
     for raw in titles:
         title = page_title(raw)
-        for candidate in (title, f"{title} ({stamp[:10]})", f"{title} ({stamp[:16].replace(':', '.')})"):
-            if candidate not in out:
-                out.append(candidate)
+        if title not in out:
+            out.append(title)
     return out
 
 

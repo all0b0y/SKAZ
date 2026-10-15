@@ -102,6 +102,26 @@ describe('Chats in the side panel', () => {
     await waitFor(() => expect(within(side()).queryByRole('button', { name: /Why is there a logarithm/ })).not.toBeInTheDocument());
   });
 
+  it('a taken analysis name: the reason is shown and nothing opens (no date appended by the backend)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const taken = 'A wiki page named “Why is there a logarithm in the loss” already exists. Rename the chat or that page, then save again.';
+    world.failures['POST /kb/chats/c1/messages/c1-a1/save'] = { status: 409, detail: taken };
+    world.failures['POST /kb/chats/c1/save'] = { status: 409, detail: taken };
+    const { services } = renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    const answer = await within(centre).findByRole('article', { name: 'Answer' });
+    await user.click(within(answer).getByRole('button', { name: 'Save to wiki' }));
+    expect(await within(centre).findByRole('status')).toHaveTextContent(taken);
+    expect(openTarget(services.ui.getState())).toBeNull();
+
+    await user.click(within(centre).getByRole('button', { name: /More for/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Save to wiki as analysis' }));
+    await waitFor(() => expect(within(centre).getByRole('status')).toHaveTextContent(`Couldn’t save to the wiki: ${taken}`));
+    expect(openTarget(services.ui.getState())).toBeNull();
+  });
+
   it('Pin and Rename from the ⋯ menu', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });
