@@ -393,12 +393,6 @@ def _openai_opener(
 
 # ── Media import ─────────────────────────────────────────────────────────────
 
-#: Advertised OpenAI transcription rates, US dollars per hour of audio.
-OPENAI_RATE_PER_HOUR_USD: dict[str, float] = {
-    "whisper-1": 0.36, "gpt-4o-transcribe": 0.36, "gpt-4o-mini-transcribe": 0.18,
-}
-
-
 def import_model(settings: StoredSettings) -> str:
     """The model identity an import records; its prefix names the provider."""
     if settings.transcription_provider == "soniox":

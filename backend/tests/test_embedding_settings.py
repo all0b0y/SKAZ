@@ -1,6 +1,5 @@
 """Embedding is a separate task; saving its profile never performs inference."""
 import httpx
-import pytest
 
 from tests.conftest import FakeHttp
 
@@ -55,22 +54,3 @@ def test_existing_settings_without_embedding_load_unconfigured() -> None:
     assert loaded.embedding.provider == "openrouter"
     assert loaded.embedding.model == ""
     assert loaded.agent == DEFAULT_SETTINGS.agent
-
-async def test_optional_embedding_limit_roundtrip(client: httpx.AsyncClient) -> None:
-    assert (await client.get("/settings")).json()["embedding_budget_usd"] is None
-    saved = await client.put("/settings", json={"embedding_budget_usd": 0.01})
-    assert saved.status_code == 200
-    assert saved.json()["embedding_budget_usd"] == 0.01
-    await client.put("/settings", json={"output_language": "en"})
-    assert (await client.get("/settings")).json()["embedding_budget_usd"] == 0.01
-    disabled = await client.put("/settings", json={"embedding_budget_usd": None})
-    assert disabled.status_code == 200
-    assert (await client.get("/settings")).json()["embedding_budget_usd"] is None
-
-
-@pytest.mark.parametrize("limit", [0, -1, 101, "0.01", True])
-async def test_invalid_embedding_limits_are_not_saved(client: httpx.AsyncClient, limit: object) -> None:
-    response = await client.put("/settings", json={"embedding_budget_usd": limit})
-    assert response.status_code == 422
-    assert (await client.get("/settings")).json()["embedding_budget_usd"] is None
-

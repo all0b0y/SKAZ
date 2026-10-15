@@ -170,8 +170,6 @@ class Runtime:
             transcript_language=settings.transcript_language,
             output_language=settings.output_language,
             cloud_consent=settings.cloud_consent,
-            import_cost_warning_usd=settings.import_cost_warning_usd,
-            embedding_budget_usd=settings.embedding_budget_usd,
             contextual_local_enabled=settings.contextual_local_enabled,
             transcription_provider=settings.transcription_provider,
             local_whisper_model=settings.local_whisper_model,

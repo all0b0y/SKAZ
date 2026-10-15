@@ -117,12 +117,9 @@ class Settings(BaseModel):
     agent: Profile
     notes: Profile
     embedding: Profile
-    embedding_budget_usd: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False, strict=True)
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
-    #: Warn when an import's estimated cost exceeds this many US dollars.
-    import_cost_warning_usd: float | None = 0.30
     #: Explicit opt-in for the experimental contextual local mode; off by default.
     contextual_local_enabled: bool = False
     transcription_provider: TranscriptionProvider = "soniox"
@@ -158,13 +155,9 @@ class SettingsUpdate(BaseModel):
     agent: ProfileUpdate | None = None
     notes: ProfileUpdate | None = None
     embedding: ProfileUpdate | None = None
-    embedding_budget_usd: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False, strict=True)
     transcript_language: str | None = None
     output_language: str | None = None
     cloud_consent: bool | None = None
-    #: Explicit null clears the warning; omitted keeps the stored threshold.
-    import_cost_warning_usd: float | None = Field(default=None, ge=0, le=1000)
-    clear_import_cost_warning: bool = False
     #: Omitted keeps the stored value: enabling is always an explicit user action.
     contextual_local_enabled: bool | None = None
     transcription_provider: TranscriptionProvider | None = None
@@ -173,23 +166,12 @@ class SettingsUpdate(BaseModel):
     speaker_separation: StrictBool | None = None
 
 
-PricingUnit = Literal["second", "minute", "request", "token"]
-
-
-class CatalogPricing(BaseModel):
-    """Pricing only when both the amount and billing unit are explicitly known."""
-
-    amount_usd: float
-    unit: PricingUnit
-
-
 class CatalogModel(BaseModel):
     id: str
     name: str
     input_modalities: list[str] = Field(default_factory=list)
     output_modalities: list[str] = Field(default_factory=list)
     max_output_tokens: int | None = None
-    pricing: CatalogPricing | None = None
     #: Set for task=asr only. A picker should default to the "dedicated" group.
     asr_contract: AsrContract | None = None
     recommended: bool = False
@@ -500,35 +482,6 @@ class ImportCreatedResponse(BaseModel):
 
 class ImportsResponse(BaseModel):
     imports: list[ImportView]
-
-
-class ImportCapabilities(BaseModel):
-    """What the UI needs to open the dialog honestly, before anything is charged."""
-
-    #: Container extensions the provider documents for automatic detection.
-    supported_extensions: list[str]
-    max_duration_ms: int
-    #: Advertised provider rates, in US dollars per hour of audio.
-    rate_per_hour_usd: float
-    translation_rate_per_hour_usd: float
-    #: Warn above this estimate; null means the user turned the warning off.
-    warn_above_usd: float | None
-    cloud_consent: bool
-    has_api_key: bool
-    active_imports: int
-    max_concurrent_imports: int
-    #: Where a finished import will be written, in words the user can check.
-    destination: str
-    markdown_enabled: bool
-    #: The transcription provider a new import will use (Settings → Transcription).
-    provider: TranscriptionProvider = "soniox"
-    provider_label: str = "Soniox"
-    #: False with a reason when the provider cannot run (key, consent, local model).
-    provider_ready: bool = True
-    provider_detail: str | None = None
-    #: False for on-device transcription: the file never leaves this computer.
-    sends_audio: bool = True
-    translation: Literal["any", "english_only", "none"] = "any"
 
 
 class AudioResponse(BaseModel):
