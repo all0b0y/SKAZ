@@ -161,8 +161,27 @@ describe('Switch and Segmented', () => {
     expect(screen.getByRole('radio', { name: 'System' })).toHaveFocus();
     await user.keyboard('{ArrowRight}');
     expect(screen.getByRole('radio', { name: 'Light' })).toHaveAttribute('aria-checked', 'true');
+    // Focus follows the choice at once (not a frame later): the next arrow starts from it.
+    expect(screen.getByRole('radio', { name: 'Light' })).toHaveFocus();
     await user.keyboard('{ArrowLeft}{ArrowLeft}');
     expect(screen.getByRole('radio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Dark' })).toHaveFocus();
+  });
+
+  it('Segmented arrows skip disabled options and keep focus on the chosen one', async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [v, setV] = useState<'a' | 'b' | 'c'>('a');
+      return <Segmented label="Mode" value={v} onChange={setV}
+        options={[{ value: 'a', label: 'One' }, { value: 'b', label: 'Two', disabled: true }, { value: 'c', label: 'Three' }]} />;
+    }
+    render(<Harness />);
+    await user.tab();
+    for (const [key, name] of [['{ArrowRight}', 'Three'], ['{ArrowRight}', 'One'], ['{ArrowLeft}', 'Three'], ['{ArrowDown}', 'One']] as const) {
+      await user.keyboard(key);
+      expect(screen.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('radio', { name })).toHaveFocus();
+    }
   });
 });
 

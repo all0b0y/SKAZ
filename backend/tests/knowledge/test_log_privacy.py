@@ -5,6 +5,7 @@ the whole captured log text, tracebacks included.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -109,3 +110,92 @@ def test_error_note_has_types_and_places_but_no_messages() -> None:
         note = error_note(error)
     assert note.startswith("RuntimeError at test_log_privacy.py:") and "caused by OSError" in note
     assert SECRET not in note
+
+
+class _Exploding:
+    """An agent whose turn fails unexpectedly with a title in the message (as a path or a quote would)."""
+
+    id = "codex"
+
+    def run(self, _turn: Any) -> Any:
+        raise RuntimeError(f"Reading “{SECRET}” failed at /Materials/Inbox/{SECRET}/source.md")
+
+    async def interrupt(self, _run_id: str) -> None:
+        return None
+
+
+async def test_unexpected_ingest_and_wiki_job_errors_log_ids_and_types_not_titles(
+    ready: KnowledgeService, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """G6 (R1 Q-2): no traceback with a title reaches the log from ingest, its listeners or wiki jobs."""
+    from skaz.knowledge.ingest.jobs import JobRepository
+    from skaz.knowledge.ingest.service import IngestService
+    from skaz.knowledge.wiki.jobs import WikiJobs
+    from tests.knowledge.ingest_support import PatternDetector
+
+    caplog.set_level(logging.DEBUG)
+    material_id, _directory = material_dir(ready)
+    ingest = IngestService(ready, engines=lambda _engine_id: _Exploding(),  # type: ignore[arg-type,return-value]
+                           detector=PatternDetector())
+    job = await ingest.request_ingest(material_id)
+    while ingest.active_jobs():
+        await asyncio.sleep(0.01)
+    record = ingest.jobs.get(job.id)
+    assert record is not None and record.state == "failed"
+    assert job.id in caplog.text and "RuntimeError" in caplog.text
+
+    def listener(_material_id: str, _record: Any) -> None:
+        raise ValueError(f"“{SECRET}” could not be announced")
+
+    ingest.finished_listeners.append(listener)
+    ingest._tell_finished(job.id, material_id)
+    assert "ValueError" in caplog.text
+
+    wiki_jobs = WikiJobs(JobRepository(ready.db))
+
+    async def work(_context: Any) -> None:
+        raise KeyError(f"page “{SECRET}”")
+
+    wiki_job = await wiki_jobs.start("refresh", material_id, "reading", work)
+    await wiki_jobs.wait(wiki_job.id)
+    assert wiki_job.id in caplog.text and "KeyError" in caplog.text
+    assert SECRET not in caplog.text
+
+
+async def test_automatic_ingest_that_does_not_start_logs_no_title(
+    ready: KnowledgeService, caplog: pytest.LogCaptureFixture,
+) -> None:
+    from skaz.knowledge.wiring import AutoIngest
+
+    caplog.set_level(logging.DEBUG)
+
+    class Refusing:
+        async def request_ingest(self, _material_id: str) -> None:
+            raise RuntimeError(f"“{SECRET}” is already being added")
+
+    await AutoIngest(ready, Refusing())._start("mat-77")  # type: ignore[arg-type]
+    assert "mat-77" in caplog.text and "RuntimeError" in caplog.text
+    assert SECRET not in caplog.text
+
+
+async def test_a_service_that_fails_to_close_logs_no_title(caplog: pytest.LogCaptureFixture) -> None:
+    from types import SimpleNamespace
+
+    from skaz.knowledge.shutdown import close_knowledge
+
+    caplog.set_level(logging.DEBUG)
+
+    async def ok() -> None:
+        return None
+
+    async def failing() -> None:
+        raise OSError(f"/Documents/SKAZ/Wiki/Concepts/{SECRET}.md")
+
+    runtime = SimpleNamespace(
+        kb_wiki=SimpleNamespace(close=failing), kb_chats=SimpleNamespace(close=ok),
+        kb_ingest=SimpleNamespace(close=ok), kb_codex=SimpleNamespace(close=ok),
+        kb_decisions=SimpleNamespace(aclose=ok), kb_agents=SimpleNamespace(aclose=ok),
+    )
+    await close_knowledge(runtime, deadline_s=2)
+    assert "wiki" in caplog.text and "OSError" in caplog.text
+    assert SECRET not in caplog.text

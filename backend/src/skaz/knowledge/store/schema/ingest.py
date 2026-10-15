@@ -8,12 +8,18 @@ the text of a source or of a rejected block.
 from __future__ import annotations
 
 NAME = "ingest"
-VERSION = 1
+VERSION = 2
 
 SQL = """
 CREATE TABLE IF NOT EXISTS ingest_jobs (
-    job_id   TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
-    counters TEXT NOT NULL DEFAULT '{}',
-    journal  TEXT NOT NULL DEFAULT '[]'
+    job_id     TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    counters   TEXT NOT NULL DEFAULT '{}',
+    journal    TEXT NOT NULL DEFAULT '[]',
+    -- Machine-readable kind of a failure the user can fix elsewhere (``AGENT_UNAVAILABLE``), or NULL.
+    error_code TEXT
 );
 """
+
+UPGRADES = {
+    2: "ALTER TABLE ingest_jobs ADD COLUMN error_code TEXT;\n",
+}

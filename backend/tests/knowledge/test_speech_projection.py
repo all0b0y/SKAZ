@@ -90,6 +90,60 @@ def test_only_closed_monologues_are_written_and_seg_ids_stay(
     assert written == legacy_monologues(legacy, session_id)
 
 
+LiveView = tuple[int, list[tuple[str | None, int, str]], tuple[str | None, str, str] | None]
+
+
+def live_view(projector: SpeechProjector, material_id: str, session_id: str) -> LiveView:
+    live = projector.live(material_id, session_id)
+    partial = (live.partial.speaker, live.partial.text, live.partial.translation) if live.partial else None
+    return live.after_seg, [(item.speaker, item.start_ms, item.text) for item in live.monologues], partial
+
+
+def test_continuous_speech_is_visible_live_before_any_monologue_closes(
+    ready: KnowledgeService, legacy: Database,
+) -> None:
+    """The open monologue (final words) and the non-final words are visible at once, not after a pause."""
+    material_id, session_id = recording(ready, legacy)
+    projector = SpeechProjector(ready, legacy.read)
+    mic = Recorder.open(legacy, session_id)
+
+    mic.say(sentence("Today we talk", 0, "1"), partial=[(" about", 900, 1_100, "1")])
+    assert projector.project(material_id, session_id, final=False) == []  # nothing closed yet
+    assert live_view(projector, material_id, session_id) == (
+        0, [("1", 0, "Today we talk")], ("1", "about", ""))
+    # Continuous speech: more final words, still no pause — still open, still visible, never twice.
+    mic.say(sentence("about entropy", 900, "1"))
+    projector.project(material_id, session_id, final=False)
+    assert texts(ready, material_id) == []
+    assert live_view(projector, material_id, session_id) == (
+        0, [("1", 0, "Today we talk about entropy")], None)
+
+    # A speaker change closes the first monologue: it moves into the material and out of the live tail.
+    mic.say(sentence("Is it disorder", 1_600, "2"), partial=[(" really", 2_500, 2_700, "2")])
+    assert live_view(projector, material_id, session_id)[1] == [  # not projected yet: both still live
+        ("1", 0, "Today we talk about entropy"), ("2", 1_600, "Is it disorder")]
+    projector.project(material_id, session_id, final=False)
+    assert texts(ready, material_id) == [(1, "Today we talk about entropy", "1")]
+    assert live_view(projector, material_id, session_id) == (
+        1, [("2", 1_600, "Is it disorder")], ("2", "really", ""))
+
+    # Stop: everything is in the material, nothing is left live.
+    projector.project(material_id, session_id, final=True)
+    assert live_view(projector, material_id, session_id)[:2] == (2, [])
+
+
+def test_the_live_tail_carries_the_translation_draft_and_strips_invisible_text(
+    ready: KnowledgeService, legacy: Database,
+) -> None:
+    material_id, session_id = recording(ready, legacy)
+    projector = SpeechProjector(ready, legacy.read)
+    mic = Recorder.open(legacy, session_id, mode="translation", target="ru")
+    mic.say([(" Good\u200b", 0, 300, "1"), (" morning", 300, 600, "1")], translation=[("Доброе", "1")],
+            partial=[(" all", 700, 900, None)], partial_translation=[(" утро", "1")])
+    assert live_view(projector, material_id, session_id) == (
+        0, [("1", 0, "Good morning")], (None, "all", "утро"))
+
+
 def test_a_monologue_spanning_events_is_written_once_closed(
     ready: KnowledgeService, legacy: Database,
 ) -> None:

@@ -50,6 +50,10 @@ async def test_ingest_job_lifecycle_over_http(kb_app: Any, kb_client: httpx.Asyn
     await settle(lambda: not ingest.active_jobs())
     failed = (await kb_client.get(f"/kb/jobs/{started.json()['id']}")).json()
     assert failed["state"] == "failed" and failed["can_retry"] is True and "Retry" not in failed["label"]
+    # No agent connected: the failure says which kind of problem it is (G4), the material too.
+    assert failed["error_code"] == "AGENT_UNAVAILABLE", failed["error"]
+    wiki_view = (await kb_client.get(f"/kb/materials/{material_id}")).json()["wiki"]
+    assert (wiki_view["state"], wiki_view["error_code"]) == ("failed", "AGENT_UNAVAILABLE")
 
     gate = asyncio.Event()
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], gate=gate)

@@ -64,7 +64,7 @@ from .legacy import (
     RecordingState,
 )
 from .media import UnsupportedMedia, classify_video_link, default_recording_titles, file_kind
-from .projector import SpeechProjector
+from .projector import CarrierMismatch, LiveTail, SpeechProjector
 
 logger = logging.getLogger(__name__)
 
@@ -464,6 +464,19 @@ class SpeechService:
             raise SpeechConflict(
                 "SKAZ is still finishing the end of this recording. Continue when it is ready.")
         return await self.view(material_id)
+
+    async def live(self, material_id: str) -> tuple[LiveTail, str]:
+        """Speech of a recording not in its material yet, and the recorder's stream state.
+
+        Final words of the open monologue appear here as soon as they are recognised, not
+        after the monologue closes (a pause, another speaker or two minutes later).
+        """
+        carrier = await self._recording(material_id)
+        try:
+            tail = await disk_call(self.projector.live, material_id, carrier.session_id)
+        except CarrierMismatch as error:
+            raise SpeechConflict(str(error)) from error
+        return tail, self.legacy.stream_state(carrier.session_id)
 
     # -- imports --------------------------------------------------------------
 

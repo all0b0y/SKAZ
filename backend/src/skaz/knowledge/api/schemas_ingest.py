@@ -41,6 +41,9 @@ class KbJob(BaseModel):
     #: The status line of the material: "Reading", "Writing notes", "Concepts 3", "Done", "Failed"…
     label: str
     error: str | None
+    #: ``AGENT_UNAVAILABLE``: the agent can't work until it is fixed in Settings → Accounts & keys
+    #: (signed out, outdated, none connected); a retry alone won't help. ``null`` otherwise.
+    error_code: str | None
     #: Failed, cancelled or interrupted: "Retry" starts a new job (``POST /kb/materials/{id}/ingest``).
     can_retry: bool
     progress: KbJobProgress

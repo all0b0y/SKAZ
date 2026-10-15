@@ -108,8 +108,8 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       // F2: the material of a stopped recording reads its state to offer "Continue recording".
       ['GET', '/kb/recordings/mat_1'],
       ['POST', '/kb/imports'], ['POST', '/kb/chats'],
-      // The live tail and recording settings of the existing pipeline.
-      ['GET', '/sessions/s1/live/events'], ['GET', '/sessions/s1/live'], ['GET', '/settings'], ['PUT', '/settings'],
+      // The live text after the material; the sample clock and recording settings of the existing pipeline.
+      ['GET', '/kb/recordings/mat_1/live'], ['GET', '/sessions/s1/live'], ['GET', '/settings'], ['PUT', '/settings'],
     ];
     for (const [method, path] of allowed) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();

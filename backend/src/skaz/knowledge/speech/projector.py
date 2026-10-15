@@ -3,7 +3,7 @@
 Only *closed* monologues are written: one after which the next one began, or
 every monologue once the recording is paused/stopped/finished or the import
 completed (``final=True``). The open tail stays out of the material — the live
-panel shows it from the legacy ``/live`` routes.
+panel reads it through ``live`` (``GET /kb/recordings/{id}/live``) until it closes.
 
 Idempotency and crash safety come from the files, not from the database: the
 position of the last written token (``speech.cursor`` in ``material.json``)
@@ -37,7 +37,7 @@ from ..library.library import Library
 from ..markdown.source import Fragment, FragmentInput
 from ..service import KnowledgeService
 from ..sources.guard import strip_invisible
-from .transcript import TokenCursor, read_new_tokens, read_translation, translation_language
+from .transcript import TokenCursor, read_draft, read_new_tokens, read_translation, translation_language
 from .translation import TRANSLATION_FILE, one_line, render_translation
 
 #: ``material.json`` extra written by this area: ``{"session_id": ..., "cursor": {...} | null}``.
@@ -48,6 +48,33 @@ LegacyReader = Callable[[], AbstractContextManager[Connection]]
 
 class CarrierMismatch(RuntimeError):
     """The material's files say another session feeds it; nothing is written."""
+
+
+@dataclass(frozen=True)
+class LiveMonologue:
+    """Final speech of one monologue that is not in the material yet (usually the open one)."""
+
+    speaker: str | None
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+@dataclass(frozen=True)
+class LivePartial:
+    """The words the provider may still revise (original, and translation when recorded with it)."""
+
+    speaker: str | None
+    text: str
+    translation: str
+
+
+@dataclass(frozen=True)
+class LiveTail:
+    #: The last fragment ``seg`` of the material that this speech follows (0: none yet).
+    after_seg: int
+    monologues: list[LiveMonologue]
+    partial: LivePartial | None
 
 
 @dataclass(frozen=True)
@@ -120,6 +147,39 @@ class SpeechProjector:
         files = library.read_material(material_id, hint=hint)
         indexer.put_material(self.kb.db, ScannedMaterial(
             files, library.relative(files.directory), library.relative(files.source_path)))
+
+    def live(self, material_id: str, session_id: str) -> LiveTail:
+        """Speech of a running recording that is not in the material yet, for the live panel.
+
+        The open monologue (final words after the last written token) and any closed one the
+        next projection has not appended yet, then the replaceable non-final words. Read under
+        the same lock as ``project``, so ``after_seg`` and the text never overlap or leave a gap:
+        the text continues exactly after fragment ``after_seg``. Nothing is written.
+        """
+        with self._exclusive(material_id):
+            library = self.kb.require()
+            manifest = library.material_manifest(material_id, hint=self._hint(material_id))  # one cheap read
+            state = SpeechState.of(manifest.model_extra)
+            if state.session_id not in (None, session_id):
+                raise CarrierMismatch("This material is fed by another recording.")
+            after_seg = manifest.next_seg() - 1
+            with self._legacy_read() as connection:
+                tokens = read_new_tokens(connection, session_id, state.cursor)
+                draft = read_draft(connection, session_id)
+        monologues = [
+            LiveMonologue(str(group.speaker) if group.speaker is not None else None,
+                          group.start_ms, group.end_ms, text)
+            for group in mono.build([item.token for item in tokens])
+            if (text := one_line(strip_invisible(group.text)))
+        ]
+        partial = None
+        if draft is not None:
+            text = one_line(strip_invisible(draft.text))
+            translation = one_line(strip_invisible(draft.translation))
+            if text or translation:
+                speaker = str(draft.speaker) if draft.speaker is not None else None
+                partial = LivePartial(speaker, text, translation)
+        return LiveTail(after_seg, monologues, partial)
 
     def write_translation(self, material_id: str, session_id: str) -> Path | None:
         """Rewrite ``.skaz/translation.md`` from all final translated tokens; ``None`` if there are none."""

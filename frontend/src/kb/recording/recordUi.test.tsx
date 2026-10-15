@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
@@ -87,6 +87,44 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     expect(eng.e.stop).toHaveBeenCalledTimes(1);
   });
 
+  it('a quick hover then click keeps the control row open (no stale state closes it)', async () => {
+    const { user, bar, record } = await start();
+    await user.click(record);
+    const capsule = await within(bar).findByRole('button', { name: /^Recording/ });
+    const wrap = within(bar).getByTestId('record-capsule');
+    // Both events before React re-renders: the click must see the row the hover just opened.
+    act(() => {
+      fireEvent.mouseEnter(wrap);
+      fireEvent.click(capsule);
+    });
+    expect(await screen.findByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+    expect(capsule).toHaveAttribute('aria-expanded', 'true');
+    // The click pinned it: leaving the capsule no longer closes it.
+    act(() => { fireEvent.mouseLeave(wrap); });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(screen.getByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+    // A second click closes it.
+    await user.click(capsule);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Recording controls' })).not.toBeInTheDocument());
+  });
+
+  it('hover opens the row and leaving closes it; a click while it is open by hover pins it', async () => {
+    const { user, bar, record } = await start();
+    await user.click(record);
+    const capsule = await within(bar).findByRole('button', { name: /^Recording/ });
+    const wrap = within(bar).getByTestId('record-capsule');
+    act(() => { fireEvent.mouseEnter(wrap); });
+    expect(await screen.findByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+    act(() => { fireEvent.mouseLeave(wrap); });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Recording controls' })).not.toBeInTheDocument());
+    act(() => { fireEvent.mouseEnter(wrap); });
+    await screen.findByRole('dialog', { name: 'Recording controls' });
+    await user.click(capsule);
+    act(() => { fireEvent.mouseLeave(wrap); });
+    await new Promise((r) => setTimeout(r, 450));
+    expect(screen.getByRole('dialog', { name: 'Recording controls' })).toBeInTheDocument();
+  });
+
   it('the live panel grows with final text, keeps the unstable tail grey, and follows the end', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -98,6 +136,41 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
       // Recorded with translation: the panel shows the translation by default.
       expect(await within(live).findByText(/Итак, Больцман записал/)).toBeInTheDocument();
       expect(live.querySelector('.kb-tail')).toHaveTextContent('Получается, что cross-entropy');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continuous speech with no pause shows within one poll: final words stable, the rest grey, no gap at the handover', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { user, record, fake, services } = await start();
+      fake.world.settings.native_recording_mode = 'transcription';
+      await services.recording.getState().loadOptions();
+      fake.world.liveOpen = 'So the entropy of a closed system';
+      await user.click(record);
+      const live = await screen.findByRole('complementary', { name: 'Live recording' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      // No monologue closed (the material is empty), yet the words are there: stable, then grey.
+      const finalWords = await within(live).findByText('So the entropy of a closed system');
+      expect(finalWords).toHaveClass('kb-live-final');
+      expect(live.querySelector('.kb-tail')).toHaveTextContent('So cross-entropy in machine learning is');
+      expect(within(live).queryByText(/Listening/)).not.toBeInTheDocument();
+
+      // The speaker keeps going and the monologue closes: the answer is a step ahead of the panel's
+      // material. The closed words stay put (never gone, never twice) until the material has them.
+      const id = services.recording.getState().materialId!;
+      const material = fake.world.materials.find((m) => m.id === id)!;
+      const reads = () => fake.calls.filter((c) => c.method === 'GET' && c.path === `/kb/materials/${id}`).length;
+      const before = reads();
+      material.fragments.push({ ...structuredClone(fake.world.materials[0]!.fragments[0]!), id: `${id}-seg-1`, seg: 1,
+        text: 'So the entropy of a closed system never decreases.', speaker: 'Speaker 1', start_ms: 0, end_ms: 9_000 });
+      fake.world.liveOpen = 'Why is that?';
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      await waitFor(() => expect(reads()).toBeGreaterThan(before));
+      await within(live).findByText('Why is that?');
+      expect(live).toHaveTextContent('So the entropy of a closed system never decreases.');
+      expect(live.textContent!.split('So the entropy of a closed system').length - 1).toBe(1);
     } finally {
       vi.useRealTimers();
     }
@@ -161,7 +234,9 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     await user.keyboard('{Escape}');
     vi.mocked(eng.e.resume).mockRejectedValueOnce(new SystemAudioUnavailable('denied'));
     await user.click(await within(bar).findByRole('button', { name: 'Resume' }));
-    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    // Resuming is not starting: the window says what didn't happen.
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t resume' });
+    expect(popover).toHaveTextContent('Recording didn’t resume');
     expect(popover).toHaveTextContent('Computer sound wasn’t allowed.');
     await user.click(within(popover).getByRole('button', { name: 'Open System Settings' }));
     expect(open).toHaveBeenCalledWith('system-audio');
@@ -176,6 +251,30 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
     expect(popover).toHaveTextContent('Microphone access was denied.');
     expect(within(popover).queryByRole('button', { name: 'Open System Settings' })).not.toBeInTheDocument();
+  });
+
+  it('a stop whose last moment is unconfirmed says so in its own words, not "didn’t start"', async () => {
+    const { user, bar, record, eng } = await start();
+    Object.assign(eng.e, { incomplete: () => true });
+    await user.click(record);
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
+    const popover = await screen.findByRole('dialog', { name: 'The end of the recording isn’t confirmed' });
+    expect(popover).toHaveTextContent('Everything received is saved.');
+    expect(screen.queryByRole('dialog', { name: 'Recording didn’t start' })).not.toBeInTheDocument();
+  });
+
+  it('continuing a recording that fails to open says it didn’t continue', async () => {
+    const { user, bar, record, eng, services } = await start();
+    await user.click(record);
+    const materialId = services.recording.getState().materialId!;
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
+    await within(bar).findByRole('button', { name: 'Record' });
+    vi.mocked(eng.e.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await act(async () => { await services.recording.getState().continueRecording(materialId); });
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t continue' });
+    expect(popover).toHaveTextContent('Microphone access was denied.');
   });
 
   it('a stopped recording offers "Continue recording" in its material; other materials do not', async () => {

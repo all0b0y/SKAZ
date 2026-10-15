@@ -67,11 +67,16 @@ export interface FakeWorld {
   dictation: { text: string } | { status: number; detail: string };
   // Old routes the recording reuses (frontend/src/audio pipeline)
   settings: Record<string, unknown>;
-  /** Unstable words of the live recording (GET /sessions/{id}/live/events → tail). */
+  /** Unstable words of the live recording (GET /kb/recordings/{id}/live → partial). */
   liveTail: string;
+  /**
+   * Continuous speech: final words of a monologue that hasn't closed (no pause, no other speaker).
+   * Set, the recording's material doesn't grow — the words come only through `live` (`monologues`).
+   */
+  liveOpen?: string;
   /** `GET /logs`: the technical activity log (absent = nothing ran yet). */
   activity?: { entries: Array<Record<string, unknown>>; capacity: number; dropped: number };
-  /** The recording's stream state in the same page (`transcription`); absent = streaming. */
+  /** The recording's stream state in the same answer (`stream`); absent = streaming. */
   liveTranscription?: 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive';
   /** One-off failures: "METHOD /path" → status + detail. */
   failures: Record<string, { status: number; detail: string }>;
@@ -106,7 +111,7 @@ export function fragment(materialId: string, seg: number, text: string, extra: P
 }
 
 export function materialWiki(state: KbMaterial['wiki']['state'], extra: Partial<KbMaterial['wiki']> = {}): KbMaterial['wiki'] {
-  return { state, note_page_id: null, concept_count: 0, job_id: null, error: null, ...extra };
+  return { state, note_page_id: null, concept_count: 0, job_id: null, error: null, error_code: null, ...extra };
 }
 
 export function block(id: string, kind: KbBlock['kind'], section: string | null, text: string,
@@ -175,7 +180,7 @@ function added(world: FakeWorld, m: KbMaterial): KbMaterialAdded {
 
 function newJob(world: FakeWorld, kind: KbJob['kind'], materialId: string | null, state: KbJob['state'] = 'done', label: string = kind): KbJob {
   const job: KbJob = {
-    id: `j${++world.seq}`, kind, material_id: materialId, state, step: state === 'done' ? 'done' : 'reading', label, error: null, can_retry: false,
+    id: `j${++world.seq}`, kind, material_id: materialId, state, step: state === 'done' ? 'done' : 'reading', label, error: null, error_code: null, can_retry: false,
     progress: { parts_total: 1, parts_done: state === 'done' ? 1 : 0, concepts_found: 0, blocks_written: 0, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 0, concepts_updated: 0 },
     journal: [], created_at: stamp(world), updated_at: stamp(world),
   };
@@ -585,6 +590,18 @@ const ROUTES: FakeRoutes = {
     return view;
   }],
   'GET /kb/recordings/{material_id}': [200, (w, { path }) => findRecording(w, path.material_id).view],
+  'GET /kb/recordings/{material_id}/live': [200, (w, { path }) => {
+    const { material } = findRecording(w, path.material_id);
+    // Without continuous speech the recording grows: every read closes the next sentence of the lecture.
+    if (material.status === 'recording' && w.liveOpen === undefined) growLive(material);
+    const last = material.fragments[material.fragments.length - 1];
+    const at = last?.end_ms ?? 0;
+    return {
+      material_id: material.id, after_seg: last?.seg ?? 0, stream: w.liveTranscription ?? 'streaming',
+      monologues: w.liveOpen ? [{ speaker: 'Speaker 1', start_ms: at, end_ms: at + 60_000, text: w.liveOpen }] : [],
+      partial: { speaker: null, text: w.liveTail, translation: 'Получается, что cross-entropy в машинном обучении —' },
+    };
+  }],
   'POST /kb/recordings/{material_id}/stop': [200, (w, { path }) => setRecording(w, path.material_id, 'ready', 'stopped')],
   'POST /kb/recordings/{material_id}/pause': [200, (w, { path }) => setRecording(w, path.material_id, 'ready', 'paused')],
   'POST /kb/recordings/{material_id}/resume': [200, (w, { path }) => setRecording(w, path.material_id, 'recording', 'recording')],
@@ -919,18 +936,8 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
   if (method === 'GET' && path === '/settings') return w.settings;
   if (method === 'PUT' && path === '/settings') { Object.assign(w.settings, req.body); return w.settings; }
   if (method === 'GET' && path === '/logs') return w.activity ?? { entries: [], capacity: 256, dropped: 0 };
-  let m = /^\/sessions\/([^/]+)\/live$/.exec(path);
+  const m = /^\/sessions\/([^/]+)\/live$/.exec(path);
   if (m && method === 'GET') return { session_id: m[1], sample_rate: 48000, saved_samples: 0, next_sequence: 0, transcription: 'inactive', connections: [], gaps: [] };
-  m = /^\/sessions\/([^/]+)\/live\/events$/.exec(path);
-  if (m && method === 'GET') {
-    // The live recording grows: every read adds the next sentence of the lecture as final text.
-    const material = w.materials.find((x) => `s-${x.id}` === m![1]);
-    if (material && material.status === 'recording') growLive(material);
-    return {
-      tail: { originals: [{ text: w.liveTail }], translations: [{ text: 'Получается, что cross-entropy в машинном обучении —' }], stream: [] }, events: [],
-      transcription: w.liveTranscription ?? 'streaming',
-    };
-  }
   return undefined;
 }
 

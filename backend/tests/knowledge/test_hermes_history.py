@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from skaz.knowledge.agents.engine import Completed, Failed
+from skaz.knowledge.agents.fake import FakeEngine
 from skaz.knowledge.agents.hermes import HermesEngine
 from tests.knowledge.agent_fakes import FakeCli
 from tests.knowledge.test_agent_hermes import PROBE, UPDATES, drain, engine_for, scenario, turn
@@ -69,3 +70,74 @@ async def test_the_sweep_never_starts_hermes_before_it_was_prepared(tmp_path: Pa
                           first_run_gate=True)
     await engine.sweep_history()
     assert fake.records() == []
+
+
+async def test_app_start_sweeps_in_the_background_once_hermes_is_prepared(tmp_path: Path) -> None:
+    """G7: the leftovers of an earlier run go at app start, not only at the first use of Hermes."""
+    from skaz.knowledge.agents.hub import build_agents_hub
+    from skaz.knowledge.agents.registry import CodexStatusEngine
+
+    engine, fake = engine_for(tmp_path, scenario(sessions_exit=1))
+    await drain(engine, turn(tools=None))
+    await engine.settle_history()
+    assert engine.pending_history() == [SESSION_ID]
+    fake.scenario_path.write_text(json.dumps(scenario()), encoding="utf-8")
+
+    restarted = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home")
+    settings: dict[str, Any] = {}
+    hub = build_agents_hub(tmp_path / "data", settings=_Settings(settings), codex=None,  # type: ignore[arg-type]
+                           engines={"codex": CodexStatusEngine(None),  # type: ignore[arg-type]
+                                    "claude_code": FakeEngine("claude_code"), "hermes": restarted})
+    before = len(_sessions_calls(fake))
+    hub.start()  # returns at once: the sweep runs in the background
+    await restarted.settle_history()
+    args = [call["args"] for call in _sessions_calls(fake)][before:]
+    assert args == [["delete", SESSION_ID, "--yes"], ["prune", "--source", "acp", "--yes"]]
+    assert restarted.pending_history() == []
+    # Once per app run: the first use of Hermes later doesn't sweep again.
+    await drain(restarted, turn(tools=None))
+    await restarted.settle_history()
+    later = [call["args"] for call in _sessions_calls(fake)][before + 2:]
+    assert ["prune", "--source", "acp", "--yes"] not in later
+
+
+async def test_app_start_never_touches_an_unprepared_hermes(tmp_path: Path) -> None:
+    from skaz.knowledge.agents.hub import build_agents_hub
+    from skaz.knowledge.agents.registry import CodexStatusEngine
+
+    fake = FakeCli(tmp_path / "bin", "hermes", scenario())
+    engine = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home",
+                          first_run_gate=True)
+    hub = build_agents_hub(tmp_path / "data", settings=_Settings({}), codex=None,  # type: ignore[arg-type]
+                           engines={"codex": CodexStatusEngine(None),  # type: ignore[arg-type]
+                                    "claude_code": FakeEngine("claude_code"), "hermes": engine})
+    hub.start()
+    await engine.settle_history()
+    assert fake.records() == []
+
+
+class _Settings:
+    def __init__(self, values: dict[str, Any]) -> None:
+        self.values = values
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.values.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self.values[key] = value
+
+
+async def test_the_app_lifespan_starts_the_sweep_after_the_library_opened(kb_app: Any,
+                                                                          monkeypatch: Any) -> None:
+    runtime = kb_app.state.runtime
+    order: list[str] = []
+    real_start = runtime.kb.start
+
+    def start_library() -> None:
+        real_start()
+        order.append("library")
+
+    monkeypatch.setattr(runtime.kb, "start", start_library)
+    monkeypatch.setattr(type(runtime.kb_agents), "start", lambda _self: order.append("agents"))
+    async with kb_app.router.lifespan_context(kb_app):
+        assert order == ["library", "agents"]

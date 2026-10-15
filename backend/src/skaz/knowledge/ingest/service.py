@@ -17,10 +17,12 @@ from dataclasses import dataclass
 from typing import cast
 
 from ...native_io import disk_call
+from ..agents.registry import EngineUnavailable
 from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
+from ..logsafe import error_note
 from ..service import KnowledgeService
-from .jobs import INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState
+from .jobs import AGENT_UNAVAILABLE, INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState
 from .protocols import (
     ConceptUpdateHook,
     EngineResolver,
@@ -184,13 +186,14 @@ class IngestService:
     async def _run(self, job_id: str, active: _Active) -> None:
         state: JobState = "failed"
         error = UNEXPECTED
+        code: str | None = None
         try:
             settings = read_settings(self.kb.settings)
             if self.detector is None:
                 raise IngestFailed(NO_DETECTOR)
             engine = self.engines(settings.engine) if self.engines is not None else None
             if engine is None:
-                raise IngestFailed(NO_ENGINE)
+                raise IngestFailed(NO_ENGINE, AGENT_UNAVAILABLE)
             active.run = IngestRun(
                 kb=self.kb, jobs=self.jobs, job_id=job_id, material_id=active.material_id, engine=engine,
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
@@ -208,16 +211,19 @@ class IngestService:
             else:
                 state, error = "interrupted", INTERRUPTED_REASON
         except IngestFailed as failure:
-            error = failure.message
+            error, code = failure.message, failure.code
+        except EngineUnavailable as failure:
+            error, code = failure.message, AGENT_UNAVAILABLE
         except KnowledgeError as failure:
             error = failure.message
         except OSError as failure:
             error = f"SKAZ couldn't use the library folder: {failure.strerror or failure}."
-        except Exception:
-            logger.exception("ingest job %s failed", job_id)
+        except Exception as failure:  # ids and types only: a message can carry a title (logsafe)
+            logger.error("ingest job %s failed: %s", job_id, error_note(failure))
         finally:
             try:
-                self.jobs.finish(job_id, state, error=error or None)
+                self.jobs.finish(job_id, state, error=error or None,
+                                 error_code=code if state == "failed" else None)
                 self._notify_blocked(job_id, active)
             finally:
                 self._active.pop(job_id, None)
@@ -231,8 +237,8 @@ class IngestService:
                 break
             try:
                 listener(material_id, record)
-            except Exception:  # a listener's failure never changes the finished job
-                logger.exception("ingest listener failed for job %s", job_id)
+            except Exception as failure:  # a listener's failure never changes the finished job
+                logger.error("ingest listener failed for job %s: %s", job_id, error_note(failure))
 
     def _notify_blocked(self, job_id: str, active: _Active) -> None:
         run = active.run

@@ -184,6 +184,41 @@ def test_a_recording_grows_by_closed_monologues_and_continues_into_the_same_mate
     assert finished == [material_id]  # a Pause is not a finished recording
 
 
+def test_continuous_speech_is_readable_live_before_the_monologue_closes(
+    http: TestClient, provider: Provider,
+) -> None:
+    """One speaker, no pause: the material gets nothing yet, but the live route has every final word."""
+    rec = http.post("/kb/recordings", headers=AUTH, json={}).json()
+    material_id, session_id = rec["material_id"], rec["session_id"]
+    provider.scripts.append([
+        [("We", 0, 400, "1")], [(" keep", 500, 900, "1")], [(" talking", 1_000, 1_400, "1")],
+    ])
+
+    def live() -> dict[str, Any]:
+        response = http.get(f"/kb/recordings/{material_id}/live", headers=AUTH)
+        assert response.status_code == 200, response.text
+        return dict(response.json())
+
+    with http.websocket_connect(f"ws://127.0.0.1/sessions/{session_id}/live/stream", headers=AUTH) as ws:
+        stream = open_stream(http, ws)
+        stream.send(1)
+        wait(http, lambda: live()["monologues"] != [], "the first live words")
+        stream.send(2)
+        wait(http, lambda: [m["text"] for m in live()["monologues"]] == ["We keep talking"],
+             "every final word")
+        now = live()
+        assert (now["after_seg"], now["stream"], now["partial"]) == (0, "streaming", None)
+        assert now["monologues"][0]["speaker"] == "1" and now["monologues"][0]["start_ms"] == 0
+        assert texts(http, material_id) == []  # the open monologue is not in the material yet
+        stream.end("stop")
+    wait(http, lambda: recording(http, material_id)["status"] == "ready", "ready after Stop")
+    assert texts(http, material_id) == [(1, "We keep talking", "1")]
+    done = live()
+    assert (done["after_seg"], done["monologues"], done["stream"]) == (1, [], "inactive")
+    # Only recordings have a live tail.
+    assert http.get("/kb/recordings/nope/live", headers=AUTH).status_code == 404
+
+
 def test_a_recognition_error_keeps_the_text_and_belongs_to_the_attempt(
     http: TestClient, provider: Provider,
 ) -> None:

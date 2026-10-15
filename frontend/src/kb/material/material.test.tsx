@@ -3,6 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
+import { materialWiki } from '../test/fakeKb';
 
 async function openMaterial(id: string) {
   const r = renderKb({ world: docWorld() });
@@ -98,6 +99,35 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(within(doc).getByText('Couldn’t read')).toBeInTheDocument();
     expect(within(doc).getByText('Wiki: the site did not answer')).toBeInTheDocument();
     expect(within(doc).queryByRole('button', { name: 'Add to wiki' })).not.toBeInTheDocument();
+  });
+
+  it('a wiki failure because the agent is signed out shows the whole reason and the fix, not only a retry', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    const reason = 'The agent stopped: Sign in to Codex with your ChatGPT account in Settings, then try again.';
+    world.materials.find((m) => m.id === 'm-txt')!.wiki = materialWiki('failed', { error: reason, error_code: 'AGENT_UNAVAILABLE' });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-txt' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    // The reason wraps instead of being cut mid-word.
+    const chip = await within(doc).findByText(`Wiki: ${reason}`);
+    expect(chip.closest('.kb-pst')).toHaveClass('kb-pst--wrap');
+    await user.click(within(doc).getByRole('button', { name: 'Open Accounts & keys' }));
+    expect(r.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
+    // Retrying stays possible once signed in.
+    expect(within(doc).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('other wiki failures offer only the retry', async () => {
+    const world = docWorld();
+    world.materials.find((m) => m.id === 'm-txt')!.wiki = materialWiki('failed', { error: 'The agent stopped: Usage limit reached.' });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-txt' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(doc).findByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(within(doc).queryByRole('button', { name: 'Open Accounts & keys' })).not.toBeInTheDocument();
   });
 
   it('pasted text not in the wiki offers "Add to wiki"; it starts ingest and shows the steps', async () => {

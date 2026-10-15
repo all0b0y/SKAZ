@@ -65,6 +65,38 @@ class KbSpeechDefaults(BaseModel):
     folder_id: str
 
 
+class KbLiveMonologue(BaseModel):
+    """Final speech not in the material yet: the open monologue (or one closed a moment ago)."""
+
+    #: Display number as text, like ``KbFragment.speaker`` (``null``: not diarised).
+    speaker: str | None
+    start_ms: int
+    end_ms: int
+    text: str
+
+
+class KbLivePartial(BaseModel):
+    """Words the speech service may still revise; shown greyed, never stored."""
+
+    speaker: str | None
+    text: str
+    #: The same moment translated (recordings with translation), else empty.
+    translation: str
+
+
+class KbRecordingLive(BaseModel):
+    """``GET /kb/recordings/{id}/live``: what the live panel shows after the material's fragments."""
+
+    material_id: str
+    #: The text below continues exactly after the material's fragment with this ``seg`` (0: none yet).
+    #: A material that has fewer fragments is older than this answer; one with more is newer.
+    after_seg: int
+    monologues: list[KbLiveMonologue]
+    partial: KbLivePartial | None
+    #: The recorder's stream: ``connecting``, ``reconnecting``, ``streaming``, ``unavailable``, ``inactive``.
+    stream: str
+
+
 class KbDictation(BaseModel):
     """``POST /kb/dictation``: the recognised text; nothing was stored."""
 

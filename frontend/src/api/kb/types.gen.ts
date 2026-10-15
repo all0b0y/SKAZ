@@ -440,6 +440,7 @@ export interface KbJob {
   step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | null;
   label: string;
   error: string | null;
+  error_code: string | null;
   can_retry: boolean;
   progress: KbJobProgress;
   journal: KbJobLogEntry[];
@@ -508,6 +509,21 @@ export interface KbLinkInfo {
   supported: boolean;
   note: string | null;
   embedded_video: KbLinkInfo | null;
+}
+
+/** Final speech not in the material yet: the open monologue (or one closed a moment ago). */
+export interface KbLiveMonologue {
+  speaker: string | null;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+
+/** Words the speech service may still revise; shown greyed, never stored. */
+export interface KbLivePartial {
+  speaker: string | null;
+  text: string;
+  translation: string;
 }
 
 export interface KbLocalDecisions {
@@ -611,6 +627,7 @@ export interface KbMaterialWiki {
   concept_count: number;
   job_id: string | null;
   error: string | null;
+  error_code: string | null;
 }
 
 export interface KbMentions {
@@ -775,6 +792,15 @@ export interface KbQuote {
 export interface KbRecordingCreate {
   folder_id?: string | null;
   title?: string | null;
+}
+
+/** ``GET /kb/recordings/{id}/live``: what the live panel shows after the material's fragments. */
+export interface KbRecordingLive {
+  material_id: string;
+  after_seg: number;
+  monologues: KbLiveMonologue[];
+  partial: KbLivePartial | null;
+  stream: string;
 }
 
 export interface KbRef {
@@ -1433,6 +1459,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbSpeechMaterial;
+    status: 200;
+  };
+  "GET /kb/recordings/{material_id}/live": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbRecordingLive;
     status: 200;
   };
   "POST /kb/recordings/{material_id}/pause": {

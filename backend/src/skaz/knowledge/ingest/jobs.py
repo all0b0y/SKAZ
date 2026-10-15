@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ..agents.engine import FailureKind
 from ..ids import new_id, utc_now
 from ..store.database import KnowledgeDatabase
 
@@ -30,6 +31,14 @@ INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the
 WIKI_INTERRUPTED_REASON = "SKAZ was closed while this wiki job was running. Start it again when needed."
 #: Bounded journal: the status view never grows without limit.
 MAX_JOURNAL = 200
+#: ``JobRecord.error_code``: the agent can't work until the user fixes it (sign in, update, connect
+#: one) in Settings → Accounts & keys — retrying alone won't help. Same code as the chats' 409.
+AGENT_UNAVAILABLE = "AGENT_UNAVAILABLE"
+
+
+def agent_failure_code(kind: FailureKind) -> str | None:
+    """The job's ``error_code`` for an agent turn that failed this way (``None``: retrying may help)."""
+    return AGENT_UNAVAILABLE if kind in ("auth", "incompatible") else None
 
 
 @dataclass(frozen=True)
@@ -53,6 +62,8 @@ class JobRecord:
     kind: JobKind = "ingest"
     #: What the job works on: a material, a page (``recheck``), a folder (``folder_overview``) or nothing.
     target_id: str | None = None
+    #: ``AGENT_UNAVAILABLE`` when the failure is fixed in Settings, not by a retry; else ``None``.
+    error_code: str | None = None
 
     @property
     def finished(self) -> bool:
@@ -85,13 +96,14 @@ def _record(row: sqlite3.Row) -> JobRecord:
         id=row["id"], material_id=material_id, state=row["state"], step=row["step"], error=row["error"],
         created_at=row["created_at"], updated_at=row["updated_at"],
         counters={key: int(value) for key, value in json.loads(row["counters"] or "{}").items()},
-        journal=journal, kind=kind, target_id=row["target_id"],
+        journal=journal, kind=kind, target_id=row["target_id"], error_code=row["error_code"],
     )
 
 
 _KINDS_IN = "(" + ", ".join(f"'{kind}'" for kind in JOB_KINDS) + ")"
 _SELECT = (
-    "SELECT j.*, COALESCE(d.counters, '{}') AS counters, COALESCE(d.journal, '[]') AS journal "
+    "SELECT j.*, COALESCE(d.counters, '{}') AS counters, COALESCE(d.journal, '[]') AS journal, "
+    "d.error_code AS error_code "
     f"FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id WHERE j.kind IN {_KINDS_IN}"
 )
 
@@ -139,14 +151,18 @@ class JobRepository:
             connection.execute("UPDATE jobs SET step = ?, updated_at = ? WHERE id = ? AND state = 'running'",
                                (step, utc_now(), job_id))
 
-    def finish(self, job_id: str, state: JobState, *, error: str | None = None) -> None:
+    def finish(self, job_id: str, state: JobState, *, error: str | None = None,
+               error_code: str | None = None) -> None:
         with self.db.write() as connection:
-            connection.execute(
+            finished = connection.execute(
                 "UPDATE jobs SET state = ?, error = ?, "
                 "step = CASE WHEN ? = 'done' THEN 'done' ELSE step END, "
                 "updated_at = ? WHERE id = ? AND state = 'running'",
                 (state, error, state, utc_now(), job_id),
-            )
+            ).rowcount
+            if finished:
+                connection.execute("UPDATE ingest_jobs SET error_code = ? WHERE job_id = ?",
+                                   (error_code, job_id))
 
     def update_counters(self, job_id: str, values: dict[str, int]) -> None:
         with self.db.write() as connection:

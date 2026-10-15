@@ -151,12 +151,41 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
       await vi.advanceTimersByTimeAsync(1600);
       expect(store.getState().stream).toBe('reconnecting');
       expect(store.getState().provider).toBe('soniox');
-      expect(store.getState().tail.original).toBe('So cross-entropy in machine learning is');
+      expect(store.getState().live?.partial?.text).toBe('So cross-entropy in machine learning is');
       fake.world.liveTranscription = 'streaming';
       await vi.advanceTimersByTimeAsync(1600);
       expect(store.getState().stream).toBe('streaming');
       await store.getState().pause();
-      expect(store.getState()).toMatchObject({ stream: null, tail: { original: '', translation: '' } });
+      // The stream is gone; the last live text stays until the material holds it (the panel trims it).
+      expect(store.getState().stream).toBeNull();
+      expect(store.getState().live).not.toBeNull();
+      const first = store.getState().materialId;
+      await store.getState().resume();
+      await store.getState().stop();
+      await store.getState().start();
+      // A new recording never shows the previous one's live text.
+      expect(store.getState().materialId).not.toBe(first);
+      await vi.waitFor(() => expect(store.getState().live?.material_id).toBe(store.getState().materialId));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continuous speech with no pause: the open monologue is in the store within one poll', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { store, fake, routes } = setup();
+      fake.world.liveOpen = 'and the entropy keeps growing while the speaker never stops';
+      await store.getState().start();
+      const id = store.getState().materialId!;
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(routes()).toContain(`GET /kb/recordings/${id}/live`);
+      expect(store.getState().live).toMatchObject({
+        material_id: id, after_seg: 0,
+        monologues: [{ text: 'and the entropy keeps growing while the speaker never stops' }],
+      });
+      // Nothing closed: the material itself is still empty.
+      expect(fake.world.materials.find((m) => m.id === id)?.fragments).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -177,6 +206,24 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     eng.unsaved();
     await expect(store.getState().prepareQuit()).resolves.toBe(false);
     expect(store.getState().phase).toBe('finishing');
+    expect(store.getState().startErrorWhen).toBe('stop-unsaved');
+  });
+
+  it('each refusal says what didn’t happen: start, resume, continue', async () => {
+    const { store, eng } = setup();
+    vi.mocked(eng.engine.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await store.getState().start();
+    expect(store.getState().startErrorWhen).toBe('start');
+    await store.getState().start();
+    await store.getState().pause();
+    vi.mocked(eng.engine.resume).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await store.getState().resume();
+    expect(store.getState()).toMatchObject({ phase: 'paused', startErrorWhen: 'resume' });
+    await store.getState().stop();
+    await store.getState().continueRecording('not-a-recording');
+    expect(store.getState().startErrorWhen).toBe('continue');
+    store.getState().clearStartError();
+    expect(store.getState()).toMatchObject({ startError: null, startErrorWhen: null });
   });
 
   it('quit barrier: a flush that never confirmed stops and settles, but does not let SKAZ quit silently', async () => {
@@ -189,6 +236,7 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(store.getState().phase).toBe('idle');
     expect(routes()).toContain(`POST /kb/recordings/${id}/stop`);
     expect(store.getState().startError).toMatch(/last moment of audio/);
+    expect(store.getState().startErrorWhen).toBe('stop-unconfirmed');
     // Nothing is left to save: a second quit is the user's informed choice.
     await expect(store.getState().prepareQuit()).resolves.toBe(true);
   });

@@ -67,7 +67,7 @@ def material_summaries(kb: KnowledgeService, records: Sequence[MaterialRecord]) 
 
 def _wiki_view(wiki: MaterialWiki) -> KbMaterialWiki:
     return KbMaterialWiki(state=wiki.state, note_page_id=wiki.note_page_id, concept_count=wiki.concept_count,
-                          job_id=wiki.job_id, error=wiki.error)
+                          job_id=wiki.job_id, error=wiki.error, error_code=wiki.error_code)
 
 
 def _translation_view(translation: Translation | None) -> KbTranslation | None:

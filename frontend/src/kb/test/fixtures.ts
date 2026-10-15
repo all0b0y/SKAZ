@@ -465,7 +465,7 @@ export function docWorld(): FakeWorld {
     pages: [entropy, note8, analysis, folderPage, ...conceptStubs],
     graph,
     jobs: [{
-      id: 'j-l5', kind: 'ingest', material_id: 'm-l5', state: 'running', step: 'writing_notes', label: 'Writing notes', error: null, can_retry: false,
+      id: 'j-l5', kind: 'ingest', material_id: 'm-l5', state: 'running', step: 'writing_notes', label: 'Writing notes', error: null, error_code: null, can_retry: false,
       progress: { parts_total: 4, parts_done: 2, concepts_found: 5, blocks_written: 7, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 1, concepts_updated: 2 },
       journal: [], created_at: NOW, updated_at: NOW,
     }],
