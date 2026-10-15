@@ -29,12 +29,12 @@ export function Shell() {
   const sideOpen = usePrefs((s) => s.sideOpen);
   const sideWidth = usePrefs((s) => s.sideWidth);
   const rightWidth = usePrefs((s) => s.rightWidth);
-  const docMaterialId = useUi((s) => s.docMaterialId);
+  const doc = useUi((s) => s.doc);
   const docExpanded = useUi((s) => s.docExpanded);
   const windowWidth = useWindowWidth();
 
   const layout = computeLayout({
-    windowWidth, sideOpen, sideWidth, docOpen: docMaterialId !== null, docExpanded, rightWidth,
+    windowWidth, sideOpen, sideWidth, docOpen: doc !== null, docExpanded, rightWidth,
   });
   const available = windowWidth - RAIL_W;
   const sideMax = Math.max(SIDE_MIN, Math.min(SIDE_MAX, available - CENTER_MIN - (layout.right ?? 0)));
@@ -60,7 +60,7 @@ export function Shell() {
           </>
         )}
         <ChatCenter hidden={!layout.centerVisible} />
-        {docMaterialId !== null && (
+        {doc !== null && (
           <>
             {layout.right !== null && (
               <Resizer
@@ -73,7 +73,7 @@ export function Shell() {
                 onChange={(px) => prefs.getState().setRightWidth(px)}
               />
             )}
-            <DocPanel materialId={docMaterialId} expanded={docExpanded} width={layout.right ?? 0} />
+            <DocPanel doc={doc} expanded={docExpanded} width={layout.right ?? 0} />
           </>
         )}
       </div>

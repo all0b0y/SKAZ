@@ -6,7 +6,7 @@ import { launchIsolatedSmoke } from './isolatedSmoke';
 import { auditPanes, type PaneViolation } from './paneAudit';
 
 // New interface (frontend/src/kb), real built Electron app + real local backend, isolated
-// profile. Layout audit of every U1 state: widths 1440/1024/960, light/dark, side panel
+// profile. Layout audit of every U1/U2 shell state: widths 1440/1024/960, light/dark, side panel
 // open/collapsed, document panel closed/open/expanded, settings open, each first-launch step.
 // Fixture materials are written by the backend's own Library code into the isolated Documents.
 
@@ -48,7 +48,8 @@ function auditExtras(): Extra[] {
       if (h < 12) out.push({ kind: 'small-text', selector: describe(el), detail: `svg text box ${h.toFixed(1)}px` });
       continue;
     }
-    if (size < 12 && !el.closest('.kb-badge')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
+    // Counter digits (rail badge, "Decide" count) are the only text allowed under 12px.
+    if (size < 12 && !el.closest('.kb-badge, .kb-count')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
   }
   for (const svg of Array.from(document.querySelectorAll('svg.kb-icon'))) {
     if (!visible(svg)) continue;
@@ -63,8 +64,9 @@ function auditExtras(): Extra[] {
   };
   expectH('.kb-titlebar', 38);
   expectH('.kb-head', 46);
-  expectH('.kb-rail__item', 58);
-  expectH('.kb-composer', 84);
+  // Rail of the v39 summary: 36px icon buttons. The message field grows with its text, so its
+  // height is checked as "unchanged between states" by anchors() instead of a fixed number.
+  expectH('.kb-rail__item', 36);
   for (const el of Array.from(document.querySelectorAll('[data-pane]'))) {
     if (!visible(el)) continue;
     const r = el.getBoundingClientRect();
@@ -209,7 +211,8 @@ test('first launch: every step at every width and theme', async () => {
       await expect(dialog.getByRole('heading', { name: 'Ready to start' })).toBeVisible();
     }
   }
-  await expect(dialog.locator('li[data-tone="ok"]')).toHaveCount(1);
+  // Only the library is surely ready here; agents and speech report whatever this Mac really has.
+  await expect(dialog.locator('li[data-tone="ok"]', { hasText: 'Library' })).toHaveCount(1);
   await dialog.getByRole('button', { name: 'Open SKAZ' }).click();
   await expect(dialog).toHaveCount(0);
 });
@@ -241,7 +244,7 @@ test('shell: side panel and document panel states keep headers, rail and compose
   await page.reload();
   const side = page.getByRole('region', { name: 'Materials' });
   await expect(side.getByRole('button', { name: /Lecture 8/ })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('button', { name: /Notifications/ })).toContainText('2');
+  await expect(page.getByRole('button', { name: /^Notifications/ })).toContainText(/\d/);
 
   for (const theme of THEMES) {
     for (const v of WIDTHS) {
@@ -251,11 +254,16 @@ test('shell: side panel and document panel states keep headers, rail and compose
       const tag = `${v.width}-${theme}`;
 
       // Side open, doc closed — each section.
-      for (const section of ['Chats', 'Materials', 'Wiki', 'Graph', 'Notifications']) {
+      for (const section of ['Chats', 'Materials', 'Wiki', 'Notifications']) {
         await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: new RegExp(`^${section}`) }).click();
         await check(`shell-${section.toLowerCase()}-${tag}`, section === 'Materials' || section === 'Chats' || section === 'Notifications');
         await record();
       }
+      // The graph is reached from the Wiki section (v39), not from the rail.
+      await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: /^Wiki/ }).click();
+      await page.getByRole('region', { name: 'Wiki' }).getByRole('button', { name: 'Graph of connections' }).click();
+      await check(`shell-graph-${tag}`, false);
+      await record();
       // Doc open.
       await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: /^Materials/ }).click();
       await page.getByRole('region', { name: 'Materials' }).getByRole('button', { name: /Lecture 8/ }).click();

@@ -76,15 +76,17 @@ describe('Settings window', () => {
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
-  it('sections without a backend yet say "Not connected yet" and their controls are inactive', async () => {
+  it('without the package-2 backend, live rows say they couldn’t read — no dummy controls; rows with no route say "Not connected yet"', async () => {
     const user = userEvent.setup();
     renderKb();
     const dialog = await openWithShortcut();
     await user.click(within(dialog).getByRole('button', { name: 'Models' }));
-    expect(within(dialog).getAllByText('Not connected yet').length).toBeGreaterThanOrEqual(5);
-    for (const radio of within(dialog).getAllByRole('radio')) expect(radio).toBeDisabled();
+    // The wiki/decision reads fail on this backend: each says so with a retry instead of a fake choice.
+    await waitFor(() => expect(within(dialog).getAllByText(/Couldn’t read/).length).toBeGreaterThanOrEqual(2));
+    expect(within(dialog).getAllByText('Not connected yet').length).toBeGreaterThanOrEqual(1);
     await user.click(within(dialog).getByRole('button', { name: 'Wiki' }));
-    for (const sw of within(dialog).getAllByRole('switch')) expect(sw).toBeDisabled();
+    await waitFor(() => expect(within(dialog).getAllByText(/Couldn’t read/).length).toBeGreaterThanOrEqual(4));
+    expect(within(dialog).queryAllByRole('switch')).toHaveLength(0);
   });
 
   it('a library problem is the only coloured spot: banner in Storage, dot on the section and the gear', async () => {

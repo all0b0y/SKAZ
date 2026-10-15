@@ -3,6 +3,7 @@
 import { vi } from 'vitest';
 import type { BridgeRequest, JsonResponse } from '../../api/bridge';
 import type { KbFolder, KbLibrary, KbMaterialSummary, KbNotification } from '../../api/kb/types.gen';
+import { fakeDictate, handleB2, type FakeB2State } from './fakeB2';
 
 export interface FakeKbState {
   library: KbLibrary;
@@ -46,7 +47,11 @@ const ok = <T,>(data: T, status = 200): JsonResponse<T> => ({ ok: true, status, 
 const fail = (status: number, detail: string): JsonResponse<never> => ({ ok: false, status, detail });
 const key = (name: string) => name.normalize('NFC').toLocaleLowerCase();
 
-export function createFakeBridge(initial: FakeKbState = readyState()) {
+/**
+ * `b2`: the package-2 world (chats, feed, search, live settings, agents — fakeB2.ts). Without it
+ * those routes answer like an old backend that doesn't have them yet.
+ */
+export function createFakeBridge(initial: FakeKbState = readyState(), b2?: FakeB2State) {
   const state: FakeKbState = structuredClone(initial);
   let seq = 0;
   const calls: BridgeRequest[] = [];
@@ -66,6 +71,14 @@ export function createFakeBridge(initial: FakeKbState = readyState()) {
       return ok(state.library);
     }
     if (method === 'POST' && path === '/kb/library/retry') return ok(state.library);
+    if (b2) {
+      if (path.startsWith('/kb/') && !['/kb/library', '/kb/folders'].some((p) => path.startsWith(p)) && !/^\/kb\/materials(\/[^/]+)?$/.test(path)) {
+        const blocked = state.library.state === 'ready' || !/^\/kb\/(chats|notifications|search|mentions|materials|imports)/.test(path) ? null : needReady();
+        if (blocked) return blocked;
+      }
+      const answer = handleB2(b2, req);
+      if (answer) return answer;
+    }
     if (path.startsWith('/kb/folders') || path.startsWith('/kb/materials') || path === '/kb/notifications') {
       const blocked = needReady();
       if (blocked) return blocked;
@@ -124,6 +137,7 @@ export function createFakeBridge(initial: FakeKbState = readyState()) {
   let quitListener: (() => Promise<boolean>) | null = null;
   return {
     state,
+    b2,
     calls,
     /** What the renderer answers when main asks it to save before quitting (null = no listener). */
     prepareQuit: async () => (quitListener ? quitListener() : null),
@@ -132,6 +146,9 @@ export function createFakeBridge(initial: FakeKbState = readyState()) {
     bridge: {
       request: request as unknown as <T = unknown>(req: BridgeRequest) => Promise<JsonResponse<T>>,
       chooseStorageRoot: vi.fn(async () => '/Users/me/Notes'),
+      chooseMaterialFiles: vi.fn(async () => [{ path: '/Users/me/Downloads/paper.pdf', name: 'paper.pdf', size: 120_000 }]),
+      saveTextFile: vi.fn(async (file: { suggested_name: string; text: string }) => ({ saved: true, path: `/Users/me/Downloads/${file.suggested_name}` })),
+      ...(b2 ? { dictate: vi.fn(fakeDictate(b2)) } : {}),
       onPrepareQuit: vi.fn((listener: () => Promise<boolean>) => {
         quitListener = listener;
         return () => { if (quitListener === listener) quitListener = null; };

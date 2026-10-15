@@ -5,6 +5,8 @@ import {
   Globe, Inbox, Info, Languages, Library, Link, MessagesSquare, Mic, Minimize2, Maximize2, Monitor, Moon,
   PanelLeft, Paperclip, Pencil, Pin, Play, Plus, Quote, RotateCw, Search, Settings, ShieldCheck, Square,
   SquarePen, Sun, Trash2, TriangleAlert, Type, Upload, Waypoints, X, Palette, HardDrive, Sparkles, Bell,
+  ArrowUpDown, BookPlus, ChevronUp, Clock, Copy, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
+  LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
 } from 'lucide-react';
 
 /**
@@ -71,6 +73,26 @@ const ICONS = {
   sun: Sun,
   moon: Moon,
   system: Monitor,
+  // Package 2 (U2): chat, composer, notifications, settings
+  copy: Copy,
+  saveWiki: BookPlus,
+  answering: LoaderCircle,
+  clock: Clock,
+  analysis: Lightbulb,
+  note: NotebookText,
+  key: KeyRound,
+  signIn: LogIn,
+  terminal: Terminal,
+  askAgent: MessageSquare,
+  unpin: PinOff,
+  chevronUp: ChevronUp,
+  enter: CornerDownLeft,
+  arrows: ArrowUpDown,
+  tab: ArrowRightToLine,
+  tool: Eye,
+  ready: FileCheck,
+  fixes: WandSparkles,
+  shield: ShieldAlert,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;
 
 export type IconName = keyof typeof ICONS;

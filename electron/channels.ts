@@ -24,4 +24,8 @@ export const CHANNELS = {
   prepareQuit: 'app:prepare-quit',
   quitPrepared: 'app:quit-prepared',
   cancelQuit: 'app:cancel-quit',
+  // Knowledge interface bridge (API-B2 §5).
+  dictate: 'kb:dictate',
+  saveTextFile: 'app:save-text-file',
+  chooseMaterialFiles: 'app:choose-material-files',
 } as const;

@@ -1,6 +1,6 @@
 import { RIGHT_MIN, SIDE_MIN } from '../state/prefs';
 
-export const RAIL_W = 88;
+export const RAIL_W = 52;
 export const CENTER_MIN = 340;
 
 export interface LayoutInput {

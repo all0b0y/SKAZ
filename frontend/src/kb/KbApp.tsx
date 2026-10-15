@@ -6,6 +6,10 @@ import { KbServicesProvider, usePrefs, useServices, useUi, type KbServices } fro
 import { Shell } from './shell/Shell';
 import { SettingsModal } from './settings/SettingsModal';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
+import { CommandK } from './search/CommandK';
+import { DecisionModal } from './notifications/DecisionModal';
+import { SelectionToolbar } from './ui/Selection';
+import { useLibrary } from './state/context';
 
 /** Mirror theme and text size onto <html>, where the tokens read them. */
 function ThemeSync() {
@@ -61,16 +65,47 @@ function useQuitAnswer() {
 
 function useSettingsShortcut() {
   const openSettings = useUi((s) => s.openSettings);
+  const setSearchOpen = useUi((s) => s.setSearchOpen);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key === ',') {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (event.key === ',') {
         event.preventDefault();
         openSettings();
+      } else if (event.key.toLowerCase() === 'k') {
+        // ⌘K (decision 29): opens over whatever is open; a second ⌘K closes it.
+        event.preventDefault();
+        setSearchOpen(!document.querySelector('[data-testid="search"]'));
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openSettings]);
+  }, [openSettings, setSearchOpen]);
+}
+
+/**
+ * Live data of the window: chats (list + answering/new-answer marks) and the notification feed
+ * follow the backend by long poll while the library is connected; agents and settings health are
+ * read once at start (and again by the screens that change them).
+ */
+function useLiveData() {
+  const { chats, notifications, agents, settings } = useServices();
+  const ready = useLibrary((s) => s.library?.state === 'ready');
+  useEffect(() => {
+    void agents.getState().refresh();
+    const s = settings.getState();
+    void s.loadHealth();
+    void s.loadWiki();
+    void s.loadSpeech();
+  }, [agents, settings]);
+  useEffect(() => {
+    if (!ready) return undefined;
+    void chats.getState().loadList();
+    void notifications.getState().refresh();
+    const stopList = chats.getState().startListPoll();
+    const stopFeed = notifications.getState().start();
+    return () => { stopList(); stopFeed(); };
+  }, [ready, chats, notifications]);
 }
 
 function Workspace() {
@@ -80,11 +115,15 @@ function Workspace() {
   const librarySetupOpen = useUi((s) => s.librarySetupOpen);
   const setLibrarySetupOpen = useUi((s) => s.setLibrarySetupOpen);
   useSettingsShortcut();
+  useLiveData();
   useEffect(() => { void library.getState().loadLibrary(); }, [library]);
   return (
     <>
       <Shell />
       <SettingsModal />
+      <CommandK />
+      <DecisionModal />
+      <SelectionToolbar />
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
     </>
