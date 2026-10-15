@@ -2,6 +2,7 @@ import type { KbJob, KbMaterial, KbMaterialWiki } from '../../api/kb/types.gen';
 import { Button, Icon, type IconName } from '../ui';
 import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';
+import { isWithoutSpeech, NO_SPEECH_REASON } from './NoSpeech';
 
 const STEP_LABEL: Record<string, string> = {
   reading: 'Reading the material',
@@ -61,13 +62,15 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   // Package-1 backends have no `wiki`: then nothing is claimed about the wiki.
   const wiki = material.wiki as KbMaterialWiki | undefined;
   const counts = material.correction_counts;
+  const silent = isWithoutSpeech(material);
 
   return (
     <div className="kb-pipe" aria-label="Processing">
       {material.status === 'recording' && <Pill tone="run" spin>Recording</Pill>}
       {material.status === 'processing' && <Pill tone="run" spin>{speech ? 'Recognising…' : 'Reading…'}</Pill>}
       {material.status === 'failed' && <Pill tone="error" icon="warning">{speech ? 'Recognition failed' : 'Couldn’t read'}</Pill>}
-      {material.status === 'ready' && <Pill tone="done" icon="check">{first}</Pill>}
+      {material.status === 'ready' && (silent ? <Pill tone="warn" icon="warning">No speech recognised</Pill>
+        : <Pill tone="done" icon="check">{first}</Pill>)}
       {material.translation && material.translation.fragments.length > 0 && <Pill tone="done" icon="check">Translated</Pill>}
       {speech && counts.applied > 0 && <Pill tone="done" icon="check">{plural(counts.applied, 'correction')}</Pill>}
       {speech && counts.doubtful > 0 && <Pill tone="warn" icon="warning">{`${counts.doubtful} doubtful`}</Pill>}
@@ -85,7 +88,14 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
       {wiki?.state === 'not_in_wiki' && material.status === 'ready' && (
         <>
           <Pill tone="todo">Not in wiki</Pill>
-          <Button size="sm" variant="quiet" icon="plus" busy={adding} onClick={onAddToWiki}>Add to wiki</Button>
+          {silent ? (
+            <>
+              <Button size="sm" variant="quiet" icon="plus" disabled aria-describedby={`kb-nowiki-${material.id}`}>Add to wiki</Button>
+              <span id={`kb-nowiki-${material.id}`} className="kb-muted kb-pipe__why">{NO_SPEECH_REASON}</span>
+            </>
+          ) : (
+            <Button size="sm" variant="quiet" icon="plus" busy={adding} onClick={onAddToWiki}>Add to wiki</Button>
+          )}
         </>
       )}
       {wiki?.state === 'failed' && (

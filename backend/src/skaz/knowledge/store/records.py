@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..markdown.source import FragmentRole
+
 
 @dataclass(frozen=True)
 class FolderRecord:
@@ -41,6 +43,8 @@ class FragmentRecord:
     speaker: str | None = None
     page: int | None = None
     index: int | None = None
+    role: FragmentRole = "paragraph"
+    level: int | None = None
 
     @property
     def id(self) -> str:

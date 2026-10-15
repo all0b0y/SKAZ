@@ -345,6 +345,8 @@ export interface KbFragment {
   speaker: string | null;
   page: number | null;
   index: number | null;
+  role: "paragraph" | "heading" | "list_item" | "quote" | "code";
+  level: number | null;
   original_text: string | null;
   corrections: string[];
 }
@@ -390,7 +392,7 @@ export interface KbGraphNode {
 }
 
 export interface KbHiddenFinding {
-  kind: "unicode_tags" | "bidi_control" | "zero_width_run" | "variation_selector_run" | "interlinear_annotation" | "hidden_html" | "html_comment" | "hidden_pdf_text";
+  kind: "unicode_tags" | "bidi_control" | "zero_width_run" | "variation_selector_run" | "interlinear_annotation" | "hidden_html" | "html_comment" | "hidden_pdf_text" | "unreadable_pdf_text";
   detail: string;
   original: string;
   index: number | null;
@@ -578,6 +580,7 @@ export interface KbMaterial {
   translation: KbTranslation | null;
   wiki: KbMaterialWiki;
   excluded_count: number;
+  unreadable_pages?: number[];
 }
 
 export interface KbMaterialAdded {
@@ -891,6 +894,7 @@ export interface KbSpeechMaterial {
   import_state: "running" | "completed" | "failed" | "interrupted" | "cancelled" | null;
   import_stage: string | null;
   error: string | null;
+  duration_ms?: number | null;
 }
 
 export interface KbSpeechSettings {

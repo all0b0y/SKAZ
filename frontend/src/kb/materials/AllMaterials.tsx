@@ -68,7 +68,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   const { client } = useServices();
   const folders = useLibrary((s) => s.folders);
   const libraryCount = useLibrary((s) => s.materials.length);
-  const libraryMaterials = useLibrary((s) => s.materials);
+  const revision = useLibrary((s) => s.revision);
   const showCenter = useUi((s) => s.showCenter);
   const openDocument = useUi((s) => s.openDocument);
   const openedId = useUi((s) => s.docMaterialId);
@@ -79,10 +79,10 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   const [sort, setSort] = useState<Sort>('newest');
   const [layout, setLayout] = useState<Layout>('table');
   const { state, reload } = useLoad('all', async () => client.call('GET /kb/materials'));
-  // The library list changed (added, recorded, deleted): read again, keeping the table on screen.
-  const libraryKey = `${libraryCount}:${libraryMaterials[0]?.id ?? ''}`;
-  useEffect(() => { reload(); }, [libraryKey, reload]);
-  const all = state.value ?? [];
+  // The library list changed (added, recorded, deleted, renamed): read again, keeping the table on screen.
+  useEffect(() => { reload(); }, [revision, reload]);
+  const gone = useLibrary((s) => s.gone);
+  const all = useMemo(() => (state.value ?? []).filter((m) => !gone.includes(m.id)), [state.value, gone]);
   const busy = all.some((m) => m.status === 'processing' || m.status === 'recording' || m.wiki_state === 'processing');
   useInterval(busy && !hidden, 3000, reload);
 

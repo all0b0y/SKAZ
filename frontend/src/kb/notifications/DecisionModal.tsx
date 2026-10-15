@@ -10,6 +10,9 @@ import {
   DECISION_SCREENS, kindOf, LOCAL_ACTIONS, type KbDiscrepancyPayload, type KbDoubtfulPayload, type KbLinkFailedPayload,
 } from './kinds';
 
+/** Actions after which the notification's material no longer exists (speech/link_failures.py). */
+const GONE_AFTER = new Set(['delete_material', 'fix_url']);
+
 interface ExcludedItem { seg: number; found: string; location_label?: string; reason?: string }
 
 /**
@@ -18,7 +21,7 @@ interface ExcludedItem { seg: number; found: string; location_label?: string; re
  * corrections, link failure, excluded instruction; other kinds show their text and actions.
  */
 export function DecisionModal() {
-  const { notifications, ui, chats, composer } = useServices();
+  const { notifications, ui, chats, composer, library } = useServices();
   const decisionId = useUi((s) => s.decisionId);
   const items = useNotifications((s) => s.items);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +65,10 @@ export function DecisionModal() {
     const res = await notifications.getState().resolve(current.id, action.id, action.needs_text ? text.trim() : null);
     setBusy(null);
     if (!res.ok) { setError(res.error); return; }
+    // "Delete" and "Fix address" remove the failed material (a fixed address imports a new one).
+    const subject = (current.payload as { material_id?: unknown }).material_id;
+    if (typeof subject === 'string' && GONE_AFTER.has(action.id)) void library.getState().forgetMaterial(subject);
+    else if (current.subject?.type === 'material') void library.getState().loadContent();
     const rest = pendingDecisions(notifications.getState().items).filter((n) => n.id !== current.id);
     const next = rest[Math.min(Math.max(0, index), rest.length - 1)];
     ui.getState().openDecision(next ? next.id : null);

@@ -54,6 +54,23 @@ class JobNotCancellable(KnowledgeError):
     status_code = 409
 
 
+NO_SPEECH = "No speech was recognised in this recording, so there is nothing to add to the wiki."
+NO_SPEECH_FILE = "No speech was recognised in this file, so there is nothing to add to the wiki."
+NO_TEXT = "This material has no text, so there is nothing to add to the wiki."
+
+
+class NothingToAdd(KnowledgeError):
+    """A finished material without any text (silence, an empty transcription): the wiki can't use it."""
+
+    status_code = 409
+
+    @classmethod
+    def of(cls, kind: str) -> NothingToAdd:
+        if kind == "recording":
+            return cls(NO_SPEECH)
+        return cls(NO_SPEECH_FILE if kind in ("audio", "video", "video_link") else NO_TEXT)
+
+
 @dataclass
 class _Active:
     material_id: str
@@ -131,8 +148,11 @@ class IngestService:
         self._active[f"pending-{id(reservation)}"] = reservation
         try:
             self.kb.require()
-            if await disk_call(self.kb.material_repo.get, material_id) is None:
+            record = await disk_call(self.kb.material_repo.get, material_id)
+            if record is None:
                 raise NotFound("Material not found.")
+            if record.status == "ready" and record.fragment_count == 0:
+                raise NothingToAdd.of(record.kind)
             job = await disk_call(lambda: self.jobs.create(material_id, kind=kind))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)

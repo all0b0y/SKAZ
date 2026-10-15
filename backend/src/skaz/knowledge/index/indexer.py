@@ -131,10 +131,10 @@ def _put_material(connection: sqlite3.Connection, material: ScannedMaterial) -> 
 def _insert_fragment(connection: sqlite3.Connection, material_id: str, ordinal: int,
                      fragment: Fragment) -> None:
     cursor = connection.execute(
-        "INSERT INTO fragments(material_id, seg, ordinal, text, start_ms, end_ms, speaker, page, idx) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO fragments(material_id, seg, ordinal, text, start_ms, end_ms, speaker, page, idx, role, "
+        "level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (material_id, fragment.seg, ordinal, fragment.text, fragment.start_ms, fragment.end_ms,
-         fragment.speaker, fragment.page, fragment.index),
+         fragment.speaker, fragment.page, fragment.index, fragment.role, fragment.level),
     )
     connection.execute("INSERT INTO fragments_fts(rowid, text, material_id, seg) VALUES (?, ?, ?, ?)",
                        (cursor.lastrowid, fragment.text, material_id, fragment.seg))

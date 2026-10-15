@@ -121,7 +121,9 @@ def test_core_v1_database_upgrades_to_quoted_citations_and_rescans_pages(tmp_pat
 
     path = tmp_path / "knowledge.sqlite3"
     connection = sqlite3.connect(path)
-    v1 = SimpleNamespace(NAME="core", VERSION=1, SQL=core.SQL.replace("    quote       TEXT,\n", ""))
+    # v1 had neither citation quotes nor fragment roles (v4).
+    v1_sql = core.SQL.replace("    quote       TEXT,\n", "").replace(core.ROLE_COLUMNS, "")
+    v1 = SimpleNamespace(NAME="core", VERSION=1, SQL=v1_sql)
     connection.executescript(
         "CREATE TABLE IF NOT EXISTS schema_versions(name TEXT PRIMARY KEY, version INTEGER NOT NULL);")
     apply_schemas(connection, [v1])

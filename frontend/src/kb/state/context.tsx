@@ -57,7 +57,15 @@ export function createServices(
 ): KbServices {
   const client = new KbClient(bridge);
   const ui = createUiStore();
-  const library = createLibraryStore(client);
+  const library = createLibraryStore(client, {
+    onForget: (id, { keepPanel }) => {
+      if (keepPanel) return;
+      const { right, closeDoc } = ui.getState();
+      const shows = right?.kind === 'live' ? right.materialId === id
+        : right?.kind === 'doc' && right.target.type === 'material' && right.target.id === id;
+      if (shows) closeDoc();
+    },
+  });
   const recording = createRecordingStore({
     client, bridge, ui,
     capture: options.capture !== undefined ? options.capture : defaultCapture(bridge),

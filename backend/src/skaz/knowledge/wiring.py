@@ -138,6 +138,11 @@ class AutoIngest:
     def wants(self, event: SourceEvent) -> bool:
         if event.kind == "fragment_restored":
             return self._restore_reruns(event.material_id)
+        found = self._kb.material_repo.get(event.material_id)
+        if found is not None and found.fragment_count == 0:
+            if event.to_wiki is None:
+                self._choice(event.material_id)  # a kept choice is used up all the same
+            return False  # nothing was recognised or extracted: the wiki has nothing to use (user bug 1016-2)
         choice = event.to_wiki if event.to_wiki is not None else self._choice(event.material_id)
         if choice is not None:
             return choice

@@ -5,7 +5,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
-import { materialWiki } from '../test/fakeKb';
+import { fragment, materialWiki } from '../test/fakeKb';
 
 async function openMaterial(id: string) {
   const r = renderKb({ world: docWorld() });
@@ -145,6 +145,82 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     pdf.unmount();
     const web = await openMaterial('m-ce');
     expect(within(web.doc).getByText('https://example.org/cross-entropy-explained')).toBeInTheDocument();
+  });
+
+  it('an article keeps its headings, lists, quotes and code (left-aligned blocks), with the text unchanged', async () => {
+    const world = docWorld();
+    const article = world.materials.find((m) => m.id === 'm-ce')!;
+    article.fragments = [
+      fragment('m-ce', 1, 'Cross-entropy explained', { role: 'heading', level: 1 }),
+      fragment('m-ce', 2, 'Cross-entropy measures how far a predicted distribution is from the true one.'),
+      fragment('m-ce', 3, 'Possible elements of an MVP:', { role: 'heading', level: 2 }),
+      fragment('m-ce', 4, 'Project register', { role: 'list_item' }),
+      fragment('m-ce', 5, 'Risk matrix with owners', { role: 'list_item' }),
+      fragment('m-ce', 6, 'All models are wrong, but some are useful.', { role: 'quote' }),
+      fragment('m-ce', 7, 'loss = -sum(y * log(p))', { role: 'code' }),
+    ];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-ce' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    // The material title is the panel's h2; the article's own headings come below it.
+    expect(await within(doc).findByRole('heading', { level: 3, name: 'Cross-entropy explained' })).toBeInTheDocument();
+    expect(within(doc).getByRole('heading', { level: 4, name: 'Possible elements of an MVP:' })).toBeInTheDocument();
+    const list = within(doc).getByRole('list');
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Project register', 'Risk matrix with owners']);
+    const quote = within(doc).getByText('All models are wrong, but some are useful.');
+    expect(quote.closest('blockquote')).not.toBeNull();
+    expect(within(doc).getByText('loss = -sum(y * log(p))').closest('pre')).not.toBeNull();
+    // Every block stays a quotable fragment of the material, whatever its element.
+    for (const seg of [1, 3, 4, 6, 7]) {
+      const el = doc.querySelector(`[data-seg="${seg}"]`)!;
+      expect(el).toHaveAttribute('data-quote-source', 'material');
+      expect(el).toHaveAttribute('data-quote-seg', String(seg));
+    }
+    expect(doc.querySelector('.kb-mtext')).not.toBeNull();
+    expect(doc.querySelector('.kb-art')).toBeNull();
+  });
+
+  it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {
+    const world = docWorld();
+    const tb = world.materials.find((m) => m.id === 'm-tb')!;
+    tb.unreadable_pages = [2, 5];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-tb' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'Unreadable text in the PDF' });
+    expect(note).toHaveTextContent('Unreadable text in the PDF (pages 2, 5)');
+    expect(note).toHaveTextContent('left out of the material');
+  });
+
+  it('a recording with no recognised speech says so, offers Delete, and cannot go to the wiki', async () => {
+    // User bug 1016-2: an empty recording looked like any material and failed in the wiki.
+    const world = docWorld();
+    const lec7 = world.materials.find((m) => m.id === 'm-lec7')!;
+    const empty = { ...structuredClone(lec7), id: 'm-empty', title: 'Recording Oct 16, 2026 00.08', fragments: [], fragment_count: 0,
+      translation: null, wiki: materialWiki('not_in_wiki'), wiki_state: 'not_in_wiki' as const };
+    world.materials.push(empty);
+    world.recordings['m-empty'] = {
+      material_id: 'm-empty', session_id: 's-empty', kind: 'recording', title: empty.title, folder_id: empty.folder_id, status: 'ready',
+      fragment_count: 0, created_at: empty.created_at, recording_state: 'stopped', import_state: null, import_stage: null, error: null,
+      duration_ms: 42_000,
+    };
+    const user = userEvent.setup();
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-empty' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'No speech' });
+    expect(note).toHaveTextContent('No speech was recognised in this recording');
+    await waitFor(() => expect(note).toHaveTextContent('Length 00:42'));
+    expect(within(doc).queryByText('This material has no text.')).not.toBeInTheDocument();
+    const add = within(doc).getByRole('button', { name: 'Add to wiki' });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription('No speech was recognised, so there is nothing to add.');
+    await user.click(within(note).getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog', { name: /Delete/ })).toBeInTheDocument();
+    expect(r.fake.calls.some((c) => c.path === '/kb/materials/m-empty/ingest')).toBe(false);
   });
 
   it('a failed link says why and offers nothing it cannot do', async () => {

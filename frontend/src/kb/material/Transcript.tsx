@@ -7,6 +7,7 @@ import { plural } from '../document/text';
 import { useServices } from '../state/context';
 import { byPage, monologues, segmentText, speakerTone, translationBySeg, type TextPiece } from './segments';
 import { quoteAttrs } from '../ui/Selection';
+import { FragmentBlocks, type FragmentAttrs } from './FragmentBlocks';
 
 export type TranscriptView = 'original' | 'translation' | 'both';
 
@@ -292,29 +293,32 @@ function SpeechText(props: TranscriptProps) {
   return originalColumn;
 }
 
-/** One paragraph of a text or a PDF page; an excluded one keeps its place, marked. */
-function Paragraph({ fragment: f, props }: { fragment: KbFragment; props: TranscriptProps }) {
-  const target = props.target.seg === f.seg ? ' is-target' : '';
-  if (isExcluded(props, f.seg)) {
-    return (
-      <p className={`kb-mtext__p kb-excluded${target}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`} data-excluded="">
-        <ExcludedTag />
-        <FragmentText fragment={f} props={props} />
-      </p>
-    );
-  }
-  return (
-    <p className={`kb-mtext__p${target}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
-      {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
-      <FragmentText fragment={f} props={props} />
-    </p>
-  );
+/**
+ * One fragment's element attributes: target, seg, role, quote source — the element itself depends on
+ * the role. An excluded fragment keeps its place, marked, and is not a quote source.
+ */
+function fragmentAttrs(props: TranscriptProps) {
+  return (f: KbFragment): FragmentAttrs => {
+    const target = props.target.seg === f.seg ? ' is-target' : '';
+    const base = { 'data-seg': f.seg, 'data-target-key': `seg-${f.seg}`, 'data-role': f.role ?? undefined };
+    if (isExcluded(props, f.seg)) return { className: `kb-mtext__p kb-excluded${target}`, ...base, 'data-excluded': '' };
+    return { className: `kb-mtext__p${target}`, ...base, ...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg }) };
+  };
+}
+
+/** A fragment's text; an excluded one is preceded by its tag. */
+function fragmentText(props: TranscriptProps) {
+  return (f: KbFragment) => (isExcluded(props, f.seg)
+    ? <><ExcludedTag /><FragmentText fragment={f} props={props} /></>
+    : <FragmentText fragment={f} props={props} />);
 }
 
 function PlainText(props: TranscriptProps) {
   return (
     <div className="kb-mtext">
-      {props.material.fragments.map((f) => <Paragraph key={f.id} fragment={f} props={props} />)}
+      <FragmentBlocks fragments={props.material.fragments} attrs={fragmentAttrs(props)}>
+        {fragmentText(props)}
+      </FragmentBlocks>
     </div>
   );
 }
@@ -325,7 +329,9 @@ function PdfPages(props: TranscriptProps) {
       {byPage(props.material.fragments).map((page, i) => (
         <section key={`${page.page}-${i}`} className="kb-pdfpage" aria-label={page.page !== null ? `Page ${page.page}` : 'Page'}>
           {page.page !== null && <span className="kb-pdfpage__n">p. {page.page}</span>}
-          {page.fragments.map((f) => <Paragraph key={f.id} fragment={f} props={props} />)}
+          <FragmentBlocks fragments={page.fragments} attrs={fragmentAttrs(props)}>
+            {fragmentText(props)}
+          </FragmentBlocks>
         </section>
       ))}
     </div>

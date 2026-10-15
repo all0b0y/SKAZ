@@ -106,7 +106,7 @@ const fail = (status: number, detail: string): never => { throw new FakeHttpErro
 export function fragment(materialId: string, seg: number, text: string, extra: Partial<KbFragment> = {}): KbFragment {
   return {
     id: `${materialId}-f${seg}`, seg, text, start_ms: null, end_ms: null, speaker: null, page: null, index: seg - 1,
-    original_text: null, corrections: [], ...extra,
+    role: 'paragraph', level: null, original_text: null, corrections: [], ...extra,
   };
 }
 
@@ -505,6 +505,11 @@ const ROUTES: FakeRoutes = {
   }],
   'POST /kb/materials/{material_id}/ingest': [202, (w, { path }) => {
     const m = findMaterial(w, path.material_id);
+    // Like ingest/service.py: a finished material without text has nothing for the wiki.
+    if (m.status === 'ready' && m.fragments.length === 0) {
+      fail(409, m.kind === 'recording' ? 'No speech was recognised in this recording, so there is nothing to add to the wiki.'
+        : 'No speech was recognised in this file, so there is nothing to add to the wiki.');
+    }
     const job = newJob(w, 'ingest', m.id, 'running', 'Adding to the wiki');
     job.step = 'checking_recognition';
     m.wiki = materialWiki('processing', { job_id: job.id });
@@ -746,6 +751,9 @@ const ROUTES: FakeRoutes = {
     if (n.resolved_at) fail(409, 'Already decided.');
     const action = n.actions.find((a) => a.id === body.action) ?? fail(422, 'Unknown action.');
     if (action.needs_text && !String(body.text ?? '').trim()) fail(422, 'Enter the text first.');
+    // Like link_failures.handle: "Delete" removes the failed material.
+    const subject = (n.payload as { material_id?: string }).material_id;
+    if (action.id === 'delete_material' && subject) w.materials = w.materials.filter((m) => m.id !== subject);
     n.resolved_at = stamp(w);
     n.resolution = action.id;
     bump(w, n);

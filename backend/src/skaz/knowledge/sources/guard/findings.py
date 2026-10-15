@@ -16,6 +16,7 @@ FindingKind = Literal[
     "hidden_html",  # an element a browser would not show
     "html_comment",  # a comment with readable text
     "hidden_pdf_text",  # PDF text drawn invisibly (Tr 3, white, off-page, zero size, hidden layer)
+    "unreadable_pdf_text",  # PDF text whose font has no usable character map (glyph numbers)
 ]
 
 #: How much of the removed content a finding keeps (enough to show the user).

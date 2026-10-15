@@ -44,7 +44,13 @@ def tool_path(name: str) -> str:
                 return found
     if candidate.is_file() and os.access(candidate, os.X_OK):
         return str(candidate)
-    raise MediaError(f"Media tool {name} is unavailable. Install an updated SKAZ build.")
+    if getattr(sys, "frozen", False):
+        raise MediaError(f"Media tool {name} is unavailable. Install an updated SKAZ build.")
+    # A development run (`npm run dev`): the tools are fetched into backend/.runtime/media-tools.
+    raise MediaError(
+        f"Media tool {name} is unavailable. "
+        "Run `npm run build:media` to fetch the media tools for development."
+    )
 
 
 #: Maps a failed tool's stderr to one of a few fixed user-facing sentences (never the text itself).

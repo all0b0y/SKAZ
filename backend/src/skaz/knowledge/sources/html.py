@@ -33,6 +33,7 @@ from lxml.cssselect import CSSSelector  # type: ignore[import-untyped]
 from readability import Document  # type: ignore[import-untyped]
 
 from ..errors import KnowledgeError
+from ..markdown.source import FragmentRole
 from .fragments import Paragraph, sanitize_title
 from .guard import Finding, clean_invisible
 from .guard.findings import visible_repr
@@ -580,14 +581,41 @@ class _Pruner:
 # -- text out of the article HTML ----------------------------------------------
 
 
-def _block_texts(root: Any) -> list[str]:
-    paragraphs: list[str] = []
+_HEADINGS = {f"h{level}": level for level in range(1, 7)}
+#: The tags that give the text inside them a display role (user bug 1016-5); the innermost one wins.
+_ROLE_TAGS: dict[str, FragmentRole] = {
+    **dict.fromkeys(_HEADINGS, "heading"),
+    "li": "list_item",
+    "blockquote": "quote",
+    "pre": "code",
+}
+
+
+@dataclass(frozen=True)
+class Block:
+    """A piece of article text and how it is shown; the role never changes the text."""
+
+    text: str
+    role: FragmentRole = "paragraph"
+    level: int | None = None
+
+
+def code_text(text: str) -> str:
+    """Code keeps its lines and indentation (trailing spaces and blank edges go)."""
+    lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    return "\n".join(lines).strip("\n")
+
+
+def _block_texts(root: Any) -> list[Block]:
+    paragraphs: list[Block] = []
     buffer: list[str] = []
+    roles: list[tuple[FragmentRole, int | None]] = []
 
     def flush() -> None:
         text = " ".join("".join(buffer).split())
         if text:
-            paragraphs.append(text)
+            role, level = roles[-1] if roles else ("paragraph", None)
+            paragraphs.append(Block(text, role, level))
         buffer.clear()
 
     def walk(node: Any) -> None:
@@ -603,13 +631,15 @@ def _block_texts(root: Any) -> list[str]:
         block = tag in BLOCK_TAGS
         if block:
             flush()
+        if tag in _ROLE_TAGS:
+            roles.append((_ROLE_TAGS[tag], _HEADINGS.get(tag)))
         if tag == "br":
             buffer.append(" ")
         if tag == "pre":
             flush()
             for part in re.split(r"\n\s*\n", node.text_content()):
                 if part.strip():
-                    paragraphs.append(part.strip())
+                    paragraphs.append(Block(code_text(part), "code"))
         else:
             if node.text:
                 buffer.append(node.text)
@@ -617,6 +647,8 @@ def _block_texts(root: Any) -> list[str]:
                 walk(child)
         if block:
             flush()
+        if tag in _ROLE_TAGS:
+            roles.pop()
         if node.tail:
             buffer.append(node.tail)
 
@@ -681,11 +713,12 @@ def extract_article(html: str) -> ArticleExtraction:
         texts = _block_texts(body)
     paragraphs: list[Paragraph] = []
     findings = list(pruner.findings)
-    for text in texts:
-        cleaned = clean_invisible(text, index=len(paragraphs))
+    for block in texts:
+        cleaned = clean_invisible(block.text, index=len(paragraphs))
         findings.extend(cleaned.findings)
         if cleaned.text.strip():
-            paragraphs.append(Paragraph(" ".join(cleaned.text.split()), index=len(paragraphs)))
+            text = code_text(cleaned.text) if block.role == "code" else " ".join(cleaned.text.split())
+            paragraphs.append(Paragraph(text, index=len(paragraphs), role=block.role, level=block.level))
     h1 = document.find(".//h1")
     title = (
         sanitize_title(og_title)

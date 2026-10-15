@@ -17,6 +17,8 @@ from starlette.testclient import TestClient
 from skaz.app import create_app
 from skaz.config import AppConfig
 from skaz.gateways import soniox as soniox_gateway
+from skaz.knowledge.corrections.offer import OFFER_KIND
+from skaz.knowledge.ingest.service import NO_SPEECH
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.speech.service import INTERRUPTED_RECORDING, STILL_STREAMING
 from skaz.secrets import MemorySecretStore
@@ -277,6 +279,35 @@ def test_an_error_before_any_text_leaves_a_failed_material_that_can_continue(
         stream.end("stop")
     wait(http, lambda: recording(http, rec["material_id"])["status"] == "ready", "ready after continuing")
     assert texts(http, rec["material_id"]) == [(1, "Finally", None)]
+
+
+def test_a_recording_without_speech_is_honest_and_never_goes_to_the_wiki(
+    http: TestClient, provider: Provider,
+) -> None:
+    # User bug 1016-2: an empty recording was handed to the wiki, which failed with a notification.
+    runtime = http.app.state.runtime  # type: ignore[attr-defined]
+    runtime.kb_ingest.update_settings(auto_add_files_links=True)
+    rec = http.post("/kb/recordings", headers=AUTH, json={"title": "Silence"}).json()
+    provider.scripts.append([])
+    url = f"ws://127.0.0.1/sessions/{rec['session_id']}/live/stream"
+    with http.websocket_connect(url, headers=AUTH) as ws:
+        stream = open_stream(http, ws)
+        stream.send(2)
+        stream.end("stop")
+    material_id = rec["material_id"]
+    wait(http, lambda: recording(http, material_id)["status"] == "ready", "settled")
+    view = recording(http, material_id)
+    assert view["fragment_count"] == 0 and view["duration_ms"] == 1_000 and view["error"] is None
+    assert http.portal is not None
+    http.portal.call(asyncio.sleep, 0.2)  # an automatic ingest would have started by now
+    assert http.get("/kb/jobs", headers=AUTH, params={"material_id": material_id}).json() == []
+    refused = http.post(f"/kb/materials/{material_id}/ingest", headers=AUTH)
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == NO_SPEECH
+    assert http.get("/kb/jobs", headers=AUTH, params={"material_id": material_id}).json() == []
+    # Nothing failed, so nothing reports a failure (the one-time automatic-fixes offer may appear).
+    kinds = {n["kind"] for n in http.get("/kb/notifications", headers=AUTH).json()["items"]}
+    assert kinds <= {OFFER_KIND}
 
 
 def test_media_imports_run_while_recording(http: TestClient, provider: Provider, cloud: FakeHttp,

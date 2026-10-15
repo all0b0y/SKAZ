@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KbApiError, KbClient, buildPath } from '../api/client';
 import { baseWorld, createFakeBridge } from '../test/fakeBridge';
@@ -149,5 +149,72 @@ describe('Library side panel on real /kb answers', () => {
     await waitFor(() => expect(within(side).queryByTestId('library-indexing')).not.toBeInTheDocument(), { timeout: 4000 });
     expect(reads()).toBe(before + 1); // one read at a time, and none once indexing ended
     await waitFor(() => expect(within(side).getByTestId('all-materials')).toHaveTextContent('All materials · 2'));
+  });
+});
+
+describe('A deleted material leaves every list (user bug 1016-1)', () => {
+  const openInbox = async (user: ReturnType<typeof userEvent.setup>) => {
+    const side = await screen.findByRole('region', { name: 'Materials' });
+    const folders = await within(side).findByRole('list', { name: 'Folders' });
+    await user.click(within(folders).getByRole('button', { name: /^Inbox/ }));
+    const list = await within(side).findByRole('list', { name: 'Inbox' });
+    return { side, list };
+  };
+
+  it('deleting from the material panel removes the row from the open folder and closes the panel', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ prefs: { section: 'materials' } });
+    const { side, list } = await openInbox(user);
+    await user.click(within(list).getByRole('button', { name: 'Pasted text: problems' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    await within(doc).findByRole('heading', { level: 2, name: 'Pasted text: problems' });
+    await user.click(within(doc).getByRole('button', { name: 'Material actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete…' }));
+    const del = await screen.findByRole('dialog', { name: /Delete/ });
+    await waitFor(() => expect(within(del).getByRole('button', { name: 'Delete' })).toBeEnabled());
+    await user.click(within(del).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(side).queryByRole('button', { name: 'Pasted text: problems' })).not.toBeInTheDocument());
+    expect(services.library.getState().materials.map((m) => m.id)).not.toContain('m3');
+    expect(services.library.getState().folderMaterials.map((m) => m.id)).not.toContain('m3');
+    await user.click(within(side).getByRole('button', { name: 'All folders' }));
+    expect(await within(side).findByTestId('all-materials')).toHaveTextContent('All materials · 2');
+  });
+
+  it('a material deleted elsewhere: opening its stale row says so and drops the row', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ prefs: { section: 'materials' } });
+    const { side, list } = await openInbox(user);
+    fake.world.materials = fake.world.materials.filter((m) => m.id !== 'm3');
+    await user.click(within(list).getByRole('button', { name: 'Pasted text: problems' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(doc).findByText(/no longer in the library/)).toBeInTheDocument();
+    await waitFor(() => expect(within(side).queryByRole('button', { name: 'Pasted text: problems' })).not.toBeInTheDocument());
+    expect(services.library.getState().materials.map((m) => m.id)).not.toContain('m3');
+  });
+
+  it('“Delete material” in a decision removes it from the lists and closes its open panel', async () => {
+    const user = userEvent.setup();
+    const world = baseWorld();
+    const base = world.notifications[0]!;
+    world.notifications.push({
+      ...structuredClone(base), id: 'n9', seq: 3, kind: 'link_failed', title: 'Couldn’t open a link', body: 'x',
+      payload: { material_id: 'm3', material_title: 'Pasted text: problems', url: 'https://example.org/a', reason: 'No answer.' },
+      requires_action: true, resolved_at: null, resolution: null,
+      actions: [{ id: 'delete_material', label: 'Delete material', primary: false, needs_text: false }],
+      subject: { type: 'material', id: 'm3', block_id: null, seg: null },
+    });
+    world.notificationSeq = 3;
+    const { services } = renderKb({ world, prefs: { section: 'materials' } });
+    const { side } = await openInbox(user);
+    act(() => services.ui.getState().openDoc('m3'));
+    await screen.findByRole('complementary', { name: 'Document' });
+    await waitFor(() => expect(services.notifications.getState().items.some((n) => n.id === 'n9')).toBe(true));
+    act(() => services.ui.getState().openDecision('n9'));
+    const decision = await screen.findByRole('dialog', { name: 'Couldn’t open a link' });
+    await user.click(within(decision).getByRole('button', { name: 'Delete material' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument());
+    await waitFor(() => expect(within(side).queryByRole('button', { name: 'Pasted text: problems' })).not.toBeInTheDocument());
+    expect(services.library.getState().materials.map((m) => m.id)).not.toContain('m3');
   });
 });

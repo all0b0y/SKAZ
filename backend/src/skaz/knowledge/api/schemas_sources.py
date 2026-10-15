@@ -19,6 +19,7 @@ KbHiddenKind = Literal[
     "hidden_html",
     "html_comment",
     "hidden_pdf_text",
+    "unreadable_pdf_text",
 ]
 
 

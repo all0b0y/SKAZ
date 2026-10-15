@@ -84,8 +84,8 @@ async def read_recording_live(material_id: str, speech: SpeechDep,
         partial=KbLivePartial(speaker=partial.speaker, text=partial.text, translation=partial.translation)
         if partial else None,
         fragments=[KbFragment(id=f.id, seg=f.seg, text=f.text, start_ms=f.start_ms, end_ms=f.end_ms,
-                              speaker=f.speaker, page=f.page, index=f.index, original_text=None,
-                              corrections=[])
+                              speaker=f.speaker, page=f.page, index=f.index, role=f.role, level=f.level,
+                              original_text=None, corrections=[])
                    for f in tail.fragments],
     )
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 NAME = "core"
-VERSION = 3
+VERSION = 4
 
 _TOKENIZE = "tokenize='unicode61 remove_diacritics 2'"
 
@@ -16,6 +16,11 @@ END;
 CREATE TRIGGER IF NOT EXISTS blocks_fts_forget AFTER DELETE ON blocks BEGIN
     DELETE FROM blocks_fts WHERE rowid = old.rowid;
 END;
+"""
+
+#: Display role of a fragment (v4, user bug 1016-5); see ``markdown.source.FragmentRole``.
+ROLE_COLUMNS = """    role        TEXT NOT NULL DEFAULT 'paragraph',
+    level       INTEGER,
 """
 
 SQL = f"""
@@ -51,7 +56,7 @@ CREATE TABLE IF NOT EXISTS fragments (
     speaker     TEXT,
     page        INTEGER,
     idx         INTEGER,
-    PRIMARY KEY (material_id, seg)
+{ROLE_COLUMNS}    PRIMARY KEY (material_id, seg)
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS fragments_fts USING fts5(
@@ -168,4 +173,10 @@ INSERT INTO blocks_fts(rowid, text, page_id, block_id)
     GROUP BY b.rowid;
 DROP TABLE blocks_fts_v2;
 """ + TRIGGERS,
+    # Display roles of fragments (user bug 1016-5). Rows indexed before them are paragraphs, as their
+    # manifests say (no role there either).
+    4: """
+ALTER TABLE fragments ADD COLUMN role TEXT NOT NULL DEFAULT 'paragraph';
+ALTER TABLE fragments ADD COLUMN level INTEGER;
+""",
 }

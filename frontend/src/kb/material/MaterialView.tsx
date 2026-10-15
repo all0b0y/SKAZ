@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../api/kb/types.gen';
-import { errorText } from '../api/client';
+import { errorText, KbApiError } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
 import { PanelFrameButtons, useAskAbout } from '../document/parts';
@@ -9,10 +9,14 @@ import { useScrollTarget } from '../document/useScrollTarget';
 import { useRecording, useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import { ExcludedFragments, useMaterialGuard } from './ExcludedFragments';
+import { UnreadableText } from './UnreadableText';
+import { isWithoutSpeech, NoSpeech } from './NoSpeech';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
 import { useLiveMaterial } from '../recording/useLiveMaterial';
+
+const MATERIAL_GONE = 'This material is no longer in the library — it was deleted.';
 
 const SPEECH = new Set<KbMaterial['kind']>(['recording', 'audio', 'video', 'video_link']);
 
@@ -64,9 +68,16 @@ function metaLine(material: KbMaterial): string {
 
 /** Material + its corrections and jobs; polled while anything about it is still running. */
 export function useMaterialData(materialId: string) {
-  const { client } = useServices();
+  const { client, library } = useServices();
   const loader = useLoad<MaterialData>(materialId, async () => {
-    const material = await client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } });
+    const material = await client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }).catch((e: unknown) => {
+      // Deleted elsewhere: drop the stale row from every list (the panel stays to say so).
+      if (e instanceof KbApiError && e.status === 404) {
+        void library.getState().forgetMaterial(materialId, { keepPanel: true });
+        throw new KbApiError(404, MATERIAL_GONE);
+      }
+      throw e;
+    });
     const [corrections, jobs] = await Promise.all([
       SPEECH.has(material.kind)
         ? client.call('GET /kb/materials/{material_id}/corrections', { path: { material_id: materialId } }).catch(() => [])
@@ -116,6 +127,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   const { client, recording } = useServices();
   const askAbout = useAskAbout();
   const expanded = useUi((s) => s.docExpanded);
+  const closeDoc = useUi((s) => s.closeDoc);
   const { state, reload, set } = useMaterialData(target.id);
   const data = state.value;
   const material = data?.material ?? null;
@@ -196,7 +208,9 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
         {state.load === 'loading' && !data && <div className="kb-doc__wait"><Spinner label="Opening the material" /></div>}
         {state.load === 'error' && !data && (
           <Banner tone="error" title="Couldn’t open this material."
-            actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
+            actions={state.error === MATERIAL_GONE
+              ? <Button size="sm" icon="close" onClick={closeDoc}>Close</Button>
+              : <Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {material && data && (
           <article className={`kb-doc__article kb-mat${expanded ? ' is-wide' : ''}`} data-material-kind={material.kind}>
@@ -215,10 +229,13 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             )}
             {addError && <p className="kb-inline-error" role="alert">{addError}</p>}
             {note && <p className="kb-mat__note" role="status">{note}</p>}
+            <UnreadableText pages={material.unreadable_pages ?? []} />
             {hasTranslation && (
               <Segmented label="Show" size="sm" value={view} options={viewOptions} onChange={setView} />
             )}
-            {material.fragments.length === 0 ? (
+            {isWithoutSpeech(material) ? (
+              <NoSpeech material={material} onDelete={() => setDialog('delete')} />
+            ) : material.fragments.length === 0 ? (
               <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>
             ) : (
               <Transcript material={material} corrections={data.corrections} view={hasTranslation ? view : 'original'}

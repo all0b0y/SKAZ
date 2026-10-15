@@ -106,7 +106,8 @@ def test_fts_rows_share_the_rowid_and_leave_with_their_rows(tmp_path: Path) -> N
 def test_core_v2_index_upgrades_to_rowid_keyed_fts(tmp_path: Path) -> None:
     connection = sqlite3.connect(tmp_path / "knowledge.sqlite3")
     connection.execute("PRAGMA foreign_keys=ON")
-    v2 = SimpleNamespace(NAME="core", VERSION=2, SQL=core.SQL.replace(core.TRIGGERS, ""))
+    v2_sql = core.SQL.replace(core.TRIGGERS, "").replace(core.ROLE_COLUMNS, "")  # roles came in v4
+    v2 = SimpleNamespace(NAME="core", VERSION=2, SQL=v2_sql)
     apply_schemas(connection, [v2])
     connection.executescript("""
         INSERT INTO folders(id, name, rel_path, created_at)

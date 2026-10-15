@@ -22,6 +22,10 @@ export interface LibraryData {
   folderMaterials: KbMaterialSummary[];
   folderLoad: Load;
   folderError: string | null;
+  /** Bumped whenever the set of materials may have changed (reload, deletion): other lists re-read on it. */
+  revision: number;
+  /** Materials known to be deleted in this window: lists with their own copy (All materials) hide them at once. */
+  gone: string[];
 }
 
 export interface LibraryActions {
@@ -33,6 +37,16 @@ export interface LibraryActions {
   renameFolder: (id: string, name: string) => Promise<ActionResult<KbFolder>>;
   deleteFolder: (id: string) => Promise<ActionResult>;
   openFolder: (id: string | null) => Promise<void>;
+  /**
+   * A material is gone (deleted from any place, or the backend answered "not found"): drop it from
+   * every list now, tell the window (`onForget`: close a panel that shows it), then re-read the lists.
+   */
+  forgetMaterial: (id: string, options?: { keepPanel?: boolean }) => Promise<void>;
+}
+
+export interface LibraryOptions {
+  /** Called once per forgotten material, before the lists are re-read. */
+  onForget?: (id: string, options: { keepPanel: boolean }) => void;
 }
 
 export type LibraryStore = StoreApi<LibraryData & LibraryActions>;
@@ -50,7 +64,7 @@ export function sortFolders(folders: KbFolder[]): KbFolder[] {
   });
 }
 
-export function createLibraryStore(client: KbClient): LibraryStore {
+export function createLibraryStore(client: KbClient, options: LibraryOptions = {}): LibraryStore {
   let indexingTimer: ReturnType<typeof setTimeout> | null = null;
   return createStore<LibraryData & LibraryActions>()((set, get) => {
     /** Follow a running scan: the next read starts after the previous answered; content reloads at the end. */
@@ -85,6 +99,8 @@ export function createLibraryStore(client: KbClient): LibraryStore {
       folderMaterials: [],
       folderLoad: 'idle',
       folderError: null,
+      revision: 0,
+      gone: [],
 
       loadLibrary: async () => {
         set({ libraryLoad: 'loading', libraryError: null });
@@ -101,11 +117,35 @@ export function createLibraryStore(client: KbClient): LibraryStore {
       loadContent: async () => {
         set({ contentLoad: 'loading', contentError: null });
         try {
-          const [folders, materials] = await Promise.all([client.folders(), client.materials()]);
-          set({ folders: sortFolders(folders), materials: [...materials].sort(newestFirst), contentLoad: 'ready' });
+          const folderId = get().openFolderId;
+          const [folders, materials, inFolder] = await Promise.all([
+            client.folders(), client.materials(), folderId ? client.materials(folderId).catch(() => null) : Promise.resolve(null),
+          ]);
+          set((s) => ({
+            folders: sortFolders(folders),
+            materials: [...materials].sort(newestFirst),
+            contentLoad: 'ready',
+            revision: s.revision + 1,
+            // The open folder follows the same reload (a recording, an import or a deletion changes it too).
+            ...(folderId && inFolder && s.openFolderId === folderId
+              ? { folderMaterials: [...inFolder].sort(newestFirst), folderLoad: 'ready' as const, folderError: null } : {}),
+          }));
         } catch (error) {
           set({ contentLoad: 'error', contentError: errorText(error) });
         }
+      },
+
+      forgetMaterial: async (id, { keepPanel = false } = {}) => {
+        const gone = [...get().materials, ...get().folderMaterials].find((m) => m.id === id);
+        set((s) => ({
+          materials: s.materials.filter((m) => m.id !== id),
+          folderMaterials: s.folderMaterials.filter((m) => m.id !== id),
+          folders: gone ? s.folders.map((f) => (f.id === gone.folder_id ? { ...f, material_count: Math.max(0, f.material_count - 1) } : f)) : s.folders,
+          revision: s.revision + 1,
+          gone: s.gone.includes(id) ? s.gone : [...s.gone, id],
+        }));
+        options.onForget?.(id, { keepPanel });
+        await get().loadContent();
       },
 
       connect: async (path) => {
