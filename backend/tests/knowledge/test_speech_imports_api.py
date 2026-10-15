@@ -219,6 +219,40 @@ async def test_requests_are_checked_before_anything_starts(
     assert len(soniox.jobs) <= 1
 
 
+async def test_audio_and_video_paths_get_the_same_checks_as_documents(
+    api: httpx.AsyncClient, speech_app: Any, soniox: AsyncSoniox, tmp_path: Path,
+) -> None:
+    """Hidden folders and SKAZ's own data are refused after links are followed; ordinary files work."""
+    sessions_before = len((await api.get("/sessions")).json()["sessions"])
+    (tmp_path / ".cache").mkdir()
+    hidden = Path(media(tmp_path / ".cache", "talk.m4a"))
+    data_dir = speech_app.state.runtime.kb.data_dir
+    inside = Path(media(data_dir, "rec.m4a"))
+    (tmp_path / "into-hidden.m4a").symlink_to(hidden)
+    (tmp_path / "into-data.m4a").symlink_to(inside)
+    (tmp_path / "Folder").mkdir()
+    cases = [
+        (str(hidden), "hidden folders"),
+        (str(tmp_path / "into-hidden.m4a"), "hidden folders"),
+        (str(inside), "own data folder"),
+        (str(tmp_path / "into-data.m4a"), "own data folder"),
+        (str(tmp_path / "missing.m4a"), "doesn't exist"),
+        (str(tmp_path / "Folder.m4a"), "doesn't exist"),
+    ]
+    (tmp_path / "Folder.m4a").mkdir()
+    cases[-1] = (str(tmp_path / "Folder.m4a"), "regular file")
+    for path, message in cases:
+        response = await api.post("/kb/imports", json={"path": path})
+        assert response.status_code == 400, (path, response.text)
+        assert message in response.json()["detail"], (path, response.text)
+    assert len((await api.get("/sessions")).json()["sessions"]) == sessions_before
+    assert (await api.get("/kb/materials")).json() == []
+    # A link to a file in an ordinary folder is followed and imported.
+    (tmp_path / "Lecture.m4a").symlink_to(Path(media(tmp_path / "Folder", "real.m4a")))
+    started = await api.post("/kb/imports", json={"path": str(tmp_path / "Lecture.m4a")})
+    assert started.status_code == 201, started.text
+
+
 async def test_video_files_and_links_become_video_materials_and_duplicates_are_guarded(
     api: httpx.AsyncClient, tmp_path: Path,
 ) -> None:

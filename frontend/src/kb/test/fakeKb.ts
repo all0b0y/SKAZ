@@ -350,6 +350,25 @@ function startAnswer(world: FakeWorld, c: KbChat, question: string): KbMessage {
 }
 
 /** Let a held answer finish (all its remaining events become visible to the next poll). */
+/** The backend's speech problem `speech-soniox-consent` and the Soniox privacy flow (S3, review B2 #6). */
+export function syncSpeechConsent(w: FakeWorld): void {
+  const speech = w.health.sections.find((s) => s.id === 'speech');
+  const needed = w.speech.provider === 'soniox' && !w.speech.cloud_consent;
+  if (speech) {
+    speech.problems = speech.problems.filter((p) => p.id !== 'speech-soniox-consent');
+    if (needed) {
+      speech.problems.push({
+        id: 'speech-soniox-consent', severity: 'error', title: 'Sending audio to Soniox is off',
+        reason: 'Speech goes to Soniox, but sending audio to the cloud isn’t allowed. Allowing it sends the audio of recordings, imported media and dictation to Soniox for recognition.',
+        still_works: 'Everything except new speech recognition.', stopped: 'New recordings, imports and dictation aren’t recognised.', progress: null,
+        actions: [{ id: 'allow_soniox', label: 'Allow sending audio to Soniox', primary: true }, { id: 'use_local', label: 'Recognise on this Mac', primary: false }],
+      });
+    }
+    speech.state = speech.problems.some((p) => p.severity === 'error') ? 'error' : speech.problems.length ? 'warning' : 'ok';
+  }
+  for (const flow of w.privacy.flows) if (/soniox/i.test(flow.where)) flow.enabled = w.speech.provider === 'soniox' && w.speech.cloud_consent;
+}
+
 export function finishAnswer(world: FakeWorld, chatId: string): void {
   delete world.pendingAnswers[chatId];
   finishers.get(world)?.[chatId]?.();
@@ -715,6 +734,12 @@ const ROUTES: FakeRoutes = {
   // -- settings --
   'GET /kb/settings/health': [200, (w) => structuredClone(w.health)],
   'POST /kb/settings/health/{problem_id}/{action_id}': [200, (w, { path }) => {
+    if (path.problem_id === 'speech-soniox-consent') {
+      // Only the user's click gives the consent; "Recognise on this Mac" switches the service instead.
+      if (path.action_id === 'allow_soniox') w.speech.cloud_consent = true;
+      else if (path.action_id === 'use_local') w.speech.provider = 'local_whisper';
+      syncSpeechConsent(w);
+    }
     for (const s of w.health.sections) {
       s.problems = s.problems.filter((p) => p.id !== path.problem_id);
       if (!s.problems.length) s.state = 'ok';
@@ -738,6 +763,7 @@ const ROUTES: FakeRoutes = {
   'GET /kb/settings/speech': [200, (w) => structuredClone(w.speech)],
   'PUT /kb/settings/speech': [200, (w, { body }) => {
     for (const [k, v] of Object.entries(body)) if (v !== undefined && v !== null) (w.speech as unknown as Record<string, unknown>)[k] = v;
+    syncSpeechConsent(w);
     return structuredClone(w.speech);
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],

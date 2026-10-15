@@ -11,6 +11,11 @@ is saved in the same manifest write that lists the new fragments. A crash
 before that write leaves the fragments unlisted (invisible) and the cursor
 where it was, so the next projection writes them again — never twice, never
 lost. ``seg`` ids are only ever appended (``Library.append_fragments``).
+
+Poisoning layer 2 applies to speech like to documents: the stored fragment
+text is the visible text (invisible characters removed), so what the user
+sees, what the agents read and what citations quote is one and the same
+text. The untouched recognition stays in the legacy session.
 """
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ from ..library.layout import SERVICE_DIR
 from ..library.library import Library
 from ..markdown.source import Fragment, FragmentInput
 from ..service import KnowledgeService
+from ..sources.guard import strip_invisible
 from .transcript import TokenCursor, read_new_tokens, read_translation, translation_language
 from .translation import TRANSLATION_FILE, one_line, render_translation
 
@@ -93,10 +99,11 @@ class SpeechProjector:
             closed = groups if final else groups[:-1]
             if not closed:
                 return []
+            visible = [(group, one_line(strip_invisible(group.text))) for group in closed]
             inputs = [
-                FragmentInput(text=one_line(group.text), start_ms=group.start_ms, end_ms=group.end_ms,
+                FragmentInput(text=text, start_ms=group.start_ms, end_ms=group.end_ms,
                               speaker=str(group.speaker) if group.speaker is not None else None)
-                for group in closed
+                for group, text in visible if text  # nothing visible left: no fragment
             ]
             cursor = located[closed[-1].tokens[-1].id].cursor()
             with self.kb.writing():  # a concurrent scan must not undo this append in the index

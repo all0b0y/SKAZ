@@ -94,6 +94,9 @@ class KbSpeechSettings(BaseModel):
     translate_by_default: bool
     translation_language: str
     local_model: KbLocalSpeechModel
+    #: The user allowed sending audio of recordings, imports and dictation to a cloud speech service
+    #: (Soniox). The existing settings' ``cloud_consent``; only ever set by the user's own action.
+    cloud_consent: bool
 
 
 class KbSpeechSettingsUpdate(_Request):
@@ -101,6 +104,8 @@ class KbSpeechSettingsUpdate(_Request):
     languages: list[str] | None = Field(default=None, min_length=1, max_length=64)
     translate_by_default: bool | None = None
     translation_language: str | None = Field(default=None, min_length=2, max_length=32)
+    #: Give (``true``) or take back (``false``) the consent; omitted keeps it. Choosing Soniox never gives it.
+    cloud_consent: bool | None = None
 
 
 class KbPrivacyFlow(BaseModel):

@@ -40,6 +40,8 @@ class SpeechSettings:
     translate_by_default: bool
     translation_language: str
     local_model: LocalModel
+    #: Consent to send audio to a cloud speech service (the existing ``cloud_consent``).
+    cloud_consent: bool
 
 
 def to_new(provider: str) -> SpeechProvider:
@@ -82,4 +84,5 @@ def speech_settings(runtime: Runtime, stored: StoredSettings | None = None) -> S
         translate_by_default=settings.native_recording_mode == "translation",
         translation_language=settings.translation_target_language,
         local_model=local_model(runtime, settings.local_whisper_model),
+        cloud_consent=settings.cloud_consent,
     )

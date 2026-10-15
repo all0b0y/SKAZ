@@ -23,6 +23,17 @@ v0.21.5+6627.g4bb9e57):
   23 tools without it.
 * Permission requests are always answered with the reject option.
 
+History (review B2 #4): Hermes ACP saves every prompted session — the whole
+SKAZ prompt: question, transcript, source excerpts — to ``HERMES_HOME/state.db``
+and has no setting to turn that off (``acp_adapter/session.py`` ``_persist``;
+docs user-guide/features/acp "Session behavior"). Claude Code runs with
+``--no-session-persistence`` and Codex ``ephemeral``; for Hermes SKAZ deletes
+each run's session from its own folder once the ACP process ended, with the
+documented ``hermes sessions delete <id> --yes``. Ids not deleted yet are kept
+in ``hermes-sessions.json`` beside the folder and swept (with
+``hermes sessions prune --source acp --yes`` for ended leftovers) on the next
+start. The user's ``~/.hermes`` is never touched (``HERMES_HOME`` is SKAZ's).
+
 First start (decision B10): the first ``hermes acp`` in a new Hermes folder
 prepares Hermes' own environment (~1.5 GB, a few minutes). With
 ``first_run_gate`` (the app's engine) SKAZ never starts ACP — not for a status
@@ -38,13 +49,15 @@ import os
 import re
 import shutil
 import signal
+import subprocess
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ...native_io import disk_call
 from ..install.recipes import HERMES_PREPARE_BYTES
 from ..install.system import (
     Located,
@@ -59,6 +72,7 @@ from ..install.system import (
     run_capture,
 )
 from ..install.terminal import TerminalLauncher
+from ..processes import CHILDREN
 from .acp_client import METHOD_NOT_FOUND, PROTOCOL_VERSION, AcpClosed, AcpConnection, AcpError
 from .engine import (
     AgentEvent,
@@ -91,6 +105,8 @@ NO_TOOLS_LISTING = "No tools available."
 SETUP_TITLE = "SKAZ opened the Hermes model setup for SKAZ's own Hermes folder."
 LIMITS_NOT_APPLIED = "Hermes did not apply SKAZ's tool limits, so SKAZ stopped the run. Update Hermes."
 PREPARED_FILE = "hermes-prepared.json"
+#: Session ids SKAZ created in its Hermes folder and has not deleted yet.
+HISTORY_FILE = "hermes-sessions.json"
 PREPARING_NOTE = "Hermes is preparing its environment (~1.5 GB, a few minutes)."
 PREPARE_FIRST = ("Hermes prepares its environment once before first use (~1.5 GB, a few minutes). "
                  "Start it from SKAZ when you're ready.")
@@ -211,6 +227,7 @@ class HermesEngine:
         root = data_dir / "agents"
         self.home = ensure_private_home(root / "hermes-home", home=user_home)
         self.prepared_marker = root / PREPARED_FILE
+        self.history_file = root / HISTORY_FILE
         self._gate = first_run_gate
         self.policy_dir = root / "hermes-policy"
         self.runs_dir = root / "hermes-runs"
@@ -224,6 +241,8 @@ class HermesEngine:
         self._runs: dict[str, _ActiveRun] = {}
         self._checked: dict[tuple[str, float], tuple[Version | None, Path | None]] = {}
         self.current_model: str | None = None
+        self._history_tasks: set[asyncio.Task[None]] = set()
+        self._swept = False
 
     @property
     def id(self) -> EngineId:
@@ -313,6 +332,7 @@ class HermesEngine:
             return EngineStatus("hermes", installed=True, version=shown, reason=NO_PROVIDER)
         if not self.prepared():
             return EngineStatus("hermes", installed=True, version=shown, reason=PREPARE_FIRST)
+        self._sweep_once()
         try:
             async with self._acp(located, self.runs_dir / "status") as (_connection, initialized):
                 methods = initialized.get("authMethods") or []
@@ -358,6 +378,97 @@ class HermesEngine:
         shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR")}
         await self._launcher.open("hermes-setup", SETUP_TITLE, [str(located.binary), "model"], shown)
 
+    # -- SKAZ conversations in Hermes' session store ----------------------------
+
+    def pending_history(self) -> list[str]:
+        """Session ids SKAZ created in its Hermes folder and has not deleted yet."""
+        try:
+            raw = json.loads(self.history_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        items = raw.get("sessions") if isinstance(raw, dict) else None
+        return [str(item) for item in items if isinstance(item, str)] if isinstance(items, list) else []
+
+    def _write_history(self, ids: Sequence[str]) -> None:
+        self.history_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = self.history_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"sessions": list(dict.fromkeys(ids))}) + "\n", encoding="utf-8")
+        os.replace(temporary, self.history_file)
+
+    def _remember(self, session_id: str) -> None:
+        self._write_history([*self.pending_history(), session_id])
+
+    async def _forget(self, session_ids: Sequence[str]) -> None:
+        """``hermes sessions delete <id> --yes`` in SKAZ's folder; ids it could not delete stay listed."""
+        located = self._locate("hermes")
+        if located is None:
+            return
+        deleted: set[str] = set()
+        for session_id in session_ids:
+            try:
+                code, out = await disk_call(self._cli, located, "sessions", "delete", session_id, "--yes")
+            except (OSError, subprocess.SubprocessError):
+                continue
+            # "No session '<id>'" (sessions_cmd._not_found): Hermes holds nothing of it (never prompted).
+            if code == 0 or f"No session '{session_id}'" in out:
+                deleted.add(session_id)
+        if deleted:
+            self._write_history([item for item in self.pending_history() if item not in deleted])
+
+    async def sweep_history(self) -> None:
+        """Start of SKAZ: delete what earlier runs left in Hermes' store (a quit mid-answer, a failed delete).
+
+        Never starts Hermes before the user prepared it (B10) — nothing can be stored before that.
+        """
+        self._swept = True
+        located = self._locate("hermes")
+        if located is None or not self.prepared() or not (self.set_up() or self.pending_history()):
+            return
+        running = {active.session_id for active in self._runs.values()}
+        await self._forget([item for item in self.pending_history() if item not in running])
+        if self._runs:
+            return  # prune refuses while another Hermes process holds the store; next start
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            # Ended ACP sessions SKAZ does not know by id (e.g. a compressed continuation).
+            await disk_call(self._cli, located, "sessions", "prune", "--source", "acp", "--yes")
+
+    def _cli(self, located: Located, *args: str) -> tuple[int, str]:
+        """A short Hermes command in SKAZ's folder, in a worker thread.
+
+        Not ``run_capture``: these run in the background, and an asyncio task cancelled while its
+        subprocess is being created (app or test loop closing) waits for that process forever.
+        """
+        argv = [str(located.binary), *args]
+        refuse_sudo(argv)
+        process = subprocess.Popen(argv, env=self.environment(located), start_new_session=True,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL)
+        CHILDREN.add(process, group=True)
+        try:
+            out, _ = process.communicate(timeout=self._status_timeout)
+        except subprocess.TimeoutExpired:
+            kill_group(process.pid)
+            process.communicate()
+            raise
+        finally:
+            CHILDREN.discard(process)
+        return process.returncode, out.decode(errors="replace")
+
+    def _sweep_once(self) -> None:
+        if not self._swept:
+            self._swept = True
+            self._in_background(self.sweep_history())
+
+    def _in_background(self, work: Coroutine[Any, Any, None]) -> None:
+        task = asyncio.create_task(work, name="hermes-history")
+        self._history_tasks.add(task)
+        task.add_done_callback(self._history_tasks.discard)
+
+    async def settle_history(self) -> None:
+        """Wait for the deletions started so far (tests; nothing in the app waits for them)."""
+        while self._history_tasks:
+            await asyncio.gather(*list(self._history_tasks), return_exceptions=True)
+
     # -- ACP process ------------------------------------------------------------
 
     @contextlib.asynccontextmanager
@@ -372,6 +483,7 @@ class HermesEngine:
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             limit=32 * 1024 * 1024,
         )
+        CHILDREN.add(process, group=True)  # quitting SKAZ signals it first (knowledge.shutdown)
         if active is not None:
             active.process = process
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
@@ -401,6 +513,7 @@ class HermesEngine:
                 except TimeoutError:
                     kill_group(process.pid)
                     await process.wait()
+            CHILDREN.discard(process)
             drain.cancel()
             await asyncio.gather(drain, return_exceptions=True)
 
@@ -448,6 +561,7 @@ class HermesEngine:
             if not self.prepared():
                 yield Failed(run_id, "other", PREPARE_FIRST)
                 return
+            self._sweep_once()
             version, _ = await self._version(located)
             if version is None or version < MIN_HERMES_VERSION:
                 yield Failed(run_id, "incompatible", f"This Hermes Agent version can't be used. Update to "
@@ -479,6 +593,8 @@ class HermesEngine:
             if granted and self.mcp is not None:
                 self.mcp.revoke(run_id)
             shutil.rmtree(work, ignore_errors=True)
+            if active.session_id:  # the ACP process has ended here (``_acp`` closed it)
+                self._in_background(self._forget([active.session_id]))
 
     async def _session(self, turn: AgentTurn, prompt: str, servers: list[dict[str, Any]], work: Path,
                        connection: AcpConnection, active: _ActiveRun) -> AsyncIterator[AgentEvent]:
@@ -493,6 +609,8 @@ class HermesEngine:
             raise _Refused(Failed(run_id, "other", "Hermes Agent stopped while starting.")) from error
         session_id = str(session.get("sessionId") or "")
         active.session_id = session_id
+        if session_id:
+            self._remember(session_id)  # before any prompt: Hermes saves the session from the first one
         await self._select_model(turn, session, connection, session_id)
         listing = await self._local_command(connection, session_id, "/tools")
         if not tools_listing_allowed(listing):

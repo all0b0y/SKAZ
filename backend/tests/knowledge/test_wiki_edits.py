@@ -11,8 +11,9 @@ from typing import Any
 import httpx
 import pytest
 
-from skaz.knowledge.markdown.page import parse_page, render_page
+from skaz.knowledge.markdown.page import Block, Cite, parse_page, render_page
 from skaz.knowledge.service import KnowledgeService
+from skaz.knowledge.sources.guard.exclusions import ExcludedFragment, ExclusionFile, FragmentLocation
 from skaz.knowledge.wiki.delete import StillRecording
 
 from .ingest_support import wait_finished
@@ -198,6 +199,64 @@ async def test_a_recheck_that_fails_the_source_check_leaves_the_block(
     note_id = next(block["id"] for block in note["blocks"] if block["kind"] == "user_note")
     refused = await kb_client.post(f"/kb/wiki/pages/{page_id}/blocks/{note_id}/recheck")
     assert refused.status_code == 409
+
+
+def exclude(kb: KnowledgeService, material_id: str, seg: int) -> None:
+    """Mark ``seg`` as an instruction kept out of processing (S1's ``excluded.json``)."""
+    record = kb.material_repo.get(material_id)
+    assert record is not None
+    item = ExcludedFragment(seg=seg, text_hash="h", reason="Instruction for an AI", rules=["ignore"],
+                            score=1.0, found="…", location=FragmentLocation(start_ms=0),
+                            detected_at="2026-10-15T00:00:00Z")
+    path = kb.library_root / record.rel_dir / ".skaz" / "excluded.json"
+    path.write_text(ExclusionFile(excluded=[item]).model_dump_json(), encoding="utf-8")
+
+
+async def test_a_recheck_never_sends_or_accepts_an_excluded_fragment(
+    kb_app: Any, kb_client: httpx.AsyncClient
+) -> None:
+    """Poisoning layer 3: a fragment excluded as an instruction is not a source for the recheck either."""
+    case = await lecture_and_textbook(kb_app, kb_client)
+    page_id = case.concept_id(ENTROPY_TITLE)
+    target = statement(case.kb, page_id, "газа растёт")
+    path = page_file(case.kb, page_id)
+    document = parse_page(path.read_text("utf-8"))
+    wider = Block.create(target.id, target.kind, target.body, owner=target.owner,
+                         cites=(*target.cites, Cite(case.lecture, 1, "мера беспорядка системы")))
+    path.write_text(render_page(document.with_block(wider)), encoding="utf-8")
+    exclude(case.kb, case.lecture, 3)
+    before = path.read_text("utf-8")
+
+    case.wiki.queues.setdefault(RECHECK, []).append(json.dumps(
+        {"text": "Энтропия газа растёт.",
+         "cites": [{"source": 1, "seg": 3, "quote": "энтропия газа тоже растёт"}]},
+        ensure_ascii=False,
+    ))
+    job = (await kb_client.post(f"/kb/wiki/pages/{page_id}/blocks/{target.id}/recheck")).json()
+    await case.service.jobs.wait(job["id"])
+    failed = (await kb_client.get(f"/kb/jobs/{job['id']}")).json()
+    [turn] = case.wiki.turns(RECHECK)
+    sent = " ".join(message.content for message in turn.messages)
+    assert "Если температура растёт" not in sent and "[seg-3]" not in sent
+    assert "мера беспорядка системы" in sent
+    # A quote from the excluded fragment is not accepted: nothing else was cited, so nothing is written.
+    assert failed["state"] == "failed" and "left as it was" in failed["error"]
+    assert path.read_text("utf-8") == before
+
+
+async def test_a_recheck_whose_only_source_is_excluded_is_refused(
+    kb_app: Any, kb_client: httpx.AsyncClient
+) -> None:
+    case = await lecture_and_textbook(kb_app, kb_client)
+    page_id = case.concept_id(ENTROPY_TITLE)
+    target = statement(case.kb, page_id, "газа растёт")
+    assert {cite.seg for cite in target.cites} == {3}
+    exclude(case.kb, case.lecture, 3)
+    job = (await kb_client.post(f"/kb/wiki/pages/{page_id}/blocks/{target.id}/recheck")).json()
+    await case.service.jobs.wait(job["id"])
+    failed = (await kb_client.get(f"/kb/jobs/{job['id']}")).json()
+    assert failed["state"] == "failed" and "excluded" in failed["error"]
+    assert case.wiki.turns(RECHECK) == []
 
 
 # -- outside edits ------------------------------------------------------------------------------

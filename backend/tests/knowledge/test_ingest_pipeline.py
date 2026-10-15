@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -434,6 +436,36 @@ async def test_close_interrupts_running_jobs(ready: KnowledgeService) -> None:
     assert ingest.job(job.id).state == "interrupted"
 
 
+async def test_a_request_that_races_close_starts_nothing(ready: KnowledgeService,
+                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """close() while a request is between its checks and its task: no job outlives the service."""
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    wiki = ScriptedWiki(notes=[NOTES_OK], gate=asyncio.Event())
+    ingest = service_for(ready, wiki)
+    loop = asyncio.get_running_loop()
+    create = ingest.jobs.create
+    closing: list[asyncio.Task[None]] = []
+    closed = threading.Event()
+
+    def start_closing() -> None:
+        closing.append(loop.create_task(ingest.close()))
+        loop.call_soon(closed.set)  # close() has begun by then
+
+    def create_while_closing(*args: Any, **kwargs: Any) -> Any:
+        # The app shuts down while the job row is being written (on a worker thread).
+        loop.call_soon_threadsafe(start_closing)
+        assert closed.wait(5)
+        return create(*args, **kwargs)
+
+    monkeypatch.setattr(ingest.jobs, "create", create_while_closing)
+    with pytest.raises(IngestBusy):
+        await ingest.request_ingest(material_id)
+    await asyncio.gather(*closing)
+    assert not [task for task in asyncio.all_tasks() if task.get_name().startswith("ingest-")]
+    assert [job.state for job in ingest.jobs.list_all(material_id=material_id)] == ["interrupted"]
+    assert wiki.engine.turns == []
+
+
 async def test_long_source_is_cut_into_parts_covering_every_fragment(ready: KnowledgeService) -> None:
     fragments = [FragmentInput(text=f"Абзац номер {n}: " + "слово " * 20) for n in range(1, 13)]
     material_id = add_material(ready, "Тексты", "Длинный", fragments, kind="text")
@@ -515,3 +547,41 @@ async def test_engine_failure_is_reported_with_its_reason(ready: KnowledgeServic
     job = await ingest.request_ingest(material_id)
     record = await wait_finished(ingest, job.id)
     assert record.state == "failed" and record.error == "The agent stopped: Usage limit reached."
+
+
+@pytest.mark.parametrize("kind", ["analysis", "note", "folder"])
+async def test_a_connection_side_is_never_an_analysis_notes_or_folder_page(ready: KnowledgeService,
+                                                                           kind: str) -> None:
+    """Decision 8: only a concept page can be the second side of a connection; an analysis is no source."""
+    from skaz.knowledge.ids import new_id
+    from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
+
+    meta = PageMeta(skaz_id=new_id("pg"), kind=kind, title="Термодинамика")  # type: ignore[arg-type]
+    page = PageDocument(meta=meta, parts=[Block.create(new_id("c"), "explanation", "Ответ чата.")])
+    ready.create_page(page)
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    good = block("from_source", "Мера беспорядка.", cite(1, "мера беспорядка"))
+    one_side = block("connection", "Беспорядок связан с термодинамикой.", cite(1, "мера беспорядка"),
+                     links=("Термодинамика",))
+    wiki = ScriptedWiki(notes=[notes(("Раздел", [good, one_side]))])
+    ingest = service_for(ready, wiki)
+    job_id = await run_ingest(ingest, material_id)
+    text = (wiki_dir(ready) / "Notes" / "Лекция 8.md").read_text(encoding="utf-8")
+    assert "Мера беспорядка." in text and "связан с термодинамикой" not in text
+    assert ingest.job(job_id).counters["blocks_dropped"] == 1
+
+
+async def test_a_concept_page_is_a_connection_side(ready: KnowledgeService) -> None:
+    from skaz.knowledge.ids import new_id
+    from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
+
+    ready.create_page(PageDocument(meta=PageMeta(skaz_id=new_id("pg"), kind="concept", title="Термодинамика"),
+                                   parts=[Block.create(new_id("c"), "explanation", "Понятие.")]))
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    side = block("connection", "Беспорядок связан с термодинамикой.", cite(1, "мера беспорядка"),
+                 links=("Термодинамика",))
+    good = block("from_source", "Мера беспорядка.", cite(1, "мера беспорядка"))
+    wiki = ScriptedWiki(notes=[notes(("Раздел", [good, side]))])
+    await run_ingest(service_for(ready, wiki), material_id)
+    text = (wiki_dir(ready) / "Notes" / "Лекция 8.md").read_text(encoding="utf-8")
+    assert "связан с термодинамикой" in text and "[[Wiki/Concepts/Термодинамика|" in text

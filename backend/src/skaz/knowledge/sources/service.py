@@ -19,9 +19,8 @@ import contextlib
 import logging
 import os
 import shutil
-import stat
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -36,6 +35,7 @@ from ..library.fsio import dump_json, fsync_dir, read_json, write_atomic
 from ..library.layout import SERVICE_DIR
 from ..library.library import MaterialFiles
 from ..library.names import validate_name
+from ..logsafe import error_note
 from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
@@ -61,6 +61,7 @@ from .intake import (
     prepare_text_file,
 )
 from .links import LinkInfo, VideoProbe, classify_link, classify_offline, domain_of
+from .paths import given_path, resolved_file
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +70,9 @@ MAX_PDF_BYTES = 200 * 1024 * 1024
 MAX_TEXT_FILE_BYTES = 64 * 1024 * 1024
 MAX_LINKED_PDF_BYTES = 100 * 1024 * 1024
 EXCLUDED_NOTIFICATION = "excluded_instruction"
+#: One lock for every ``excluded.json`` read-modify-write, shared by all ``SourceService``
+#: instances (speech guards its materials through its own instance).
+_GUARD_LOCK = threading.RLock()
 RESTORE_LABEL = "This isn't an instruction — restore"
 VIDEO_LINK = "This is a video link. Add it with the speech import (audio and video)."
 MEDIA_FILE_LINK = (
@@ -163,7 +167,7 @@ class SourceService:
         self.fetcher = fetcher or SafeFetcher()
         self.video_probe = video_probe
         self._listeners: list[Listener] = []
-        self._lock = threading.RLock()
+        self._lock = _GUARD_LOCK
 
     # -- events ---------------------------------------------------------------
 
@@ -175,8 +179,9 @@ class SourceService:
         for listener in list(self._listeners):
             try:
                 listener(event)
-            except Exception:
-                log.exception("Source event listener failed for %s", event.kind)
+            except Exception as error:
+                log.error("Source event listener failed for %s of %s: %s", event.kind, event.material_id,
+                          error_note(error))
 
     # -- adding ----------------------------------------------------------------
 
@@ -254,38 +259,16 @@ class SourceService:
         return await classify_link(url, self.fetcher, video_probe=self.video_probe if probe else None)
 
     def _checked_file(self, raw: str | Path) -> Path:
-        """The file path from the open dialog: absolute, a readable regular file of a supported type.
-
-        The backend can't prove the path came from the dialog (the renderer
-        forwards it); it refuses what a dialog would never return: relative
-        paths, hidden folders, the app's own data, devices and other types.
-        """
-        text = str(raw)
-        if "\x00" in text or not text:
-            raise SourceRejected("Choose a file to add.")
-        path = Path(text)
-        if not path.is_absolute():
-            raise SourceRejected("The file path must be absolute.")
-        if any(part.startswith(".") for part in path.parts[1:]):
-            raise SourceRejected("Files inside hidden folders can't be added.")
+        """The file path from the open dialog: absolute, a readable regular file of a supported type,
+        not in a hidden folder or SKAZ's own data — checked where the file really is (``paths``)."""
+        path = given_path(raw, SourceRejected)
         suffix = path.suffix.lower()
         if suffix not in PDF_EXTENSIONS | TEXT_EXTENSIONS:
             raise SourceRejected(
                 "SKAZ adds PDF, Markdown (.md) and text (.txt) files here. "
                 "Audio and video go through the speech import."
             )
-        try:
-            resolved = path.resolve(strict=True)
-            info = resolved.stat()
-        except (OSError, RuntimeError) as error:
-            raise SourceRejected("This file doesn't exist any more or can't be opened.") from error
-        data_dir = self.kb.data_dir.resolve()
-        if resolved == data_dir or data_dir in resolved.parents:
-            raise SourceRejected("Files from SKAZ's own data folder can't be added.")
-        if not stat.S_ISREG(info.st_mode):
-            raise SourceRejected("Choose a regular file.")
-        if not os.access(resolved, os.R_OK):
-            raise SourceRejected("SKAZ isn't allowed to read this file.")
+        resolved, info = resolved_file(path, self.kb.data_dir, SourceRejected)
         limit = MAX_PDF_BYTES if suffix in PDF_EXTENSIONS else MAX_TEXT_FILE_BYTES
         if info.st_size > limit:
             raise SourceRejected(f"This file is larger than {limit // (1024 * 1024)} MB.")
@@ -327,7 +310,7 @@ class SourceService:
             if not prepared.failure:
                 self.kb.set_material_status(material_id, "ready")
         except (OSError, KnowledgeError, ValidationError) as error:
-            log.exception("Finishing material %s failed", material_id)
+            log.error("Finishing material %s failed: %s", material_id, error_note(error))
             with contextlib.suppress(OSError, KnowledgeError):
                 self.kb.set_material_status(material_id, "failed")
             raise KnowledgeError(
@@ -475,19 +458,27 @@ class SourceService:
         self._emit(SourceEvent("fragment_restored", material_id, seg))
         return self.guard_report(material_id)
 
-    def rescan(self, material_id: str) -> GuardReport:
+    def rescan(self, material_id: str, *, segs: Collection[int] | None = None) -> GuardReport:
         """Run the detector again over the material's current fragments (restored texts stay included).
 
         For reprocessing and for materials added by other areas (speech).
-        A new exclusion raises a notification like adding does.
+        ``segs``: only these fragments (speech appended them just now); the
+        other fragments keep their exclusions as they are. A new exclusion
+        raises a notification like adding does.
         """
         with self._lock:
             files = self._material_files(material_id)
             current = self._read_exclusions(files.directory)
-            detections = [detect_instruction(fragment.text) for fragment in files.fragments]
-            excluded = self._exclusions(files.fragments, detections, current)
+            scanned = [item for item in files.fragments if segs is None or item.seg in segs]
+            detections = [detect_instruction(fragment.text) for fragment in scanned]
+            excluded = self._exclusions(scanned, detections, current)
             known = {(item.seg, item.text_hash) for item in current.excluded}
             new = [item for item in excluded if (item.seg, item.text_hash) not in known]
+            if segs is not None:
+                kept = [item for item in current.excluded if item.seg not in segs]
+                if not new and len(kept) + len(excluded) == len(current.excluded):
+                    return self.guard_report(material_id)  # nothing changed: no write
+                excluded = sorted([*kept, *excluded], key=lambda item: item.seg)
             current.excluded = excluded
             if new:
                 current.notification_id = self._notify(material_id, files.title, new)

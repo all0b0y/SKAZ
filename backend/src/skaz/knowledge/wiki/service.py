@@ -27,6 +27,7 @@ from ..errors import KnowledgeError, NotFound
 from ..ingest.jobs import JobRecord
 from ..ingest.service import IngestService
 from ..ingest.writer import WikiWriter
+from ..logsafe import error_note
 from ..markdown.page import PageDocument
 from ..notifications.feed import NotificationFeed, register_material_kinds
 from ..service import KnowledgeService, MaterialDetail, PageView
@@ -69,8 +70,9 @@ class PageDetail:
 
 
 def _log_failure(task: asyncio.Task[None]) -> None:
-    if not task.cancelled() and task.exception() is not None:
-        logger.error("wiki work after ingest failed", exc_info=task.exception())
+    error = None if task.cancelled() else task.exception()
+    if error is not None:
+        logger.error("wiki work after ingest failed: %s", error_note(error))
 
 
 class WikiService:
@@ -134,8 +136,9 @@ class WikiService:
         try:
             self.store.rebuild_index()
             self.graph.refresh(force=True)
-        except Exception:  # the scan itself succeeded; these indexes are rebuilt on the next one
-            logger.exception("rebuilding the corrections index or graph after a scan failed")
+        except Exception as error:  # the scan itself succeeded; these indexes are rebuilt on the next one
+            logger.error("rebuilding the corrections index or graph after a scan failed: %s",
+                         error_note(error))
 
     # -- engines ------------------------------------------------------------
 
@@ -165,8 +168,9 @@ class WikiService:
         """W1 ``ConceptUpdateHook``: compare the new statements with other sources on the page."""
         self._touch()
 
-        async def log(message: str) -> None:
-            logger.info("discrepancy check: %s", message)
+        async def log(_message: str) -> None:
+            # The message names pages and materials: the log gets the page id only.
+            logger.info("discrepancy check on page %s: one step logged", page_id)
 
         await self.discrepancies.check_page(page_id, list(new_block_ids), self._caller("disc"), log)
 
@@ -351,17 +355,18 @@ class WikiService:
     def move_material(self, material_id: str, *, title: str | None, folder_id: str | None) -> MaterialDetail:
         with self.ctx.write_lock:
             journal = move_material(self.kb, material_id, title=title, folder_id=folder_id)
-        for line in journal:
-            logger.info("move %s: %s", material_id, line)
+        if journal:  # the lines name pages; the log gets ids and a count only
+            logger.info("move %s: %d page(s) could not be updated", material_id, len(journal))
         self.graph.refresh()
         self._refresh_index()
         return self.kb.material(material_id)
 
     def _refresh_index(self) -> None:
         try:
-            self._writer.refresh_index(self.ingest.settings().language)
-        except (OSError, KnowledgeError):
-            logger.info("Wiki/index.md could not be refreshed", exc_info=True)
+            with self.ctx.write_lock:  # reads the page index, writes Wiki/index.md: one library write
+                self._writer.refresh_index(self.ingest.settings().language)
+        except (OSError, KnowledgeError) as error:
+            logger.info("Wiki/index.md could not be refreshed: %s", error_note(error))
 
     # -- pages ----------------------------------------------------------------
 
@@ -445,8 +450,8 @@ class WikiService:
                 await self.tick()
             except asyncio.CancelledError:
                 raise
-            except Exception:  # one bad tick never stops the watcher
-                logger.exception("wiki watcher tick failed")
+            except Exception as error:  # one bad tick never stops the watcher
+                logger.error("wiki watcher tick failed: %s", error_note(error))
 
     async def tick(self) -> JobRecord | None:
         """Start background "Find connections" when the user allowed it, SKAZ is idle and the wiki changed."""

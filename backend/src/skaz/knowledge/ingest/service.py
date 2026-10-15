@@ -14,6 +14,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 from ...native_io import disk_call
 from ..decisions.protocol import DecisionLayer
@@ -79,7 +80,10 @@ class IngestService:
         #: Called with ``(material_id, job)`` after a job finished ``done`` (W2: overview, connections).
         self.finished_listeners: list[Callable[[str, JobRecord], None]] = []
         self.limits = limits or Limits()
-        self._writer = WikiWriter(kb, threading.Lock())
+        # The library's one write lock (``KnowledgeService.writing``): wiki writes, W2 page edits,
+        # library scans and the Wiki/ watcher never interleave. ``WikiWriter`` only enters it; the
+        # cast is the annotation there (``threading.Lock``), the object is the re-entrant library lock.
+        self._writer = WikiWriter(kb, cast("threading.Lock", kb.writing()))
         #: The one lock for writing wiki files; W2 page edits take it too, so writes never interleave.
         self.write_lock = self._writer.lock
         self._active: dict[str, _Active] = {}
@@ -130,6 +134,11 @@ class IngestService:
             job = await disk_call(lambda: self.jobs.create(material_id, kind=kind))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)
+        if self._closing:
+            # close() ran while this request was on a worker thread: it could not see a task to
+            # stop, so none may start now — the job ends as an interrupted one.
+            await disk_call(self.jobs.finish, job.id, "interrupted", error=INTERRUPTED_REASON)
+            raise IngestBusy("SKAZ is closing. Retry after it starts again.")
         self._active[job.id] = reservation
         reservation.task = asyncio.create_task(self._run(job.id, reservation), name=f"ingest-{job.id}")
         return job

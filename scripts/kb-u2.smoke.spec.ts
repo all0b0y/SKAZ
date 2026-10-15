@@ -252,6 +252,23 @@ for (const theme of THEMES) {
       await page.keyboard.press('Escape');
     });
 
+    test(`settings: consent to send audio to Soniox — ${tag}`, async () => {
+      await open('?soniox=off', theme, view);
+      await page.getByRole('button', { name: 'Settings, needs attention' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Settings' });
+      await dialog.getByRole('navigation').getByRole('button', { name: /^Recording . speech/ }).click();
+      const plate = dialog.locator('.kb-banner', { hasText: 'Sending audio to Soniox is off' });
+      await expect(plate).toBeVisible();
+      const consent = dialog.getByRole('switch', { name: 'Send audio to Soniox' });
+      await expect(consent).toHaveAttribute('aria-checked', 'false');
+      await check(`settings-soniox-consent-off-${tag}`);
+      await plate.getByRole('button', { name: 'Allow sending audio to Soniox' }).click();
+      await expect(plate).toHaveCount(0);
+      await expect(consent).toHaveAttribute('aria-checked', 'true');
+      await check(`settings-soniox-consent-on-${tag}`);
+      await page.keyboard.press('Escape');
+    });
+
     test(`first launch: Agent step — ${tag}`, async () => {
       await open('?onboarding=1', theme, view);
       const dialog = page.getByRole('dialog', { name: 'Welcome to SKAZ' });

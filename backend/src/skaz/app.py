@@ -15,6 +15,7 @@ from .activity import current_activity
 from .config import AppConfig
 from .knowledge.api import ROUTERS as KB_ROUTERS
 from .knowledge.mcp.router import router as kb_mcp_router
+from .knowledge.shutdown import close_knowledge
 from .native_io import disk_call
 from .routes import health, live, logs, sessions, settings
 from .runtime import Runtime
@@ -46,12 +47,8 @@ def create_app(
             await runtime.kb_speech.start()
             yield
         finally:
-            await runtime.kb_wiki.close()
-            await runtime.kb_chats.close()
-            await runtime.kb_ingest.close()
-            await runtime.kb_codex.close()
-            await runtime.kb_decisions.aclose()
-            await runtime.kb_agents.aclose()
+            # Agents and llama-server first, then the wiki services, within Electron's grace.
+            await close_knowledge(runtime)
             await runtime.codex_connection.close()
             await runtime.imports.close()
             await runtime.stop_native()
