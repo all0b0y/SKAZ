@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from skaz.knowledge.sources.pdf import NO_TEXT_LAYER, ONLY_HIDDEN_TEXT, PdfRejected, extract_pdf
-from tests.knowledge.pdf_fixtures import glyph_line, line, make_pdf, word_by_word
+from tests.knowledge.pdf_fixtures import glyph_line, line, make_pdf, rect, word_by_word
 
 BODY = (
     "Entropy measures the number of microscopic states compatible with a macrostate. "
@@ -142,10 +142,13 @@ def test_render_mode_persists_after_et_like_in_a_viewer() -> None:
 
 WORDY = [
     (20, ["Seminar Assignment 2: The Boardroom Dilemma"]),
-    (11, [
-        "You are acting as senior consultants hired by a pension fund that",
-        "currently holds four hundred units in assets.",
-    ]),
+    (
+        11,
+        [
+            "You are acting as senior consultants hired by a pension fund that",
+            "currently holds four hundred units in assets.",
+        ],
+    ),
     (11, ["Your task is to take a definitive position and pitch it to the board."]),
 ]
 WORDY_PARAGRAPHS = [
@@ -221,3 +224,83 @@ def test_unreadable_text_is_left_out_and_recorded_never_kept_as_garbage() -> Non
 def test_ordinary_text_is_never_taken_for_garbage(text: str) -> None:
     extraction = extract_pdf(make_pdf([line(text, 700)]))
     assert [p.text for p in extraction.paragraphs] == [text] and extraction.findings == []
+
+
+# User bug 1016-7: a slide deck paints a dark background and writes white text on it. Text is
+# hidden only when its colour is close to what is actually painted beneath it.
+TITLE = "Sustainable Business Management"
+SECRET = "Secret words for the model."
+DARK = "0.13 0.2 0.4 rg"
+
+
+def hidden_page(content: bytes, **options: object) -> tuple[list[str], list[str]]:
+    extraction = extract_pdf(make_pdf([line(BODY, 700) + content], **options))  # type: ignore[arg-type]
+    return [p.text for p in extraction.paragraphs], [f.detail for f in extraction.findings]
+
+
+@pytest.mark.parametrize(
+    ("background", "prefix", "options", "visible"),
+    [
+        (rect(DARK), "1 1 1 rg", {}, True),
+        (rect("1 g"), "1 1 1 rg", {}, False),
+        (b"", "0.93 g", {}, False),
+        (rect("1 1 1 rg"), "0.93 0.93 0.93 rg", {}, False),
+        (b"q 612 0 0 792 0 0 cm /Im1 Do Q\n", "1 1 1 rg", {"image": True}, True),
+        (rect("0 0 0.2 rg"), "0.03 0.03 0.25 rg", {}, False),
+        (rect("0 0 0 1 k"), "0.9 0.9 0.9 rg", {}, True),
+        (rect(DARK, 300, 0, 312, 792), "1 1 1 rg", {}, False),
+        (rect(DARK) + rect("1 g", 0, 600, 612, 120), "1 1 1 rg", {}, False),
+        (rect(DARK, prefix="/Clear gs"), "1 1 1 rg", {"alphas": {"Clear": 0.0}}, False),
+        (rect(DARK, prefix="0 0 10 10 re W n"), "1 1 1 rg", {}, False),
+        (rect(DARK) + b"q 612 0 0 792 0 0 cm /Im1 Do Q\n" + rect("1 g"), "1 1 1 rg", {"image": True}, False),
+    ],
+    ids=[
+        "white on a dark rectangle",
+        "white on a white rectangle",
+        "light grey on the page",
+        "light grey on a white rectangle",
+        "white over an image",
+        "dark text on a dark rectangle",
+        "light grey on black",
+        "white beside a dark rectangle",
+        "white on a white box over a dark slide",
+        "white on a fully transparent dark rectangle",
+        "white beside a clipped-away dark rectangle",
+        "white on white painted over an image",
+    ],
+)
+def test_text_is_hidden_only_in_the_colour_beneath_it(
+    background: bytes, prefix: str, options: dict[str, object], visible: bool
+) -> None:
+    texts_, details = hidden_page(background + line(SECRET, 680, prefix=prefix), **options)
+    assert (SECRET in " ".join(texts_)) is visible
+    assert texts_[0].startswith(BODY)
+    assert len(details) == (0 if visible else 1)
+
+
+def test_a_slide_with_white_text_on_its_painted_background_keeps_every_line() -> None:
+    # The lecture's layout: a flipped page matrix, the background as a scaled path filled with f*,
+    # text under its own scale and a flipped text matrix.
+    content = (
+        b"q 1 0 0 -1 0 792 cm\n"
+        b"q .001968504 0 0 .001968504 0 0 cm 0 0 m 310896 0 l 310896 402336 l 0 402336 l h W n\n"
+        b"q 0.086 0.17 0.4 rg 0 0 m 310896 0 l 310896 402336 l 0 402336 l h f* Q Q\n"
+        b"q 381 0 0 381 0 0 cm q 1 0 0 1 0.2 0.2 cm 1 1 1 rg\n"
+        b"BT /F1 0.08 Tf 1 0 0 -1 0 0.1 Tm 0 0 Td (" + TITLE.encode() + b") Tj ET\n"
+        b"BT /F1 0.03 Tf 1 0 0 -1 0 0.2 Tm 0 0 Td (Moscow 2026) Tj ET\n"
+        b"Q Q Q\n"
+    )
+    extraction = extract_pdf(make_pdf([content]))
+    assert [p.text for p in extraction.paragraphs] == [TITLE, "Moscow 2026"]
+    assert extraction.findings == [] and extraction.title == TITLE
+
+
+def test_transparent_text_is_hidden() -> None:
+    texts_, details = hidden_page(line(SECRET, 680, prefix="/Clear gs"), alphas={"Clear": 0.0})
+    assert texts_ == [BODY]
+    assert details == ["Removed hidden PDF text (transparent text)."]
+
+
+def test_a_hidden_colour_on_a_dark_background_is_named_after_the_background() -> None:
+    _, details = hidden_page(rect("0 0 0.2 rg") + line(SECRET, 680, prefix="0.03 0.03 0.25 rg"))
+    assert details == ["Removed hidden PDF text (text the colour of its background)."]

@@ -9,6 +9,7 @@ from pypdf.generic import (
     ArrayObject,
     DecodedStreamObject,
     DictionaryObject,
+    FloatObject,
     NameObject,
     NumberObject,
     TextStringObject,
@@ -112,12 +113,14 @@ def make_pdf(
     image: bool = False,
     forms: dict[str, bytes] | None = None,
     cid_font: str | None = None,
+    alphas: dict[str, float] | None = None,
 ) -> bytes:
     """One page per content stream. ``image`` adds ``/Im1`` (a 1×1 image) to every page's resources.
 
     ``cid_font`` adds ``/F2``, a two-byte (Identity-H) TrueType font whose codes are glyph numbers
     = Unicode − 29, like a subset Arial: ``"mapped"`` with a ToUnicode map, ``"unmapped"`` without
     one (what such a font prints without its map is the user's "+6(8QLYHUVLW\\" for "HSE University").
+    ``alphas`` adds graphics states ``/<name>`` with that fill and stroke alpha (``/ca``, ``/CA``).
     """
     writer = PdfWriter()
     font = writer._add_object(
@@ -155,6 +158,15 @@ def make_pdf(
         resources = DictionaryObject({NameObject("/Font"): fonts})
         if xobjects:
             resources[NameObject("/XObject")] = xobjects
+        if alphas:
+            resources[NameObject("/ExtGState")] = DictionaryObject(
+                {
+                    NameObject(f"/{name}"): DictionaryObject(
+                        {NameObject("/ca"): FloatObject(alpha), NameObject("/CA"): FloatObject(alpha)}
+                    )
+                    for name, alpha in alphas.items()
+                }
+            )
         page[NameObject("/Resources")] = resources
         stream = DecodedStreamObject()
         stream.set_data(content)
@@ -172,6 +184,12 @@ def line(text: str, y: int, *, size: int = 12, prefix: str = "", x: int = 72) ->
     shown = f"BT /F1 {size} Tf {prefix} {x} {y} Td ({escaped}) Tj ET"
     return (f"q {shown} Q\n" if prefix else f"{shown}\n").encode("cp1252")
 
+
+def rect(
+    color: str, x: float = 0, y: float = 0, width: float = 612, height: float = 792, *, prefix: str = ""
+) -> bytes:
+    """A filled rectangle (``color`` is a fill operator such as ``"0 0 0.3 rg"``), scoped with ``q … Q``."""
+    return f"q {prefix} {color} {x} {y} {width} {height} re f Q\n".encode()
 
 
 def word_by_word(blocks: list[tuple[int, list[str]]], *, spaces: bool = True, top: float = 72) -> bytes:
