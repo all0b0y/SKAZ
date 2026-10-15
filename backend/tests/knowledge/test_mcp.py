@@ -304,10 +304,12 @@ def test_no_token_carrying_dataclass_shows_its_token() -> None:
     checked = []
     for module in (server, tokens, mcp_access):
         for value in vars(module).values():
-            own = isinstance(value, type) and value.__module__ == module.__name__
-            if own and dataclasses.is_dataclass(value):
+            if not isinstance(value, type) or value.__module__ != module.__name__:
+                continue
+            name = value.__name__
+            if dataclasses.is_dataclass(value):
                 for item in dataclasses.fields(value):
                     if "token" in item.name:
-                        checked.append(f"{value.__name__}.{item.name}")
-                        assert item.repr is False, f"{value.__name__}.{item.name} is shown in repr"
+                        checked.append(f"{name}.{item.name}")
+                        assert item.repr is False, f"{name}.{item.name} is shown in repr"
     assert "McpAccess.token" in checked
