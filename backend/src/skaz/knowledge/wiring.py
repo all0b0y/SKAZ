@@ -3,21 +3,27 @@
 * The S1 instruction detector is the ingest layer-5 output check (W1).
 * The decision layer the user chose *now* (D1) answers ingest's "which page"
   questions; when it is off, ingest asks the writing model and logs that.
-* Wiki engines resolve to the engines that exist; an engine that is not
-  available yields ``None`` (the job fails with a plain reason) — never a
-  silent substitute.
-* A new material (S1) is added to the wiki when the wiki settings say so
-  (decision 15), and a restored fragment re-runs its material (decision 41).
+* Wiki engines resolve through the engine registry (A2); an unknown engine
+  yields ``None`` (the job fails with a plain reason) — never a silent
+  substitute. Claude Code and Hermes reach the SKAZ tools through per-run
+  MCP tokens of the A1 server (``McpGrants``).
+* A new material (S1 documents, S2 finished speech — never a paused
+  recording) is added to the wiki when the wiki settings say so (decision
+  15), and a restored fragment re-runs its material (decision 41).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
-from .agents.engine import AgentEngine
+from .agents.engine import AgentEngine, EngineId, ToolSpec
+from .agents.mcp_access import McpAccess as EngineMcpAccess
+from .agents.registry import ENGINE_IDS
 from .decisions.protocol import Answer, DeciderId, DecisionLayer, Question, Undecided
 from .ingest.service import IngestService
+from .mcp.server import McpServer
+from .mcp.tokens import McpRunScope
 from .service import KnowledgeService
 from .sources.guard.detector import Detection, detect_instruction
 from .sources.service import SourceEvent, SourceService
@@ -33,6 +39,20 @@ class GuardDetector:
     def detect(self, text: str) -> Sequence[Detection]:
         detection = detect_instruction(text)
         return [detection] if detection is not None else []
+
+
+class McpGrants:
+    """A2's ``McpAccessProvider`` over the A1 MCP server: a token per run, limited to its tools."""
+
+    def __init__(self, server: McpServer) -> None:
+        self._server = server
+
+    def grant(self, run_id: str, tools: tuple[ToolSpec, ...]) -> EngineMcpAccess:
+        token = self._server.issue_mcp_token(McpRunScope(run_id, frozenset(tool.name for tool in tools)))
+        return EngineMcpAccess(self._server.url, token)
+
+    def revoke(self, run_id: str) -> None:
+        self._server.revoke_run(run_id)
 
 
 class CurrentDecisions:
@@ -79,6 +99,10 @@ class AutoIngest:
         settings = self._ingest.settings()
         return settings.auto_add_text if material.kind == "text" else settings.auto_add_files_links
 
+    def material_finished(self, material_id: str) -> None:
+        """A recording was stopped or an import completed (speech, S2)."""
+        self(SourceEvent("material_ready", material_id))
+
     def __call__(self, event: SourceEvent) -> None:
         if not self.wants(event):
             return
@@ -103,10 +127,12 @@ class AutoIngest:
             log.info("Automatic ingest of %s did not start", material_id, exc_info=True)
 
 
-def engine_resolver(engines: dict[str, AgentEngine],
-                    default: str = "codex") -> Callable[[str | None], AgentEngine | None]:
+def engine_resolver(engines: Mapping[EngineId, AgentEngine],
+                    default: Callable[[], str]) -> Callable[[str | None], AgentEngine | None]:
+    """The wiki engine, or the app's default engine (Settings → Models) when none is chosen."""
     def resolve(engine_id: str | None) -> AgentEngine | None:
-        return engines.get(engine_id or default)
+        wanted = engine_id or default()
+        return engines.get(wanted) if wanted in ENGINE_IDS else None
 
     return resolve
 
@@ -116,11 +142,12 @@ def wire(
     ingest: IngestService,
     sources: SourceService,
     decisions: Callable[[], DecisionLayer | None],
-    engines: dict[str, AgentEngine],
+    engines: Mapping[EngineId, AgentEngine],
+    default_engine: Callable[[], str] = lambda: "codex",
 ) -> AutoIngest:
     ingest.detector = GuardDetector()
     ingest.decisions = CurrentDecisions(decisions)
-    ingest.engines = engine_resolver(engines)
+    ingest.engines = engine_resolver(engines, default_engine)
     auto = AutoIngest(kb, ingest)
     sources.subscribe(auto)
     return auto

@@ -114,6 +114,9 @@ class SpeechService:
         self._dirty: set[str] = set()
         self._locks: dict[str, asyncio.Lock] = {}
         self._closing = False
+        #: Called with a material id when speech settled finished (Stop or a completed import,
+        #: not a Pause): the wiki may process it now.
+        self._finished_listeners: list[Callable[[str], None]] = []
         legacy.add_listeners(on_event=self._on_event_saved, on_import=self._on_import_changed)
 
     # -- plumbing -----------------------------------------------------------
@@ -238,6 +241,8 @@ class SpeechService:
     # -- settling -------------------------------------------------------------
 
     async def _settle(self, carrier: Carrier, reason: str | None, set_error: bool) -> None:
+        before = await disk_call(self.kb.material_repo.get, carrier.material_id)
+        was_ready = before is not None and before.status == "ready"
         await self._project(carrier.material_id, carrier.session_id, final=True)
         await disk_call(self.projector.write_translation, carrier.material_id, carrier.session_id)
         if set_error:
@@ -245,7 +250,20 @@ class SpeechService:
         error = reason if set_error else carrier.attempt_error
         record = await disk_call(self.kb.material_repo.get, carrier.material_id)
         empty = record is None or record.fragment_count == 0
-        await self._set_status(carrier.material_id, "failed" if error and empty else "ready")
+        status: MaterialStatus = "failed" if error and empty else "ready"
+        await self._set_status(carrier.material_id, status)
+        # Once per finish: an explicit Stop after the stream already settled changes nothing.
+        if status == "ready" and not was_ready and \
+                await disk_call(self.legacy.recording_state, carrier.session_id) != "paused":
+            for listener in list(self._finished_listeners):
+                try:
+                    listener(carrier.material_id)
+                except Exception:
+                    logger.exception("Speech finished listener failed for %s", carrier.material_id)
+
+    def on_finished(self, listener: Callable[[str], None]) -> None:
+        """Subscribe to finished speech materials (used to add them to the wiki)."""
+        self._finished_listeners.append(listener)
 
     async def _reconcile_import(self, carrier: Carrier) -> None:
         status = await disk_call(self.legacy.import_status, carrier.session_id)

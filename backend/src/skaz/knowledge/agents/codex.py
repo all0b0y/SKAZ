@@ -90,7 +90,6 @@ class CodexProcesses(Protocol):
 
     def rpc(self, *, max_message_bytes: int = ...) -> CodexRpc: ...
 
-
 class _Closed:
     """Queue marker: the run's process ended."""
 
@@ -199,6 +198,15 @@ class CodexEngine:
                 self._status_at = time.monotonic()
             assert self._status is not None
             return self._status
+
+    async def login_url(self, consent: bool) -> str:
+        """Codex's own ChatGPT sign-in (the existing flow); SKAZ never sees credentials."""
+        login = getattr(self._connection, "login", None)
+        if login is None:
+            raise RuntimeError("This Codex connection has no sign-in.")
+        url = str(await login(consent))
+        self._status = None
+        return url
 
     async def models(self) -> Sequence[ModelOption]:
         """Visible models from ``model/list``; empty when Codex is missing or does not answer."""

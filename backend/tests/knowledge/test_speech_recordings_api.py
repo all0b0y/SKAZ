@@ -134,6 +134,8 @@ LECTURE: list[Step] = [
 def test_a_recording_grows_by_closed_monologues_and_continues_into_the_same_material(
     http: TestClient, provider: Provider,
 ) -> None:
+    finished: list[str] = []
+    http.app.state.runtime.kb_speech.on_finished(finished.append)  # type: ignore[attr-defined]
     created = http.post("/kb/recordings", headers=AUTH, json={})
     assert created.status_code == 201, created.text
     rec = created.json()
@@ -161,6 +163,8 @@ def test_a_recording_grows_by_closed_monologues_and_continues_into_the_same_mate
     ]
     stopped = http.post(f"/kb/recordings/{material_id}/stop", headers=AUTH).json()
     assert (stopped["status"], stopped["recording_state"], stopped["error"]) == ("ready", "stopped", None)
+    # Finished once (the wiki may take it now), not again for the explicit Stop that changed nothing.
+    assert finished == [material_id]
 
     # Continue recording: the same material, ``seg`` continues after the existing ones.
     assert http.post(f"/kb/recordings/{material_id}/resume", headers=AUTH).status_code == 200
@@ -176,6 +180,7 @@ def test_a_recording_grows_by_closed_monologues_and_continues_into_the_same_mate
     assert (paused["status"], paused["recording_state"]) == ("ready", "paused")
     assert texts(http, material_id)[-1] == (4, "More", "3")
     assert len(http.get("/kb/materials", headers=AUTH).json()) == 1
+    assert finished == [material_id]  # a Pause is not a finished recording
 
 
 def test_a_recognition_error_keeps_the_text_and_belongs_to_the_attempt(

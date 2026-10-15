@@ -19,6 +19,57 @@ export interface KbAddText {
   title?: string | null;
 }
 
+export interface KbAgent {
+  id: "codex" | "claude_code" | "hermes";
+  name: string;
+  state: "ready" | "not_installed" | "outdated" | "signed_out" | "unavailable";
+  installed: boolean;
+  version: string | null;
+  min_version: string;
+  signed_in: boolean;
+  incompatible: boolean;
+  reason: string | null;
+  action: "install" | "update" | "login" | "check" | null;
+  models: KbAgentModel[];
+  current_model: string | null;
+  install: KbAgentInstallInfo;
+  install_task: string | null;
+  checked_at: string;
+}
+
+export interface KbAgentDefault {
+  engine: "codex" | "claude_code" | "hermes";
+}
+
+export interface KbAgentInstallInfo {
+  docs_url: string;
+  manual_command: string;
+  checked_on: string;
+}
+
+export interface KbAgentLogin {
+  consent?: boolean;
+}
+
+export interface KbAgentLoginResult {
+  engine: "codex" | "claude_code" | "hermes";
+  method: "terminal" | "browser";
+  url: string | null;
+  message: string;
+}
+
+export interface KbAgentModel {
+  id: string;
+  label: string;
+  efforts: string[];
+  default_effort: string | null;
+}
+
+export interface KbAgents {
+  agents: KbAgent[];
+  default: "codex" | "claude_code" | "hermes";
+}
+
 export interface KbBlock {
   id: string;
   kind: "from_source" | "connection" | "explanation" | "user_note";
@@ -157,6 +208,31 @@ export interface KbImportCreate {
   translate?: boolean;
   language?: string | null;
   allow_duplicate?: boolean;
+}
+
+export interface KbInstallLine {
+  seq: number;
+  text: string;
+  at: string;
+}
+
+export interface KbInstallStart {
+  action?: "install" | "update";
+}
+
+export interface KbInstallTask {
+  id: string;
+  engine: "codex" | "claude_code" | "hermes";
+  action: "install" | "update";
+  state: "running" | "succeeded" | "failed" | "cancelled";
+  lines: KbInstallLine[];
+  cursor: number;
+  dropped: number;
+  reason: string | null;
+  version: string | null;
+  install: KbAgentInstallInfo;
+  started_at: string;
+  finished_at: string | null;
 }
 
 export interface KbJob {
@@ -378,6 +454,55 @@ export interface KbWikiSettingsUpdate {
 
 /** Every /kb route: path and query parameters, JSON body and JSON response. */
 export interface KbEndpoints {
+  "GET /kb/agents": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbAgents;
+    status: 200;
+  };
+  "PUT /kb/agents/default": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbAgentDefault;
+    response: KbAgents;
+    status: 200;
+  };
+  "GET /kb/agents/install/{task_id}": {
+    path: { task_id: string };
+    query: { after?: number; wait?: number };
+    body: never;
+    response: KbInstallTask;
+    status: 200;
+  };
+  "POST /kb/agents/install/{task_id}/cancel": {
+    path: { task_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbInstallTask;
+    status: 200;
+  };
+  "POST /kb/agents/{engine}/check": {
+    path: { engine: "codex" | "claude_code" | "hermes" };
+    query: Record<string, never>;
+    body: never;
+    response: KbAgent;
+    status: 200;
+  };
+  "POST /kb/agents/{engine}/install": {
+    path: { engine: "codex" | "claude_code" | "hermes" };
+    query: Record<string, never>;
+    body: KbInstallStart | null;
+    response: KbInstallTask;
+    status: 202;
+  };
+  "POST /kb/agents/{engine}/login": {
+    path: { engine: "codex" | "claude_code" | "hermes" };
+    query: Record<string, never>;
+    body: KbAgentLogin | null;
+    response: KbAgentLoginResult;
+    status: 200;
+  };
   "GET /kb/decisions": {
     path: Record<string, never>;
     query: Record<string, never>;

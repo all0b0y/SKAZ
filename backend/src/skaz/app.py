@@ -63,6 +63,7 @@ def create_app(
             await runtime.kb_ingest.close()
             await runtime.kb_codex.close()
             await runtime.kb_decisions.aclose()
+            await runtime.kb_agents.aclose()
             await runtime.codex.close()
             await runtime.imports.close()
             await runtime.stop_native()

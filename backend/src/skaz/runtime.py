@@ -21,6 +21,7 @@ from .gateways.asr import LocalModelPreparations
 from .import_service import ImportService
 from .ingestion import IngestionService
 from .knowledge.agents.codex import CodexEngine
+from .knowledge.agents.hub import build_agents_hub
 from .knowledge.agents.tools import ToolRegistry
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
@@ -29,6 +30,7 @@ from .knowledge.service import KnowledgeService
 from .knowledge.sources.links import ytdlp_probe
 from .knowledge.sources.service import SourceService
 from .knowledge.speech import create_speech_service
+from .knowledge.wiring import McpGrants
 from .knowledge.wiring import wire as wire_knowledge
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -85,6 +87,10 @@ class Runtime:
         self.kb_codex = CodexEngine(self.codex.connection, self.kb_tools)
         #: Adding documents, links and pasted text to the knowledge library (area S1).
         self.kb_sources = SourceService(self.kb, video_probe=ytdlp_probe)
+        #: Agent engines (Codex, Claude Code, Hermes): statuses, installs, sign-in; nothing runs until asked.
+        self.kb_agents = build_agents_hub(config.data_dir, settings=self.kb.settings,
+                                          codex=self.codex.connection, codex_engine=self.kb_codex,
+                                          mcp=McpGrants(self.kb_mcp))
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
@@ -95,10 +101,9 @@ class Runtime:
             api_key=lambda: self.secrets.get("openrouter"), activity=self.activity_log,
         )
         #: Seams between the knowledge areas (detector, decisions, engines, auto-ingest).
-        #: Engines: Codex only until the engine registry (A2) lands; others resolve to None.
         self.kb_auto_ingest = wire_knowledge(
             self.kb, self.kb_ingest, self.kb_sources, self.kb_decisions.layer,
-            {"codex": self.kb_codex},
+            self.kb_agents.registry.engines, self.kb_agents.registry.default,
         )
         self.web_search = WebSearch(self.db, self.secrets)
         self.codex.web_search = self.web_search
@@ -114,6 +119,7 @@ class Runtime:
         self.imports = ImportService(self)
         #: Speech → materials (area S2): links recordings/imports to library materials.
         self.kb_speech = create_speech_service(self)
+        self.kb_speech.on_finished(self.kb_auto_ingest.material_finished)
         #: Written-but-unapplied note passages, held until the user compares them.
         self.note_rewrites = PendingRewrites()
         self.window_asr = WindowAsrPreview(self)
