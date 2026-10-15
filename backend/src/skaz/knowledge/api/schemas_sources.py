@@ -32,6 +32,9 @@ class KbAddText(_Request):
     folder_id: str = Field(min_length=1, max_length=64)
     #: ``null`` = the first words of the text (≤ 60 characters).
     title: str | None = Field(default=None, max_length=255)
+    #: Decision 15: add this material to the wiki once it is ready (``true``), keep it out
+    #: (``false``), or let Settings → Wiki decide (``null``).
+    to_wiki: bool | None = None
 
 
 class KbAddFile(_Request):
@@ -40,6 +43,9 @@ class KbAddFile(_Request):
     folder_id: str = Field(min_length=1, max_length=64)
     #: ``null`` = the document's own title, else the file name.
     title: str | None = Field(default=None, max_length=255)
+    #: Decision 15: add this material to the wiki once it is ready (``true``), keep it out
+    #: (``false``), or let Settings → Wiki decide (``null``).
+    to_wiki: bool | None = None
 
 
 KbAddLinkMode = Literal["text", "video", "both"]
@@ -56,6 +62,9 @@ class KbAddLink(_Request):
     #: Videos only: the spoken language (``null`` = the saved languages) and provider translation.
     language: str | None = Field(default=None, max_length=32)
     translate: bool = False
+    #: Decision 15: add this material to the wiki once it is ready (``true``), keep it out
+    #: (``false``), or let Settings → Wiki decide (``null``).
+    to_wiki: bool | None = None
 
 
 class KbClassifyLink(_Request):

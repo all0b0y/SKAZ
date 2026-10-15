@@ -12,6 +12,7 @@ import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
 import { clearEditor, insertText, insertToken, isEmpty, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { openTarget } from '../state/document';
+import { ingestWhenReady } from '../materials/ingestWhenReady';
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; started: number } | { phase: 'transcribing' };
 
@@ -121,9 +122,11 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const addAttachments = (items: Array<{ source: Attachment['source']; name: string; value: string; materialId?: string }>) => {
     for (const item of items) {
       const key = attachmentKey();
-      const inWiki = item.source === 'file' || item.source === 'link';
+      // Decision 15: the default comes from Settings → Wiki; the user may switch it either way.
+      const inWiki = wiki ? (item.source === 'text' ? wiki.auto_add_text : wiki.auto_add_files_links) : item.source !== 'text';
       setAttachments((list) => [...list, {
         key, name: item.name, source: item.source, state: item.materialId ? 'ready' : 'adding', materialId: item.materialId ?? null, error: null, inWiki,
+        materialReady: true,
       }]);
       if (item.materialId) continue;
       if (!inboxId) {
@@ -132,13 +135,11 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
       const source = item.source as 'file' | 'link' | 'text';
       addMaterial(client, source, item.value, inboxId).then(
-        (id) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'ready', materialId: id } : a))),
+        (added) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready } : a))),
         (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
       );
     }
   };
-
-  const autoWiki = (a: Attachment) => !!wiki && (a.source === 'text' ? wiki.auto_add_text : wiki.auto_add_files_links);
 
   const submit = async () => {
     const root = editorRef.current;
@@ -156,11 +157,11 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     const result = await chats.getState().send(input, context);
     setSending(false);
     if (!result.ok) { setError(result.error); return; }
-    // "In wiki" for what Settings does not add by itself (decision 15).
+    // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
     for (const a of ready) {
-      if (a.source !== 'existing' && a.inWiki && !autoWiki(a)) {
-        client.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: a.materialId! } }).catch((e: unknown) => {
-          setError(`“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${errorText(e)} You can add it from Materials later.`);
+      if (a.source !== 'existing' && a.inWiki) {
+        ingestWhenReady(client, a.materialId!, a.materialReady, (text) => {
+          setError(`“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${text} You can add it from Materials later.`);
         });
       }
     }
@@ -252,7 +253,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
           onPick={pickMention} onHover={setActive} />
       )}
-      <AttachmentChips items={attachments} autoWiki={autoWiki}
+      <AttachmentChips items={attachments}
         onToggleWiki={(key) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, inWiki: !a.inWiki } : a)))}
         onRemove={(key) => setAttachments((list) => list.filter((a) => a.key !== key))} />
       <div className="kb-editor-wrap">

@@ -29,10 +29,6 @@ class StoredSettings(BaseModel):
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
-    #: Explicit opt-in for the experimental contextual local mode. It is the only
-    #: user-facing way to enable local live finality and the local speech gate;
-    #: it stays false for settings documents written before this field existed.
-    contextual_local_enabled: bool = False
     #: The live and media-import transcription provider. Soniox stays the default so
     #: settings written before this field existed keep behaving exactly as before.
     transcription_provider: TranscriptionProvider = "soniox"
@@ -107,11 +103,6 @@ class SettingsStore:
             if (
                 current.asr != settings.asr
                 or current.transcript_language != settings.transcript_language
-                # The contextual opt-in changes decoder behaviour (finality and the
-                # speech gate), and toggling it off and on again returns the effective
-                # booleans to equal values. Only a monotonic generation can keep a
-                # decode started under the withdrawn configuration from committing.
-                or current.contextual_local_enabled != settings.contextual_local_enabled
             ):
                 connection.execute(
                     """
@@ -143,7 +134,6 @@ def apply_update(current: StoredSettings, update: SettingsUpdate) -> StoredSetti
         "transcript_language",
         "output_language",
         "cloud_consent",
-        "contextual_local_enabled",
         "capture_system_audio",
         "transcription_provider",
         "local_whisper_model",

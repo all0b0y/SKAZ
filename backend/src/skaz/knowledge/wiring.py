@@ -9,6 +9,8 @@
   MCP tokens of the A1 server (``McpGrants``).
 * The wiki after ingest (W2): recognition corrections and their check, the
   discrepancy hook, notification actions (``wire_wiki``).
+* The first finished recording offers the local decision model once, when no
+  decision provider is chosen (``corrections/offer.py``, user decision X2-8).
 * A new material (S1 documents, S2 finished speech — never a paused
   recording) is added to the wiki when the wiki settings say so (decision
   15), and a restored fragment re-runs its material (decision 41).
@@ -22,13 +24,16 @@ from collections.abc import Callable, Mapping, Sequence
 from .agents.engine import AgentEngine, EngineId, ToolSpec
 from .agents.mcp_access import McpAccess as EngineMcpAccess
 from .agents.registry import ENGINE_IDS
+from .corrections.offer import AutoFixesOffer
 from .decisions.protocol import Answer, DeciderId, DecisionLayer, Question, Undecided
+from .decisions.service import DecisionService
 from .ingest.service import IngestService
 from .logsafe import error_note
 from .mcp.server import McpServer
 from .mcp.tokens import McpRunScope
 from .service import KnowledgeService
 from .sources.guard.detector import Detection, detect_instruction
+from .sources.material_info import wiki_states
 from .sources.service import SourceEvent, SourceService
 from .speech.link_failures import LinkFailures
 from .speech.service import SpeechService
@@ -64,8 +69,16 @@ class McpGrants:
 class CurrentDecisions:
     """Whatever decision layer is selected at the moment of each question."""
 
-    def __init__(self, current: Callable[[], DecisionLayer | None]) -> None:
+    def __init__(self, current: Callable[[], DecisionLayer | None],
+                 ready: Callable[[], bool] | None = None) -> None:
         self._current = current
+        self._ready = ready
+
+    def ready(self) -> bool:
+        """A layer is chosen and can answer (local model downloaded / cloud consent and key)."""
+        if self._current() is None:
+            return False
+        return self._ready() if self._ready is not None else True
 
     @property
     def id(self) -> DeciderId:
@@ -85,21 +98,60 @@ class CurrentDecisions:
         return await layer.ask_many(questions)
 
 
+#: Settings key of the user's "to wiki" choice for a speech material still being imported (decision 15).
+CHOICE_KEY = "wiki.add_choice."
+
+
 class AutoIngest:
-    """Starts ingest from source events, which may fire on any thread."""
+    """Starts ingest from source events, which may fire on any thread.
+
+    Decision 15: the "to wiki" switch of a new file, link or text is the user's, whatever Settings →
+    Wiki says (the settings only give its default). Documents carry the choice in their event; an
+    audio/video import finishes later, so its choice is kept (``remember``) until it does — in the
+    knowledge settings, so an import resumed after a restart still follows it.
+    """
 
     def __init__(self, kb: KnowledgeService, ingest: IngestService) -> None:
         self._kb = kb
         self._ingest = ingest
         self._loop: asyncio.AbstractEventLoop | None = None
+        #: Started ingest requests, held until done (the loop keeps only weak references to tasks).
+        self.running: set[asyncio.Task[None]] = set()
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
 
+    def remember(self, material_id: str, to_wiki: bool | None) -> None:
+        """The user's choice for a material that becomes ready later (speech import, video link)."""
+        if to_wiki is not None:
+            self._kb.settings.set(CHOICE_KEY + material_id, to_wiki)
+
+    def _choice(self, material_id: str) -> bool | None:
+        value = self._kb.settings.get(CHOICE_KEY + material_id)
+        if value is None:
+            return None
+        self._kb.settings.set(CHOICE_KEY + material_id, None)
+        return value is True
+
     def wants(self, event: SourceEvent) -> bool:
         if event.kind == "fragment_restored":
-            return True
+            return self._restore_reruns(event.material_id)
+        choice = event.to_wiki if event.to_wiki is not None else self._choice(event.material_id)
+        if choice is not None:
+            return choice
         material = self._kb.material_repo.get(event.material_id)
+        if material is None:
+            return False
+        settings = self._ingest.settings()
+        return settings.auto_add_text if material.kind == "text" else settings.auto_add_files_links
+
+    def _restore_reruns(self, material_id: str) -> bool:
+        """Review L2: a restored fragment re-runs the material only if the wiki has (or tried to add) it,
+        or Settings → Wiki add this kind by themselves — never a material the user kept out."""
+        state = wiki_states(self._kb.db, [material_id]).get(material_id)
+        if state is not None and state.state != "not_in_wiki":
+            return True
+        material = self._kb.material_repo.get(material_id)
         if material is None:
             return False
         settings = self._ingest.settings()
@@ -118,7 +170,9 @@ class AutoIngest:
         except RuntimeError:
             running = None
         if running is not None:
-            running.create_task(coroutine)
+            task = running.create_task(coroutine)
+            self.running.add(task)
+            task.add_done_callback(self.running.discard)
         elif self._loop is not None and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(coroutine, self._loop)
         else:
@@ -157,9 +211,10 @@ def wire(
     decisions: Callable[[], DecisionLayer | None],
     engines: Mapping[EngineId, AgentEngine],
     default_engine: Callable[[], str] = lambda: "codex",
+    decisions_ready: Callable[[], bool] | None = None,
 ) -> AutoIngest:
     ingest.detector = GuardDetector()
-    ingest.decisions = CurrentDecisions(decisions)
+    ingest.decisions = CurrentDecisions(decisions, decisions_ready)
     ingest.engines = engine_resolver(engines, default_engine)
     auto = AutoIngest(kb, ingest)
     sources.subscribe(auto)
@@ -171,3 +226,12 @@ def wire_speech(kb: KnowledgeService, speech: SpeechService) -> LinkFailures:
     failures = LinkFailures(kb, speech)
     failures.register()
     return failures
+
+
+def wire_fixes_offer(kb: KnowledgeService, speech: SpeechService,
+                     decisions: DecisionService) -> AutoFixesOffer:
+    """X2-8: the one-time "turn on automatic fixes" offer at the first finished recording."""
+    offer = AutoFixesOffer(kb, decisions)
+    offer.register()
+    speech.on_finished(offer.material_finished)
+    return offer

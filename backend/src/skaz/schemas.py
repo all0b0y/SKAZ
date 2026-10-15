@@ -112,8 +112,6 @@ class Settings(BaseModel):
     transcript_language: str = "auto"
     output_language: str = "ru"
     cloud_consent: bool = False
-    #: Explicit opt-in for the experimental contextual local mode; off by default.
-    contextual_local_enabled: bool = False
     transcription_provider: TranscriptionProvider = "soniox"
     local_whisper_model: str = "small"
     openai_transcription_model: str = "whisper-1"
@@ -150,8 +148,6 @@ class SettingsUpdate(BaseModel):
     transcript_language: str | None = None
     output_language: str | None = None
     cloud_consent: bool | None = None
-    #: Omitted keeps the stored value: enabling is always an explicit user action.
-    contextual_local_enabled: bool | None = None
     transcription_provider: TranscriptionProvider | None = None
     local_whisper_model: str | None = Field(default=None, max_length=64)
     openai_transcription_model: str | None = Field(default=None, max_length=64)

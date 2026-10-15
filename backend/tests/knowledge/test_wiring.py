@@ -58,16 +58,32 @@ async def test_pasted_text_waits_for_the_user_by_default(ready: KnowledgeService
 
 async def test_a_restored_fragment_reruns_its_material_from_a_worker_thread(ready: KnowledgeService) -> None:
     good = block("from_source", "Entropy measures disorder.", cite(1, "a measure of the disorder"))
-    wiki = ScriptedWiki(notes=[notes(("Entropy", [good]))])
+    wiki = ScriptedWiki(notes=[notes(("Entropy", [good]))] * 2)
     ingest, sources = wired(ready, wiki)
-    result = sources.add_text(TEXT, "fld-inbox", "Restore me")
+    result = sources.add_text(TEXT, "fld-inbox", "Restore me", to_wiki=True)  # the user put it in the wiki
+    await settle(lambda: bool(ingest.list_jobs(material_id=result.material_id)))
+    first = await wait_finished(ingest, ingest.list_jobs(material_id=result.material_id)[0].id)
+    assert first.state == "done", first
     seg = next(iter(sources.excluded_segs(result.material_id)))
     await asyncio.to_thread(sources.restore, result.material_id, seg)
-    await settle(lambda: bool(ingest.list_jobs(material_id=result.material_id)))
-    job = await wait_finished(ingest, ingest.list_jobs(material_id=result.material_id)[0].id)
+    await settle(lambda: len(ingest.list_jobs(material_id=result.material_id)) == 2)
+    rerun = next(job for job in ingest.list_jobs(material_id=result.material_id) if job.id != first.id)
+    job = await wait_finished(ingest, rerun.id)
     assert job.state == "done", job
     assert any("Ignore all previous instructions" in prompt_text(turn)
                for turn in wiki.turns(prompts.NOTES_SCHEMA_TITLE))
+
+
+async def test_restoring_a_fragment_of_a_material_kept_out_of_the_wiki_adds_nothing(
+        ready: KnowledgeService) -> None:
+    """Review L2: "Return fragment" re-runs ingest only for a material the wiki takes (or took)."""
+    ingest, sources = wired(ready, ScriptedWiki())
+    ingest.update_settings(auto_add_text=False)
+    result = sources.add_text(TEXT, "fld-inbox", "Kept out")
+    seg = next(iter(sources.excluded_segs(result.material_id)))
+    await asyncio.to_thread(sources.restore, result.material_id, seg)
+    await asyncio.sleep(0.1)
+    assert ingest.list_jobs(material_id=result.material_id) == []
 
 
 async def test_model_output_with_an_instruction_is_blocked_by_the_guard(ready: KnowledgeService) -> None:

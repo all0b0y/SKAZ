@@ -17,6 +17,7 @@ from typing import Any
 
 from .db import Database
 from .gateways.soniox import SonioxConfig, SonioxEvent
+from .knowledge.logsafe import error_note
 from .native_tokens import persist_tokens, read_tokens
 from .native_translation import project_final_translation, project_live_translation
 from .schemas import NativeRecordingMode
@@ -57,8 +58,9 @@ class LiveStore:
         for listener in self._listeners:
             try:
                 listener(session_id)
-            except Exception:  # a listener never breaks the recording
-                logger.exception("Live event listener failed")
+            except Exception as error:  # a listener never breaks the recording
+                # Ids and types only: the message/traceback can quote a title or recognised text.
+                logger.error("Live event listener failed for %s: %s", session_id, error_note(error))
 
     def open(
         self, session_id: str, *, sample_rate: int, model: str,

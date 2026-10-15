@@ -97,6 +97,8 @@ export interface AddOptions {
   /** Spoken language of audio/video; null = detect. */
   language: string | null;
   translate: boolean;
+  /** Decision 15: the user's "Add to wiki" switch, sent with the request; the backend honours it. */
+  toWiki: boolean;
 }
 
 export interface Added {
@@ -110,24 +112,24 @@ export async function submitItem(client: KbClient, item: AddItem, o: AddOptions)
   const fromSummary = (m: KbMaterialSummary): Added => ({ materialId: m.id, ready: m.status === 'ready' });
   if (item.type === 'file') {
     if (item.kind === 'speech') {
-      const view = await client.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language } });
+      const view = await client.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
       return [{ materialId: view.material_id, ready: view.status === 'ready' }];
     }
-    const added = await client.call('POST /kb/materials/file', { body: { path: item.path, folder_id: o.folderId } });
+    const added = await client.call('POST /kb/materials/file', { body: { path: item.path, folder_id: o.folderId, to_wiki: o.toWiki } });
     return [fromSummary(added.material)];
   }
   if (item.type === 'text') {
-    const added = await client.call('POST /kb/materials/text', { body: { text: item.text, folder_id: o.folderId } });
+    const added = await client.call('POST /kb/materials/text', { body: { text: item.text, folder_id: o.folderId, to_wiki: o.toWiki } });
     return [fromSummary(added.material)];
   }
   // A plain video link goes to the speech import (spoken language + translation apply);
   // an article with a video asks text/video/both and goes to /kb/materials/link (§4).
   if (item.info?.kind === 'video') {
-    const view = await client.call('POST /kb/imports', { body: { url: item.url, folder_id: o.folderId, translate: o.translate, language: o.language } });
+    const view = await client.call('POST /kb/imports', { body: { url: item.url, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
     return [{ materialId: view.material_id, ready: view.status === 'ready' }];
   }
   const added = await client.call('POST /kb/materials/link', {
-    body: { url: item.url, folder_id: o.folderId, ...(item.info?.embedded_video ? { mode: item.mode } : {}) },
+    body: { url: item.url, folder_id: o.folderId, to_wiki: o.toWiki, ...(item.info?.embedded_video ? { mode: item.mode } : {}) },
   });
   return [fromSummary(added.material)];
 }

@@ -21,7 +21,7 @@ from typing import Literal
 from ...gateways.codex_locate import search_path
 from ..agents.engine import EngineId, EngineStatus
 from ..errors import KnowledgeError, NotFound
-from .errors import failure_reason
+from .errors import StepRefused, StepWatch, failure_reason
 from .recipes import RECIPES, Action, Recipe, Step
 from .runner import Executor, RunningStep, SubprocessExecutor, clean_line
 from .system import ElevationRefused, base_env, refuse_sudo
@@ -94,14 +94,17 @@ Verify = Callable[[EngineId], Awaitable[EngineStatus]]
 Resolve = Callable[[EngineId], Awaitable[Mapping[str, str]]]
 #: Called after every step of a task succeeded, before the result check (e.g. "Hermes is prepared").
 AfterSteps = Callable[[EngineId, Action], None]
+#: Watch around one step given its extra environment (Hermes' launchers, review C1); ``None``: no watch.
+WatchStep = Callable[[EngineId, Mapping[str, str]], StepWatch | None]
 
 
 class InstallManager:
     def __init__(self, work_dir: Path, *, verify: Verify, resolve: Resolve,
                  executor: Executor | None = None, recipes: Mapping[EngineId, Recipe] | None = None,
                  timeout_s: float = DEFAULT_TIMEOUT_S, env: Mapping[str, str] | None = None,
-                 after_steps: AfterSteps | None = None) -> None:
+                 after_steps: AfterSteps | None = None, watch_step: WatchStep | None = None) -> None:
         self.work_dir = work_dir
+        self._watch_step = watch_step
         self._verify = verify
         self._resolve = resolve
         self._after_steps = after_steps
@@ -177,7 +180,7 @@ class InstallManager:
             await self._stop(step_handle)
             minutes = round(self._timeout / 60)
             task.finish("failed", f"The installation took longer than {minutes} minutes and was stopped.")
-        except ElevationRefused as error:
+        except (ElevationRefused, StepRefused) as error:
             task.finish("failed", str(error))
         except OSError as error:
             task.finish("failed", f"SKAZ couldn't run the installer: {error.strerror or error}.")
@@ -196,15 +199,24 @@ class InstallManager:
             argv, cwd, extra = await self._fill(task.engine, step)
             refuse_sudo(argv)
             task.log(f"$ {' '.join(argv)}")
+            watch = self._watch_step(task.engine, extra) if self._watch_step is not None else None
             handle = await self._executor.start(argv, cwd=Path(cwd) if cwd else None, env={**env, **extra})
             step_handle.append(handle)
             seen: list[str] = []
-            async for raw in handle.lines():
-                text = clean_line(raw)
-                if text:
-                    seen.append(text)
-                    task.log(text)
-            code = await handle.wait()
+            try:
+                async for raw in handle.lines():
+                    text = clean_line(raw)
+                    if text:
+                        seen.append(text)
+                        task.log(text)
+                code = await handle.wait()
+            except BaseException:
+                if watch is not None:  # cancelled or timed out: still put back what points into SKAZ
+                    with contextlib.suppress(StepRefused):
+                        watch.check()
+                raise
+            if watch is not None:
+                watch.check()  # StepRefused: the step's result must not count (the task fails)
             if code != 0:
                 task.finish("failed", f"{step.label} failed. {failure_reason(seen, code)}")
                 return False

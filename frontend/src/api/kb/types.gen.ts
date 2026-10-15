@@ -11,6 +11,7 @@ export interface KbAddFile {
   path: string;
   folder_id: string;
   title?: string | null;
+  to_wiki?: boolean | null;
 }
 
 export interface KbAddLink {
@@ -20,12 +21,14 @@ export interface KbAddLink {
   mode?: "text" | "video" | "both";
   language?: string | null;
   translate?: boolean;
+  to_wiki?: boolean | null;
 }
 
 export interface KbAddText {
   text: string;
   folder_id: string;
   title?: string | null;
+  to_wiki?: boolean | null;
 }
 
 export interface KbAgent {
@@ -405,6 +408,7 @@ export interface KbImportCreate {
   translate?: boolean;
   language?: string | null;
   allow_duplicate?: boolean;
+  to_wiki?: boolean | null;
 }
 
 export interface KbInstallLine {

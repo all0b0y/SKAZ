@@ -10,8 +10,9 @@ import { useLibrary, useServices } from '../state/context';
 /**
  * "+" in the message field (v3, decision 15): a file, a link, pasted text or one of my materials.
  * Everything new is saved to Materials right away (Inbox when no folder is chosen — decision 16)
- * through the existing material routes; "In wiki" is on by default for files and links, off for
- * pasted text, and can be switched until the message is sent.
+ * through the existing material routes, held out of the wiki (``to_wiki: false``); "In wiki" starts
+ * from Settings → Wiki (decision 15) and stays the user's to switch until the message is sent, when a
+ * ticked one is added (an import once it is processed).
  */
 export interface Attachment {
   key: string;
@@ -21,6 +22,8 @@ export interface Attachment {
   materialId: string | null;
   error: string | null;
   inWiki: boolean;
+  /** The material can be added to the wiki now (an audio/video import is still processing). */
+  materialReady: boolean;
 }
 
 const SPEECH_EXT = new Set(['aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm', 'mkv', 'mov', 'avi', 'm4v']);
@@ -29,22 +32,23 @@ export function isSpeechFile(name: string): boolean {
   return SPEECH_EXT.has(/\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? '');
 }
 
-/** Create the material for one attachment; resolves with its id. */
-export async function addMaterial(client: KbClient, source: 'file' | 'link' | 'text', value: string, folderId: string): Promise<string> {
+/** Create the material for one attachment, kept out of the wiki until the message is sent. */
+export async function addMaterial(client: KbClient, source: 'file' | 'link' | 'text', value: string, folderId: string): Promise<{ id: string; ready: boolean }> {
+  const hold = { folder_id: folderId, to_wiki: false };
   if (source === 'file') {
     if (isSpeechFile(value)) {
-      const res = await client.call('POST /kb/imports', { body: { path: value, folder_id: folderId } });
-      return res.material_id;
+      const res = await client.call('POST /kb/imports', { body: { path: value, ...hold } });
+      return { id: res.material_id, ready: res.status === 'ready' };
     }
-    const res = await client.call('POST /kb/materials/file', { body: { path: value, folder_id: folderId } });
-    return res.material.id;
+    const res = await client.call('POST /kb/materials/file', { body: { path: value, ...hold } });
+    return { id: res.material.id, ready: res.material.status === 'ready' };
   }
   if (source === 'link') {
-    const res = await client.call('POST /kb/materials/link', { body: { url: value, folder_id: folderId } });
-    return res.material.id;
+    const res = await client.call('POST /kb/materials/link', { body: { url: value, ...hold } });
+    return { id: res.material.id, ready: res.material.status === 'ready' };
   }
-  const res = await client.call('POST /kb/materials/text', { body: { text: value, folder_id: folderId } });
-  return res.material.id;
+  const res = await client.call('POST /kb/materials/text', { body: { text: value, ...hold } });
+  return { id: res.material.id, ready: res.material.status === 'ready' };
 }
 
 let seq = 0;
@@ -173,10 +177,8 @@ function MaterialPicker({ onDone }: { onDone: (ref: KbRef) => void }) {
   );
 }
 
-export function AttachmentChips({ items, autoWiki, onToggleWiki, onRemove }: {
+export function AttachmentChips({ items, onToggleWiki, onRemove }: {
   items: Attachment[];
-  /** Settings → Wiki adds this kind automatically: the switch can't turn it off here. */
-  autoWiki: (a: Attachment) => boolean;
   onToggleWiki: (key: string) => void;
   onRemove: (key: string) => void;
 }) {
@@ -184,7 +186,6 @@ export function AttachmentChips({ items, autoWiki, onToggleWiki, onRemove }: {
   return (
     <ul className="kb-attachments" aria-label="Attachments">
       {items.map((a) => {
-        const forced = a.source !== 'existing' && autoWiki(a);
         return (
           <li key={a.key} className={`kb-attachment is-${a.state}`}>
             <Icon name={a.source === 'link' ? 'link' : a.source === 'text' ? 'text' : 'pdf'} size={13} />
@@ -192,8 +193,8 @@ export function AttachmentChips({ items, autoWiki, onToggleWiki, onRemove }: {
             {a.state === 'adding' && <span className="kb-spinner kb-spinner--inline" role="status" aria-label="Saving to Materials" />}
             {a.state === 'failed' && <span className="kb-attachment__err" role="alert" title={a.error ?? ''}><Icon name="error" size={13} />{a.error}</span>}
             {a.source !== 'existing' && a.state !== 'failed' && (
-              <label className="kb-attachment__wiki" title={forced ? 'Settings → Wiki adds new files and links automatically' : undefined}>
-                <input type="checkbox" checked={forced || a.inWiki} disabled={forced} onChange={() => onToggleWiki(a.key)} />
+              <label className="kb-attachment__wiki">
+                <input type="checkbox" checked={a.inWiki} onChange={() => onToggleWiki(a.key)} />
                 In wiki
               </label>
             )}

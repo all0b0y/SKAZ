@@ -75,6 +75,9 @@ def manager(
         return {
             "binary": f"/Users/me/.local/bin/{RECIPES[engine].binary}",
             "install_dir": "/Users/me/.hermes/hermes-agent",
+            "hermes_home": "/skaz/agents/hermes-home",
+            "hermes_policy": "/skaz/agents/hermes-policy",
+            "hermes_runtime": "/Users/me/.hermes/tools",
         }
 
     return InstallManager(
@@ -186,6 +189,15 @@ async def test_hermes_procedure_adds_the_acp_extra_and_checks_it(tmp_path: Path)
         ["/Users/me/.local/bin/hermes", "acp", "--check"],
     ]
     assert executor.started[1]["cwd"] == Path("/Users/me/.hermes/hermes-agent")
+    # Review C1: the check runs in SKAZ's Hermes folder on the user's own tool store; the official
+    # updater and the ACP extra run as the user's Hermes (no SKAZ folder).
+    assert {key: executor.started[2]["env"].get(key) for key in ("HERMES_HOME", "HERMES_MANAGED_DIR",
+                                                                "HERMES_RUNTIME_DIR")} == {
+        "HERMES_HOME": "/skaz/agents/hermes-home",
+        "HERMES_MANAGED_DIR": "/skaz/agents/hermes-policy",
+        "HERMES_RUNTIME_DIR": "/Users/me/.hermes/tools",
+    }
+    assert not any("HERMES_HOME" in step["env"] for step in executor.started[:2])
     install = RECIPES["hermes"].plan("install")[0].argv
     assert install[-1].endswith(
         "https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive"

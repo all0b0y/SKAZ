@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from typing import Protocol
 
 _RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"no space left|ENOSPC|disk (is )?full|not enough (free )?space", re.I),
@@ -24,6 +25,15 @@ _RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"curl: \(22\)|HTTP error 40\d|404 Not Found|403 Forbidden", re.I),
      "The installer download was refused. Try again later or install manually."),
 )
+
+
+class StepRefused(Exception):
+    """A step must not run, or its result must not count; the message is the plain reason shown."""
+
+
+#: Optional check around one installer step (e.g. Hermes launchers): ``check()`` raises ``StepRefused``.
+class StepWatch(Protocol):
+    def check(self) -> None: ...
 
 
 def failure_reason(lines: Sequence[str], exit_code: int | None) -> str:

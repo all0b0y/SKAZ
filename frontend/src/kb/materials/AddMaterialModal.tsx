@@ -9,8 +9,6 @@ import {
 } from './addItems';
 
 const SPOKEN = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
-const INGEST_POLL_MS = 3000;
-const INGEST_POLL_LIMIT = 600;
 
 interface WikiAuto { files: boolean; text: boolean }
 
@@ -46,9 +44,10 @@ export function AddMaterialModal() {
       .then((r) => setTarget(r.ok ? r.data.translation_target_language ?? null : null), () => setTarget(null));
   }, [open]); // only on opening: the folder list and services are read at that moment
 
+  // Decision 15: Settings → Wiki give the default; the switch is the user's either way and travels
+  // with each add request (the backend adds the material once it is ready, or keeps it out).
   const wikiOn = toWiki ?? wikiDefault(items, auto);
   const speech = items.some(isSpeech);
-  const autoHolds = !wikiOn && items.some((i) => (i.type === 'text' ? auto.text : auto.files));
 
   const classify = (item: LinkItem) => {
     client.call('POST /kb/links/classify', { body: { url: item.url, probe: true } }).then(
@@ -91,20 +90,6 @@ export function AddMaterialModal() {
     addFiles(picked);
   };
 
-  /** "Add to wiki" on, auto-add off for that type: add it once the material is ready. */
-  const ingestWhenReady = (materialId: string, ready: boolean) => {
-    const go = () => void client.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: materialId } }).catch(() => undefined);
-    if (ready) { go(); return; }
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries += 1;
-      client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }).then((m) => {
-        if (m.status === 'ready') { clearInterval(timer); go(); }
-        else if (m.status === 'failed' || tries > INGEST_POLL_LIMIT) clearInterval(timer);
-      }, () => { if (tries > 5) clearInterval(timer); });
-    }, INGEST_POLL_MS);
-  };
-
   const submit = async () => {
     if (!items.length || !folderId) return;
     setBusy(true);
@@ -112,9 +97,7 @@ export function AddMaterialModal() {
     const left: AddItem[] = [];
     for (const item of items) {
       try {
-        const added = await submitItem(client, item, { folderId, language: language || null, translate });
-        const autoAdds = item.type === 'text' ? auto.text : auto.files;
-        if (wikiOn && !autoAdds) for (const a of added) ingestWhenReady(a.materialId, a.ready);
+        await submitItem(client, item, { folderId, language: language || null, translate, toWiki: wikiOn });
       } catch (e) {
         failed[item.id] = errorText(e);
         left.push(item);
@@ -201,9 +184,6 @@ export function AddMaterialModal() {
               <Switch label="Add to wiki after processing" checked={wikiOn} onChange={setToWiki} />
               <span>Add to wiki after processing</span>
             </div>
-            {autoHolds && (
-              <p className="kb-arow__note">Settings → Wiki adds new {items.every((i) => i.type === 'text') ? 'text' : 'files and links'} automatically, so this switch can’t hold it back yet.</p>
-            )}
             {speech && (
               <div className="kb-arow">
                 <span className="kb-arow__label">Audio and video</span>

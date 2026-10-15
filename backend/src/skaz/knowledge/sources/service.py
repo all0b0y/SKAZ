@@ -119,6 +119,8 @@ class SourceEvent:
     kind: Literal["material_ready", "fragment_restored"]
     material_id: str
     seg: int | None = None
+    #: Decision 15: the user's "to wiki" choice for a new material; ``None`` = the wiki settings decide.
+    to_wiki: bool | None = None
 
 
 Listener = Callable[[SourceEvent], None]
@@ -185,14 +187,16 @@ class SourceService:
 
     # -- adding ----------------------------------------------------------------
 
-    def add_text(self, text: str, folder_id: str, title: str | None = None) -> IntakeResult:
+    def add_text(self, text: str, folder_id: str, title: str | None = None, *,
+                 to_wiki: bool | None = None) -> IntakeResult:
         """Pasted text, any length; long paragraphs are split at sentences."""
         prepared = prepare_text(text, origin=Origin(type="paste"))
         if prepared.failure:
             raise SourceRejected(prepared.failure)
-        return self._publish(prepared, folder_id, title)
+        return self._publish(prepared, folder_id, title, to_wiki)
 
-    def add_file(self, path: str | Path, folder_id: str, title: str | None = None) -> IntakeResult:
+    def add_file(self, path: str | Path, folder_id: str, title: str | None = None, *,
+                 to_wiki: bool | None = None) -> IntakeResult:
         """A PDF (or book) or a ``.md``/``.txt`` file the user picked in the file dialog."""
         file_path = self._checked_file(path)
         suffix = file_path.suffix.lower()
@@ -208,9 +212,10 @@ class SourceService:
             prepared = prepare_text_file(file_path.read_bytes(), file_path.name, origin=origin)
             if prepared.failure:
                 raise SourceRejected("This file has no text.")
-        return self._publish(prepared, folder_id, title)
+        return self._publish(prepared, folder_id, title, to_wiki)
 
-    async def add_link(self, url: str, folder_id: str, title: str | None = None) -> IntakeResult:
+    async def add_link(self, url: str, folder_id: str, title: str | None = None, *,
+                       to_wiki: bool | None = None) -> IntakeResult:
         """An article, a PDF or a text file by URL. Video links are refused: the speech import adds them."""
         self.kb.require()  # refuse before any request when no library is connected
         offline = classify_offline(url)
@@ -250,10 +255,11 @@ class SourceService:
             raise SourceRejected(MEDIA_FILE_LINK)
         else:
             raise SourceRejected(f"SKAZ can't read this kind of page ({content_type or 'unknown type'}).")
-        return await self._publish_async(prepared, folder_id, title)
+        return await self._publish_async(prepared, folder_id, title, to_wiki)
 
-    async def _publish_async(self, prepared: Prepared, folder_id: str, title: str | None) -> IntakeResult:
-        return await disk_call(self._publish, prepared, folder_id, title)
+    async def _publish_async(self, prepared: Prepared, folder_id: str, title: str | None,
+                             to_wiki: bool | None = None) -> IntakeResult:
+        return await disk_call(self._publish, prepared, folder_id, title, to_wiki)
 
     async def classify(self, url: str, *, probe: bool = True) -> LinkInfo:
         return await classify_link(url, self.fetcher, video_probe=self.video_probe if probe else None)
@@ -279,7 +285,8 @@ class SourceService:
             return validate_name(title)
         return prepared.title or prepared.fallback_title
 
-    def _publish(self, prepared: Prepared, folder_id: str, title: str | None) -> IntakeResult:
+    def _publish(self, prepared: Prepared, folder_id: str, title: str | None,
+                 to_wiki: bool | None = None) -> IntakeResult:
         name = self._title(prepared, title)
         detections = [detect_instruction(fragment.text) for fragment in prepared.fragments]
         status: MaterialStatus = "failed" if prepared.failure else "processing"
@@ -318,7 +325,7 @@ class SourceService:
                 "It's marked as failed; delete it and try again."
             ) from error
         if not prepared.failure:
-            self._emit(SourceEvent("material_ready", material_id))
+            self._emit(SourceEvent("material_ready", material_id, to_wiki=to_wiki))
         return IntakeResult(
             material_id,
             files.title,

@@ -81,6 +81,27 @@ _HERMES = (
     _COMMON
     + r"""
 args = sys.argv[1:]
+LAUNCHER = SCENARIO.get("launcher")
+if LAUNCHER:
+    # Hermes' boot as in its source: the tool store is HERMES_RUNTIME_DIR (pm/environments.py:117), else
+    # <HERMES_HOME>/tools for a home outside ~/.hermes (hermes_constants.py:231, environments.py:140); a
+    # missing store is built and the install's launcher re-minted onto its Python (venv_sync.py:429).
+    # "rogue" ignores the override for the listed commands (a Hermes that broke the contract).
+    import shlex
+    rogue = args[:1] in [[name] for name in LAUNCHER.get("rogue", [])]
+    store = os.environ.get("HERMES_RUNTIME_DIR")
+    if rogue or not store:
+        store = os.path.join(os.environ["HERMES_HOME"], "tools")
+    python = os.path.join(store, "python-3.14", "bin", "python3")
+    if not os.path.isfile(os.path.join(store, "facts.json")):
+        os.makedirs(os.path.dirname(python), exist_ok=True)
+        open(os.path.join(store, "facts.json"), "w").write("{}")
+    script = "import sys\nsys.path.insert(0, %%r)\nfrom hermes_cli.main import main\n" %% LAUNCHER["root"]
+    body = "#!/bin/sh\nexec " + shlex.join([python, "-I", "-c", script]) + ' "$@"\n'
+    target = os.path.join(LAUNCHER["root"], ".hermes", "bin", "hermes")
+    if open(target).read() != body:
+        record("launcher_minted", store=store)
+        open(target, "w").write(body)
 if args == ["--version"]:
     print(SCENARIO.get("version_output", "Hermes Agent v0.21.5+6627.g4bb9e57 (2026.9.24)"))
     sys.exit(0)
@@ -179,6 +200,43 @@ class FakeCli:
 
 def recorded_claude_lines(name: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in (FIXTURES / name).read_text(encoding="utf-8").splitlines() if line]
+
+
+def hermes_launcher_text(python: Path, root: Path) -> str:
+    """A store launcher in the shape ``hermes_cli/_launchers.py`` mints (``exec <python> -I -c <script>``)."""
+    import shlex
+
+    script = f"import sys\nsys.path.insert(0, {str(root)!r})\nfrom hermes_cli.main import main\n"
+    return "#!/bin/sh\nexec " + shlex.join([str(python), "-I", "-c", script]) + ' "$@"\n'
+
+
+class UserHermesInstall:
+    """The user's own Hermes install in a fake home: checkout, tool store, launcher and PATH forwarder."""
+
+    def __init__(self, home: Path) -> None:
+        self.home = home
+        self.root = home / ".hermes" / "hermes-agent"
+        self.store = home / ".hermes" / "tools"
+        self.python = self.store / "python-3.14" / "bin" / "python3"
+        self.launcher = self.root / ".hermes" / "bin" / "hermes"
+        self.forwarder = home / ".local" / "bin" / "hermes"
+        self.python.parent.mkdir(parents=True)
+        (self.store / "facts.json").write_text("{}", encoding="utf-8")
+        self.root.mkdir(parents=True, exist_ok=True)
+        (self.root / "pyproject.toml").write_text("[project]\nname = 'hermes-agent'\n", encoding="utf-8")
+        self.launcher.parent.mkdir(parents=True)
+        self.launcher.write_text(hermes_launcher_text(self.python, self.root), encoding="utf-8")
+        self.launcher.chmod(0o755)
+        self.forwarder.parent.mkdir(parents=True)
+        self.forwarder.write_text(f'#!/bin/sh\nexec {self.launcher} "$@"\n', encoding="utf-8")
+        self.forwarder.chmod(0o755)
+        self.original = self.snapshot()
+
+    def snapshot(self) -> dict[str, bytes]:
+        return {"launcher": self.launcher.read_bytes(), "forwarder": self.forwarder.read_bytes()}
+
+    def scenario(self, *, rogue: tuple[str, ...] = ()) -> dict[str, Any]:
+        return {"launcher": {"root": str(self.root), "rogue": list(rogue)}}
 
 
 def hermes_probe() -> dict[str, Any]:

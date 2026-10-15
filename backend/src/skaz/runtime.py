@@ -31,7 +31,7 @@ from .knowledge.sources.service import SourceService
 from .knowledge.speech import create_speech_service
 from .knowledge.speech.dictation import Dictation
 from .knowledge.wiki.service import WikiService
-from .knowledge.wiring import McpGrants, wire_speech, wire_wiki
+from .knowledge.wiring import McpGrants, wire_fixes_offer, wire_speech, wire_wiki
 from .knowledge.wiring import wire as wire_knowledge
 from .live_store import LiveStore
 from .native_stream import NativeStream
@@ -90,6 +90,7 @@ class Runtime:
         self.kb_auto_ingest = wire_knowledge(
             self.kb, self.kb_ingest, self.kb_sources, self.kb_decisions.layer,
             self.kb_agents.registry.engines, self.kb_agents.registry.default,
+            decisions_ready=self.kb_decisions.ready,
         )
         #: The wiki after ingest (W2): corrections, discrepancies, edits, deletion, connections, graph.
         self.kb_wiki = wire_wiki(WikiService(self.kb, self.kb_ingest))
@@ -106,6 +107,8 @@ class Runtime:
         self.kb_speech.on_finished(self.kb_auto_ingest.material_finished)
         #: ``link_failed`` notifications and their actions (area S3).
         self.kb_link_failures = wire_speech(self.kb, self.kb_speech)
+        #: One-time "turn on automatic fixes" offer at the first finished recording (X2-8).
+        self.kb_fixes_offer = wire_fixes_offer(self.kb, self.kb_speech, self.kb_decisions)
         self._close_started = False
         self.native_tasks: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}
         self.native_streams: dict[str, NativeStream] = {}
@@ -161,7 +164,6 @@ class Runtime:
             transcript_language=settings.transcript_language,
             output_language=settings.output_language,
             cloud_consent=settings.cloud_consent,
-            contextual_local_enabled=settings.contextual_local_enabled,
             transcription_provider=settings.transcription_provider,
             local_whisper_model=settings.local_whisper_model,
             openai_transcription_model=settings.openai_transcription_model,
