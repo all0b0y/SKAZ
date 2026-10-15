@@ -19,7 +19,8 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
   ``scripts/run-in-hermes-env`` (/docs/reference/package-management); the
   source installer's ``[all]`` extra already includes ``[acp]`` (pyproject),
   so this step is a no-op on fresh installs and repairs older ones. Then
-  ``hermes acp --check`` verifies it.
+  ``hermes acp --check`` verifies it — in SKAZ's own Hermes folder, like every
+  other SKAZ start of Hermes (review C1).
 
 None of these needs ``sudo``; SKAZ refuses any command that would use it.
 
@@ -85,8 +86,13 @@ def _codex(action: Action) -> tuple[Step, ...]:
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
 
 
+#: SKAZ's own Hermes folder and policy on the user's own tool store (review C1,
+#: ``agents/hermes_launchers.py``): without ``HERMES_RUNTIME_DIR`` Hermes would build a store
+#: in SKAZ's folder and re-point the user's launcher.
+SKAZ_HERMES_ENV = (("HERMES_HOME", "{hermes_home}"), ("HERMES_MANAGED_DIR", "{hermes_policy}"),
+                   ("HERMES_RUNTIME_DIR", "{hermes_runtime}"))
 HERMES_PREPARE = Step("Prepare Hermes Agent's environment for SKAZ", ("{binary}", "acp", "--check"),
-                      env=(("HERMES_HOME", "{hermes_home}"), ("HERMES_MANAGED_DIR", "{hermes_policy}")))
+                      env=SKAZ_HERMES_ENV)
 #: What Hermes needs on disk for its first start (B10); shown before the user starts it.
 HERMES_PREPARE_BYTES = 1_500_000_000
 
@@ -99,7 +105,7 @@ def _hermes(action: Action) -> tuple[Step, ...]:
     return (
         first,
         Step("Add ACP support to Hermes Agent", HERMES_ACP_EXTRA, cwd="{install_dir}"),
-        Step("Check ACP support", ("{binary}", "acp", "--check")),
+        Step("Check ACP support", ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV),
     )
 
 

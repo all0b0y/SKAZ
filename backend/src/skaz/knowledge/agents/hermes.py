@@ -34,6 +34,12 @@ in ``hermes-sessions.json`` beside the folder and swept (with
 ``hermes sessions prune --source acp --yes`` for ended leftovers) on the next
 start. The user's ``~/.hermes`` is never touched (``HERMES_HOME`` is SKAZ's).
 
+The user's installation (review C1): a ``HERMES_HOME`` outside ``~/.hermes`` makes
+Hermes build its own tool store there and re-point the user's shared launcher at
+it. Every invocation therefore also gets ``HERMES_RUNTIME_DIR`` = the user's own
+store and runs under :class:`~.hermes_launchers.LauncherWatch` (see that module
+for the exact Hermes source lines).
+
 First start (decision B10): the first ``hermes acp`` in a new Hermes folder
 prepares Hermes' own environment (~1.5 GB, a few minutes). With
 ``first_run_gate`` (the app's engine) SKAZ never starts ACP — not for a status
@@ -88,6 +94,7 @@ from .engine import (
     ToolResult,
     Usage,
 )
+from .hermes_launchers import LauncherTampered, LauncherWatch, launcher_files, user_store
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .registry import FirstRun
 from .transcript import render_prompt
@@ -225,6 +232,7 @@ class HermesEngine:
                  status_timeout_s: float = 20.0, interrupt_grace_s: float = 5.0,
                  first_run_gate: bool = False) -> None:
         root = data_dir / "agents"
+        self.agents_dir = root
         self.home = ensure_private_home(root / "hermes-home", home=user_home)
         self.prepared_marker = root / PREPARED_FILE
         self.history_file = root / HISTORY_FILE
@@ -282,7 +290,22 @@ class HermesEngine:
         env = base_env(located.path, self._user_home)
         env["HERMES_HOME"] = str(ensure_private_home(self.home, home=self._user_home))
         env["HERMES_MANAGED_DIR"] = str(self.policy_dir)
+        env["HERMES_RUNTIME_DIR"] = str(self.runtime_dir(located))
         return env
+
+    def runtime_dir(self, located: Located) -> Path:
+        """The tool store the user's own ``hermes`` runs on (never one in SKAZ's folder)."""
+        return user_store(located.binary, self._user_home or Path.home())
+
+    def watch(self, located: Located, *, strict: bool = True) -> LauncherWatch:
+        """Snapshot of the user's Hermes launchers; ``LauncherTampered`` if one already points into SKAZ."""
+        home = self._user_home or Path.home()
+        system = () if self._user_home is not None else (Path("/usr/local/bin"),)
+        watch = LauncherWatch(launcher_files(located.binary, home, system_bins=system),
+                              skaz_dirs=[self.agents_dir], stores=[self.home / "tools"], strict=strict)
+        if strict:
+            watch.refuse_if_tainted()
+        return watch
 
     # -- status ---------------------------------------------------------------
 
@@ -298,8 +321,12 @@ class HermesEngine:
         key = (str(located.binary), stamp)
         if key not in self._checked:
             self.prepare()
-            out = await run_capture([str(located.binary), "--version"], env=self.environment(located),
-                                    timeout=self._status_timeout)
+            watch = self.watch(located)
+            try:
+                out = await run_capture([str(located.binary), "--version"], env=self.environment(located),
+                                        timeout=self._status_timeout)
+            finally:
+                watch.check()
             self._checked[key] = (parse_hermes_version(out.stdout), install_dir_of(out.stdout))
         return self._checked[key]
 
@@ -315,6 +342,8 @@ class HermesEngine:
             return EngineStatus("hermes", installed=False, reason=NOT_INSTALLED)
         try:
             version, _ = await self._version(located)
+        except LauncherTampered as error:
+            return EngineStatus("hermes", installed=True, incompatible=True, reason=str(error))
         except (OSError, TimeoutError):
             return EngineStatus("hermes", installed=True, incompatible=True,
                                 reason="SKAZ couldn't start Hermes Agent. Reinstall it.")
@@ -356,7 +385,7 @@ class HermesEngine:
             async with self._acp(located, work) as (connection, _initialized):
                 session = await connection.request("session/new", {"cwd": str(work), "mcpServers": []},
                                                    timeout=self._start_timeout)
-        except (_Refused, AcpError, AcpClosed, TimeoutError):
+        except (_Refused, AcpError, AcpClosed, TimeoutError, LauncherTampered):
             return ()
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -374,8 +403,9 @@ class HermesEngine:
         if located is None:
             raise FileNotFoundError(NOT_INSTALLED)
         self.prepare()
+        self.watch(located)  # never open it on a launcher that already points into SKAZ's folder
         env = self.environment(located)
-        shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR")}
+        shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR", "HERMES_RUNTIME_DIR")}
         await self._launcher.open("hermes-setup", SETUP_TITLE, [str(located.binary), "model"], shown)
 
     # -- SKAZ conversations in Hermes' session store ----------------------------
@@ -407,6 +437,8 @@ class HermesEngine:
         for session_id in session_ids:
             try:
                 code, out = await disk_call(self._cli, located, "sessions", "delete", session_id, "--yes")
+            except LauncherTampered:
+                break  # nothing more runs against a Hermes that touched the user's launchers
             except (OSError, subprocess.SubprocessError):
                 continue
             # "No session '<id>'" (sessions_cmd._not_found): Hermes holds nothing of it (never prompted).
@@ -428,7 +460,7 @@ class HermesEngine:
         await self._forget([item for item in self.pending_history() if item not in running])
         if self._runs:
             return  # prune refuses while another Hermes process holds the store; next start
-        with contextlib.suppress(OSError, subprocess.SubprocessError):
+        with contextlib.suppress(OSError, subprocess.SubprocessError, LauncherTampered):
             # Ended ACP sessions SKAZ does not know by id (e.g. a compressed continuation).
             await disk_call(self._cli, located, "sessions", "prune", "--source", "acp", "--yes")
 
@@ -440,6 +472,7 @@ class HermesEngine:
         """
         argv = [str(located.binary), *args]
         refuse_sudo(argv)
+        watch = self.watch(located)
         process = subprocess.Popen(argv, env=self.environment(located), start_new_session=True,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL)
@@ -452,6 +485,7 @@ class HermesEngine:
             raise
         finally:
             CHILDREN.discard(process)
+            watch.check()
         return process.returncode, out.decode(errors="replace")
 
     def sweep_at_start(self) -> bool:
@@ -488,6 +522,10 @@ class HermesEngine:
         work.mkdir(mode=0o700, parents=True, exist_ok=True)
         argv = [str(located.binary), "acp"]
         refuse_sudo(argv)
+        try:
+            watch = self.watch(located)
+        except LauncherTampered as error:
+            raise _Refused(Failed("", "incompatible", str(error))) from error
         process = await asyncio.create_subprocess_exec(
             *argv, cwd=str(work), env=self.environment(located), start_new_session=True,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -513,6 +551,10 @@ class HermesEngine:
             except (AcpClosed, AcpError, TimeoutError) as error:
                 await asyncio.sleep(0)
                 raise _Refused(self._startup_failure(tail, error)) from error
+            try:
+                watch.check()  # Hermes publishes launchers while it boots, before it answers ``initialize``
+            except LauncherTampered as error:
+                raise _Refused(Failed("", "incompatible", str(error))) from error
             yield connection, initialized
         finally:
             await connection.close()
@@ -526,6 +568,8 @@ class HermesEngine:
             CHILDREN.discard(process)
             drain.cancel()
             await asyncio.gather(drain, return_exceptions=True)
+            with contextlib.suppress(LauncherTampered):
+                watch.check()  # a late change pointing into SKAZ's folder is put back here too
 
     def _startup_failure(self, tail: deque[str], error: BaseException) -> Failed:
         text = " ".join(tail)
@@ -572,7 +616,11 @@ class HermesEngine:
                 yield Failed(run_id, "other", PREPARE_FIRST)
                 return
             self._sweep_once()
-            version, _ = await self._version(located)
+            try:
+                version, _ = await self._version(located)
+            except LauncherTampered as error:
+                yield Failed(run_id, "incompatible", str(error))
+                return
             if version is None or version < MIN_HERMES_VERSION:
                 yield Failed(run_id, "incompatible", f"This Hermes Agent version can't be used. Update to "
                                                      f"{dotted(MIN_HERMES_VERSION)} or newer.")

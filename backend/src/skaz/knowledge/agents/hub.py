@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ...gateways.codex_connection import CodexConnection
+from ..install.errors import StepWatch
 from ..install.recipes import RECIPES, Action
 from ..install.runner import Executor
 from ..install.system import LocateFn, locate
@@ -81,6 +82,8 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
                 target.prepare()
                 values["hermes_home"] = str(target.home)
                 values["hermes_policy"] = str(target.policy_dir)
+                if located is not None:
+                    values["hermes_runtime"] = str(target.runtime_dir(located))
         return values
 
     def after_steps(engine: EngineId, action: Action) -> None:
@@ -89,6 +92,14 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
             target.mark_prepared()
         registry.forget(engine)
 
+    def watch_step(engine: EngineId, env: Mapping[str, str]) -> StepWatch | None:
+        """Hermes steps run under a launcher watch: strict in SKAZ's folder, else only SKAZ paths count."""
+        target = registry.engine(engine)
+        located = finder(RECIPES[engine].binary)
+        if not isinstance(target, HermesEngine) or located is None:
+            return None
+        return target.watch(located, strict=env.get("HERMES_HOME") == str(target.home))
+
     installs = InstallManager(agents_dir / "install", verify=verify, resolve=resolve, executor=executor,
-                              after_steps=after_steps)
+                              after_steps=after_steps, watch_step=watch_step)
     return AgentsHub(registry, installs)
