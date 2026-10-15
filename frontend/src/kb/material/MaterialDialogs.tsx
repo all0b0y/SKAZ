@@ -145,8 +145,9 @@ export function DeleteDialog({ material, open, onClose }: { material: KbMaterial
     setBusy(true);
     try {
       await client.call('DELETE /kb/materials/{material_id}', { path: { material_id: material.id } });
-      void library.getState().loadContent();
       onClose();
+      // Out of every list (Recent, the open folder, All materials) and out of the panel.
+      void library.getState().forgetMaterial(material.id);
       closeDoc();
     } catch (e) {
       setError(errorText(e));

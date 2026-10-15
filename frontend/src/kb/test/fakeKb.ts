@@ -746,6 +746,9 @@ const ROUTES: FakeRoutes = {
     if (n.resolved_at) fail(409, 'Already decided.');
     const action = n.actions.find((a) => a.id === body.action) ?? fail(422, 'Unknown action.');
     if (action.needs_text && !String(body.text ?? '').trim()) fail(422, 'Enter the text first.');
+    // Like link_failures.handle: "Delete" removes the failed material.
+    const subject = (n.payload as { material_id?: string }).material_id;
+    if (action.id === 'delete_material' && subject) w.materials = w.materials.filter((m) => m.id !== subject);
     n.resolved_at = stamp(w);
     n.resolution = action.id;
     bump(w, n);
