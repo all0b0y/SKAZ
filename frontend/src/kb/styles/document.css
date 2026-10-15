@@ -155,6 +155,18 @@
 .kb-pst--warn { border-style: solid; border-color: color-mix(in srgb, var(--kb-warn) 60%, transparent); color: var(--kb-warn); background: var(--kb-warn-soft); }
 .kb-pst--error { border-style: solid; border-color: color-mix(in srgb, var(--kb-danger) 50%, transparent); color: var(--kb-danger); background: var(--kb-danger-soft); }
 .kb-pst.is-link { font-weight: 600; cursor: pointer; }
+/* A failure's reason is a sentence: it wraps (whole words) instead of being cut mid-word. */
+.kb-pst--wrap {
+  height: auto;
+  min-height: 24px;
+  padding: 3px 9px;
+  align-items: flex-start;
+  border-radius: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.kb-pst--wrap > .kb-icon { flex: none; margin-top: 2px; }
 .kb-pst.is-link:hover { border-color: var(--kb-muted); }
 .kb-spinner--xs { width: 10px; height: 10px; border-width: 1.5px; }
 .kb-mat__note { font-size: var(--t-sm); color: var(--kb-muted); }

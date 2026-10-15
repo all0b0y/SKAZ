@@ -49,3 +49,25 @@ async def test_a_wiki_job_requested_while_closing_starts_nothing(
     assert ran == []
     assert not [task for task in asyncio.all_tasks() if task.get_name().startswith("wiki-")]
     assert [job.state for job in repo.list_all()] == ["interrupted"]
+
+
+async def test_a_wiki_job_whose_agent_is_signed_out_says_so_in_its_code(ready: KnowledgeService) -> None:
+    """G4: a refresh/recheck that failed on sign-in carries ``AGENT_UNAVAILABLE``; other failures don't."""
+    from skaz.knowledge.agents.engine import Failed, FailureKind
+    from skaz.knowledge.agents.fake import FakeEngine
+    from skaz.knowledge.ingest.jobs import AGENT_UNAVAILABLE
+    from skaz.knowledge.wiki.agent import AgentCaller
+
+    repo = JobRepository(ready.db)
+    wiki_jobs = WikiJobs(repo)
+    outcomes: dict[FailureKind, str | None] = {"auth": AGENT_UNAVAILABLE, "network": None}
+    for kind, code in outcomes.items():
+        caller = AgentCaller(FakeEngine("codex", script=[Failed("", kind, "Sign in to Codex.")]), f"t-{kind}")
+
+        async def work(_context: Any, caller: AgentCaller = caller) -> None:
+            await caller.ask("", [], {})
+
+        job = await wiki_jobs.start("refresh", "mat-1", "reading", work)
+        await wiki_jobs.wait(job.id)
+        record = repo.get(job.id)
+        assert record is not None and record.state == "failed" and record.error_code == code, kind

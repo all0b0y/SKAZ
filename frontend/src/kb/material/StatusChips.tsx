@@ -19,14 +19,18 @@ export function stepLabel(job: KbJob): string {
 }
 
 const SPEECH: ReadonlyArray<KbMaterial['kind']> = ['recording', 'audio', 'video', 'video_link'];
+/** `KbMaterialWiki.error_code`: the agent can't work until it is fixed in Settings → Accounts & keys. */
+const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
 
-function Pill({ tone, icon, spin, children, onClick, label }: {
+function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
   tone: 'done' | 'run' | 'todo' | 'error' | 'warn';
   icon?: IconName;
   spin?: boolean;
   children: string;
   onClick?: () => void;
   label?: string;
+  /** A sentence (a failure's reason): wraps onto more lines instead of being cut. */
+  wrap?: boolean;
 }) {
   const body = (
     <>
@@ -38,7 +42,7 @@ function Pill({ tone, icon, spin, children, onClick, label }: {
   if (onClick) {
     return <button type="button" className={`kb-pst kb-pst--${tone} is-link`} onClick={onClick} aria-label={label}>{body}</button>;
   }
-  return <span className={`kb-pst kb-pst--${tone}`} role="status">{body}</span>;
+  return <span className={`kb-pst kb-pst--${tone}${wrap ? ' kb-pst--wrap' : ''}`} role="status">{body}</span>;
 }
 
 /** Processing strip (v10, decision 24): what is done, what runs now, links into the wiki. */
@@ -49,6 +53,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   adding: boolean;
 }) {
   const openDocument = useUi((s) => s.openDocument);
+  const openSettings = useUi((s) => s.openSettings);
   const { prefs } = useServices();
   const speech = SPEECH.includes(material.kind);
   const first = speech ? 'Recognised' : material.kind === 'web' ? 'Text cleaned' : material.kind === 'text' ? 'Text saved' : 'Text extracted';
@@ -85,7 +90,12 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
       )}
       {wiki?.state === 'failed' && (
         <>
-          <Pill tone="error" icon="warning">{wiki.error ? `Wiki: ${wiki.error}` : 'Couldn’t add to the wiki'}</Pill>
+          <Pill tone="error" icon="warning" wrap>{wiki.error ? `Wiki: ${wiki.error}` : 'Couldn’t add to the wiki'}</Pill>
+          {/* The agent can't work (signed out, outdated, none connected): the fix is in Settings;
+              a retry alone would fail the same way, so it comes second. */}
+          {wiki.error_code === AGENT_UNAVAILABLE && (
+            <Button size="sm" variant="outline" icon="settings" onClick={() => openSettings('conn')}>Open Accounts &amp; keys</Button>
+          )}
           <Button size="sm" variant="quiet" icon="retry" busy={adding} onClick={onAddToWiki}>Try again</Button>
         </>
       )}

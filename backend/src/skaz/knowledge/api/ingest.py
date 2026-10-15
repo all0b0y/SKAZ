@@ -26,7 +26,8 @@ def job_view(record: JobRecord) -> KbJob:
     counters = record.counters
     return KbJob.model_validate({
         "id": record.id, "kind": record.kind, "material_id": record.material_id, "state": record.state,
-        "step": record.step, "label": record.label, "error": record.error, "can_retry": record.can_retry,
+        "step": record.step, "label": record.label, "error": record.error,
+        "error_code": record.error_code, "can_retry": record.can_retry,
         "progress": KbJobProgress(**{name: counters.get(name, 0) for name in KbJobProgress.model_fields}),
         "journal": [KbJobLogEntry(at=entry.at, message=entry.message) for entry in record.journal],
         "created_at": record.created_at, "updated_at": record.updated_at,

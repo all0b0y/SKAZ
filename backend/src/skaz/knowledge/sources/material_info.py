@@ -43,6 +43,9 @@ class MaterialWiki:
     concept_count: int
     job_id: str | None
     error: str | None
+    #: ``AGENT_UNAVAILABLE``: the latest job failed because the agent can't work (signed out,
+    #: outdated, none connected) — fixed in Settings, not by a retry. ``None`` otherwise.
+    error_code: str | None = None
 
 
 NOT_IN_WIKI = MaterialWiki("not_in_wiki", None, 0, None, None)
@@ -69,7 +72,7 @@ def _chunks(ids: list[str], size: int = 400) -> Iterable[list[str]]:
 def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str, MaterialWiki]:
     """The wiki state of each material (one read of jobs and page sources for all of them)."""
     ids = list(dict.fromkeys(material_ids))
-    latest: dict[str, tuple[str, str, str | None]] = {}
+    latest: dict[str, tuple[str, str, str | None, str | None]] = {}
     notes: dict[str, str] = {}
     concepts: dict[str, int] = {}
     with db.read() as connection:
@@ -77,11 +80,14 @@ def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str,
             marks = ",".join("?" * len(chunk))
             kinds = ",".join("?" * len(_WIKI_JOB_KINDS))
             for row in connection.execute(
-                f"SELECT id, target_id, state, error FROM jobs WHERE kind IN ({kinds}) "
-                f"AND target_id IN ({marks}) ORDER BY created_at DESC, rowid DESC",
+                f"SELECT j.id AS id, j.target_id AS target_id, j.state AS state, j.error AS error, "
+                f"d.error_code AS error_code FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id "
+                f"WHERE j.kind IN ({kinds}) AND j.target_id IN ({marks}) "
+                f"ORDER BY j.created_at DESC, j.rowid DESC",
                 (*_WIKI_JOB_KINDS, *chunk),
             ):
-                latest.setdefault(row["target_id"], (row["id"], row["state"], row["error"]))
+                latest.setdefault(row["target_id"],
+                                  (row["id"], row["state"], row["error"], row["error_code"]))
             for row in connection.execute(
                 "SELECT s.material_id AS material_id, p.id AS page_id, p.kind AS kind "
                 f"FROM page_sources s JOIN pages p ON p.id = s.page_id WHERE s.material_id IN ({marks}) "
@@ -97,8 +103,9 @@ def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str,
         job = latest.get(material_id)
         note = notes.get(material_id)
         count = concepts.get(material_id, 0)
-        job_id, job_state, job_error = job if job else (None, None, None)
+        job_id, job_state, job_error, job_code = job if job else (None, None, None, None)
         error = job_error if job_state in _FAILED else None
+        code = job_code if job_state in _FAILED else None
         if job_state == "running":
             state: WikiState = "processing"
         elif note is not None or count:
@@ -107,7 +114,7 @@ def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str,
             state = "failed"
         else:
             state = "not_in_wiki"
-        result[material_id] = MaterialWiki(state, note, count, job_id, error)
+        result[material_id] = MaterialWiki(state, note, count, job_id, error, code)
     return result
 
 

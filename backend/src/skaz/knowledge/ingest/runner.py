@@ -24,7 +24,7 @@ from ..service import KnowledgeService
 from . import prompts
 from .checks import CheckedBlock, CheckStats, check_statement, clean_text, clean_title, flags_instructions
 from .drafts import ConceptDraft, DraftSection
-from .jobs import JobRepository, JobStep
+from .jobs import JobRepository, JobStep, agent_failure_code
 from .matching import decide, find_candidates
 from .model import AnswerInvalid, BlockOut, ConceptsOut, MatchOut, NotesOut, parse_answer
 from .pages import match_key
@@ -42,9 +42,11 @@ class IngestCancelled(Exception):
 
 
 class IngestFailed(Exception):
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, code: str | None = None) -> None:
         super().__init__(message)
         self.message = message
+        #: ``JobRecord.error_code`` (``AGENT_UNAVAILABLE``: fixed in Settings, not by a retry).
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -132,7 +134,8 @@ class IngestRun:
             when = ""
             if terminal.retry_at is not None:
                 when = f" It should work again after {terminal.retry_at.isoformat()}."
-            raise IngestFailed(f"The agent stopped: {terminal.message}{when}")
+            raise IngestFailed(f"The agent stopped: {terminal.message}{when}",
+                               agent_failure_code(terminal.kind))
         return result.text
 
     async def _answers(self, operation: _Operation, instructions: str, prompt: str, schema: dict[str, Any],

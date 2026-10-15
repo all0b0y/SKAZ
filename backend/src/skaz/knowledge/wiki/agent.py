@@ -15,6 +15,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from ..agents.engine import AgentEngine, AgentTurn, Failed, TurnMessage, collect
+from ..ingest.jobs import agent_failure_code
 from ..ingest.model import AnswerInvalid, parse_answer
 from ..ingest.prompts import repair_message
 
@@ -22,9 +23,11 @@ M = TypeVar("M", bound=BaseModel)
 
 
 class WikiJobFailed(Exception):
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, code: str | None = None) -> None:
         super().__init__(message)
         self.message = message
+        #: ``JobRecord.error_code`` (``AGENT_UNAVAILABLE``: fixed in Settings, not by a retry).
+        self.code = code
 
 
 class AgentCaller:
@@ -54,7 +57,8 @@ class AgentCaller:
             when = (
                 f" It should work again after {terminal.retry_at.isoformat()}." if terminal.retry_at else ""
             )
-            raise WikiJobFailed(f"The agent stopped: {terminal.message}{when}")
+            raise WikiJobFailed(f"The agent stopped: {terminal.message}{when}",
+                                agent_failure_code(terminal.kind))
         return result.text
 
     async def ask_json(

@@ -119,6 +119,9 @@ class KbMaterialWiki(BaseModel):
     job_id: str | None
     #: Why the latest job failed (also when older pages are still in the wiki).
     error: str | None
+    #: ``AGENT_UNAVAILABLE``: the agent can't work until it is fixed in Settings → Accounts & keys
+    #: (signed out, outdated, none connected); a retry alone won't help. ``null`` otherwise.
+    error_code: str | None
 
 
 class KbMaterial(KbMaterialSummary):

@@ -111,7 +111,7 @@ export function fragment(materialId: string, seg: number, text: string, extra: P
 }
 
 export function materialWiki(state: KbMaterial['wiki']['state'], extra: Partial<KbMaterial['wiki']> = {}): KbMaterial['wiki'] {
-  return { state, note_page_id: null, concept_count: 0, job_id: null, error: null, ...extra };
+  return { state, note_page_id: null, concept_count: 0, job_id: null, error: null, error_code: null, ...extra };
 }
 
 export function block(id: string, kind: KbBlock['kind'], section: string | null, text: string,
@@ -180,7 +180,7 @@ function added(world: FakeWorld, m: KbMaterial): KbMaterialAdded {
 
 function newJob(world: FakeWorld, kind: KbJob['kind'], materialId: string | null, state: KbJob['state'] = 'done', label: string = kind): KbJob {
   const job: KbJob = {
-    id: `j${++world.seq}`, kind, material_id: materialId, state, step: state === 'done' ? 'done' : 'reading', label, error: null, can_retry: false,
+    id: `j${++world.seq}`, kind, material_id: materialId, state, step: state === 'done' ? 'done' : 'reading', label, error: null, error_code: null, can_retry: false,
     progress: { parts_total: 1, parts_done: state === 'done' ? 1 : 0, concepts_found: 0, blocks_written: 0, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 0, concepts_updated: 0 },
     journal: [], created_at: stamp(world), updated_at: stamp(world),
   };

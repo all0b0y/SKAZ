@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from skaz.knowledge.agents.engine import AgentEngine
+from skaz.knowledge.agents.engine import AgentEngine, FailureKind
 from skaz.knowledge.agents.prompting import UNTRUSTED_HEADER
 from skaz.knowledge.decisions.protocol import ChoiceAnswer, ChoiceQuestion, Question, Undecided
 from skaz.knowledge.ingest import prompts
@@ -547,6 +547,33 @@ async def test_engine_failure_is_reported_with_its_reason(ready: KnowledgeServic
     job = await ingest.request_ingest(material_id)
     record = await wait_finished(ingest, job.id)
     assert record.state == "failed" and record.error == "The agent stopped: Usage limit reached."
+    assert record.error_code is None  # a limit is not fixed in Settings: retry later
+
+
+@pytest.mark.parametrize("kind", ["auth", "incompatible"])
+async def test_a_signed_out_or_outdated_agent_fails_with_a_machine_readable_code(
+    ready: KnowledgeService, kind: FailureKind,
+) -> None:
+    """The material offers the fix (Settings → Accounts & keys) instead of a plain retry (G4)."""
+    from skaz.knowledge.agents.engine import Failed
+    from skaz.knowledge.agents.fake import FakeEngine
+    from skaz.knowledge.ingest.jobs import AGENT_UNAVAILABLE
+    from skaz.knowledge.sources.material_info import wiki_states
+
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    engine = FakeEngine("codex", script=[Failed("", kind, "Sign in to Codex with your ChatGPT account.")])
+    ingest = IngestService(ready, engines=lambda _engine_id: engine, detector=PatternDetector())
+    job = await ingest.request_ingest(material_id)
+    record = await wait_finished(ingest, job.id)
+    assert record.state == "failed" and record.error_code == AGENT_UNAVAILABLE
+    wiki = wiki_states(ready.db, [material_id])[material_id]
+    assert (wiki.state, wiki.error_code) == ("failed", AGENT_UNAVAILABLE)
+
+    # No agent at all is the same kind of problem.
+    no_engine = service_for(ready, None)
+    other = add_material(ready, "Физика", "Лекция 9")
+    job = await no_engine.request_ingest(other)
+    assert (await wait_finished(no_engine, job.id)).error_code == AGENT_UNAVAILABLE
 
 
 @pytest.mark.parametrize("kind", ["analysis", "note", "folder"])

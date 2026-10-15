@@ -58,6 +58,30 @@ def test_area_modules_apply_in_order_and_upgrade(tmp_path: Path) -> None:
         db.close()
 
 
+def test_an_ingest_v1_database_gains_the_job_error_code(tmp_path: Path) -> None:
+    """A database from before G4 keeps its jobs and gets ``ingest_jobs.error_code`` (NULL for old rows)."""
+    from skaz.knowledge.store.schema import ingest
+
+    path = tmp_path / "knowledge.sqlite3"
+    v1 = SimpleNamespace(NAME="ingest", VERSION=1, SQL=(
+        "CREATE TABLE IF NOT EXISTS ingest_jobs (job_id TEXT PRIMARY KEY REFERENCES jobs(id) "
+        "ON DELETE CASCADE, counters TEXT NOT NULL DEFAULT '{}', journal TEXT NOT NULL DEFAULT '[]');"))
+    old = KnowledgeDatabase(path, modules=tuple(v1 if module is ingest else module for module in MODULES))
+    with old.write() as connection:
+        connection.execute("INSERT INTO jobs(id, kind, target_id, state, created_at, updated_at) "
+                           "VALUES ('job-1', 'ingest', 'mat-1', 'failed', 't', 't')")
+        connection.execute("INSERT INTO ingest_jobs(job_id) VALUES ('job-1')")
+    old.close()
+    db = KnowledgeDatabase(path)
+    try:
+        with db.read() as connection:
+            row = connection.execute("SELECT job_id, error_code FROM ingest_jobs").fetchone()
+        assert tuple(row) == ("job-1", None)
+        assert db.schema_versions()["ingest"] == ingest.VERSION == 2
+    finally:
+        db.close()
+
+
 def test_newer_schema_than_this_build_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "knowledge.sqlite3"
     KnowledgeDatabase(path).close()

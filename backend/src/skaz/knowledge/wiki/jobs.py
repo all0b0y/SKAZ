@@ -13,8 +13,17 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from ...native_io import disk_call
+from ..agents.registry import EngineUnavailable
 from ..errors import KnowledgeError
-from ..ingest.jobs import WIKI_INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState, JobStep
+from ..ingest.jobs import (
+    AGENT_UNAVAILABLE,
+    WIKI_INTERRUPTED_REASON,
+    JobKind,
+    JobRecord,
+    JobRepository,
+    JobState,
+    JobStep,
+)
 from .agent import WikiJobFailed
 
 logger = logging.getLogger(__name__)
@@ -71,13 +80,16 @@ class WikiJobs:
     async def _run(self, job_id: str, work: Work) -> None:
         state: JobState = "failed"
         error: str | None = UNEXPECTED
+        code: str | None = None
         try:
             await work(JobContext(self.jobs, job_id))
             state, error = "done", None
         except asyncio.CancelledError:
             state, error = "interrupted", WIKI_INTERRUPTED_REASON
         except WikiJobFailed as failure:
-            error = failure.message
+            error, code = failure.message, failure.code
+        except EngineUnavailable as failure:
+            error, code = failure.message, AGENT_UNAVAILABLE
         except KnowledgeError as failure:
             error = failure.message
         except OSError as failure:
@@ -86,7 +98,7 @@ class WikiJobs:
             logger.exception("wiki job %s failed", job_id)
         finally:
             try:
-                self.jobs.finish(job_id, state, error=error)
+                self.jobs.finish(job_id, state, error=error, error_code=code if state == "failed" else None)
             finally:
                 self._tasks.pop(job_id, None)
 

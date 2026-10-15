@@ -440,6 +440,7 @@ export interface KbJob {
   step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | null;
   label: string;
   error: string | null;
+  error_code: string | null;
   can_retry: boolean;
   progress: KbJobProgress;
   journal: KbJobLogEntry[];
@@ -626,6 +627,7 @@ export interface KbMaterialWiki {
   concept_count: number;
   job_id: string | null;
   error: string | null;
+  error_code: string | null;
 }
 
 export interface KbMentions {
