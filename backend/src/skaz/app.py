@@ -60,6 +60,7 @@ def create_app(
             runtime.codex.start()
             yield
         finally:
+            await runtime.kb_chats.close()
             await runtime.kb_ingest.close()
             await runtime.kb_codex.close()
             await runtime.kb_decisions.aclose()
