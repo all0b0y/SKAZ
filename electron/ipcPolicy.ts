@@ -115,6 +115,9 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/recordings\/[^/]+\/(?:stop|pause|resume)$/ },
   // F2: a recording's own state, so its material offers "Continue recording" only when it may continue.
   { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+$/ },
+  // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
+  { method: 'POST', pattern: /^\/kb\/agents\/codex\/logout$/ },
+  { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
 ];
 
 /** The knowledge-library (/kb) rules, for the test that checks them against the backend's routes. */

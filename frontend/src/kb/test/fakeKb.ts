@@ -744,6 +744,13 @@ const ROUTES: FakeRoutes = {
     for (const [k, v] of Object.entries(body)) if (v !== undefined && v !== null) (w.speech as unknown as Record<string, unknown>)[k] = v;
     return structuredClone(w.speech);
   }],
+  'DELETE /kb/settings/speech/local-model': [200, (w) => {
+    const model = w.speech.local_model;
+    const deleted = model.state === 'ready' || model.state === 'failed';
+    const freed = deleted ? model.size_bytes ?? 0 : 0;
+    w.speech.local_model = { ...model, state: 'missing', progress: null, reason: null };
+    return { deleted, deleted_bytes: freed, speech: structuredClone(w.speech) };
+  }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
   'GET /kb/settings/wiki': [200, (w) => structuredClone(w.wiki)],
@@ -786,6 +793,11 @@ const ROUTES: FakeRoutes = {
     if (a.id === 'codex' && body?.consent !== true) fail(409, 'Confirm the ChatGPT privacy notice first.');
     Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
     return { engine: a.id, method: 'terminal', url: null, message: `${a.name} sign-in opened in Terminal. Come back when it says you’re signed in.` };
+  }],
+  'POST /kb/agents/codex/logout': [200, (w) => {
+    const a = findAgent(w, 'codex');
+    Object.assign(a, { state: 'signed_out', signed_in: false, reason: 'Sign in with ChatGPT to use Codex.', action: 'login', models: [], current_model: null });
+    return structuredClone(a);
   }],
   'POST /kb/agents/{engine}/install': [202, (w, { path, body }) => {
     const a = findAgent(w, path.engine);

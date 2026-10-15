@@ -153,6 +153,55 @@ export function LocalWhisperRow() {
   return <span className={`kb-status kb-status--${m.state === 'failed' ? 'err' : 'warn'}`}><Icon name={m.state === 'failed' ? 'error' : 'warning'} size={13} />{m.state === 'failed' ? m.reason ?? 'Download failed' : 'Not downloaded'}</span>;
 }
 
+/** Sizes as Finder shows them (1 MB = 1,000,000 bytes), so the number matches what the user sees there. */
+const decimalSize = (bytes: number) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB`
+  : bytes >= 1e6 ? `${Math.round(bytes / 1e6)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`);
+
+/**
+ * Settings → Recording & speech: the downloaded Whisper model, with its size, and deleting it after
+ * a confirmation (the old "Delete downloaded model"). Only that model's files are removed.
+ */
+export function SpeechModelRow() {
+  const speech = useSettings((s) => s.speech);
+  const { settings } = useServices();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, show] = useResult();
+  if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
+  const m = speech.value.local_model;
+  const size = m.size_bytes ? ` · about ${decimalSize(m.size_bytes)}` : '';
+  const name = `Whisper ${m.model}`;
+  // Ready, or a failed download that may have left partial files: both have something to delete.
+  const deletable = m.state === 'ready' || m.state === 'failed';
+  return (
+    <>
+      {m.state === 'downloading' ? <Progress value={m.progress} label="Downloading the speech model" />
+        : deletable ? <span className="kb-muted">{name}{m.state === 'failed' ? ' · partly downloaded' : size}</span>
+          : <span className="kb-muted">Not downloaded</span>}
+      {deletable && (
+        <Button size="sm" variant="outline" icon="trash" busy={busy} onClick={() => setAsking(true)}>Delete…</Button>
+      )}
+      {result}
+      <Modal open={asking} onClose={() => setAsking(false)} title="Delete the speech model?" className="kb-confirm" testId="confirm-delete-speech-model">
+        <div className="kb-confirm__body">
+          <p>{name}{m.size_bytes ? ` (about ${decimalSize(m.size_bytes)})` : ''} will be removed from this Mac.</p>
+          <p className="kb-muted">Recognition on this computer won’t work until you download it again. Recordings with Soniox and your materials are not affected.</p>
+        </div>
+        <footer className="kb-confirm__foot">
+          <Button onClick={() => setAsking(false)}>Cancel</Button>
+          <Button variant="danger" icon="trash" onClick={async () => {
+            setAsking(false);
+            setBusy(true);
+            const r = await settings.getState().deleteLocalModel();
+            setBusy(false);
+            show(r.ok ? { ok: true } : r, r.ok ? (r.value > 0 ? `Deleted · ${decimalSize(r.value)} freed` : 'Deleted') : undefined);
+          }}>Delete</Button>
+        </footer>
+      </Modal>
+    </>
+  );
+}
+
 function Progress({ value, label }: { value: number | null; label: string }) {
   const pct = value === null ? null : Math.round(value * 100);
   return (

@@ -65,7 +65,7 @@ describe('Electron IPC policy — knowledge library (/kb) routes of the new inte
     const refused: Array<[string, string]> = [
       ['PUT', '/kb/chats/c1'], ['DELETE', '/kb/chats'], ['POST', '/kb/chats/c1/messages/m1/delete'],
       ['PUT', '/kb/settings/keys/github'], ['GET', '/kb/settings/keys/soniox'], ['DELETE', '/kb/settings/keys/soniox'],
-      ['POST', '/kb/agents/other/install'], ['POST', '/kb/agents/codex/logout'], ['DELETE', '/kb/decisions/local'],
+      ['POST', '/kb/agents/other/install'], ['DELETE', '/kb/decisions/local'],
       ['POST', '/kb/materials/m1/excluded/x/restore'], ['POST', '/kb/dictation'], ['POST', '/kb/notifications/n1/delete'],
       ['GET', '/kb/chats/c1/events/x'], ['POST', '/kb/chats/../x/read'],
     ];
@@ -191,6 +191,18 @@ describe('Electron IPC policy — /kb rules match the real backend routes (I1)',
 });
 
 describe('Electron IPC policy — restored capabilities (F2)', () => {
+  it('lets Codex sign out and the local speech model be deleted — nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/codex/logout' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/settings/speech/local-model' })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/agents/claude_code/logout'], ['POST', '/kb/agents/hermes/logout'], ['GET', '/kb/agents/codex/logout'],
+      ['DELETE', '/kb/settings/speech'], ['DELETE', '/kb/settings/speech/local-model/x'], ['POST', '/kb/settings/speech/local-model'],
+      ['DELETE', '/kb/decisions/local'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+
   it('lets the activity log be read, and nothing else under /logs', () => {
     expect(validateBridgeRequest({ method: 'GET', path: '/logs' })).toBeNull();
     for (const [method, path] of [['POST', '/logs'], ['DELETE', '/logs'], ['GET', '/logs/1'], ['GET', '/logs/../settings']] as const) {

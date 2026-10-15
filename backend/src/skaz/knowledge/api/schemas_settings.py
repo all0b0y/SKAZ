@@ -83,6 +83,8 @@ class KbLocalSpeechModel(BaseModel):
     progress: float | None
     #: Why it failed, in plain words.
     reason: str | None
+    #: Approximate size of the model's files (its download size); ``null`` when unknown.
+    size_bytes: int | None
 
 
 class KbSpeechSettings(BaseModel):
@@ -94,6 +96,16 @@ class KbSpeechSettings(BaseModel):
     translate_by_default: bool
     translation_language: str
     local_model: KbLocalSpeechModel
+
+
+class KbLocalModelDeleted(BaseModel):
+    """``DELETE /kb/settings/speech/local-model``: what was removed, and the speech settings after it."""
+
+    #: Whether any files of the model were there to remove.
+    deleted: bool
+    #: Bytes freed on this Mac.
+    deleted_bytes: int
+    speech: KbSpeechSettings
 
 
 class KbSpeechSettingsUpdate(_Request):

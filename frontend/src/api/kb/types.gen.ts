@@ -526,11 +526,19 @@ export interface KbLocalDecisions {
   server_license: string;
 }
 
+/** ``DELETE /kb/settings/speech/local-model``: what was removed, and the speech settings after it. */
+export interface KbLocalModelDeleted {
+  deleted: boolean;
+  deleted_bytes: number;
+  speech: KbSpeechSettings;
+}
+
 export interface KbLocalSpeechModel {
   model: string;
   state: "missing" | "downloading" | "ready" | "failed";
   progress: number | null;
   reason: string | null;
+  size_bytes: number | null;
 }
 
 export interface KbMaterial {
@@ -926,6 +934,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbAgents;
+    status: 200;
+  };
+  "POST /kb/agents/codex/logout": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbAgent;
     status: 200;
   };
   "PUT /kb/agents/default": {
@@ -1507,6 +1522,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbSpeechSettingsUpdate;
     response: KbSpeechSettings;
+    status: 200;
+  };
+  "DELETE /kb/settings/speech/local-model": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbLocalModelDeleted;
     status: 200;
   };
   "GET /kb/settings/wiki": {

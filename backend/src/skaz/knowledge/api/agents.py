@@ -139,3 +139,17 @@ async def login_agent(engine: KbEngineId, hub: HubDep,
         raise _http(error) from error
     return KbAgentLoginResult(engine=outcome.engine, method=outcome.method, url=outcome.url,
                               message=outcome.message)
+
+
+@router.post("/codex/logout")
+async def logout_codex(hub: HubDep) -> KbAgent:
+    """Sign out of Codex in SKAZ's own Codex profile (Codex's ``account/logout``); the agent re-checked.
+
+    Only Codex: its sign-in lives in SKAZ's ``CODEX_HOME``. Claude Code and Hermes keep theirs in
+    their own apps, which SKAZ never touches.
+    """
+    try:
+        view = await hub.registry.logout("codex")
+    except EngineUnavailable as error:
+        raise _http(error) from error
+    return agent_view(hub, view)

@@ -208,6 +208,16 @@ class CodexEngine:
         self._status = None
         return url
 
+    async def logout(self) -> None:
+        """Codex's own sign-out in SKAZ's own Codex profile; other Codex apps keep their sign-in."""
+        logout = getattr(self._connection, "logout", None)
+        if logout is None:
+            raise RuntimeError("This Codex connection has no sign-out.")
+        try:
+            await logout()
+        finally:
+            self._status = None
+
     async def models(self) -> Sequence[ModelOption]:
         """Visible models from ``model/list``; empty when Codex is missing or does not answer."""
         if self._connection.binary is None:

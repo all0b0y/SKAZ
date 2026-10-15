@@ -28,6 +28,8 @@ export interface AgentsActions {
   cancelInstall: (engine: EngineId) => Promise<ActionResult>;
   login: (engine: EngineId, consent?: boolean) => Promise<ActionResult<KbAgentLoginResult>>;
   check: (engine: EngineId) => Promise<ActionResult<KbAgent>>;
+  /** Codex only: sign out of SKAZ's own Codex profile (other Codex apps keep their sign-in). */
+  logoutCodex: () => Promise<ActionResult<KbAgent>>;
 }
 
 export type AgentsStore = StoreApi<AgentsData & AgentsActions>;
@@ -108,6 +110,16 @@ export function createAgentsStore(client: KbClient): AgentsStore {
         try {
           const res = await client.call('POST /kb/agents/{engine}/login', { path: { engine }, body: consent ? { consent: true } : {} });
           return { ok: true, value: res };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
+
+      logoutCodex: async () => {
+        try {
+          const agent = await client.call('POST /kb/agents/codex/logout');
+          putAgent(agent);
+          return { ok: true, value: agent };
         } catch (error) {
           return { ok: false, error: errorText(error) };
         }

@@ -1,5 +1,6 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { launchIsolatedSmoke } from './isolatedSmoke';
 
@@ -14,6 +15,10 @@ let app: ElectronApplication;
 let page: Page;
 let close: () => Promise<void>;
 let profile = '';
+/** An isolated model cache (SKAZ_MODEL_CACHE): deletion must never reach this Mac's Hugging Face cache. */
+const modelCache = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'skaz-model-cache-')));
+const SMALL = path.join(modelCache, 'models--Systran--faster-whisper-small');
+const BASE = path.join(modelCache, 'models--Systran--faster-whisper-base');
 
 async function bridge<T>(method: string, reqPath: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T; detail?: string }> {
   return page.evaluate(({ m, p, b }) => window.skaz.request({ method: m as 'GET', path: p, ...(b === undefined ? {} : { body: b }) }),
@@ -45,7 +50,12 @@ test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({}, testInfo) => {
   testInfo.setTimeout(120_000);
   fs.mkdirSync(shots, { recursive: true });
-  ({ app, close, profile } = await launchIsolatedSmoke('skaz-kb-restored-'));
+  // Placeholder files where the chosen Whisper model (small) and another one would be: not a model.
+  for (const repo of [SMALL, BASE]) {
+    fs.mkdirSync(path.join(repo, 'blobs'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'blobs', 'placeholder.bin'), Buffer.alloc(4096));
+  }
+  ({ app, close, profile } = await launchIsolatedSmoke('skaz-kb-restored-', { env: { SKAZ_MODEL_CACHE: modelCache } }));
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase), { timeout: 60_000 }).toBe('ready');
@@ -59,6 +69,7 @@ test.beforeAll(async ({}, testInfo) => {
 test.afterAll(async ({}, testInfo) => {
   testInfo.setTimeout(60_000);
   await close?.();
+  fs.rmSync(modelCache, { recursive: true, force: true });
 });
 
 test('Settings → Privacy → Activity log reads GET /logs through the real IPC policy and opens the logs folder', async () => {
@@ -118,4 +129,33 @@ test('a denied microphone offers "Open System Settings", which opens the fixed m
   expect(refused).toEqual([false, false]);
   expect(await app.evaluate(() => (globalThis as unknown as { openedUrls: string[] }).openedUrls)).toHaveLength(1);
   await popover.getByRole('button', { name: 'OK' }).click();
+});
+
+test('Settings → Recording & speech deletes the downloaded speech model after a confirmation, and only that model', async () => {
+  const dialog = await openSettings('Recording & speech');
+  const model = dialog.getByRole('group', { name: 'Speech model on this computer' });
+  // The real readiness check sees the files in the isolated cache; the size shown is the model's download size.
+  await expect(model.getByText('Whisper small · about 484 MB')).toBeVisible({ timeout: 15_000 });
+  await model.getByRole('button', { name: 'Delete…' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete the speech model?' });
+  await expect(confirm).toContainText('Whisper small (about 484 MB)');
+  await shoot('delete-speech-model');
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(confirm).toHaveCount(0);
+  expect(fs.existsSync(SMALL)).toBe(true);
+  await model.getByRole('button', { name: 'Delete…' }).click();
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(model.getByRole('status')).toHaveText('Deleted · 4 KB freed');
+  await expect(model.getByText('Not downloaded')).toBeVisible();
+  expect(fs.existsSync(SMALL)).toBe(false);
+  expect(fs.existsSync(path.join(BASE, 'blobs', 'placeholder.bin'))).toBe(true);
+  await shoot('speech-model-deleted');
+
+  // Codex: no sign-in in this fresh profile, so no Sign out — the button appears only when signed in.
+  await dialog.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Accounts & keys' }).click();
+  const codex = dialog.getByRole('group', { name: 'Codex' });
+  await expect(codex.locator('.kb-status')).toBeVisible({ timeout: 30_000 });
+  await expect(codex.getByRole('button', { name: 'Sign out' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
 });

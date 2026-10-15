@@ -68,3 +68,89 @@ describe('Settings → Privacy → Activity log', () => {
     await waitFor(() => expect(within(log).getByRole('alert')).toHaveTextContent('Couldn’t read the activity log'));
   });
 });
+
+describe('Settings → Accounts & keys → Codex: sign out (SKAZ’s own Codex sign-in)', () => {
+  it('a signed-in Codex offers Sign out; it signs out through /kb/agents/codex/logout and says what it removed', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const codex = row(dialog, 'Codex');
+    expect(await within(codex).findByText(/Connected/)).toBeInTheDocument();
+    // Only Codex: Claude Code and Hermes keep their sign-in in their own apps.
+    expect(within(row(dialog, 'Claude Code')).queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    await user.click(within(codex).getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/codex/logout' })));
+    expect(await within(codex).findByText('Not signed in')).toBeInTheDocument();
+    expect(within(codex).getByRole('status')).toHaveTextContent('Signed out of Codex in SKAZ. Codex in other apps stays signed in.');
+    expect(within(codex).queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    expect(within(codex).getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('a refused sign-out is said, and Codex stays as it was', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    world.failures['POST /kb/agents/codex/logout'] = { status: 409, detail: 'SKAZ couldn’t sign out of Codex: Check the Codex connection first' };
+    renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const codex = row(dialog, 'Codex');
+    await user.click(await within(codex).findByRole('button', { name: 'Sign out' }));
+    expect(await within(codex).findByRole('alert')).toHaveTextContent('Check the Codex connection first');
+    expect(within(codex).getByText(/Connected/)).toBeInTheDocument();
+  });
+});
+
+describe('Settings → Recording & speech → the speech model on this computer: delete', () => {
+  const readyWorld = () => {
+    const world = chatWorld();
+    world.speech.local_model = { model: 'small', state: 'ready', progress: null, reason: null, size_bytes: 484_000_000 };
+    return world;
+  };
+
+  it('asks first with the size, then deletes only after confirming; the row says what was freed', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: readyWorld() });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Recording & speech/ }));
+    const model = row(dialog, 'Speech model on this computer');
+    expect(await within(model).findByText('Whisper small · about 484 MB')).toBeInTheDocument();
+    await user.click(within(model).getByRole('button', { name: 'Delete…' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Delete the speech model?' });
+    expect(confirm).toHaveTextContent('Whisper small (about 484 MB)');
+    expect(confirm).toHaveTextContent('Recognition on this computer won’t work until you download it again');
+    // Cancel deletes nothing.
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(fake.calls.some((c) => c.method === 'DELETE')).toBe(false);
+    await user.click(within(model).getByRole('button', { name: 'Delete…' }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Delete the speech model?' })).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'DELETE', path: '/kb/settings/speech/local-model' })));
+    expect(await within(model).findByRole('status')).toHaveTextContent('Deleted · 484 MB freed');
+    expect(within(model).getByText('Not downloaded')).toBeInTheDocument();
+    expect(within(model).queryByRole('button', { name: 'Delete…' })).not.toBeInTheDocument();
+  });
+
+  it('a busy model is not deleted and the reason is shown; nothing to delete offers no button', async () => {
+    const user = userEvent.setup();
+    const world = readyWorld();
+    world.failures['DELETE /kb/settings/speech/local-model'] = { status: 409, detail: 'The speech model is in use or still downloading. Try again when it is free.' };
+    renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Recording & speech/ }));
+    const model = row(dialog, 'Speech model on this computer');
+    await user.click(await within(model).findByRole('button', { name: 'Delete…' }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Delete the speech model?' })).getByRole('button', { name: 'Delete' }));
+    expect(await within(model).findByRole('alert')).toHaveTextContent('in use or still downloading');
+    expect(within(model).getByText('Whisper small · about 484 MB')).toBeInTheDocument();
+  });
+
+  it('a model that is not downloaded has nothing to delete', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Recording & speech/ }));
+    const model = row(dialog, 'Speech model on this computer');
+    expect(await within(model).findByText('Not downloaded')).toBeInTheDocument();
+    expect(within(model).queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument();
+  });
+});

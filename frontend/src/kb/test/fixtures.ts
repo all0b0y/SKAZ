@@ -70,7 +70,7 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
     ] },
     speech: {
       provider: 'soniox', languages: ['ru', 'en'], translate_by_default: true, translation_language: 'ru',
-      local_model: { model: 'whisper-large-v3-turbo', state: 'missing', progress: null, reason: null },
+      local_model: { model: 'whisper-large-v3-turbo', state: 'missing', progress: null, reason: null, size_bytes: 1_620_000_000 },
     },
     wiki: {
       wiki_language: 'en', wiki_language_chosen: true, wiki_engine: null, auto_add_files_links: true, auto_add_text: false,

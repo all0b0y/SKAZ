@@ -156,7 +156,9 @@ async def test_speech_settings_read_and_write_the_existing_settings(
         "languages": [],
         "translate_by_default": False,
         "translation_language": "ru",
-        "local_model": {"model": "small", "state": "missing", "progress": None, "reason": None},
+        "local_model": {
+            "model": "small", "state": "missing", "progress": None, "reason": None, "size_bytes": 484_000_000,
+        },
     }
     changed = await api.put(
         "/kb/settings/speech",
