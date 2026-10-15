@@ -197,6 +197,14 @@ class KnowledgeService:
             for listener in list(self.after_scan):
                 listener()
 
+    def writing(self) -> threading.RLock:
+        """Hold while writing a library file and its index rows.
+
+        A scan (startup, connect, retry) re-reads every file and replaces the index; a write that
+        lands between its read and its replace would be undone in the index. Scans hold the same lock.
+        """
+        return self._state_lock
+
     def require(self) -> Library:
         library = self._library
         if library is None:
@@ -219,23 +227,26 @@ class KnowledgeService:
         return record
 
     def create_folder(self, name: str) -> FolderRecord:
-        library = self.require()
-        entry = library.create_folder(name)
-        indexer.put_folder(self.db, entry.id, entry.name, library.relative(entry.path), entry.system,
-                           entry.created_at)
+        with self.writing():
+            library = self.require()
+            entry = library.create_folder(name)
+            indexer.put_folder(self.db, entry.id, entry.name, library.relative(entry.path), entry.system,
+                               entry.created_at)
         return self._folder_record(entry.id)
 
     def rename_folder(self, folder_id: str, name: str) -> FolderRecord:
-        library = self.require()
-        entry = library.rename_folder(folder_id, name)
-        indexer.put_folder(self.db, entry.id, entry.name, library.relative(entry.path), entry.system,
-                           entry.created_at)
+        with self.writing():
+            library = self.require()
+            entry = library.rename_folder(folder_id, name)
+            indexer.put_folder(self.db, entry.id, entry.name, library.relative(entry.path), entry.system,
+                               entry.created_at)
         return self._folder_record(entry.id)
 
     def delete_folder(self, folder_id: str) -> None:
-        library = self.require()
-        library.delete_folder(folder_id)
-        indexer.delete_folder(self.db, folder_id)
+        with self.writing():
+            library = self.require()
+            library.delete_folder(folder_id)
+            indexer.delete_folder(self.db, folder_id)
 
     # -- materials ----------------------------------------------------------
 
@@ -248,27 +259,30 @@ class KnowledgeService:
         self, folder_id: str, title: str, kind: MaterialKind, fragments: Sequence[FragmentInput], *,
         status: MaterialStatus = "ready", origin: Origin | None = None, languages: Sequence[str] = (),
     ) -> MaterialFiles:
-        library = self.require()
-        files = library.create_material(folder_id, title, kind, fragments, status=status, origin=origin,
-                                        languages=languages)
-        self._index_material(library, files)
+        with self.writing():
+            library = self.require()
+            files = library.create_material(folder_id, title, kind, fragments, status=status, origin=origin,
+                                            languages=languages)
+            self._index_material(library, files)
         return files
 
     def append_fragments(self, material_id: str, fragments: Sequence[FragmentInput]) -> list[Fragment]:
         """Live recording growth: new ``seg`` ids after the existing ones, indexed immediately."""
-        library = self.require()
-        record = self.material_repo.get(material_id)
-        hint = record.rel_dir if record else None
-        added = library.append_fragments(material_id, fragments, hint=hint)
-        self._index_material(library, library.read_material(material_id, hint=hint))
+        with self.writing():
+            library = self.require()
+            record = self.material_repo.get(material_id)
+            hint = record.rel_dir if record else None
+            added = library.append_fragments(material_id, fragments, hint=hint)
+            self._index_material(library, library.read_material(material_id, hint=hint))
         return added
 
     def set_material_status(self, material_id: str, status: MaterialStatus) -> None:
-        library = self.require()
-        record = self.material_repo.get(material_id)
-        hint = record.rel_dir if record else None
-        library.set_material_status(material_id, status, hint=hint)
-        self._index_material(library, library.read_material(material_id, hint=hint))
+        with self.writing():
+            library = self.require()
+            record = self.material_repo.get(material_id)
+            hint = record.rel_dir if record else None
+            library.set_material_status(material_id, status, hint=hint)
+            self._index_material(library, library.read_material(material_id, hint=hint))
 
     def materials(self, *, folder_id: str | None = None, kind: str | None = None) -> list[MaterialRecord]:
         return self.material_repo.list_all(folder_id=folder_id, kind=kind)

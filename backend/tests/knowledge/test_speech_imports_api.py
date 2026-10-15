@@ -90,6 +90,10 @@ async def api(speech_app: Any, soniox: AsyncSoniox) -> AsyncIterator[httpx.Async
     try:
         yield client
     finally:
+        # No lifespan here (plain ASGI transport): close what a finished import may have started —
+        # the automatic wiki job and its engine — before the loop ends, as the app's shutdown does.
+        await speech_app.state.runtime.kb_ingest.close()
+        await speech_app.state.runtime.kb_codex.close()
         await speech_app.state.runtime.imports.close()
         await speech_app.state.runtime.kb_speech.close()
         await client.aclose()

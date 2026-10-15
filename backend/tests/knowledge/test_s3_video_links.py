@@ -108,6 +108,9 @@ async def api(app: Any, soniox: AsyncSoniox) -> AsyncIterator[httpx.AsyncClient]
     try:
         yield client
     finally:
+        # No lifespan: close the automatic wiki job and its engine before the loop ends (as shutdown does).
+        await app.state.runtime.kb_ingest.close()
+        await app.state.runtime.kb_codex.close()
         await app.state.runtime.imports.close()
         await app.state.runtime.kb_speech.close()
         await client.aclose()

@@ -99,11 +99,12 @@ class SpeechProjector:
                 for group in closed
             ]
             cursor = located[closed[-1].tokens[-1].id].cursor()
-            added = library.append_fragments(
-                material_id, inputs, hint=hint,
-                manifest_extra={SPEECH_KEY: {"session_id": session_id, "cursor": cursor.to_json()}},
-            )
-            self._index(library, material_id, hint, added)
+            with self.kb.writing():  # a concurrent scan must not undo this append in the index
+                added = library.append_fragments(
+                    material_id, inputs, hint=hint,
+                    manifest_extra={SPEECH_KEY: {"session_id": session_id, "cursor": cursor.to_json()}},
+                )
+                self._index(library, material_id, hint, added)
             return added
 
     def _index(self, library: Library, material_id: str, hint: str | None, added: list[Fragment]) -> None:
