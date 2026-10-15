@@ -1,8 +1,9 @@
-"""One-time offer of automatic recognition fixes at the first recording (user decision X2-8).
+"""One-time offer of automatic recognition fixes at the first speech material (user decision X2-8).
 
 Without a decision layer every proposed fix stays "doubtful" (highlighted in the
-material only). When the first recording is finished and no decision provider
-is chosen, SKAZ posts one notification offering the local decision model:
+material only). When the first speech material is finished — a live recording or
+an imported audio/video file or video link (X5) — and no decision provider is
+chosen, SKAZ posts one notification offering the local decision model:
 
 * **Download** starts the existing local-model download (``decisions/local.py``)
   and selects the ``local`` provider once the model is there;
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from ...native_io import disk_call
 from ..logsafe import error_note
 from ..notifications.actions import ActionSpec
+from ..speech.carriers import CarrierKind
 
 if TYPE_CHECKING:
     from ..decisions.local import LocalModel, LocalStatus
@@ -34,6 +36,8 @@ OFFER_KEY = "decisions.local_offer"
 OfferState = Literal["shown", "dismissed", "accepted"]
 DOWNLOAD = ActionSpec("download", "Download", primary=True)
 NOT_NOW = ActionSpec("not_now", "Not now")
+#: Materials whose text is recognised speech: the ones automatic fixes work on.
+SPEECH_KINDS: tuple[CarrierKind, ...] = ("recording", "audio", "video", "video_link")
 
 
 class _Manager(Protocol):
@@ -92,18 +96,19 @@ class AutoFixesOffer:
             logger.error("The automatic fixes offer for %s failed: %s", material_id, error_note(error))
 
     def offer_once(self, material_id: str) -> bool:
-        """Post the offer for the first finished recording, unless asked before or a provider is chosen."""
+        """Offer it for the first finished speech material, unless asked before or a provider is chosen."""
         if self.state() is not None or self.decisions.provider() != "off":
             return False
         material = self.kb.material_repo.get(material_id)
-        if material is None or material.kind != "recording":
+        if material is None or material.kind not in SPEECH_KINDS:
             return False
         size = size_label(self.decisions.manager.model.asset.size)
         self.kb.settings.set(OFFER_KEY, "shown")
         self.kb.notify(
             OFFER_KIND,
             "Turn on automatic fixes",
-            body=(f"Download a {size} local model so SKAZ can fix misheard words in recordings by itself. "
+            body=(f"Download a {size} local model so SKAZ can fix misheard words in recordings and imported "
+                  "audio and video by itself. "
                   "Without it, doubtful fixes are only highlighted in the material. "
                   "You can also do this later in Settings → Decisions."),
             payload={"bytes": self.decisions.manager.model.asset.size},

@@ -303,6 +303,27 @@ def test_media_imports_run_while_recording(http: TestClient, provider: Provider,
     assert [text for _seg, text, _speaker in texts(http, imported)] == ["Hello there", "Hi"]
 
 
+def test_the_first_finished_import_offers_automatic_fixes(http: TestClient, cloud: FakeHttp,
+                                                          tmp_path: Path) -> None:
+    """X5 (X2 Q2): the one-time local-model offer also follows an imported file, not only a recording."""
+    from skaz.knowledge.corrections.offer import OFFER_KIND
+
+    AsyncSoniox(cloud)
+    source = tmp_path / "Imported.m4a"
+    source.write_bytes(b"\x00\x01" * 2048)
+    started = http.post("/kb/imports", headers=AUTH, json={"path": str(source)})
+    assert started.status_code == 201, started.text
+    imported = started.json()["material_id"]
+    wait(http, lambda: http.get(f"/kb/imports/{imported}", headers=AUTH).json()["status"] == "ready",
+         "the import")
+
+    def offered() -> list[dict[str, Any]]:
+        items = http.get("/kb/notifications", headers=AUTH).json()["items"]
+        return [item for item in items if item["kind"] == OFFER_KIND]
+
+    wait(http, lambda: len(offered()) == 1, "the automatic fixes offer after the import")
+
+
 def test_creating_a_recording_checks_folder_and_name(http: TestClient) -> None:
     physics = http.post("/kb/folders", headers=AUTH, json={"name": "Physics"}).json()["id"]
     first = http.post("/kb/recordings", headers=AUTH, json={"folder_id": physics, "title": "Lecture 1"})
