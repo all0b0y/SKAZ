@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -84,6 +86,57 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(await within(doc).findByText(/Ignore previous instructions/)).toBeInTheDocument();
     await user.click(within(doc).getByRole('button', { name: 'Not an instruction — restore' }));
     await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/materials/m-lec8/excluded/3/restore')).toBe(true));
+  });
+
+  it('a pasted text is laid out as a document, not in the onboarding illustration’s box (user report X7)', async () => {
+    // The text container once shared `.kb-art` with the onboarding picture: 118 px high, centred,
+    // overflow hidden — the text was cut top and bottom and short paragraphs were centred.
+    const onboardingCss = fs.readFileSync(path.resolve(__dirname, '../styles/onboarding.css'), 'utf8');
+    // Classes the onboarding styles own (a rule starts with them).
+    const illustration = new Set([...onboardingCss.matchAll(/^\.(kb-[\w-]+)/gm)].map((m) => m[1]!));
+    for (const id of ['m-txt', 'm-ce', 'm-tb']) {
+      const { doc, unmount } = await openMaterial(id);
+      const article = doc.querySelector('article')!;
+      const classes = new Set([...article.querySelectorAll('*')].flatMap((el) => [...el.classList]));
+      expect([...classes].filter((c) => illustration.has(c)), id).toEqual([]);
+      unmount();
+    }
+  });
+
+  it('the header says type · date · size in one line', async () => {
+    const text = await openMaterial('m-txt');
+    expect(within(text.doc).getByText(/^Text · \d+ Oct, \d\d:\d\d · 9 words$/)).toBeInTheDocument();
+    text.unmount();
+    const pdf = await openMaterial('m-tb');
+    expect(within(pdf.doc).getByText(/^PDF · \d+ Oct, \d\d:\d\d · 2 pages$/)).toBeInTheDocument();
+    pdf.unmount();
+    const rec = await openMaterial('m-lec8');
+    expect(within(rec.doc).getByText(/^Recording · \d+ Oct, \d\d:\d\d · \d\d:\d\d · English → Russian$/)).toBeInTheDocument();
+  });
+
+  it('excluded fragments stay in the text where they were, marked, in a text and in a recording', async () => {
+    const world = docWorld();
+    world.excluded['m-txt'] = [{ seg: 1, found: 'Problem 1.', reason: 'Instruction to an AI', label: 'paragraph 1', start_ms: null, restored: false }];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-txt' }));
+    let doc = await screen.findByRole('complementary', { name: 'Document' });
+    const para = await waitFor(() => {
+      const el = doc.querySelector('[data-seg="1"]')!;
+      expect(el).toHaveAttribute('data-excluded');
+      return el as HTMLElement;
+    });
+    expect(para).toHaveTextContent('Excluded · instruction to an AI');
+    expect(para).toHaveTextContent('Problem 1. Compute the entropy of a fair die.');
+    r.unmount();
+
+    const rec = await openMaterial('m-lec8');
+    doc = rec.doc;
+    const user = userEvent.setup();
+    await user.click(within(doc).getByRole('radio', { name: 'Original' }));
+    await waitFor(() => expect(doc.querySelector('[data-seg="3"]')).toHaveAttribute('data-excluded'));
+    expect(doc.querySelectorAll('[data-excluded]')).toHaveLength(1);
+    expect(doc.querySelector('[data-seg="3"]')).toHaveTextContent('Excluded · instruction to an AI');
   });
 
   it('PDF pages and the article’s source link', async () => {

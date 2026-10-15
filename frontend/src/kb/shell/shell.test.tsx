@@ -9,7 +9,7 @@ describe('Window shell', () => {
   it('shows title bar, narrow icon rail (v39) with named sections, search and settings, side panel, chat centre; no document panel', async () => {
     renderKb();
     const rail = await screen.findByRole('navigation', { name: 'Sections' });
-    // Icons only (summary v39): names are accessible names and tooltips; the graph lives under Wiki.
+    // Icons only (summary v39): names are accessible names and slide out on hover (v43 B); the graph lives under Wiki.
     for (const label of [/^Chats/, /^Materials/, /^Wiki/, /^Notifications/, /^Search/, /^Settings/]) {
       expect(within(rail).getByRole('button', { name: label })).toBeInTheDocument();
     }
@@ -23,6 +23,64 @@ describe('Window shell', () => {
     expect(screen.getByTestId('record-capsule')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
     expect(within(screen.getByTestId('record-capsule')).getByRole('button', { name: 'Record' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  it('rail names slide out beside the icon (v43 B): after a short hover, then at once along the rail; focus at once', async () => {
+    const user = userEvent.setup();
+    renderKb();
+    const rail = await screen.findByRole('navigation', { name: 'Sections' });
+    const chats = within(rail).getByRole('button', { name: /^Chats/ });
+    const materials = within(rail).getByRole('button', { name: /^Materials/ });
+    await user.hover(chats);
+    // Not at once on the first hover…
+    expect(within(chats).queryByTestId('rail-label')).not.toBeInTheDocument();
+    // …but after the reveal delay, inside the button (one shape), decorative.
+    const label = await within(chats).findByTestId('rail-label', {}, { timeout: 1000 });
+    expect(label).toHaveTextContent('Chats');
+    expect(label).toHaveAttribute('aria-hidden', 'true');
+    expect(chats).toHaveAccessibleName('Chats');
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    // Moving along the rail: the next name comes at once, the previous one is gone.
+    await user.hover(materials);
+    expect(within(materials).getByTestId('rail-label')).toHaveTextContent('Materials');
+    expect(within(chats).queryByTestId('rail-label')).not.toBeInTheDocument();
+    await user.unhover(materials);
+    expect(within(rail).queryByTestId('rail-label')).not.toBeInTheDocument();
+    // Escape hides it.
+    await user.hover(materials);
+    await user.keyboard('{Escape}');
+    expect(within(rail).queryByTestId('rail-label')).not.toBeInTheDocument();
+  });
+
+  it('the rail carries a vertical SKAZ wordmark above Search (v44 A): decorative, not a control', async () => {
+    renderKb();
+    const rail = await screen.findByRole('navigation', { name: 'Sections' });
+    const mark = rail.querySelector('.kb-rail__wordmark');
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveTextContent('SKAZ');
+    expect(mark).toHaveAttribute('aria-hidden', 'true');
+    expect(mark!.closest('button, a, [tabindex]')).toBeNull();
+    // Between the sections and Search, in the flexible space.
+    const search = within(rail).getByRole('button', { name: 'Search' });
+    expect(mark!.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mark!.parentElement).toHaveClass('kb-rail__spacer');
+  });
+
+  it('keyboard focus shows the rail name at once; search and settings carry their shortcut, muted', async () => {
+    const user = userEvent.setup();
+    renderKb();
+    const rail = await screen.findByRole('navigation', { name: 'Sections' });
+    const search = within(rail).getByRole('button', { name: 'Search' });
+    within(rail).getByRole('button', { name: /^Notifications/ }).focus();
+    await user.tab();
+    expect(search).toHaveFocus();
+    const label = within(search).getByTestId('rail-label');
+    expect(label).toHaveTextContent('Search⌘K');
+    expect(label.querySelector('.kb-rail__hint')).toHaveTextContent('⌘K');
+    await user.tab();
+    const settings = within(rail).getByRole('button', { name: /^Settings/ });
+    expect(within(settings).getByTestId('rail-label')).toHaveTextContent(/^Settings/);
+    expect(within(search).queryByTestId('rail-label')).not.toBeInTheDocument();
   });
 
   it('collapses the side panel to the rail and opens it again from a rail item; the choice is kept', async () => {

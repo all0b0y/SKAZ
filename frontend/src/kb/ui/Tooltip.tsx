@@ -59,7 +59,7 @@ export function Tooltip({ text, children, placement = 'bottom', describes = fals
     if (!open || !anchorRef.current || !tipRef.current) return;
     const a = anchorRef.current.getBoundingClientRect();
     const t = tipRef.current.getBoundingClientRect();
-    setPos(placePopup(a, { width: t.width, height: t.height }, placement, boundaryFor(anchorRef.current)));
+    setPos(placePopup(a, { width: t.width, height: t.height }, placement, boundaryFor(anchorRef.current, { placement, scope: 'window' })));
   }, [open, placement, text]);
 
   const child = children;

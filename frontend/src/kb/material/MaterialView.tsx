@@ -6,9 +6,9 @@ import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
 import { PanelFrameButtons, useAskAbout } from '../document/parts';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
-import { useLibrary, useRecording, useServices, useUi } from '../state/context';
+import { useRecording, useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
-import { ExcludedFragments } from './ExcludedFragments';
+import { ExcludedFragments, useMaterialGuard } from './ExcludedFragments';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
@@ -33,21 +33,32 @@ function durationOf(material: KbMaterial): number | null {
   return ends.length ? Math.max(...ends) : null;
 }
 
-function metaLine(material: KbMaterial, folderName: string | undefined): string {
-  const parts: string[] = [];
-  if (folderName) parts.push(folderName);
+const count = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+
+/** How big the material is: duration of speech, pages of a PDF, words of a text. */
+function sizeOf(material: KbMaterial): string | null {
   if (SPEECH.has(material.kind)) {
     const d = durationOf(material);
-    if (d !== null) parts.push(formatTime(d));
-  } else if (material.kind === 'pdf' || material.kind === 'book') {
-    const pages = new Set(material.fragments.map((f) => f.page).filter((p) => p !== null));
-    if (pages.size) parts.push(`${pages.size} ${pages.size === 1 ? 'page' : 'pages'}`);
-  } else if (material.origin?.url) {
-    try { parts.push(new URL(material.origin.url).hostname.replace(/^www\./, '')); } catch { /* not a URL */ }
+    return d !== null ? formatTime(d) : null;
   }
+  if (material.kind === 'pdf' || material.kind === 'book') {
+    const pages = new Set(material.fragments.map((f) => f.page).filter((p) => p !== null));
+    if (pages.size) return count(pages.size, 'page', 'pages');
+  }
+  const words = material.fragments.reduce((n, f) => n + (f.text.match(/\S+/g)?.length ?? 0), 0);
+  return words ? count(words, 'word', 'words') : null;
+}
+
+/** One muted line under the title: type · date · size (and the translation, when there is one). */
+function metaLine(material: KbMaterial): string {
+  const parts: string[] = [KIND_LABEL[material.kind]];
   parts.push(new Date(material.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }));
-  const lang = material.languages.map(languageName).join(', ');
-  if (lang) parts.push(material.translation?.language ? `${lang} → ${languageName(material.translation.language)}` : lang);
+  const size = sizeOf(material);
+  if (size) parts.push(size);
+  if (material.translation?.language) {
+    const from = material.languages.map(languageName).join(', ');
+    parts.push(from ? `${from} → ${languageName(material.translation.language)}` : `Translated to ${languageName(material.translation.language)}`);
+  }
   return parts.join(' · ');
 }
 
@@ -104,12 +115,12 @@ function useContinuable(material: KbMaterial | null): boolean {
 export function MaterialView({ target, nonce }: { target: DocTarget; nonce: number }) {
   const { client, recording } = useServices();
   const askAbout = useAskAbout();
-  const folders = useLibrary((s) => s.folders);
   const expanded = useUi((s) => s.docExpanded);
   const { state, reload, set } = useMaterialData(target.id);
   const data = state.value;
   const material = data?.material ?? null;
   const continuable = useContinuable(material);
+  const guard = useMaterialGuard(target.id, material?.excluded_count ?? 0);
   const [view, setView] = useState<TranscriptView>('original');
   const [dialog, setDialog] = useState<MaterialDialog>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -145,7 +156,6 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
     }
   };
   const replace = (next: KbMaterial) => { if (data) set({ ...data, material: next }); };
-  const folderName = material ? folders.find((f) => f.id === material.folder_id)?.name : undefined;
   const viewOptions = [
     { value: 'original' as const, label: 'Original' },
     { value: 'translation' as const, label: 'Translation' },
@@ -190,9 +200,12 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
         )}
         {material && data && (
           <article className={`kb-doc__article kb-mat${expanded ? ' is-wide' : ''}`} data-material-kind={material.kind}>
-            <h2 className="kb-doc__title">{material.title}</h2>
-            <p className="kb-doc__meta">{metaLine(material, folderName)}</p>
-            <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} />
+            <div className="kb-mat__head">
+              <h2 className="kb-doc__title">{material.title}</h2>
+              <p className="kb-doc__meta">{metaLine(material)}</p>
+              <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} />
+              <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />
+            </div>
             {continuable && (
               <div className="kb-mat__actions">
                 <Button size="sm" variant="outline" icon="mic" onClick={() => void recording.getState().continueRecording(material.id)}>
@@ -202,7 +215,6 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             )}
             {addError && <p className="kb-inline-error" role="alert">{addError}</p>}
             {note && <p className="kb-mat__note" role="status">{note}</p>}
-            <ExcludedFragments materialId={material.id} count={material.excluded_count} onRestored={reload} />
             {hasTranslation && (
               <Segmented label="Show" size="sm" value={view} options={viewOptions} onChange={setView} />
             )}
@@ -211,7 +223,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             ) : (
               <Transcript material={material} corrections={data.corrections} view={hasTranslation ? view : 'original'}
                 sideBySide={expanded} target={{ seg: target.seg ?? null, quote: target.quote ?? null }}
-                onCorrectionChanged={onCorrection} />
+                excluded={guard.excludedSegs} onCorrectionChanged={onCorrection} />
             )}
             {material.kind === 'web' && material.origin?.url && (
               <p className="kb-arturl">
