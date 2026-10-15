@@ -66,7 +66,34 @@
   border-right: 1px solid var(--kb-line);
 }
 .kb-rail__list { display: flex; flex-direction: column; gap: 6px; }
-.kb-rail__spacer { flex: 1; }
+.kb-rail__spacer {
+  flex: 1;
+  min-height: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 10px;
+  container-type: size;
+}
+/* Wordmark (v44 A): vertical, bottom-to-top, the text colour at 32 % in both themes. Decorative.
+   It lives in the flexible space and leaves when that space is too short for it — the icons are
+   never squeezed (the spacer may shrink to 0). */
+.kb-rail__wordmark {
+  font-family: var(--kb-font-display);
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.22em;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: color-mix(in srgb, var(--kb-text) 32%, transparent);
+  user-select: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
+@container (max-height: 96px) { .kb-rail__wordmark { display: none; } }
 .kb-rail__item {
   position: relative;
   width: 36px;
