@@ -136,6 +136,7 @@ def _speech_view(value: SpeechSettings) -> KbSpeechSettings:
         translation_language=value.translation_language,
         local_model=KbLocalSpeechModel(model=model.model, state=model.state, progress=model.progress,
                                        reason=model.reason),
+        cloud_consent=value.cloud_consent,
     )
 
 
@@ -146,7 +147,10 @@ async def read_speech(runtime: RuntimeDep) -> KbSpeechSettings:
 
 @router.put("/speech")
 async def update_speech(body: KbSpeechSettingsUpdate, runtime: RuntimeDep) -> KbSpeechSettings:
-    """Service, languages and the translation default — stored in the existing settings, nowhere else."""
+    """Service, languages, translation default and the cloud consent — in the existing settings, nowhere else.
+
+    Taking the consent back stops cloud recognition that is running (the legacy update does that).
+    """
     try:
         update = _speech_update(body)
     except ValidationError as error:
@@ -164,6 +168,7 @@ def _speech_update(body: KbSpeechSettingsUpdate) -> SettingsUpdate:
             "native_recording_mode": (None if body.translate_by_default is None
                                       else "translation" if body.translate_by_default else "transcription"),
             "translation_target_language": body.translation_language,
+            "cloud_consent": body.cloud_consent,
         }.items() if value is not None
     })
 

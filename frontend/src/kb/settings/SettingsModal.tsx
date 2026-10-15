@@ -6,7 +6,7 @@ import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
 import {
   AgentRow, AsrRow, BackgroundLinksRow, ChatModelRow, DecisionsRow, DefaultAgentRow, FindLinksNowRow, HealthPlates, KeyRow,
-  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SpeechLanguagesRow, TranslationRow, VersionRow,
+  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SonioxConsentRow, SpeechLanguagesRow, TranslationRow, VersionRow,
   WikiLanguageRow, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
 import { EngineBadge } from '../ui/EngineBadge';
@@ -37,6 +37,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'wiki-model': return <WikiModelRow label={row.label} />;
     case 'decisions': return <DecisionsRow label={row.label} />;
     case 'asr-service': return <AsrRow label={row.label} />;
+    case 'soniox-consent': return <SonioxConsentRow label={row.label} />;
     case 'speech-languages': return <SpeechLanguagesRow />;
     case 'translate-default': return <TranslationRow />;
     case 'wiki-language': return <WikiLanguageRow />;

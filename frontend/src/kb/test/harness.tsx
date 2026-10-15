@@ -6,13 +6,18 @@ import { KbApp } from '../KbApp';
 import { createServices } from '../state/context';
 import { PREFS_KEY } from '../state/prefs';
 import { createBrowserFake } from './browserFake';
-import { finishAnswer } from './fakeKb';
+import { finishAnswer, syncSpeechConsent } from './fakeKb';
 import { chatWorld } from './fixtures';
 import '../styles/index.css';
 
 const params = new URLSearchParams(location.search);
 const world = chatWorld();
 if (params.get('hold') === '1') world.hold = true;
+// Soniox chosen without the consent to send audio (review B2 #6).
+if (params.get('soniox') === 'off') {
+  world.speech.cloud_consent = false;
+  syncSpeechConsent(world);
+}
 const fake = createBrowserFake(world);
 const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Record<string, unknown>;
 localStorage.setItem(PREFS_KEY, JSON.stringify({ onboardingDone: params.get('onboarding') !== '1', ...prefs }));

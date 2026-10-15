@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld } from '../test/fixtures';
 import { unconfiguredWorld } from '../test/fakeBridge';
+import { syncSpeechConsent } from '../test/fakeKb';
 
 const openSettings = async () => {
   await screen.findByRole('navigation', { name: 'Sections' });
@@ -110,6 +111,41 @@ describe('Live settings (package 2)', () => {
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ body: { background_connections: true } })));
     await user.click(within(row(dialog, 'Find connections now')).getByRole('button', { name: 'Find now' }));
     expect(await within(dialog).findByText(/Found connections arrive as notifications/)).toBeInTheDocument();
+  });
+
+  it('sending audio to Soniox: allowed only by the user (plate or switch), shown with what goes where, revocable', async () => {
+    const user = userEvent.setup();
+    const state = chatWorld();
+    state.speech.cloud_consent = false;
+    syncSpeechConsent(state);
+    const { fake } = renderKb({ world: state });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Recording & speech/ }));
+    const consent = row(dialog, 'Send audio to Soniox');
+    const toggle = within(consent).getByRole('switch', { name: 'Send audio to Soniox' });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
+    expect(consent).toHaveTextContent('Audio of recordings, imports and dictation → Soniox (cloud speech recognition)');
+    // The plate offers the consent as an explicit action.
+    const plate = (await within(dialog).findByText('Sending audio to Soniox is off')).closest('.kb-banner') as HTMLElement;
+    await user.click(within(plate).getByRole('button', { name: 'Allow sending audio to Soniox' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/settings/health/speech-soniox-consent/allow_soniox' })));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+    expect(within(dialog).queryByText('Sending audio to Soniox is off')).not.toBeInTheDocument();
+    // Taking it back is one click; giving it again asks first and says what is sent where.
+    await user.click(toggle);
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/speech', body: { cloud_consent: false } })));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
+    expect(await within(dialog).findByText('Sending audio to Soniox is off')).toBeInTheDocument();
+    const puts = () => fake.calls.filter((c) => c.path === '/kb/settings/speech' && (c.body as Record<string, unknown> | undefined)?.cloud_consent === true);
+    await user.click(toggle);
+    const ask = await screen.findByRole('dialog', { name: 'Send audio to Soniox?' });
+    expect(ask).toHaveTextContent('Soniox');
+    await user.click(within(ask).getByRole('button', { name: 'Cancel' }));
+    expect(puts()).toHaveLength(0);
+    await user.click(toggle);
+    await user.click(within(await screen.findByRole('dialog', { name: 'Send audio to Soniox?' })).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
   });
 
   it('Privacy shows where data goes from the backend; About shows the version and licences', async () => {

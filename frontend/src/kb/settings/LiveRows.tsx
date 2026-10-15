@@ -56,6 +56,8 @@ export function HealthPlates({ section }: { section: SettingsSection }) {
                     const r = await settings.getState().healthAction(p.id, a.id);
                     setBusy(null);
                     setError(r.ok ? null : r.error);
+                    // A speech fix changes the service or the Soniox consent: the rows and Privacy follow.
+                    if (r.ok && section === 'rec') await Promise.all([settings.getState().loadSpeech(), settings.getState().loadPrivacy()]);
                   }}>{a.label}</Button>
               ))}
             </>
@@ -299,6 +301,41 @@ export function AsrRow({ label }: { label: string }) {
         options={[{ value: 'soniox', label: 'Soniox' }, { value: 'local_whisper', label: 'On this computer' },
           ...(speech.value.provider === 'openai' ? [{ value: 'openai' as const, label: 'OpenAI' }] : [])]} />
       {result}
+    </>
+  );
+}
+
+/**
+ * Consent to send audio to Soniox (review B2 #6): stored as the existing settings' cloud consent, given
+ * only here (after saying what goes where) or by the plate's "Allow sending audio to Soniox", taken
+ * back with one click. Choosing Soniox as the service never gives it.
+ */
+export function SonioxConsentRow({ label }: { label: string }) {
+  const { settings } = useServices();
+  const speech = useSettings((s) => s.speech);
+  const [asking, setAsking] = useState(false);
+  const [result, show] = useResult();
+  if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
+  const set = async (consent: boolean) => {
+    const r = await settings.getState().updateSpeech({ cloud_consent: consent });
+    show(r);
+    if (r.ok) await Promise.all([settings.getState().loadHealth(), settings.getState().loadPrivacy()]);
+  };
+  return (
+    <>
+      <span className="kb-muted">Audio of recordings, imports and dictation → Soniox (cloud speech recognition)</span>
+      <Switch label={label} checked={speech.value.cloud_consent} onChange={(v) => { if (v) setAsking(true); else void set(false); }} />
+      {result}
+      <Modal open={asking} onClose={() => setAsking(false)} title="Send audio to Soniox?" className="kb-confirm" testId="confirm-soniox">
+        <div className="kb-confirm__body">
+          <p>While you record, import audio or video, or dictate, the sound goes to Soniox (cloud speech recognition) through your Soniox key; the recognised text comes back to this computer.</p>
+          <p className="kb-muted">You can turn this off at any time, or recognise speech on this computer instead.</p>
+        </div>
+        <footer className="kb-confirm__foot">
+          <Button onClick={() => setAsking(false)}>Cancel</Button>
+          <Button variant="fill" onClick={async () => { setAsking(false); await set(true); }}>Allow</Button>
+        </footer>
+      </Modal>
     </>
   );
 }

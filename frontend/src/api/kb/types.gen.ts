@@ -860,6 +860,7 @@ export interface KbSpeechSettings {
   translate_by_default: boolean;
   translation_language: string;
   local_model: KbLocalSpeechModel;
+  cloud_consent: boolean;
 }
 
 export interface KbSpeechSettingsUpdate {
@@ -867,6 +868,7 @@ export interface KbSpeechSettingsUpdate {
   languages?: string[] | null;
   translate_by_default?: boolean | null;
   translation_language?: string | null;
+  cloud_consent?: boolean | null;
 }
 
 /** What a click on a notification opens. */

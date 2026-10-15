@@ -64,6 +64,8 @@ class Section:
 
 
 USE_LOCAL = ProblemAction("use_local", "Recognise on this Mac")
+#: The user's explicit consent to send audio to Soniox (stored as the existing ``cloud_consent``).
+ALLOW_SONIOX = ProblemAction("allow_soniox", "Allow sending audio to Soniox", True)
 
 
 class UnknownProblem(NotFound):
@@ -219,8 +221,10 @@ class SettingsHealth:
                                 "Add it in Accounts and keys.", still, stopped, actions=(USE_LOCAL,))]
             if not settings.cloud_consent:
                 return [Problem("speech-soniox-consent", "speech", "error", "Sending audio to Soniox is off",
-                                "Speech goes to Soniox, but sending audio to the cloud isn't allowed.",
-                                still, stopped, actions=(USE_LOCAL,))]
+                                "Speech goes to Soniox, but sending audio to the cloud isn't allowed. "
+                                "Allowing it sends the audio of recordings, imported media and dictation "
+                                "to Soniox for recognition.",
+                                still, stopped, actions=(ALLOW_SONIOX, USE_LOCAL))]
         return []
 
     def _library(self) -> list[Problem]:
@@ -285,13 +289,17 @@ class SettingsHealth:
             model = (await disk_call(runtime.settings_store.load)).local_whisper_model
             await runtime.local_models.start(model, "local-whisper")
         elif action in ("use_soniox", "use_local"):
-            await self._switch_speech("soniox" if action == "use_soniox" else "local-whisper")
+            await self._update_speech(transcription_provider="soniox" if action == "use_soniox"
+                                      else "local-whisper")
+        elif action == ALLOW_SONIOX.id:
+            # The user's click on "Allow sending audio to Soniox"; revoked in Settings → Speech.
+            await self._update_speech(cloud_consent=True)
 
-    async def _switch_speech(self, provider: str) -> None:
+    async def _update_speech(self, **changes: object) -> None:
         from ...routes.settings import update_settings
         from ...schemas import SettingsUpdate
 
-        await update_settings(SettingsUpdate(transcription_provider=provider), self._runtime)  # type: ignore[arg-type]
+        await update_settings(SettingsUpdate.model_validate(changes), self._runtime)
 
     async def _library_action(self, _problem: Problem, action: str) -> None:
         kb = self._runtime.kb
