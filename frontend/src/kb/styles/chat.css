@@ -140,6 +140,33 @@
   container-type: inline-size;
 }
 .kb-composer:focus-within { border-color: color-mix(in srgb, var(--kb-text) 45%, var(--kb-line)); }
+/* Quick questions over the field while a recording runs (v39 rec): one row of pills, scrolls sideways. */
+.kb-quick {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  margin: 0 18px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.kb-quick::-webkit-scrollbar { display: none; }
+.kb-quick__chip {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--kb-line);
+  border-radius: 999px;
+  background: var(--kb-pane);
+  color: var(--kb-text);
+  font: inherit;
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.kb-quick__chip:hover { border-color: color-mix(in srgb, var(--kb-text) 45%, var(--kb-line)); }
+.kb-quick__chip:focus-visible { outline: 2px solid color-mix(in srgb, var(--kb-text) 40%, transparent); outline-offset: 1px; }
+.kb-quick__chip[aria-disabled='true'] { color: var(--kb-muted); cursor: not-allowed; }
+.kb-quick__chip[aria-disabled='true']:hover { border-color: var(--kb-line); }
 .kb-editor-wrap { position: relative; }
 .kb-editor {
   /* Grows like text; after five lines it scrolls (decision 23). */
@@ -284,6 +311,7 @@
 .kb-attachment__open:focus-visible { outline: 2px solid color-mix(in srgb, var(--kb-text) 40%, transparent); outline-offset: 2px; border-radius: var(--kb-r-xs); }
 .kb-attachment__act.kb-iconbtn { width: 20px; height: 20px; color: var(--kb-muted); }
 .kb-pastepop { display: flex; flex-direction: column; gap: 8px; padding: 6px; }
+.kb-popover.kb-pastepop { max-width: min(520px, calc(100vw - 32px)); }
 .kb-pastepop__head { font-size: var(--t-sm); font-weight: 600; }
 .kb-pastepop__body {
   max-height: min(360px, 50vh);

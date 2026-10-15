@@ -5,13 +5,14 @@ import { Icon, IconButton } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { agentOf } from '../state/agents';
 import { isAnswering, type AgentChoice } from '../state/chats';
-import { useAgents, useChats, useComposerBus, useLibrary, useServices, useSettings, useUi } from '../state/context';
+import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
 import { clearEditor, insertText, insertToken, isEmpty, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
+import { QuickQuestions } from './QuickQuestions';
 import { openTarget } from '../state/document';
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; started: number } | { phase: 'transcribing' };
@@ -64,10 +65,14 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const focusTick = useComposerBus((s) => s.focusTick);
   const queued = useComposerBus((s) => s.queue.length);
   const mentions = useMentions(mention ? mention.query : null);
+  const recPhase = useRecording((s) => s.phase);
+  const recId = useRecording((s) => s.materialId);
+  const recTitle = useRecording((s) => s.title);
 
   const agent = choice ? agentOf(agents, choice.engine) : undefined;
   const model = agent?.models.find((m) => m.id === choice?.model);
   const agentReady = agent?.state === 'ready';
+  const unavailable = `${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`;
 
   const refresh = useCallback(() => {
     const root = editorRef.current;
@@ -144,6 +149,39 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   const autoWiki = (a: Attachment) => !!wiki && (a.source === 'text' ? wiki.auto_add_text : wiki.auto_add_files_links);
 
+  const openContext = () => (doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {});
+
+  // Quick questions while recording: the recording goes along as an attached material, so the agent
+  // reads its transcribed fragments only — never the words still being recognised.
+  const quickReason = !agentReady ? unavailable : answering ? 'The agent is still answering' : null;
+  const askQuick = async (text: string) => {
+    if (!recId || sending || quickReason) return;
+    setSending(true);
+    setError(null);
+    const result = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [recId] }, openContext());
+    setSending(false);
+    if (!result.ok) setError(result.error);
+  };
+  const prefillQuick = (text: string) => {
+    const root = editorRef.current;
+    if (!root || !recId || quickReason) return;
+    if (!attachments.some((a) => a.materialId === recId)) {
+      addAttachments([{ source: 'existing', name: recTitle ?? 'Recording', value: recId, materialId: recId }]);
+    }
+    root.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    lastPaste.current = null;
+    insertText(root, text);
+    refresh();
+  };
+
   const submit = async () => {
     const root = editorRef.current;
     if (!root || sending) return;
@@ -153,7 +191,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
       && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
     if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
-    if (!agentReady) { setError(`${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`); return; }
+    if (!agentReady) { setError(unavailable); return; }
     if (answering) return;
     setSending(true);
     setError(null);
@@ -180,8 +218,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     }
     const ready = list.filter((a) => a.state === 'ready' && a.materialId);
     const input: KbMessageInput = { text: value.text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!) };
-    const context = doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {};
-    const result = await chats.getState().send(input, context);
+    const result = await chats.getState().send(input, openContext());
     setSending(false);
     if (!result.ok) { setError(result.error); return; }
     // "In wiki" for what Settings does not add by itself (decision 15).
@@ -303,92 +340,97 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
 
   return (
-    <div className="kb-composer" data-testid="composer">
-      {popupOpen && (
-        <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
-          onPick={pickMention} onHover={setActive} />
+    <>
+      {recPhase === 'recording' && recId && (
+        <QuickQuestions disabledReason={quickReason} onAsk={(q) => void askQuick(q)} onPrefill={prefillQuick} />
       )}
-      <AttachmentChips items={attachments} autoWiki={autoWiki}
-        onToggleWiki={(key) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, inWiki: !a.inWiki } : a)))}
-        onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
-        renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
-      <div className="kb-editor-wrap">
-        {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{placeholder}</span>}
-        <div
-          ref={editorRef}
-          className="kb-editor"
-          contentEditable
-          suppressContentEditableWarning
-          role="textbox"
-          aria-multiline="true"
-          aria-label="Message"
-          aria-placeholder={placeholder}
-          aria-controls={popupOpen ? listId : undefined}
-          aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
-          aria-autocomplete="list"
-          data-testid="message-input"
-          onInput={() => { lastPaste.current = null; refresh(); }}
-          onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') refresh(); }}
-          onMouseUp={refresh}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          onBlur={() => window.setTimeout(() => setMention(null), 120)}
-          onMouseOver={(e) => showHover(e.target)}
-          onMouseLeave={() => setHover(null)}
-        />
-      </div>
-      {hover && (
-        <div className="kb-tooltip kb-tooltip--quote" role="tooltip" style={{ left: hover.left, top: Math.max(8, hover.top - 8), transform: 'translateY(-100%)' }}>
-          {hover.text}
-        </div>
-      )}
-      <div className="kb-composer__bar">
-        <AttachButton onAdd={addAttachments} disabled={false} />
-        <span className="kb-composer__spacer" />
-        {dictation.phase === 'recording' && (
-          <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>
+      <div className="kb-composer" data-testid="composer">
+        {popupOpen && (
+          <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
+            onPick={pickMention} onHover={setActive} />
         )}
-        <AgentPicker choice={choice} existingChat={chatId !== null}
-          onChoose={async (next) => {
-            setError(null);
-            const res = await chats.getState().setAgent(chatId, next);
-            if (!res.ok) setError(res.error);
-          }} />
-        {choice && model && (
-          <EffortPicker efforts={model.efforts} value={choice.effort}
-            onChange={async (effort) => {
-              const res = await chats.getState().setAgent(chatId, { ...choice, effort });
+        <AttachmentChips items={attachments} autoWiki={autoWiki}
+          onToggleWiki={(key) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, inWiki: !a.inWiki } : a)))}
+          onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
+          renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
+        <div className="kb-editor-wrap">
+          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{placeholder}</span>}
+          <div
+            ref={editorRef}
+            className="kb-editor"
+            contentEditable
+            suppressContentEditableWarning
+            role="textbox"
+            aria-multiline="true"
+            aria-label="Message"
+            aria-placeholder={placeholder}
+            aria-controls={popupOpen ? listId : undefined}
+            aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
+            aria-autocomplete="list"
+            data-testid="message-input"
+            onInput={() => { lastPaste.current = null; refresh(); }}
+            onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') refresh(); }}
+            onMouseUp={refresh}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onBlur={() => window.setTimeout(() => setMention(null), 120)}
+            onMouseOver={(e) => showHover(e.target)}
+            onMouseLeave={() => setHover(null)}
+          />
+        </div>
+        {hover && (
+          <div className="kb-tooltip kb-tooltip--quote" role="tooltip" style={{ left: hover.left, top: Math.max(8, hover.top - 8), transform: 'translateY(-100%)' }}>
+            {hover.text}
+          </div>
+        )}
+        <div className="kb-composer__bar">
+          <AttachButton onAdd={addAttachments} disabled={false} />
+          <span className="kb-composer__spacer" />
+          {dictation.phase === 'recording' && (
+            <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>
+          )}
+          <AgentPicker choice={choice} existingChat={chatId !== null}
+            onChoose={async (next) => {
+              setError(null);
+              const res = await chats.getState().setAgent(chatId, next);
               if (!res.ok) setError(res.error);
             }} />
-        )}
-        {bridge.dictate ? (
-          <IconButton icon="mic" label={dictation.phase === 'recording' ? 'Stop dictation' : dictation.phase === 'transcribing' ? 'Recognising…' : 'Dictate'}
-            aria-pressed={dictation.phase === 'recording'} active={dictation.phase === 'recording'}
-            className={dictation.phase === 'recording' ? 'kb-mic is-on' : 'kb-mic'}
-            disabled={dictation.phase === 'transcribing'} onClick={() => void toggleDictation()} tooltipPlacement="top" />
-        ) : (
-          <Tooltip text="Dictation isn’t available in this window" placement="top" describes>
-            <button type="button" className="kb-iconbtn kb-iconbtn--md" aria-label="Dictate" aria-disabled="true"><Icon name="mic" size={16} /></button>
-          </Tooltip>
-        )}
-        {answering && streaming && chatId ? (
-          <Tooltip text="Stop the answer" placement="top">
-            <button type="button" className="kb-send is-stop" aria-label="Stop the answer"
-              onClick={async () => { const r = await chats.getState().stop(chatId, streaming.id); if (!r.ok) setError(r.error); }}>
-              <Icon name="stop" size={12} />
-            </button>
-          </Tooltip>
-        ) : (
-          <Tooltip text={answering ? 'The agent is still answering' : 'Send (Enter)'} placement="top">
-            <button type="button" className="kb-send" aria-label="Send" aria-disabled={!canSend || sending || answering || undefined}
-              onClick={() => void submit()} data-busy={sending || undefined}>
-              <Icon name="send" size={14} />
-            </button>
-          </Tooltip>
-        )}
+          {choice && model && (
+            <EffortPicker efforts={model.efforts} value={choice.effort}
+              onChange={async (effort) => {
+                const res = await chats.getState().setAgent(chatId, { ...choice, effort });
+                if (!res.ok) setError(res.error);
+              }} />
+          )}
+          {bridge.dictate ? (
+            <IconButton icon="mic" label={dictation.phase === 'recording' ? 'Stop dictation' : dictation.phase === 'transcribing' ? 'Recognising…' : 'Dictate'}
+              aria-pressed={dictation.phase === 'recording'} active={dictation.phase === 'recording'}
+              className={dictation.phase === 'recording' ? 'kb-mic is-on' : 'kb-mic'}
+              disabled={dictation.phase === 'transcribing'} onClick={() => void toggleDictation()} tooltipPlacement="top" />
+          ) : (
+            <Tooltip text="Dictation isn’t available in this window" placement="top" describes>
+              <button type="button" className="kb-iconbtn kb-iconbtn--md" aria-label="Dictate" aria-disabled="true"><Icon name="mic" size={16} /></button>
+            </Tooltip>
+          )}
+          {answering && streaming && chatId ? (
+            <Tooltip text="Stop the answer" placement="top">
+              <button type="button" className="kb-send is-stop" aria-label="Stop the answer"
+                onClick={async () => { const r = await chats.getState().stop(chatId, streaming.id); if (!r.ok) setError(r.error); }}>
+                <Icon name="stop" size={12} />
+              </button>
+            </Tooltip>
+          ) : (
+            <Tooltip text={answering ? 'The agent is still answering' : 'Send (Enter)'} placement="top">
+              <button type="button" className="kb-send" aria-label="Send" aria-disabled={!canSend || sending || answering || undefined}
+                onClick={() => void submit()} data-busy={sending || undefined}>
+                <Icon name="send" size={14} />
+              </button>
+            </Tooltip>
+          )}
+        </div>
+        {error && <p className="kb-composer__error" role="alert">{error}</p>}
       </div>
-      {error && <p className="kb-composer__error" role="alert">{error}</p>}
-    </div>
+    </>
   );
 }
 

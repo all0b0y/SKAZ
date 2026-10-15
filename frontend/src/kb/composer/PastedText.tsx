@@ -37,13 +37,13 @@ export function PastedCard({ attachment, text, onPasteAsText }: {
         {attachment.name}
       </button>
       {attachment.state !== 'adding' && (
-        <IconButton icon="text" size="sm" label="Paste as text" className="kb-attachment__act" onClick={back} tooltipPlacement="top" />
+        <IconButton icon="enter" size="sm" label="Paste as text" className="kb-attachment__act" onClick={back} tooltipPlacement="top" />
       )}
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} placement="top-start" width={460} label="Pasted text" className="kb-pastepop">
         <div className="kb-pastepop__head">{attachment.name}</div>
         <div className="kb-pastepop__body" role="region" aria-label="Pasted text content" tabIndex={0}>{text}</div>
         <div className="kb-attachform__foot">
-          {attachment.state !== 'adding' && <Button size="sm" variant="outline" icon="text" onClick={back}>Paste as text</Button>}
+          {attachment.state !== 'adding' && <Button size="sm" variant="outline" icon="enter" onClick={back}>Paste as text</Button>}
         </div>
       </Popover>
     </>
