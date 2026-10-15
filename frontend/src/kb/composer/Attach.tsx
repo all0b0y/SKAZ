@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { MaterialFileChoice } from '../../api/bridge';
 import type { KbRef } from '../../api/kb/types.gen';
 import type { MaterialKind } from '../api/names';
@@ -24,6 +24,8 @@ export interface Attachment {
   inWiki: boolean;
   /** The material can be added to the wiki now (an audio/video import is still processing). */
   materialReady: boolean;
+  /** A long paste kept as a card (Composer): saved to Materials only when the message is sent. */
+  text?: string;
 }
 
 const SPEECH_EXT = new Set(['aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm', 'mkv', 'mov', 'avi', 'm4v']);
@@ -177,8 +179,10 @@ function MaterialPicker({ onDone }: { onDone: (ref: KbRef) => void }) {
   );
 }
 
-export function AttachmentChips({ items, onToggleWiki, onRemove }: {
+export function AttachmentChips({ items, onToggleWiki, onRemove, renderName }: {
   items: Attachment[];
+  /** Replaces the plain name (the pasted-text card's preview button); null keeps the default. */
+  renderName?: (a: Attachment) => ReactNode;
   onToggleWiki: (key: string) => void;
   onRemove: (key: string) => void;
 }) {
@@ -189,7 +193,7 @@ export function AttachmentChips({ items, onToggleWiki, onRemove }: {
         return (
           <li key={a.key} className={`kb-attachment is-${a.state}`}>
             <Icon name={a.source === 'link' ? 'link' : a.source === 'text' ? 'text' : 'pdf'} size={13} />
-            <span className="kb-attachment__name" title={a.name}>{a.name}</span>
+            {renderName?.(a) ?? <span className="kb-attachment__name" title={a.name}>{a.name}</span>}
             {a.state === 'adding' && <span className="kb-spinner kb-spinner--inline" role="status" aria-label="Saving to Materials" />}
             {a.state === 'failed' && <span className="kb-attachment__err" role="alert" title={a.error ?? ''}><Icon name="error" size={13} />{a.error}</span>}
             {a.source !== 'existing' && a.state !== 'failed' && (
