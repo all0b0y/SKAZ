@@ -22,6 +22,12 @@ v0.21.5+6627.g4bb9e57):
   Offline check on the installed build: "No tools available." with the policy,
   23 tools without it.
 * Permission requests are always answered with the reject option.
+
+First start (decision B10): the first ``hermes acp`` in a new Hermes folder
+prepares Hermes' own environment (~1.5 GB, a few minutes). With
+``first_run_gate`` (the app's engine) SKAZ never starts ACP — not for a status
+check, models or a run — until the user ran the ``prepare`` task
+(``install/recipes.py``), which leaves ``hermes-prepared.json`` beside the folder.
 """
 from __future__ import annotations
 
@@ -39,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..install.recipes import HERMES_PREPARE_BYTES
 from ..install.system import (
     Located,
     LocateFn,
@@ -68,6 +75,7 @@ from .engine import (
     Usage,
 )
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
+from .registry import FirstRun
 from .transcript import render_prompt
 
 #: Oldest Hermes build SKAZ verified (ACP session MCP servers, platform_toolsets.acp,
@@ -82,6 +90,10 @@ SETUP_AUTH_METHOD = "hermes-setup"
 NO_TOOLS_LISTING = "No tools available."
 SETUP_TITLE = "SKAZ opened the Hermes model setup for SKAZ's own Hermes folder."
 LIMITS_NOT_APPLIED = "Hermes did not apply SKAZ's tool limits, so SKAZ stopped the run. Update Hermes."
+PREPARED_FILE = "hermes-prepared.json"
+PREPARING_NOTE = "Hermes is preparing its environment (~1.5 GB, a few minutes)."
+PREPARE_FIRST = ("Hermes prepares its environment once before first use (~1.5 GB, a few minutes). "
+                 "Start it from SKAZ when you're ready.")
 #: Every toolset Hermes ships (core + platform + known plugin toolsets), all disabled for SKAZ.
 DISABLED_TOOLSETS = (
     "a2a", "browser", "clarify", "code_execution", "computer_use", "context_engine", "cronjob",
@@ -194,9 +206,12 @@ class HermesEngine:
     def __init__(self, data_dir: Path, *, mcp: McpAccessProvider | None = None,
                  locate_cli: LocateFn | None = None, launcher: TerminalLauncher | None = None,
                  user_home: Path | None = None, start_timeout_s: float = 180.0,
-                 status_timeout_s: float = 20.0, interrupt_grace_s: float = 5.0) -> None:
+                 status_timeout_s: float = 20.0, interrupt_grace_s: float = 5.0,
+                 first_run_gate: bool = False) -> None:
         root = data_dir / "agents"
         self.home = ensure_private_home(root / "hermes-home", home=user_home)
+        self.prepared_marker = root / PREPARED_FILE
+        self._gate = first_run_gate
         self.policy_dir = root / "hermes-policy"
         self.runs_dir = root / "hermes-runs"
         self.mcp = mcp
@@ -225,6 +240,20 @@ class HermesEngine:
         # JSON is valid YAML; no YAML writer is needed.
         temporary.write_text(json.dumps(HERMES_POLICY, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, target)
+
+    def prepared(self) -> bool:
+        """The first start (Hermes' own environment) was done by the user's ``prepare`` task."""
+        return not self._gate or self.prepared_marker.is_file()
+
+    def first_run(self) -> FirstRun:
+        return FirstRun(HERMES_PREPARE_BYTES, self.prepared(),
+                        needed=self._gate and self.set_up() and not self.prepared(), note=PREPARING_NOTE)
+
+    def mark_prepared(self) -> None:
+        self.prepared_marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = self.prepared_marker.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"prepared": True}) + "\n", encoding="utf-8")
+        os.replace(temporary, self.prepared_marker)
 
     def set_up(self) -> bool:
         """``hermes model`` has written a configuration into SKAZ's Hermes folder (contents are not read)."""
@@ -282,6 +311,8 @@ class HermesEngine:
             # Never start Hermes for a folder nobody set up: the first ``hermes acp`` in a new
             # HERMES_HOME may prepare Hermes' own runtime. The user starts that from "Set up".
             return EngineStatus("hermes", installed=True, version=shown, reason=NO_PROVIDER)
+        if not self.prepared():
+            return EngineStatus("hermes", installed=True, version=shown, reason=PREPARE_FIRST)
         try:
             async with self._acp(located, self.runs_dir / "status") as (_connection, initialized):
                 methods = initialized.get("authMethods") or []
@@ -298,7 +329,7 @@ class HermesEngine:
     async def models(self) -> Sequence[ModelOption]:
         """What is set up in SKAZ's Hermes folder; empty until a provider is chosen there."""
         located = self._locate("hermes")
-        if located is None or not self.set_up():
+        if located is None or not self.set_up() or not self.prepared():
             return ()
         work = self.runs_dir / f"models-{uuid.uuid4().hex}"
         try:
@@ -413,6 +444,9 @@ class HermesEngine:
             located = self._locate("hermes")
             if located is None:
                 yield Failed(run_id, "incompatible", NOT_INSTALLED)
+                return
+            if not self.prepared():
+                yield Failed(run_id, "other", PREPARE_FIRST)
                 return
             version, _ = await self._version(located)
             if version is None or version < MIN_HERMES_VERSION:

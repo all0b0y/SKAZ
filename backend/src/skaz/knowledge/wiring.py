@@ -29,6 +29,8 @@ from .mcp.tokens import McpRunScope
 from .service import KnowledgeService
 from .sources.guard.detector import Detection, detect_instruction
 from .sources.service import SourceEvent, SourceService
+from .speech.link_failures import LinkFailures
+from .speech.service import SpeechService
 from .wiki.service import WikiService
 
 log = logging.getLogger(__name__)
@@ -160,3 +162,10 @@ def wire(
     auto = AutoIngest(kb, ingest)
     sources.subscribe(auto)
     return auto
+
+
+def wire_speech(kb: KnowledgeService, speech: SpeechService) -> LinkFailures:
+    """S3: a video link that fails after it was added raises ``link_failed`` with its actions."""
+    failures = LinkFailures(kb, speech)
+    failures.register()
+    return failures

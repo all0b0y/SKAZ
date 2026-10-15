@@ -22,6 +22,11 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
   ``hermes acp --check`` verifies it.
 
 None of these needs ``sudo``; SKAZ refuses any command that would use it.
+
+Hermes' first start in a new ``HERMES_HOME`` prepares its own environment
+(about 1.5 GB, a few minutes; decision B10). SKAZ never lets that happen on
+its own: the ``prepare`` action runs ``hermes acp --check`` once for SKAZ's
+Hermes folder, with the same log as an installation, only when the user asks.
 """
 from __future__ import annotations
 
@@ -31,7 +36,7 @@ from typing import Literal
 
 from ..agents.engine import EngineId
 
-Action = Literal["install", "update"]
+Action = Literal["install", "update", "prepare"]
 CHECKED_ON = "2026-10-15"
 
 
@@ -41,6 +46,8 @@ class Step:
     #: ``{install_dir}`` and ``{binary}`` are filled in right before the step runs.
     argv: tuple[str, ...]
     cwd: str | None = None
+    #: Extra environment for this step (values filled in like ``argv``).
+    env: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,8 @@ class Recipe:
     manual_command: str
     plan: Callable[[Action], tuple[Step, ...]]
     checked_on: str = CHECKED_ON
+    #: The agent prepares its own environment on first use (``prepare`` action; Hermes only).
+    can_prepare: bool = False
 
 
 def _shell(command: str) -> tuple[str, ...]:
@@ -76,7 +85,15 @@ def _codex(action: Action) -> tuple[Step, ...]:
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
 
 
+HERMES_PREPARE = Step("Prepare Hermes Agent's environment for SKAZ", ("{binary}", "acp", "--check"),
+                      env=(("HERMES_HOME", "{hermes_home}"), ("HERMES_MANAGED_DIR", "{hermes_policy}")))
+#: What Hermes needs on disk for its first start (B10); shown before the user starts it.
+HERMES_PREPARE_BYTES = 1_500_000_000
+
+
 def _hermes(action: Action) -> tuple[Step, ...]:
+    if action == "prepare":
+        return (HERMES_PREPARE,)
     first = (Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL)) if action == "install"
              else Step("Update Hermes Agent", ("{binary}", "update")))
     return (
@@ -93,5 +110,6 @@ RECIPES: dict[EngineId, Recipe] = {
                     _codex),
     "hermes": Recipe("hermes", "Hermes Agent", "hermes",
                      "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
-                     "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", _hermes),
+                     "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", _hermes,
+                     can_prepare=True),
 }

@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 
+from skaz import media_tools
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.sources.fetch import SafeFetcher
 from tests.knowledge.pdf_fixtures import line, make_pdf
@@ -98,7 +100,8 @@ async def test_add_file_and_failed_scan(kb_client: httpx.AsyncClient, tmp_path: 
     assert bad.status_code == 422 and "absolute" in bad.json()["detail"]
 
 
-async def test_add_link_and_classify(kb_app: Any, kb_client: httpx.AsyncClient) -> None:
+async def test_add_link_and_classify(kb_app: Any, kb_client: httpx.AsyncClient,
+                                     monkeypatch: pytest.MonkeyPatch) -> None:
     await kb_client.post("/kb/library", json={})
     html = (
         f"<html><head><title>Heat</title></head><body><article><h1>Heat</h1><p>{CLEAN_EN[0]}</p>"
@@ -117,10 +120,15 @@ async def test_add_link_and_classify(kb_app: Any, kb_client: httpx.AsyncClient) 
     detail = (await kb_client.get(f"/kb/materials/{added['material']['id']}")).json()
     assert detail["origin"]["url"] == "https://blog.example/heat"
 
+    async def metadata(url: str) -> dict[str, Any]:
+        return {"url": url, "video_id": "dQw4w9WgXcQ", "title": "Talk", "duration_ms": 1000}
+
+    monkeypatch.setattr(media_tools, "video_metadata", metadata)
     video = await kb_client.post(
         "/kb/materials/link", json={"url": "https://youtu.be/dQw4w9WgXcQ", "folder_id": INBOX_ID}
     )
-    assert video.status_code == 422 and "speech import" in video.json()["detail"]
+    # S3: a video link goes to the speech import (no longer refused); this app has no Soniox consent.
+    assert video.status_code == 409 and "Soniox" in video.json()["detail"]
     local = await kb_client.post(
         "/kb/materials/link", json={"url": "http://127.0.0.1:8765/kb/library", "folder_id": INBOX_ID}
     )
@@ -138,6 +146,7 @@ async def test_add_link_and_classify(kb_app: Any, kb_client: httpx.AsyncClient) 
         "duration_ms": None,
         "supported": True,
         "note": None,
+        "embedded_video": None,
     }
     playlist = await kb_client.post("/kb/links/classify", json={"url": "https://vimeo.com/showcase/1"})
     assert playlist.status_code == 422 and "playlist" in playlist.json()["detail"]

@@ -42,11 +42,20 @@ class KbAddFile(_Request):
     title: str | None = Field(default=None, max_length=255)
 
 
+KbAddLinkMode = Literal["text", "video", "both"]
+
+
 class KbAddLink(_Request):
     url: str = Field(min_length=1, max_length=4096)
     folder_id: str = Field(min_length=1, max_length=64)
-    #: ``null`` = the page's title, else the domain.
+    #: ``null`` = the page's (video's) title, else the domain.
     title: str | None = Field(default=None, max_length=255)
+    #: A page with an embedded video (``KbLinkInfo.embedded_video``): its text, the video or both
+    #: (two materials). A video link itself is always imported as a video.
+    mode: KbAddLinkMode = "text"
+    #: Videos only: the spoken language (``null`` = the saved languages) and provider translation.
+    language: str | None = Field(default=None, max_length=32)
+    translate: bool = False
 
 
 class KbClassifyLink(_Request):
@@ -63,6 +72,10 @@ class KbMaterialAdded(BaseModel):
     hidden_count: int
     #: Why the material is ``failed`` (e.g. a scanned PDF), else ``null``.
     failure_reason: str | None
+    #: Mode ``both``: the video material added beside the article (``null`` otherwise or if it failed).
+    video: KbMaterialSummary | None
+    #: Mode ``both``: why the video could not be added (the article was added).
+    video_failure_reason: str | None
 
 
 class KbLinkInfo(BaseModel):
@@ -78,6 +91,8 @@ class KbLinkInfo(BaseModel):
     #: False when SKAZ can't add the link as this kind (e.g. a video on another site).
     supported: bool
     note: str | None
+    #: The page embeds a video from YouTube, VK Video, RuTube or Vimeo: ask text / video / both.
+    embedded_video: KbLinkInfo | None
 
 
 class KbFragmentLocation(BaseModel):

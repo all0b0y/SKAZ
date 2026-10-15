@@ -63,3 +63,12 @@ class KbSpeechMaterial(BaseModel):
 class KbSpeechDefaults(BaseModel):
     #: Where a new recording/import goes when no folder is chosen (last used, else Inbox).
     folder_id: str
+
+
+class KbDictation(BaseModel):
+    """``POST /kb/dictation``: the recognised text; nothing was stored."""
+
+    text: str
+    #: The language recognised (or asked for); ``null`` when unknown.
+    language: str | None
+    provider: Literal["soniox", "local_whisper"]

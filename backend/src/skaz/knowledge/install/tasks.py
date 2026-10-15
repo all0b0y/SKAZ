@@ -92,15 +92,19 @@ class InstallBusy(KnowledgeError):
 
 Verify = Callable[[EngineId], Awaitable[EngineStatus]]
 Resolve = Callable[[EngineId], Awaitable[Mapping[str, str]]]
+#: Called after every step of a task succeeded, before the result check (e.g. "Hermes is prepared").
+AfterSteps = Callable[[EngineId, Action], None]
 
 
 class InstallManager:
     def __init__(self, work_dir: Path, *, verify: Verify, resolve: Resolve,
                  executor: Executor | None = None, recipes: Mapping[EngineId, Recipe] | None = None,
-                 timeout_s: float = DEFAULT_TIMEOUT_S, env: Mapping[str, str] | None = None) -> None:
+                 timeout_s: float = DEFAULT_TIMEOUT_S, env: Mapping[str, str] | None = None,
+                 after_steps: AfterSteps | None = None) -> None:
         self.work_dir = work_dir
         self._verify = verify
         self._resolve = resolve
+        self._after_steps = after_steps
         self._executor: Executor = executor or SubprocessExecutor()
         self.recipes: Mapping[EngineId, Recipe] = recipes or RECIPES
         self._timeout = timeout_s
@@ -129,6 +133,8 @@ class InstallManager:
                     raise InstallBusy(f"{task.recipe.name} is already being installed or updated.")
                 return task
         recipe = self.recipes[engine]
+        if action == "prepare" and not recipe.can_prepare:
+            raise InstallBusy(f"{recipe.name} has nothing to prepare.")
         task = InstallTask(uuid.uuid4().hex, engine, action, recipe)
         self._tasks[task.id] = task
         self._running[task.id] = asyncio.create_task(self._run(task))
@@ -160,6 +166,8 @@ class InstallManager:
         try:
             async with asyncio.timeout(self._timeout):
                 if await self._steps(task, step_handle):
+                    if self._after_steps is not None:
+                        self._after_steps(task.engine, task.action)
                     await self._check_result(task)
         except asyncio.CancelledError:
             await self._stop(step_handle)
@@ -185,10 +193,10 @@ class InstallManager:
     async def _steps(self, task: InstallTask, step_handle: list[RunningStep]) -> bool:
         env = self.environment()
         for step in task.recipe.plan(task.action):
-            argv, cwd = await self._fill(task.engine, step)
+            argv, cwd, extra = await self._fill(task.engine, step)
             refuse_sudo(argv)
             task.log(f"$ {' '.join(argv)}")
-            handle = await self._executor.start(argv, cwd=Path(cwd) if cwd else None, env=env)
+            handle = await self._executor.start(argv, cwd=Path(cwd) if cwd else None, env={**env, **extra})
             step_handle.append(handle)
             seen: list[str] = []
             async for raw in handle.lines():
@@ -202,15 +210,16 @@ class InstallManager:
                 return False
         return True
 
-    async def _fill(self, engine: EngineId, step: Step) -> tuple[list[str], str | None]:
-        needs = any("{" in part for part in (*step.argv, step.cwd or ""))
+    async def _fill(self, engine: EngineId, step: Step) -> tuple[list[str], str | None, dict[str, str]]:
+        needs = any("{" in part for part in (*step.argv, step.cwd or "", *(value for _, value in step.env)))
         values = dict(await self._resolve(engine)) if needs else {}
         try:
             argv = [part.format(**values) for part in step.argv]
             cwd = step.cwd.format(**values) if step.cwd else None
+            extra = {name: value.format(**values) for name, value in step.env}
         except KeyError as missing:
             raise OSError(f"the {task_name(engine)} folder ({missing}) was not found") from missing
-        return argv, cwd
+        return argv, cwd, extra
 
     async def _check_result(self, task: InstallTask) -> None:
         status = await self._verify(task.engine)
@@ -221,6 +230,9 @@ class InstallManager:
                                   "window to check it, or install manually.")
         elif status.incompatible:
             task.finish("failed", status.reason or f"The installed {name} can't be used by SKAZ.")
+        elif task.action == "prepare":
+            task.log(f"{name}'s environment for SKAZ is ready.")
+            task.finish("succeeded")
         else:
             task.log(f"{name} {status.version or ''} is ready.".replace("  ", " "))
             task.finish("succeeded")

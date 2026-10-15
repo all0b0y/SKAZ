@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .library_session_schema import NativeConnection, NativeToken, SessionDocument
-from .media_source import youtube_source
+from .media_source import video_source
 
 
 def _require(condition: bool) -> None:
@@ -40,7 +40,7 @@ def validate_document(document: SessionDocument) -> None:
         _require(source.duration_ms == document.session.duration_ms)
         if source.kind == "youtube":
             _require(source.url is not None)
-            parsed = youtube_source(source.url or "")
+            parsed = video_source(source.url or "")
             _require(parsed.video_id == source.video_id and parsed.url == source.url)
         else:
             _require(source.url is None and source.video_id is None)

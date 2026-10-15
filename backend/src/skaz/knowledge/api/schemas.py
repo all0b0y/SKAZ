@@ -58,6 +58,9 @@ class KbOrigin(BaseModel):
     file_name: str | None
 
 
+KbWikiState = Literal["not_in_wiki", "processing", "in_wiki", "failed"]
+
+
 class KbMaterialSummary(BaseModel):
     id: str
     title: str
@@ -67,6 +70,9 @@ class KbMaterialSummary(BaseModel):
     languages: list[str]
     created_at: str
     fragment_count: int
+    #: The "Wiki" column of All materials (see ``KbMaterialWiki``).
+    wiki_state: KbWikiState
+    folder_name: str
 
 
 class KbFragment(BaseModel):
@@ -91,10 +97,39 @@ class KbCorrectionCounts(BaseModel):
     doubtful: int
 
 
+class KbTranslationFragment(BaseModel):
+    #: Soniox translations have no segment ids: ``null``, paragraphs in the original's order.
+    seg: int | None
+    speaker: str | None
+    text: str
+
+
+class KbTranslation(BaseModel):
+    language: str | None
+    fragments: list[KbTranslationFragment]
+
+
+class KbMaterialWiki(BaseModel):
+    #: ``processing``: an ingest job runs; ``in_wiki``: its note/concept pages exist;
+    #: ``failed``: the last job failed and nothing is in the wiki yet.
+    state: KbWikiState
+    note_page_id: str | None
+    concept_count: int
+    #: The latest ingest job of this material, if any.
+    job_id: str | None
+    #: Why the latest job failed (also when older pages are still in the wiki).
+    error: str | None
+
+
 class KbMaterial(KbMaterialSummary):
     origin: KbOrigin | None
     fragments: list[KbFragment]
     correction_counts: KbCorrectionCounts
+    #: The provider's translation (``.skaz/translation.md``), else ``null``.
+    translation: KbTranslation | None
+    wiki: KbMaterialWiki
+    #: Fragments kept out of processing as instructions for an AI ("excluded fragments: N").
+    excluded_count: int
 
 
 class KbPageSummary(BaseModel):
@@ -186,11 +221,33 @@ class KbPageHit(BaseModel):
     matched_alias: str | None
 
 
+class KbMaterialHit(BaseModel):
+    id: str
+    title: str
+    kind: MaterialKind
+    folder_id: str
+    folder_name: str
+    created_at: str
+    #: The title with the matched words marked.
+    snippet: list[KbSnippetPart]
+
+
+class KbSearchCounts(BaseModel):
+    """Totals per ⌘K section (not the length of the returned lists)."""
+
+    wiki: int
+    materials: int
+    chats: int
+
+
 class KbSearchResults(BaseModel):
     query: str
     fragments: list[KbFragmentHit]
     blocks: list[KbBlockHit]
     pages: list[KbPageHit]
+    #: Materials whose title matches (newest first).
+    materials: list[KbMaterialHit]
+    counts: KbSearchCounts
 
 
 class KbNotificationAction(BaseModel):

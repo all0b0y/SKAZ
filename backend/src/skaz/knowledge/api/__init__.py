@@ -7,6 +7,7 @@ from . import (
     agents,
     chats,
     decisions,
+    dictation,
     folders,
     ingest,
     library,
@@ -14,6 +15,7 @@ from . import (
     mentions,
     notifications,
     search,
+    settings,
     sources,
     speech,
     wiki,
@@ -36,4 +38,6 @@ ROUTERS: tuple[APIRouter, ...] = (
     wiki.graph_router,
     chats.router,
     mentions.router,
+    settings.router,
+    dictation.router,
 )

@@ -1,4 +1,4 @@
-"""``/kb/search``: fragments and wiki blocks (FTS5) plus page titles/aliases."""
+"""``/kb/search``: fragments and wiki blocks (FTS5), page titles/aliases, material titles and counts."""
 from __future__ import annotations
 
 from typing import Annotated
@@ -6,8 +6,18 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from ..index.search import SnippetPart
+from ..service import KnowledgeService
+from ..sources.material_search import counts, search_materials
 from .deps import KbDep, kb_call
-from .schemas import KbBlockHit, KbFragmentHit, KbPageHit, KbSearchResults, KbSnippetPart
+from .schemas import (
+    KbBlockHit,
+    KbFragmentHit,
+    KbMaterialHit,
+    KbPageHit,
+    KbSearchCounts,
+    KbSearchResults,
+    KbSnippetPart,
+)
 
 router = APIRouter(prefix="/kb/search", tags=["kb"])
 
@@ -16,10 +26,10 @@ def _snippet(parts: tuple[SnippetPart, ...]) -> list[KbSnippetPart]:
     return [KbSnippetPart(text=part.text, match=part.match) for part in parts]
 
 
-@router.get("")
-async def search(kb: KbDep, q: Annotated[str, Query(max_length=500)],
-                 limit: Annotated[int, Query(ge=1, le=100)] = 20) -> KbSearchResults:
-    results = await kb_call(kb.search, q, limit=limit)
+def run_search(kb: KnowledgeService, q: str, limit: int) -> KbSearchResults:
+    results = kb.search(q, limit=limit)
+    materials, titled = search_materials(kb.db, q, limit=limit)
+    totals = counts(kb.db, q, material_titles=titled)
     return KbSearchResults.model_validate({
         "query": results.query,
         "fragments": [
@@ -44,4 +54,19 @@ async def search(kb: KbDep, q: Annotated[str, Query(max_length=500)],
                                       "matched_alias": hit.matched_alias})
             for hit in results.pages
         ],
+        "materials": [
+            KbMaterialHit.model_validate({
+                "id": hit.id, "title": hit.title, "kind": hit.kind, "folder_id": hit.folder_id,
+                "folder_name": hit.folder_name, "created_at": hit.created_at,
+                "snippet": _snippet(hit.snippet),
+            })
+            for hit in materials
+        ],
+        "counts": KbSearchCounts(wiki=totals.wiki, materials=totals.materials, chats=totals.chats),
     })
+
+
+@router.get("")
+async def search(kb: KbDep, q: Annotated[str, Query(max_length=500)],
+                 limit: Annotated[int, Query(ge=1, le=100)] = 20) -> KbSearchResults:
+    return await kb_call(run_search, kb, q, limit)

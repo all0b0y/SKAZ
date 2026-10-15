@@ -72,3 +72,7 @@ class CarrierRepository:
         with self.db.write() as connection:
             connection.execute("UPDATE speech_carriers SET attempt_error = ? WHERE material_id = ?",
                                (error, material_id))
+
+    def remove(self, material_id: str) -> None:
+        with self.db.write() as connection:
+            connection.execute("DELETE FROM speech_carriers WHERE material_id = ?", (material_id,))

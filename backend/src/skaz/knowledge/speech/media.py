@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import PurePath
 
 from ...gateways.soniox_async import SUPPORTED_EXTENSIONS
-from ...media_source import InvalidMediaSource, youtube_source
+from ...media_source import InvalidMediaSource, VideoPlatform, video_source
 from .carriers import CarrierKind
 
 #: Containers that normally carry a picture: their audio track is extracted first.
@@ -32,21 +32,21 @@ def file_kind(path: PurePath) -> CarrierKind:
 class VideoLink:
     url: str
     video_id: str
-    host: str
+    host: VideoPlatform
 
 
 def classify_video_link(url: str) -> VideoLink:
     """A single public video on a supported host, or ``UnsupportedMedia`` with the reason.
 
-    Until area S1's ``classify_link`` (YouTube, VK Video, RuTube, Vimeo) is
-    merged this accepts what ``media_source.youtube_source`` accepts; the host
-    table plugs in here, and the import pipeline below it is host-neutral.
+    The host table is S1's (``media_source.video_source``: YouTube, VK Video,
+    RuTube, Vimeo, strict single-video check, canonical URL); there is no
+    second list here.
     """
     try:
-        source = youtube_source(url)
+        source = video_source(url)
     except InvalidMediaSource as error:
         raise UnsupportedMedia(str(error)) from error
-    return VideoLink(source.url, source.video_id, "youtube")
+    return VideoLink(source.url, source.video_id, source.platform)
 
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
