@@ -122,6 +122,23 @@ const ROUTES: readonly Route[] = [
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
 ];
 
+/**
+ * The legacy `PUT /settings` takes every app setting, consent and provider choice included. The
+ * renderer only sets the recording options (kb/recording/recordingStore.ts `setOptions`); consent,
+ * keys and providers have their own routes and dialogs. Anything else in the body is refused here,
+ * in the main process (final review M5).
+ */
+export const RENDERER_SETTINGS_FIELDS: ReadonlySet<string> = new Set([
+  'native_recording_mode', 'translation_target_language', 'input_device_id', 'capture_system_audio',
+]);
+
+function settingsBodyError(body: unknown): string | null {
+  if (body === undefined) return null;
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return 'settings body must be an object';
+  const refused = Object.keys(body).filter((key) => !RENDERER_SETTINGS_FIELDS.has(key));
+  return refused.length ? `settings field not allowed from the window: ${refused.join(', ')}` : null;
+}
+
 /** The knowledge-library (/kb) rules, for the test that checks them against the backend's routes. */
 export function kbRouteRules(): ReadonlyArray<{ method: HttpMethod; pattern: RegExp }> {
   return ROUTES.filter((r) => r.pattern.source.startsWith('^\\/kb\\/'));
@@ -185,5 +202,6 @@ export function validateBridgeRequest(req: BridgeRequestShape): string | null {
       return `request body too large (${serialized.length} > ${maxChars} chars)`;
     }
   }
+  if (req.method === 'PUT' && req.path === '/settings') return settingsBodyError(req.body);
   return null;
 }
