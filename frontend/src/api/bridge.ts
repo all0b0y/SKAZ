@@ -5,6 +5,7 @@
 // bridge can therefore only reach the loopback backend, nothing else.
 
 import type { NativeAudioMeta, NativeFailure, NativeOpened, NativeSaved, NativeStopped } from './nativeLive';
+import type { KbDictation } from './kb/types.gen';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -71,12 +72,8 @@ export interface CaptureState {
   failed: number;
 }
 
-/** Text recognised from one dictation clip (`POST /kb/dictation`); nothing is stored. */
-export interface DictationResult {
-  text: string;
-  language: string;
-  provider: string;
-}
+/** Text recognised from one dictation clip (`POST /kb/dictation`, generated `KbDictation`); nothing is stored. */
+export type DictationResult = KbDictation;
 
 /** A text file the user saves through the native dialog (chat export as `.md`). */
 export interface TextFileSave {

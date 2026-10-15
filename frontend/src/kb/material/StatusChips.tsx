@@ -1,4 +1,4 @@
-import type { KbJob, KbMaterial, KbMaterialWiki } from '../api/b2-u3';
+import type { KbJob, KbMaterial, KbMaterialWiki } from '../../api/kb/types.gen';
 import { Button, Icon, type IconName } from '../ui';
 import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';

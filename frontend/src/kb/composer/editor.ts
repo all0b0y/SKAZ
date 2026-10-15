@@ -2,7 +2,7 @@
 // quotes (decision 23: quotes are tokens inside the text, like mentions; full text on hover; the
 // field grows like text and scrolls after five lines). Pure DOM helpers, tested in jsdom.
 
-import type { KbQuote, KbRef } from '../api/b2';
+import type { KbQuote, KbRef } from '../../api/kb/types.gen';
 
 export type Token = { kind: 'mention'; ref: KbRef } | { kind: 'quote'; quote: KbQuote };
 

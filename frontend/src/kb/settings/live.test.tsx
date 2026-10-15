@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { b2State } from '../test/fakeB2';
-import { notConfiguredState } from '../test/fakeBridge';
+import { chatWorld } from '../test/fixtures';
+import { unconfiguredWorld } from '../test/fakeBridge';
 
 const openSettings = async () => {
   await screen.findByRole('navigation', { name: 'Sections' });
@@ -15,7 +15,7 @@ const row = (dialog: HTMLElement, label: string) => within(dialog).getByRole('gr
 describe('Live settings (package 2)', () => {
   it('health problems put a dot on the gear and the section, and a plate with what still works', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     expect(await screen.findByTestId('settings-dot')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Settings, needs attention' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^Settings/ }));
@@ -33,7 +33,7 @@ describe('Live settings (package 2)', () => {
 
   it('Accounts & keys: real agent states; installing shows the log; a key is sent once and never shown', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const dialog = await openSettings();
     await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
     const codex = row(dialog, 'Codex');
@@ -61,10 +61,10 @@ describe('Live settings (package 2)', () => {
 
   it('Models: default agent only among connected ones; wiki model; decisions to the cloud need explicit consent', async () => {
     const user = userEvent.setup();
-    const state = b2State();
+    const state = chatWorld();
     state.decisions.provider = 'off';
     state.decisions.cloud_consent = false;
-    const { fake } = renderKb({ b2: state });
+    const { fake } = renderKb({ world: state });
     const dialog = await openSettings();
     await user.click(within(dialog).getByRole('button', { name: 'Models' }));
     const def = row(dialog, 'Default agent');
@@ -88,7 +88,7 @@ describe('Live settings (package 2)', () => {
 
   it('Recording & speech and Wiki read and write the backend; background connections ask first; "Find now" starts a job', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const dialog = await openSettings();
     await user.click(within(dialog).getByRole('button', { name: /Recording & speech/ }));
     await waitFor(() => expect(within(row(dialog, 'Service')).getByRole('radio', { name: 'Soniox' })).toBeChecked());
@@ -114,7 +114,7 @@ describe('Live settings (package 2)', () => {
 
   it('Privacy shows where data goes from the backend; About shows the version and licences', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     const dialog = await openSettings();
     await user.click(within(dialog).getByRole('button', { name: 'Privacy' }));
     await waitFor(() => expect(row(dialog, 'Soniox')).toHaveTextContent('Sound of recordings'));
@@ -128,10 +128,10 @@ describe('Live settings (package 2)', () => {
 describe('First launch, step "Agent" (v21)', () => {
   it('three cards with the real state; Hermes warns about preparing; the summary is honest', async () => {
     const user = userEvent.setup();
-    const state = b2State();
+    const state = unconfiguredWorld();
     state.agents.agents.find((a) => a.id === 'codex')!.state = 'signed_out';
     Object.assign(state.agents.agents.find((a) => a.id === 'codex')!, { action: 'login', reason: 'Not signed in.' });
-    const { fake } = renderKb({ state: notConfiguredState(), b2: state, prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: state, prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     const cards = await within(dialog).findAllByRole('listitem');

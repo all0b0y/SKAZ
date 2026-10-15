@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
-import { notConfiguredState } from '../test/fakeBridge';
+import { unconfiguredWorld, baseWorld, without } from '../test/fakeBridge';
 import { ROWS, searchRows } from './schema';
 
 const openWithShortcut = async () => {
@@ -78,7 +78,7 @@ describe('Settings window', () => {
 
   it('without the package-2 backend, live rows say they couldn’t read — no dummy controls; rows with no route say "Not connected yet"', async () => {
     const user = userEvent.setup();
-    renderKb();
+    renderKb({ world: without(baseWorld()) });
     const dialog = await openWithShortcut();
     await user.click(within(dialog).getByRole('button', { name: 'Models' }));
     // The wiki/decision reads fail on this backend: each says so with a retry instead of a fake choice.
@@ -91,7 +91,7 @@ describe('Settings window', () => {
 
   it('a library problem is the only coloured spot: banner in Storage, dot on the section and the gear', async () => {
     const user = userEvent.setup();
-    renderKb({ state: notConfiguredState() });
+    renderKb({ world: unconfiguredWorld() });
     expect(await screen.findByTestId('settings-dot')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^Settings/ }));
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });

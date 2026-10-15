@@ -2,7 +2,6 @@ import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { BridgeApi } from '../../api/bridge';
 import { KbClient } from '../api/client';
-import { KbU3Client } from '../api/b2-u3';
 import { nativeCapture, type CaptureFactory } from '../recording/capture';
 import { createRecordingStore, type RecordingActions, type RecordingData, type RecordingStore } from '../recording/recordingStore';
 import { createAgentsStore, type AgentsActions, type AgentsData, type AgentsStore } from './agents';
@@ -27,8 +26,6 @@ export type KbBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi, Opti
 export interface KbServices {
   bridge: KbBridge;
   client: KbClient;
-  /** Package-2 routes of the U3 screens (see api/b2-u3.ts). */
-  u3: KbU3Client;
   prefs: PrefsStore;
   library: LibraryStore;
   ui: UiStore;
@@ -59,18 +56,16 @@ export function createServices(
   options: { capture?: CaptureFactory | null } = {},
 ): KbServices {
   const client = new KbClient(bridge);
-  const u3 = new KbU3Client(bridge);
   const ui = createUiStore();
   const library = createLibraryStore(client);
   const recording = createRecordingStore({
-    u3, bridge, ui,
+    client, bridge, ui,
     capture: options.capture !== undefined ? options.capture : defaultCapture(bridge),
     onMaterialsChanged: () => { void library.getState().loadContent(); },
   });
   return {
     bridge,
     client,
-    u3,
     prefs: createPrefsStore(storage),
     library,
     ui,

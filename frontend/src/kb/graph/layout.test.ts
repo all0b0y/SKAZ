@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { KbGraph } from '../api/b2-u3';
+import type { KbGraph } from '../../api/kb/types.gen';
 import { bounds, createSim, fit, pick, settle, showsLabel, step, toScreen, zoomAt, ZOOM_MAX } from './layout';
 
 function graph(n: number, edges: Array<[number, number]>, hub: number[] = []): KbGraph {

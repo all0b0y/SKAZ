@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { normalizeMaterial, type KbMaterial } from '../api/b2-u3';
+import type { KbMaterial } from '../../api/kb/types.gen';
 import { Button, Icon, Spinner } from '../ui';
 import { formatTime } from '../library/materialMeta';
 import { PanelFrameButtons } from '../document/parts';
@@ -17,7 +17,7 @@ const NEAR_BOTTOM = 80;
 
 /** Live transcript on the right while recording (v12–v15): text grows, unstable tail in grey. */
 export function LivePanel({ materialId }: { materialId: string }) {
-  const { u3, bridge } = useServices();
+  const { client, bridge } = useServices();
   const folders = useLibrary((s) => s.folders);
   const phase = useRecording((s) => s.phase);
   const recMaterial = useRecording((s) => s.materialId);
@@ -29,7 +29,7 @@ export function LivePanel({ materialId }: { materialId: string }) {
   const mine = recMaterial === materialId;
   const live = mine && (isLive(phase) || phase === 'finishing' || phase === 'starting');
   const { state, reload } = useLoad<KbMaterial>(materialId, async () =>
-    normalizeMaterial(await u3.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } })));
+    await client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }));
   const [tail, setTail] = useState('');
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
@@ -69,7 +69,7 @@ export function LivePanel({ materialId }: { materialId: string }) {
               : null;
   const folderName = material ? folders.find((f) => f.id === material.folder_id)?.name : undefined;
   const meta = material ? [folderName, material.languages.map(languageName).join(', ')
-    + (material.translation ? ` → ${languageName(material.translation.language)}` : '')].filter(Boolean).join(' · ') : '';
+    + (material.translation?.language ? ` → ${languageName(material.translation.language)}` : '')].filter(Boolean).join(' · ') : '';
 
   return (
     <>

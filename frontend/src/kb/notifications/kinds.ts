@@ -1,4 +1,4 @@
-import type { KbNotification } from '../api/b2';
+import type { KbCitation, KbNotification } from '../../api/kb/types.gen';
 import type { IconName } from '../ui';
 
 export type Tone = 'r' | 'y' | 'a';
@@ -31,3 +31,38 @@ export function quickAction(n: KbNotification) {
 
 /** Actions the client carries out itself (navigation) instead of resolving the notification. */
 export const LOCAL_ACTIONS = new Set(['open_material']);
+
+// `KbNotification.payload` is a free dict in the contract (API-B2 §1.1 fixes its keys per kind); these
+// are the keys the decision screens read. The backend writes them in knowledge/wiki/discrepancy.py,
+// corrections/check.py and speech/link_failures.py.
+
+export interface KbDiscrepancySide {
+  block_id: string;
+  text: string;
+  /** null when the block lost its citation before the notice was written. */
+  citation: KbCitation | null;
+  material_title: string;
+  folder_name: string;
+}
+
+export interface KbDiscrepancyPayload {
+  page_id: string;
+  page_title: string;
+  sides: KbDiscrepancySide[];
+  explanation_block_id: string | null;
+  /** Not written by the backend today (the text lives in the block `explanation_block_id`); shown when present. */
+  explanation?: string | null;
+}
+
+export interface KbDoubtfulPayload {
+  material_id: string;
+  material_title: string;
+  correction_ids: string[];
+}
+
+export interface KbLinkFailedPayload {
+  material_id: string;
+  material_title?: string;
+  url: string;
+  reason: string;
+}

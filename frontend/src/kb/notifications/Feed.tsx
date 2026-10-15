@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, m } from 'motion/react';
-import type { KbNotification } from '../api/b2';
+import type { KbNotification } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, Segmented, Spinner } from '../ui';
 import { EXIT, SPRING_SMALL } from '../ui/motion';
 import { dayLabel, groupBy, shortTime } from '../ui/time';

@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import type { KbChatSummary } from '../api/b2';
+import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Button, IconButton, Menu, Modal } from '../ui';
 import { Popover } from '../ui/Popover';
 import { useServices } from '../state/context';

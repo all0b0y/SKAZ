@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { KbMaterialGuard } from '../api/b2-u3';
+import type { KbMaterialGuard } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Banner, Button, Icon, Spinner } from '../ui';
 import { useServices } from '../state/context';
@@ -9,7 +9,7 @@ import { useServices } from '../state/context';
  * and "Restore" — the backend reprocesses the source with that fragment.
  */
 export function ExcludedFragments({ materialId, count, onRestored }: { materialId: string; count: number; onRestored: () => void }) {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const [open, setOpen] = useState(false);
   const [guard, setGuard] = useState<KbMaterialGuard | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,14 +20,14 @@ export function ExcludedFragments({ materialId, count, onRestored }: { materialI
     setOpen(next);
     if (next && !guard) {
       setError(null);
-      u3.call('GET /kb/materials/{material_id}/excluded', { path: { material_id: materialId } }).then(setGuard, (e: unknown) => setError(errorText(e)));
+      client.call('GET /kb/materials/{material_id}/excluded', { path: { material_id: materialId } }).then(setGuard, (e: unknown) => setError(errorText(e)));
     }
   };
   const restore = async (seg: number) => {
     setBusy(seg);
     setError(null);
     try {
-      setGuard(await u3.call('POST /kb/materials/{material_id}/excluded/{seg}/restore', { path: { material_id: materialId, seg: String(seg) } }));
+      setGuard(await client.call('POST /kb/materials/{material_id}/excluded/{seg}/restore', { path: { material_id: materialId, seg } }));
       onRestored();
     } catch (e) {
       setError(errorText(e));

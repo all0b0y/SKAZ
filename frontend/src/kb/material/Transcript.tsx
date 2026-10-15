@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
-import type { KbCorrection, KbCorrectionChange, KbFragment, KbMaterial } from '../api/b2-u3';
+import type { KbCorrection, KbCorrectionChange, KbFragment, KbMaterial } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Button, Popover } from '../ui';
 import { formatTime } from '../library/materialMeta';
 import { plural } from '../document/text';
 import { useServices } from '../state/context';
 import { byPage, monologues, segmentText, speakerTone, translationBySeg, type TextPiece } from './segments';
+import { quoteAttrs } from '../ui/Selection';
 
 export type TranscriptView = 'original' | 'translation' | 'both';
 
@@ -17,20 +18,27 @@ const STATE_TEXT: Record<KbCorrection['state'], string> = {
 };
 
 /** Was → became, confidence, and the actions this state allows (§2.1). */
+/** One literal per action, so the routes the interface calls can be listed (IPC policy test). */
+const CORRECTION_ROUTE = {
+  revert: 'POST /kb/corrections/{correction_id}/revert',
+  accept: 'POST /kb/corrections/{correction_id}/accept',
+  keep: 'POST /kb/corrections/{correction_id}/keep',
+  reapply: 'POST /kb/corrections/{correction_id}/reapply',
+} as const;
+
 function CorrectionCard({ fix, onChanged, close }: {
   fix: KbCorrection;
   onChanged: (change: KbCorrectionChange) => void;
   close: () => void;
 }) {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const act = async (action: 'revert' | 'accept' | 'keep' | 'reapply') => {
     setBusy(action);
     setError(null);
     try {
-      const route = `POST /kb/corrections/{correction_id}/${action}` as const;
-      onChanged(await u3.call(route, { path: { correction_id: fix.id } }));
+      onChanged(await client.call(CORRECTION_ROUTE[action], { path: { correction_id: fix.id } }));
       close();
     } catch (e) {
       setError(errorText(e));
@@ -123,7 +131,11 @@ function FragmentSpan({ fragment, props, translation }: { fragment: KbFragment; 
   const targeted = props.target.seg === fragment.seg;
   return (
     <span className={`kb-seg-frag${targeted ? ' is-target' : ''}`} data-seg={fragment.seg} data-target-key={`seg-${fragment.seg}`}>
-      {showOriginal && <span className="kb-seg-frag__orig"><FragmentText fragment={fragment} props={props} /> </span>}
+      {showOriginal && (
+        <span className="kb-seg-frag__orig" {...quoteAttrs({ source: 'material', id: props.material.id, seg: fragment.seg })}>
+          <FragmentText fragment={fragment} props={props} />{' '}
+        </span>
+      )}
       {showTranslation && !showOriginal && <span className="kb-seg-frag__tr">{translated ?? fragment.text} </span>}
     </span>
   );
@@ -168,7 +180,7 @@ function SpeechText(props: TranscriptProps) {
 
   if (paragraphMode) {
     const translated = (
-      <div className="kb-tr-paras" lang={material.translation!.language}>
+      <div className="kb-tr-paras" lang={material.translation!.language ?? undefined}>
         {paragraphs.map((p, i) => <p key={i} className="kb-spk__text">{p.text}</p>)}
       </div>
     );
@@ -207,7 +219,8 @@ function PlainText(props: TranscriptProps) {
   return (
     <div className="kb-art">
       {props.material.fragments.map((f) => (
-        <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}>
+        <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
+          {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
           <FragmentText fragment={f} props={props} />
         </p>
       ))}
@@ -222,7 +235,8 @@ function PdfPages(props: TranscriptProps) {
         <section key={`${page.page}-${i}`} className="kb-pdfpage" aria-label={page.page !== null ? `Page ${page.page}` : 'Page'}>
           {page.page !== null && <span className="kb-pdfpage__n">p. {page.page}</span>}
           {page.fragments.map((f) => (
-            <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}>
+            <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
+          {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
               <FragmentText fragment={f} props={props} />
             </p>
           ))}

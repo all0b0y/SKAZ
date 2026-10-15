@@ -1,15 +1,14 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
-import type { KbCitation } from '../../api/kb/types.gen';
-import type {
-  KbCorrection, KbDiscrepancyPayload, KbDoubtfulPayload, KbLinkFailedPayload, KbNotification, KbNotificationAction,
-} from '../api/b2';
+import type { KbCitation, KbCorrection, KbNotification, KbNotificationAction } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Button, Chip, Icon, IconButton, Modal, Spinner } from '../ui';
 import { CiteChip, useFolderTone } from '../chat/parts';
 import { useNotifications, useServices, useUi } from '../state/context';
 import { subjectRef } from '../state/document';
 import { pendingDecisions } from '../state/notifications';
-import { DECISION_SCREENS, kindOf, LOCAL_ACTIONS } from './kinds';
+import {
+  DECISION_SCREENS, kindOf, LOCAL_ACTIONS, type KbDiscrepancyPayload, type KbDoubtfulPayload, type KbLinkFailedPayload,
+} from './kinds';
 
 interface ExcludedItem { seg: number; found: string; location_label?: string; reason?: string }
 
@@ -135,14 +134,14 @@ export function DecisionModal() {
   );
 }
 
-function Quote({ side, citation, folder, title }: { side: string; citation: KbCitation; folder: string; title: string }) {
+function Quote({ side, citation, folder, title }: { side: string; citation: KbCitation | null; folder: string; title: string }) {
   const tone = useFolderTone();
   return (
     <figure className="kb-quotecard">
       <figcaption className="kb-quotecard__head">
         <i className={`kb-fdot kb-fdot--${tone(folder)}`} aria-hidden="true" />
         <span>{title}</span>
-        <CiteChip citation={citation} />
+        {citation && <CiteChip citation={citation} />}
       </figcaption>
       <blockquote className="kb-quotecard__text">“{side}”</blockquote>
     </figure>

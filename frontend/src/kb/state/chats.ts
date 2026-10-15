@@ -1,7 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type {
-  EngineId, KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbPageRef, KbSendContext,
-} from '../api/b2';
+import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbPageRef } from '../../api/kb/types.gen';
+import type { EngineId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
@@ -39,7 +38,7 @@ export interface ChatsActions {
   /** Follow one chat's events (streamed text, states, title). Returns stop. */
   follow: (id: string) => () => void;
   /** Create the chat if needed, then send. Resolves with the chat id. */
-  send: (input: KbMessageInput, context: KbSendContext) => Promise<ActionResult<string>>;
+  send: (input: KbMessageInput, context: KbOpenContext) => Promise<ActionResult<string>>;
   stop: (chatId: string, messageId: string) => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
   resume: (chatId: string, messageId: string) => Promise<ActionResult>;

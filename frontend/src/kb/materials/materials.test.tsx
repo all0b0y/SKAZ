@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { u3State } from '../test/fakeBridge';
+import { docWorld } from '../test/fakeBridge';
 import { addedLabel } from './AllMaterials';
 import { fileItem, pasteItem, wikiDefault } from './addItems';
 
 async function ready() {
-  const r = renderKb({ state: u3State(), prefs: { section: 'materials' } });
+  const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
   await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
   return r;
 }

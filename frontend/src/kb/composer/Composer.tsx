@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import type { KbMessageInput, KbQuote } from '../api/b2';
+import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton } from '../ui';
 import { Tooltip } from '../ui/Tooltip';

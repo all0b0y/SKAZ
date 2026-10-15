@@ -10,7 +10,7 @@ import {
   WikiLanguageRow, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
 import { EngineBadge } from '../ui/EngineBadge';
-import type { EngineId } from '../api/b2';
+import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
 

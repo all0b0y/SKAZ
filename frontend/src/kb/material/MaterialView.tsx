@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { normalizeMaterial, type KbCorrection, type KbCorrectionChange, type KbJob, type KbMaterial } from '../api/b2-u3';
+import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
-import { askAbout, PanelFrameButtons } from '../document/parts';
+import { PanelFrameButtons, useAskAbout } from '../document/parts';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
 import { useLibrary, useServices, useUi } from '../state/context';
@@ -46,20 +46,20 @@ function metaLine(material: KbMaterial, folderName: string | undefined): string 
   }
   parts.push(new Date(material.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }));
   const lang = material.languages.map(languageName).join(', ');
-  if (lang) parts.push(material.translation ? `${lang} → ${languageName(material.translation.language)}` : lang);
+  if (lang) parts.push(material.translation?.language ? `${lang} → ${languageName(material.translation.language)}` : lang);
   return parts.join(' · ');
 }
 
 /** Material + its corrections and jobs; polled while anything about it is still running. */
 export function useMaterialData(materialId: string) {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const loader = useLoad<MaterialData>(materialId, async () => {
-    const material = normalizeMaterial(await u3.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }));
+    const material = await client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } });
     const [corrections, jobs] = await Promise.all([
       SPEECH.has(material.kind)
-        ? u3.call('GET /kb/materials/{material_id}/corrections', { path: { material_id: materialId } }).catch(() => [])
+        ? client.call('GET /kb/materials/{material_id}/corrections', { path: { material_id: materialId } }).catch(() => [])
         : Promise.resolve([]),
-      u3.call('GET /kb/jobs', { query: { material_id: materialId } }).catch(() => []),
+      client.call('GET /kb/jobs', { query: { material_id: materialId } }).catch(() => []),
     ]);
     return { material, corrections, jobs };
   });
@@ -72,7 +72,8 @@ export function useMaterialData(materialId: string) {
 
 /** Material in the right panel (v10, decision 24). */
 export function MaterialView({ target, nonce }: { target: DocTarget; nonce: number }) {
-  const { u3 } = useServices();
+  const { client } = useServices();
+  const askAbout = useAskAbout();
   const folders = useLibrary((s) => s.folders);
   const expanded = useUi((s) => s.docExpanded);
   const { state, reload, set } = useMaterialData(target.id);
@@ -104,7 +105,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
     setAdding(true);
     setAddError(null);
     try {
-      await u3.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: material.id } });
+      await client.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: material.id } });
       reload();
     } catch (e) {
       setAddError(errorText(e));

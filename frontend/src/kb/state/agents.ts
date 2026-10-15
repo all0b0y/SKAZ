@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbAgentLoginResult, KbInstallLine } from '../../api/kb/types.gen';
-import type { EngineId, KbAgent, KbAgents, KbInstallTask } from '../api/b2';
+import type { KbAgent, KbAgentLoginResult, KbAgents, KbInstallLine, KbInstallTask } from '../../api/kb/types.gen';
+import type { EngineId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
@@ -22,7 +22,7 @@ export interface AgentsData {
 export interface AgentsActions {
   refresh: () => Promise<void>;
   setDefault: (engine: EngineId) => Promise<ActionResult>;
-  install: (engine: EngineId, action?: 'install' | 'update') => Promise<ActionResult>;
+  install: (engine: EngineId, action?: 'install' | 'update' | 'prepare') => Promise<ActionResult>;
   /** Follow a running task's log; returns stop. */
   followInstall: (engine: EngineId, taskId: string) => () => void;
   cancelInstall: (engine: EngineId) => Promise<ActionResult>;

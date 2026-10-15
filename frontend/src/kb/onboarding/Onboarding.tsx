@@ -3,7 +3,7 @@ import { AnimatePresence, m } from 'motion/react';
 import { Button, Icon, Modal, PathText } from '../ui';
 import { EXIT, SPRING_LARGE } from '../ui/motion';
 import { useAgents, useLibrary, useServices, useSettings } from '../state/context';
-import type { KbAgents, KbSettingsKeys, KbSpeechSettings } from '../api/b2';
+import type { KbAgents, KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 import { AgentCards } from '../settings/AgentCard';
 import { AsrRow, KeyRow, LocalWhisperRow } from '../settings/LiveRows';
 import { LanguagePicker, TranslationSelect } from '../settings/Languages';
@@ -31,7 +31,7 @@ export interface StatusLine {
 export function summaryLines(
   library: { state: string; root: string | null } | null,
   agents: KbAgents | null = null,
-  speech: { settings: KbSpeechSettings | null; keys: KbSettingsKeys | null } = { settings: null, keys: null },
+  speech: { settings: KbSpeechSettings | null; keys: KbKeys | null } = { settings: null, keys: null },
 ): StatusLine[] {
   const lib: StatusLine = library?.state === 'ready'
     ? { label: 'Library', tone: 'ok', text: library.root ?? 'Connected' }

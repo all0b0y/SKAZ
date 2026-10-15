@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbMessage, KbMessageInput, KbMessagePart } from '../api/b2';
+import type { KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';

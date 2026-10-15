@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { useReducedMotion } from 'motion/react';
-import { normalizePage, type KbCitation, type KbGraph } from '../api/b2-u3';
+import type { KbCitation, KbGraph } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
 import { CitationChip, FolderTag, PanelFrameButtons, useFolderTone } from '../document/parts';
 import { plural } from '../document/text';
@@ -10,7 +10,7 @@ import { drawGraph, readPalette } from './draw';
 import { createSim, fit, pick, reheat, settle, step, toGraph, zoomAt, type Sim, type View } from './layout';
 
 function NodeCard({ sim, id }: { sim: Sim; id: string }) {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const openDocument = useUi((s) => s.openDocument);
   const folders = useLibrary((s) => s.folders);
   const tone = useFolderTone();
@@ -19,11 +19,11 @@ function NodeCard({ sim, id }: { sim: Sim; id: string }) {
   useEffect(() => {
     let live = true;
     setCites(null);
-    u3.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: id } }).then((raw) => {
+    client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: id } }).then((raw) => {
       if (!live) return;
       const seen = new Set<string>();
       const out: KbCitation[] = [];
-      for (const block of normalizePage(raw).blocks) {
+      for (const block of raw.blocks) {
         for (const c of block.citations) {
           if (seen.has(c.material_id) || !c.available) continue;
           seen.add(c.material_id);
@@ -33,7 +33,7 @@ function NodeCard({ sim, id }: { sim: Sim; id: string }) {
       setCites(out.slice(0, 4));
     }, () => { if (live) setCites([]); });
     return () => { live = false; };
-  }, [u3, id]);
+  }, [client, id]);
   if (!node) return null;
   const links = sim.adj.get(id)?.size ?? node.degree;
   return (
@@ -59,12 +59,12 @@ function NodeCard({ sim, id }: { sim: Sim; id: string }) {
 
 /** Graph of connections in a wide right panel (v4/v5): canvas, own force layout, no library. */
 export function GraphPanel() {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const folders = useLibrary((s) => s.folders);
   const openDocument = useUi((s) => s.openDocument);
   const reduce = useReducedMotion() ?? false;
   const [folderId, setFolderId] = useState('');
-  const { state, reload } = useLoad<KbGraph>(`graph:${folderId}`, () => u3.call('GET /kb/graph', { query: folderId ? { folder_id: folderId } : {} }));
+  const { state, reload } = useLoad<KbGraph>(`graph:${folderId}`, () => client.call('GET /kb/graph', { query: folderId ? { folder_id: folderId } : {} }));
   const graph = state.value;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);

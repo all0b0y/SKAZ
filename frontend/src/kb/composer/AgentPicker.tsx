@@ -1,5 +1,6 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
-import type { EngineId, KbAgent } from '../api/b2';
+import type { KbAgent } from '../../api/kb/types.gen';
+import type { EngineId } from '../api/names';
 import { Icon } from '../ui';
 import { Popover } from '../ui/Popover';
 import { EngineBadge } from '../ui/EngineBadge';

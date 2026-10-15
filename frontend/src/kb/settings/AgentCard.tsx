@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { EngineId, KbAgent } from '../api/b2';
+import type { KbAgent } from '../../api/kb/types.gen';
+import type { EngineId } from '../api/names';
 import { Button, Icon } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { useAgents, useServices } from '../state/context';
@@ -49,12 +50,12 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     return store.getState().followInstall(agent.id, taskId);
   }, [store, agent.id, taskId, install?.task.state]);
 
-  const act = async (what: 'install' | 'update' | 'login' | 'check' | 'cancel') => {
+  const act = async (what: 'install' | 'update' | 'prepare' | 'login' | 'check' | 'cancel') => {
     setBusy(what);
     setMessage(null);
     const s = store.getState();
-    if (what === 'install' || what === 'update') {
-      const r = await s.install(agent.id, what === 'update' ? 'update' : 'install');
+    if (what === 'install' || what === 'update' || what === 'prepare') {
+      const r = await s.install(agent.id, what);
       if (!r.ok) setMessage({ text: r.error, error: true });
     } else if (what === 'cancel') {
       const r = await s.cancelInstall(agent.id);
@@ -73,7 +74,8 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
 
   const hermesPrep = agent.id === 'hermes' && agent.first_run && !agent.first_run.prepared;
   const action = agent.action;
-  const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again' : null;
+  const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again'
+    : action === 'prepare' ? 'Prepare' : null;
   const finished = install && install.task.state !== 'running' ? install.task : null;
 
   const status = (
@@ -100,7 +102,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {hermesPrep && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
           <Icon name="warning" size={13} />
-          {agent.first_run.note || `The first check prepares Hermes’ environment: about ${gb(agent.first_run.required_bytes)}, a few minutes. Nothing starts until you press Check.`}
+          {agent.first_run.note || `The first check prepares Hermes’ environment: about ${gb(agent.first_run.required_bytes)}, a few minutes. Nothing starts until you press Prepare.`}
         </p>
       )}
       {(running || finished) && install && (

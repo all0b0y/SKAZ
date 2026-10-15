@@ -1,4 +1,4 @@
-import type { KbCorrection, KbFragment, KbTranslation } from '../api/b2-u3';
+import type { KbCorrection, KbFragment, KbTranslation } from '../../api/kb/types.gen';
 import { markQuote } from '../document/text';
 
 export interface TextPiece {

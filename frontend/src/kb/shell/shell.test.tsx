@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
 import { computeLayout, RAIL_W } from './layout';
-import { notConfiguredState } from '../test/fakeBridge';
+import { unconfiguredWorld } from '../test/fakeBridge';
 
 describe('Window shell', () => {
   it('shows title bar, narrow icon rail (v39) with named sections, search and settings, side panel, chat centre; no document panel', async () => {
@@ -105,7 +105,7 @@ describe('Window shell', () => {
 
   it('the library-not-connected screen leads to the library step of first launch', async () => {
     const user = userEvent.setup();
-    renderKb({ state: notConfiguredState(), prefs: { section: 'materials' } });
+    renderKb({ world: unconfiguredWorld(), prefs: { section: 'materials' } });
     await user.click(await screen.findByRole('button', { name: 'Choose where to keep it' }));
     const dialog = await screen.findByRole('dialog', { name: 'Library' });
     expect(within(dialog).getByTestId('library-path')).toHaveTextContent('/Users/me/Documents/SKAZ');

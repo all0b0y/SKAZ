@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { KbMessage } from '../api/b2';
+import type { KbMessage } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Spinner } from '../ui';
 import { Composer } from '../composer/Composer';
 import { useChats, useServices } from '../state/context';

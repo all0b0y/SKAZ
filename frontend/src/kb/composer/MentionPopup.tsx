@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KbMentions, KbRef } from '../api/b2';
+import type { KbMentions, KbRef } from '../../api/kb/types.gen';
 import { Icon, type IconName } from '../ui';
 import { useLibrary, useServices } from '../state/context';
 import { KIND_ICON } from '../library/materialMeta';

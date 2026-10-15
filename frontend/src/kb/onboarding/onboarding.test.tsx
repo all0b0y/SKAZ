@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
-import { notConfiguredState, readyState } from '../test/fakeBridge';
+import { unconfiguredWorld, baseWorld, without } from '../test/fakeBridge';
 import { summaryLines } from './Onboarding';
 
 const currentStep = (dialog: HTMLElement) =>
@@ -11,7 +11,7 @@ const currentStep = (dialog: HTMLElement) =>
 describe('First launch', () => {
   it('goes Languages → Agent → Speech → Library → Summary; languages are saved', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: notConfiguredState(), prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: without(unconfiguredWorld()), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     expect(currentStep(dialog)).toBe('lang');
     // Without reduced motion the illustration is animated (the still frame is tested separately).
@@ -57,7 +57,7 @@ describe('First launch', () => {
 
   it('choosing another folder sends that path; a refusal stays on the step in the backend’s words', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: notConfiguredState(), prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: unconfiguredWorld(), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 2; i += 1) await user.click(within(dialog).getByRole('button', { name: 'Skip' }));
@@ -74,7 +74,7 @@ describe('First launch', () => {
 
   it('skipping the library is reported honestly: no check where nothing is ready', async () => {
     const user = userEvent.setup();
-    renderKb({ state: notConfiguredState(), prefs: { onboardingDone: false } });
+    renderKb({ world: without(unconfiguredWorld()), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 3; i += 1) await user.click(within(dialog).getByRole('button', { name: 'Skip' }));
@@ -86,7 +86,7 @@ describe('First launch', () => {
 
   it('a library that is already connected is not created again', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: readyState(), prefs: { onboardingDone: false } });
+    const { fake } = renderKb({ world: baseWorld(), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     for (let i = 0; i < 2; i += 1) await user.click(within(dialog).getByRole('button', { name: 'Skip' }));

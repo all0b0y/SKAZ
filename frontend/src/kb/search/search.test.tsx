@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { b2State } from '../test/fakeB2';
+import { chatWorld } from '../test/fixtures';
 import { toHits } from './CommandK';
 import { openTarget } from '../state/document';
 
@@ -15,7 +15,7 @@ const openK = async () => {
 describe('⌘K', () => {
   it('⌘K and the rail button open it; sections with counts, three per section in All, matches marked', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     const dialog = await openK();
     const input = within(dialog).getByRole('combobox', { name: 'Search the wiki, materials and chats' });
     expect(input).toHaveFocus();
@@ -36,7 +36,7 @@ describe('⌘K', () => {
 
   it('↓ and Enter open the chosen result on the right; Tab switches the section', async () => {
     const user = userEvent.setup();
-    const { services } = renderKb({ b2: b2State() });
+    const { services } = renderKb({ world: chatWorld() });
     const dialog = await openK();
     await user.type(within(dialog).getByRole('combobox'), 'entropy');
     await waitFor(() => expect(within(dialog).getAllByRole('option').length).toBeGreaterThan(2));
@@ -51,7 +51,7 @@ describe('⌘K', () => {
 
   it('⌘Enter asks the agent: a new chat with the query sent', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const dialog = await openK();
     await user.type(within(dialog).getByRole('combobox'), 'why log in loss');
     await user.keyboard('{Meta>}{Enter}{/Meta}');
@@ -61,7 +61,7 @@ describe('⌘K', () => {
 
   it('a chat result opens the chat', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     const dialog = await openK();
     await user.type(within(dialog).getByRole('combobox'), 'regularisation');
     await waitFor(() => expect(within(dialog).getAllByRole('option').length).toBeGreaterThan(1));

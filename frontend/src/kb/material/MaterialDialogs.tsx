@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import type { KbDeletePreview, KbMaterial } from '../api/b2-u3';
+import type { KbDeletePreview, KbMaterial } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Banner, Button, Icon, Modal, Spinner, TextField } from '../ui';
 import { PageChip, useFolderTone } from '../document/parts';
@@ -15,7 +15,7 @@ function Footer({ children }: { children: ReactNode }) {
 export function RenameDialog({ material, open, onClose, onDone }: {
   material: KbMaterial; open: boolean; onClose: () => void; onDone: (m: KbMaterial) => void;
 }) {
-  const { u3, library } = useServices();
+  const { client, library } = useServices();
   const [title, setTitle] = useState(material.title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export function RenameDialog({ material, open, onClose, onDone }: {
     if (clean === material.title) { onClose(); return; }
     setBusy(true);
     try {
-      const next = await u3.call('PATCH /kb/materials/{material_id}', { path: { material_id: material.id }, body: { title: clean } });
+      const next = await client.call('PATCH /kb/materials/{material_id}', { path: { material_id: material.id }, body: { title: clean } });
       void library.getState().loadContent();
       onDone(next);
       onClose();
@@ -53,7 +53,7 @@ export function RenameDialog({ material, open, onClose, onDone }: {
 export function MoveDialog({ material, open, onClose, onDone }: {
   material: KbMaterial; open: boolean; onClose: () => void; onDone: (m: KbMaterial) => void;
 }) {
-  const { u3, library } = useServices();
+  const { client, library } = useServices();
   const folders = useLibrary((s) => s.folders);
   const tone = useFolderTone();
   const [choice, setChoice] = useState(material.folder_id);
@@ -64,7 +64,7 @@ export function MoveDialog({ material, open, onClose, onDone }: {
     if (choice === material.folder_id) { onClose(); return; }
     setBusy(true);
     try {
-      const next = await u3.call('PATCH /kb/materials/{material_id}', { path: { material_id: material.id }, body: { folder_id: choice } });
+      const next = await client.call('PATCH /kb/materials/{material_id}', { path: { material_id: material.id }, body: { folder_id: choice } });
       void library.getState().loadContent();
       onDone(next);
       onClose();
@@ -125,7 +125,7 @@ function PreviewSummary({ preview }: { preview: KbDeletePreview }) {
 
 /** Delete with a preview of what changes in the wiki (decision 7); nothing is removed before "Delete". */
 export function DeleteDialog({ material, open, onClose }: { material: KbMaterial; open: boolean; onClose: () => void }) {
-  const { u3, library } = useServices();
+  const { client, library } = useServices();
   const closeDoc = useUi((s) => s.closeDoc);
   const [preview, setPreview] = useState<KbDeletePreview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -135,16 +135,16 @@ export function DeleteDialog({ material, open, onClose }: { material: KbMaterial
     if (!open) return undefined;
     let live = true;
     setPreview(null); setLoadError(null); setError(null);
-    u3.call('GET /kb/materials/{material_id}/delete-preview', { path: { material_id: material.id } }).then(
+    client.call('GET /kb/materials/{material_id}/delete-preview', { path: { material_id: material.id } }).then(
       (p) => { if (live) setPreview(p); },
       (e: unknown) => { if (live) setLoadError(errorText(e)); },
     );
     return () => { live = false; };
-  }, [open, u3, material.id]);
+  }, [open, client, material.id]);
   const remove = async () => {
     setBusy(true);
     try {
-      await u3.call('DELETE /kb/materials/{material_id}', { path: { material_id: material.id } });
+      await client.call('DELETE /kb/materials/{material_id}', { path: { material_id: material.id } });
       void library.getState().loadContent();
       onClose();
       closeDoc();

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { MaterialFileChoice } from '../../api/bridge';
-import type { KbRef, MaterialKind } from '../api/b2';
+import type { KbRef } from '../../api/kb/types.gen';
+import type { MaterialKind } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import { Button, Icon, IconButton, Menu } from '../ui';
 import { Popover } from '../ui/Popover';

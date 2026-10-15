@@ -199,9 +199,13 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/graph$/ },
   { method: 'GET', pattern: /^\/kb\/recordings\/defaults$/ },
   { method: 'POST', pattern: /^\/kb\/recordings$/ },
-  { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/recordings\/[^/]+\/(?:stop|pause|resume)$/ },
 ];
+
+/** The knowledge-library (/kb) rules, for the test that checks them against the backend's routes. */
+export function kbRouteRules(): ReadonlyArray<{ method: HttpMethod; pattern: RegExp }> {
+  return ROUTES.filter((r) => r.pattern.source.startsWith('^\\/kb\\/'));
+}
 
 /** True only for links safe to hand to the OS browser via shell.openExternal. */
 export function isAllowedExternalUrl(rawUrl: string): boolean {

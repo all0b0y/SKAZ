@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { b2State } from '../test/fakeB2';
+import { chatWorld } from '../test/fixtures';
 import { quoteAttrs, readSelectionQuote } from '../ui/Selection';
 import { insertToken, serialize } from './editor';
 
@@ -24,7 +24,7 @@ describe('Message field', () => {
 
   it('@ suggests Wiki · Materials · Chats; the choice becomes a token and is sent as a mention', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
     await user.click(input);
     await user.keyboard('Explain @Entr');
@@ -48,7 +48,7 @@ describe('Message field', () => {
 
   it('agent picker lists only connected agents as choosable; switching in a chat leaves a record', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
     const picker = await screen.findByTestId('agent-picker');
     await waitFor(() => expect(picker).toHaveAccessibleName(/Claude Code, claude-opus-5-5/));
@@ -66,9 +66,9 @@ describe('Message field', () => {
 
   it('an agent that can’t answer is refused with its reason; nothing is swapped silently', async () => {
     const user = userEvent.setup();
-    const state = b2State();
+    const state = chatWorld();
     state.agents.agents.find((a) => a.id === 'codex')!.state = 'signed_out';
-    const { fake } = renderKb({ b2: state });
+    const { fake } = renderKb({ world: state });
     await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
     const picker = await screen.findByTestId('agent-picker');
     await user.click(picker);
@@ -80,7 +80,7 @@ describe('Message field', () => {
 
   it('"+" → File: saved to Materials (Inbox) at once, "In wiki" on by default; the message carries its id', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'File…' }));
@@ -99,7 +99,7 @@ describe('Message field', () => {
 
   it('"+" → Paste text: "In wiki" is off by default and switching it on sends the material to the wiki', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'Paste text…' }));
@@ -117,7 +117,7 @@ describe('Message field', () => {
 
   it('"+" → Link refuses anything but http(s)', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
@@ -128,7 +128,7 @@ describe('Message field', () => {
 
   it('dictation: voice → text in the field through bridge.dictate; nothing is sent by itself', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const input = await ready();
     const mic = screen.getByRole('button', { name: 'Dictate' });
     await user.click(mic);
@@ -142,9 +142,9 @@ describe('Message field', () => {
 
   it('a dictation failure is shown in the backend’s words', async () => {
     const user = userEvent.setup();
-    const state = b2State();
+    const state = chatWorld();
     state.dictation = { status: 503, detail: 'Speech recognition is not set up.' };
-    renderKb({ b2: state });
+    renderKb({ world: state });
     await ready();
     await user.click(screen.getByRole('button', { name: 'Dictate' }));
     await user.click(await screen.findByRole('button', { name: 'Stop dictation' }));
@@ -153,7 +153,7 @@ describe('Message field', () => {
 
   it('a quote handed over from a selection becomes a token with its full text on hover and is sent as a quote', async () => {
     const user = userEvent.setup();
-    const { fake, services } = renderKb({ b2: b2State() });
+    const { fake, services } = renderKb({ world: chatWorld() });
     const input = await ready();
     act(() => {
       services.composer.getState().push([{ kind: 'quote', quote: { source: 'chat', id: 'c1', message_id: 'c1-a1', text: 'Cross-entropy is Shannon entropy applied to the model’s error' } }], { focus: true });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { b2State } from '../test/fakeB2';
+import { chatWorld } from '../test/fixtures';
 import { openTarget } from '../state/document';
 
 const openFeed = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -13,7 +13,7 @@ const openFeed = async (user: ReturnType<typeof userEvent.setup>) => {
 describe('Notification feed', () => {
   it('the bell counts unread; opening the feed reads it', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const bell = await screen.findByRole('button', { name: 'Notifications, 5 unread' });
     expect(bell).toHaveTextContent('5');
     await openFeed(user);
@@ -23,7 +23,7 @@ describe('Notification feed', () => {
 
   it('by day; "Decide" shows only what waits for a decision; unknown kinds are ordinary items; nothing opens by itself', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     expect(await within(feed).findByRole('region', { name: 'Today' })).toBeInTheDocument();
     expect(within(feed).getByRole('region', { name: 'Yesterday' })).toHaveTextContent('Textbook added to the wiki');
@@ -35,7 +35,7 @@ describe('Notification feed', () => {
 
   it('dismiss removes an item; a quick action decides in place', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: 'Dismiss “Notes ready”' }));
     await waitFor(() => expect(within(feed).queryByText('Notes ready')).not.toBeInTheDocument());
@@ -47,7 +47,7 @@ describe('Notification feed', () => {
 
   it('a notification without a decision opens its subject on the right', async () => {
     const user = userEvent.setup();
-    const { services } = renderKb({ b2: b2State() });
+    const { services } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: /^New connection across 3 folders/ }));
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'page', id: 'p-entropy' });
@@ -57,7 +57,7 @@ describe('Notification feed', () => {
 describe('Decision window', () => {
   it('discrepancy: two quotes with sources, the explanation, four actions; ‹ › walks the queue; deciding moves on', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: 'Needs a decision: Sources disagree in “Entropy”' }));
     const dialog = await screen.findByRole('dialog', { name: 'Sources disagree in “Entropy”' });
@@ -78,7 +78,7 @@ describe('Decision window', () => {
 
   it('"My own note" asks for the text before deciding', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: 'Needs a decision: Sources disagree in “Entropy”' }));
     const dialog = await screen.findByRole('dialog', { name: 'Sources disagree in “Entropy”' });
@@ -92,7 +92,7 @@ describe('Decision window', () => {
 
   it('doubtful corrections: was → becomes with confidence; accept or keep each; Open transcript navigates', async () => {
     const user = userEvent.setup();
-    const { fake, services } = renderKb({ b2: b2State() });
+    const { fake, services } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: 'Needs a decision: 2 doubtful corrections' }));
     const dialog = await screen.findByRole('dialog', { name: '2 doubtful corrections' });
@@ -111,7 +111,7 @@ describe('Decision window', () => {
 
   it('link failure: Fix address prefills the URL and sends the new one', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: 'Needs a decision: Couldn’t open a link' }));
     const dialog = await screen.findByRole('dialog', { name: 'Couldn’t open a link' });
@@ -130,7 +130,7 @@ describe('Decision window', () => {
 
   it('excluded instruction: the found text, where, and "Not an instruction, restore"', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: /Needs a decision: Instruction for AI found/ }));
     const dialog = await screen.findByRole('dialog', { name: /Instruction for AI found/ });
@@ -143,7 +143,7 @@ describe('Decision window', () => {
 
   it('"Ask the agent about this" starts a new chat with the subject as a reference', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
     await user.click(await within(feed).findByRole('button', { name: 'Needs a decision: Sources disagree in “Entropy”' }));
     const dialog = await screen.findByRole('dialog', { name: 'Sources disagree in “Entropy”' });

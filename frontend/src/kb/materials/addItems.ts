@@ -1,7 +1,8 @@
 // What "+ Material" sends, decided without the UI: file type by extension, link vs text, and the
 // route per item (API-B2 §4; package-1 routes for files, text and speech imports).
 
-import type { KbLinkInfo, KbMaterialSummary, KbU3Client } from '../api/b2-u3';
+import type { KbLinkInfo, KbMaterialSummary } from '../../api/kb/types.gen';
+import type { KbClient } from '../api/client';
 
 const SPEECH_EXT = new Set(['aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm', 'mov', 'mkv', 'avi', 'm4v', 'opus']);
 const VIDEO_EXT = new Set(['mp4', 'mov', 'mkv', 'avi', 'm4v', 'webm']);
@@ -105,27 +106,27 @@ export interface Added {
 }
 
 /** Send one item; returns the materials it created (a link in mode "both" makes two). */
-export async function submitItem(u3: KbU3Client, item: AddItem, o: AddOptions): Promise<Added[]> {
+export async function submitItem(client: KbClient, item: AddItem, o: AddOptions): Promise<Added[]> {
   const fromSummary = (m: KbMaterialSummary): Added => ({ materialId: m.id, ready: m.status === 'ready' });
   if (item.type === 'file') {
     if (item.kind === 'speech') {
-      const view = await u3.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language } });
+      const view = await client.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language } });
       return [{ materialId: view.material_id, ready: view.status === 'ready' }];
     }
-    const added = await u3.call('POST /kb/materials/file', { body: { path: item.path, folder_id: o.folderId } });
+    const added = await client.call('POST /kb/materials/file', { body: { path: item.path, folder_id: o.folderId } });
     return [fromSummary(added.material)];
   }
   if (item.type === 'text') {
-    const added = await u3.call('POST /kb/materials/text', { body: { text: item.text, folder_id: o.folderId } });
+    const added = await client.call('POST /kb/materials/text', { body: { text: item.text, folder_id: o.folderId } });
     return [fromSummary(added.material)];
   }
   // A plain video link goes to the speech import (spoken language + translation apply);
   // an article with a video asks text/video/both and goes to /kb/materials/link (§4).
   if (item.info?.kind === 'video') {
-    const view = await u3.call('POST /kb/imports', { body: { url: item.url, folder_id: o.folderId, translate: o.translate, language: o.language } });
+    const view = await client.call('POST /kb/imports', { body: { url: item.url, folder_id: o.folderId, translate: o.translate, language: o.language } });
     return [{ materialId: view.material_id, ready: view.status === 'ready' }];
   }
-  const added = await u3.call('POST /kb/materials/link', {
+  const added = await client.call('POST /kb/materials/link', {
     body: { url: item.url, folder_id: o.folderId, ...(item.info?.embedded_video ? { mode: item.mode } : {}) },
   });
   return [fromSummary(added.material)];

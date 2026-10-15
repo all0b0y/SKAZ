@@ -6,19 +6,20 @@ import { KbApp } from '../KbApp';
 import { createServices } from '../state/context';
 import { PREFS_KEY } from '../state/prefs';
 import { createBrowserFake } from './browserFake';
-import { b2State, finishAnswer } from './fakeB2';
+import { finishAnswer } from './fakeKb';
+import { chatWorld } from './fixtures';
 import '../styles/index.css';
 
 const params = new URLSearchParams(location.search);
-const b2 = b2State();
-if (params.get('hold') === '1') b2.hold = true;
-const fake = createBrowserFake(b2);
+const world = chatWorld();
+if (params.get('hold') === '1') world.hold = true;
+const fake = createBrowserFake(world);
 const prefs = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Record<string, unknown>;
 localStorage.setItem(PREFS_KEY, JSON.stringify({ onboardingDone: params.get('onboarding') !== '1', ...prefs }));
 const services = createServices(fake.bridge as never, localStorage);
 
 // Handles for the smoke: finish a held answer, read what was sent.
-Object.assign(window, { __kbFake: { b2, finish: (id: string) => finishAnswer(b2, id), services } });
+Object.assign(window, { __kbFake: { world, finish: (id: string) => finishAnswer(world, id), services } });
 
 document.documentElement.dataset.kbUi = '';
 createRoot(document.getElementById('root')!).render(

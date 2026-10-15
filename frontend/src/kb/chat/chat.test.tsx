@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { b2State } from '../test/fakeB2';
+import { chatWorld } from '../test/fixtures';
 import { InlineMarkdown } from './Markdown';
 import { plainText, toBlocks } from './Message';
 import { openTarget } from '../state/document';
@@ -11,7 +11,7 @@ const side = () => screen.getByRole('region', { name: 'Chats' });
 
 describe('Chats in the side panel', () => {
   it('pinned first, then by date, a few only, "All chats · N"; answering and new-answer marks are still', async () => {
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     const panel = side();
     const pinned = await within(panel).findByRole('region', { name: 'Pinned' });
     expect(within(pinned).getAllByRole('button').map((b) => b.textContent)).toEqual(['Exam preparation for ML', 'Entropy across folders']);
@@ -27,7 +27,7 @@ describe('Chats in the side panel', () => {
 
   it('opens a chat: the answer with page and source chips, the connection folded, the tool trail folded', async () => {
     const user = userEvent.setup();
-    const { services } = renderKb({ b2: b2State() });
+    const { services } = renderKb({ world: chatWorld() });
     await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
     const centre = screen.getByRole('region', { name: 'Chat' });
     expect(await within(centre).findByRole('heading', { name: 'Why is there a logarithm in the loss?' })).toBeInTheDocument();
@@ -51,7 +51,7 @@ describe('Chats in the side panel', () => {
 
   it('sends a question in a new chat; the answer arrives and the list moves it to the top', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     await within(side()).findByRole('region', { name: 'Pinned' });
     const input = screen.getByTestId('message-input');
     await user.click(input);
@@ -68,7 +68,7 @@ describe('Chats in the side panel', () => {
 
   it('an interrupted answer says why and when, and Resume starts it again', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ b2: b2State() });
+    const { fake } = renderKb({ world: chatWorld() });
     await within(side()).findByRole('region', { name: 'Pinned' });
     await user.click(screen.getByTestId('message-input'));
     await user.keyboard('hit the limit{Enter}');
@@ -82,7 +82,7 @@ describe('Chats in the side panel', () => {
 
   it('⋯ menu: export goes through the native save dialog; save to wiki opens the analysis page; delete asks first', async () => {
     const user = userEvent.setup();
-    const { fake, services } = renderKb({ b2: b2State() });
+    const { fake, services } = renderKb({ world: chatWorld() });
     await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
     const centre = screen.getByRole('region', { name: 'Chat' });
     const more = await within(centre).findByRole('button', { name: /More for/ });
@@ -104,7 +104,7 @@ describe('Chats in the side panel', () => {
 
   it('Pin and Rename from the ⋯ menu', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     await user.click(await within(side()).findByRole('button', { name: /Compare regularisation/ }));
     const centre = screen.getByRole('region', { name: 'Chat' });
     await user.click(await within(centre).findByRole('button', { name: /More for/ }));
@@ -120,7 +120,7 @@ describe('Chats in the side panel', () => {
 
   it('"All chats" takes the whole centre: search, filters, folder; a row opens the chat', async () => {
     const user = userEvent.setup();
-    renderKb({ b2: b2State() });
+    renderKb({ world: chatWorld() });
     await user.click(await within(side()).findByRole('button', { name: 'All chats · 7' }));
     const all = screen.getByRole('region', { name: 'All chats' });
     expect(await within(all).findByRole('button', { name: /^Transformer paper review/ })).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe('Answer text', () => {
   });
 
   it('parts: text/cite/page flow as one run; a connection is its own block; tools are not text', () => {
-    const state = b2State();
+    const state = chatWorld();
     const parts = state.chats.find((c) => c.id === 'c1')!.messages[1]!.parts;
     const blocks = toBlocks(parts);
     expect(blocks.map((b) => b.kind)).toEqual(['inline', 'connection']);

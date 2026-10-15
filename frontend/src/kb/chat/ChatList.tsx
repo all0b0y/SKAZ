@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import type { KbChatSummary } from '../api/b2';
+import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { clockOrDate, dayBucket, groupBy } from '../ui/time';

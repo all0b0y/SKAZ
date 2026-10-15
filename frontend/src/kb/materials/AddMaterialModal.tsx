@@ -16,7 +16,7 @@ interface WikiAuto { files: boolean; text: boolean }
 
 /** "+ Material" (v11): drop files, paste a link or any text, choose the folder, add. */
 export function AddMaterialModal() {
-  const { u3, bridge, library } = useServices();
+  const { client, bridge, library } = useServices();
   const open = useUi((s) => s.addMaterialOpen);
   const setOpen = useUi((s) => s.setAddMaterialOpen);
   const folders = useLibrary((s) => s.folders);
@@ -40,8 +40,8 @@ export function AddMaterialModal() {
   useEffect(() => {
     if (!open) return;
     setItems([]); setPaste(''); setErrors({}); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
-    u3.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
-    u3.call('GET /kb/settings/wiki').then((w) => setAuto({ files: w.auto_add_files_links, text: w.auto_add_text }), () => undefined);
+    client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
+    client.call('GET /kb/settings/wiki').then((w) => setAuto({ files: w.auto_add_files_links, text: w.auto_add_text }), () => undefined);
     bridge.request<{ translation_target_language?: string }>({ method: 'GET', path: '/settings' })
       .then((r) => setTarget(r.ok ? r.data.translation_target_language ?? null : null), () => setTarget(null));
   }, [open]); // only on opening: the folder list and services are read at that moment
@@ -51,7 +51,7 @@ export function AddMaterialModal() {
   const autoHolds = !wikiOn && items.some((i) => (i.type === 'text' ? auto.text : auto.files));
 
   const classify = (item: LinkItem) => {
-    u3.call('POST /kb/links/classify', { body: { url: item.url, probe: true } }).then(
+    client.call('POST /kb/links/classify', { body: { url: item.url, probe: true } }).then(
       (info) => setItems((list) => list.map((i) => (i.id === item.id ? { ...item, info, classifying: false } : i))),
       (e: unknown) => setItems((list) => list.map((i) => (i.id === item.id ? { ...item, classifying: false, error: errorText(e) } : i))),
     );
@@ -93,12 +93,12 @@ export function AddMaterialModal() {
 
   /** "Add to wiki" on, auto-add off for that type: add it once the material is ready. */
   const ingestWhenReady = (materialId: string, ready: boolean) => {
-    const go = () => void u3.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: materialId } }).catch(() => undefined);
+    const go = () => void client.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: materialId } }).catch(() => undefined);
     if (ready) { go(); return; }
     let tries = 0;
     const timer = setInterval(() => {
       tries += 1;
-      u3.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }).then((m) => {
+      client.call('GET /kb/materials/{material_id}', { path: { material_id: materialId } }).then((m) => {
         if (m.status === 'ready') { clearInterval(timer); go(); }
         else if (m.status === 'failed' || tries > INGEST_POLL_LIMIT) clearInterval(timer);
       }, () => { if (tries > 5) clearInterval(timer); });
@@ -112,7 +112,7 @@ export function AddMaterialModal() {
     const left: AddItem[] = [];
     for (const item of items) {
       try {
-        const added = await submitItem(u3, item, { folderId, language: language || null, translate });
+        const added = await submitItem(client, item, { folderId, language: language || null, translate });
         const autoAdds = item.type === 'text' ? auto.text : auto.files;
         if (wikiOn && !autoAdds) for (const a of added) ingestWhenReady(a.materialId, a.ready);
       } catch (e) {

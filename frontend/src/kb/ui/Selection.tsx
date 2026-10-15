@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbQuote } from '../api/b2';
+import type { KbQuote } from '../../api/kb/types.gen';
 import { useServices } from '../state/context';
 import { Icon } from './Icon';
 

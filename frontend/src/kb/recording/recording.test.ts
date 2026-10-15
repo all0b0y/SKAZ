@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { KbU3Client } from '../api/b2-u3';
 import { createUiStore } from '../state/ui';
-import { createFakeBridge, u3State } from '../test/fakeBridge';
+import { createFakeBridge, docWorld } from '../test/fakeBridge';
 import type { CaptureCallbacks, CaptureEngine, CaptureStart } from './capture';
 import { barsFrom, SILENT_BARS } from './level';
 import { createRecordingStore } from './recordingStore';
+import { KbClient } from '../api/client';
 
 /** A capture engine with no sound hardware: it reports what the store asked and lets tests speak. */
 function fakeEngine() {
@@ -32,11 +32,11 @@ function fakeEngine() {
 }
 
 function setup() {
-  const fake = createFakeBridge(u3State());
+  const fake = createFakeBridge(docWorld());
   const ui = createUiStore();
   const eng = fakeEngine();
   const store = createRecordingStore({
-    u3: new KbU3Client(fake.bridge), bridge: fake.bridge, ui, capture: () => eng.engine, sleep: async () => undefined,
+    client: new KbClient(fake.bridge), bridge: fake.bridge, ui, capture: () => eng.engine, sleep: async () => undefined,
   });
   const routes = () => fake.calls.map((c) => `${c.method} ${c.path}`);
   return { fake, ui, eng, store, routes };
@@ -67,7 +67,7 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(eng.started?.sessionId).toBe(s.sessionId);
     expect(ui.getState().right).toEqual({ kind: 'live', materialId: s.materialId });
     expect(s.view).toBe('translation');
-    await vi.waitFor(() => expect(store.getState().chatId).toMatch(/^chat/));
+    await vi.waitFor(() => expect(store.getState().chatId).toMatch(/^c\d+$/));
     expect(fake.bridge.reportCaptureState).toHaveBeenLastCalledWith({ recorderState: 'recording', pending: 0, failed: 0 });
   });
 
@@ -130,8 +130,8 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
   });
 
   it('without a capture pipeline (no native bridge) Record explains instead of pretending', async () => {
-    const fake = createFakeBridge(u3State());
-    const store = createRecordingStore({ u3: new KbU3Client(fake.bridge), bridge: fake.bridge, ui: createUiStore(), capture: null, sleep: async () => undefined });
+    const fake = createFakeBridge(docWorld());
+    const store = createRecordingStore({ client: new KbClient(fake.bridge), bridge: fake.bridge, ui: createUiStore(), capture: null, sleep: async () => undefined });
     await store.getState().start();
     expect(store.getState().phase).toBe('idle');
     expect(store.getState().startError).toMatch(/isn’t available/);

@@ -1,4 +1,4 @@
-import type { EngineId } from '../api/b2';
+import type { EngineId } from '../api/names';
 
 const MARK: Record<EngineId, { text: string; cls: string; name: string }> = {
   codex: { text: 'Cx', cls: 'codex', name: 'Codex' },

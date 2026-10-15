@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { KbPageSummary } from '../../api/kb/types.gen';
-import type { PageKind } from '../api/b2-u3';
+import type { PageKind } from '../api/names';
 import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
 import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
@@ -29,12 +29,12 @@ function PageRow({ page }: { page: KbPageSummary }) {
 
 /** Side panel "Wiki" (v39): sections with counts, the graph, recently opened pages. */
 export function WikiSide() {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const openGraph = useUi((s) => s.openGraph);
   const graphOpen = useUi((s) => s.right?.kind === 'graph');
   const recent = useUi((s) => s.recentPages);
   const [kind, setKind] = useState<PageKind | null>(null);
-  const { state, reload } = useLoad('wiki-pages', () => u3.call('GET /kb/wiki/pages'));
+  const { state, reload } = useLoad('wiki-pages', () => client.call('GET /kb/wiki/pages'));
   const pages = state.value ?? [];
   const byId = new Map(pages.map((p) => [p.id, p]));
 

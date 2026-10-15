@@ -1,6 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
-import type { KbDecisions } from '../../api/kb/types.gen';
-import type { EngineId, KbProblem, KeyProviderId } from '../api/b2';
+import type { KbDecisions, KbProblem, KbSpeechSettings } from '../../api/kb/types.gen';
+import type { EngineId, KeyProviderId } from '../api/names';
 import { errorText } from '../api/client';
 import { Banner, Button, Icon, Modal, Segmented, Switch } from '../ui';
 import { ENGINE_NAME, ENGINE_ORDER, agentOf } from '../state/agents';
@@ -293,9 +293,11 @@ export function AsrRow({ label }: { label: string }) {
   if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
   return (
     <>
-      <Segmented<'soniox' | 'local_whisper'> label={label} size="sm" value={speech.value.provider}
-        onChange={async (v) => show(await settings.getState().updateSpeech({ provider: v }))}
-        options={[{ value: 'soniox', label: 'Soniox' }, { value: 'local_whisper', label: 'On this computer' }]} />
+      {/* The old app may have chosen OpenAI for speech; it is shown as is but not offered here. */}
+      <Segmented<KbSpeechSettings['provider']> label={label} size="sm" value={speech.value.provider}
+        onChange={async (v) => { if (v !== 'openai') show(await settings.getState().updateSpeech({ provider: v })); }}
+        options={[{ value: 'soniox', label: 'Soniox' }, { value: 'local_whisper', label: 'On this computer' },
+          ...(speech.value.provider === 'openai' ? [{ value: 'openai' as const, label: 'OpenAI' }] : [])]} />
       {result}
     </>
   );

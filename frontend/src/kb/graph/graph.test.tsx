@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { u3State } from '../test/fakeBridge';
+import { docWorld } from '../test/fakeBridge';
 
 describe('Graph of connections (v4/v5)', () => {
   it('opens wide on the right from the side panel, with counts, legend and the selected node card', async () => {
     const user = userEvent.setup();
-    const { fake } = renderKb({ state: u3State(), prefs: { section: 'graph' } });
+    const { fake } = renderKb({ world: docWorld(), prefs: { section: 'graph' } });
     await user.click(await screen.findByRole('button', { name: 'Open the graph' }));
     const panel = await screen.findByRole('complementary', { name: 'Graph of connections' });
     expect(panel).toHaveAttribute('data-view', 'graph');
@@ -31,14 +31,14 @@ describe('Graph of connections (v4/v5)', () => {
 
   it('filters by folder and says so when there is nothing yet', async () => {
     const user = userEvent.setup();
-    const { services, fake } = renderKb({ state: u3State() });
+    const { services, fake } = renderKb({ world: docWorld() });
     await screen.findByRole('navigation', { name: 'Sections' });
     services.ui.getState().openGraph();
     const panel = await screen.findByRole('complementary', { name: 'Graph of connections' });
     await within(panel).findByText('22 concepts · 4 folders');
     await user.selectOptions(within(panel).getByRole('combobox', { name: 'Folder' }), 'math');
     expect(await within(panel).findByText('4 concepts · 1 folder')).toBeInTheDocument();
-    fake.state.u3!.graph = { nodes: [], edges: [] };
+    fake.world.graph = { nodes: [], edges: [] };
     await user.selectOptions(within(panel).getByRole('combobox', { name: 'Folder' }), '');
     expect(await within(panel).findByText('No connections yet')).toBeInTheDocument();
   });

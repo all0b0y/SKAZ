@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import type { KbChatSummary, KbSearchResults } from '../api/b2';
+import type { KbChatSummary, KbSearchResults } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, Modal, type IconName } from '../ui';
 import { Highlight, Snippet } from '../ui/Highlight';

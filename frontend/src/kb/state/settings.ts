@@ -1,9 +1,8 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbDecisionProviderUpdate, KbDecisions } from '../../api/kb/types.gen';
 import type {
-  HealthSectionId, KbAbout, KbPrivacy, KbSettingsHealth, KbSettingsKeys, KbSpeechSettings, KbSpeechSettingsUpdate,
-  KbWikiSettings, KbWikiSettingsUpdate, KeyProviderId,
-} from '../api/b2';
+  KbAbout, KbDecisionProviderUpdate, KbDecisions, KbKeys, KbPrivacy, KbSettingsHealth, KbSpeechSettings, KbSpeechSettingsUpdate, KbWikiSettings, KbWikiSettingsUpdate,
+} from '../../api/kb/types.gen';
+import type { HealthSectionId, KeyProviderId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult } from './library';
 import type { SettingsSection } from './ui';
@@ -18,7 +17,7 @@ const empty = <T,>(): Remote<T> => ({ value: null, error: null });
 
 export interface SettingsData {
   health: Remote<KbSettingsHealth>;
-  keys: Remote<KbSettingsKeys>;
+  keys: Remote<KbKeys>;
   speech: Remote<KbSpeechSettings>;
   wiki: Remote<KbWikiSettings>;
   decisions: Remote<KbDecisions>;

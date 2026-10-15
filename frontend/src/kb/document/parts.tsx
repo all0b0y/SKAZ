@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
-import type { KbCitation, KbPageRef, PageKind } from '../api/b2-u3';
+import { useCallback, type ReactNode } from 'react';
+import type { KbCitation, KbPageRef } from '../../api/kb/types.gen';
+import type { PageKind } from '../api/names';
 import { Chip, IconButton, type IconName } from '../ui';
 import { formatTime, folderTone } from '../library/materialMeta';
-import { useLibrary, useUi } from '../state/context';
+import { useLibrary, useServices, useUi } from '../state/context';
 
 export const PAGE_KIND_LABEL: Record<PageKind, string> = {
   concept: 'Concept',
@@ -19,11 +20,18 @@ export const PAGE_KIND_ICON: Record<PageKind, IconName> = {
 };
 
 /**
- * "Ask about this" from a page or a material. The chat and its composer are U2's: this posts a
- * window event the composer listens to (`kb:ask-about`, detail = {type, id, title}).
+ * "Ask about this" from a page or a material: the page/material becomes an @-token in the message
+ * field of the current chat (the composer bus, like "Ask agent about this" of a decision), the chat
+ * comes back to the centre if a list or the expanded document had it, and the field takes focus.
  */
-export function askAbout(detail: { type: 'page' | 'material'; id: string; title: string }) {
-  window.dispatchEvent(new CustomEvent('kb:ask-about', { detail }));
+export function useAskAbout(): (ref: { type: 'page' | 'material'; id: string; title: string }) => void {
+  const { ui, composer } = useServices();
+  return useCallback((ref) => {
+    const s = ui.getState();
+    if (s.center !== 'chat') s.showCenter('chat');
+    if (s.docExpanded) s.toggleDocExpanded();
+    composer.getState().push([{ kind: 'mention', ref }], { focus: true });
+  }, [ui, composer]);
 }
 
 /** Source chip of a claim: opens the material at the fragment with the exact quote marked. */

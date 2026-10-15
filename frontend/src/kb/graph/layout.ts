@@ -1,7 +1,7 @@
 // Force layout of the wiki graph: a small, dependency-free simulation (decision v4/v5).
 // Pure functions over plain objects so it is unit-testable and deterministic (seeded start).
 
-import type { KbGraph, KbGraphEdge, KbGraphNode } from '../api/b2-u3';
+import type { KbGraph, KbGraphEdge, KbGraphNode } from '../../api/kb/types.gen';
 
 export interface SimNode {
   id: string;

@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { AnimatePresence, m } from 'motion/react';
-import type { KbCitation } from '../../api/kb/types.gen';
-import type { KbConnectionSide, KbMessagePart, KbPageRef } from '../api/b2';
+import type { KbCitation, KbConnectionFolder, KbMessagePart, KbPageRef } from '../../api/kb/types.gen';
 import { Chip, Icon } from '../ui';
 import { EXIT, SPRING_SMALL } from '../ui/motion';
 import { clock } from '../ui/time';
@@ -52,7 +51,7 @@ function hash(text: string): number {
  * "Connection · N folders" (v4): folded into one pill; unfolded — a row per folder with its
  * formula/claim and source chip, the last row the agent's inference (italic, labelled) and the page.
  */
-export function ConnectionBlock({ folders, inference, page }: { folders: KbConnectionSide[]; inference: string; page: KbPageRef | null }) {
+export function ConnectionBlock({ folders, inference, page }: { folders: KbConnectionFolder[]; inference: string; page: KbPageRef | null }) {
   const [open, setOpen] = useState(false);
   const tone = useFolderTone();
   const n = folders.length;

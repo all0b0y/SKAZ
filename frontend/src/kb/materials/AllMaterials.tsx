@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { normalizeSummary, type KbMaterialSummary, type KbWikiState } from '../api/b2-u3';
+import type { KbMaterialSummary } from '../../api/kb/types.gen';
+import type { KbWikiState } from '../api/names';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL } from '../library/materialMeta';
 import { useFolderTone } from '../document/parts';
@@ -64,7 +65,7 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
 
 /** "All materials" over the centre (v11, decision 25): table by default, cards on demand. */
 export function AllMaterials({ hidden }: { hidden: boolean }) {
-  const { u3 } = useServices();
+  const { client } = useServices();
   const folders = useLibrary((s) => s.folders);
   const libraryCount = useLibrary((s) => s.materials.length);
   const libraryMaterials = useLibrary((s) => s.materials);
@@ -77,7 +78,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   const [folderId, setFolderId] = useState('');
   const [sort, setSort] = useState<Sort>('newest');
   const [layout, setLayout] = useState<Layout>('table');
-  const { state, reload } = useLoad('all', async () => (await u3.call('GET /kb/materials')).map(normalizeSummary));
+  const { state, reload } = useLoad('all', async () => client.call('GET /kb/materials'));
   // The library list changed (added, recorded, deleted): read again, keeping the table on screen.
   const libraryKey = `${libraryCount}:${libraryMaterials[0]?.id ?? ''}`;
   useEffect(() => { reload(); }, [libraryKey, reload]);

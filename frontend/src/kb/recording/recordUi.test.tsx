@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { u3State } from '../test/fakeBridge';
+import { docWorld } from '../test/fakeBridge';
 import type { CaptureCallbacks, CaptureEngine } from './capture';
 
 function engine() {
@@ -22,7 +22,7 @@ function engine() {
 async function start() {
   const eng = engine();
   const user = userEvent.setup();
-  const r = renderKb({ state: u3State(), capture: () => eng.e });
+  const r = renderKb({ world: docWorld(), capture: () => eng.e });
   const bar = screen.getByTestId('titlebar');
   const record = await within(bar).findByRole('button', { name: 'Record' });
   await waitFor(() => expect(record).not.toHaveAttribute('aria-disabled'));
@@ -53,7 +53,7 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     await user.click(record);
     const capsule = await within(bar).findByRole('button', { name: /^Recording 00:00, folder Physics/ });
     expect(capsule).toHaveClass('kb-cap--rec');
-    expect(fake.calls.find((c) => c.path === '/kb/chats')?.body).toEqual({ recording_material_id: services.recording.getState().materialId });
+    expect(fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/chats')?.body).toEqual({ recording_material_id: services.recording.getState().materialId });
     const live = await screen.findByRole('complementary', { name: 'Live recording' });
     expect(within(live).getByRole('heading', { level: 2, name: 'Recording 15 Oct, 09:00' })).toBeInTheDocument();
     // Bars: still in silence, the real level when there is sound — never animated by CSS.

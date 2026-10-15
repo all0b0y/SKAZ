@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { u3State } from '../test/fakeBridge';
+import { docWorld } from '../test/fakeBridge';
 
 async function openPage(id: string) {
-  const r = renderKb({ state: u3State() });
+  const r = renderKb({ world: docWorld() });
   await screen.findByRole('navigation', { name: 'Sections' });
   act(() => r.services.ui.getState().openDocument({ type: 'page', id }));
   const doc = await screen.findByRole('complementary', { name: 'Document' });
@@ -100,7 +100,7 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
 
   it('the side panel Wiki lists sections with counts and opens a page', async () => {
     const user = userEvent.setup();
-    renderKb({ state: u3State(), prefs: { section: 'wiki' } });
+    renderKb({ world: docWorld(), prefs: { section: 'wiki' } });
     const side = await screen.findByRole('region', { name: 'Wiki' });
     const concepts = await within(side).findByRole('button', { name: /Concepts/ });
     expect(concepts).toHaveTextContent('22');

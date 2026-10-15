@@ -1,8 +1,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { BridgeApi } from '../../api/bridge';
 import type { MeterSnapshot } from '../../audio/meter';
-import { errorText, KbApiError } from '../api/client';
-import type { KbU3Client } from '../api/b2-u3';
+import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { UiStore } from '../state/ui';
 import { captureErrorText, type CaptureEngine, type CaptureFactory } from './capture';
 import { barsFrom, SILENT_BARS, type Bars } from './level';
@@ -75,7 +74,7 @@ export type RecordingStore = StoreApi<RecordingData & RecordingActions>;
 type RecBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi, 'reportCaptureState'>>;
 
 interface Deps {
-  u3: KbU3Client;
+  client: KbClient;
   bridge: RecBridge;
   ui: UiStore;
   capture: CaptureFactory | null;
@@ -146,7 +145,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
     const settle = async (materialId: string, action: 'stop' | 'pause') => {
       for (let i = 0; i < SETTLE_TRIES; i += 1) {
         try {
-          const view = await deps.u3.call(action === 'stop' ? 'POST /kb/recordings/{material_id}/stop' : 'POST /kb/recordings/{material_id}/pause',
+          const view = await deps.client.call(action === 'stop' ? 'POST /kb/recordings/{material_id}/stop' : 'POST /kb/recordings/{material_id}/pause',
             { path: { material_id: materialId } });
           if (action === 'pause' || (view.recording_state !== 'processing' && view.status !== 'processing')) return;
         } catch (error) {
@@ -189,7 +188,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
 
       loadOptions: async () => {
         const [defaults, settings] = await Promise.allSettled([
-          deps.u3.call('GET /kb/recordings/defaults'),
+          deps.client.call('GET /kb/recordings/defaults'),
           deps.bridge.request<LegacySettings>({ method: 'GET', path: '/settings' }),
         ]);
         const patch: Partial<RecOptions> = {};
@@ -220,7 +219,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           }
           // Decision 16: the folder can change during a recording too — the material moves.
           if (patch.folderId && materialId && isLive(get().phase)) {
-            await deps.u3.call('PATCH /kb/materials/{material_id}', { path: { material_id: materialId }, body: { folder_id: patch.folderId } });
+            await deps.client.call('PATCH /kb/materials/{material_id}', { path: { material_id: materialId }, body: { folder_id: patch.folderId } });
             deps.onMaterialsChanged?.();
           }
           return null;
@@ -236,7 +235,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         report();
         let materialId: string | null = null;
         try {
-          const speech = await deps.u3.call('POST /kb/recordings', { body: { folder_id: get().options.folderId } });
+          const speech = await deps.client.call('POST /kb/recordings', { body: { folder_id: get().options.folderId } });
           materialId = speech.material_id;
           set({
             materialId, sessionId: speech.session_id, title: speech.title,
@@ -246,7 +245,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           deps.onMaterialsChanged?.();
           deps.ui.getState().openLive(materialId);
           // A new chat about this recording; the recording works even if the chat can't open.
-          void deps.u3.call('POST /kb/chats', { body: { recording_material_id: materialId } }).then(
+          void deps.client.call('POST /kb/chats', { body: { recording_material_id: materialId } }).then(
             (chat) => { if (get().materialId === materialId) set({ chatId: chat.id }); },
             (error: unknown) => { if (get().materialId === materialId) set({ chatError: errorText(error) }); },
           );
@@ -283,7 +282,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (phase !== 'paused' || !engine || !materialId) return;
         set({ phase: 'resuming', startError: null });
         try {
-          await deps.u3.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
+          await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
           await engine.resume(sources());
           set({ phase: 'recording' });
           tick(true);
@@ -321,7 +320,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (!failure || get().phase !== 'idle' || !sessionId) return;
         set({ phase: 'starting', startError: null, failure: null, materialId: failure.materialId });
         try {
-          await deps.u3.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: failure.materialId } });
+          await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: failure.materialId } });
           const live = await deps.bridge.request<{ sample_rate?: number }>({
             method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live`,
           });

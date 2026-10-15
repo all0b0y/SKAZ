@@ -1,24 +1,26 @@
 import { useRef, useState } from 'react';
-import { normalizePage, type KbBlock, type KbJob, type KbPage } from '../api/b2-u3';
+import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { AnswerMarkdown } from '../../components/assistant/AnswerMarkdown';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import {
-  askAbout, CitationChip, FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, PanelFrameButtons, useFolderTone,
+  CitationChip, FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, PanelFrameButtons, useAskAbout, useFolderTone,
 } from '../document/parts';
 import { plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
 import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, type ClaimKind } from './blocks';
+import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 
 const NO_CITES: never[] = [];
 
 /** Block text rendered by the old UI's safe Markdown renderer (no raw HTML, http(s) links only). */
-function BlockMarkdown({ text }: { text: string }) {
+function BlockMarkdown({ text, quote }: { text: string; quote: QuoteSource }) {
+  // Quotable: a selection here becomes a quote token of this block (ui/Selection.tsx).
   return (
-    <div className="kb-md">
+    <div className="kb-md" {...quoteAttrs(quote)}>
       <AnswerMarkdown content={readableBlockText(text)} citations={NO_CITES} activeSessionId={null} onCite={() => undefined} />
     </div>
   );
@@ -91,7 +93,7 @@ function BlockEditor({ initial, agentBlock, onSave, onCancel, onRecheck }: {
   );
 }
 
-function Block({ block, label, actions }: { block: KbBlock; label: boolean; actions: BlockActions }) {
+function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlock; label: boolean; actions: BlockActions }) {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const edited = isEditedByUser(block);
@@ -122,7 +124,7 @@ function Block({ block, label, actions }: { block: KbBlock; label: boolean; acti
         />
       ) : (
         <div className="kb-block__body">
-          <BlockMarkdown text={block.text} />
+          <BlockMarkdown text={block.text} quote={{ source: 'page', id: pageId, block_id: block.id }} />
           {block.citations.length > 0 && (
             <span className="kb-block__cites">
               {block.citations.map((c) => <CitationChip key={`${c.material_id}:${c.seg}`} citation={c} />)}
@@ -194,7 +196,7 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
             {open && (
               <div className="kb-psec__body">
                 {section.blocks.map((b) => (
-                  <Block key={b.id} block={b} label={section.kind === null && b.kind !== 'from_source'} actions={actions} />
+                  <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source'} actions={actions} />
                 ))}
               </div>
             )}
@@ -234,7 +236,8 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
 
 /** Wiki page in the right panel (v7–v8, decisions 20–22). */
 export function PageView({ target, nonce }: { target: DocTarget; nonce: number }) {
-  const { u3 } = useServices();
+  const { client } = useServices();
+  const askAbout = useAskAbout();
   const expanded = useUi((s) => s.docExpanded);
   const openGraph = useUi((s) => s.openGraph);
   const tone = useFolderTone();
@@ -243,13 +246,13 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const [menuOpen, setMenuOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [jobs, setJobs] = useState<Record<string, string>>({});
-  const { state, reload, set } = useLoad(target.id, async () => normalizePage(await u3.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } })));
+  const { state, reload, set } = useLoad(target.id, async () => await client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } }));
   const page = state.value;
   useScrollTarget(bodyRef.current, target.block_id ?? null, nonce, state.load === 'ready');
 
   useInterval(Object.keys(jobs).length > 0, 1500, () => {
     for (const [blockId, jobId] of Object.entries(jobs)) {
-      u3.call('GET /kb/jobs/{job_id}', { path: { job_id: jobId } }).then((job: KbJob) => {
+      client.call('GET /kb/jobs/{job_id}', { path: { job_id: jobId } }).then((job: KbJob) => {
         if (job.state === 'running') return;
         setJobs((j) => { const next = { ...j }; delete next[blockId]; return next; });
         reload();
@@ -262,24 +265,24 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const pathOf = (block: KbBlock) => ({ page_id: target.id, block_id: block.id });
   const actions: BlockActions = {
     edit: async (block, text) => {
-      try { set(normalizePage(await u3.call('PUT /kb/wiki/pages/{page_id}/blocks/{block_id}', { path: pathOf(block), body: { text } }))); return null; }
+      try { set(await client.call('PUT /kb/wiki/pages/{page_id}/blocks/{block_id}', { path: pathOf(block), body: { text } })); return null; }
       catch (error) { return errorText(error); }
     },
     recheck: async (block) => {
       try {
-        const job = await u3.call('POST /kb/wiki/pages/{page_id}/blocks/{block_id}/recheck', { path: pathOf(block) });
+        const job = await client.call('POST /kb/wiki/pages/{page_id}/blocks/{block_id}/recheck', { path: pathOf(block) });
         setJobs((j) => ({ ...j, [block.id]: job.id }));
         return null;
       } catch (error) { return errorText(error); }
     },
     remove: async (block) => {
-      try { set(normalizePage(await u3.call('DELETE /kb/wiki/pages/{page_id}/blocks/{block_id}', { path: pathOf(block) }))); return null; }
+      try { set(await client.call('DELETE /kb/wiki/pages/{page_id}/blocks/{block_id}', { path: pathOf(block) })); return null; }
       catch (error) { return errorText(error); }
     },
     rechecking: (blockId) => blockId in jobs,
   };
   const addNote = async (text: string) => {
-    try { set(normalizePage(await u3.call('POST /kb/wiki/pages/{page_id}/blocks', { path: { page_id: target.id }, body: { text } }))); return null; }
+    try { set(await client.call('POST /kb/wiki/pages/{page_id}/blocks', { path: { page_id: target.id }, body: { text } })); return null; }
     catch (error) { return errorText(error); }
   };
 

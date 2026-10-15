@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbQuote, KbRef } from '../api/b2';
+import type { KbQuote, KbRef } from '../../api/kb/types.gen';
 
 /**
  * Hand-off into the message field from anywhere in the window: the selection toolbar ("Ask",

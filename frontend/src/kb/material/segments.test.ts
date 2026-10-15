@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { KbCorrection, KbFragment } from '../api/b2-u3';
+import type { KbCorrection, KbFragment } from '../../api/kb/types.gen';
 import { markQuote, readableBlockText, relativeTime } from '../document/text';
 import { byPage, monologues, segmentText, translationBySeg } from './segments';
 
@@ -62,9 +62,9 @@ describe('Fragment pieces: recognition fixes and the target quote', () => {
       .map((m) => [m.speaker, m.fragments.length])).toEqual([['Speaker 1', 2], ['Speaker 2', 1]]);
     expect(byPage([frag(1, { page: 30 }), frag(2, { page: 31 }), frag(3, { page: 31 })]).map((p) => [p.page, p.fragments.length]))
       .toEqual([[30, 1], [31, 2]]);
-    expect(translationBySeg({ language: 'ru', fragments: [{ seg: 1, text: 'a' }, { seg: 1, text: 'b' }] })?.get(1)).toBe('a b');
+    expect(translationBySeg({ language: 'ru', fragments: [{ seg: 1, speaker: null, text: 'a' }, { seg: 1, speaker: null, text: 'b' }] })?.get(1)).toBe('a b');
     // Soniox: no segment ids → paragraphs, not a map.
-    expect(translationBySeg({ language: 'ru', fragments: [{ seg: null, text: 'a' }] })).toBeNull();
+    expect(translationBySeg({ language: 'ru', fragments: [{ seg: null, speaker: null, text: 'a' }] })).toBeNull();
     expect(translationBySeg(null)).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import type { KbBlock } from '../api/b2-u3';
+import type { KbBlock } from '../../api/kb/types.gen';
 import type { IconName } from '../ui';
 
 export type ClaimKind = KbBlock['kind'];
