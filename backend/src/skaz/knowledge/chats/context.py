@@ -22,6 +22,11 @@ ITEM_CHARS = 8_000
 RECORDING_TAIL_CHARS = 4_000
 CHAT_MENTION_MESSAGES = 8
 CONTEXT_CHARS = 48_000
+#: The attachments of the current message (pasted text, files, links) share this budget of their own,
+#: fragment by fragment in full; past it the context says where ``skaz_read_material`` continues.
+#: 60 000 chars ≈ 15–20k tokens: a long paste or a chapter fits whole, the whole prompt (with the
+#: general ``CONTEXT_CHARS``) stays far below the agents' context windows.
+ATTACHMENT_CHARS = 60_000
 HISTORY_QUOTE_CHARS = 300
 
 #: Another chat's title and messages by id (``None`` when it does not exist).
@@ -145,10 +150,15 @@ class ContextBuilder:
             mention = self._mention(ref, chat.id, chats)
             if mention is not None:
                 add(*mention)
+        # The question's own attachments: their own budget, never cut by the general one (X5).
+        attachments_left = ATTACHMENT_CHARS
         for material_id in dict.fromkeys(given.attachments):
-            material = self._material(material_id)
-            if material is not None:
-                add("The user attached this material to the question:", "attached material", material)
+            attached = self._attachment(material_id, attachments_left)
+            if attached is not None:
+                body, used = attached
+                attachments_left -= used
+                sections.append("The user attached this material to the question:\n"
+                                + untrusted_block("attached material", body))
         for quote in given.quotes:
             add(*self._quote(quote))
         if not sections:
@@ -214,6 +224,28 @@ class ContextBuilder:
         return _clip("\n".join(lines), ITEM_CHARS)
 
     def _material(self, material_id: str) -> str | None:
+        """A mentioned or open material: its first fragments up to ``ITEM_CHARS``."""
+        fitted = self._fragments(material_id, ITEM_CHARS)
+        if fitted is None:
+            return None
+        lines, _used, rest = fitted
+        if rest is not None:
+            lines.append("…[more fragments: read them with skaz_read_material]")
+        return "\n".join(lines)
+
+    def _attachment(self, material_id: str, limit: int) -> tuple[str, int] | None:
+        """A current-message attachment: whole fragments while ``limit`` lasts, then where to go on."""
+        fitted = self._fragments(material_id, max(limit, 0))
+        if fitted is None:
+            return None
+        lines, used, rest = fitted
+        if rest is not None:
+            lines.append(f"…[continue reading: call skaz_read_material with material_id {material_id} "
+                         f"and from_seg {rest}]")
+        return "\n".join(lines), used
+
+    def _fragments(self, material_id: str, limit: int) -> tuple[list[str], int, int | None] | None:
+        """Header and fragment lines up to ``limit`` chars; the chars used and the first seg left out."""
         record = self.kb.material_repo.get(material_id)
         if record is None:
             return None
@@ -225,12 +257,11 @@ class ContextBuilder:
         for fragment in source.fragments if source is not None else ():
             line = _fragment_line(record.id, fragment.seg, fragment.start_ms, fragment.speaker, fragment.page,
                                   fragment.text)
-            if size + len(line) > ITEM_CHARS:
-                lines.append("…[more fragments: read them with skaz_read_material]")
-                break
+            if size + len(line) > limit:
+                return lines, size, fragment.seg
             lines.append(line)
             size += len(line)
-        return "\n".join(lines)
+        return lines, size, None
 
     def _mention(self, ref: Ref, chat_id: str, chats: ChatLookup) -> tuple[str, str, str] | None:
         if ref.type == "page":
