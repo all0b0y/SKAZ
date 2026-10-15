@@ -7,8 +7,13 @@ is that the proposal fixes a recognition error:
 
 * sure yes → ``applied`` automatically (when ``auto_corrections`` is on);
 * sure no → left out (it would change terms or content);
-* ``Undecided``/below the threshold, automatic corrections off, or a number
-  changes → ``doubtful``: only highlighted until the user decides.
+* ``Undecided``/below the threshold, automatic corrections off, or the change
+  can flip the meaning → ``doubtful``: only highlighted until the user decides.
+  Meaning flips (final review M2): a negation or a meaning-changing particle
+  added, removed or replaced ("не убывает" → "убывает", "never" → "ever",
+  "неверно" → "верно"), or a number changed (digits or number words). These
+  sound alike by design, so neither the screen nor the decision layer may
+  apply them on their own.
 
 Mechanical screen ("only recognition errors, not terms or content"): ``before``
 must occur exactly once in the recognised fragment; ``before``/``after`` are
@@ -66,6 +71,35 @@ PHRASE_SIMILARITY = 0.75
 PART_BUDGET = 12_000
 _WORD = re.compile(r"\w+(?:[-'’]\w+)*", re.UNICODE)
 _DIGITS = re.compile(r"\d+")
+#: Words whose presence flips or limits a statement (ru/en): negations and such particles.
+FLIP_WORDS = frozenset({
+    # ru
+    "не", "ни", "нет", "нельзя", "никогда", "ничего", "ничто", "никто", "нигде", "никуда", "никак", "ничуть",
+    "нисколько", "отнюдь", "вовсе", "без", "разве", "неужели", "вряд", "едва", "лишь", "только", "почти",
+    "ли", "уже", "ещё", "еще", "даже", "кроме",
+    # en
+    "not", "no", "never", "nor", "neither", "none", "nothing", "nobody", "nowhere", "without", "hardly",
+    "barely", "scarcely", "only", "except", "cannot", "isn't", "aren't", "wasn't", "weren't", "don't",
+    "doesn't", "didn't", "won't", "wouldn't", "can't", "couldn't", "shouldn't", "mustn't", "haven't",
+    "hasn't", "hadn't", "ever", "always", "almost",
+})
+#: Prefixes that negate the rest of a word ("неверно"/"верно", "unable"/"able").
+_NEGATING_PREFIXES = ("не", "ни", "без", "бес", "un", "non", "in", "im", "il", "ir", "dis")
+#: Number words (ru/en, cardinal and ordinal stems as written): a change of one is a change of a number.
+NUMBER_WORDS = frozenset({
+    "ноль", "нуль", "один", "одна", "одно", "одного", "одной", "одну", "два", "две", "двух", "двум", "три",
+    "трех", "трём", "трем", "четыре", "четырех", "пять", "пяти", "шесть", "шести", "семь", "семи", "восемь",
+    "восьми", "девять", "девяти", "десять", "десяти", "одиннадцать", "двенадцать", "тринадцать",
+    "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать", "двадцать",
+    "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто", "сто", "двести",
+    "триста", "четыреста", "пятьсот", "тысяча", "тысячи", "тысяч", "миллион", "миллиона", "миллионов",
+    "миллиард", "миллиарда", "миллиардов", "полтора", "половина", "треть", "четверть", "первый", "второй",
+    "третий", "четвертый", "пятый", "десятый", "сотый",
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
+    "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
+    "half", "third", "quarter", "first", "second", "tenth", "dozen",
+})
 
 SCHEMA: dict[str, Any] = {
     "title": SCHEMA_TITLE,
@@ -149,7 +183,7 @@ class Screened:
     before: str
     after: str
     reason: str
-    #: Numbers change: never applied without the user.
+    #: The meaning can flip (negation, particle, number): never applied without the user.
     force_doubtful: bool
 
 
@@ -195,8 +229,25 @@ def screen(
         if any(_similar(word, other) >= WORD_SIMILARITY for other in before_words):
             continue
         return "new_word"
-    digits_changed = Counter(_DIGITS.findall(before)) != Counter(_DIGITS.findall(after))
-    return Screened(proposal.seg, places[0], before, after, reason, digits_changed)
+    return Screened(proposal.seg, places[0], before, after, reason, flips_meaning(before, after))
+
+
+def _negated(a: str, b: str) -> bool:
+    """``b`` is ``a`` with a negating prefix (or the other way round): "верно"/"неверно"."""
+    short, long = sorted((a, b), key=len)
+    return any(long == prefix + short for prefix in _NEGATING_PREFIXES) and len(short) >= 3
+
+
+def flips_meaning(before: str, after: str) -> bool:
+    """A negation, a meaning-changing particle or a number differs between ``before`` and ``after``."""
+    if Counter(_DIGITS.findall(before)) != Counter(_DIGITS.findall(after)):
+        return True
+    old = [_key(word) for word in words(before)]
+    new = [_key(word) for word in words(after)]
+    for vocabulary in (FLIP_WORDS, NUMBER_WORDS):
+        if Counter(w for w in old if w in vocabulary) != Counter(w for w in new if w in vocabulary):
+            return True
+    return any(_negated(a, b) for a in old for b in new if a != b)
 
 
 def _fragment_line(fragment: Fragment) -> str:
