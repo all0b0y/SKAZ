@@ -90,11 +90,16 @@ class WriteResult:
 
 
 class _Resolver:
-    """Page titles → wiki links: this run's concepts first, then existing pages by title/alias."""
+    """Page titles → wiki links: this run's concepts first, then existing concept pages by title/alias.
+
+    Only concept pages: a link resolved here can be the second side of a
+    connection, and an analysis is never a source (decision 8) — nor are a
+    Notes page or a folder overview, which only restate their materials.
+    """
 
     def __init__(self, kb: KnowledgeService) -> None:
         self.refs: dict[str, PageRef] = {}
-        for record in kb.pages():
+        for record in kb.pages(kind="concept"):
             ref = PageRef(record.rel_path.removesuffix(".md"), record.title, record.id)
             for name in (record.title, record.original or "", *record.aliases):
                 if name.strip():

@@ -515,3 +515,41 @@ async def test_engine_failure_is_reported_with_its_reason(ready: KnowledgeServic
     job = await ingest.request_ingest(material_id)
     record = await wait_finished(ingest, job.id)
     assert record.state == "failed" and record.error == "The agent stopped: Usage limit reached."
+
+
+@pytest.mark.parametrize("kind", ["analysis", "note", "folder"])
+async def test_a_connection_side_is_never_an_analysis_notes_or_folder_page(ready: KnowledgeService,
+                                                                           kind: str) -> None:
+    """Decision 8: only a concept page can be the second side of a connection; an analysis is no source."""
+    from skaz.knowledge.ids import new_id
+    from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
+
+    meta = PageMeta(skaz_id=new_id("pg"), kind=kind, title="Термодинамика")  # type: ignore[arg-type]
+    page = PageDocument(meta=meta, parts=[Block.create(new_id("c"), "explanation", "Ответ чата.")])
+    ready.create_page(page)
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    good = block("from_source", "Мера беспорядка.", cite(1, "мера беспорядка"))
+    one_side = block("connection", "Беспорядок связан с термодинамикой.", cite(1, "мера беспорядка"),
+                     links=("Термодинамика",))
+    wiki = ScriptedWiki(notes=[notes(("Раздел", [good, one_side]))])
+    ingest = service_for(ready, wiki)
+    job_id = await run_ingest(ingest, material_id)
+    text = (wiki_dir(ready) / "Notes" / "Лекция 8.md").read_text(encoding="utf-8")
+    assert "Мера беспорядка." in text and "связан с термодинамикой" not in text
+    assert ingest.job(job_id).counters["blocks_dropped"] == 1
+
+
+async def test_a_concept_page_is_a_connection_side(ready: KnowledgeService) -> None:
+    from skaz.knowledge.ids import new_id
+    from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
+
+    ready.create_page(PageDocument(meta=PageMeta(skaz_id=new_id("pg"), kind="concept", title="Термодинамика"),
+                                   parts=[Block.create(new_id("c"), "explanation", "Понятие.")]))
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    side = block("connection", "Беспорядок связан с термодинамикой.", cite(1, "мера беспорядка"),
+                 links=("Термодинамика",))
+    good = block("from_source", "Мера беспорядка.", cite(1, "мера беспорядка"))
+    wiki = ScriptedWiki(notes=[notes(("Раздел", [good, side]))])
+    await run_ingest(service_for(ready, wiki), material_id)
+    text = (wiki_dir(ready) / "Notes" / "Лекция 8.md").read_text(encoding="utf-8")
+    assert "связан с термодинамикой" in text and "[[Wiki/Concepts/Термодинамика|" in text
