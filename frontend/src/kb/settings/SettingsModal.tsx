@@ -204,7 +204,8 @@ export function SettingsModal() {
     void s.loadDecisions();
     void s.loadPrivacy();
     void s.loadAbout();
-    void agents.getState().refresh();
+    // Agents: checked by themselves on open (at most every 30 s each; Check forces it).
+    agents.getState().autoCheck('open');
   }, [open, settings, agents]);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement | null>(null);
