@@ -181,3 +181,14 @@ def test_an_old_history_file_without_counters_still_reads(tmp_path: Path) -> Non
     engine.history_file.parent.mkdir(parents=True, exist_ok=True)
     engine.history_file.write_text(json.dumps({"sessions": ["a", "b"]}))
     assert engine.pending_history() == ["a", "b"]
+
+
+async def test_the_model_list_session_is_deleted_too(tmp_path: Path) -> None:
+    """Hermes 0.22 stores a session when it is created (``gateway/session_local.py`` mints the row
+    with its policy at ``session.create``), not only once prompted: the one SKAZ opens to read the
+    model list is removed like a run's."""
+    engine, fake = engine_for(tmp_path, scenario())
+    assert await engine.models() != ()
+    await engine.settle_history()
+    assert [call["args"] for call in _sessions_calls(fake)] == [["delete", SESSION_ID, "--yes"]]
+    assert engine.pending_history() == []

@@ -478,14 +478,21 @@ class HermesEngine:
         if located is None or not self.set_up() or not self.checked():
             return ()
         work = self.runs_dir / f"models-{uuid.uuid4().hex}"
+        session_id = ""
         try:
             async with self._acp(located, work) as (connection, _initialized):
                 session = await connection.request("session/new", {"cwd": str(work), "mcpServers": []},
                                                    timeout=self._start_timeout)
+                # Hermes 0.22 keeps a session from ``session/new`` on (not only once prompted).
+                session_id = str(session.get("sessionId") or "")
+                if session_id:
+                    self._remember(session_id)
         except (_Refused, AcpError, AcpClosed, TimeoutError, LauncherTampered):
             return ()
         finally:
             shutil.rmtree(work, ignore_errors=True)
+            if session_id:  # the ACP process has ended here
+                self._in_background(self._forget([session_id]))
         state = session.get("models") or {}
         current = state.get("currentModelId")
         self.current_model = current if isinstance(current, str) else None
