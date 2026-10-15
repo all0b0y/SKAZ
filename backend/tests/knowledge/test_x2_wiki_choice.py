@@ -75,3 +75,16 @@ async def test_the_flag_over_http(kb_app: Any, kb_client: httpx.AsyncClient) -> 
     bad = await kb_client.post("/kb/materials/text",
                                json={"text": TEXT, "folder_id": "fld-inbox", "to_wiki": "x"})
     assert bad.status_code == 422
+
+
+async def test_auto_ingest_keeps_a_reference_to_the_task_it_starts(ready: KnowledgeService) -> None:
+    """Review Low: a bare ``loop.create_task`` may be collected mid-run; AutoIngest holds it until done."""
+    ingest, sources = wired(ready, wiki_with_notes())
+    from skaz.knowledge.wiring import AutoIngest
+
+    auto = AutoIngest(ready, ingest)
+    material_id = add_material(ready, "Физика", "Kept task")
+    auto.remember(material_id, True)
+    auto(SourceEvent("material_ready", material_id))
+    assert len(auto.running) == 1
+    await settle(lambda: not auto.running)

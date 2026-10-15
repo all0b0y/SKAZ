@@ -115,6 +115,8 @@ class AutoIngest:
         self._kb = kb
         self._ingest = ingest
         self._loop: asyncio.AbstractEventLoop | None = None
+        #: Started ingest requests, held until done (the loop keeps only weak references to tasks).
+        self.running: set[asyncio.Task[None]] = set()
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
@@ -168,7 +170,9 @@ class AutoIngest:
         except RuntimeError:
             running = None
         if running is not None:
-            running.create_task(coroutine)
+            task = running.create_task(coroutine)
+            self.running.add(task)
+            task.add_done_callback(self.running.discard)
         elif self._loop is not None and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(coroutine, self._loop)
         else:
