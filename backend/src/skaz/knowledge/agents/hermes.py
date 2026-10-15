@@ -22,7 +22,10 @@ see "Hermes 0.22" below):
   model call) and refuses the run if anything but SKAZ tools is listed.
   Offline check on the installed build: "No tools available." with the policy,
   23 tools without it.
-* Permission requests are always answered with the reject option.
+* Permission requests are answered with the reject option — except, while SKAZ's
+  own ``session/set_model`` is in flight, Hermes 0.22's confirmation of a guarded
+  switch to exactly the model the user picked in SKAZ (decision B18,
+  :func:`model_switch_option`).
 
 Hermes 0.22 (source of v0.22.1+179.gb51e8b8, read only — no Hermes was run):
 ``hermes acp`` is a viewer of a per-``HERMES_HOME`` gateway daemon that owns
@@ -90,7 +93,7 @@ import signal
 import subprocess
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -301,6 +304,7 @@ class _ActiveRun:
     connection: AcpConnection | None = None
     session_id: str | None = None
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
+    requests: _Requests = field(default_factory=lambda: _Requests())
 
 
 class _Refused(Exception):
@@ -309,16 +313,78 @@ class _Refused(Exception):
         self.failure = failure
 
 
-async def _deny_requests(method: str, params: Mapping[str, Any]) -> dict[str, Any]:
-    """Permission prompts are always rejected; file/terminal access is not offered at all."""
-    if method == "session/request_permission":
-        options = params.get("options") or []
-        for kind in ("reject_once", "reject_always"):
-            for option in options:
-                if isinstance(option, dict) and option.get("kind") == kind and option.get("optionId"):
-                    return {"outcome": {"outcome": "selected", "optionId": option["optionId"]}}
-        return {"outcome": {"outcome": "cancelled"}}
-    raise AcpError(METHOD_NOT_FOUND, "Not available in SKAZ.")
+#: Hermes 0.22's confirmation of a guarded model switch (``acp_adapter/gateway_server.py``
+#: ``_model_confirmer``): tool call ``model-confirm-<12 hex>``, kind ``other``, ``rawInput`` the
+#: switch's resolved target, option ``allow_once`` ("Switch anyway").
+_MODEL_CONFIRM = re.compile(r"model-confirm-[0-9a-f]{12}")
+
+
+def _reject(params: Mapping[str, Any]) -> dict[str, Any]:
+    options = params.get("options") or []
+    for kind in ("reject_once", "reject_always"):
+        for option in options:
+            if isinstance(option, dict) and option.get("kind") == kind and option.get("optionId"):
+                return {"outcome": {"outcome": "selected", "optionId": option["optionId"]}}
+    return {"outcome": {"outcome": "cancelled"}}
+
+
+def model_switch_option(params: Mapping[str, Any], session_id: str, model_id: str) -> str | None:
+    """The ``allow_once`` option of Hermes' confirmation of switching ``session_id`` to exactly
+    ``model_id`` (decision B18), else None.
+
+    The target is ``rawInput`` ``{model, provider, guards}`` — what ``switch_model`` resolved from
+    SKAZ's ``provider:model`` id (``gateway/session_mutation_model.py`` ``_selection_guard_refusal``:
+    ``target_model``/``target_provider``); SKAZ's id is ``encode_model_choice(provider, model)``
+    (``acp_adapter/model_catalog.py``). Anything else in the request makes it not this one.
+    """
+    if params.get("sessionId") != session_id:
+        return None
+    call = params.get("toolCall")
+    if not isinstance(call, dict) or call.get("kind") != "other":
+        return None
+    if not isinstance(call.get("toolCallId"), str) or not _MODEL_CONFIRM.fullmatch(call["toolCallId"]):
+        return None
+    target = call.get("rawInput")
+    if not isinstance(target, dict) or not set(target) <= {"model", "provider", "guards"}:
+        return None
+    model, provider = target.get("model"), target.get("provider")
+    if not (isinstance(model, str) and isinstance(provider, str) and model.strip() and provider.strip()):
+        return None
+    if f"{provider.strip().lower()}:{model.strip()}" != model_id:
+        return None
+    for option in params.get("options") or []:
+        if isinstance(option, dict) and option.get("kind") == "allow_once" and option.get("optionId"):
+            return str(option["optionId"])
+    return None
+
+
+class _Requests:
+    """Answers Hermes' own requests on one ACP connection.
+
+    File/terminal access is not offered at all. Permission prompts are rejected — all but one
+    (decision B18): while SKAZ's own ``session/set_model`` is in flight, Hermes 0.22's
+    confirmation of a guarded switch to exactly the model the user picked in SKAZ is approved.
+    """
+
+    def __init__(self) -> None:
+        self._switch: tuple[str, str] | None = None
+
+    @contextlib.contextmanager
+    def switching(self, session_id: str, model_id: str) -> Iterator[None]:
+        self._switch = (session_id, model_id)
+        try:
+            yield
+        finally:
+            self._switch = None
+
+    async def __call__(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        if method == "session/request_permission":
+            if self._switch is not None:
+                option = model_switch_option(params, *self._switch)
+                if option is not None:
+                    return {"outcome": {"outcome": "selected", "optionId": option}}
+            return _reject(params)
+        raise AcpError(METHOD_NOT_FOUND, "Not available in SKAZ.")
 
 
 class HermesEngine:
@@ -681,7 +747,8 @@ class HermesEngine:
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
         tail: deque[str] = deque(maxlen=60)
         drain = asyncio.create_task(_drain(process.stderr, tail))
-        connection = AcpConnection(process.stdout, process.stdin, on_request=_deny_requests)
+        connection = AcpConnection(process.stdout, process.stdin,
+                                   on_request=active.requests if active is not None else _Requests())
         if active is not None:
             active.connection = connection
         try:
@@ -813,7 +880,7 @@ class HermesEngine:
         active.session_id = session_id
         if session_id:
             self._remember(session_id)  # before any prompt: Hermes saves the session from the first one
-        await self._select_model(turn, session, connection, session_id)
+        await self._select_model(turn, session, connection, session_id, active.requests)
         listing = await self._local_command(connection, session_id, "/tools")
         if not tools_listing_allowed(listing):
             raise _Refused(Failed(run_id, "incompatible", LIMITS_NOT_APPLIED))
@@ -853,7 +920,7 @@ class HermesEngine:
             await asyncio.gather(watcher, return_exceptions=True)
 
     async def _select_model(self, turn: AgentTurn, session: Mapping[str, Any], connection: AcpConnection,
-                            session_id: str) -> None:
+                            session_id: str, requests: _Requests) -> None:
         if not turn.model:
             return
         state = session.get("models") or {}
@@ -863,9 +930,10 @@ class HermesEngine:
                                   "This model is not set up in Hermes. Choose it in the Hermes setup."))
         if state.get("currentModelId") != turn.model:
             try:
-                await connection.request("session/set_model",
-                                         {"sessionId": session_id, "modelId": turn.model},
-                                         timeout=self._start_timeout)
+                with requests.switching(session_id, turn.model):
+                    await connection.request("session/set_model",
+                                             {"sessionId": session_id, "modelId": turn.model},
+                                             timeout=self._start_timeout)
             except (AcpError, AcpClosed, TimeoutError) as error:
                 raise _Refused(Failed(turn.run_id, "incompatible",
                                       "Hermes could not switch to this model.")) from error

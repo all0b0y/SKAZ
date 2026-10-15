@@ -140,7 +140,23 @@ while True:
         else:
             send({"jsonrpc": "2.0", "id": ident, "result": SCENARIO["session_new"]})
     elif method == "session/set_model":
-        send({"jsonrpc": "2.0", "id": ident, "result": {}})
+        # Hermes 0.22 (acp_adapter/gateway_server.py set_session_model/_model_confirmer): a guarded
+        # target is confirmed through session/request_permission while set_model is in flight; a
+        # declined confirmation fails set_model (GatewayClientError("model_switch_cancelled")).
+        allowed = True
+        for asked in SCENARIO.get("set_model_permissions", []):
+            next_id += 1
+            send({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission",
+                  "params": {"sessionId": params["sessionId"], **asked}})
+            reply = json.loads(sys.stdin.readline())
+            record("set_model_permission_reply", message=reply)
+            outcome = (reply.get("result") or {}).get("outcome") or {}
+            allowed = allowed and outcome.get("optionId") == "allow_once"
+        if allowed:
+            send({"jsonrpc": "2.0", "id": ident, "result": {}})
+        else:
+            send({"jsonrpc": "2.0", "id": ident,
+                  "error": {"code": -32603, "message": "model_switch_cancelled"}})
     elif method == "session/cancel":
         for pending, session in list(waiting.items()):
             send({"jsonrpc": "2.0", "id": pending, "result": {"stopReason": "cancelled"}})
@@ -154,6 +170,12 @@ while True:
             send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
             continue
         for body in SCENARIO.get("updates", []):
+            if body == "PERMISSION_MODEL":
+                next_id += 1
+                send({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission",
+                      "params": {"sessionId": session, **SCENARIO["model_permission"]}})
+                record("permission_reply", message=json.loads(sys.stdin.readline()))
+                continue
             if body == "PERMISSION":
                 next_id += 1
                 send({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission", "params": {

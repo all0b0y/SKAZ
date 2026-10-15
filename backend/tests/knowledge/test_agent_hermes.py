@@ -422,3 +422,114 @@ async def test_parallel_runs_use_separate_processes(tmp_path: Path) -> None:
     results = await asyncio.gather(drain(engine, turn("a", tools=None)), drain(engine, turn("b", tools=None)))
     assert all(isinstance(events[-1], Completed) for events in results)
     assert len([item for item in fake.records("start") if item["argv"] == ["acp"]]) == 2
+
+
+# -- B18: Hermes 0.22's confirmation of a guarded model switch -------------------------------------
+# ``acp_adapter/gateway_server.py`` ``_model_confirmer``: while ``session/set_model`` is in flight the
+# gateway asks ``session/request_permission`` with a ``model-confirm-<12 hex>`` tool call of kind
+# ``other``, ``rawInput`` = {model, provider, guards} (the switch's resolved target) and the options
+# ``allow_once`` ("Switch anyway") / ``deny``; only ``allow_once`` applies the switch.
+
+PICKED = "anthropic:claude-sonnet-5-5"
+
+
+def model_confirmation(model: str = "claude-sonnet-5-5", provider: str | None = "anthropic", *,
+                       call_id: str = "model-confirm-0123456789ab", kind: str = "other",
+                       **raw: Any) -> dict[str, Any]:
+    return {
+        "toolCall": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": call_id,
+            "title": f"Model Selection Warning: {model}",
+            "kind": kind,
+            "status": "pending",
+            "content": [{"type": "content", "content": {"type": "text", "text": "This model costs more."}}],
+            "rawInput": {"model": model, "provider": provider, "guards": ["cost"], **raw},
+        },
+        "options": [
+            {"optionId": "allow_once", "kind": "allow_once", "name": "Switch anyway"},
+            {"optionId": "deny", "kind": "reject_once", "name": "Cancel"},
+        ],
+    }
+
+
+def tool_permission(title: str = "rm -rf ~", kind: str = "execute") -> dict[str, Any]:
+    return {
+        "toolCall": {"toolCallId": "perm-1", "title": title, "kind": kind, "status": "pending",
+                     "rawInput": {"command": title}},
+        "options": [
+            {"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"},
+            {"optionId": "allow_always", "kind": "allow_always", "name": "Allow always"},
+            {"optionId": "deny", "kind": "reject_once", "name": "Deny"},
+        ],
+    }
+
+
+def switching_engine(tmp_path: Path, asked: list[dict[str, Any]]) -> tuple[HermesEngine, FakeCli]:
+    new = dict(PROBE["session_new_configured"])
+    new["models"] = {
+        "currentModelId": "custom:probe-model",
+        "availableModels": [
+            {"modelId": "custom:probe-model", "name": "probe"},
+            {"modelId": PICKED, "name": "claude-sonnet-5-5"},
+        ],
+    }
+    plan = scenario(version_output=V022_VERSION, session_new=new, updates=UPDATES[1:2],
+                    set_model_permissions=asked)
+    return engine_for(tmp_path, plan)
+
+
+def answers(fake: FakeCli) -> list[Any]:
+    return [item["message"]["result"]["outcome"] for item in fake.records("set_model_permission_reply")]
+
+
+async def test_the_model_switch_confirmation_for_the_picked_model_is_approved(tmp_path: Path) -> None:
+    engine, fake = switching_engine(tmp_path, [model_confirmation()])
+    events = await drain(engine, turn(tools=None, model=PICKED))
+    assert isinstance(events[-1], Completed), events
+    assert answers(fake) == [{"outcome": "selected", "optionId": "allow_once"}]
+    assert received(fake, "session/set_model")[0]["params"]["modelId"] == PICKED
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        model_confirmation("claude-opus-5-5"),  # another model than the one picked in SKAZ
+        model_confirmation("claude-sonnet-5-5", "openrouter"),  # the same name on another provider
+        model_confirmation("claude-sonnet-5-5", None),  # no provider: not the id SKAZ asked for
+        model_confirmation(call_id="perm-1"),  # not Hermes' model confirmation
+        model_confirmation(kind="execute"),
+        model_confirmation(command="rm -rf ~"),  # anything more than a model choice in the request
+        tool_permission(),  # a command
+        tool_permission("Write ~/.zshrc", "edit"),  # a file
+        tool_permission("mcp__editor_skaz_1a2b3c4d__search", "other"),  # a tool
+    ],
+)
+async def test_every_other_permission_during_the_model_switch_is_rejected(
+    tmp_path: Path, asked: dict[str, Any],
+) -> None:
+    engine, fake = switching_engine(tmp_path, [asked])
+    events = await drain(engine, turn(tools=None, model=PICKED))
+    assert events == [Failed("run-1", "incompatible", "Hermes could not switch to this model.")]
+    assert answers(fake) == [{"outcome": "selected", "optionId": "deny"}]
+    assert [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")] == []
+
+
+async def test_a_tool_request_next_to_the_confirmation_is_still_rejected(tmp_path: Path) -> None:
+    engine, fake = switching_engine(tmp_path, [tool_permission(), model_confirmation()])
+    events = await drain(engine, turn(tools=None, model=PICKED))
+    assert isinstance(events[0], Failed)
+    assert answers(fake) == [{"outcome": "selected", "optionId": "deny"},
+                             {"outcome": "selected", "optionId": "allow_once"}]
+
+
+async def test_a_model_confirmation_outside_the_switch_is_rejected(tmp_path: Path) -> None:
+    """The approval exists only while SKAZ's own ``session/set_model`` is in flight."""
+    updates = ["PERMISSION_MODEL", *UPDATES[1:2]]
+    plan = scenario(version_output=V022_VERSION, updates=updates,
+                    model_permission=model_confirmation("probe-model", "custom"))
+    engine, fake = engine_for(tmp_path, plan)
+    events = await drain(engine, turn(tools=None, model="custom:probe-model"))
+    assert isinstance(events[-1], Completed)
+    assert fake.records("permission_reply")[0]["message"]["result"] == {
+        "outcome": {"outcome": "selected", "optionId": "deny"}}
