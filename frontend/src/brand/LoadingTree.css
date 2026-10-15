@@ -1,0 +1,100 @@
+/* SKAZ startup screen (LoadingTree.tsx) — variant A «Соки снизу», mockup loading-tree-v41.html. */
+
+.skaz-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 200; /* above every app layer while it fades out over the app */
+  display: flex;
+  flex-direction: column;
+  background: var(--kb-bg);
+  color: var(--kb-text);
+  transition: opacity 0.42s ease, transform 0.42s ease;
+}
+/* The window can be dragged by its top edge while the app is not there yet. */
+.skaz-loading::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--kb-titlebar-h, 38px);
+  -webkit-app-region: drag;
+}
+.skaz-loading[data-phase='ready'] {
+  opacity: 0;
+  transform: scale(0.985);
+  pointer-events: none;
+}
+
+.skaz-loading__stage { position: relative; flex: 1 1 auto; min-height: 0; }
+.skaz-loading__mark { position: absolute; inset: 0; width: 100%; height: 100%; display: block; overflow: visible; }
+
+.skaz-loading__message {
+  position: relative;
+  flex: none;
+  width: min(440px, calc(100vw - 48px));
+  margin: 0 auto 24px;
+  -webkit-app-region: no-drag;
+  animation: skaz-loading-fade 0.3s ease both;
+}
+
+.skaz-loading__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Tree parts: crown and trunk in the text colour, grove and roots in the folder colours. */
+.skaz-loading__tree { fill: var(--kb-text); }
+.skaz-loading__grove { transform-box: fill-box; transform-origin: 50% 100%; }
+.skaz-loading__grove--blue { fill: var(--kb-folder-1); }
+.skaz-loading__grove--purple { fill: var(--kb-folder-2); }
+.skaz-loading__px { transform-box: fill-box; transform-origin: center; opacity: var(--o); transition: fill 0.4s; }
+.skaz-loading__px--blue { fill: var(--kb-folder-1); }
+.skaz-loading__px--purple { fill: var(--kb-folder-2); }
+.skaz-loading__px--olive { fill: var(--kb-folder-3); }
+
+/* Starting: sap rises from the root tips to the trunk; the grove flares as the wave reaches it. */
+@keyframes skaz-loading-sap {
+  0%, 100% { opacity: var(--o); transform: scale(1); }
+  6% { opacity: 1; transform: scale(1.32); }
+  18% { opacity: var(--o); transform: scale(1); }
+}
+@keyframes skaz-loading-grove {
+  0%, 100% { opacity: 0.86; }
+  8% { opacity: 1; }
+  22% { opacity: 0.86; }
+}
+.skaz-loading[data-phase='starting'] .skaz-loading__px { animation: skaz-loading-sap 3.6s ease-in-out var(--sap) infinite; }
+.skaz-loading[data-phase='starting'] .skaz-loading__grove--blue { animation: skaz-loading-grove 3.6s ease-in-out 1.25s infinite; }
+.skaz-loading[data-phase='starting'] .skaz-loading__grove--purple { animation: skaz-loading-grove 3.6s ease-in-out 2.45s infinite; }
+
+/* Error: the roots turn amber, the deepest pixels fall away, the tree lifts above the message. */
+@keyframes skaz-loading-fall { to { opacity: 0; transform: translateY(90px); } }
+@keyframes skaz-loading-lift { from { transform: translateY(var(--lift-y, 0)) scale(var(--lift-s, 1)); } }
+@keyframes skaz-loading-fade { from { opacity: 0; } }
+.skaz-loading[data-phase='error'] .skaz-loading__px { fill: var(--kb-warn); }
+.skaz-loading[data-phase='error'] .skaz-loading__px--deep { animation: skaz-loading-fall 0.9s ease-in var(--fall) both; }
+.skaz-loading[data-phase='error'] .skaz-loading__mark { animation: skaz-loading-lift 0.42s ease both; }
+
+/* Reduced motion: nothing moves; the roots pulse slowly in opacity; no fall, no lift. */
+@keyframes skaz-loading-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.skaz-loading[data-motion='reduced'],
+.skaz-loading[data-motion='reduced'] .skaz-loading__message { transition-duration: 0.01s; animation: none; }
+.skaz-loading[data-motion='reduced'][data-phase='ready'] { transform: none; }
+.skaz-loading[data-motion='reduced'] .skaz-loading__mark,
+.skaz-loading[data-motion='reduced'] .skaz-loading__px,
+.skaz-loading[data-motion='reduced'] .skaz-loading__grove { animation: none; }
+.skaz-loading[data-motion='reduced'][data-phase='starting'] .skaz-loading__roots { animation: skaz-loading-pulse 2.6s ease-in-out infinite; }
+.skaz-loading[data-motion='reduced'][data-phase='error'] .skaz-loading__px--deep { opacity: 0; }
+
+/* A hidden window draws nothing; its animations wait. */
+.skaz-loading[data-paused='true'],
+.skaz-loading[data-paused='true'] * { animation-play-state: paused !important; }
