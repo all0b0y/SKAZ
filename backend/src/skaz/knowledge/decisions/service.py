@@ -162,6 +162,15 @@ class DecisionService:
             self.settings.set(CONSENT_KEY, cloud_consent)
         self.settings.set(PROVIDER_KEY, provider)
 
+    def ready(self) -> bool:
+        """The chosen layer can answer: the local model is downloaded, or the cloud has consent and a key."""
+        provider = self.provider()
+        if provider == "local":
+            return self.manager.installed()
+        if provider == "openrouter_jev":
+            return self.cloud_consent() and bool(self._api_key())
+        return False
+
     # -- layer --------------------------------------------------------------
 
     def layer(self) -> DecisionLayer | None:

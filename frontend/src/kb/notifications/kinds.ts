@@ -6,6 +6,8 @@ export type Tone = 'r' | 'y' | 'a';
 const KINDS: Record<string, { icon: IconName; tone: Tone; open: string }> = {
   discrepancy: { icon: 'warning', tone: 'r', open: 'Compare' },
   doubtful_corrections: { icon: 'fixes', tone: 'y', open: 'Review' },
+  // One-time offer of the local decision model (backend corrections/offer.py): Download / Not now.
+  auto_fixes_offer: { icon: 'fixes', tone: 'a', open: 'Details' },
   link_failed: { icon: 'link', tone: 'r', open: 'Details' },
   import_failed: { icon: 'error', tone: 'r', open: 'Details' },
   ingest_failed: { icon: 'error', tone: 'r', open: 'Details' },

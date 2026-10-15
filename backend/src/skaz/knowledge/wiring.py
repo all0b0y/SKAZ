@@ -9,6 +9,8 @@
   MCP tokens of the A1 server (``McpGrants``).
 * The wiki after ingest (W2): recognition corrections and their check, the
   discrepancy hook, notification actions (``wire_wiki``).
+* The first finished recording offers the local decision model once, when no
+  decision provider is chosen (``corrections/offer.py``, user decision X2-8).
 * A new material (S1 documents, S2 finished speech — never a paused
   recording) is added to the wiki when the wiki settings say so (decision
   15), and a restored fragment re-runs its material (decision 41).
@@ -22,7 +24,9 @@ from collections.abc import Callable, Mapping, Sequence
 from .agents.engine import AgentEngine, EngineId, ToolSpec
 from .agents.mcp_access import McpAccess as EngineMcpAccess
 from .agents.registry import ENGINE_IDS
+from .corrections.offer import AutoFixesOffer
 from .decisions.protocol import Answer, DeciderId, DecisionLayer, Question, Undecided
+from .decisions.service import DecisionService
 from .ingest.service import IngestService
 from .logsafe import error_note
 from .mcp.server import McpServer
@@ -64,8 +68,16 @@ class McpGrants:
 class CurrentDecisions:
     """Whatever decision layer is selected at the moment of each question."""
 
-    def __init__(self, current: Callable[[], DecisionLayer | None]) -> None:
+    def __init__(self, current: Callable[[], DecisionLayer | None],
+                 ready: Callable[[], bool] | None = None) -> None:
         self._current = current
+        self._ready = ready
+
+    def ready(self) -> bool:
+        """A layer is chosen and can answer (local model downloaded / cloud consent and key)."""
+        if self._current() is None:
+            return False
+        return self._ready() if self._ready is not None else True
 
     @property
     def id(self) -> DeciderId:
@@ -157,9 +169,10 @@ def wire(
     decisions: Callable[[], DecisionLayer | None],
     engines: Mapping[EngineId, AgentEngine],
     default_engine: Callable[[], str] = lambda: "codex",
+    decisions_ready: Callable[[], bool] | None = None,
 ) -> AutoIngest:
     ingest.detector = GuardDetector()
-    ingest.decisions = CurrentDecisions(decisions)
+    ingest.decisions = CurrentDecisions(decisions, decisions_ready)
     ingest.engines = engine_resolver(engines, default_engine)
     auto = AutoIngest(kb, ingest)
     sources.subscribe(auto)
@@ -171,3 +184,12 @@ def wire_speech(kb: KnowledgeService, speech: SpeechService) -> LinkFailures:
     failures = LinkFailures(kb, speech)
     failures.register()
     return failures
+
+
+def wire_fixes_offer(kb: KnowledgeService, speech: SpeechService,
+                     decisions: DecisionService) -> AutoFixesOffer:
+    """X2-8: the one-time "turn on automatic fixes" offer at the first finished recording."""
+    offer = AutoFixesOffer(kb, decisions)
+    offer.register()
+    speech.on_finished(offer.material_finished)
+    return offer
