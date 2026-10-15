@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
@@ -7,10 +7,20 @@ import { InlineMarkdown } from './Markdown';
 import { plainText, toBlocks } from './Message';
 import { openTarget } from '../state/document';
 
+/** Freeze the clock at 14:00 today (only Date; timers stay real). */
+function atMidday() {
+  const noon = new Date();
+  noon.setHours(14, 0, 0, 0);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(noon);
+}
+afterEach(() => { vi.useRealTimers(); });
+
 const side = () => screen.getByRole('region', { name: 'Chats' });
 
 describe('Chats in the side panel', () => {
   it('pinned first, then by date, a few only, "All chats · N"; answering and new-answer marks are still', async () => {
+    atMidday(); // day groups (Today / Yesterday) must not depend on when the suite runs
     renderKb({ world: chatWorld() });
     const panel = side();
     const pinned = await within(panel).findByRole('region', { name: 'Pinned' });

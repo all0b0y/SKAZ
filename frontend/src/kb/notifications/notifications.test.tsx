@@ -1,9 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld } from '../test/fixtures';
 import { openTarget } from '../state/document';
+
+/** Freeze the clock at 14:00 today (only Date; timers stay real). */
+function atMidday() {
+  const noon = new Date();
+  noon.setHours(14, 0, 0, 0);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(noon);
+}
+afterEach(() => { vi.useRealTimers(); });
 
 const openFeed = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('button', { name: /^Notifications/ }));
@@ -22,6 +31,7 @@ describe('Notification feed', () => {
   });
 
   it('by day; "Decide" shows only what waits for a decision; unknown kinds are ordinary items; nothing opens by itself', async () => {
+    atMidday(); // day groups (Today / Yesterday) must not depend on when the suite runs
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });
     const feed = await openFeed(user);
