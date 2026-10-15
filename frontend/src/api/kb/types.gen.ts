@@ -149,6 +149,16 @@ export interface KbHiddenFinding {
   instruction: boolean;
 }
 
+export interface KbImportCreate {
+  path?: string | null;
+  url?: string | null;
+  folder_id?: string | null;
+  title?: string | null;
+  translate?: boolean;
+  language?: string | null;
+  allow_duplicate?: boolean;
+}
+
 export interface KbJob {
   id: string;
   kind: "ingest";
@@ -307,6 +317,11 @@ export interface KbPageSummary {
   language: string;
 }
 
+export interface KbRecordingCreate {
+  folder_id?: string | null;
+  title?: string | null;
+}
+
 export interface KbRestoredFragment {
   seg: number;
   text_hash: string;
@@ -323,6 +338,26 @@ export interface KbSearchResults {
 export interface KbSnippetPart {
   text: string;
   match: boolean;
+}
+
+export interface KbSpeechDefaults {
+  folder_id: string;
+}
+
+/** A speech material and the recording/import that feeds it. */
+export interface KbSpeechMaterial {
+  material_id: string;
+  session_id: string;
+  kind: "recording" | "audio" | "video" | "video_link";
+  title: string;
+  folder_id: string;
+  status: "recording" | "processing" | "ready" | "failed";
+  fragment_count: number;
+  created_at: string;
+  recording_state: "recording" | "processing" | "paused" | "stopped" | null;
+  import_state: "running" | "completed" | "failed" | "interrupted" | "cancelled" | null;
+  import_stage: string | null;
+  error: string | null;
 }
 
 export interface KbWikiSettings {
@@ -412,6 +447,41 @@ export interface KbEndpoints {
     body: never;
     response: void;
     status: 204;
+  };
+  "POST /kb/imports": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbImportCreate;
+    response: KbSpeechMaterial;
+    status: 201;
+  };
+  "GET /kb/imports/active": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial[];
+    status: 200;
+  };
+  "GET /kb/imports/{material_id}": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
+    status: 200;
+  };
+  "POST /kb/imports/{material_id}/cancel": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
+    status: 200;
+  };
+  "POST /kb/imports/{material_id}/retry": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
+    status: 200;
   };
   "GET /kb/jobs": {
     path: Record<string, never>;
@@ -530,6 +600,48 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbNotification;
+    status: 200;
+  };
+  "POST /kb/recordings": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbRecordingCreate;
+    response: KbSpeechMaterial;
+    status: 201;
+  };
+  "GET /kb/recordings/defaults": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechDefaults;
+    status: 200;
+  };
+  "GET /kb/recordings/{material_id}": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
+    status: 200;
+  };
+  "POST /kb/recordings/{material_id}/pause": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
+    status: 200;
+  };
+  "POST /kb/recordings/{material_id}/resume": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
+    status: 200;
+  };
+  "POST /kb/recordings/{material_id}/stop": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbSpeechMaterial;
     status: 200;
   };
   "GET /kb/search": {

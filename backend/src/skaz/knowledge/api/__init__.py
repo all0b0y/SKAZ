@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import decisions, folders, ingest, library, materials, notifications, search, sources, wiki
+from . import decisions, folders, ingest, library, materials, notifications, search, sources, speech, wiki
 
 #: Mounted with the bearer-token dependency. Append-only: one line per area.
 ROUTERS: tuple[APIRouter, ...] = (
@@ -16,4 +16,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     ingest.router,
     sources.router,
     decisions.router,
+    speech.router,
 )

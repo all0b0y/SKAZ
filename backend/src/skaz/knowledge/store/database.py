@@ -45,6 +45,22 @@ class KnowledgeDatabase:
                 raise
 
     @contextmanager
+    def write_rebuildable(self) -> Iterator[sqlite3.Connection]:
+        """A write to index tables that the startup scan rebuilds from the library files.
+
+        Committed without the full disk flush (``synchronous=NORMAL`` in WAL mode):
+        a power loss can only lose index rows the next scan re-creates, never a
+        file. Service tables (not rebuilt from files) must use ``write``.
+        """
+        with self._lock:
+            self._connection.execute("PRAGMA synchronous=NORMAL")
+            try:
+                with self.write() as connection:
+                    yield connection
+            finally:
+                self._connection.execute("PRAGMA synchronous=FULL")
+
+    @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
             yield self._connection

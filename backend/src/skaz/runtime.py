@@ -28,6 +28,7 @@ from .knowledge.mcp import McpServer
 from .knowledge.service import KnowledgeService
 from .knowledge.sources.links import ytdlp_probe
 from .knowledge.sources.service import SourceService
+from .knowledge.speech import create_speech_service
 from .knowledge.wiring import wire as wire_knowledge
 from .live_asr import LiveAsrDraftService
 from .live_fragments import LiveAsrFragmentService
@@ -111,6 +112,8 @@ class Runtime:
         #: File imports. Resumption is started by the app lifespan, not here: a
         #: constructor must not create tasks on a loop it does not own.
         self.imports = ImportService(self)
+        #: Speech → materials (area S2): links recordings/imports to library materials.
+        self.kb_speech = create_speech_service(self)
         #: Written-but-unapplied note passages, held until the user compares them.
         self.note_rewrites = PendingRewrites()
         self.window_asr = WindowAsrPreview(self)
