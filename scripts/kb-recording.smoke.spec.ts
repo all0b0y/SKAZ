@@ -280,6 +280,11 @@ test('provider error: Record says why without a key; recognition stops on its ow
     await expect(capsule(page)).toBeVisible();
     await emit(page);
     const panel = livePanel(page);
+    // While SKAZ retries the same provider (attempts 2 and 3), the recording UI says so instead of nothing.
+    await expect(panel.getByRole('status').filter({ hasText: 'Reconnecting to Soniox…' })).toBeVisible({ timeout: 15_000 });
+    await expect(capsule(page)).toContainText('Reconnecting…');
+    await expect(panel.getByRole('note')).toContainText('Recording continues');
+    await shoot(page, 'reconnecting');
     const stopped = panel.getByRole('alert');
     await expect(stopped).toContainText('Recognition stopped at', { timeout: 30_000 });
     await expect(stopped).toContainText(/Soniox/);

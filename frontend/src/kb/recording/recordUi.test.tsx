@@ -102,6 +102,28 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     }
   });
 
+  it('a dropped speech connection is said in the live panel and the capsule while SKAZ reconnects', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { user, bar, record, fake } = await start();
+      await user.click(record);
+      const live = await screen.findByRole('complementary', { name: 'Live recording' });
+      fake.world.liveTranscription = 'reconnecting';
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      // Announced as a status, not an alert: recording goes on.
+      expect(within(live).getAllByRole('status').some((el) => el.textContent?.includes('Reconnecting to Soniox…'))).toBe(true);
+      expect(within(live).getByText(/Recording continues/)).toBeInTheDocument();
+      const capsule = within(bar).getByRole('button', { name: /^Recording .*reconnecting to Soniox/ });
+      expect(capsule).toHaveTextContent('Reconnecting…');
+      fake.world.liveTranscription = 'streaming';
+      await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
+      expect(within(live).queryByText('Reconnecting to Soniox…')).not.toBeInTheDocument();
+      expect(within(bar).getByRole('button', { name: /^Recording/ })).not.toHaveTextContent('Reconnecting');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('recognition stops: the panel says when, keeps the text, offers to continue; the capsule is gone', async () => {
     const { user, bar, record, eng } = await start();
     await user.click(record);

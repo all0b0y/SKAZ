@@ -97,7 +97,7 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
       { id: 'wiki', state: 'ok', problems: [] },
     ] },
     dictation: { text: 'and how does it relate to a decision tree' },
-    settings: { native_recording_mode: 'translation', translation_target_language: 'ru', input_device_id: null, capture_system_audio: false, used_languages: ['en', 'ru'] },
+    settings: { transcription_provider: 'soniox', native_recording_mode: 'translation', translation_target_language: 'ru', input_device_id: null, capture_system_audio: false, used_languages: ['en', 'ru'] },
     liveTail: 'So cross-entropy in machine learning is',
     failures: {},
     log: [],

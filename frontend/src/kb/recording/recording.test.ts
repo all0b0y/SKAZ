@@ -95,7 +95,8 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(store.getState().phase).toBe('recording');
     await store.getState().stop();
     expect(eng.calls).toEqual(['start', 'pause', 'resume', 'stop']);
-    expect(routes().filter((r) => r.includes(id))).toEqual([
+    // Writes only: the stream-state poll reads the session's live events in between.
+    expect(routes().filter((r) => r.includes(id) && !r.startsWith('GET '))).toEqual([
       `POST /kb/recordings/${id}/pause`, `POST /kb/recordings/${id}/resume`, `POST /kb/recordings/${id}/stop`,
     ]);
     expect(store.getState().phase).toBe('idle');
@@ -138,6 +139,27 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(store.getState().phase).toBe('idle');
     expect(store.getState().startError).toMatch(/not a recording/);
     expect(eng.engine.start).not.toHaveBeenCalled();
+  });
+
+  it('while recording it follows the stream state of the session: reconnecting is said, never hidden', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { store, fake } = setup();
+      await store.getState().loadOptions();
+      await store.getState().start();
+      fake.world.liveTranscription = 'reconnecting';
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(store.getState().stream).toBe('reconnecting');
+      expect(store.getState().provider).toBe('soniox');
+      expect(store.getState().tail.original).toBe('So cross-entropy in machine learning is');
+      fake.world.liveTranscription = 'streaming';
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(store.getState().stream).toBe('streaming');
+      await store.getState().pause();
+      expect(store.getState()).toMatchObject({ stream: null, tail: { original: '', translation: '' } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('a failed start says why and leaves nothing recording', async () => {

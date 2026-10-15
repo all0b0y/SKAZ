@@ -18,6 +18,9 @@ import { barsFrom, SILENT_BARS, type Bars } from './level';
 export type RecPhase = 'idle' | 'starting' | 'recording' | 'pausing' | 'paused' | 'resuming' | 'finishing';
 export type LiveView = 'original' | 'translation' | 'both';
 export type RecMode = 'transcription' | 'translation';
+/** The recording's live stream as the backend reports it (`transcription` of `/sessions/{id}/live/events`). */
+export type StreamState = 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive' | 'disabled';
+const STREAM_STATES: ReadonlyArray<StreamState> = ['connecting', 'reconnecting', 'streaming', 'unavailable', 'inactive', 'disabled'];
 
 export interface RecOptions {
   folderId: string | null;
@@ -53,6 +56,12 @@ export interface RecordingData {
   /** Recognition stopped on its own; text is saved; nothing continues by itself. */
   failure: RecFailure | null;
   view: LiveView;
+  /** Stream state while recording (null when not streaming); polled with the unstable tail. */
+  stream: StreamState | null;
+  /** The speech service of new recordings (legacy `transcription_provider`): `soniox`, `local-whisper`, … */
+  provider: string | null;
+  /** Unstable (not yet final) words of the recording, original and translation. */
+  tail: { original: string; translation: string };
 }
 
 export interface RecordingActions {
@@ -87,8 +96,18 @@ interface Deps {
 
 const LIVE_STATES: ReadonlyArray<RecPhase> = ['recording', 'pausing', 'paused', 'resuming'];
 const SETTLE_TRIES = 60;
+const STREAM_POLL_MS = 1500;
+const NO_TAIL = { original: '', translation: '' };
+
+interface TailPage {
+  transcription?: string;
+  tail: { originals: Array<{ text: string }>; translations: Array<{ text: string }> } | null;
+}
+
+const joined = (parts: Array<{ text: string }> | undefined) => (parts ?? []).map((t) => t.text).join('').trim();
 
 interface LegacySettings {
+  transcription_provider?: string;
   native_recording_mode?: string;
   translation_target_language?: string;
   input_device_id?: string | null;
@@ -103,6 +122,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let engine: CaptureEngine | null = null;
   let ticker: ReturnType<typeof setInterval> | null = null;
+  let poller: ReturnType<typeof setInterval> | null = null;
   let attempt = 0;
 
   const store = createStore<RecordingData & RecordingActions>()((set, get) => {
@@ -116,10 +136,33 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         failed: pending.failed,
       });
     };
+    /** One small page of the session's live events: its stream state and the unstable tail. */
+    const pollStream = async () => {
+      const sessionId = get().sessionId;
+      if (get().phase !== 'recording' || !sessionId) return;
+      try {
+        const res = await deps.bridge.request<TailPage>({
+          method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live/events`, query: { limit: 1 },
+        });
+        if (get().phase !== 'recording' || get().sessionId !== sessionId) return;
+        if (!res.ok) { set({ tail: NO_TAIL }); return; }
+        const state = STREAM_STATES.find((s) => s === res.data.transcription) ?? null;
+        set({ stream: state, tail: { original: joined(res.data.tail?.originals), translation: joined(res.data.tail?.translations) } });
+      } catch {
+        set({ tail: NO_TAIL });
+      }
+    };
     const tick = (on: boolean) => {
       if (ticker) clearInterval(ticker);
+      if (poller) clearInterval(poller);
       ticker = null;
-      if (on) ticker = setInterval(() => { if (engine) set({ elapsedMs: engine.elapsedMs() }); }, 250);
+      poller = null;
+      if (on) {
+        ticker = setInterval(() => { if (engine) set({ elapsedMs: engine.elapsedMs() }); }, 250);
+        poller = setInterval(() => { void pollStream(); }, STREAM_POLL_MS);
+      } else {
+        set({ stream: null, tail: NO_TAIL });
+      }
     };
     const onLevel = (id: number) => (snapshot: MeterSnapshot) => {
       if (id === attempt && get().phase === 'recording') set({ bars: barsFrom(snapshot) });
@@ -170,6 +213,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       if (id !== attempt) return;
       set({ phase: 'recording', elapsedMs: engine.elapsedMs() });
       tick(true);
+      void pollStream();
       report();
     };
 
@@ -187,6 +231,9 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       startError: null,
       failure: null,
       view: 'original',
+      stream: null,
+      provider: null,
+      tail: NO_TAIL,
 
       loadOptions: async () => {
         const [defaults, settings] = await Promise.allSettled([
@@ -197,6 +244,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (defaults.status === 'fulfilled' && get().options.folderId === null) patch.folderId = defaults.value.folder_id;
         if (settings.status === 'fulfilled' && settings.value.ok) {
           const s = settings.value.data;
+          if (s.transcription_provider) set({ provider: s.transcription_provider });
           patch.mode = s.native_recording_mode === 'translation' ? 'translation' : 'transcription';
           patch.target = s.translation_target_language || 'en';
           patch.deviceId = s.input_device_id ?? '';
@@ -288,6 +336,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           await engine.resume(sources());
           set({ phase: 'recording' });
           tick(true);
+          void pollStream();
         } catch (error) {
           set({ phase: 'paused', startError: captureErrorText(error) });
         }

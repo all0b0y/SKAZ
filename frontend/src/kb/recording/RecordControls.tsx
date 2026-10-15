@@ -7,6 +7,7 @@ import { NameField } from '../library/NameField';
 import { languageName } from '../material/MaterialView';
 import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import { isLive, type LiveView, type RecOptions } from './recordingStore';
+import { speechServiceName } from './connection';
 
 const TARGETS = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
 const VIEW_OPTIONS: ReadonlyArray<{ value: LiveView; label: string }> = [
@@ -129,6 +130,8 @@ export function RecordControls() {
   const startError = useRecording((s) => s.startError);
   const view = useRecording((s) => s.view);
   const materialId = useRecording((s) => s.materialId);
+  const stream = useRecording((s) => s.stream);
+  const provider = useRecording((s) => s.provider);
   const folders = useLibrary((s) => s.folders);
   const library = useLibrary((s) => s.library);
   const openLive = useUi((s) => s.openLive);
@@ -149,6 +152,7 @@ export function RecordControls() {
 
   const live = isLive(phase);
   const paused = phase === 'paused' || phase === 'pausing';
+  const reconnecting = phase === 'recording' && stream === 'reconnecting';
 
   if (phase === 'finishing') {
     return (
@@ -172,7 +176,7 @@ export function RecordControls() {
           className={`kb-cap${paused ? ' kb-cap--paused' : ' kb-cap--rec'}${rowOpen ? ' is-open' : ''}`}
           aria-haspopup="dialog"
           aria-expanded={rowOpen}
-          aria-label={`${paused ? 'Paused' : 'Recording'} ${formatTime(elapsed)}, folder ${folderName}. Recording controls`}
+          aria-label={`${paused ? 'Paused' : 'Recording'} ${formatTime(elapsed)}, folder ${folderName}${reconnecting ? `, reconnecting to ${speechServiceName(provider)}` : ''}. Recording controls`}
           onClick={() => {
             // Opened by hovering: a click pins it open instead of closing it under the pointer.
             if (rowOpen && rowByHover.current) { rowByHover.current = false; window.clearTimeout(hoverTimer.current); return; }
@@ -183,7 +187,7 @@ export function RecordControls() {
           {paused ? <span className="kb-pzd" aria-hidden="true" /> : <Bars />}
           <b className="kb-cap__time">{formatTime(elapsed)}</b>
           <span className="kb-capsule__div" aria-hidden="true" />
-          <span className="kb-cap__folder">{paused ? 'Paused' : folderName}</span>
+          <span className={`kb-cap__folder${reconnecting ? ' kb-cap__folder--warn' : ''}`}>{paused ? 'Paused' : reconnecting ? 'Reconnecting…' : folderName}</span>
           <Icon name="chevronDown" size={12} className={rowOpen ? 'kb-rot' : undefined} />
         </button>
         {paused && (

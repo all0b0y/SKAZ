@@ -69,6 +69,8 @@ export interface FakeWorld {
   settings: Record<string, unknown>;
   /** Unstable words of the live recording (GET /sessions/{id}/live/events → tail). */
   liveTail: string;
+  /** The recording's stream state in the same page (`transcription`); absent = streaming. */
+  liveTranscription?: 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive';
   /** One-off failures: "METHOD /path" → status + detail. */
   failures: Record<string, { status: number; detail: string }>;
   /** Route prefixes this backend lacks (answer 404 "Not Found", as FastAPI does): an older or broken backend. */
@@ -883,7 +885,10 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
     // The live recording grows: every read adds the next sentence of the lecture as final text.
     const material = w.materials.find((x) => `s-${x.id}` === m![1]);
     if (material && material.status === 'recording') growLive(material);
-    return { tail: { originals: [{ text: w.liveTail }], translations: [{ text: 'Получается, что cross-entropy в машинном обучении —' }], stream: [] }, events: [] };
+    return {
+      tail: { originals: [{ text: w.liveTail }], translations: [{ text: 'Получается, что cross-entropy в машинном обучении —' }], stream: [] }, events: [],
+      transcription: w.liveTranscription ?? 'streaming',
+    };
   }
   return undefined;
 }
