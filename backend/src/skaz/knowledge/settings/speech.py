@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ... import asr_providers
 from ...gateways.asr import LOCAL_ASR_DEPENDENCY_DETAIL
-from ...local_models import local_model_size
+from ...local_models import local_model_size, local_model_spec
 
 if TYPE_CHECKING:  # pragma: no cover
     from ...gateways.asr import LocalModelPreparations
@@ -24,6 +24,13 @@ SpeechProvider = Literal["soniox", "local_whisper", "openai"]
 LocalState = Literal["missing", "downloading", "ready", "failed"]
 _FAILED_STATES = ("error", "dependency_missing", "unsupported")
 _WORKING_STATES = ("installing", "verifying", "loading")
+
+
+class UnknownLocalModel(ValueError):
+    """The stored Whisper model is not one SKAZ knows (an old or hand-edited setting)."""
+
+    def __init__(self, model: str) -> None:
+        super().__init__(f"SKAZ doesn't know the speech model “{model}”. Choose another one.")
 
 
 @dataclass(frozen=True)
@@ -112,6 +119,8 @@ async def delete_local_model(runtime: Runtime) -> LocalModelDeleted:
     (``CacheSafetyError``). Recording with Soniox is not affected.
     """
     model = runtime.settings_store.load().local_whisper_model
+    if local_model_spec("local-whisper", model) is None:
+        raise UnknownLocalModel(model)
     preparations: LocalModelPreparations = runtime.local_models
     result = await preparations.delete("local-whisper", model)
     return LocalModelDeleted(deleted=result.deleted, deleted_bytes=result.deleted_bytes)

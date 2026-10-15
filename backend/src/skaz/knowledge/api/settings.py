@@ -24,7 +24,7 @@ from ..settings.about import about
 from ..settings.health import SettingsHealth
 from ..settings.keys import KeyChecks, KeyProvider, KeyStatus
 from ..settings.privacy import privacy_flows
-from ..settings.speech import SpeechSettings, delete_local_model, speech_settings, to_legacy
+from ..settings.speech import SpeechSettings, UnknownLocalModel, delete_local_model, speech_settings, to_legacy
 from .schemas_settings import (
     KbAbout,
     KbKeyProvider,
@@ -174,6 +174,8 @@ async def delete_speech_model(runtime: RuntimeDep) -> KbLocalModelDeleted:
         raise HTTPException(status_code=409, detail=(
             "SKAZ didn't delete the model: its folder isn't safe to remove "
             "(it links outside the model cache).")) from error
+    except UnknownLocalModel as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return KbLocalModelDeleted(deleted=result.deleted, deleted_bytes=result.deleted_bytes,
                                speech=_speech_view(await disk_call(speech_settings, runtime)))
 
