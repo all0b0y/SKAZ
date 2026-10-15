@@ -41,6 +41,7 @@ from ..errors import KnowledgeError
 from .fragments import Paragraph, sanitize_title
 from .guard import Finding, clean_invisible, strip_invisible
 from .guard.findings import visible_repr
+from .pdf_layout import largest_text, page_text
 
 NO_TEXT_LAYER = "This PDF has no text layer (scanned pages). OCR isn't supported yet."
 ONLY_HIDDEN_TEXT = "This PDF has no visible text: all of its text is hidden, and hidden text isn't added."
@@ -421,7 +422,7 @@ def _variant_text(reader: PdfReader, page_number: int, analysis: _PageAnalysis, 
             stream = ContentStream(target, writer)
             stream.operations = _filtered(stream.operations, report.hidden, keep_hidden)
             target.set_data(stream.get_data())
-    return page.extract_text()
+    return page_text(page)
 
 
 @dataclass(frozen=True)
@@ -481,13 +482,6 @@ def _metadata_title(reader: PdfReader) -> str | None:
 
 def _largest_line(reader: PdfReader, analysis: _PageAnalysis) -> str | None:
     """The first page's biggest visible text, as a title (hidden text never becomes the title)."""
-    chunks: list[tuple[float, str]] = []
-
-    def visit(text: str, cm: Any, tm: Any, _font: Any, size: Any) -> None:
-        if text.strip():
-            full = _mul(_matrix(list(tm)) or IDENTITY, _matrix(list(cm)) or IDENTITY)
-            chunks.append((abs(_num(size)) * math.sqrt(abs(full[0] * full[3] - full[1] * full[2])), text))
-
     writer = PdfWriter()
     page = writer.add_page(reader.pages[0])
     if analysis.hidden_count:
@@ -496,17 +490,8 @@ def _largest_line(reader: PdfReader, analysis: _PageAnalysis) -> str | None:
             stream = ContentStream(page.get_contents(), writer)
             stream.operations = _filtered(stream.operations, report.hidden, keep_hidden=False)
             page.replace_contents(stream)
-    try:
-        page.extract_text(visitor_text=visit)
-    except (PyPdfError, KeyError, ValueError, TypeError):
-        return None
-    if not chunks:
-        return None
-    biggest = max(size for size, _text in chunks)
-    if biggest <= 0:
-        return None
-    parts = [text.strip() for size, text in chunks if size >= biggest * 0.95]
-    return sanitize_title(" ".join(parts))
+    text = largest_text(page)
+    return sanitize_title(text) if text else None
 
 
 def _hidden_finding(text: str, page: int, reasons: list[str]) -> Finding | None:
@@ -566,7 +551,7 @@ def extract_pdf(data: bytes) -> PdfExtraction:
                     findings.append(finding)
                     any_hidden = True
             else:
-                visible = page.extract_text()
+                visible = page_text(page)
             if number == 0:
                 title = _metadata_title(reader) or (
                     _largest_line(reader, analysis) if not ocr_layer else None
