@@ -115,4 +115,29 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     await user.click(within(alert).getByRole('button', { name: 'Continue recording' }));
     expect(await within(bar).findByRole('button', { name: /^Recording/ })).toBeInTheDocument();
   });
+
+  it('a stopped recording offers "Continue recording" in its material; other materials do not', async () => {
+    const { user, bar, record, services, fake } = await start();
+    await user.click(record);
+    const materialId = services.recording.getState().materialId!;
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
+    await within(bar).findByRole('button', { name: 'Record' });
+    // A recording made by SKAZ: its material asks the backend whether it may continue.
+    act(() => services.ui.getState().openDocument({ type: 'material', id: materialId }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    await user.click(await within(doc).findByRole('button', { name: 'Continue recording' }));
+    expect(await within(bar).findByRole('button', { name: /^Recording/ })).toBeInTheDocument();
+    expect(fake.calls.filter((c) => c.path === `/kb/recordings/${materialId}/resume`)).toHaveLength(1);
+    expect(services.recording.getState()).toMatchObject({ phase: 'recording', materialId });
+  });
+
+  it('a recording with no recorder session behind it (seeded, imported) shows no "Continue recording"', async () => {
+    const { services, fake } = await start();
+    act(() => services.ui.getState().openDocument({ type: 'material', id: 'm-lec8' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    await within(doc).findByRole('heading', { level: 2 });
+    await waitFor(() => expect(fake.calls.some((c) => c.method === 'GET' && c.path === '/kb/recordings/m-lec8')).toBe(true));
+    expect(within(doc).queryByRole('button', { name: 'Continue recording' })).not.toBeInTheDocument();
+  });
 });

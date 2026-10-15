@@ -62,6 +62,8 @@ export interface RecordingActions {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<boolean>;
+  /** Continue a paused/stopped recording into the same material and session (also after a restart). */
+  continueRecording: (materialId: string) => Promise<void>;
   continueAfterFailure: () => Promise<void>;
   setView: (view: LiveView) => void;
   clearStartError: () => void;
@@ -299,7 +301,8 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         tick(false);
         set({ phase: 'finishing', bars: SILENT_BARS });
         report();
-        const saved = await (engine?.stop() ?? Promise.resolve(true)).catch(() => false);
+        const current = engine;
+        const saved = await (current?.stop() ?? Promise.resolve(true)).catch(() => false);
         if (!saved) {
           // Unsaved audio: keep the quit guard (main warns before closing) and say so.
           set({ startError: 'Some audio isn’t saved yet. SKAZ keeps it and will not quit silently.' });
@@ -308,33 +311,56 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         }
         engine = null;
         await settle(materialId, 'stop');
-        set({ phase: 'idle', bars: SILENT_BARS });
+        // The capture graph never confirmed its last flush: what arrived is saved, the final
+        // moment may be missing. The quit guard hears it, so SKAZ never quits over it silently.
+        const complete = !(current?.incomplete?.() ?? false);
+        set({
+          phase: 'idle', bars: SILENT_BARS,
+          ...(complete ? {} : { startError: 'The last moment of audio before stopping couldn’t be confirmed. Everything received is saved.' }),
+        });
         report();
         deps.onMaterialsChanged?.();
-        return true;
+        return complete;
       },
 
-      continueAfterFailure: async () => {
+      continueRecording: async (materialId) => {
+        if (get().phase !== 'idle') return;
         const failure = get().failure;
-        const sessionId = get().sessionId;
-        if (!failure || get().phase !== 'idle' || !sessionId) return;
-        set({ phase: 'starting', startError: null, failure: null, materialId: failure.materialId });
+        const kept = failure && failure.materialId === materialId ? failure : null;
+        set({ phase: 'starting', startError: null, failure: null, elapsedMs: 0, bars: SILENT_BARS });
+        report();
+        let resumed = false;
         try {
-          await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: failure.materialId } });
-          const live = await deps.bridge.request<{ sample_rate?: number }>({
-            method: 'GET', path: `/sessions/${encodeURIComponent(sessionId)}/live`,
+          // The backend checks the material is a recording that may continue (not running, not finishing).
+          const speech = await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
+          resumed = true;
+          const live = await deps.bridge.request<{ sample_rate?: number; recording_mode?: string }>({
+            method: 'GET', path: `/sessions/${encodeURIComponent(speech.session_id)}/live`,
           });
-          deps.ui.getState().openLive(failure.materialId);
-          await begin(sessionId, live.ok ? live.data.sample_rate : undefined);
+          const translation = live.ok && live.data.recording_mode === 'translation';
+          set({
+            materialId, sessionId: speech.session_id, title: speech.title,
+            chatId: get().materialId === materialId ? get().chatId : null,
+            view: translation ? 'translation' : 'original',
+            options: { ...get().options, folderId: speech.folder_id },
+          });
+          deps.ui.getState().openLive(materialId);
+          // The session keeps its PCM clock: capture continues at the sample rate it started with.
+          await begin(speech.session_id, live.ok ? live.data.sample_rate : undefined);
         } catch (error) {
           tick(false);
           attempt += 1;
           await engine?.stop().catch(() => false);
           engine = null;
-          await settle(failure.materialId, 'stop');
-          set({ phase: 'idle', failure, startError: captureErrorText(error) });
+          if (resumed) await settle(materialId, 'stop');
+          set({ phase: 'idle', failure: kept, startError: resumed ? captureErrorText(error) : errorText(error), bars: SILENT_BARS });
           report();
         }
+      },
+
+      continueAfterFailure: async () => {
+        const failure = get().failure;
+        if (failure) await get().continueRecording(failure.materialId);
       },
 
       setView: (view) => set({ view }),

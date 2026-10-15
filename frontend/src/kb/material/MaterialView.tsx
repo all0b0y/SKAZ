@@ -6,7 +6,7 @@ import { KIND_ICON, KIND_LABEL, formatTime } from '../library/materialMeta';
 import { PanelFrameButtons, useAskAbout } from '../document/parts';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
-import { useLibrary, useServices, useUi } from '../state/context';
+import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import { ExcludedFragments } from './ExcludedFragments';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
@@ -70,15 +70,38 @@ export function useMaterialData(materialId: string) {
   return loader;
 }
 
+/**
+ * A recording SKAZ made and that is paused or stopped may continue into the same material and
+ * session (the old "Continue recording", also after a restart). The backend's carrier decides:
+ * a recording without one (seeded, imported) never offers it.
+ */
+function useContinuable(material: KbMaterial | null): boolean {
+  const { client } = useServices();
+  const phase = useRecording((s) => s.phase);
+  const id = material?.kind === 'recording' && material.status !== 'recording' && material.status !== 'processing' ? material.id : null;
+  const [state, setState] = useState<{ id: string; ok: boolean } | null>(null);
+  useEffect(() => {
+    if (!id || phase !== 'idle') return undefined;
+    let live = true;
+    client.call('GET /kb/recordings/{material_id}', { path: { material_id: id } }).then(
+      (view) => { if (live) setState({ id, ok: view.recording_state === 'paused' || view.recording_state === 'stopped' }); },
+      () => { if (live) setState({ id, ok: false }); },
+    );
+    return () => { live = false; };
+  }, [client, id, phase]);
+  return id !== null && phase === 'idle' && state?.id === id && state.ok;
+}
+
 /** Material in the right panel (v10, decision 24). */
 export function MaterialView({ target, nonce }: { target: DocTarget; nonce: number }) {
-  const { client } = useServices();
+  const { client, recording } = useServices();
   const askAbout = useAskAbout();
   const folders = useLibrary((s) => s.folders);
   const expanded = useUi((s) => s.docExpanded);
   const { state, reload, set } = useMaterialData(target.id);
   const data = state.value;
   const material = data?.material ?? null;
+  const continuable = useContinuable(material);
   const [view, setView] = useState<TranscriptView>('original');
   const [dialog, setDialog] = useState<MaterialDialog>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -162,6 +185,13 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             <h2 className="kb-doc__title">{material.title}</h2>
             <p className="kb-doc__meta">{metaLine(material, folderName)}</p>
             <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} />
+            {continuable && (
+              <div className="kb-mat__actions">
+                <Button size="sm" variant="outline" icon="mic" onClick={() => void recording.getState().continueRecording(material.id)}>
+                  Continue recording
+                </Button>
+              </div>
+            )}
             {addError && <p className="kb-inline-error" role="alert">{addError}</p>}
             {note && <p className="kb-mat__note" role="status">{note}</p>}
             <ExcludedFragments materialId={material.id} count={material.excluded_count} onRestored={reload} />

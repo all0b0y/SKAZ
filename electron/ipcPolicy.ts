@@ -111,6 +111,8 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/recordings\/defaults$/ },
   { method: 'POST', pattern: /^\/kb\/recordings$/ },
   { method: 'POST', pattern: /^\/kb\/recordings\/[^/]+\/(?:stop|pause|resume)$/ },
+  // F2: a recording's own state, so its material offers "Continue recording" only when it may continue.
+  { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+$/ },
 ];
 
 /** The knowledge-library (/kb) rules, for the test that checks them against the backend's routes. */

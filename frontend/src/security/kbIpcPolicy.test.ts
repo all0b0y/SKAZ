@@ -105,6 +105,8 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['GET', '/kb/jobs'], ['GET', '/kb/jobs/j1'], ['GET', '/kb/graph'], ['GET', '/kb/settings/wiki'],
       ['GET', '/kb/recordings/defaults'], ['POST', '/kb/recordings'],
       ['POST', '/kb/recordings/mat_1/stop'], ['POST', '/kb/recordings/mat_1/pause'], ['POST', '/kb/recordings/mat_1/resume'],
+      // F2: the material of a stopped recording reads its state to offer "Continue recording".
+      ['GET', '/kb/recordings/mat_1'],
       ['POST', '/kb/imports'], ['POST', '/kb/chats'],
       // The live tail and recording settings of the existing pipeline.
       ['GET', '/sessions/s1/live/events'], ['GET', '/sessions/s1/live'], ['GET', '/settings'], ['PUT', '/settings'],
@@ -119,8 +121,7 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['POST', '/kb/corrections/c1/delete'], ['GET', '/kb/corrections/c1/revert'],
       ['POST', '/kb/materials/mat_1/excluded/x/restore'], ['POST', '/kb/materials/other'],
       ['DELETE', '/kb/recordings/mat_1'], ['POST', '/kb/recordings/mat_1/delete'],
-      // Reading one recording's state is a backend route no screen calls (I1: the live view polls the session).
-      ['GET', '/kb/recordings/mat_1'],
+      ['GET', '/kb/recordings/mat_1/state'], ['GET', '/kb/recordings/a/b'],
       ['PUT', '/kb/wiki/pages/p1'], ['POST', '/kb/wiki/pages/p1/blocks/c-1/edit'],
       ['GET', '/kb/wiki/pages/a/b'], ['POST', '/kb/graph'], ['DELETE', '/kb/jobs/j1'],
     ];
