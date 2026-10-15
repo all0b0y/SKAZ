@@ -279,14 +279,25 @@ test('recording: capsule from the real signal, controls row, live panel, pause, 
       await expect(menu).toBeVisible();
       await check(`rec-menu-${tag}`, v.width === 1440);
       await page.keyboard.press('Escape');
+      // The fake device's tone comes in short beeps: remember the tallest bar the capsule ever
+      // drew, instead of sampling its height at moments that can all fall between two beeps.
+      await page.evaluate(() => {
+        const seen = { max: 0 };
+        Object.assign(window, { __bars: seen });
+        new MutationObserver(() => {
+          for (const bar of document.querySelectorAll<HTMLElement>('[data-testid="titlebar"] .kb-lvl i')) {
+            seen.max = Math.max(seen.max, parseFloat(bar.style.height) || 0);
+          }
+        }).observe(document.querySelector('[data-testid="titlebar"]')!, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
+      });
       await bar.getByRole('button', { name: 'Record', exact: true }).click();
       const capsule = bar.getByRole('button', { name: /^Recording \d\d:\d\d/ });
       await expect(capsule).toBeVisible({ timeout: 15_000 });
       const live = page.getByRole('complementary', { name: 'Live recording' });
       await expect(live.getByText(/Итак, Больцман записал|So Boltzmann wrote/).first()).toBeVisible({ timeout: 15_000 });
-      // The fake capture device plays a tone: the bars must leave the silent height.
-      await expect.poll(async () => capsule.locator('.kb-lvl i').evaluateAll((els) => els.map((e) => (e as HTMLElement).style.height)), { timeout: 10_000 })
-        .not.toEqual(['4px', '4px', '4px']);
+      // The fake capture device plays a tone: the bars must leave the silent height (4px).
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __bars: { max: number } }).__bars.max), { timeout: 10_000 })
+        .toBeGreaterThan(4);
       const animated = await capsule.locator('.kb-lvl i').first().evaluate((e) => getComputedStyle(e).animationName);
       expect(animated).toBe('none');
       await check(`rec-live-${tag}`);
