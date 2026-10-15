@@ -25,13 +25,12 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..agents.tools import ToolRegistry
-from .tokens import McpRunScope, McpTokens, scope_for
+from .tokens import McpRunScope, McpTokens
 
 MODERN_VERSIONS: tuple[str, ...] = ("2026-07-28",)
 LEGACY_VERSIONS: tuple[str, ...] = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -63,15 +62,6 @@ class McpReply:
     #: JSON body; ``None`` for 202 Accepted (notifications).
     body: dict[str, Any] | None
     headers: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class McpAccess:
-    """What an agent adapter puts in the agent's MCP config for one run."""
-
-    url: str
-    token: str
-    tools: tuple[str, ...]
 
 
 def _error(identity: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
@@ -109,21 +99,9 @@ class McpServer:
             raise ValueError(f"Unknown SKAZ tools: {', '.join(sorted(unknown))}")
         return self.tokens.issue(run_scope)
 
-    def revoke_mcp_token(self, token: str) -> None:
-        self.tokens.revoke(token)
-
     def revoke_run(self, run_id: str) -> None:
+        """End every token of ``run_id`` (engines call this through ``wiring.McpGrants`` when a run ends)."""
         self.tokens.revoke_run(run_id)
-
-    @contextmanager
-    def run_access(self, run_id: str, tool_names: tuple[str, ...]) -> Iterator[McpAccess]:
-        """Token for one run, revoked when the block exits (however the run ends)."""
-        token = self.issue_mcp_token(scope_for(run_id, tool_names))
-        try:
-            granted = tuple(name for name in self.registry.names if name in tool_names)
-            yield McpAccess(self.url, token, granted)
-        finally:
-            self.tokens.revoke(token)
 
     # -- HTTP --------------------------------------------------------------------
 

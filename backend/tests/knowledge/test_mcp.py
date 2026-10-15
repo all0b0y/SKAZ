@@ -13,6 +13,7 @@ from skaz.knowledge.agents.prompting import UNTRUSTED_HEADER
 from skaz.knowledge.agents.tools import TOOL_NAMES
 from skaz.knowledge.markdown.source import FragmentInput
 from skaz.knowledge.mcp import McpRunScope, McpServer, McpTokens
+from skaz.knowledge.wiring import McpGrants
 from tests.conftest import TOKEN
 
 from .a1_library import Seeded, seed
@@ -183,16 +184,18 @@ async def test_wrong_app_revoked_or_expired_tokens_get_401(kb_app: Any, http: ht
     forged = await http.post("/kb/mcp", headers=legacy_headers("skaz-mcp-forged"), json=request)
     assert forged.status_code == 401
 
-    token = full_token(mcp)
-    assert (await http.post("/kb/mcp", headers=legacy_headers(token), json=request)).status_code == 200
-    mcp.revoke_mcp_token(token)
-    assert (await http.post("/kb/mcp", headers=legacy_headers(token), json=request)).status_code == 401
-
-    with mcp.run_access("run-ctx", ("skaz_list_folders",)) as access:
-        assert access.url.endswith("/kb/mcp") and access.tools == ("skaz_list_folders",)
-        inside = await http.post("/kb/mcp", headers=legacy_headers(access.token), json=request)
-        assert inside.status_code == 200
+    # The live path: engines get access per run through ``McpGrants`` and lose it when the run ends.
+    grants = McpGrants(mcp)
+    specs = tuple(spec for spec in kb_app.state.runtime.kb_tools.specs() if spec.name == "skaz_list_folders")
+    access = grants.grant("run-ctx", specs)
+    assert access.url.endswith("/kb/mcp") and access.token not in repr(access)
+    inside = await http.post("/kb/mcp", headers=legacy_headers(access.token), json=request)
+    assert inside.status_code == 200
+    other = grants.grant("run-other", specs)
+    grants.revoke("run-ctx")
     assert (await http.post("/kb/mcp", headers=legacy_headers(access.token), json=request)).status_code == 401
+    assert (await http.post("/kb/mcp", headers=legacy_headers(other.token), json=request)).status_code == 200
+    grants.revoke("run-ctx")  # idempotent
 
     second = full_token(mcp, "run-2")
     mcp.revoke_run("run-2")
@@ -289,3 +292,22 @@ async def test_transport_edges_and_local_only(kb_app: Any, http: httpx.AsyncClie
         assert (await remote.post("/kb/mcp", headers=headers, json=rpc("ping"))).status_code == 403
 
     assert not any(path.startswith("/kb/mcp") for path in kb_app.openapi()["paths"])
+
+
+def test_no_token_carrying_dataclass_shows_its_token() -> None:
+    """A token kept in a dataclass never appears in its repr (logs, tracebacks)."""
+    import dataclasses
+
+    from skaz.knowledge.agents import mcp_access
+    from skaz.knowledge.mcp import server, tokens
+
+    checked = []
+    for module in (server, tokens, mcp_access):
+        for value in vars(module).values():
+            own = isinstance(value, type) and value.__module__ == module.__name__
+            if own and dataclasses.is_dataclass(value):
+                for item in dataclasses.fields(value):
+                    if "token" in item.name:
+                        checked.append(f"{value.__name__}.{item.name}")
+                        assert item.repr is False, f"{value.__name__}.{item.name} is shown in repr"
+    assert "McpAccess.token" in checked
