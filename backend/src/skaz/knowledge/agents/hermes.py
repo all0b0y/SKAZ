@@ -8,7 +8,8 @@ for that folder in Terminal; SKAZ never sees keys or sign-ins.
 
 Tool limits (checked 2026-10-15 against hermes-agent.nousresearch.com/docs
 user-guide/features/acp, user-guide/managed-scope and the source of
-v0.21.5+6627.g4bb9e57):
+v0.21.5+6627.g4bb9e57; re-read 2026-10-16 in the source of v0.22.1+179.gb51e8b8,
+see "Hermes 0.22" below):
 
 * A managed-scope layer (``HERMES_MANAGED_DIR=<data_dir>/agents/hermes-policy``,
   ``config.yaml`` there) pins ``platform_toolsets.acp: [no_mcp]`` (no built-in
@@ -22,6 +23,32 @@ v0.21.5+6627.g4bb9e57):
   Offline check on the installed build: "No tools available." with the policy,
   23 tools without it.
 * Permission requests are always answered with the reject option.
+
+Hermes 0.22 (source of v0.22.1+179.gb51e8b8, read only — no Hermes was run):
+``hermes acp`` is a viewer of a per-``HERMES_HOME`` gateway daemon that owns
+sessions, MCP and execution (``acp_adapter/entry.py`` "MCP discovery and
+execution belong to the gateway daemon"; ``server.py`` ``HermesACPAgent.__new__``
+→ ``gateway_server.GatewayACPAgent``). The client starts the daemon for SKAZ's
+folder with its own environment, ``HERMES_MANAGED_DIR`` and ``HERMES_RUNTIME_DIR``
+included (``hermes_cli/gateway_client.py`` ``connect_gateway`` →
+``gateway_runtime.ensure_gateway_runtime`` → ``gateway_runtime_start.py``
+``spawn_unmanaged_gateway``: ``os.environ`` minus ``DAEMON_STRIPPED_ENV``), and
+refuses a daemon of another home (``gateway_server.py`` ``_client``:
+``profile_mismatch``). The policy still applies: ``session.create`` reads the
+config through ``gateway/run.py`` ``_load_gateway_config`` (managed overlay,
+``hermes_cli/config_effective.py``) and ``gateway/session_policy.py``
+``_resolve_toolsets`` takes ``_get_platform_tools(config, "acp")`` —
+``platform_toolsets.acp`` with ``agent.disabled_toolsets`` subtracted last
+(``hermes_cli/tools_config.py`` ``_get_platform_tools``); the agent is built with
+those toolsets (``gateway/session_execution.py`` ``_build_fresh_agent``). The
+MCP servers from ``session/new`` are frozen into the session as
+``editor_skaz_<8 hex>`` (``gateway/session_local_mcp.py`` ``_server_names``,
+``rebind_editor_mcp``): toolset ``mcp-editor_skaz_<tag>``, tools
+``mcp__editor_skaz_<tag>__<tool>``. ``/tools`` is answered by
+``acp_adapter/gateway_commands.py`` ``_tools_text`` grouped by toolset (or
+``Enabled toolsets: …`` before the session's tools are built);
+:func:`tools_listing_allowed` reads both formats and accepts only SKAZ's toolset.
+The daemon may outlive the ``hermes acp`` process (it ends itself when idle).
 
 History (review B2 #4): Hermes ACP saves every prompted session — the whole
 SKAZ prompt: question, transcript, source excerpts — to ``HERMES_HOME/state.db``
@@ -108,7 +135,8 @@ logger = logging.getLogger(__name__)
 
 #: Oldest Hermes build SKAZ verified (ACP session MCP servers, platform_toolsets.acp,
 #: agent.disabled_toolsets, managed scope via HERMES_MANAGED_DIR, ``/tools`` in ACP):
-#: 0.21.5+6627.g4bb9e57. Older tags are refused; the per-run ``/tools`` check guards newer ones.
+#: 0.21.5+6627.g4bb9e57 (run offline); 0.22.1+179.gb51e8b8 checked from its source (gateway ACP,
+#: toolset-grouped ``/tools``). Older tags are refused; the per-run ``/tools`` check guards newer ones.
 MIN_HERMES_VERSION: Version = (0, 21, 5)
 _VERSION = re.compile(r"Hermes Agent v(\d+)\.(\d+)\.(\d+)")
 _INSTALL_DIR = re.compile(r"^Install directory:\s*(.+)$", re.MULTILINE)
@@ -116,6 +144,10 @@ NOT_INSTALLED = "Hermes Agent is not installed."
 NO_PROVIDER = "Choose a model and provider for Hermes in its setup (opened from SKAZ)."
 SETUP_AUTH_METHOD = "hermes-setup"
 NO_TOOLS_LISTING = "No tools available."
+_ENABLED_TOOLSETS = "Enabled toolsets:"
+#: Hermes 0.22 registers an ACP client's MCP server as ``editor_<name>_<8 hex>`` (one per session).
+_EDITOR_TOOLSET = re.compile(rf"mcp-editor_{MCP_SERVER_NAME}_(?P<tag>[0-9a-f]{{8}})")
+_EDITOR_TOOL = re.compile(rf"mcp__editor_{MCP_SERVER_NAME}_[0-9a-f]{{8}}__(?P<tool>.+)")
 SETUP_TITLE = "SKAZ opened the Hermes model setup for SKAZ's own Hermes folder."
 LIMITS_NOT_APPLIED = "Hermes did not apply SKAZ's tool limits, so SKAZ stopped the run. Update Hermes."
 CHECKED_FILE = "hermes-checked.json"
@@ -136,15 +168,19 @@ FIRST_CHECK = ("SKAZ checks once that Hermes Agent runs with SKAZ's own Hermes f
 FIRST_CHECK_NOTE = ("The check starts Hermes once with SKAZ's own Hermes folder, on the Hermes you "
                     "installed. Your ~/.hermes stays untouched. Nothing starts until you press Check.")
 #: Every toolset Hermes ships (core + platform + known plugin toolsets), all disabled for SKAZ.
+#: 0.22 added bot_room … yuanbao (``toolsets.py`` TOOLSETS of v0.22.1+179.gb51e8b8).
 DISABLED_TOOLSETS = (
-    "a2a", "browser", "clarify", "code_execution", "computer_use", "context_engine", "cronjob",
-    "delegation", "discord", "discord_admin", "file", "homeassistant", "image_gen", "kanban", "memory",
-    "messaging", "moa", "session_search", "skills", "spotify", "terminal", "todo", "tts", "vision", "web",
-    "youtube",
+    "a2a", "bot_room", "browser", "catalog", "clarify", "code_execution", "coding", "computer_use",
+    "connections", "context_engine", "cronjob", "debugging", "delegation", "desktop_ui", "discord",
+    "discord_admin", "feishu_doc", "feishu_drive", "file", "homeassistant", "image_gen", "kanban", "memory",
+    "messaging", "moa", "onboarding", "project", "search", "session_search", "skills", "spotify", "terminal",
+    "todo", "tts", "video", "video_gen", "vision", "web", "x_search", "youtube", "yuanbao",
 )
 HERMES_POLICY: dict[str, Any] = {
     "platform_toolsets": {"acp": ["no_mcp"]},
-    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS)},
+    # ``coding_context: focus`` would swap ``platform_toolsets.acp`` for the coding toolsets in a code
+    # folder (0.22 ``gateway/session_policy.py:310-312, 433``); SKAZ's sessions never take that posture.
+    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS), "coding_context": "off"},
     "memory": {"memory_enabled": False, "user_profile_enabled": False},
     "skills": {"project_discovery": False, "external_dirs": []},
 }
@@ -173,16 +209,58 @@ def ensure_private_home(path: Path, *, home: Path | None = None) -> Path:
     return resolved
 
 
+def _skaz_toolset_tag(toolset: str) -> str | None:
+    """Hermes 0.22: the per-session tag of SKAZ's MCP toolset (``mcp-editor_skaz_<tag>``), else ``None``."""
+    match = _EDITOR_TOOLSET.fullmatch(toolset)
+    return match["tag"] if match else None
+
+
+def _skaz_toolset_line(toolset: str, tools: str) -> bool:
+    """``mcp-editor_skaz_<tag>: mcp__editor_skaz_<tag>__a, …`` — SKAZ's toolset holding only its own tools."""
+    tag = _skaz_toolset_tag(toolset)
+    if tag is None:
+        return False
+    prefix = f"mcp__editor_{MCP_SERVER_NAME}_{tag}__"
+    names = [name.strip() for name in tools.split(",")]
+    return all(name.startswith(prefix) and len(name) > len(prefix) for name in names)
+
+
 def tools_listing_allowed(listing: str) -> bool:
-    """``/tools`` output lists only SKAZ MCP tools (or none at all)."""
+    """``/tools`` output lists only SKAZ MCP tools (or none at all).
+
+    Hermes 0.21 (in-process ACP, ``acp_adapter/commands.py``): ``Available tools (N):`` then one
+    ``  <tool>: <description>`` line per tool, tools named ``mcp__skaz__<tool>``.
+    Hermes 0.22 (gateway ACP, ``acp_adapter/gateway_commands.py`` ``_tools_text``): the same header
+    then ``  <toolset>: <tool>, <tool>`` per toolset, or ``Enabled toolsets: <a>, <b>`` while the
+    session's tools are not built yet; SKAZ's server is the only acceptable toolset there.
+    """
     text = listing.strip()
     if text == NO_TOOLS_LISTING:
         return True
+    if text.startswith(_ENABLED_TOOLSETS):
+        toolsets = [name.strip() for name in text[len(_ENABLED_TOOLSETS):].split(",")]
+        return all(_skaz_toolset_tag(name) is not None for name in toolsets)
     lines = text.splitlines()
     if not lines or not lines[0].startswith("Available tools"):
         return False
-    names = [line.strip().split(":", 1)[0].strip() for line in lines[1:] if line.strip()]
-    return all(name.startswith(MCP_TOOL_PREFIX) for name in names)
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        key, _sep, rest = line.strip().partition(":")
+        key = key.strip()
+        if key.startswith(MCP_TOOL_PREFIX):
+            continue  # 0.21: one SKAZ tool and its description
+        if not _skaz_toolset_line(key, rest):
+            return False
+    return True
+
+
+def hermes_tool_name(qualified: str) -> str:
+    """The SKAZ tool behind a Hermes tool name: ``mcp__skaz__search`` (0.21) and
+    ``mcp__editor_skaz_<tag>__search`` (0.22, ``gateway/session_local_mcp.py`` ``_server_names``)
+    both become ``search``; anything else is returned unchanged."""
+    match = _EDITOR_TOOL.fullmatch(qualified)
+    return match["tool"] if match else tool_name(qualified)
 
 
 def classify_error(text: str) -> tuple[FailureKind, str]:
@@ -816,7 +894,7 @@ class HermesEngine:
                 name = str(update.get("title") or "").split(":", 1)[0].strip()
                 names[call_id] = name
                 raw = update.get("rawInput")
-                yield ToolCall(run_id, call_id, tool_name(name), raw if isinstance(raw, dict) else {})
+                yield ToolCall(run_id, call_id, hermes_tool_name(name), raw if isinstance(raw, dict) else {})
             elif kind == "tool_call_update" and update.get("status") in ("completed", "failed"):
                 call_id = str(update.get("toolCallId") or "")
                 yield ToolResult(run_id, call_id, _tool_output(update), update.get("status") == "failed")
