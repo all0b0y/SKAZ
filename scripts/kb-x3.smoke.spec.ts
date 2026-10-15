@@ -147,7 +147,12 @@ test('error (real backend exit): amber roots, deep pixels fall, the tree above t
   await setView('light');
   await alert.getByRole('button', { name: 'Try again' }).click();
   await expect(tree).toHaveAttribute('data-phase', 'starting');
-  expect(await animationOf('.skaz-loading__px')).toBe('skaz-loading-sap');
+  // The sap starts a frame or two after the phase flips (the error styles are swapped out first):
+  // wait for it instead of reading the computed animation at once.
+  await expect.poll(() => page.evaluate(() => {
+    const px = document.querySelector('.skaz-loading__px');
+    return px ? getComputedStyle(px).animationName : 'no tree';
+  }), { timeout: 5000 }).toBe('skaz-loading-sap');
   await expect.poll(phase, { timeout: 60_000 }).toBe('ready');
   await expect(tree).toHaveCount(0, { timeout: 5000 });
   await expect(page.getByRole('dialog', { name: 'Welcome to SKAZ' })).toBeVisible();
