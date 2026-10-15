@@ -627,7 +627,6 @@ class SpeechService:
         os.rename(directory, doomed)
         shutil.rmtree(doomed, ignore_errors=True)
         with self.kb.db.write() as connection:
-            connection.execute("DELETE FROM fragments_fts WHERE material_id = ?", (material_id,))
             connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
         self.carriers.remove(material_id)
         with self._map_lock:

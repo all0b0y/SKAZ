@@ -60,14 +60,12 @@ def reindex(kb: KnowledgeService, library: Library, path: Path) -> None:
 
 def forget_page(db: KnowledgeDatabase, page_id: str) -> None:
     with db.write() as connection:
-        connection.execute("DELETE FROM blocks_fts WHERE page_id = ?", (page_id,))
         connection.execute("DELETE FROM pages WHERE id = ?", (page_id,))
         connection.execute("DELETE FROM wiki_checked WHERE page_id = ?", (page_id,))
 
 
 def forget_material(db: KnowledgeDatabase, material_id: str) -> None:
     with db.write() as connection:
-        connection.execute("DELETE FROM fragments_fts WHERE material_id = ?", (material_id,))
         connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
         connection.execute("DELETE FROM corrections WHERE material_id = ?", (material_id,))
 
