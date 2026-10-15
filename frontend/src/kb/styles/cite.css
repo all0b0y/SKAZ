@@ -74,3 +74,8 @@
 .kb-srcpop__open:hover { text-decoration: underline; }
 .kb-srcpop__open:focus-visible { outline: 2px solid var(--kb-folder-1); outline-offset: 2px; }
 .kb-srcpop__gone { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; color: var(--kb-muted); }
+/* No exact words in the answer: the start of the cited fragment, labelled, not styled as a quote. */
+.kb-srcpop__frag { margin: 0 0 6px; padding: 6px 8px; border-radius: var(--kb-r-sm); background: color-mix(in srgb, var(--kb-text) 5%, var(--kb-pane)); }
+.kb-srcpop__fraglabel { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--kb-muted); margin-bottom: 2px; }
+.kb-srcpop__fragtext { margin: 0; max-height: 9.5em; overflow: auto; overflow-wrap: anywhere; }
+.kb-srcpop__fragtext.is-wait { color: var(--kb-muted); }

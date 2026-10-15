@@ -164,7 +164,7 @@ for (const theme of THEMES) {
       const pop = page.getByRole('dialog', { name: 'Lecture 5' });
       await expect(pop.getByText('44:00')).toBeVisible();
       await check(`chat-source-${tag}`);
-      await pop.getByRole('button', { name: /^Open at quote/ }).click();
+      await pop.getByRole('button', { name: /^Open at fragment/ }).click();
       await expect(page.getByRole('complementary', { name: 'Document' }).getByRole('heading', { level: 2 })).toBeVisible();
       await check(`chat-doc-${tag}`);
     });

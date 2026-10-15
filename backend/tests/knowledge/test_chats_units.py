@@ -181,3 +181,23 @@ def test_streaming_answers_become_interrupted_after_a_restart(ready: KnowledgeSe
 def test_repository_refuses_unknown_columns(ready: KnowledgeService) -> None:
     with pytest.raises(ValueError, match="Unknown chat columns"):
         ChatRepository(ready.db).update("chat-1", engine_secret="x")
+
+
+def test_instructions_require_exact_words_for_every_fragment_citation() -> None:
+    # Live B5 (Codex): 5/5 answers cited fragments without words, so the source popup had no quote.
+    from skaz.knowledge.chats.context import instructions
+    from skaz.knowledge.ingest.checks import MIN_QUOTE_CHARS
+
+    text = instructions(None)
+    assert "Always add the exact words you relied on, copied verbatim" in text
+    assert f"at least {MIN_QUOTE_CHARS} characters" in text
+    assert "⟦m:mat-1a2b3c:12|" in text
+    # The old optional wording is gone; a token without words is no longer the shown form.
+    assert "When you rely on exact words" not in text
+    assert "for example ⟦m:mat-1a2b3c:12⟧" not in text
+
+
+def test_a_citation_without_or_with_a_short_quote_still_parses_with_quote_dropped() -> None:
+    # Required in the prompt, tolerated in parsing: a missing quote stays None, never an error.
+    assert parse_token("m:mat-x1:7") == CiteToken("mat-x1", 7, None)
+    assert parse_token("m:mat-x1:7|") == CiteToken("mat-x1", 7, None)

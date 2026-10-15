@@ -3,6 +3,7 @@ import type { KbCitation } from '../../api/kb/types.gen';
 import { Icon, Popover } from '../ui';
 import { clock } from '../ui/time';
 import { citationRef, useOpenDocument } from '../state/document';
+import { useFragmentText } from './fragments';
 import { claimSources, indexSources, type SourceEntry, type SourceIndex } from './sources';
 
 /** The numbering of one answer / one wiki page; marks outside a provider number themselves. */
@@ -20,6 +21,37 @@ function where(c: KbCitation): string | null {
   return null;
 }
 
+/**
+ * One cited place: page/time, then the exact words as a quote — or, when the answer gave none,
+ * the start of the cited fragment (read lazily), labelled "Fragment".
+ */
+function QuoteItem({ citation: c, onOpen }: { citation: KbCitation; onOpen: (c: KbCitation) => void }) {
+  const at = where(c);
+  const fragment = useFragmentText(c.material_id, c.seg, !c.quote);
+  const action = c.quote ? 'Open at quote' : 'Open at fragment';
+  return (
+    <div className="kb-srcpop__item">
+      {at && (
+        <div className="kb-srcpop__meta">
+          {c.start_ms !== null && <Icon name="play" size={11} />}
+          <span>{at}</span>
+        </div>
+      )}
+      {c.quote ? <blockquote className="kb-srcpop__quote">{c.quote}</blockquote> : (
+        <div className="kb-srcpop__frag" aria-busy={fragment.state === 'loading'}>
+          <span className="kb-srcpop__fraglabel">Fragment</span>
+          {fragment.state === 'ready' && <p className="kb-srcpop__fragtext">{fragment.text}</p>}
+          {fragment.state === 'loading' && <p className="kb-srcpop__fragtext is-wait">Reading the fragment…</p>}
+          {fragment.state === 'missing' && <p className="kb-srcpop__fragtext is-wait">The fragment’s text couldn’t be read.</p>}
+        </div>
+      )}
+      <button type="button" className="kb-srcpop__open" aria-label={`${action}${at ? `, ${at}` : ''}`} onClick={() => onOpen(c)}>
+        {action}<Icon name="chevronRight" size={12} />
+      </button>
+    </div>
+  );
+}
+
 function SourcePopup({ entry, quotes, titleId, onOpen }: {
   entry: SourceEntry;
   quotes: KbCitation[];
@@ -34,24 +66,7 @@ function SourcePopup({ entry, quotes, titleId, onOpen }: {
       </div>
       {!entry.available ? (
         <p className="kb-srcpop__gone"><Icon name="error" size={12} />This source is no longer available.</p>
-      ) : quotes.map((c) => {
-        const at = where(c);
-        return (
-          <div key={`${c.seg}:${c.quote ?? ''}`} className="kb-srcpop__item">
-            {at && (
-              <div className="kb-srcpop__meta">
-                {c.start_ms !== null && <Icon name="play" size={11} />}
-                <span>{at}</span>
-              </div>
-            )}
-            {c.quote && <blockquote className="kb-srcpop__quote">{c.quote}</blockquote>}
-            <button type="button" className="kb-srcpop__open" aria-label={`Open at quote${at ? `, ${at}` : ''}`}
-              onClick={() => onOpen(c)}>
-              Open at quote<Icon name="chevronRight" size={12} />
-            </button>
-          </div>
-        );
-      })}
+      ) : quotes.map((c) => <QuoteItem key={`${c.seg}:${c.quote ?? ''}`} citation={c} onOpen={onOpen} />)}
     </div>
   );
 }

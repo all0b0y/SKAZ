@@ -477,9 +477,9 @@ test('package 2 on the real backend: chats, notifications, ⌘K, all materials, 
     await expect(doc().getByText('Agent explanation')).toBeVisible();
     await expect(doc().getByText(/1 folder · 1 source/)).toBeVisible();
     await checkKey(`p2-wiki-page-${tag}`);
-    // The claim's source number opens a popup; "Open at quote" opens the material at the fragment.
+    // The claim's source number opens a popup; "Open at quote/fragment" opens the material there.
     await doc().getByRole('button', { name: /^Source \d+: Lecture 8/ }).first().click();
-    await page.getByRole('dialog', { name: /Lecture 8/ }).getByRole('button', { name: /^Open at quote/ }).first().click();
+    await page.getByRole('dialog', { name: /Lecture 8/ }).getByRole('button', { name: /^Open at (quote|fragment)/ }).first().click();
     await expect(doc().getByRole('heading', { level: 2 })).toContainText('Lecture 8');
     await expect(doc().locator('.is-target').first()).toBeVisible();
     await checkKey(`p2-citation-material-${tag}`);

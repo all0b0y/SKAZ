@@ -8,6 +8,8 @@ import { createServices, KbServicesProvider } from '../state/context';
 import { openTarget } from '../state/document';
 import { MotionProvider } from '../ui';
 import { createFakeBridge } from '../test/fakeBridge';
+import { chatWorld } from '../test/fixtures';
+import { excerpt } from './fragments';
 import { SourceMarks, SourcesProvider, SourcesRow } from './SourceMarks';
 import { claimSources, indexSources } from './sources';
 
@@ -24,9 +26,14 @@ const G = doc('s1', SEMINAR, 2, 1, 'Maplewood Pension Fund, established in 2004,
 const F = doc('s2', 'BlackRock Investment Stewardship Report 2025', 7, 14, 'In 2025 the firm withdrew from the initiative.');
 
 function harness(ui: React.ReactNode) {
-  const services = createServices(createFakeBridge().bridge, null, { capture: null });
+  return harnessWith(ui).services;
+}
+
+function harnessWith(ui: React.ReactNode) {
+  const fake = createFakeBridge(chatWorld());
+  const services = createServices(fake.bridge, null, { capture: null });
   render(<KbServicesProvider services={services}><MotionProvider>{ui}</MotionProvider></KbServicesProvider>);
-  return services;
+  return { services, fake };
 }
 
 describe('Source numbering', () => {
@@ -159,5 +166,45 @@ describe('Source marks and popup', () => {
     await user.click(items[0]!);
     const pop = await screen.findByRole('dialog', { name: SEMINAR });
     expect(pop.querySelectorAll('blockquote')).toHaveLength(2);
+  });
+
+  it('no exact words: the popup shows the cited fragment (read lazily, once per material), "Open at fragment"', async () => {
+    const user = userEvent.setup();
+    const bare = rec('m5', 'Lecture 5', 3, 2_640_000, null);
+    const other = rec('m5', 'Lecture 5', 2, 2_620_000, null);
+    const { services, fake } = harnessWith(<><p>One<SourceMarks citations={[bare]} /></p><p>Two<SourceMarks citations={[other]} /></p></>);
+    const reads = () => fake.calls.filter((c) => c.method === 'GET' && c.path === '/kb/materials/m5').length;
+    expect(reads()).toBe(0); // nothing is read before a popup opens
+    const [first, second] = screen.getAllByRole('button', { name: 'Source 1: Lecture 5' });
+    await user.hover(first!);
+    const pop = await screen.findByRole('dialog', { name: 'Lecture 5' });
+    expect(within(pop).getByText('Fragment')).toBeInTheDocument();
+    expect(await within(pop).findByText('This is Shannon entropy applied to the model’s error.')).toBeInTheDocument();
+    expect(pop.querySelector('blockquote')).toBeNull();
+    await user.unhover(first!);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.hover(second!);
+    expect(await within(await screen.findByRole('dialog', { name: 'Lecture 5' })).findByText('The cross-entropy loss punishes confident mistakes.')).toBeInTheDocument();
+    expect(reads()).toBe(1); // cached per material
+    await user.click(second!);
+    await user.click(within(screen.getByRole('dialog', { name: 'Lecture 5' })).getByRole('button', { name: 'Open at fragment, 43:40' }));
+    expect(openTarget(services.ui.getState())).toEqual({ type: 'material', id: 'm5', seg: 2 });
+  });
+
+  it('no exact words and the fragment cannot be read: says so, still opens at the fragment', async () => {
+    const user = userEvent.setup();
+    harness(<p>Claim<SourceMarks citations={[rec('m5', 'Lecture 5', 99, 1000, null)]} /></p>);
+    await user.click(screen.getByRole('button', { name: 'Source 1: Lecture 5' }));
+    const pop = await screen.findByRole('dialog', { name: 'Lecture 5' });
+    expect(await within(pop).findByText('The fragment’s text couldn’t be read.')).toBeInTheDocument();
+    expect(within(pop).getByRole('button', { name: /^Open at fragment/ })).toBeInTheDocument();
+  });
+
+  it('a fragment excerpt is about 300 characters, cut at a word', () => {
+    const long = 'word '.repeat(200);
+    const cut = excerpt(long);
+    expect(cut.length).toBeLessThanOrEqual(301);
+    expect(cut.endsWith('word…')).toBe(true);
+    expect(excerpt('  short\n text ')).toBe('short text');
   });
 });

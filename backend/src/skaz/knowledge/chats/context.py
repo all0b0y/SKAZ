@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from ..agents.engine import TurnMessage
 from ..agents.prompting import untrusted_block
+from ..ingest.checks import MIN_QUOTE_CHARS
 from ..markdown.text import format_timestamp
 from ..service import KnowledgeService
 from ..store.records import MaterialRecord
@@ -53,8 +54,9 @@ source behind them instead.
 - Never invent an id. Use only ids that the tools or the context gave you.
 
 How to cite (SKAZ turns these tokens into links; an unknown id is removed):
-- A source fragment: ⟦m:<material_id>:<seg>⟧, for example ⟦m:mat-1a2b3c:12⟧. When you rely on \
-exact words, add them verbatim after a bar: ⟦m:mat-1a2b3c:12|the exact words from the fragment⟧.
+- A source fragment: ⟦m:<material_id>:<seg>|<exact words>⟧. Always add the exact words you relied on, \
+copied verbatim from the fragment, at least {min_quote} characters, after a bar: \
+⟦m:mat-1a2b3c:12|the exact words from the fragment⟧. The user sees these words as the quote.
 - A wiki page: ⟦p:<page_id>⟧; a block on it: ⟦p:<page_id>#<block_id>⟧.
 - Put a token right after the sentence it supports.
 - A connection between folders (disciplines): a fenced block, one per connection:
@@ -72,7 +74,7 @@ _LANGUAGE_HINT = "; when it is unclear, use the user's wiki language ({code})"
 
 def instructions(wiki_language: str | None) -> str:
     hint = _LANGUAGE_HINT.format(code=wiki_language) if wiki_language else ""
-    return INSTRUCTIONS.replace("{language}", hint)
+    return INSTRUCTIONS.replace("{language}", hint).replace("{min_quote}", str(MIN_QUOTE_CHARS))
 
 
 # -- history ---------------------------------------------------------------------

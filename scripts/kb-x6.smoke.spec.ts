@@ -57,6 +57,9 @@ async function seed() {
       cite(c), cite(d), cite(f),
       text('\n\n**Обосновать решение фактами**, а не просто «экология — это важно». '),
       cite(a), cite(g),
+      text(' Тот же принцип разбирали в лекции. '),
+      // Live B5: Codex cited fragments without words — the popup shows the fragment instead.
+      { type: 'cite', citation: { material_id: 'm5', seg: 3, available: true, material_title: 'Lecture 5', start_ms: 2_640_000, end_ms: 2_650_000, page: null, quote: null } },
     ];
     const entropy = fake.world.pages.find((x) => x.id === 'p-entropy')!;
     const maple = structuredClone(entropy);
@@ -125,9 +128,9 @@ for (const theme of THEMES) {
     const answer = page.getByRole('article', { name: 'Answer' });
     // Seven chips became numbers: duplicates merged, one number per document.
     await expect(answer.locator('.kb-chip[data-kind="document"]')).toHaveCount(0);
-    await expect(answer.locator('.kb-cn')).toHaveText(['1', '1', '1', '2', '1']);
+    await expect(answer.locator('.kb-cn')).toHaveText(['1', '1', '1', '2', '1', '3']);
     const sources = answer.getByRole('group', { name: 'Sources' });
-    await expect(sources.getByRole('button')).toHaveText([`1${SEMINAR}`, `2${BLACKROCK}`]);
+    await expect(sources.getByRole('button')).toHaveText([`1${SEMINAR}`, `2${BLACKROCK}`, '3Lecture 5']);
     await page.mouse.move(2, 300);
     await check(`chat-answer-1440-${theme}`);
     // Hover the LEAVE claim's first number: both of its seminar quotes, with pages.
@@ -141,6 +144,15 @@ for (const theme of THEMES) {
     const mark = (await answer.locator('.kb-cn').nth(2).boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(1440);
     expect(box.y).toBeGreaterThanOrEqual(mark.y + mark.height);
+    // No exact words: the start of the cited fragment, labelled "Fragment", and "Open at fragment".
+    await page.mouse.move(2, 300);
+    await expect(pop).toHaveCount(0);
+    await answer.locator('.kb-cn').nth(5).hover();
+    const bare = page.getByRole('dialog', { name: 'Lecture 5' });
+    await expect(bare.getByText('Fragment', { exact: true })).toBeVisible();
+    await expect(bare.getByText('This is Shannon entropy applied to the model’s error.')).toBeVisible();
+    await expect(bare.getByRole('button', { name: 'Open at fragment, 44:00' })).toBeVisible();
+    await check(`chat-fragment-popover-1440-${theme}`);
   });
 
   test(`wiki page: numbers at the end of each claim, Sources at the end of the page — 1440 ${theme}`, async () => {

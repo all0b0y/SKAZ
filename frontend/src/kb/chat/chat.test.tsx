@@ -41,7 +41,7 @@ describe('Chats in the side panel', () => {
     await user.click(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' })[0]!);
     const pop = await screen.findByRole('dialog', { name: 'Lecture 5' });
     expect(within(pop).getByText('44:00')).toBeInTheDocument();
-    await user.click(within(pop).getByRole('button', { name: /^Open at quote/ }));
+    await user.click(within(pop).getByRole('button', { name: /^Open at fragment/ }));
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
     // The answer ends with its sources, each once, numbered in order of appearance (connection included).
     const sources = within(answer).getByRole('group', { name: 'Sources' });
