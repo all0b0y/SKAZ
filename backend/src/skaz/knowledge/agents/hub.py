@@ -30,6 +30,16 @@ class AgentsHub:
             return "preparing", None
         return view.state, view.action
 
+    def start(self) -> None:
+        """App start, once the library is open: background housekeeping of the agents.
+
+        Hermes deletes what earlier runs left in its session store (a quit mid-answer, a delete
+        that failed) — only when the user prepared it (B10); returns at once.
+        """
+        hermes = self.registry.engines.get("hermes")
+        if isinstance(hermes, HermesEngine):
+            hermes.sweep_at_start()
+
     async def aclose(self) -> None:
         await self.installs.aclose()
 

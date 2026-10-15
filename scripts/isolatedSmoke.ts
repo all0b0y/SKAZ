@@ -36,7 +36,7 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
         PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
         SKAZ_OPTIN_SMOKE_USER_DATA: profile,
         PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-        SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
+        SKAZ_ALLOW_MODEL_DOWNLOAD: '0',
         ...options.env,
       },
     });

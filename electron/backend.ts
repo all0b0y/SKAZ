@@ -173,7 +173,6 @@ export class BackendManager {
         SKAZ_DOCUMENTS_SANDBOX: app.isPackaged ? '' : (
           process.env.SKAZ_OPTIN_SMOKE_USER_DATA ? app.getPath('userData') : app.getPath('documents')
         ),
-        SKAZ_SESSION_FILES_ROOT: app.isPackaged ? '' : process.env.SKAZ_SESSION_FILES_ROOT ?? '',
         // The backend exits on its own if this process dies without stopping it
         // (crash / force quit), so it never keeps the database and queue locks.
         SKAZ_PARENT_PID: String(process.pid),

@@ -45,6 +45,8 @@ def create_app(
             runtime.imports.resume()
             # Speech materials interrupted by the last shutdown settle in the background.
             await runtime.kb_speech.start()
+            # Agents' housekeeping in the background (Hermes' leftover sessions, once prepared).
+            runtime.kb_agents.start()
             yield
         finally:
             # Agents and llama-server first, then the wiki services, within Electron's grace.

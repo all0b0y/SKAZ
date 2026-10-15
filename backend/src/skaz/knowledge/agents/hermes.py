@@ -454,6 +454,16 @@ class HermesEngine:
             CHILDREN.discard(process)
         return process.returncode, out.decode(errors="replace")
 
+    def sweep_at_start(self) -> bool:
+        """App start: sweep in the background if Hermes is prepared; never starts it before (B10).
+
+        An unprepared Hermes holds nothing of SKAZ's yet; its first use after preparing sweeps.
+        """
+        if not self.prepared():
+            return False
+        self._sweep_once()
+        return True
+
     def _sweep_once(self) -> None:
         if not self._swept:
             self._swept = True
