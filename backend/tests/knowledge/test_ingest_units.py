@@ -69,7 +69,9 @@ def test_check_statement_layer4() -> None:
     none: frozenset[int] = frozenset()
     twice = out("from_source", "Мера.", (1, "мера беспорядка"), (1, "Энтропия — это"))
     ok = check_statement(twice, FRAGMENTS, none)
-    assert ok == CheckedBlock("from_source", "Мера.", (1,))  # whitespace-normalised match, duplicates folded
+    # Whitespace-normalised match; the seg is counted once, both checked quotes are kept for the marker.
+    assert ok == CheckedBlock("from_source", "Мера.", (1,),
+                              quotes=((1, "мера беспорядка"), (1, "Энтропия — это")))
     assert check_statement(out("from_source", "Мера.", (1, "Мера беспорядка")), FRAGMENTS, none) == \
         "quote_not_in_source"  # case is preserved
     assert check_statement(out("from_source", "Мера.", (1, "")), FRAGMENTS, none) == "quote_not_in_source"
@@ -77,7 +79,7 @@ def test_check_statement_layer4() -> None:
     assert check_statement(out("from_source", "Мера.", (1, "мера")), FRAGMENTS, none) == "quote_too_short"
     # ...unless the quote is the whole (short) fragment.
     assert check_statement(out("from_source", "Абзац.", (2, "Второй абзац.")), FRAGMENTS, none) == \
-        CheckedBlock("from_source", "Абзац.", (2,))
+        CheckedBlock("from_source", "Абзац.", (2,), quotes=((2, "Второй абзац."),))
     assert check_statement(out("from_source", "Мера.", (2, "Второй")), FRAGMENTS, frozenset({2})) == \
         "excluded_fragment"
     assert check_statement(out("from_source", "  "), FRAGMENTS, none) == "empty_text"

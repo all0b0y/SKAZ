@@ -174,8 +174,9 @@ def _put_page(connection: sqlite3.Connection, page: ScannedPage) -> None:
         )
         connection.execute("INSERT INTO blocks_fts(text, page_id, block_id) VALUES (?, ?, ?)",
                            (plain_text(block.text), meta.skaz_id, block.block_id))
-        for ordinal, (material_id, seg) in enumerate(block.cites, start=1):
+        for ordinal, (material_id, seg, quote) in enumerate(block.cites, start=1):
             connection.execute(
-                "INSERT INTO citations(page_id, block_id, ordinal, material_id, seg) VALUES (?, ?, ?, ?, ?)",
-                (meta.skaz_id, block.block_id, ordinal, material_id, seg),
+                "INSERT INTO citations(page_id, block_id, ordinal, material_id, seg, quote) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (meta.skaz_id, block.block_id, ordinal, material_id, seg, quote),
             )

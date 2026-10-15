@@ -32,7 +32,7 @@ def page_view(view: PageView) -> KbPage:
                 "citations": [
                     KbCitation(material_id=c.material_id, seg=c.seg, available=c.available,
                                material_title=c.material_title, start_ms=c.start_ms, end_ms=c.end_ms,
-                               page=c.page)
+                               page=c.page, quote=c.quote)
                     for c in entry.citations
                 ],
             })

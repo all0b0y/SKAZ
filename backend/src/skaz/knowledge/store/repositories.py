@@ -204,11 +204,11 @@ class PageRepository:
         with self.db.read() as connection:
             cites: dict[str, list[CitationRecord]] = defaultdict(list)
             for row in connection.execute(
-                "SELECT block_id, material_id, seg FROM citations WHERE page_id = ? "
+                "SELECT block_id, material_id, seg, quote FROM citations WHERE page_id = ? "
                 "ORDER BY block_id, ordinal",
                 (page_id,),
             ):
-                cites[row["block_id"]].append(CitationRecord(row["material_id"], row["seg"]))
+                cites[row["block_id"]].append(CitationRecord(row["material_id"], row["seg"], row["quote"]))
             rows = connection.execute("SELECT * FROM blocks WHERE page_id = ? ORDER BY ordinal",
                                       (page_id,)).fetchall()
         return [

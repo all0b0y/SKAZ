@@ -94,7 +94,12 @@ async def test_full_pass_writes_notes_two_concepts_index_and_log(ready: Knowledg
     statements = [b for b in note.blocks() if b.id.startswith("c-" + material_id.removeprefix("mat-"))]
     assert [b.kind for b in statements] == ["from_source", "explanation", "from_source", "connection"]
     first = statements[0]
-    assert [cite.token for cite in first.cites] == [f"{material_id}:seg-1"]
+    # The marker keeps the exact checked quote, so the UI highlights it rather than the whole fragment.
+    assert [(cite.material_id, cite.seg, cite.quote) for cite in first.cites] == [
+        (material_id, 1, "мера беспорядка системы"),
+    ]
+    assert [(c.seg, c.quote) for c in statements[3].cites] == [(2, "Температура показывает"),
+                                                               (3, "энтропия газа тоже растёт")]
     assert first.body == ("Энтропия определяется как мера беспорядка системы. "
                           "[[Materials/Физика/Лекция 8/Лекция 8#^seg-1|Лекция 8 · 00:00]]")
     assert statements[1].cites == () and "[[" not in statements[1].body
@@ -119,6 +124,7 @@ async def test_full_pass_writes_notes_two_concepts_index_and_log(ready: Knowledg
     # Indexed: the API view shows the citations as available.
     view = ready.page(note.meta.skaz_id)
     assert view.entries[0].citations[0].available
+    assert view.entries[0].citations[0].quote == "мера беспорядка системы"
 
     index = (wiki_dir(ready) / "index.md").read_text(encoding="utf-8")
     assert "## Concepts" in index and "## Notes" in index

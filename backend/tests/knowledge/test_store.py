@@ -88,3 +88,25 @@ def test_failed_write_rolls_back(tmp_path: Path) -> None:
             assert connection.execute("SELECT COUNT(*) FROM settings").fetchone()[0] == 0
     finally:
         db.close()
+
+
+def test_core_v1_database_upgrades_to_quoted_citations_and_rescans_pages(tmp_path: Path) -> None:
+    import sqlite3
+
+    from skaz.knowledge.store.schema import apply_schemas, core
+
+    path = tmp_path / "knowledge.sqlite3"
+    connection = sqlite3.connect(path)
+    v1 = SimpleNamespace(NAME="core", VERSION=1, SQL=core.SQL.replace("    quote       TEXT,\n", ""))
+    connection.executescript(
+        "CREATE TABLE IF NOT EXISTS schema_versions(name TEXT PRIMARY KEY, version INTEGER NOT NULL);")
+    apply_schemas(connection, [v1])
+    connection.execute("INSERT INTO pages(id, kind, title, rel_path, language, file_sha256, indexed_at) "
+                       "VALUES ('pg-1', 'note', 'T', 'Wiki/Notes/T.md', 'en', 'abc', 'now')")
+    connection.commit()
+    apply_schemas(connection, [core])
+    connection.commit()
+    columns = [row[1] for row in connection.execute("PRAGMA table_info(citations)")]
+    assert "quote" in columns
+    assert connection.execute("SELECT file_sha256 FROM pages").fetchone()[0] == ""  # re-read on next scan
+    connection.close()

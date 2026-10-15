@@ -48,7 +48,8 @@ class IndexedBlock:
     hash: str
     text: str
     marked: bool
-    cites: tuple[tuple[str, int], ...] = ()
+    #: (material id, seg, exact quote or None)
+    cites: tuple[tuple[str, int, str | None], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,7 @@ def read_page(library: Library, path: Path) -> ScannedPage:
             blocks.append(IndexedBlock(
                 block_id=item.id, ordinal=ordinal, section=entry.section, kind=item.kind, owner=item.owner,
                 hash=item.hash, text=item.body, marked=True,
-                cites=tuple((cite.material_id, cite.seg) for cite in item.cites),
+                cites=tuple((cite.material_id, cite.seg, cite.quote) for cite in item.cites),
             ))
         else:
             assert isinstance(item, UserParagraph)

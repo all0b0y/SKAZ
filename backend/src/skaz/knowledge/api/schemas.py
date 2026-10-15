@@ -106,6 +106,8 @@ class KbCitation(BaseModel):
     start_ms: int | None
     end_ms: int | None
     page: int | None
+    #: The verbatim quote the claim rests on; highlight it rather than the whole fragment.
+    quote: str | None = None
 
 
 class KbBlock(BaseModel):

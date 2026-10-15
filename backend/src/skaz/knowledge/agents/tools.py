@@ -339,6 +339,8 @@ def _read_page(kb: KnowledgeService, args: ReadPageArgs) -> dict[str, Any]:
             found = fragments.get((cite.material_id, cite.seg))
             item: dict[str, Any] = {"ref": f"{cite.material_id}:seg-{cite.seg}",
                                     "available": found is not None}
+            if cite.quote:
+                item["quote"] = cite.quote
             if found is not None:
                 fragment, title = found
                 item["material_title"] = title

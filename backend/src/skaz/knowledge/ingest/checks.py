@@ -70,6 +70,8 @@ class CheckedBlock:
     segs: tuple[int, ...]
     #: Page titles the model linked (connections only); resolved when pages are planned.
     links: tuple[str, ...] = ()
+    #: Every checked (seg, verbatim quote) pair in the model's order — stored in the page marker.
+    quotes: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass
@@ -99,6 +101,7 @@ def check_statement(block: BlockOut, fragments: Mapping[int, Fragment],
     if not block.cites:
         return "no_cite"
     segs: list[int] = []
+    quotes: list[tuple[int, str]] = []
     for cite in block.cites:
         if cite.seg in excluded:
             return "excluded_fragment"
@@ -111,12 +114,15 @@ def check_statement(block: BlockOut, fragments: Mapping[int, Fragment],
             return "quote_too_short"
         if cite.seg not in segs:
             segs.append(cite.seg)
+        quote = cite.quote.strip()
+        if (cite.seg, quote) not in quotes:
+            quotes.append((cite.seg, quote))
     if block.kind == "from_source":
-        return CheckedBlock("from_source", text, tuple(segs))
+        return CheckedBlock("from_source", text, tuple(segs), quotes=tuple(quotes))
     links = tuple(dict.fromkeys(title for title in (clean_title(link) for link in block.links) if title))
     if len(segs) < 2 and not links:
         return "connection_one_side"
-    return CheckedBlock("connection", text, tuple(segs), links)
+    return CheckedBlock("connection", text, tuple(segs), links, tuple(quotes))
 
 
 def connection_complete(block: CheckedBlock, resolved_links: Sequence[object]) -> bool:

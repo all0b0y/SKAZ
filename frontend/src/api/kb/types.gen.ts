@@ -99,6 +99,7 @@ export interface KbCitation {
   start_ms: number | null;
   end_ms: number | null;
   page: number | null;
+  quote?: string | null;
 }
 
 export interface KbClassifyLink {

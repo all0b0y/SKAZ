@@ -2,7 +2,7 @@
 
 A SKAZ block is::
 
-    %% skaz:block id=c-<id> kind=<kind> owner=<owner> hash=<sha256-12> cites=mat-x:seg-12,… %%
+    %% skaz:block id=c-<id> kind=<kind> owner=<owner> hash=<sha256-12> cites=mat-x:seg-12~<quote>,… %%
     Paragraph or list item text [[Materials/<Folder>/<Title>/<Title>#^seg-12|<Title> · 08:12]] ^c-<id>
 
 The marker (``cites`` by id) is the machine truth; the wikilink is only a
@@ -13,6 +13,7 @@ same string byte for byte; only parts that were replaced are re-rendered.
 """
 from __future__ import annotations
 
+import base64
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -47,7 +48,8 @@ SECTION_TITLES: dict[str, dict[BlockKind, str]] = {
 _MARKER = re.compile(r"%% skaz:block (.+?) %%")
 _HEADING = re.compile(r"(#{1,6})[ \t]+(.*?)[ \t#]*")
 _BLOCK_ID = re.compile(r"c-[A-Za-z0-9-]+")
-_CITE = re.compile(r"(mat-[A-Za-z0-9-]+):seg-([1-9]\d*)")
+#: ``mat-x:seg-12`` or, with the exact quote the claim rests on, ``mat-x:seg-12~<base64url(utf-8)>``.
+_CITE = re.compile(r"(mat-[A-Za-z0-9-]+):seg-([1-9]\d*)(?:~([A-Za-z0-9_-]+))?")
 _BLANK_SPLIT = re.compile(r"\n[ \t]*\n")
 _LABELLED_LINK = re.compile(r"\[\[[^\]|\n]+\|([^\]\n]+)\]\]")
 _BARE_LINK = re.compile(r"\[\[([^\]|\n]+)\]\]")
@@ -80,10 +82,27 @@ def citation_link(folder: str, title: str, seg: int, label: str, *, file_stem: s
 class Cite:
     material_id: str
     seg: int
+    #: The verbatim quote in the fragment that was checked (layer 4); ``None`` for older/hand-made
+    #: markers — then the whole fragment is the reference.
+    quote: str | None = None
 
     @property
     def token(self) -> str:
-        return f"{self.material_id}:seg-{self.seg}"
+        base = f"{self.material_id}:seg-{self.seg}"
+        if not self.quote:
+            return base
+        encoded = base64.urlsafe_b64encode(self.quote.encode("utf-8")).decode("ascii").rstrip("=")
+        return f"{base}~{encoded}"
+
+
+def _decode_quote(encoded: str | None) -> str | None:
+    if not encoded:
+        return None
+    try:
+        quote = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None  # a damaged quote keeps the citation; it just points at the whole fragment
+    return quote or None
 
 
 @dataclass(frozen=True)
@@ -278,7 +297,7 @@ def _marker(content: str) -> tuple[str, BlockKind, Owner, str, tuple[Cite, ...]]
         cite = _CITE.fullmatch(token)
         if cite is None:
             return None
-        cites.append(Cite(cite.group(1), int(cite.group(2))))
+        cites.append(Cite(cite.group(1), int(cite.group(2)), _decode_quote(cite.group(3))))
     return block_id, kind, owner, digest, tuple(cites)
 
 

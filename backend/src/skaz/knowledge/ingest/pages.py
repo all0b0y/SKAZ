@@ -110,8 +110,9 @@ def new_block_id(material_id: str) -> str:
 def render_statement(block: CheckedBlock, source: SourceRef, links: Sequence[PageRef]) -> Block:
     """A SKAZ block: model text + citation/page links built by code from ids."""
     pieces = [block.text, *(source.link(seg) for seg in block.segs), *(ref.link() for ref in links)]
-    return Block.create(new_block_id(source.material_id), block.kind, " ".join(pieces),
-                        cites=tuple(Cite(source.material_id, seg) for seg in block.segs))
+    cites = (tuple(Cite(source.material_id, seg, quote) for seg, quote in block.quotes)
+             or tuple(Cite(source.material_id, seg) for seg in block.segs))
+    return Block.create(new_block_id(source.material_id), block.kind, " ".join(pieces), cites=cites)
 
 
 def page_links(body: str) -> list[PageRef]:

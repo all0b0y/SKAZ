@@ -66,6 +66,7 @@ class PageRecord:
 class CitationRecord:
     material_id: str
     seg: int
+    quote: str | None = None
 
 
 @dataclass(frozen=True)

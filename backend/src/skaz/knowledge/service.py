@@ -70,6 +70,8 @@ class CitationView:
     start_ms: int | None = None
     end_ms: int | None = None
     page: int | None = None
+    #: The verbatim quote the claim rests on (highlight it, not the whole fragment); None if unknown.
+    quote: str | None = None
 
 
 @dataclass(frozen=True)
@@ -306,13 +308,13 @@ class KnowledgeService:
         keys = {(cite.material_id, cite.seg) for block in blocks for cite in block.citations}
         fragments = self.material_repo.fragment_map(keys)
 
-        def citation(material_id: str, seg: int) -> CitationView:
+        def citation(material_id: str, seg: int, quote: str | None) -> CitationView:
             found = fragments.get((material_id, seg))
             if found is None:
-                return CitationView(material_id, seg, available=False)
+                return CitationView(material_id, seg, available=False, quote=quote)
             fragment, title = found
             return CitationView(material_id, seg, True, title, fragment.start_ms, fragment.end_ms,
-                                fragment.page)
+                                fragment.page, quote)
 
         return PageView(
             id=record.id, kind=record.kind, title=record.title, original=record.original,
@@ -320,7 +322,8 @@ class KnowledgeService:
             rel_path=record.rel_path,
             entries=tuple(
                 EntryView(block.block_id, block.kind, block.owner, block.marked, block.section, block.text,
-                          block.hash, tuple(citation(cite.material_id, cite.seg) for cite in block.citations))
+                          block.hash,
+                          tuple(citation(cite.material_id, cite.seg, cite.quote) for cite in block.citations))
                 for block in blocks
             ),
         )

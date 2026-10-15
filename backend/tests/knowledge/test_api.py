@@ -92,7 +92,7 @@ async def test_materials_pages_search_notifications(kb_app: Any, kb_client: http
     assert block["kind"] == "from_source" and block["owner"] == "agent" and block["marked"] is True
     assert block["citations"][0] == {
         "material_id": material_id, "seg": 1, "available": True, "material_title": "Лекция 8",
-        "start_ms": 0, "end_ms": 4_000, "page": None,
+        "start_ms": 0, "end_ms": 4_000, "page": None, "quote": None,  # a hand-made marker has no quote
     }
     assert block["citations"][1]["available"] is False
 

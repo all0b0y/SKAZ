@@ -211,3 +211,20 @@ def test_frontmatter_written_by_obsidian_in_block_style_is_read() -> None:
 def test_foreign_markdown_is_not_a_page(text: str) -> None:
     with pytest.raises(PageFormatError):
         parse_page(text)
+
+
+def test_cited_quote_round_trips_in_the_marker_and_a_damaged_one_keeps_the_citation() -> None:
+    meta = PageMeta(skaz_id="pg-3", kind="note", title="Лекция 8", language="en", sources=("mat-1",))
+    quote = "мера беспорядка, «системы» ~ 100% = x"
+    block = Block.create("c-q1", "from_source", "Claim.", cites=(Cite("mat-1", 12, quote), Cite("mat-1", 13)))
+    text = render_page(PageDocument(meta=meta, parts=[block]))
+    marker = next(line for line in text.splitlines() if "id=c-q1" in line)
+    assert " cites=mat-1:seg-12~" in marker and ",mat-1:seg-13 " in marker and quote not in marker
+    again = parse_page(text).blocks()[0]
+    assert again.cites == (Cite("mat-1", 12, quote), Cite("mat-1", 13))
+    assert render_page(parse_page(text)) == text
+
+    damaged = text.replace(marker, marker.replace("seg-12~", "seg-12~%%"))
+    assert parse_page(damaged).blocks() == []  # not a valid marker token: user text, never a guess
+    broken = text.replace(marker, marker.replace("seg-12~", "seg-12~_"))
+    assert parse_page(broken).blocks()[0].cites[0] == Cite("mat-1", 12, None)

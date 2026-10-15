@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 NAME = "core"
-VERSION = 1
+VERSION = 2
 
 _TOKENIZE = "tokenize='unicode61 remove_diacritics 2'"
 
@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS citations (
     ordinal     INTEGER NOT NULL,
     material_id TEXT NOT NULL,
     seg         INTEGER NOT NULL,
+    quote       TEXT,
     PRIMARY KEY (page_id, block_id, ordinal),
     FOREIGN KEY (page_id, block_id) REFERENCES blocks(page_id, block_id) ON DELETE CASCADE
 );
@@ -133,3 +134,8 @@ CREATE TABLE IF NOT EXISTS aliases (
 );
 CREATE INDEX IF NOT EXISTS aliases_by_key ON aliases(alias_key);
 """
+
+#: v2: citations keep the exact quote (marker ``~<base64url>``); pages are re-read on the next scan.
+UPGRADES = {
+    2: "ALTER TABLE citations ADD COLUMN quote TEXT;\nUPDATE pages SET file_sha256 = '';\n",
+}
