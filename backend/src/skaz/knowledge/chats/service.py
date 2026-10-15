@@ -140,6 +140,8 @@ class ChatService:
         self._checkpoint_s = checkpoint_s
         self._stop_timeout_s = stop_timeout_s
         self._close_stop_s = close_stop_s
+        #: One "Save to wiki" per answer at a time: a double click must not write two analysis pages.
+        self._saving: dict[str, asyncio.Lock] = {}
         #: Answers that were streaming when SKAZ stopped are "interrupted" (resumable) from now on.
         self.recovered = self.repo.interrupt_streaming()
         self._feeds: dict[str, ChatFeed] = {}
@@ -659,6 +661,12 @@ class ChatService:
         return AnalysisWriter(self.kb, MaterialReader(self.kb, self._text_layer()), settings.language)
 
     async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
+        """The answer as an analysis page; a repeated (also a concurrent) save is 409 ``ALREADY_SAVED``
+        naming the page the first one wrote."""
+        async with self._saving.setdefault(message_id, asyncio.Lock()):
+            return await self._save_message(chat_id, message_id)
+
+    async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
         chat = await self._chat(chat_id)
         message = await self._message(chat_id, message_id)
         if message.role != "assistant" or message.state != "done":

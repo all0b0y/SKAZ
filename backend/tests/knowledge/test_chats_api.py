@@ -483,6 +483,24 @@ async def test_save_answer_as_analysis_with_checked_quotes_only(env: Env) -> Non
                             "saved_page_id": ref["id"]}
 
 
+async def test_a_double_save_to_wiki_writes_one_page(env: Env) -> None:
+    env.agents.scripts["codex"] = lambda _turn: text("Энтропия — мера беспорядка.")
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "Что такое энтропия?")
+    url = f"/kb/chats/{chat['id']}/messages/{answer['id']}/save"
+
+    async def analyses() -> set[str]:
+        pages = (await env.client.get("/kb/wiki/pages", params={"kind": "analysis"})).json()
+        return {page["id"] for page in pages}
+
+    before = await analyses()
+    first, second = await asyncio.gather(env.client.post(url), env.client.post(url))
+    assert sorted((first.status_code, second.status_code)) == [200, 409]
+    saved, again = (first, second) if first.status_code == 200 else (second, first)
+    assert again.json()["code"] == "ALREADY_SAVED" and again.json()["saved_page_id"] == saved.json()["id"]
+    assert await analyses() - before == {saved.json()["id"]}
+
+
 async def test_saving_an_answer_under_a_taken_name_is_refused_until_the_chat_is_renamed(env: Env) -> None:
     env.agents.scripts["codex"] = lambda _turn: text("Энтропия — мера беспорядка.")
     first = await env.chat()
