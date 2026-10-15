@@ -24,9 +24,14 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     }
     // Labels are not colour only: each carries its own marker for its kind.
     expect(doc.querySelector('[data-claim="connection"] [data-icon="graph"]')).not.toBeNull();
-    // Citation wikilinks are not printed as text: the source is a chip.
+    // Citation wikilinks are not printed as text: the source is a footnote number (v42 A).
     expect(within(doc).queryByText(/\[\[Materials/)).not.toBeInTheDocument();
-    expect(within(doc).getByRole('button', { name: 'Recording: Lecture 8 — entropy, 08:12' })).toBeInTheDocument();
+    expect(doc.querySelector('.kb-block__cites .kb-chip')).toBeNull();
+    const marks = Array.from(doc.querySelectorAll('.kb-block__cites .kb-cn'));
+    expect(marks.map((m) => m.getAttribute('aria-label'))).toEqual(['Source 1: Lecture 8 — entropy', 'Source 2: Textbook', 'Source 3: Lecture 5']);
+    // The page ends with its sources, each once.
+    const sources = within(doc).getByRole('group', { name: 'Sources' });
+    expect(within(sources).getAllByRole('button').map((b) => b.textContent)).toEqual(['1Lecture 8 — entropy', '2Textbook', '3Lecture 5']);
     // Related and Mentioned in.
     expect(within(doc).getByRole('heading', { name: 'Related' })).toBeInTheDocument();
     expect(within(doc).getByRole('heading', { name: 'Mentioned in' })).toBeInTheDocument();
@@ -44,10 +49,13 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     expect(within(doc).getByText(/A measure of disorder/)).toBeInTheDocument();
   });
 
-  it('a citation chip opens the material at that fragment with exactly the checked quote marked', async () => {
+  it('a source number opens the material at that fragment with exactly the checked quote marked', async () => {
     const user = userEvent.setup();
     const { doc } = await openPage('p-entropy');
-    await user.click(await within(doc).findByRole('button', { name: 'Recording: Lecture 8 — entropy, 08:12' }));
+    await user.click((await within(doc).findAllByRole('button', { name: 'Source 1: Lecture 8 — entropy' }))[0]!);
+    const pop = await screen.findByRole('dialog', { name: 'Lecture 8 — entropy' });
+    expect(within(pop).getByText('S equals k times the log of W')).toBeInTheDocument();
+    await user.click(within(pop).getByRole('button', { name: 'Open at quote, 08:12' }));
     expect(await within(doc).findByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeInTheDocument();
     const mark = await waitFor(() => {
       const el = doc.querySelector('mark.kb-quote');

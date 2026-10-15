@@ -42,7 +42,7 @@ function auditExtras(): Extra[] {
     const own = Array.from(el.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim());
     if (!own) continue;
     const size = parseFloat(getComputedStyle(el).fontSize);
-    if (size < 12 && !el.closest('.kb-badge, .kb-count')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
+    if (size < 12 && !el.closest('.kb-badge, .kb-count, .kb-cn')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
   }
   for (const svg of Array.from(document.querySelectorAll('svg.kb-icon'))) {
     if (visible(svg) && svg.childElementCount === 0) out.push({ kind: 'empty-icon', selector: describe(svg), detail: svg.getAttribute('data-icon') ?? '' });
@@ -65,7 +65,7 @@ function auditExtras(): Extra[] {
     }
   }
   // A source chip keeps its time/page in view and stays inside its pane (long titles shorten instead).
-  for (const chip of Array.from(document.querySelectorAll('.kb-chip'))) {
+  for (const chip of Array.from(document.querySelectorAll('.kb-chip, .kb-srcs__item'))) {
     if (!visible(chip)) continue;
     const pane = chip.closest('[data-pane]');
     const c = chip.getBoundingClientRect();
@@ -153,14 +153,18 @@ for (const theme of THEMES) {
   for (const view of VIEWS) {
     const tag = `${view.width}-${theme}`;
 
-    test(`chat with a connection, source chip on the right — ${tag}`, async () => {
+    test(`chat with a connection, source number on the right — ${tag}`, async () => {
       await open('', theme, view);
       await side().getByRole('button', { name: /Why is there a logarithm/ }).click();
       const answer = page.getByRole('article', { name: 'Answer' });
       await answer.getByRole('button', { name: /Connection · 3 folders/ }).click();
       await expect(answer.getByText('Agent inference:')).toBeVisible();
       await check(`chat-${tag}`);
-      await answer.getByRole('button', { name: 'Recording: Lecture 5, 44:00' }).first().click();
+      await answer.getByRole('button', { name: 'Source 1: Lecture 5' }).first().click();
+      const pop = page.getByRole('dialog', { name: 'Lecture 5' });
+      await expect(pop.getByText('44:00')).toBeVisible();
+      await check(`chat-source-${tag}`);
+      await pop.getByRole('button', { name: /^Open at quote/ }).click();
       await expect(page.getByRole('complementary', { name: 'Document' }).getByRole('heading', { level: 2 })).toBeVisible();
       await check(`chat-doc-${tag}`);
     });

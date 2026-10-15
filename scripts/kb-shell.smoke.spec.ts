@@ -50,8 +50,8 @@ function auditExtras(): Extra[] {
       if (h < 12) out.push({ kind: 'small-text', selector: describe(el), detail: `svg text box ${h.toFixed(1)}px` });
       continue;
     }
-    // Counter digits (rail badge, "Decide" count) are the only text allowed under 12px.
-    if (size < 12 && !el.closest('.kb-badge, .kb-count')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
+    // Counter digits (rail badge, "Decide" count) and source footnote numbers (v42) are the only text under 12px.
+    if (size < 12 && !el.closest('.kb-badge, .kb-count, .kb-cn')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
   }
   for (const svg of Array.from(document.querySelectorAll('svg.kb-icon'))) {
     if (!visible(svg)) continue;
@@ -70,7 +70,7 @@ function auditExtras(): Extra[] {
   // height is checked as "unchanged between states" by anchors() instead of a fixed number.
   expectH('.kb-rail__item', 36);
   // A source chip keeps its time/page in view and stays inside its pane (long titles shorten instead).
-  for (const chip of Array.from(document.querySelectorAll('.kb-chip'))) {
+  for (const chip of Array.from(document.querySelectorAll('.kb-chip, .kb-srcs__item'))) {
     if (!visible(chip)) continue;
     const pane = chip.closest('[data-pane]');
     const c = chip.getBoundingClientRect();
@@ -477,8 +477,9 @@ test('package 2 on the real backend: chats, notifications, ⌘K, all materials, 
     await expect(doc().getByText('Agent explanation')).toBeVisible();
     await expect(doc().getByText(/1 folder · 1 source/)).toBeVisible();
     await checkKey(`p2-wiki-page-${tag}`);
-    // The claim's chip opens the material at the cited fragment.
-    await doc().getByRole('button', { name: /^Recording: Lecture 8/ }).first().click();
+    // The claim's source number opens a popup; "Open at quote" opens the material at the fragment.
+    await doc().getByRole('button', { name: /^Source \d+: Lecture 8/ }).first().click();
+    await page.getByRole('dialog', { name: /Lecture 8/ }).getByRole('button', { name: /^Open at quote/ }).first().click();
     await expect(doc().getByRole('heading', { level: 2 })).toContainText('Lecture 8');
     await expect(doc().locator('.is-target').first()).toBeVisible();
     await checkKey(`p2-citation-material-${tag}`);

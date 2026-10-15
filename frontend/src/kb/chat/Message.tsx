@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
+import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
@@ -8,27 +8,79 @@ import { quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
+import { SourcesProvider, SourcesRow } from '../cite/SourceMarks';
+import { indexSources } from '../cite/sources';
+
+/** An inline slot: a run of source citations (one claim) or a wiki page chip. */
+export type InlineSlot =
+  | { type: 'cites'; citations: KbCitation[] }
+  | Extract<KbMessagePart, { type: 'page' }>;
 
 type Block =
-  | { kind: 'inline'; pieces: Array<string | number>; slots: KbMessagePart[] }
+  | { kind: 'inline'; pieces: Array<string | number>; slots: InlineSlot[] }
   | { kind: 'connection'; part: Extract<KbMessagePart, { type: 'connection' }> };
 
-/** Text/cite/page parts flow inline in one Markdown run; a connection is its own block. */
+/**
+ * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
+ * standing next to each other (only spaces between) are one claim's sources: one slot, so the
+ * marks merge duplicates; the spaces before them go, so the number sits on the sentence.
+ */
 export function toBlocks(parts: KbMessagePart[]): Block[] {
   const out: Block[] = [];
   let run: Extract<Block, { kind: 'inline' }> | null = null;
+  let pendingSpace: string | null = null;
+  const lastCites = () => {
+    const last = run?.pieces.at(-1);
+    const slot = typeof last === 'number' ? run?.slots[last] : undefined;
+    return slot?.type === 'cites' ? slot : null;
+  };
+  const flushSpace = () => {
+    if (pendingSpace !== null && run) run.pieces.push(pendingSpace);
+    pendingSpace = null;
+  };
   for (const part of parts) {
     if (part.type === 'tool') continue;
     if (part.type === 'connection') {
+      flushSpace();
       run = null;
       out.push({ kind: 'connection', part });
       continue;
     }
     if (!run) { run = { kind: 'inline', pieces: [], slots: [] }; out.push(run); }
-    if (part.type === 'text') run.pieces.push(part.text);
-    else { run.pieces.push(run.slots.length); run.slots.push(part); }
+    if (part.type === 'text') {
+      if (!part.text.trim() && part.text.length > 0 && !part.text.includes('\n') && lastCites()) {
+        pendingSpace = (pendingSpace ?? '') + part.text;
+        continue;
+      }
+      flushSpace();
+      run.pieces.push(part.text);
+      continue;
+    }
+    if (part.type === 'cite') {
+      const open = lastCites();
+      if (open) { pendingSpace = null; open.citations.push(part.citation); continue; }
+      flushSpace();
+      const prev = run.pieces.at(-1);
+      if (typeof prev === 'string') run.pieces[run.pieces.length - 1] = prev.replace(/[ \t]+$/, '');
+      run.pieces.push(run.slots.length);
+      run.slots.push({ type: 'cites', citations: [part.citation] });
+      continue;
+    }
+    flushSpace();
+    run.pieces.push(run.slots.length);
+    run.slots.push(part);
   }
+  flushSpace();
   return out;
+}
+
+/** Every citation of an answer in reading order: the numbering of its sources. */
+export function answerCitations(parts: KbMessagePart[]): KbCitation[] {
+  return parts.flatMap((p) => {
+    if (p.type === 'cite') return [p.citation];
+    if (p.type === 'connection') return p.folders.map((f) => f.citation);
+    return [];
+  });
 }
 
 /** Plain text of an answer for "Copy": the words, chips as their names. */
@@ -99,13 +151,17 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const open = useOpenDocument();
   const empty = message.parts.filter((p) => p.type !== 'tool').length === 0;
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
+  const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
   return (
     <article className="kb-msg kb-msg--assistant" data-state={message.state} aria-label="Answer">
       <Tools parts={message.parts} />
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
         {empty && message.state === 'streaming' && <p className="kb-msg__wait" role="status">Writing an answer…</p>}
-        <Parts parts={message.parts} />
+        <SourcesProvider index={sources}>
+          <Parts parts={message.parts} />
+        </SourcesProvider>
       </div>
+      <SourcesRow index={sources} />
       {interrupted && message.failure && (
         <div className="kb-interrupt" role="alert">
           <Icon name="clock" size={16} className="kb-interrupt__icon" />

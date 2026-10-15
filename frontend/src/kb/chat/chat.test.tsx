@@ -33,11 +33,20 @@ describe('Chats in the side panel', () => {
     expect(await within(centre).findByRole('heading', { name: 'Why is there a logarithm in the loss?' })).toBeInTheDocument();
     const answer = await within(centre).findByRole('article', { name: 'Answer' });
     expect(within(answer).getByText('Shannon entropy').tagName).toBe('STRONG');
-    // Chips are shapes with an icon and a label, not colour only.
+    // Page chips are shapes with an icon and a label, not colour only.
     await user.click(within(answer).getAllByRole('button', { name: 'Wiki page: Entropy' })[0]!);
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'page', id: 'p-entropy' });
-    await user.click(within(answer).getAllByRole('button', { name: 'Recording: Lecture 5, 44:00' })[0]!);
+    // A source is a footnote number (v42 A); its popup opens the material at the quote.
+    expect(within(answer).queryByRole('button', { name: /^Recording: / })).not.toBeInTheDocument();
+    await user.click(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' })[0]!);
+    const pop = await screen.findByRole('dialog', { name: 'Lecture 5' });
+    expect(within(pop).getByText('44:00')).toBeInTheDocument();
+    await user.click(within(pop).getByRole('button', { name: /^Open at quote/ }));
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
+    // The answer ends with its sources, each once, numbered in order of appearance (connection included).
+    const sources = within(answer).getByRole('group', { name: 'Sources' });
+    expect(within(sources).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Source 1: Lecture 5', 'Source 2: Lecture 8', 'Source 3: Textbook: Information theory, ch. 2']);
     expect(screen.getByRole('complementary', { name: 'Document' })).toBeInTheDocument();
 
     const pill = within(answer).getByRole('button', { name: /Connection · 3 folders/ });
@@ -45,6 +54,8 @@ describe('Chats in the side panel', () => {
     await user.click(pill);
     const rows = within(answer).getByRole('list', { name: 'Connection across folders' });
     expect(within(rows).getByText('S = k·ln W')).toBeInTheDocument();
+    // Connection rows use the answer's numbers: Lecture 5 is 1 here as in the text.
+    expect(within(rows).getAllByRole('button', { name: /^Source / }).map((b) => b.textContent)).toEqual(['2', '3', '1']);
     expect(within(rows).getByText('Agent inference:')).toBeInTheDocument();
     expect(within(answer).getByRole('button', { name: /Looked at 1 thing/ })).toHaveAttribute('aria-expanded', 'false');
   });
@@ -178,5 +189,20 @@ describe('Answer text', () => {
     // Copy keeps the Markdown the agent wrote; chips become their names.
     expect(plainText(parts)).toMatch(/^Cross-entropy is \*\*Shannon entropy\*\* applied to the model’s error Entropy\./);
     expect(plainText(parts)).not.toMatch(/Read page/);
+  });
+
+  it('parts: citations side by side are one claim — one slot, the space before them dropped', () => {
+    const c = (seg: number) => ({ material_id: 's1', seg, available: true, material_title: 'Seminar', start_ms: null, end_ms: null, page: 1, quote: 'q' });
+    const blocks = toBlocks([
+      { type: 'text', text: 'One clear recommendation. ' },
+      { type: 'cite', citation: c(1) }, { type: 'text', text: ' ' }, { type: 'cite', citation: c(1) },
+      { type: 'cite', citation: c(2) },
+      { type: 'text', text: ' Next claim' }, { type: 'cite', citation: c(2) },
+    ]);
+    expect(blocks).toHaveLength(1);
+    const run = blocks[0]!;
+    if (run.kind !== 'inline') throw new Error('inline run expected');
+    expect(run.pieces).toEqual(['One clear recommendation.', 0, ' Next claim', 1]);
+    expect(run.slots.map((s) => (s.type === 'cites' ? s.citations.map((x) => x.seg) : s.type))).toEqual([[1, 1, 2], [2]]);
   });
 });
