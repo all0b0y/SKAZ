@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -141,14 +142,6 @@ class CorrectionsLayer:
         for fragment in fragments:
             entries = data.for_seg(fragment.seg)
             if entries:
-                fragment = Fragment(
-                    seg=fragment.seg,
-                    text=apply_to_text(fragment.text, entries),
-                    start_ms=fragment.start_ms,
-                    end_ms=fragment.end_ms,
-                    speaker=fragment.speaker,
-                    page=fragment.page,
-                    index=fragment.index,
-                )
+                fragment = replace(fragment, text=apply_to_text(fragment.text, entries))
             result.append(fragment)
         return result

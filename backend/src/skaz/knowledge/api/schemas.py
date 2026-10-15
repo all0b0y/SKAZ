@@ -11,7 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..markdown.page import BlockKind, Owner, PageKind
-from ..markdown.source import MaterialKind, MaterialStatus
+from ..markdown.source import FragmentRole, MaterialKind, MaterialStatus
 
 KbLibraryState = Literal["not_configured", "ready", "unavailable"]
 
@@ -88,6 +88,10 @@ class KbFragment(BaseModel):
     speaker: str | None
     page: int | None
     index: int | None
+    #: How the fragment is shown: a heading (``level`` 1–6), a list item, a quote, code or a paragraph.
+    #: Display only — ``text`` is the same whatever the role, and quotes are matched against it.
+    role: FragmentRole
+    level: int | None
     #: The recognised text when corrections changed it; ``null`` when ``text`` is the original.
     original_text: str | None
     #: Ids of the recognition corrections in this fragment (any state).

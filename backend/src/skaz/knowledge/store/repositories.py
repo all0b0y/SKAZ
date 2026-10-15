@@ -100,7 +100,7 @@ def _material(row: sqlite3.Row) -> MaterialRecord:
 
 def _fragment(row: sqlite3.Row) -> FragmentRecord:
     return FragmentRecord(row["material_id"], row["seg"], row["ordinal"], row["text"], row["start_ms"],
-                          row["end_ms"], row["speaker"], row["page"], row["idx"])
+                          row["end_ms"], row["speaker"], row["page"], row["idx"], row["role"], row["level"])
 
 
 class MaterialRepository:

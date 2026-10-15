@@ -49,7 +49,7 @@ from ..errors import KnowledgeError
 from .fragments import Paragraph, sanitize_title
 from .guard import Finding, clean_invisible, strip_invisible
 from .guard.findings import visible_repr
-from .pdf_layout import PageText, largest_text, page_text
+from .pdf_layout import PageText, Shape, body_size, largest_text, page_text, paragraph_role
 
 NO_TEXT_LAYER = "This PDF has no text layer (scanned pages). OCR isn't supported yet."
 ONLY_HIDDEN_TEXT = "This PDF has no visible text: all of its text is hidden, and hidden text isn't added."
@@ -599,21 +599,28 @@ class PdfExtraction:
 _HYPHENATED = re.compile(r"(\w)-$")
 
 
-def _paragraphs(text: str) -> list[str]:
-    """Rebuild paragraphs from extracted lines: blank lines and short sentence-final lines end them."""
+def _paragraphs(text: str) -> list[tuple[int, str]]:
+    """Rebuild paragraphs from extracted lines: blank lines and short sentence-final lines end them.
+
+    Each comes with the number of the blank-line-separated block of ``text`` it was in.
+    """
     lines = [line.strip() for line in text.split("\n")]
     lengths = sorted(len(line) for line in lines if line)
     if not lengths:
         return []
     typical = lengths[min(len(lengths) - 1, int(len(lengths) * 0.9))]
-    paragraphs: list[str] = []
+    paragraphs: list[tuple[int, str]] = []
     current = ""
+    block, in_block = 0, False
     for line in lines:
         if not line:
             if current:
-                paragraphs.append(current)
+                paragraphs.append((block, current))
             current = ""
+            if in_block:
+                block, in_block = block + 1, False
             continue
+        in_block = True
         if current:
             hyphen = _HYPHENATED.search(current)
             if hyphen is not None and line[:1].islower():
@@ -623,10 +630,10 @@ def _paragraphs(text: str) -> list[str]:
         else:
             current = line
         if line[-1:] in '.!?…:»"”)' and len(line) < 0.8 * typical:
-            paragraphs.append(current)
+            paragraphs.append((block, current))
             current = ""
     if current:
-        paragraphs.append(current)
+        paragraphs.append((block, current))
     return paragraphs
 
 
@@ -691,7 +698,9 @@ def open_pdf(data: bytes) -> PdfReader:
 
 def extract_pdf(data: bytes) -> PdfExtraction:
     reader = open_pdf(data)
-    paragraphs: list[Paragraph] = []
+    #: (page, text, shape of its paragraph block) — roles need the whole document's body size.
+    pieces: list[tuple[int, str, Shape | None]] = []
+    shaped: list[Shape] = []
     findings: list[Finding] = []
     any_visible = any_hidden = False
     title: str | None = None
@@ -731,9 +740,18 @@ def extract_pdf(data: bytes) -> PdfExtraction:
         findings.extend(_unreadable_finding(text, number + 1) for text in visible.unreadable)
         cleaned = clean_invisible(visible.text, page=number + 1)
         findings.extend(cleaned.findings)
-        for text in _paragraphs(cleaned.text):
-            paragraphs.append(Paragraph(text, page=number + 1))
+        blocks = [part for part in re.split(r"\n\s*\n", cleaned.text) if part.strip()]
+        # Cleaning removes characters, not lines; should a block go anyway, the roles are not guessed.
+        shapes = visible.shapes if len(visible.shapes) == len(blocks) else []
+        shaped.extend(shapes)
+        for block, text in _paragraphs(cleaned.text):
+            pieces.append((number + 1, text, shapes[block] if block < len(shapes) else None))
             any_visible = True
+    body = body_size(shaped)
+    paragraphs: list[Paragraph] = []
+    for page_number, text, shape in pieces:
+        role, level = paragraph_role(shape, body) if shape is not None else ("paragraph", None)
+        paragraphs.append(Paragraph(text, page=page_number, role=role, level=level))
     failure = None
     if not any_visible:
         failure = ONLY_HIDDEN_TEXT if any_hidden else NO_TEXT_LAYER

@@ -7,6 +7,7 @@ import { plural } from '../document/text';
 import { useServices } from '../state/context';
 import { byPage, monologues, segmentText, speakerTone, translationBySeg, type TextPiece } from './segments';
 import { quoteAttrs } from '../ui/Selection';
+import { FragmentBlocks, type FragmentAttrs } from './FragmentBlocks';
 
 export type TranscriptView = 'original' | 'translation' | 'both';
 
@@ -267,15 +268,23 @@ function SpeechText(props: TranscriptProps) {
   return originalColumn;
 }
 
+/** One fragment's element attributes: target, seg, quote source (the element itself depends on the role). */
+function fragmentAttrs(props: TranscriptProps) {
+  return (f: KbFragment): FragmentAttrs => ({
+    className: `kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`,
+    'data-seg': f.seg,
+    'data-target-key': `seg-${f.seg}`,
+    'data-role': f.role,
+    ...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg }),
+  });
+}
+
 function PlainText(props: TranscriptProps) {
   return (
-    <div className="kb-art">
-      {props.material.fragments.map((f) => (
-        <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
-          {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
-          <FragmentText fragment={f} props={props} />
-        </p>
-      ))}
+    <div className="kb-art kb-mtext">
+      <FragmentBlocks fragments={props.material.fragments} attrs={fragmentAttrs(props)}>
+        {(f) => <FragmentText fragment={f} props={props} />}
+      </FragmentBlocks>
     </div>
   );
 }
@@ -286,12 +295,9 @@ function PdfPages(props: TranscriptProps) {
       {byPage(props.material.fragments).map((page, i) => (
         <section key={`${page.page}-${i}`} className="kb-pdfpage" aria-label={page.page !== null ? `Page ${page.page}` : 'Page'}>
           {page.page !== null && <span className="kb-pdfpage__n">p. {page.page}</span>}
-          {page.fragments.map((f) => (
-            <p key={f.id} className={`kb-art__p${props.target.seg === f.seg ? ' is-target' : ''}`} data-seg={f.seg} data-target-key={`seg-${f.seg}`}
-          {...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg })}>
-              <FragmentText fragment={f} props={props} />
-            </p>
-          ))}
+          <FragmentBlocks fragments={page.fragments} attrs={fragmentAttrs(props)}>
+            {(f) => <FragmentText fragment={f} props={props} />}
+          </FragmentBlocks>
         </section>
       ))}
     </div>

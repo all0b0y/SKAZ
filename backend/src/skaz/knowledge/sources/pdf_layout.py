@@ -12,6 +12,10 @@ positions, in content-stream order (so the columns of a two-column page stay apa
   first (its width from the font's metrics) and the start of the next is wider than 0.2 em;
 * a new paragraph starts when the vertical step is clearly larger than the page's usual line
   step, the font size changes, or the line starts with a bullet glyph.
+
+Each paragraph also gets a display role (user bug 1016-5): a short paragraph set clearly larger
+than the document's body text is a heading (level by how much larger), one that starts with a
+bullet glyph is a list item; everything else is a paragraph. The role never changes the text.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from typing import Any
 from pypdf import PageObject
 from pypdf.errors import PyPdfError
 
+from ..markdown.source import FragmentRole
 from .pdf_glyphs import judge, shift_text
 
 SAME_LINE_EM = 0.45
@@ -37,6 +42,11 @@ SIZE_CHANGE = 0.2
 BULLETS = frozenset("•●▪◦‣■□►➢✓✔○◆◇")
 #: Glyph width (thousandths of an em) when the font gives none.
 DEFAULT_WIDTH = 500.0
+#: A paragraph at least this much larger than the body text, and short, is a heading…
+HEADING_SIZE = 1.2
+HEADING_CHARS = 200
+#: …of level 1 from this ratio on, level 2 from the next one, level 3 below.
+HEADING_LEVELS = (1.8, 1.4)
 
 
 @dataclass
@@ -262,12 +272,50 @@ def paragraph_breaks(lines: list[Line]) -> list[bool]:
     return breaks
 
 
+Role = tuple[FragmentRole, int | None]
+
+
+@dataclass(frozen=True)
+class Shape:
+    """What a paragraph looks like: its biggest letters, its length, a leading bullet glyph."""
+
+    size: float
+    chars: int
+    bullet: bool
+
+
 @dataclass(frozen=True)
 class PageText:
     #: One line per rebuilt line, a blank line between paragraphs.
     text: str
     unreadable: list[str] = field(default_factory=list)
     decoded: int = 0
+    #: The shape of each blank-line-separated paragraph of ``text``, in order (empty: unknown).
+    shapes: list[Shape] = field(default_factory=list)
+
+
+def body_size(shapes: list[Shape]) -> float:
+    """The size most of the letters have (of a page or of the whole document)."""
+    weight: dict[float, int] = {}
+    for shape in shapes:
+        key = round(shape.size * 2) / 2
+        weight[key] = weight.get(key, 0) + shape.chars
+    return max(weight, key=lambda key: weight[key]) if weight else 0.0
+
+
+def paragraph_role(shape: Shape, body: float) -> Role:
+    if shape.bullet:
+        return ("list_item", None)
+    if body > 0 and shape.size >= body * HEADING_SIZE and shape.chars <= HEADING_CHARS:
+        ratio = shape.size / body
+        level = 1 if ratio >= HEADING_LEVELS[0] else 2 if ratio >= HEADING_LEVELS[1] else 3
+        return ("heading", level)
+    return ("paragraph", None)
+
+
+def _shape(lines: list[Line]) -> Shape:
+    text = " ".join(line.text for line in lines)
+    return Shape(max(line.size for line in lines), len(text), text[:1] in BULLETS)
 
 
 def page_text(page: PageObject) -> PageText:
@@ -279,11 +327,15 @@ def page_text(page: PageObject) -> PageText:
         return PageText(page.extract_text())
     breaks = paragraph_breaks(lines)
     out: list[str] = []
+    groups: list[list[Line]] = []
     for line, new_paragraph in zip(lines, breaks, strict=True):
         if new_paragraph:
             out.append("")
+        if new_paragraph or not groups:
+            groups.append([])
+        groups[-1].append(line)
         out.append(line.text)
-    return PageText("\n".join(out), found.unreadable, found.decoded)
+    return PageText("\n".join(out), found.unreadable, found.decoded, [_shape(group) for group in groups])
 
 
 def largest_text(page: PageObject) -> str | None:

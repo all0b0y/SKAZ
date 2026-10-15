@@ -106,7 +106,7 @@ const fail = (status: number, detail: string): never => { throw new FakeHttpErro
 export function fragment(materialId: string, seg: number, text: string, extra: Partial<KbFragment> = {}): KbFragment {
   return {
     id: `${materialId}-f${seg}`, seg, text, start_ms: null, end_ms: null, speaker: null, page: null, index: seg - 1,
-    original_text: null, corrections: [], ...extra,
+    role: 'paragraph', level: null, original_text: null, corrections: [], ...extra,
   };
 }
 

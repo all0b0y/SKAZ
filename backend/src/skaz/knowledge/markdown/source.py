@@ -13,13 +13,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 from .frontmatter import FrontmatterError, render_frontmatter, split_frontmatter
 from .text import format_timestamp
 
 MaterialKind = Literal["recording", "audio", "video", "video_link", "pdf", "book", "web", "text"]
 MaterialStatus = Literal["recording", "processing", "ready", "failed"]
+#: How a fragment is shown (user bug 1016-5): set by the extractors, never changes the text.
+FragmentRole = Literal["paragraph", "heading", "list_item", "quote", "code"]
+FRAGMENT_ROLES: tuple[FragmentRole, ...] = ("paragraph", "heading", "list_item", "quote", "code")
 MATERIAL_KINDS: tuple[MaterialKind, ...] = (
     "recording", "audio", "video", "video_link", "pdf", "book", "web", "text",
 )
@@ -43,6 +46,9 @@ class FragmentInput:
     speaker: str | None = None
     page: int | None = None
     index: int | None = None
+    role: FragmentRole = "paragraph"
+    #: Heading level 1–6 (``role == "heading"`` only).
+    level: int | None = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +60,8 @@ class Fragment:
     speaker: str | None = None
     page: int | None = None
     index: int | None = None
+    role: FragmentRole = "paragraph"
+    level: int | None = None
 
     @property
     def block_id(self) -> str:
@@ -75,6 +83,10 @@ class FragmentPlacement(Protocol):
     def page(self) -> int | None: ...
     @property
     def index(self) -> int | None: ...
+    @property
+    def role(self) -> FragmentRole | None: ...
+    @property
+    def level(self) -> int | None: ...
 
 
 class Origin(BaseModel):
@@ -94,15 +106,31 @@ class FragmentMeta(BaseModel):
     speaker: str | None = None
     page: int | None = Field(default=None, ge=1)
     index: int | None = Field(default=None, ge=0)
+    #: Absent (manifests before roles, speech, plain text): a paragraph.
+    role: FragmentRole | None = None
+    level: int | None = Field(default=None, ge=1, le=6)
 
     @property
     def seg(self) -> int:
         return int(self.id.removeprefix("seg-"))
 
+    @model_serializer(mode="wrap")
+    def _without_paragraph_role(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """A paragraph's manifest entry stays as it was before roles (no ``role``/``level`` keys)."""
+        data: dict[str, object] = handler(self)
+        for key in ("role", "level"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
+
     @classmethod
     def of(cls, fragment: Fragment) -> FragmentMeta:
-        return cls(id=fragment.block_id, start_ms=fragment.start_ms, end_ms=fragment.end_ms,
+        meta = cls(id=fragment.block_id, start_ms=fragment.start_ms, end_ms=fragment.end_ms,
                    speaker=fragment.speaker, page=fragment.page, index=fragment.index)
+        if fragment.role != "paragraph":  # a paragraph adds nothing to the manifest
+            meta.role = fragment.role
+            meta.level = fragment.level if fragment.role == "heading" else None
+        return meta
 
 
 class MaterialManifest(BaseModel):
@@ -147,7 +175,8 @@ def number_fragments(existing: Sequence[Fragment], new: Sequence[FragmentInput],
             raise SourceFormatError("A fragment is one paragraph; split it before adding.")
         numbered.append(Fragment(
             seg=start + offset, text=text, start_ms=item.start_ms, end_ms=item.end_ms,
-            speaker=item.speaker, page=item.page, index=item.index,
+            speaker=item.speaker, page=item.page, index=item.index, role=item.role,
+            level=item.level if item.role == "heading" else None,
         ))
     return numbered
 
@@ -218,5 +247,6 @@ def read_source(text: str, placements: Sequence[FragmentPlacement]) -> list[Frag
         result.append(Fragment(
             seg=placement.seg, text=raw, start_ms=placement.start_ms, end_ms=placement.end_ms,
             speaker=placement.speaker, page=placement.page, index=placement.index,
+            role=placement.role or "paragraph", level=placement.level,
         ))
     return result

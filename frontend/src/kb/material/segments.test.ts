@@ -9,7 +9,7 @@ const fix = (over: Partial<KbCorrection>): KbCorrection => ({
 });
 const frag = (seg: number, over: Partial<KbFragment> = {}): KbFragment => ({
   id: `f${seg}`, seg, text: `t${seg}`, start_ms: null, end_ms: null, speaker: null, page: null, index: null,
-  original_text: null, corrections: [], ...over,
+  role: 'paragraph', level: null, original_text: null, corrections: [], ...over,
 });
 
 describe('Block text and quotes', () => {

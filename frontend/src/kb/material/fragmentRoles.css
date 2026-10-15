@@ -1,0 +1,58 @@
+/* Fragment roles in the material view (user bug 1016-5): headings, lists, quotes, code. Left-aligned. */
+
+/* The article column: `.kb-art` is also the onboarding illustration box (118 px, tinted, centred);
+   none of that applies to a material's text. */
+.kb-art.kb-mtext {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  height: auto;
+  flex: initial;
+  overflow: visible;
+  border-radius: 0;
+  background: none;
+  text-align: start;
+}
+
+.kb-art__h {
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  margin-top: 6px;
+}
+.kb-art__h--1 { font-size: 1.35em; }
+.kb-art__h--2 { font-size: 1.18em; }
+.kb-art__h--3 { font-size: 1.05em; }
+
+.kb-art__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.4em;
+  list-style: disc;
+}
+.kb-art__li { line-height: 1.6; overflow-wrap: anywhere; border-radius: 3px; }
+.kb-art__li--glyph { list-style: none; margin-inline-start: -1.1em; }
+.kb-art__li::marker { color: var(--kb-muted); }
+
+.kb-art__quote {
+  margin: 0;
+  padding: 2px 0 2px 12px;
+  border-inline-start: 3px solid var(--kb-line);
+  color: var(--kb-muted);
+}
+
+.kb-art__code {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--kb-r-md);
+  background: var(--kb-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kb-art__code code { font: inherit; }

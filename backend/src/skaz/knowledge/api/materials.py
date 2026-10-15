@@ -91,15 +91,16 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
     fragments: list[KbFragment]
     if corrections is None:  # no wiki service (tests of the index alone): the recognised text as is
         fragments = [KbFragment(id=f.id, seg=f.seg, text=f.text, start_ms=f.start_ms, end_ms=f.end_ms,
-                                speaker=f.speaker, page=f.page, index=f.index, original_text=None,
-                                corrections=[])
+                                speaker=f.speaker, page=f.page, index=f.index, role=f.role, level=f.level,
+                                original_text=None, corrections=[])
                      for f in detail.fragments]
         applied = doubtful = 0
     else:
         fragments = [
             KbFragment(id=v.fragment.id, seg=v.fragment.seg, text=v.text, start_ms=v.fragment.start_ms,
                        end_ms=v.fragment.end_ms, speaker=v.fragment.speaker, page=v.fragment.page,
-                       index=v.fragment.index, original_text=v.original_text, corrections=list(v.corrections))
+                       index=v.fragment.index, role=v.fragment.role, level=v.fragment.level,
+                       original_text=v.original_text, corrections=list(v.corrections))
             for v in corrections.corrections.fragment_views(detail.id, detail.fragments)
         ]
         applied, doubtful = corrections.corrections.counts(detail.id)

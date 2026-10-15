@@ -3,7 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
-import { materialWiki } from '../test/fakeKb';
+import { fragment, materialWiki } from '../test/fakeKb';
 
 async function openMaterial(id: string) {
   const r = renderKb({ world: docWorld() });
@@ -92,6 +92,39 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     pdf.unmount();
     const web = await openMaterial('m-ce');
     expect(within(web.doc).getByText('https://example.org/cross-entropy-explained')).toBeInTheDocument();
+  });
+
+  it('an article keeps its headings, lists, quotes and code (left-aligned blocks), with the text unchanged', async () => {
+    const world = docWorld();
+    const article = world.materials.find((m) => m.id === 'm-ce')!;
+    article.fragments = [
+      fragment('m-ce', 1, 'Cross-entropy explained', { role: 'heading', level: 1 }),
+      fragment('m-ce', 2, 'Cross-entropy measures how far a predicted distribution is from the true one.'),
+      fragment('m-ce', 3, 'Possible elements of an MVP:', { role: 'heading', level: 2 }),
+      fragment('m-ce', 4, 'Project register', { role: 'list_item' }),
+      fragment('m-ce', 5, 'Risk matrix with owners', { role: 'list_item' }),
+      fragment('m-ce', 6, 'All models are wrong, but some are useful.', { role: 'quote' }),
+      fragment('m-ce', 7, 'loss = -sum(y * log(p))', { role: 'code' }),
+    ];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-ce' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    // The material title is the panel's h2; the article's own headings come below it.
+    expect(await within(doc).findByRole('heading', { level: 3, name: 'Cross-entropy explained' })).toBeInTheDocument();
+    expect(within(doc).getByRole('heading', { level: 4, name: 'Possible elements of an MVP:' })).toBeInTheDocument();
+    const list = within(doc).getByRole('list');
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Project register', 'Risk matrix with owners']);
+    const quote = within(doc).getByText('All models are wrong, but some are useful.');
+    expect(quote.closest('blockquote')).not.toBeNull();
+    expect(within(doc).getByText('loss = -sum(y * log(p))').closest('pre')).not.toBeNull();
+    // Every block stays a quotable fragment of the material, whatever its element.
+    for (const seg of [1, 3, 4, 6, 7]) {
+      const el = doc.querySelector(`[data-seg="${seg}"]`)!;
+      expect(el).toHaveAttribute('data-quote-source', 'material');
+      expect(el).toHaveAttribute('data-quote-seg', String(seg));
+    }
+    expect(doc.querySelector('.kb-art')).toHaveClass('kb-mtext');
   });
 
   it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {

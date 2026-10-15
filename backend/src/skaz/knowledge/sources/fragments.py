@@ -15,7 +15,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from ..library.names import FORBIDDEN_CHARACTERS, MAX_NAME_BYTES
-from ..markdown.source import FragmentInput
+from ..markdown.source import FragmentInput, FragmentRole
 from .guard import strip_invisible
 
 MAX_FRAGMENT_CHARS = 1500
@@ -50,6 +50,10 @@ class Paragraph:
     text: str
     index: int | None = None
     page: int | None = None
+    #: How it is shown (``heading`` with ``level`` 1–6, ``list_item``, ``quote``, ``code``);
+    #: the role never changes ``text``.
+    role: FragmentRole = "paragraph"
+    level: int | None = None
 
 
 def split_paragraphs(text: str) -> list[str]:
@@ -95,7 +99,15 @@ def to_fragments(paragraphs: Iterable[Paragraph]) -> list[FragmentInput]:
     fragments: list[FragmentInput] = []
     for paragraph in paragraphs:
         for piece in split_long(paragraph.text):
-            fragments.append(FragmentInput(text=piece, index=paragraph.index, page=paragraph.page))
+            fragments.append(
+                FragmentInput(
+                    text=piece,
+                    index=paragraph.index,
+                    page=paragraph.page,
+                    role=paragraph.role,
+                    level=paragraph.level if paragraph.role == "heading" else None,
+                )
+            )
     return fragments
 
 
