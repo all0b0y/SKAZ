@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from skaz import monologues as mono
 from skaz import repository as repo
-from skaz import transcript_monologues as tmono
 from skaz.db import Database
 from skaz.gateways.soniox import SonioxEvent, SonioxToken
 from skaz.gateways.soniox_async import AsyncToken
@@ -19,6 +19,7 @@ from skaz.knowledge.markdown.source import FragmentInput, MaterialManifest, rend
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.speech.media import default_recording_titles, file_kind
 from skaz.knowledge.speech.projector import SpeechProjector
+from skaz.knowledge.speech.transcript import read_new_tokens
 from skaz.live_store import LiveStore
 
 
@@ -118,7 +119,7 @@ def test_imported_speech_projects_like_the_legacy_reader(ready: KnowledgeService
                                             status="processing").manifest.id
         added = SpeechProjector(ready, db.read).project(material_id, session.id, final=True)
         with db.read() as connection:
-            expected = tmono.build_monologues(connection, session.id, repo.list_segments(db, session.id))
+            expected = mono.build([found.token for found in read_new_tokens(connection, session.id, None)])
         assert [(item.text, item.start_ms, item.end_ms) for item in added] == [
             (item.text, item.start_ms, item.end_ms) for item in expected]
         assert [item.text for item in added] == ["Good morning", "Hello all", "Again"]

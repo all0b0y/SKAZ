@@ -12,13 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from skaz import monologues as mono
 from skaz import repository as repo
-from skaz import transcript_monologues as tmono
 from skaz.db import Database
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.markdown.source import render_source, source_paragraphs
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.speech.projector import SpeechProjector
+from skaz.knowledge.speech.transcript import read_new_tokens
 from skaz.knowledge.speech.translation import TRANSLATION_FILE
 
 from .speech_support import Recorder, sentence
@@ -48,8 +49,9 @@ def source_text(kb: KnowledgeService, material_id: str) -> str:
 
 
 def legacy_monologues(legacy: Database, session_id: str) -> list[str]:
+    """The whole transcript read in one pass by the app's reader, grouped as the projector groups it."""
     with legacy.read() as connection:
-        built = tmono.build_monologues(connection, session_id, repo.list_segments(legacy, session_id))
+        built = mono.build([found.token for found in read_new_tokens(connection, session_id, None)])
     return [item.text for item in built]
 
 

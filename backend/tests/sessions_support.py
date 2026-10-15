@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException
 from starlette.testclient import TestClient
 
 from skaz import repository as repo
+from skaz.live_store import LiveConflict
 from skaz.routes.sessions import delete_session
 from skaz.runtime import Runtime
 from skaz.schemas import Session
@@ -52,7 +53,8 @@ def get_session(target: Any, session_id: str) -> Session | None:
 
 
 def session_count(target: Any) -> int:
-    return len(repo.list_sessions(runtime_of(target).db))
+    with runtime_of(target).db.read() as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0])
 
 
 def session_gone(target: Any, session_id: str) -> bool:
@@ -80,10 +82,19 @@ def live_status(target: Any, session_id: str) -> dict[str, Any]:
         "attempt": stream.recovery.attempt if stream is not None else 0,
         "processing": bool(stream and stream.processing),
         "background_sessions": [sid for sid, worker in runtime.native_streams.items() if worker.processing],
-        "incomplete": runtime.live_store.last_incomplete(session_id),
+        "incomplete": _last_connection_incomplete(runtime, session_id),
         "buffered_audio_ms": (stream.buffer.size_bytes * 500 // stream.connection.sample_rate
                               if stream is not None else 0),
     }
+
+
+def _last_connection_incomplete(runtime: Runtime, session_id: str) -> bool:
+    """Whether the latest provider connection ended without its final text, as ``/live`` reports it."""
+    try:
+        connections = runtime.live_store.snapshot(session_id)["connections"]
+    except LiveConflict:
+        return False
+    return bool(connections) and connections[-1]["status"] == "incomplete"
 
 
 def delete(http: TestClient, session_id: str) -> None:

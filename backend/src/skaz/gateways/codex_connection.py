@@ -117,10 +117,6 @@ class CodexConnection:
             marker.unlink(missing_ok=True)
         self.view["relogin_available"] = value
 
-    def has_saved_login(self) -> bool:
-        """A sign-in file exists in SKAZ's own profile (not proof it is still valid)."""
-        return (self.root / "profile" / "auth.json").is_file() or self.consented()
-
     def environment(self) -> dict[str, str]:
         for name in ("home", "profile", "work", "tmp"):
             (self.root / name).mkdir(mode=0o700, parents=True, exist_ok=True)

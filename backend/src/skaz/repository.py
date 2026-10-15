@@ -47,16 +47,6 @@ def create_session(db: Database, title: str, mode: SessionMode = "legacy") -> Se
     return session
 
 
-def list_sessions(db: Database) -> list[Session]:
-    with db.read() as connection:
-        rows = connection.execute(
-            "SELECT sessions.*, COALESCE(n.origin, 'live') AS origin FROM sessions "
-            "LEFT JOIN native_recordings n ON n.session_id=sessions.id "
-            "ORDER BY sessions.created_at DESC, sessions.rowid DESC"
-        ).fetchall()
-    return [_session(row) for row in rows]
-
-
 def get_session(db: Database, session_id: str) -> Session | None:
     with db.read() as connection:
         row = connection.execute(

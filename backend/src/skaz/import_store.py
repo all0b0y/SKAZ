@@ -166,24 +166,6 @@ class ImportStore:
             ).fetchone()
         return _record(row) if row is not None else None
 
-    def unsettled(self) -> list[ImportRecord]:
-        """Imports a restart must resume, oldest first."""
-        with self.db.read() as connection:
-            rows = connection.execute(
-                f"SELECT * FROM native_imports WHERE status IN ({','.join('?' * len(UNSETTLED))}) "
-                "ORDER BY created_at, rowid", UNSETTLED,
-            ).fetchall()
-        return [_record(row) for row in rows]
-
-    def pending(self) -> list[ImportRecord]:
-        """Unfinished imports, including ones waiting for an explicit decision."""
-        with self.db.read() as connection:
-            rows = connection.execute(
-                "SELECT * FROM native_imports WHERE status NOT IN ('completed','cancelled') "
-                "ORDER BY created_at"
-            ).fetchall()
-        return [_record(row) for row in rows]
-
     def interrupt(self) -> None:
         """Recover durable state without contacting a provider or spawning work."""
         with self.db.write() as connection:

@@ -48,7 +48,8 @@ async def test_restart_releases_sessions_left_recording(tmp_path: Path) -> None:
     ids = await _with_app(config, seed)
 
     async def statuses(app: Any, _client: httpx.AsyncClient) -> dict[str, str]:
-        return {item.id: item.status for item in repo.list_sessions(app.state.runtime.db)}
+        found = {sid: repo.get_session(app.state.runtime.db, sid) for sid in ids.values()}
+        return {sid: session.status for sid, session in found.items() if session is not None}
 
     after = await _with_app(config, statuses)
     assert after[ids["left"]] == "paused"

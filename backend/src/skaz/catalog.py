@@ -222,12 +222,6 @@ class ProviderCatalogs:
             f"OpenRouter model '{model_id}' has no dedicated transcription or legacy audio-chat contract."
         )
 
-    def cached_entry(self, provider: str, model_id: str) -> CatalogEntry | None:
-        """The entry from memory or the disk cache only: never a network request."""
-        cached = self._memory.get(self._cache_key(provider, None))
-        entries = cached[1] if cached else self._read_disk_cache(provider, None) or []
-        return next((entry for entry in entries if entry.id == model_id), None)
-
     def cached_openrouter_asr_kind(self, model_id: str) -> str | None:
         for entry in self._memory.get(self._cache_key("openrouter", "asr"), (0, []))[1]:
             if entry.id == model_id and entry.emits_transcription:

@@ -3,8 +3,7 @@
 Runs the *product* code path (the same decoder, VAD, LocalAgreement session and
 optional speaker tracker the app uses) over PCM16 WAV files, fed at real-time pace
 the way a microphone would, with the Hugging Face hub forced offline. Nothing is
-downloaded: prepare the model in Settings → Transcription (or with the
-``/models/local/prepare`` endpoint) first.
+downloaded: prepare the model in the app first (Settings → Speech).
 
 For each ``speech.wav`` a reference transcript ``speech.txt`` must sit next to it.
 Use real human speech you are allowed to process (for example a Common Voice or

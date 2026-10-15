@@ -349,35 +349,6 @@ class Database:
         with self._lock:
             yield self._connection
 
-    @contextmanager
-    def snapshot_read(self) -> Iterator[sqlite3.Connection]:
-        """Pin a committed WAL revision, then release the application lock.
-
-        The reader must be short-lived: it does not block WAL writers, but holds
-        back checkpoint reclamation. File-backed WAL only; never silently fall
-        back to holding the recording lock for a full corpus copy.
-        """
-        source: sqlite3.Connection | None = None
-        try:
-            with self._lock:
-                if self._connection.in_transaction:
-                    raise ValueError("Cannot snapshot inside a write transaction")
-                filename = self._connection.execute("PRAGMA database_list").fetchone()["file"]
-                if not filename:
-                    raise ValueError("Snapshot requires a file-backed WAL database")
-                source = sqlite3.connect(Path(filename).as_uri() + "?mode=ro", uri=True, timeout=0.1)
-                source.row_factory = sqlite3.Row
-                source.execute("PRAGMA query_only=ON")
-                if source.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
-                    raise ValueError("Snapshot requires a file-backed WAL database")
-                source.execute("BEGIN")
-                # BEGIN alone is deferred: touch a table to pin before releasing the lock.
-                source.execute("SELECT rowid FROM sessions LIMIT 1").fetchone()
-            yield source
-        finally:
-            if source is not None:
-                source.close()
-
     def close(self) -> None:
         with self._lock:
             self._connection.close()

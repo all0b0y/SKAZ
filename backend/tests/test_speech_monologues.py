@@ -1,30 +1,15 @@
-"""Session speech projected onto monologues, from both storage eras."""
+"""A live recording's tokens, read by the speech area, group into monologues by speaker."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from skaz import monologues as mono
 from skaz import repository as repo
-from skaz import transcript_monologues as tm
 from skaz.db import Database
 from skaz.gateways.soniox import SonioxEvent, SonioxToken
+from skaz.knowledge.speech.transcript import read_new_tokens
 from skaz.live_store import LiveStore
-from skaz.schemas import Segment
-
-
-def test_segment_only_session_yields_monologues_without_invented_speakers(tmp_path: Path) -> None:
-    db = Database(tmp_path / "legacy.sqlite")
-    session_id = repo.create_session(db, "Лекция").id
-    segments = [
-        Segment(id="s1", start_ms=0, end_ms=2_000, text="Первая мысль."),
-        Segment(id="s2", start_ms=2_200, end_ms=4_000, text="Её продолжение."),
-        Segment(id="s3", start_ms=30_000, end_ms=32_000, text="После долгой паузы."),
-    ]
-    with db.read() as connection:
-        built = tm.build_monologues(connection, session_id, segments)
-    assert [m.speaker for m in built] == [None, None]
-    assert built[0].text == "Первая мысль. Её продолжение."
-    assert built[1].text == "После долгой паузы."
 
 
 def test_live_tokens_group_by_speaker(tmp_path: Path) -> None:
@@ -47,8 +32,7 @@ def test_live_tokens_group_by_speaker(tmp_path: Path) -> None:
         (), (), 1_400, 2_000, False,
     ))
     with db.read() as connection:
-        segments = repo.list_segments(db, session_id)
-        built = tm.build_monologues(connection, session_id, segments)
+        built = mono.build([found.token for found in read_new_tokens(connection, session_id, None)])
     assert [m.speaker for m in built] == [1, 2]
     assert built[0].text == "Вопрос от первого."
     assert built[1].text == "Ответ второго."
