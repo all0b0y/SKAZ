@@ -359,7 +359,8 @@ class WikiService:
 
     def _refresh_index(self) -> None:
         try:
-            self._writer.refresh_index(self.ingest.settings().language)
+            with self.ctx.write_lock:  # reads the page index, writes Wiki/index.md: one library write
+                self._writer.refresh_index(self.ingest.settings().language)
         except (OSError, KnowledgeError):
             logger.info("Wiki/index.md could not be refreshed", exc_info=True)
 

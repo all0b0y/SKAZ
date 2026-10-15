@@ -46,7 +46,16 @@ class WikiWatcher:
         return found
 
     def poll(self) -> int:
-        """One tick: re-index what changed since the last tick; returns how many pages changed."""
+        """One tick: re-index what changed since the last tick; returns how many pages changed.
+
+        The whole tick holds the library's write lock: a SKAZ write between reading a page here
+        and indexing it would otherwise be replaced by the older copy, and the next snapshot (which
+        already has the new mtime) would never bring it back.
+        """
+        with self.kb.writing():
+            return self._poll()
+
+    def _poll(self) -> int:
         try:
             library = self.kb.require()
         except LibraryUnavailable:

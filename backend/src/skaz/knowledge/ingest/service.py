@@ -14,6 +14,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 from ...native_io import disk_call
 from ..decisions.protocol import DecisionLayer
@@ -79,7 +80,10 @@ class IngestService:
         #: Called with ``(material_id, job)`` after a job finished ``done`` (W2: overview, connections).
         self.finished_listeners: list[Callable[[str, JobRecord], None]] = []
         self.limits = limits or Limits()
-        self._writer = WikiWriter(kb, threading.Lock())
+        # The library's one write lock (``KnowledgeService.writing``): wiki writes, W2 page edits,
+        # library scans and the Wiki/ watcher never interleave. ``WikiWriter`` only enters it; the
+        # cast is the annotation there (``threading.Lock``), the object is the re-entrant library lock.
+        self._writer = WikiWriter(kb, cast("threading.Lock", kb.writing()))
         #: The one lock for writing wiki files; W2 page edits take it too, so writes never interleave.
         self.write_lock = self._writer.lock
         self._active: dict[str, _Active] = {}
