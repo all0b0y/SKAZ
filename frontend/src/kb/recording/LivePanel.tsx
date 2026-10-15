@@ -3,13 +3,14 @@ import type { KbMaterial } from '../../api/kb/types.gen';
 import { Button, Icon, Spinner } from '../ui';
 import { formatTime } from '../library/materialMeta';
 import { PanelFrameButtons } from '../document/parts';
-import { useInterval, useLoad } from '../document/useLoad';
+import { useLoad } from '../document/useLoad';
 import { useLibrary, useRecording, useServices } from '../state/context';
 import { languageName } from '../material/MaterialView';
 import { Transcript } from '../material/Transcript';
 import { isLive } from './recordingStore';
 import { connectionText } from './connection';
 import { EMPTY_LIVE, lastSeg, liveAfter, type LiveText } from './liveText';
+import { useLiveMaterial } from './useLiveMaterial';
 
 const NEAR_BOTTOM = 80;
 
@@ -38,15 +39,9 @@ export function LivePanel({ materialId }: { materialId: string }) {
   const [following, setFollowing] = useState(true);
   const reconnect = mine && phase === 'recording' ? connectionText(stream, provider) : null;
 
-  useInterval(live, 1500, reload);
-  // Recording ended (Stop/failure): one more read picks up the monologue that the end closed.
-  const wasLive = useRef(live);
-  useEffect(() => {
-    if (wasLive.current && !live) reload();
-    wasLive.current = live;
-  }, [live, reload]);
-
-  const material = state.value;
+  // While recording the material is read once; the recording's live poll brings the fragments it
+  // gains. Recording ended (Stop/failure): one more read picks up the monologue that the end closed.
+  const { material } = useLiveMaterial(materialId, state.value, reload);
   const count = material?.fragments.length ?? 0;
   const seg = material ? lastSeg(material.fragments) : 0;
   // Speech after the fragments: the open monologue's final words as they arrive, then the words
@@ -58,7 +53,12 @@ export function LivePanel({ materialId }: { materialId: string }) {
   if (!behind) shown.current = { seg, text: fitted };
   else if (shown.current.seg !== seg) shown.current = { seg, text: EMPTY_LIVE };
   const liveText = shown.current.text;
-  useEffect(() => { if (behind) reload(); }, [behind, liveAnswer, reload]);
+  // The live answer continues fragments this panel hasn't got (it opened mid-way): read the material
+  // again — once per answer, never while a read is still running.
+  const loading = state.load === 'loading';
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+  useEffect(() => { if (behind && !loadingRef.current) reload(); }, [behind, liveAnswer, reload]);
   const partial = live && liveText.partial
     ? (view === 'translation' && liveText.partial.translation ? liveText.partial.translation : liveText.partial.text) : '';
   const extra = { monologues: liveText.monologues, partial: partial ? { speaker: liveText.partial!.speaker, text: partial } : null };

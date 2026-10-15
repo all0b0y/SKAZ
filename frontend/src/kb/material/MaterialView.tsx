@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
@@ -12,6 +12,7 @@ import { ExcludedFragments } from './ExcludedFragments';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
+import { useLiveMaterial } from '../recording/useLiveMaterial';
 
 const SPEECH = new Set<KbMaterial['kind']>(['recording', 'audio', 'video', 'video_link']);
 
@@ -64,10 +65,17 @@ export function useMaterialData(materialId: string) {
     return { material, corrections, jobs };
   });
   const data = loader.state.value;
-  const busy = data !== null && (data.material.status === 'processing' || data.material.status === 'recording'
+  // A material being recorded right now grows from the recording's live poll, not by re-reading it.
+  const { material, followed } = useLiveMaterial(materialId, data?.material ?? null, loader.reload);
+  const busy = data !== null && !followed && (data.material.status === 'processing' || data.material.status === 'recording'
     || data.material.wiki?.state === 'processing' || data.jobs.some((j) => j.state === 'running'));
+  // The next read starts 2 s after the previous one answered (the interval stops while one runs).
   useInterval(busy && loader.state.load !== 'loading', 2000, loader.reload);
-  return loader;
+  const state = useMemo(
+    () => (data && material && material !== data.material ? { ...loader.state, value: { ...data, material } } : loader.state),
+    [loader.state, data, material],
+  );
+  return { ...loader, state: state as typeof loader.state };
 }
 
 /**

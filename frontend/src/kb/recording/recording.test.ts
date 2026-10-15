@@ -191,6 +191,49 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     }
   });
 
+  it('polls one request at a time and asks only for the fragments after the last one it has', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeBridge(docWorld());
+      let inFlight = 0;
+      let most = 0;
+      const slowLive = {
+        ...fake.bridge,
+        request: async (req: Parameters<typeof fake.bridge.request>[0]) => {
+          if (!/^\/kb\/recordings\/[^/]+\/live$/.test(req.path)) return fake.bridge.request(req);
+          inFlight += 1;
+          most = Math.max(most, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 4000)); // a backend busy with a scan
+          try { return await fake.bridge.request(req); } finally { inFlight -= 1; }
+        },
+      } as typeof fake.bridge;
+      const eng = fakeEngine();
+      const store = createRecordingStore({
+        client: new KbClient(slowLive), bridge: slowLive, ui: createUiStore(), capture: () => eng.engine,
+        sleep: async () => undefined,
+      });
+      const started = store.getState().start();
+      await vi.advanceTimersByTimeAsync(0);
+      await started;
+      const id = store.getState().materialId!;
+      await vi.advanceTimersByTimeAsync(20_000);
+      const reads = fake.calls.filter((c) => c.path === `/kb/recordings/${id}/live`);
+      expect(most).toBe(1); // the next poll starts 1.5 s after the previous one answered
+      expect(reads.length).toBeLessThanOrEqual(Math.ceil(20_000 / 5_500) + 1); // not one per 1.5 s
+      // The first poll asks for no fragments; each next one for those after the last answer's after_seg.
+      expect(reads[0]!.query).toBeUndefined();
+      expect(reads[1]!.query).toEqual({ since_seg: 1 });
+      const material = fake.world.materials.find((m) => m.id === id)!;
+      const known = material.fragments.filter((f) => f.seg <= store.getState().live!.after_seg && f.seg > 1);
+      expect(store.getState().liveFragments.map((f) => f.seg)).toEqual(known.map((f) => f.seg));
+      // Nothing reads the whole material while recording.
+      expect(fake.calls.some((c) => c.method === 'GET' && c.path === `/kb/materials/${id}`)).toBe(false);
+      await store.getState().stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a failed start says why and leaves nothing recording', async () => {
     const { store, eng } = setup();
     vi.mocked(eng.engine.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));

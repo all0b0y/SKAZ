@@ -215,6 +215,12 @@ def test_continuous_speech_is_readable_live_before_the_monologue_closes(
     assert texts(http, material_id) == [(1, "We keep talking", "1")]
     done = live()
     assert (done["after_seg"], done["monologues"], done["stream"]) == (1, [], "inactive")
+    assert done["fragments"] == []  # without since_seg
+    # The live panel asks for what was added since the fragment it has, never the whole material.
+    tail = http.get(f"/kb/recordings/{material_id}/live", params={"since_seg": 0}, headers=AUTH).json()
+    assert [(f["seg"], f["text"], f["speaker"]) for f in tail["fragments"]] == [(1, "We keep talking", "1")]
+    assert http.get(f"/kb/recordings/{material_id}/live", params={"since_seg": 1},
+                    headers=AUTH).json()["fragments"] == []
     # Only recordings have a live tail.
     assert http.get("/kb/recordings/nope/live", headers=AUTH).status_code == 404
 

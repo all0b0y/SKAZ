@@ -590,7 +590,7 @@ const ROUTES: FakeRoutes = {
     return view;
   }],
   'GET /kb/recordings/{material_id}': [200, (w, { path }) => findRecording(w, path.material_id).view],
-  'GET /kb/recordings/{material_id}/live': [200, (w, { path }) => {
+  'GET /kb/recordings/{material_id}/live': [200, (w, { path, query }) => {
     const { material } = findRecording(w, path.material_id);
     // Without continuous speech the recording grows: every read closes the next sentence of the lecture.
     if (material.status === 'recording' && w.liveOpen === undefined) growLive(material);
@@ -600,6 +600,9 @@ const ROUTES: FakeRoutes = {
       material_id: material.id, after_seg: last?.seg ?? 0, stream: w.liveTranscription ?? 'streaming',
       monologues: w.liveOpen ? [{ speaker: 'Speaker 1', start_ms: at, end_ms: at + 60_000, text: w.liveOpen }] : [],
       partial: { speaker: null, text: w.liveTail, translation: 'Получается, что cross-entropy в машинном обучении —' },
+      // Only what was added after the fragment the caller has (the live panel appends it).
+      fragments: query.since_seg === undefined || query.since_seg === null ? []
+        : structuredClone(material.fragments.filter((f) => f.seg > Number(query.since_seg))),
     };
   }],
   'POST /kb/recordings/{material_id}/stop': [200, (w, { path }) => setRecording(w, path.material_id, 'ready', 'stopped')],

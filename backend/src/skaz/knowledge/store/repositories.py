@@ -139,6 +139,15 @@ class MaterialRepository:
             ).fetchall()
         return [_fragment(row) for row in rows]
 
+    def fragments_after(self, material_id: str, after_seg: int, up_to_seg: int) -> list[FragmentRecord]:
+        """Fragments with ``after_seg < seg <= up_to_seg`` (``seg`` only grows): a live tail."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM fragments WHERE material_id = ? AND seg > ? AND seg <= ? ORDER BY ordinal",
+                (material_id, after_seg, up_to_seg),
+            ).fetchall()
+        return [_fragment(row) for row in rows]
+
     def fragment_map(self, keys: set[tuple[str, int]]) -> dict[tuple[str, int], tuple[FragmentRecord, str]]:
         """``(material_id, seg)`` → (fragment, material title) for the keys that exist."""
         found: dict[tuple[str, int], tuple[FragmentRecord, str]] = {}

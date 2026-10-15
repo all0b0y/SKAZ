@@ -802,6 +802,7 @@ export interface KbRecordingLive {
   monologues: KbLiveMonologue[];
   partial: KbLivePartial | null;
   stream: string;
+  fragments?: KbFragment[];
 }
 
 export interface KbRef {
@@ -1464,7 +1465,7 @@ export interface KbEndpoints {
   };
   "GET /kb/recordings/{material_id}/live": {
     path: { material_id: string };
-    query: Record<string, never>;
+    query: { since_seg?: number | null };
     body: never;
     response: KbRecordingLive;
     status: 200;
