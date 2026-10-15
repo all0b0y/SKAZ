@@ -108,7 +108,7 @@ function RailButton({ id, label, hint, icon, active = false, open = false, label
       {active && <m.span layoutId="kb-rail-active" className="kb-rail__fill" aria-hidden="true" />}
       <Icon name={icon} size={18} className="kb-rail__icon" />
       {labels.shown === id && (
-        <span className="kb-rail__label" aria-hidden="true" data-testid="rail-label">
+        <span className="kb-rail__label" aria-hidden="true" data-testid="rail-label" data-overlay="">
           <Icon name={icon} size={18} />
           <span>{label}</span>
           {hint && <span className="kb-rail__hint">{hint}</span>}
