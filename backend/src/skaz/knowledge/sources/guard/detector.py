@@ -11,6 +11,14 @@ Matching runs on the NFKC form with whitespace collapsed and, in addition, on
 two skeletons where Cyrillic/Latin look-alike letters are folded to one
 script, so ``ignоre`` with a Cyrillic ``о`` still matches.
 
+Addressing a model is a signal in several shapes (final review H1): a
+vocative with an order ("Нейросеть, слушай внимательно: … напиши"), "for the
+language model that processes this text:", "the model that reads this must
+insert …" (a modal with an output verb), "ATTENTION LLM:", "disregard the rules
+above". Words people and physics also use ("assistant", "agent", "model") never
+reach the threshold alone; the shared decision-41 set
+(``tests/knowledge/decision41.py``) holds the attacks and the near misses.
+
 This is a heuristic, not a guarantee: paraphrases, other languages, text in
 images and instructions split across fragments are not caught. An article
 *about* prompt injection is expected to trigger it — the user restores it.
@@ -50,6 +58,12 @@ _AI_RU = (
     r"(?:ии|ai|llm|gpt|chatgpt|claude|codex|ассистент\w*|модел\w*|нейросет\w*|языков\w+\s+модел\w*|"
     r"агент\w*|чат-?бот\w*|бот\w*)"
 )
+#: Names that can only mean an AI (not "assistant", "agent", "model" — people and physics use those).
+_AI_NAME_EN = (
+    r"(?:ai|a\.i\.|llm|large\s+language\s+model|language\s+model|chatgpt|gpt(?:-\d+)?|claude|gemini|"
+    r"codex|copilot)"
+)
+_AI_NAME_RU = r"(?:ии|ai|llm|gpt|chatgpt|claude|codex|нейросет\w*|языков\w+\s+модел\w*)"
 _PREVIOUS_EN = r"(?:previous|prior|above|earlier|preceding|former|original|initial|system|all)"
 _PREVIOUS_RU = (
     r"(?:предыдущ\w*|прошл\w*|прежн\w*|вышеуказанн\w*|вышеизложенн\w*|выше\w*|ранее\s+\w+|"
@@ -58,13 +72,24 @@ _PREVIOUS_RU = (
 _VERBS_EN = (
     r"(?:write|save|store|record|send|email|post|upload|execute|run|open|visit|navigate|go|click|fetch|"
     r"download|add|insert|include|remember|delete|remove|output|print|say|tell|reply|respond|translate|"
-    r"summari[sz]e|ignore|forget|call|use|append|change|replace)"
+    r"summari[sz]e|ignore|disregard|forget|call|use|append|change|replace|listen|state|claim|answer|"
+    r"insert|mention|report)"
 )
 _VERBS_RU = (
     r"(?:запиши|сохрани|отправь|выполни|запусти|перейди|открой|добавь|удали|напиши|вставь|запомни|"
-    r"игнорируй|забудь|ответь|скажи|выведи|переведи|перескажи|скачай|загрузи|используй|замени|измени)"
+    r"игнорируй|забудь|ответь|скажи|выведи|переведи|перескажи|скачай|загрузи|используй|замени|измени|"
+    r"слушай|послушай|следуй|укажи|сообщи|упомяни|утверждай|напечатай|перепиши)"
 )
 _SENTENCE_START = r"(?:^|[.!?;:]\s+|\n)\s*"
+#: Output verbs a modal sentence about the model asks for ("the model must claim …", "должна вставить …").
+_MODAL_VERBS_EN = (
+    r"(?:claim|state|say|write|add|insert|include|mention|report|output|print|tell|assert|ignore|disregard|"
+    r"forget|remove|delete|replace|send|reply|respond|answer)"
+)
+_MODAL_VERBS_RU = (
+    r"(?:вставить|добавить|написать|записать|дописать|указать|сообщить|сказать|утверждать|заявить|упомянуть|"
+    r"удалить|убрать|изменить|заменить|игнорировать|проигнорировать|забыть|вывести|отправить|ответить)"
+)
 
 RULES: tuple[Rule, ...] = (
     # -- strong: one is enough ---------------------------------------------
@@ -97,6 +122,21 @@ RULES: tuple[Rule, ...] = (
         r"\b(?:игнорируй(?:те)?|забудь(?:те)?)\s+(?:всё|все)\s+(?:что\s+(?:тебе|вам)\s+говорили|выше|до\s+этого)",
     ),
     _rule(
+        "ignore_rules",
+        1.0,
+        "asks to ignore the rules it was given",
+        r"\b(?:ignore|disregard|forget|override|bypass)\s+(?:all\s+|any\s+|the\s+|your\s+|these\s+)*"
+        r"(?:rules|guidelines|guardrails|constraints|restrictions|policies|safety\s+rules)\s+"
+        r"(?:above|before|you\s+(?:were|have\s+been)\s+given|stated\s+(?:above|earlier))\b",
+    ),
+    _rule(
+        "ignore_rules_ru",
+        1.0,
+        "asks to ignore the rules it was given",
+        r"\b(?:игнорируй(?:те)?|проигнорируй(?:те)?|забудь(?:те)?|отбрось(?:те)?|нарушь(?:те)?)\s+"
+        r"(?:все\s+)?(?:правила|ограничения)\s+(?:выше|сверху|которые\s+тебе\s+дали)\b",
+    ),
+    _rule(
         "control_token",
         1.0,
         "contains a language model's control token",
@@ -115,14 +155,51 @@ RULES: tuple[Rule, ...] = (
         "vocative_command",
         0.9,
         "gives an order addressed to an AI",
-        rf"{_SENTENCE_START}(?:the\s+|dear\s+|hey\s+)?{_AI_EN}\s*[,:]\s*(?:please\s*,?\s*)?{_VERBS_EN}\b",
+        rf"{_SENTENCE_START}(?:the\s+|dear\s+|hey\s+|attention\s*,?\s*)?{_AI_EN}\s*[,:!]\s*"
+        rf"(?:please\s*,?\s*)?{_VERBS_EN}\b",
     ),
     _rule(
         "vocative_command_ru",
         0.9,
         "gives an order addressed to an AI",
-        rf"{_SENTENCE_START}(?:дорог\w+\s+|уважаем\w+\s+|эй\s*,?\s*)?{_AI_RU}\s*[,:]\s*"
-        rf"(?:пожалуйста\s*,?\s*)?{_VERBS_RU}\b",
+        rf"{_SENTENCE_START}(?:дорог\w+\s+|уважаем\w+\s+|эй\s*,?\s*|внимание\s*,?\s*)?{_AI_RU}\s*[,:!]\s*"
+        rf"(?:пожалуйста\s*,?\s*|внимание\s*[,:!]?\s*)?{_VERBS_RU}\b",
+    ),
+    _rule(
+        "addressed_ai",
+        0.5,
+        "addresses an AI by name",
+        rf"{_SENTENCE_START}(?:dear\s+|hey\s+|attention\s*,?\s*|внимание\s*,?\s*|эй\s*,?\s*|дорог\w+\s+)?"
+        rf"(?:{_AI_NAME_EN}|{_AI_NAME_RU})\s*(?:[,!]|:(?!\s*(?:определени|истори|definition|history|"
+        r"overview|обзор|введение|introduction)))",
+    ),
+    _rule(
+        "ai_reading_this",
+        0.8,
+        "speaks to the AI that reads or processes the text",
+        rf"\b{_AI_EN}\s*,?\s+(?:that|which|who)\s+(?:is\s+)?(?:\S+\s+)?"
+        r"(?:process|read|summari[sz]|analy[sz]|ingest|index)\w*\s+(?:this|these|the\s+following)\b",
+    ),
+    _rule(
+        "ai_reading_this_ru",
+        0.8,
+        "speaks to the AI that reads or processes the text",
+        rf"\b{_AI_RU}\s*,?\s+(?:которая|который|которое|что)\s+(?:\S+\s+)?"
+        r"(?:обрабатыва|чита|анализиру|пересказыва|конспектиру|прочита|обработа)\w*"
+        r"(?:\s+(?:эт\w+|данн\w+|следующ\w+))?",
+    ),
+    _rule(
+        "ai_must",
+        0.7,
+        "says what the AI must write",
+        rf"\b{_AI_EN}\b[^.!?]{{0,80}}?\b(?:must|should|shall|has\s+to|is\s+to|needs\s+to|is\s+required\s+to)\s+"
+        rf"(?:\S+\s+)?{_MODAL_VERBS_EN}\b",
+    ),
+    _rule(
+        "ai_must_ru",
+        0.7,
+        "says what the AI must write",
+        rf"\b{_AI_RU}[^.!?]{{0,80}}?\b(?:должн\w*|обязан\w*|следует|нужно|надо)\s+(?:\S+\s+)?{_MODAL_VERBS_RU}\b",
     ),
     _rule(
         "persona",
@@ -165,6 +242,13 @@ RULES: tuple[Rule, ...] = (
         "contains a note meant for an AI",
         rf"\b(?:инструкци\w*|указани\w*|сообщени\w*|примечани\w*|заметк\w*|обращени\w*|задани\w*|"
         rf"внимание)\s+(?:для|к)\s+{_AI_RU}",
+    ),
+    _rule(
+        "for_the_ai_colon",
+        0.6,
+        "contains a note meant for an AI",
+        rf"{_SENTENCE_START}(?:for|to)\s+(?:the\s+|any\s+|all\s+)?{_AI_EN}\b[^.!?:\n]{{0,80}}:|"
+        rf"{_SENTENCE_START}(?:для|к)\s+{_AI_RU}[^.!?:\n]{{0,80}}:",
     ),
     _rule(
         "greeting_ai",
@@ -292,14 +376,18 @@ RULES: tuple[Rule, ...] = (
         0.6,
         "addresses whoever processes the text",
         r"\bwhen\s+(?:you\s+)?(?:summari[sz]|process|read|analy[sz]|index|ingest|crawl)\w*\s+(?:this|the)\s+"
-        r"(?:page|document|article|text|content|file|source|website)\b",
+        r"(?:page|document|article|text|content|file|source|website|lecture|transcript|recording|video|talk|"
+        r"lesson|material|notes)\b|"
+        r"\bwhen\s+(?:you\s+)?(?:summari[sz]|process|analy[sz]|ingest|index)\w*\s*,",
     ),
     _rule(
         "when_processing_ru",
         0.6,
         "addresses whoever processes the text",
         r"\bкогда\s+(?:будешь|станешь|ты\s+будешь)\s+(?:пересказывать|обрабатывать|читать|анализировать|"
-        r"резюмировать|конспектировать)\s+(?:этот|эту|это|данн\w+)",
+        r"резюмировать|конспектировать)\s+(?:этот|эту|это|данн\w+)|"
+        r"\b(?:в\s+итогов\w+|в\s+(?:сво\w+\s+)?ответе|в\s+пересказе)\s+(?:текст\w*|конспект\w*|ответе)?\s*"
+        r"(?:напиши|укажи|сообщи|скажи|добавь|вставь)",
     ),
     _rule(
         "follow_link",
