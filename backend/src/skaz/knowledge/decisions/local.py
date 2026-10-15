@@ -90,10 +90,11 @@ LLAMA_SERVER = ServerBuild(
     license="MIT",
 )
 
-#: Chosen by ``scripts/decisions_benchmark.py`` on the authored decision set (D1 spike gate):
-#: held-out accuracy 96% on answered at 96% coverage (ru 97%, en 95%). Thresholds are the
-#: smallest that reached 85% on the *tune* split; the score threshold is not measured (no
-#: score questions in the set). Plain instruct model: SKAZ asks it with single-token labels.
+#: Chosen by ``scripts/decisions_benchmark.py`` on the authored decision set (D1 spike gate).
+#: User decision B9: threshold 0.7 for choice and yes/no. Held-out (80 questions): 100% correct
+#: on answered at 91% coverage; at 0.5 it was 96% at 96%, and every wrong answer had p < 0.57.
+#: A wrong merge damages the wiki for good, so the doubtful 9% go to the writing model.
+#: The score threshold is not measured (no score questions in the set).
 LOCAL_MODEL = LocalModel(
     id="qwen3.5-4b-q4_k_m",
     title="Qwen3.5 4B (Q4_K_M)",
@@ -106,7 +107,7 @@ LOCAL_MODEL = LocalModel(
         size=2_740_937_888,
     ),
     mode="labels",
-    thresholds=Thresholds(choice=0.5, noul=0.5, score=0.5),
+    thresholds=Thresholds(choice=0.7, noul=0.7, score=0.5),
     context=8192,
 )
 

@@ -26,6 +26,7 @@ from skaz.app import create_app
 from skaz.config import AppConfig
 from skaz.knowledge.decisions.llama import LlamaClient
 from skaz.knowledge.decisions.local import (
+    LOCAL_MODEL,
     LlamaServerManager,
     LocalDecider,
     LocalModel,
@@ -303,3 +304,9 @@ def test_closing_the_app_stops_the_server(tmp_path: Path) -> None:
     assert process.returncode is not None
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+def test_product_thresholds_are_the_user_decision_b9() -> None:
+    """B9: Qwen3.5-4B at 0.7 — a doubtful choice goes to the writing model rather than a guess."""
+    assert LOCAL_MODEL.id == "qwen3.5-4b-q4_k_m"
+    assert (LOCAL_MODEL.thresholds.choice, LOCAL_MODEL.thresholds.noul) == (0.7, 0.7)
