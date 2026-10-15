@@ -448,3 +448,18 @@ async def test_a_ticked_import_that_finishes_at_once_goes_to_the_wiki(
         api, speech_app, monkeypatch, tmp_path, to_wiki=True, settings_add=False)
     assert started == [material_id]
     assert speech_app.state.runtime.kb.settings.get(CHOICE_KEY + material_id) is None
+
+
+async def test_a_dropped_file_name_is_cleaned_but_a_typed_title_is_refused(
+    api: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    # macOS allows "?" (and ":" shown as "/") in file names; SKAZ derives the name, so it cleans it.
+    reported = media(tmp_path, "Почему фондовый рынок США стал ПОМОЙКОЙ?.m4a")
+    dropped = await api.post("/kb/imports", json={"path": reported})
+    assert dropped.status_code == 201, dropped.text
+    assert dropped.json()["title"] == "Почему фондовый рынок США стал ПОМОЙКОЙ"
+    odd = await api.post("/kb/imports", json={"path": media(tmp_path, "Q3: plan*.mov")})
+    assert odd.status_code == 201, odd.text
+    assert odd.json()["title"] == "Q3 - plan"
+    typed = await api.post("/kb/imports", json={"path": media(tmp_path, "fine.m4a"), "title": "Why?"})
+    assert typed.status_code == 422 and "can't contain ?" in typed.json()["detail"]

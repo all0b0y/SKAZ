@@ -40,6 +40,7 @@ from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
 from .fetch import MAX_PAGE_BYTES, SafeFetcher, check_url
+from .fragments import sanitize_title
 from .guard import Detection, Finding, detect_instruction
 from .guard.exclusions import (
     EXCLUDED_FILE,
@@ -205,7 +206,7 @@ class SourceService:
             prepared = prepare_pdf(
                 file_path.read_bytes(),
                 origin=origin,
-                fallback=file_path.stem or "Document",
+                fallback=sanitize_title(file_path.stem) or "Document",
                 original=Original("original.pdf", path=file_path),
             )
         else:

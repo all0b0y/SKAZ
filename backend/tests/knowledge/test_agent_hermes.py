@@ -30,6 +30,7 @@ from skaz.knowledge.agents.engine import (
 )
 from skaz.knowledge.agents.hermes import (
     DISABLED_TOOLSETS,
+    LIMITS_NOT_APPLIED,
     HermesEngine,
     ensure_private_home,
     tools_listing_allowed,
@@ -202,6 +203,73 @@ def test_tools_listing_rule() -> None:
     assert not tools_listing_allowed("Could not list tools: boom")
 
 
+# Hermes v0.22.1+179.gb51e8b8 answers ``/tools`` from the gateway (``acp_adapter/gateway_commands.py``
+# ``_tools_text``): tools grouped by toolset, or only the toolset names before the session's first turn.
+# An editor's MCP server is registered as ``editor_<name>_<8 hex>`` (``gateway/session_local_mcp.py``
+# ``_server_names``): toolset ``mcp-editor_skaz_<tag>``, tools ``mcp__editor_skaz_<tag>__<tool>``.
+V022_TAG = "1a2b3c4d"
+V022_SKAZ_ONLY = (f"Available tools (2):\n  mcp-editor_skaz_{V022_TAG}: mcp__editor_skaz_{V022_TAG}__read, "
+                  f"mcp__editor_skaz_{V022_TAG}__search\n")
+V022_WITH_TERMINAL = ("Available tools (3):\n"
+                      f"  mcp-editor_skaz_{V022_TAG}: mcp__editor_skaz_{V022_TAG}__search\n"
+                      "  terminal: process_manage, terminal")
+V022_VERSION = ("Hermes Agent v0.22.1+179.gb51e8b8 (2026.10.15) · upstream b51e8b85\n"
+                "Install directory: /tmp/home/.hermes/hermes-agent\nInstall method: git\n")
+
+
+@pytest.mark.parametrize("listing", [
+    "No tools available.\n",
+    V022_SKAZ_ONLY,
+    f"Enabled toolsets: mcp-editor_skaz_{V022_TAG}\n",
+    f"Available tools (1):\n  mcp-editor_skaz_{V022_TAG}: mcp__editor_skaz_{V022_TAG}__list_resources",
+])
+def test_tools_listing_rule_accepts_hermes_022_with_only_the_skaz_toolset(listing: str) -> None:
+    assert tools_listing_allowed(listing)
+
+
+@pytest.mark.parametrize("listing", [
+    V022_WITH_TERMINAL,
+    "Available tools (2):\n  file: read_file, write_file",
+    f"Enabled toolsets: mcp-editor_skaz_{V022_TAG}, terminal",
+    "Enabled toolsets: web",
+    "Enabled toolsets: ",
+    # The SKAZ toolset must hold only SKAZ tools of the same server.
+    f"Available tools (2):\n  mcp-editor_skaz_{V022_TAG}: mcp__editor_skaz_{V022_TAG}__search, terminal",
+    f"Available tools (1):\n  mcp-editor_skaz_{V022_TAG}: mcp__editor_skaz_99999999__search",
+    # Another editor MCP server, a configured server named like SKAZ's, an unknown group.
+    f"Available tools (1):\n  mcp-editor_github_{V022_TAG}: mcp__editor_github_{V022_TAG}__issues",
+    "Available tools (1):\n  mcp-skaz: mcp__skaz__search",
+    "Available tools (1):\n  other: mcp__skaz__search",
+    f"Enabled toolsets: mcp-editor_skaz_{V022_TAG}x",
+])
+def test_tools_listing_rule_refuses_hermes_022_with_anything_else(listing: str) -> None:
+    assert not tools_listing_allowed(listing)
+
+
+async def test_hermes_022_run_with_only_skaz_tools_streams_with_plain_tool_names(tmp_path: Path) -> None:
+    call = UPDATES[2]
+    assert isinstance(call, dict)
+    updates = [*UPDATES[:2], {**call, "title": f"mcp__editor_skaz_{V022_TAG}__search: entropy"}, *UPDATES[3:]]
+    plan = scenario(version_output=V022_VERSION, tools_listing=V022_SKAZ_ONLY, updates=updates)
+    engine, _fake = engine_for(tmp_path, plan, mcp=RecordingMcp())
+    events = await drain(engine, turn())
+    assert events == [
+        TextDelta("run-1", "Энтропия "),
+        ToolCall("run-1", "tc-1", "search", {"q": "entropy"}),
+        ToolResult("run-1", "tc-1", "[seg-3] dS ≥ 0", False),
+        TextDelta("run-1", "растёт."),
+        Completed("run-1", Usage(10, 4)),
+    ]
+
+
+async def test_hermes_022_run_is_refused_when_another_toolset_is_listed(tmp_path: Path) -> None:
+    plan = scenario(version_output=V022_VERSION, tools_listing=V022_WITH_TERMINAL)
+    engine, fake = engine_for(tmp_path, plan, mcp=RecordingMcp())
+    events = await drain(engine, turn())
+    assert events == [Failed("run-1", "incompatible", LIMITS_NOT_APPLIED)]
+    assert [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")] == ["/tools"]
+
+
 async def test_never_set_up_folder_is_reported_without_starting_hermes(tmp_path: Path) -> None:
     engine, fake = engine_for(tmp_path, scenario(), set_up=False)
     status = await engine.status()
@@ -325,6 +393,12 @@ def test_policy_pins_no_builtin_toolsets_no_memory_no_skills(tmp_path: Path) -> 
         "computer_use",
     ):
         assert toolset in policy["agent"]["disabled_toolsets"] and toolset in DISABLED_TOOLSETS
+    # Toolsets new in Hermes 0.22 (``toolsets.py`` TOOLSETS), disabled as well; and no coding posture,
+    # whose ``focus`` mode would replace ``platform_toolsets.acp`` (``gateway/session_policy.py``).
+    for toolset in ("coding", "project", "catalog", "connections", "debugging", "search", "video",
+                    "video_gen", "x_search", "onboarding", "bot_room", "desktop_ui"):
+        assert toolset in policy["agent"]["disabled_toolsets"], toolset
+    assert policy["agent"]["coding_context"] == "off"
     assert policy["memory"] == {"memory_enabled": False, "user_profile_enabled": False}
     assert policy["skills"]["project_discovery"] is False
     assert (
@@ -348,3 +422,134 @@ async def test_parallel_runs_use_separate_processes(tmp_path: Path) -> None:
     results = await asyncio.gather(drain(engine, turn("a", tools=None)), drain(engine, turn("b", tools=None)))
     assert all(isinstance(events[-1], Completed) for events in results)
     assert len([item for item in fake.records("start") if item["argv"] == ["acp"]]) == 2
+
+
+# -- B18: Hermes 0.22's confirmation of a guarded model switch -------------------------------------
+# ``acp_adapter/gateway_server.py`` ``_model_confirmer``: while ``session/set_model`` is in flight the
+# gateway asks ``session/request_permission`` with a ``model-confirm-<12 hex>`` tool call of kind
+# ``other``, ``rawInput`` = {model, provider, guards} (the switch's resolved target) and the options
+# ``allow_once`` ("Switch anyway") / ``deny``; only ``allow_once`` applies the switch.
+
+PICKED = "anthropic:claude-sonnet-5-5"
+
+
+def model_confirmation(model: str = "claude-sonnet-5-5", provider: str | None = "anthropic", *,
+                       call_id: str = "model-confirm-0123456789ab", kind: str = "other",
+                       **raw: Any) -> dict[str, Any]:
+    return {
+        "toolCall": {
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": call_id,
+            "title": f"Model Selection Warning: {model}",
+            "kind": kind,
+            "status": "pending",
+            "content": [{"type": "content", "content": {"type": "text", "text": "This model costs more."}}],
+            "rawInput": {"model": model, "provider": provider, "guards": ["cost"], **raw},
+        },
+        "options": [
+            {"optionId": "allow_once", "kind": "allow_once", "name": "Switch anyway"},
+            {"optionId": "deny", "kind": "reject_once", "name": "Cancel"},
+        ],
+    }
+
+
+def tool_permission(title: str = "rm -rf ~", kind: str = "execute") -> dict[str, Any]:
+    return {
+        "toolCall": {"toolCallId": "perm-1", "title": title, "kind": kind, "status": "pending",
+                     "rawInput": {"command": title}},
+        "options": [
+            {"optionId": "allow_once", "kind": "allow_once", "name": "Allow once"},
+            {"optionId": "allow_always", "kind": "allow_always", "name": "Allow always"},
+            {"optionId": "deny", "kind": "reject_once", "name": "Deny"},
+        ],
+    }
+
+
+def switching_engine(tmp_path: Path, asked: list[dict[str, Any]]) -> tuple[HermesEngine, FakeCli]:
+    new = dict(PROBE["session_new_configured"])
+    new["models"] = {
+        "currentModelId": "custom:probe-model",
+        "availableModels": [
+            {"modelId": "custom:probe-model", "name": "probe"},
+            {"modelId": PICKED, "name": "claude-sonnet-5-5"},
+        ],
+    }
+    plan = scenario(version_output=V022_VERSION, session_new=new, updates=UPDATES[1:2],
+                    set_model_permissions=asked)
+    return engine_for(tmp_path, plan)
+
+
+def answers(fake: FakeCli) -> list[Any]:
+    return [item["message"]["result"]["outcome"] for item in fake.records("set_model_permission_reply")]
+
+
+async def test_the_model_switch_confirmation_for_the_picked_model_is_approved(tmp_path: Path) -> None:
+    engine, fake = switching_engine(tmp_path, [model_confirmation()])
+    events = await drain(engine, turn(tools=None, model=PICKED))
+    assert isinstance(events[-1], Completed), events
+    assert answers(fake) == [{"outcome": "selected", "optionId": "allow_once"}]
+    assert received(fake, "session/set_model")[0]["params"]["modelId"] == PICKED
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        model_confirmation("claude-opus-5-5"),  # another model than the one picked in SKAZ
+        model_confirmation("claude-sonnet-5-5", "openrouter"),  # the same name on another provider
+        model_confirmation("claude-sonnet-5-5", None),  # no provider: not the id SKAZ asked for
+        model_confirmation(call_id="perm-1"),  # not Hermes' model confirmation
+        model_confirmation(kind="execute"),
+        model_confirmation(command="rm -rf ~"),  # anything more than a model choice in the request
+        tool_permission(),  # a command
+        tool_permission("Write ~/.zshrc", "edit"),  # a file
+        tool_permission("mcp__editor_skaz_1a2b3c4d__search", "other"),  # a tool
+    ],
+)
+async def test_every_other_permission_during_the_model_switch_is_rejected(
+    tmp_path: Path, asked: dict[str, Any],
+) -> None:
+    engine, fake = switching_engine(tmp_path, [asked])
+    events = await drain(engine, turn(tools=None, model=PICKED))
+    assert events == [Failed("run-1", "incompatible", "Hermes could not switch to this model.")]
+    assert answers(fake) == [{"outcome": "selected", "optionId": "deny"}]
+    assert [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")] == []
+
+
+async def test_a_tool_request_next_to_the_confirmation_is_still_rejected(tmp_path: Path) -> None:
+    engine, fake = switching_engine(tmp_path, [tool_permission(), model_confirmation()])
+    events = await drain(engine, turn(tools=None, model=PICKED))
+    assert isinstance(events[0], Failed)
+    assert answers(fake) == [{"outcome": "selected", "optionId": "deny"},
+                             {"outcome": "selected", "optionId": "allow_once"}]
+
+
+async def test_a_model_confirmation_outside_the_switch_is_rejected(tmp_path: Path) -> None:
+    """The approval exists only while SKAZ's own ``session/set_model`` is in flight."""
+    updates = ["PERMISSION_MODEL", *UPDATES[1:2]]
+    plan = scenario(version_output=V022_VERSION, updates=updates,
+                    model_permission=model_confirmation("probe-model", "custom"))
+    engine, fake = engine_for(tmp_path, plan)
+    events = await drain(engine, turn(tools=None, model="custom:probe-model"))
+    assert isinstance(events[-1], Completed)
+    assert fake.records("permission_reply")[0]["message"]["result"] == {
+        "outcome": {"outcome": "selected", "optionId": "deny"}}
+
+
+async def test_the_gateway_of_skaz_folder_is_registered_after_a_run(tmp_path: Path) -> None:
+    """Hermes 0.22 leaves its gateway running after ``hermes acp`` ends; SKAZ registers it (B18)."""
+    from skaz.knowledge.processes import CHILDREN
+    from tests.knowledge.agent_fakes import FakeGateway
+
+    engine, _fake = engine_for(tmp_path, scenario(version_output=V022_VERSION, updates=UPDATES[1:2]))
+    user = FakeGateway(tmp_path / "fakes", tmp_path / "home" / ".hermes")
+    ours = FakeGateway(tmp_path / "fakes", engine.home)
+    try:
+        assert ours.pid not in CHILDREN.running()
+        events = await drain(engine, turn(tools=None))
+        assert isinstance(events[-1], Completed)
+        assert ours.pid in CHILDREN.running() and user.pid not in CHILDREN.running()
+    finally:
+        if engine._gateway is not None:
+            CHILDREN.discard(engine._gateway)
+        ours.close()
+        user.close()

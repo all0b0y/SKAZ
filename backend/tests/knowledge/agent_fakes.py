@@ -140,7 +140,23 @@ while True:
         else:
             send({"jsonrpc": "2.0", "id": ident, "result": SCENARIO["session_new"]})
     elif method == "session/set_model":
-        send({"jsonrpc": "2.0", "id": ident, "result": {}})
+        # Hermes 0.22 (acp_adapter/gateway_server.py set_session_model/_model_confirmer): a guarded
+        # target is confirmed through session/request_permission while set_model is in flight; a
+        # declined confirmation fails set_model (GatewayClientError("model_switch_cancelled")).
+        allowed = True
+        for asked in SCENARIO.get("set_model_permissions", []):
+            next_id += 1
+            send({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission",
+                  "params": {"sessionId": params["sessionId"], **asked}})
+            reply = json.loads(sys.stdin.readline())
+            record("set_model_permission_reply", message=reply)
+            outcome = (reply.get("result") or {}).get("outcome") or {}
+            allowed = allowed and outcome.get("optionId") == "allow_once"
+        if allowed:
+            send({"jsonrpc": "2.0", "id": ident, "result": {}})
+        else:
+            send({"jsonrpc": "2.0", "id": ident,
+                  "error": {"code": -32603, "message": "model_switch_cancelled"}})
     elif method == "session/cancel":
         for pending, session in list(waiting.items()):
             send({"jsonrpc": "2.0", "id": pending, "result": {"stopReason": "cancelled"}})
@@ -154,6 +170,12 @@ while True:
             send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
             continue
         for body in SCENARIO.get("updates", []):
+            if body == "PERMISSION_MODEL":
+                next_id += 1
+                send({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission",
+                      "params": {"sessionId": session, **SCENARIO["model_permission"]}})
+                record("permission_reply", message=json.loads(sys.stdin.readline()))
+                continue
             if body == "PERMISSION":
                 next_id += 1
                 send({"jsonrpc": "2.0", "id": next_id, "method": "session/request_permission", "params": {
@@ -267,3 +289,108 @@ class RecordingOpener:
 
     async def __call__(self, argv: Any) -> None:
         self.calls.append(list(argv))
+
+
+_GATEWAY = r"""
+import fcntl, json, os, signal, sys, time
+START = time.time()
+home = os.environ["FAKE_GATEWAY_HOME"]
+log = os.environ["FAKE_GATEWAY_LOG"]
+plan = json.loads(os.environ.get("FAKE_GATEWAY_PLAN", "{}"))
+
+def note(text):
+    with open(log, "a") as handle:
+        handle.write(text + "\n")
+
+def start_time():
+    # Hermes' fingerprint (gateway/status.py _get_process_start_time): /proc ticks, else psutil's
+    # create time in centiseconds.
+    try:
+        return int(open("/proc/%d/stat" % os.getpid()).read().rsplit(")", 1)[1].split()[19])
+    except OSError:
+        return round(START * 100)
+
+def stop(signum, frame):
+    note(signal.Signals(signum).name)
+    with open(os.path.join(home, "gateway.pid")) as handle:
+        if json.load(handle).get("pid") == os.getpid():
+            os.unlink(os.path.join(home, "gateway.pid"))
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, stop)
+signal.signal(signal.SIGTERM, stop)
+os.makedirs(home, exist_ok=True)
+record = {"pid": os.getpid(), "kind": "hermes-gateway", "argv": sys.argv[1:], "start_time": start_time(),
+          "hermes_home": os.path.realpath(home)}
+lock = open(os.path.join(home, "gateway.lock"), "a+")
+fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+lock.seek(0)
+lock.truncate()
+json.dump({**record, **plan.get("lock", {})}, lock)
+lock.flush()
+claim = {**record, **plan.get("pid_file", {})}
+if "start_shift" in plan:
+    claim["start_time"] = record["start_time"] + plan["start_shift"]
+with open(os.path.join(home, "gateway.pid"), "w") as handle:
+    json.dump(claim, handle)
+note("ready")
+while True:
+    time.sleep(0.05)
+"""
+
+#: The argv ``spawn_unmanaged_gateway`` gives the daemon (``hermes_cli/gateway_runtime_start.py``).
+GATEWAY_ARGV = ("-m", "hermes_cli.main", "--profile", "default", "gateway", "run", "--quiet", "--idle-exit")
+
+
+class FakeGateway:
+    """A stand-in for Hermes 0.22's gateway daemon of one ``HERMES_HOME``: holds ``gateway.lock``
+    with its record and writes ``gateway.pid`` as ``gateway/status.py`` does; notes the signals it
+    gets. A real process (SKAZ signals real pids), never Hermes."""
+
+    def __init__(self, directory: Path, home: Path, *, argv: tuple[str, ...] = GATEWAY_ARGV,
+                 plan: dict[str, Any] | None = None) -> None:
+        import os
+        import subprocess
+        import time
+
+        directory.mkdir(parents=True, exist_ok=True)
+        script = directory / "fake-gateway.py"
+        script.write_text(_GATEWAY, encoding="utf-8")
+        self.home = home
+        self.log = directory / f"gateway-{len(list(directory.glob('gateway-*.log')))}.log"
+        self.log.touch()
+        env = {**os.environ, "FAKE_GATEWAY_HOME": str(home), "FAKE_GATEWAY_LOG": str(self.log),
+               "FAKE_GATEWAY_PLAN": json.dumps(plan or {})}
+        self.process = subprocess.Popen([sys.executable, str(script), *argv], env=env, start_new_session=True,
+                                        stdin=subprocess.DEVNULL)
+        deadline = time.monotonic() + 15
+        while "ready" not in self.notes():
+            if self.process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f"fake gateway did not start: {self.notes()}")
+            time.sleep(0.02)
+
+    @property
+    def pid(self) -> int:
+        return self.process.pid
+
+    def notes(self) -> list[str]:
+        return self.log.read_text(encoding="utf-8").split()
+
+    def stopped(self, timeout: float = 5.0) -> bool:
+        import subprocess
+
+        try:
+            self.process.wait(timeout)
+        except subprocess.TimeoutExpired:
+            return False
+        return True
+
+    def close(self) -> None:
+        import contextlib
+        import os
+        import signal
+
+        if self.process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self.pid, signal.SIGKILL)
+            self.process.wait()

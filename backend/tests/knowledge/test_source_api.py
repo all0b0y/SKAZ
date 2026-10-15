@@ -154,3 +154,19 @@ async def test_add_link_and_classify(kb_app: Any, kb_client: httpx.AsyncClient,
         "/kb/links/classify", json={"url": "https://youtu.be/dQw4w9WgXcQ", "probe": False}
     )
     assert youtube.json()["label"] == "YouTube · video" and youtube.json()["platform"] == "youtube"
+
+
+async def test_a_pdf_named_by_its_file_gets_a_cleaned_name(
+    kb_client: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    """No title inside the PDF (a scan): the file name is the name, cleaned like any title SKAZ derives."""
+    await kb_client.post("/kb/library", json={})
+    scan = tmp_path / "Почему фондовый рынок США стал ПОМОЙКОЙ?.pdf"
+    scan.write_bytes(make_pdf([b"q 612 0 0 792 0 0 cm /Im1 Do Q\n"], image=True))
+    added = await kb_client.post("/kb/materials/file", json={"path": str(scan), "folder_id": INBOX_ID})
+    assert added.status_code == 201, added.text
+    assert added.json()["material"]["title"] == "Почему фондовый рынок США стал ПОМОЙКОЙ"
+    typed = await kb_client.post(
+        "/kb/materials/file", json={"path": str(scan), "folder_id": INBOX_ID, "title": "Why?"}
+    )
+    assert typed.status_code == 422 and "can't contain ?" in typed.json()["detail"]

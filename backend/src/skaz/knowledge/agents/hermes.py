@@ -8,7 +8,8 @@ for that folder in Terminal; SKAZ never sees keys or sign-ins.
 
 Tool limits (checked 2026-10-15 against hermes-agent.nousresearch.com/docs
 user-guide/features/acp, user-guide/managed-scope and the source of
-v0.21.5+6627.g4bb9e57):
+v0.21.5+6627.g4bb9e57; re-read 2026-10-16 in the source of v0.22.1+179.gb51e8b8,
+see "Hermes 0.22" below):
 
 * A managed-scope layer (``HERMES_MANAGED_DIR=<data_dir>/agents/hermes-policy``,
   ``config.yaml`` there) pins ``platform_toolsets.acp: [no_mcp]`` (no built-in
@@ -21,7 +22,37 @@ v0.21.5+6627.g4bb9e57):
   model call) and refuses the run if anything but SKAZ tools is listed.
   Offline check on the installed build: "No tools available." with the policy,
   23 tools without it.
-* Permission requests are always answered with the reject option.
+* Permission requests are answered with the reject option — except, while SKAZ's
+  own ``session/set_model`` is in flight, Hermes 0.22's confirmation of a guarded
+  switch to exactly the model the user picked in SKAZ (decision B18,
+  :func:`model_switch_option`).
+
+Hermes 0.22 (source of v0.22.1+179.gb51e8b8, read only — no Hermes was run):
+``hermes acp`` is a viewer of a per-``HERMES_HOME`` gateway daemon that owns
+sessions, MCP and execution (``acp_adapter/entry.py`` "MCP discovery and
+execution belong to the gateway daemon"; ``server.py`` ``HermesACPAgent.__new__``
+→ ``gateway_server.GatewayACPAgent``). The client starts the daemon for SKAZ's
+folder with its own environment, ``HERMES_MANAGED_DIR`` and ``HERMES_RUNTIME_DIR``
+included (``hermes_cli/gateway_client.py`` ``connect_gateway`` →
+``gateway_runtime.ensure_gateway_runtime`` → ``gateway_runtime_start.py``
+``spawn_unmanaged_gateway``: ``os.environ`` minus ``DAEMON_STRIPPED_ENV``), and
+refuses a daemon of another home (``gateway_server.py`` ``_client``:
+``profile_mismatch``). The policy still applies: ``session.create`` reads the
+config through ``gateway/run.py`` ``_load_gateway_config`` (managed overlay,
+``hermes_cli/config_effective.py``) and ``gateway/session_policy.py``
+``_resolve_toolsets`` takes ``_get_platform_tools(config, "acp")`` —
+``platform_toolsets.acp`` with ``agent.disabled_toolsets`` subtracted last
+(``hermes_cli/tools_config.py`` ``_get_platform_tools``); the agent is built with
+those toolsets (``gateway/session_execution.py`` ``_build_fresh_agent``). The
+MCP servers from ``session/new`` are frozen into the session as
+``editor_skaz_<8 hex>`` (``gateway/session_local_mcp.py`` ``_server_names``,
+``rebind_editor_mcp``): toolset ``mcp-editor_skaz_<tag>``, tools
+``mcp__editor_skaz_<tag>__<tool>``. ``/tools`` is answered by
+``acp_adapter/gateway_commands.py`` ``_tools_text`` grouped by toolset (or
+``Enabled toolsets: …`` before the session's tools are built);
+:func:`tools_listing_allowed` reads both formats and accepts only SKAZ's toolset.
+The daemon may outlive the ``hermes acp`` process (it ends itself when idle); SKAZ
+stops the one of its own folder when it quits (decision B18, ``hermes_gateway.py``).
 
 History (review B2 #4): Hermes ACP saves every prompted session — the whole
 SKAZ prompt: question, transcript, source excerpts — to ``HERMES_HOME/state.db``
@@ -63,7 +94,7 @@ import signal
 import subprocess
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -99,6 +130,7 @@ from .engine import (
     ToolResult,
     Usage,
 )
+from .hermes_gateway import GatewayDaemon, find_gateway
 from .hermes_launchers import LauncherTampered, LauncherWatch, launcher_files, user_store
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .registry import FirstRun
@@ -108,7 +140,8 @@ logger = logging.getLogger(__name__)
 
 #: Oldest Hermes build SKAZ verified (ACP session MCP servers, platform_toolsets.acp,
 #: agent.disabled_toolsets, managed scope via HERMES_MANAGED_DIR, ``/tools`` in ACP):
-#: 0.21.5+6627.g4bb9e57. Older tags are refused; the per-run ``/tools`` check guards newer ones.
+#: 0.21.5+6627.g4bb9e57 (run offline); 0.22.1+179.gb51e8b8 checked from its source (gateway ACP,
+#: toolset-grouped ``/tools``). Older tags are refused; the per-run ``/tools`` check guards newer ones.
 MIN_HERMES_VERSION: Version = (0, 21, 5)
 _VERSION = re.compile(r"Hermes Agent v(\d+)\.(\d+)\.(\d+)")
 _INSTALL_DIR = re.compile(r"^Install directory:\s*(.+)$", re.MULTILINE)
@@ -116,6 +149,10 @@ NOT_INSTALLED = "Hermes Agent is not installed."
 NO_PROVIDER = "Choose a model and provider for Hermes in its setup (opened from SKAZ)."
 SETUP_AUTH_METHOD = "hermes-setup"
 NO_TOOLS_LISTING = "No tools available."
+_ENABLED_TOOLSETS = "Enabled toolsets:"
+#: Hermes 0.22 registers an ACP client's MCP server as ``editor_<name>_<8 hex>`` (one per session).
+_EDITOR_TOOLSET = re.compile(rf"mcp-editor_{MCP_SERVER_NAME}_(?P<tag>[0-9a-f]{{8}})")
+_EDITOR_TOOL = re.compile(rf"mcp__editor_{MCP_SERVER_NAME}_[0-9a-f]{{8}}__(?P<tool>.+)")
 SETUP_TITLE = "SKAZ opened the Hermes model setup for SKAZ's own Hermes folder."
 LIMITS_NOT_APPLIED = "Hermes did not apply SKAZ's tool limits, so SKAZ stopped the run. Update Hermes."
 CHECKED_FILE = "hermes-checked.json"
@@ -136,15 +173,19 @@ FIRST_CHECK = ("SKAZ checks once that Hermes Agent runs with SKAZ's own Hermes f
 FIRST_CHECK_NOTE = ("The check starts Hermes once with SKAZ's own Hermes folder, on the Hermes you "
                     "installed. Your ~/.hermes stays untouched. Nothing starts until you press Check.")
 #: Every toolset Hermes ships (core + platform + known plugin toolsets), all disabled for SKAZ.
+#: 0.22 added bot_room … yuanbao (``toolsets.py`` TOOLSETS of v0.22.1+179.gb51e8b8).
 DISABLED_TOOLSETS = (
-    "a2a", "browser", "clarify", "code_execution", "computer_use", "context_engine", "cronjob",
-    "delegation", "discord", "discord_admin", "file", "homeassistant", "image_gen", "kanban", "memory",
-    "messaging", "moa", "session_search", "skills", "spotify", "terminal", "todo", "tts", "vision", "web",
-    "youtube",
+    "a2a", "bot_room", "browser", "catalog", "clarify", "code_execution", "coding", "computer_use",
+    "connections", "context_engine", "cronjob", "debugging", "delegation", "desktop_ui", "discord",
+    "discord_admin", "feishu_doc", "feishu_drive", "file", "homeassistant", "image_gen", "kanban", "memory",
+    "messaging", "moa", "onboarding", "project", "search", "session_search", "skills", "spotify", "terminal",
+    "todo", "tts", "video", "video_gen", "vision", "web", "x_search", "youtube", "yuanbao",
 )
 HERMES_POLICY: dict[str, Any] = {
     "platform_toolsets": {"acp": ["no_mcp"]},
-    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS)},
+    # ``coding_context: focus`` would swap ``platform_toolsets.acp`` for the coding toolsets in a code
+    # folder (0.22 ``gateway/session_policy.py:310-312, 433``); SKAZ's sessions never take that posture.
+    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS), "coding_context": "off"},
     "memory": {"memory_enabled": False, "user_profile_enabled": False},
     "skills": {"project_discovery": False, "external_dirs": []},
 }
@@ -173,16 +214,58 @@ def ensure_private_home(path: Path, *, home: Path | None = None) -> Path:
     return resolved
 
 
+def _skaz_toolset_tag(toolset: str) -> str | None:
+    """Hermes 0.22: the per-session tag of SKAZ's MCP toolset (``mcp-editor_skaz_<tag>``), else ``None``."""
+    match = _EDITOR_TOOLSET.fullmatch(toolset)
+    return match["tag"] if match else None
+
+
+def _skaz_toolset_line(toolset: str, tools: str) -> bool:
+    """``mcp-editor_skaz_<tag>: mcp__editor_skaz_<tag>__a, …`` — SKAZ's toolset holding only its own tools."""
+    tag = _skaz_toolset_tag(toolset)
+    if tag is None:
+        return False
+    prefix = f"mcp__editor_{MCP_SERVER_NAME}_{tag}__"
+    names = [name.strip() for name in tools.split(",")]
+    return all(name.startswith(prefix) and len(name) > len(prefix) for name in names)
+
+
 def tools_listing_allowed(listing: str) -> bool:
-    """``/tools`` output lists only SKAZ MCP tools (or none at all)."""
+    """``/tools`` output lists only SKAZ MCP tools (or none at all).
+
+    Hermes 0.21 (in-process ACP, ``acp_adapter/commands.py``): ``Available tools (N):`` then one
+    ``  <tool>: <description>`` line per tool, tools named ``mcp__skaz__<tool>``.
+    Hermes 0.22 (gateway ACP, ``acp_adapter/gateway_commands.py`` ``_tools_text``): the same header
+    then ``  <toolset>: <tool>, <tool>`` per toolset, or ``Enabled toolsets: <a>, <b>`` while the
+    session's tools are not built yet; SKAZ's server is the only acceptable toolset there.
+    """
     text = listing.strip()
     if text == NO_TOOLS_LISTING:
         return True
+    if text.startswith(_ENABLED_TOOLSETS):
+        toolsets = [name.strip() for name in text[len(_ENABLED_TOOLSETS):].split(",")]
+        return all(_skaz_toolset_tag(name) is not None for name in toolsets)
     lines = text.splitlines()
     if not lines or not lines[0].startswith("Available tools"):
         return False
-    names = [line.strip().split(":", 1)[0].strip() for line in lines[1:] if line.strip()]
-    return all(name.startswith(MCP_TOOL_PREFIX) for name in names)
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        key, _sep, rest = line.strip().partition(":")
+        key = key.strip()
+        if key.startswith(MCP_TOOL_PREFIX):
+            continue  # 0.21: one SKAZ tool and its description
+        if not _skaz_toolset_line(key, rest):
+            return False
+    return True
+
+
+def hermes_tool_name(qualified: str) -> str:
+    """The SKAZ tool behind a Hermes tool name: ``mcp__skaz__search`` (0.21) and
+    ``mcp__editor_skaz_<tag>__search`` (0.22, ``gateway/session_local_mcp.py`` ``_server_names``)
+    both become ``search``; anything else is returned unchanged."""
+    match = _EDITOR_TOOL.fullmatch(qualified)
+    return match["tool"] if match else tool_name(qualified)
 
 
 def classify_error(text: str) -> tuple[FailureKind, str]:
@@ -223,6 +306,7 @@ class _ActiveRun:
     connection: AcpConnection | None = None
     session_id: str | None = None
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
+    requests: _Requests = field(default_factory=lambda: _Requests())
 
 
 class _Refused(Exception):
@@ -231,16 +315,78 @@ class _Refused(Exception):
         self.failure = failure
 
 
-async def _deny_requests(method: str, params: Mapping[str, Any]) -> dict[str, Any]:
-    """Permission prompts are always rejected; file/terminal access is not offered at all."""
-    if method == "session/request_permission":
-        options = params.get("options") or []
-        for kind in ("reject_once", "reject_always"):
-            for option in options:
-                if isinstance(option, dict) and option.get("kind") == kind and option.get("optionId"):
-                    return {"outcome": {"outcome": "selected", "optionId": option["optionId"]}}
-        return {"outcome": {"outcome": "cancelled"}}
-    raise AcpError(METHOD_NOT_FOUND, "Not available in SKAZ.")
+#: Hermes 0.22's confirmation of a guarded model switch (``acp_adapter/gateway_server.py``
+#: ``_model_confirmer``): tool call ``model-confirm-<12 hex>``, kind ``other``, ``rawInput`` the
+#: switch's resolved target, option ``allow_once`` ("Switch anyway").
+_MODEL_CONFIRM = re.compile(r"model-confirm-[0-9a-f]{12}")
+
+
+def _reject(params: Mapping[str, Any]) -> dict[str, Any]:
+    options = params.get("options") or []
+    for kind in ("reject_once", "reject_always"):
+        for option in options:
+            if isinstance(option, dict) and option.get("kind") == kind and option.get("optionId"):
+                return {"outcome": {"outcome": "selected", "optionId": option["optionId"]}}
+    return {"outcome": {"outcome": "cancelled"}}
+
+
+def model_switch_option(params: Mapping[str, Any], session_id: str, model_id: str) -> str | None:
+    """The ``allow_once`` option of Hermes' confirmation of switching ``session_id`` to exactly
+    ``model_id`` (decision B18), else None.
+
+    The target is ``rawInput`` ``{model, provider, guards}`` — what ``switch_model`` resolved from
+    SKAZ's ``provider:model`` id (``gateway/session_mutation_model.py`` ``_selection_guard_refusal``:
+    ``target_model``/``target_provider``); SKAZ's id is ``encode_model_choice(provider, model)``
+    (``acp_adapter/model_catalog.py``). Anything else in the request makes it not this one.
+    """
+    if params.get("sessionId") != session_id:
+        return None
+    call = params.get("toolCall")
+    if not isinstance(call, dict) or call.get("kind") != "other":
+        return None
+    if not isinstance(call.get("toolCallId"), str) or not _MODEL_CONFIRM.fullmatch(call["toolCallId"]):
+        return None
+    target = call.get("rawInput")
+    if not isinstance(target, dict) or not set(target) <= {"model", "provider", "guards"}:
+        return None
+    model, provider = target.get("model"), target.get("provider")
+    if not (isinstance(model, str) and isinstance(provider, str) and model.strip() and provider.strip()):
+        return None
+    if f"{provider.strip().lower()}:{model.strip()}" != model_id:
+        return None
+    for option in params.get("options") or []:
+        if isinstance(option, dict) and option.get("kind") == "allow_once" and option.get("optionId"):
+            return str(option["optionId"])
+    return None
+
+
+class _Requests:
+    """Answers Hermes' own requests on one ACP connection.
+
+    File/terminal access is not offered at all. Permission prompts are rejected — all but one
+    (decision B18): while SKAZ's own ``session/set_model`` is in flight, Hermes 0.22's
+    confirmation of a guarded switch to exactly the model the user picked in SKAZ is approved.
+    """
+
+    def __init__(self) -> None:
+        self._switch: tuple[str, str] | None = None
+
+    @contextlib.contextmanager
+    def switching(self, session_id: str, model_id: str) -> Iterator[None]:
+        self._switch = (session_id, model_id)
+        try:
+            yield
+        finally:
+            self._switch = None
+
+    async def __call__(self, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+        if method == "session/request_permission":
+            if self._switch is not None:
+                option = model_switch_option(params, *self._switch)
+                if option is not None:
+                    return {"outcome": {"outcome": "selected", "optionId": option}}
+            return _reject(params)
+        raise AcpError(METHOD_NOT_FOUND, "Not available in SKAZ.")
 
 
 class HermesEngine:
@@ -269,6 +415,7 @@ class HermesEngine:
         self.current_model: str | None = None
         self._history_tasks: set[asyncio.Task[None]] = set()
         self._swept = False
+        self._gateway: GatewayDaemon | None = None
 
     @property
     def id(self) -> EngineId:
@@ -400,14 +547,21 @@ class HermesEngine:
         if located is None or not self.set_up() or not self.checked():
             return ()
         work = self.runs_dir / f"models-{uuid.uuid4().hex}"
+        session_id = ""
         try:
             async with self._acp(located, work) as (connection, _initialized):
                 session = await connection.request("session/new", {"cwd": str(work), "mcpServers": []},
                                                    timeout=self._start_timeout)
+                # Hermes 0.22 keeps a session from ``session/new`` on (not only once prompted).
+                session_id = str(session.get("sessionId") or "")
+                if session_id:
+                    self._remember(session_id)
         except (_Refused, AcpError, AcpClosed, TimeoutError, LauncherTampered):
             return ()
         finally:
             shutil.rmtree(work, ignore_errors=True)
+            if session_id:  # the ACP process has ended here
+                self._in_background(self._forget([session_id]))
         state = session.get("models") or {}
         current = state.get("currentModelId")
         self.current_model = current if isinstance(current, str) else None
@@ -596,7 +750,8 @@ class HermesEngine:
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
         tail: deque[str] = deque(maxlen=60)
         drain = asyncio.create_task(_drain(process.stderr, tail))
-        connection = AcpConnection(process.stdout, process.stdin, on_request=_deny_requests)
+        connection = AcpConnection(process.stdout, process.stdin,
+                                   on_request=active.requests if active is not None else _Requests())
         if active is not None:
             active.connection = connection
         try:
@@ -629,6 +784,36 @@ class HermesEngine:
             await asyncio.gather(drain, return_exceptions=True)
             with contextlib.suppress(LauncherTampered):
                 watch.check()  # a late change pointing into SKAZ's folder is put back here too
+            with contextlib.suppress(OSError):
+                await disk_call(self.adopt_gateway)  # Hermes 0.22 started (or used) its gateway
+
+    # -- Hermes 0.22 gateway daemon (decision B18) ---------------------------------
+
+    def adopt_gateway(self) -> GatewayDaemon | None:
+        """Register the running gateway of SKAZ's own Hermes folder with the app's children, so
+        quitting SKAZ stops it (``knowledge.shutdown``); never a process of another folder
+        (``hermes_gateway.find_gateway``). Blocking: call it off the event loop."""
+        daemon = find_gateway(self.home)
+        if daemon is None:
+            return None
+        known = self._gateway
+        if known is None or known.pid != daemon.pid or known.returncode is not None:
+            if known is not None:
+                CHILDREN.discard(known)
+            self._gateway = known = daemon
+            CHILDREN.add(daemon, group=True)
+        return known
+
+    async def aclose(self, *, wait_s: float = 2.0) -> None:
+        """Backend shutdown: stop the gateway of SKAZ's Hermes folder (a planned stop for Hermes) and
+        give it ``wait_s`` to end; ``knowledge.shutdown`` sends SIGKILL to it if it is still there."""
+        with contextlib.suppress(OSError):
+            daemon = await disk_call(self.adopt_gateway)
+            if daemon is None or not await disk_call(daemon.deliver, signal.SIGTERM):
+                return
+            deadline = asyncio.get_running_loop().time() + wait_s
+            while daemon.returncode is None and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.05)
 
     def _startup_failure(self, tail: deque[str], error: BaseException) -> Failed:
         text = " ".join(tail)
@@ -728,7 +913,7 @@ class HermesEngine:
         active.session_id = session_id
         if session_id:
             self._remember(session_id)  # before any prompt: Hermes saves the session from the first one
-        await self._select_model(turn, session, connection, session_id)
+        await self._select_model(turn, session, connection, session_id, active.requests)
         listing = await self._local_command(connection, session_id, "/tools")
         if not tools_listing_allowed(listing):
             raise _Refused(Failed(run_id, "incompatible", LIMITS_NOT_APPLIED))
@@ -768,7 +953,7 @@ class HermesEngine:
             await asyncio.gather(watcher, return_exceptions=True)
 
     async def _select_model(self, turn: AgentTurn, session: Mapping[str, Any], connection: AcpConnection,
-                            session_id: str) -> None:
+                            session_id: str, requests: _Requests) -> None:
         if not turn.model:
             return
         state = session.get("models") or {}
@@ -778,9 +963,10 @@ class HermesEngine:
                                   "This model is not set up in Hermes. Choose it in the Hermes setup."))
         if state.get("currentModelId") != turn.model:
             try:
-                await connection.request("session/set_model",
-                                         {"sessionId": session_id, "modelId": turn.model},
-                                         timeout=self._start_timeout)
+                with requests.switching(session_id, turn.model):
+                    await connection.request("session/set_model",
+                                             {"sessionId": session_id, "modelId": turn.model},
+                                             timeout=self._start_timeout)
             except (AcpError, AcpClosed, TimeoutError) as error:
                 raise _Refused(Failed(turn.run_id, "incompatible",
                                       "Hermes could not switch to this model.")) from error
@@ -816,7 +1002,7 @@ class HermesEngine:
                 name = str(update.get("title") or "").split(":", 1)[0].strip()
                 names[call_id] = name
                 raw = update.get("rawInput")
-                yield ToolCall(run_id, call_id, tool_name(name), raw if isinstance(raw, dict) else {})
+                yield ToolCall(run_id, call_id, hermes_tool_name(name), raw if isinstance(raw, dict) else {})
             elif kind == "tool_call_update" and update.get("status") in ("completed", "failed"):
                 call_id = str(update.get("toolCallId") or "")
                 yield ToolResult(run_id, call_id, _tool_output(update), update.get("status") == "failed")
