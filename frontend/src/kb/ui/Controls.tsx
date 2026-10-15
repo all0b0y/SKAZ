@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useRef, type ReactNode } from 'react';
 import { m } from 'motion/react';
 
 export interface SwitchProps {
@@ -48,6 +48,7 @@ export interface SegmentedProps<T extends string> {
 /** One-of-N choice (radiogroup). Arrow keys move and select, like native radios. */
 export function Segmented<T extends string>({ value, options, onChange, label, disabled = false, size = 'md' }: SegmentedProps<T>) {
   const group = useId();
+  const buttons = useRef(new Map<T, HTMLButtonElement>());
   const enabled = options.filter((o) => !o.disabled && !disabled);
   const move = (dir: 1 | -1, from: T) => {
     if (enabled.length === 0) return;
@@ -55,7 +56,10 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
     const next = enabled[(i + dir + enabled.length) % enabled.length];
     if (!next) return;
     onChange(next.value);
-    requestAnimationFrame(() => document.getElementById(`${group}-${next.value}`)?.focus());
+    // Focus moves now, with the choice, like native radios: the button already exists (only its
+    // tabIndex changes on re-render), so a later frame would only let the next key start from the
+    // old option.
+    buttons.current.get(next.value)?.focus();
   };
   return (
     <div role="radiogroup" aria-label={label} aria-disabled={disabled || undefined} className={`kb-seg kb-seg--${size}`}>
@@ -65,6 +69,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
           <button
             key={o.value}
             id={`${group}-${o.value}`}
+            ref={(el) => { if (el) buttons.current.set(o.value, el); else buttons.current.delete(o.value); }}
             type="button"
             role="radio"
             aria-checked={selected}
