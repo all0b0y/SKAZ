@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Literal
 
 from ...native_io import disk_call
 from ..agents.engine import EngineId
-from ..agents.hermes import PREPARING_NOTE
+from ..agents.hermes import CHECKING_NOTE
 from ..agents.registry import ENGINE_IDS, ENGINE_NAMES
 from ..errors import KnowledgeError, NotFound
 from .keys import KEY_PROVIDERS, LABELS, KeyChecks, KeyProvider
@@ -115,9 +115,9 @@ class SettingsHealth:
         for engine in ENGINE_IDS:
             name = ENGINE_NAMES[engine]
             running = hub.installs.running_for(engine)
-            if running is not None and running.action == "prepare":
+            if running is not None and running.action == "first_check":
                 problems.append(Problem(
-                    f"agent-{engine}", "accounts", "progress", f"{name} is getting ready", PREPARING_NOTE,
+                    f"agent-{engine}", "accounts", "progress", f"{name} is being checked", CHECKING_NOTE,
                     "Everything else works; other agents can answer meanwhile.",
                     f"Chats and wiki work with {name} once it is ready.",
                 ))
@@ -129,8 +129,8 @@ class SettingsHealth:
             if state == "ready":
                 continue
             actions: tuple[ProblemAction, ...] = ()
-            if action in ("install", "update", "prepare"):
-                label = {"install": "Install", "update": "Update", "prepare": "Prepare (~1.5 GB)"}[action]
+            if action in ("install", "update", "first_check"):
+                label = {"install": "Install", "update": "Update", "first_check": "Check"}[action]
                 actions = (ProblemAction(action, label, True),)
             elif action == "login" and engine != "codex":
                 actions = (ProblemAction("login", "Sign in", True),)
@@ -138,8 +138,8 @@ class SettingsHealth:
                 actions = (ProblemAction("check", "Check again", True),)
             title = {"not_installed": f"{name} isn't installed", "outdated": f"{name} needs an update",
                      "signed_out": f"{name}: sign-in needed"}.get(state, f"{name} isn't ready")
-            if action == "prepare":
-                title = f"{name} needs to prepare its environment"
+            if action == "first_check":
+                title = f"{name} needs a one-time check"
             problems.append(Problem(
                 f"agent-{engine}", "accounts", "error", title,
                 view.status.reason or f"{name} can't be used right now.",
@@ -266,7 +266,7 @@ class SettingsHealth:
     async def _agent_action(self, problem: Problem, action: str) -> None:
         engine: EngineId = problem.id.removeprefix("agent-")  # type: ignore[assignment]
         hub = self._runtime.kb_agents
-        if action in ("install", "update", "prepare"):
+        if action in ("install", "update", "first_check"):
             hub.installs.start(engine, action)  # type: ignore[arg-type]
             hub.registry.forget(engine)
         elif action == "login":

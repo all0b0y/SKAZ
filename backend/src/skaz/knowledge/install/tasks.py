@@ -136,8 +136,8 @@ class InstallManager:
                     raise InstallBusy(f"{task.recipe.name} is already being installed or updated.")
                 return task
         recipe = self.recipes[engine]
-        if action == "prepare" and not recipe.can_prepare:
-            raise InstallBusy(f"{recipe.name} has nothing to prepare.")
+        if action == "first_check" and not recipe.first_check:
+            raise InstallBusy(f"{recipe.name} has nothing to check first.")
         task = InstallTask(uuid.uuid4().hex, engine, action, recipe)
         self._tasks[task.id] = task
         self._running[task.id] = asyncio.create_task(self._run(task))
@@ -242,8 +242,8 @@ class InstallManager:
                                   "window to check it, or install manually.")
         elif status.incompatible:
             task.finish("failed", status.reason or f"The installed {name} can't be used by SKAZ.")
-        elif task.action == "prepare":
-            task.log(f"{name}'s environment for SKAZ is ready.")
+        elif task.action == "first_check":
+            task.log(f"{name} runs with SKAZ's own Hermes folder.")
             task.finish("succeeded")
         else:
             task.log(f"{name} {status.version or ''} is ready.".replace("  ", " "))

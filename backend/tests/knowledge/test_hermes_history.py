@@ -64,7 +64,7 @@ async def test_a_session_hermes_could_not_delete_is_swept_on_the_next_start(tmp_
     assert restarted.pending_history() == []
 
 
-async def test_the_sweep_never_starts_hermes_before_it_was_prepared(tmp_path: Path) -> None:
+async def test_the_sweep_never_starts_hermes_before_its_first_check(tmp_path: Path) -> None:
     fake = FakeCli(tmp_path / "bin", "hermes", scenario())
     engine = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home",
                           first_run_gate=True)
@@ -72,7 +72,7 @@ async def test_the_sweep_never_starts_hermes_before_it_was_prepared(tmp_path: Pa
     assert fake.records() == []
 
 
-async def test_app_start_sweeps_in_the_background_once_hermes_is_prepared(tmp_path: Path) -> None:
+async def test_app_start_sweeps_in_the_background_once_hermes_was_checked(tmp_path: Path) -> None:
     """G7: the leftovers of an earlier run go at app start, not only at the first use of Hermes."""
     from skaz.knowledge.agents.hub import build_agents_hub
     from skaz.knowledge.agents.registry import CodexStatusEngine
@@ -101,7 +101,7 @@ async def test_app_start_sweeps_in_the_background_once_hermes_is_prepared(tmp_pa
     assert ["prune", "--source", "acp", "--yes"] not in later
 
 
-async def test_app_start_never_touches_an_unprepared_hermes(tmp_path: Path) -> None:
+async def test_app_start_never_touches_an_unchecked_hermes(tmp_path: Path) -> None:
     from skaz.knowledge.agents.hub import build_agents_hub
     from skaz.knowledge.agents.registry import CodexStatusEngine
 

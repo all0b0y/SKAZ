@@ -9,7 +9,7 @@ from ...gateways.codex_connection import MIN_CODEX_VERSION
 from ...native_io import disk_call
 from ..agents.claude_code import MIN_CLAUDE_VERSION
 from ..agents.engine import EngineId
-from ..agents.hermes import MIN_HERMES_VERSION
+from ..agents.hermes import CHECKING_NOTE, MIN_HERMES_VERSION
 from ..agents.hub import AgentsHub
 from ..agents.registry import AgentView, EngineUnavailable
 from ..errors import KnowledgeError
@@ -63,9 +63,8 @@ def agent_view(hub: AgentsHub, view: AgentView) -> KbAgent:
     return KbAgent(
         id=view.engine, name=view.name, state=state, installed=status.installed, version=status.version,
         min_version=MIN_VERSIONS[view.engine], signed_in=status.signed_in, incompatible=status.incompatible,
-        reason=first.note if state == "preparing" and first is not None else status.reason, action=action,
-        first_run=(KbAgentFirstRun(required_bytes=first.required_bytes, prepared=first.prepared,
-                                   note=first.note) if first is not None else None),
+        reason=CHECKING_NOTE if state == "preparing" else status.reason, action=action,
+        first_run=(KbAgentFirstRun(checked=first.checked, note=first.note) if first is not None else None),
         models=[KbAgentModel(id=m.id, label=m.label, efforts=list(m.efforts), default_effort=m.default_effort)
                 for m in view.models],
         current_model=view.current_model, install=_install_info(hub.installs.recipes[view.engine]),

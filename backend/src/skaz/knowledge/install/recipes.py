@@ -24,10 +24,10 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
 
 None of these needs ``sudo``; SKAZ refuses any command that would use it.
 
-Hermes' first start in a new ``HERMES_HOME`` prepares its own environment
-(about 1.5 GB, a few minutes; decision B10). SKAZ never lets that happen on
-its own: the ``prepare`` action runs ``hermes acp --check`` once for SKAZ's
-Hermes folder, with the same log as an installation, only when the user asks.
+Hermes' first check (decision B10, X5): SKAZ never starts Hermes with its own
+folder by itself; the ``first_check`` action runs ``hermes acp --check`` once for
+SKAZ's Hermes folder (on the user's own tool store, ``HERMES_RUNTIME_DIR`` — nothing
+is downloaded), with the same log as an installation, only when the user asks.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from typing import Literal
 
 from ..agents.engine import EngineId
 
-Action = Literal["install", "update", "prepare"]
+Action = Literal["install", "update", "first_check"]
 CHECKED_ON = "2026-10-15"
 
 
@@ -62,8 +62,8 @@ class Recipe:
     manual_command: str
     plan: Callable[[Action], tuple[Step, ...]]
     checked_on: str = CHECKED_ON
-    #: The agent prepares its own environment on first use (``prepare`` action; Hermes only).
-    can_prepare: bool = False
+    #: SKAZ starts the agent only after a one-time check (``first_check`` action; Hermes only).
+    first_check: bool = False
 
 
 def _shell(command: str) -> tuple[str, ...]:
@@ -91,15 +91,13 @@ def _codex(action: Action) -> tuple[Step, ...]:
 #: in SKAZ's folder and re-point the user's launcher.
 SKAZ_HERMES_ENV = (("HERMES_HOME", "{hermes_home}"), ("HERMES_MANAGED_DIR", "{hermes_policy}"),
                    ("HERMES_RUNTIME_DIR", "{hermes_runtime}"))
-HERMES_PREPARE = Step("Prepare Hermes Agent's environment for SKAZ", ("{binary}", "acp", "--check"),
-                      env=SKAZ_HERMES_ENV)
-#: What Hermes needs on disk for its first start (B10); shown before the user starts it.
-HERMES_PREPARE_BYTES = 1_500_000_000
+HERMES_FIRST_CHECK = Step("Check that Hermes Agent runs with SKAZ's own Hermes folder",
+                          ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV)
 
 
 def _hermes(action: Action) -> tuple[Step, ...]:
-    if action == "prepare":
-        return (HERMES_PREPARE,)
+    if action == "first_check":
+        return (HERMES_FIRST_CHECK,)
     first = (Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL)) if action == "install"
              else Step("Update Hermes Agent", ("{binary}", "update")))
     return (
@@ -117,5 +115,5 @@ RECIPES: dict[EngineId, Recipe] = {
     "hermes": Recipe("hermes", "Hermes Agent", "hermes",
                      "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
                      "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", _hermes,
-                     can_prepare=True),
+                     first_check=True),
 }

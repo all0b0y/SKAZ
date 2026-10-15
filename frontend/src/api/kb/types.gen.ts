@@ -41,7 +41,7 @@ export interface KbAgent {
   signed_in: boolean;
   incompatible: boolean;
   reason: string | null;
-  action: "install" | "update" | "login" | "check" | "prepare" | null;
+  action: "install" | "update" | "login" | "check" | "first_check" | null;
   models: KbAgentModel[];
   current_model: string | null;
   install: KbAgentInstallInfo;
@@ -54,10 +54,9 @@ export interface KbAgentDefault {
   engine: "codex" | "claude_code" | "hermes";
 }
 
-/** Hermes prepares its own environment once (B10); nothing starts until the user asks. */
+/** Hermes is checked once with SKAZ's own folder (B10); nothing starts until the user asks. */
 export interface KbAgentFirstRun {
-  required_bytes: number;
-  prepared: boolean;
+  checked: boolean;
   note: string;
 }
 
@@ -418,13 +417,13 @@ export interface KbInstallLine {
 }
 
 export interface KbInstallStart {
-  action?: "install" | "update" | "prepare";
+  action?: "install" | "update" | "first_check";
 }
 
 export interface KbInstallTask {
   id: string;
   engine: "codex" | "claude_code" | "hermes";
-  action: "install" | "update" | "prepare";
+  action: "install" | "update" | "first_check";
   state: "running" | "succeeded" | "failed" | "cancelled";
   lines: KbInstallLine[];
   cursor: number;

@@ -17,10 +17,8 @@ const STATE_TEXT: Record<KbAgent['state'], string> = {
   outdated: 'Needs an update',
   signed_out: 'Not signed in',
   unavailable: 'Unavailable',
-  preparing: 'Preparing',
+  preparing: 'Checking',
 };
-
-const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 
 function tone(state: KbAgent['state']): 'ok' | 'warn' | 'err' {
   if (state === 'ready') return 'ok';
@@ -30,8 +28,9 @@ function tone(state: KbAgent['state']): 'ok' | 'warn' | 'err' {
 
 /**
  * One agent with its real state (v21): Connected / Not installed / Not signed in / Needs an
- * update, the action that fixes it, and the install log while a task runs. Hermes says honestly
- * that its first run prepares ~1.5 GB. Used by first launch and Settings → Accounts & keys.
+ * update, the action that fixes it, and the install log while a task runs. Hermes says that SKAZ
+ * checks it once with SKAZ's own folder before starting it (nothing is downloaded: it runs on the
+ * user's own Hermes). Used by first launch and Settings → Accounts & keys.
  */
 export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant?: 'card' | 'row' }) {
   const { agents: store } = useServices();
@@ -50,11 +49,11 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     return store.getState().followInstall(agent.id, taskId);
   }, [store, agent.id, taskId, install?.task.state]);
 
-  const act = async (what: 'install' | 'update' | 'prepare' | 'login' | 'check' | 'cancel' | 'logout') => {
+  const act = async (what: 'install' | 'update' | 'first_check' | 'login' | 'check' | 'cancel' | 'logout') => {
     setBusy(what);
     setMessage(null);
     const s = store.getState();
-    if (what === 'install' || what === 'update' || what === 'prepare') {
+    if (what === 'install' || what === 'update' || what === 'first_check') {
       const r = await s.install(agent.id, what);
       if (!r.ok) setMessage({ text: r.error, error: true });
     } else if (what === 'cancel') {
@@ -75,10 +74,10 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     setBusy(null);
   };
 
-  const hermesPrep = agent.id === 'hermes' && agent.first_run && !agent.first_run.prepared;
+  const firstCheck = agent.id === 'hermes' && agent.first_run && !agent.first_run.checked;
   const action = agent.action;
   const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again'
-    : action === 'prepare' ? 'Prepare' : null;
+    : action === 'first_check' ? 'Check' : null;
   const finished = install && install.task.state !== 'running' ? install.task : null;
 
   const status = (
@@ -94,7 +93,8 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {label && action && (
         <Button size="sm" variant="fill" busy={busy === action} onClick={() => void act(action)}>{label}</Button>
       )}
-      {action !== 'check' && (
+      {/* "Look again" means nothing before the first check: that check is the only "Check". */}
+      {action !== 'check' && action !== 'first_check' && (
         <Button size="sm" variant="quiet" busy={busy === 'check'} onClick={() => void act('check')}>Check</Button>
       )}
       {/* Only Codex signs in inside SKAZ (its own Codex profile); the others sign out in their own apps. */}
@@ -106,10 +106,10 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   const details = (
     <>
       {agent.reason && agent.state !== 'ready' && agent.state !== 'not_installed' && variant === 'card' && <p className="kb-agentcard__reason">{agent.reason}</p>}
-      {hermesPrep && agent.first_run && (
+      {firstCheck && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
-          <Icon name="warning" size={13} />
-          {agent.first_run.note || `The first check prepares Hermes’ environment: about ${gb(agent.first_run.required_bytes)}, a few minutes. Nothing starts until you press Prepare.`}
+          <Icon name="shield" size={13} />
+          {agent.first_run.note || 'SKAZ checks Hermes once with its own Hermes folder. Nothing starts until you press Check.'}
         </p>
       )}
       {(running || finished) && install && (
@@ -117,7 +117,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
           <div className="kb-installlog__head">
             {running ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" /> : <Icon name={finished?.state === 'succeeded' ? 'check' : 'error'} size={13} />}
             <span role="status">
-              {running ? (install.task.action === 'update' ? 'Updating…' : install.task.action === 'prepare' ? 'Preparing…' : 'Installing…')
+              {running ? (install.task.action === 'update' ? 'Updating…' : install.task.action === 'first_check' ? 'Checking…' : 'Installing…')
                 : finished?.state === 'succeeded' ? `Done${finished.version ? ` · ${finished.version}` : ''}`
                   : finished?.state === 'cancelled' ? 'Cancelled' : `Failed${finished?.reason ? `: ${finished.reason}` : ''}`}
             </span>

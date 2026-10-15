@@ -15,14 +15,14 @@ export interface AgentsData {
   agents: KbAgents | null;
   load: Load;
   error: string | null;
-  /** Install/update/prepare logs by engine. */
+  /** Install/update/first-check logs by engine. */
   installs: Partial<Record<EngineId, InstallView>>;
 }
 
 export interface AgentsActions {
   refresh: () => Promise<void>;
   setDefault: (engine: EngineId) => Promise<ActionResult>;
-  install: (engine: EngineId, action?: 'install' | 'update' | 'prepare') => Promise<ActionResult>;
+  install: (engine: EngineId, action?: 'install' | 'update' | 'first_check') => Promise<ActionResult>;
   /** Follow a running task's log; returns stop. */
   followInstall: (engine: EngineId, taskId: string) => () => void;
   cancelInstall: (engine: EngineId) => Promise<ActionResult>;
