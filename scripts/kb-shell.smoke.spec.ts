@@ -12,6 +12,8 @@ import { auditPanes, type PaneViolation } from './paneAudit';
 
 const root = path.resolve(__dirname, '..');
 const shots = process.env.SKAZ_KB_SHOTS ?? path.join(root, '.runtime', 'shots', 'kb-shell');
+/** Key package-2 screens on the real backend (I1); the orchestrator copies them where it wants. */
+const keyShots = process.env.SKAZ_I1_SHOTS ?? path.join(root, '.runtime', 'shots', 'kb-i1');
 const WIDTHS = [
   { width: 1440, height: 860 },
   { width: 1024, height: 720 },
@@ -25,7 +27,7 @@ let close: () => Promise<void>;
 let profileDir = '';
 const consoleErrors: string[] = [];
 
-interface Extra { kind: 'small-text' | 'empty-icon' | 'header-height' | 'offscreen'; selector: string; detail: string }
+interface Extra { kind: 'small-text' | 'empty-icon' | 'header-height' | 'offscreen' | 'chip-cut'; selector: string; detail: string }
 
 /** Checks beyond paneAudit: text under 12px (counter digits excepted), empty icons, fixed header heights. */
 function auditExtras(): Extra[] {
@@ -67,6 +69,17 @@ function auditExtras(): Extra[] {
   // Rail of the v39 summary: 36px icon buttons. The message field grows with its text, so its
   // height is checked as "unchanged between states" by anchors() instead of a fixed number.
   expectH('.kb-rail__item', 36);
+  // A source chip keeps its time/page in view and stays inside its pane (long titles shorten instead).
+  for (const chip of Array.from(document.querySelectorAll('.kb-chip'))) {
+    if (!visible(chip)) continue;
+    const pane = chip.closest('[data-pane]');
+    const c = chip.getBoundingClientRect();
+    const p = pane?.getBoundingClientRect();
+    const meta = chip.querySelector('.kb-chip__meta')?.getBoundingClientRect();
+    if ((p && c.right > p.right + 1) || (meta && meta.right > c.right + 1)) {
+      out.push({ kind: 'chip-cut', selector: describe(chip), detail: `${chip.textContent!.trim().slice(0, 40)} → ${Math.round(c.right)} / ${Math.round(p?.right ?? 0)}` });
+    }
+  }
   for (const el of Array.from(document.querySelectorAll('[data-pane]'))) {
     if (!visible(el)) continue;
     const r = el.getBoundingClientRect();
@@ -113,6 +126,17 @@ async function check(state: string, shot = true) {
   expect(extras, `${state}: extra violations ${JSON.stringify(extras, null, 1)}`).toEqual([]);
 }
 
+/** Audit a package-2 screen; its screenshot goes with the key screens. */
+async function checkKey(state: string) {
+  await check(state, false);
+  await page.screenshot({ path: path.join(keyShots, `${state}.png`) });
+}
+
+/** A request through the real preload bridge and IPC policy, as the renderer makes it. */
+async function bridgeRequest<T>(method: string, reqPath: string): Promise<{ ok: boolean; status: number; data?: T; detail?: string }> {
+  return page.evaluate(({ m, p }) => window.skaz.request({ method: m as 'GET', path: p }), { m: method, p: reqPath }) as never;
+}
+
 async function setView(width: number, height: number, theme: 'light' | 'dark') {
   await page.setViewportSize({ width, height });
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'no-preference' });
@@ -153,6 +177,7 @@ test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({}, testInfo) => {
   testInfo.setTimeout(120_000);
   fs.mkdirSync(shots, { recursive: true });
+  fs.mkdirSync(keyShots, { recursive: true });
   ({ app, close } = await launchIsolatedSmoke('skaz-kb-shell-'));
   profileDir = fs.realpathSync(await app.evaluate(({ app: main }) => main.getPath('userData')));
   page = await app.firstWindow();
@@ -308,7 +333,8 @@ test('settings: every section at every width and theme', async () => {
       const dialog = page.getByRole('dialog', { name: 'Settings' });
       await expect(dialog).toBeVisible();
       for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Storage', 'Privacy', 'Appearance', 'About']) {
-        await dialog.getByRole('navigation').getByRole('button', { name: section, exact: true }).click();
+        // A section with a problem on this Mac is named "<section> Needs attention" (the dot).
+        await dialog.getByRole('navigation').getByRole('button', { name: new RegExp(`^${section}`) }).click();
         const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance') && v.width !== 1024;
         await check(`settings-${section.replace(/\W+/g, '-').toLowerCase()}-${v.width}-${theme}`, shot);
       }
@@ -330,6 +356,152 @@ test('folder create with a name collision shows the backend reason in place', as
   await expect(side.getByRole('alert')).toContainText('already exists');
   await check('shell-folder-collision-1440-light');
   await page.keyboard.press('Escape');
+});
+
+/** A concept page written by the backend's own Library code (no model): one claim citing Lecture 8. */
+function seedPage(materialId: string, folderId: string) {
+  const libRoot = path.join(profileDir, 'Documents', 'SKAZ');
+  const script = `
+import sys
+from pathlib import Path
+from skaz.knowledge.library.library import Library
+from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta
+lib = Library.open(Path(sys.argv[1]), None)
+lib.create_page(PageDocument(
+    meta=PageMeta(skaz_id="pg-entropy", kind="concept", title="Entropy", language="en", sources=(sys.argv[2],), folders=(sys.argv[3],)),
+    parts=[
+        Block.create("c-e1", "from_source", "Entropy grows with the number of microstates W: S = k·ln W.",
+                     cites=(Cite(sys.argv[2], 1, "S equals k times the logarithm of W"),)),
+        Block.create("c-e2", "explanation", "The logarithm makes the entropies of independent systems add up."),
+    ],
+))
+`;
+  const res = spawnSync(path.join(root, 'backend/.venv/bin/python'), ['-c', script, libRoot, materialId, folderId], {
+    cwd: path.join(root, 'backend'), env: { ...process.env, PYTHONPATH: path.join(root, 'backend/src') }, encoding: 'utf8',
+  });
+  if (res.status !== 0) throw new Error(`page fixture failed: ${res.stderr}`);
+}
+
+test('package 2 on the real backend: chats, notifications, ⌘K, all materials, + Material, graph, wiki page, settings health', async () => {
+  test.setTimeout(240_000);
+  const rail = (name: string) => page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: new RegExp(`^${name}`) });
+  const doc = () => page.getByRole('complementary', { name: 'Document' });
+  const notFound = () => page.getByText(/Not Found/);
+  await page.getByRole('button', { name: 'Show side panel' }).click().catch(() => undefined);
+
+  // Every live read of the package-2 screens answers on this backend (no 404 behind a screen).
+  for (const route of ['/kb/chats', '/kb/chats/events', '/kb/notifications', '/kb/agents', '/kb/settings/health', '/kb/settings/keys',
+    '/kb/settings/speech', '/kb/settings/wiki', '/kb/settings/privacy', '/kb/settings/about', '/kb/decisions', '/kb/graph', '/kb/wiki/pages', '/kb/jobs']) {
+    const res = await bridgeRequest('GET', route);
+    expect(res, `GET ${route}`).toMatchObject({ ok: true });
+  }
+
+  let added = false;
+  for (const theme of THEMES) {
+    await setView(1440, 860, theme);
+    const tag = `1440-${theme}`;
+
+    // Chats: an empty list, the honest empty state, no "Not Found".
+    await rail('Chats').click();
+    await expect(page.getByRole('region', { name: 'Chats' }).getByText('No chats yet')).toBeVisible();
+    await expect(notFound()).toHaveCount(0);
+    await checkKey(`p2-chats-empty-${tag}`);
+
+    // Notifications: the feed reads the real KbNotificationFeed.
+    await rail('Notifications').click();
+    const feed = page.getByRole('region', { name: 'Notifications' });
+    await expect(feed.getByText(/Conflict in “Entropy”/)).toBeVisible();
+    await expect(feed.getByText(/Note ready: Lecture 8/)).toBeVisible();
+    await checkKey(`p2-notifications-${tag}`);
+
+    // ⌘K over the real /kb/search + /kb/chats?q=.
+    await page.keyboard.press('Meta+k');
+    const search = page.getByRole('dialog', { name: 'Search' });
+    await expect(search).toBeVisible();
+    await search.getByRole('combobox').fill('entropy');
+    await expect(search.getByRole('option').filter({ hasText: /Lecture 8/ }).first()).toBeVisible();
+    await expect(search.getByRole('tab', { name: /Materials/ })).toContainText(/\d/);
+    await checkKey(`p2-search-${tag}`);
+    await page.keyboard.press('Escape');
+    await expect(search).toHaveCount(0);
+
+    // All materials over the centre.
+    await rail('Materials').click();
+    await page.getByRole('region', { name: 'Materials' }).getByRole('button', { name: /^All materials/ }).click();
+    const all = page.getByRole('region', { name: 'All materials' });
+    await expect(all.getByText('Cross-entropy explained')).toBeVisible();
+    await checkKey(`p2-all-materials-${tag}`);
+    await all.getByRole('button', { name: 'Close all materials' }).click();
+
+    // + Material: pasted text, wiki left off (no model runs), then it opens on the right.
+    if (!added) {
+      await page.getByTestId('add-material').click();
+      const dialog = page.getByTestId('add-material-dialog');
+      await dialog.getByRole('textbox', { name: 'Link or any text' }).fill('Seminar notes: the logarithm makes entropy additive.');
+      await dialog.getByRole('button', { name: 'Add to list' }).click();
+      const wiki = dialog.getByRole('switch', { name: 'Add to wiki after processing' });
+      if ((await wiki.getAttribute('aria-checked')) === 'true') await wiki.click();
+      await expect(wiki).toHaveAttribute('aria-checked', 'false');
+      await checkKey(`p2-add-material-${tag}`);
+      await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      added = true;
+    }
+    await rail('Materials').click();
+    await page.getByRole('region', { name: 'Materials' }).getByRole('button', { name: /Seminar notes/ }).first().click();
+    await expect(doc().getByText('Seminar notes: the logarithm makes entropy additive.')).toBeVisible();
+    await expect(doc().getByRole('heading', { level: 2 })).toContainText('Seminar notes');
+    await checkKey(`p2-material-text-${tag}`);
+    await doc().getByRole('button', { name: /^Close/ }).click();
+
+    // Graph of an empty wiki: the honest empty state in the wide panel.
+    await rail('Wiki').click();
+    const wikiSide = page.getByRole('region', { name: 'Wiki' });
+    if (theme === 'light') await expect(wikiSide.getByText('The wiki is empty')).toBeVisible();
+    await wikiSide.getByRole('button', { name: 'Graph of connections' }).click();
+    const graph = page.getByRole('complementary', { name: 'Graph of connections' });
+    if (theme === 'light') await expect(graph.getByText('No connections yet')).toBeVisible();
+    await checkKey(`p2-graph-${theme === 'light' ? 'empty' : 'one'}-${tag}`);
+    await graph.getByRole('button', { name: 'Close graph' }).click();
+
+    // A wiki page written to disk by the Library (no model), picked up by the backend's watcher.
+    if (theme === 'light') {
+      const list = await bridgeRequest<Array<{ id: string; title: string; folder_id: string }>>('GET', '/kb/materials');
+      const lecture = list.data!.find((m) => m.title.startsWith('Lecture 8'))!;
+      seedPage(lecture.id, lecture.folder_id);
+      await expect.poll(async () => (await bridgeRequest<unknown[]>('GET', '/kb/wiki/pages')).data?.length ?? 0, { timeout: 30_000 }).toBeGreaterThan(0);
+      await page.reload();
+      await rail('Wiki').click();
+    }
+    await page.getByRole('region', { name: 'Wiki' }).getByRole('button', { name: /^Concepts/ }).click();
+    await page.getByRole('region', { name: 'Wiki' }).getByRole('button', { name: 'Entropy' }).click();
+    await expect(doc().getByRole('heading', { level: 2, name: 'Entropy' })).toBeVisible();
+    await expect(doc().getByText('Entropy grows with the number of microstates W: S = k·ln W.')).toBeVisible();
+    await expect(doc().getByText('Agent explanation')).toBeVisible();
+    await expect(doc().getByText(/1 folder · 1 source/)).toBeVisible();
+    await checkKey(`p2-wiki-page-${tag}`);
+    // The claim's chip opens the material at the cited fragment.
+    await doc().getByRole('button', { name: /^Recording: Lecture 8/ }).first().click();
+    await expect(doc().getByRole('heading', { level: 2 })).toContainText('Lecture 8');
+    await expect(doc().locator('.is-target').first()).toBeVisible();
+    await checkKey(`p2-citation-material-${tag}`);
+    await doc().getByRole('button', { name: /^Close/ }).click();
+
+    // Settings: health on the gear and in the sections; every live row read without an error.
+    const health = await bridgeRequest<{ sections: Array<{ id: string }> }>('GET', '/kb/settings/health');
+    expect(health.data!.sections.length).toBeGreaterThan(0);
+    await page.keyboard.press('Meta+Comma');
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Privacy', 'About']) {
+      await settings.getByRole('navigation').getByRole('button', { name: new RegExp(`^${section}`) }).click();
+      await page.waitForTimeout(300);
+      await expect(settings.getByText(/Couldn’t read/), `${section}: a live row failed to read`).toHaveCount(0);
+      await expect(settings.getByText(/Not Found/)).toHaveCount(0);
+      if (section === 'Accounts & keys' || section === 'Models') await checkKey(`p2-settings-${section.replace(/\W+/g, '-').toLowerCase()}-${tag}`);
+    }
+    await page.keyboard.press('Escape');
+    await expect(settings).toHaveCount(0);
+  }
 });
 
 test('console stayed clean', async () => {

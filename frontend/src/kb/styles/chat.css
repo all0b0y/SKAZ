@@ -106,7 +106,7 @@
 .kb-conn__row { display: flex; align-items: center; gap: 7px; white-space: nowrap; min-width: 0; }
 .kb-conn__folder { color: var(--kb-muted); flex: none; width: 7.6em; overflow: hidden; text-overflow: ellipsis; }
 .kb-conn__text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.kb-conn__row .kb-chip { flex: none; }
+.kb-conn__row .kb-chip { flex: 0 1 auto; min-width: 0; }
 .kb-conn__row--inference .kb-conn__text { color: var(--kb-muted); font-style: italic; white-space: normal; }
 .kb-conn__label { font-weight: 500; }
 

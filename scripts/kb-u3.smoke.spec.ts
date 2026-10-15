@@ -14,7 +14,8 @@ import { auditPanes, type PaneViolation } from './paneAudit';
 
 const root = path.resolve(__dirname, '..');
 const renderer = path.join(root, 'dist', 'renderer');
-const shots = process.env.SKAZ_U3_SHOTS ?? path.join(root, '..', 'AudioHelper', '.dev', 'wiki-build', 'u3-shots');
+// Screenshots go to .runtime unless SKAZ_U3_SHOTS points elsewhere (never into another checkout by default).
+const shots = process.env.SKAZ_U3_SHOTS ?? path.join(root, '.runtime', 'shots', 'kb-u3');
 const WIDTHS = [{ width: 1440, height: 900 }, { width: 1100, height: 760 }] as const;
 const THEMES = ['light', 'dark'] as const;
 
@@ -25,7 +26,7 @@ let origin = '';
 const consoleErrors: string[] = [];
 const report: Array<{ state: string; panes: PaneViolation[]; extras: Extra[] }> = [];
 
-interface Extra { kind: 'small-text' | 'empty-icon' | 'header-height' | 'offscreen'; selector: string; detail: string }
+interface Extra { kind: 'small-text' | 'empty-icon' | 'header-height' | 'offscreen' | 'chip-cut'; selector: string; detail: string }
 
 /** The same extra checks as kb-shell: text ≥ 12px, no empty icons, fixed header heights, nothing off screen. */
 function auditExtras(): Extra[] {
@@ -56,12 +57,24 @@ function auditExtras(): Extra[] {
   };
   expectH('.kb-titlebar', 38);
   expectH('.kb-head', 46);
-  expectH('.kb-rail__item', 58);
+  // The merged rail is the narrow v39 one (U2): 36 px icon buttons.
+  expectH('.kb-rail__item', 36);
   for (const el of Array.from(document.querySelectorAll('[data-pane]'))) {
     if (!visible(el)) continue;
     const r = el.getBoundingClientRect();
     if (r.right > window.innerWidth + 1 || r.bottom > window.innerHeight + 1 || r.left < -1 || r.top < -1) {
       out.push({ kind: 'offscreen', selector: el.getAttribute('data-pane')!, detail: JSON.stringify({ l: r.left, r: r.right, b: r.bottom }) });
+    }
+  }
+  // A source chip keeps its time/page in view and stays inside its pane (long titles shorten instead).
+  for (const chip of Array.from(document.querySelectorAll('.kb-chip'))) {
+    if (!visible(chip)) continue;
+    const pane = chip.closest('[data-pane]');
+    const c = chip.getBoundingClientRect();
+    const p = pane?.getBoundingClientRect();
+    const meta = chip.querySelector('.kb-chip__meta')?.getBoundingClientRect();
+    if ((p && c.right > p.right + 1) || (meta && meta.right > c.right + 1)) {
+      out.push({ kind: 'chip-cut', selector: describe(chip), detail: `${chip.textContent!.trim().slice(0, 40)} → ${Math.round(c.right)} / ${Math.round(p?.right ?? 0)}` });
     }
   }
   return out;
@@ -213,8 +226,9 @@ test('graph: wide panel, drawn on canvas (pixels), node card, legend', async () 
     for (const v of WIDTHS) {
       await setView(v.width, v.height, theme);
       const tag = `${v.width}-${theme}`;
-      await rail('Graph').click();
-      await page.getByRole('button', { name: /Open the graph|Graph is open/ }).click();
+      // The merged rail has no Graph item (v39): the graph opens from the Wiki section.
+      await rail('Wiki').click();
+      await page.locator('#kb-side').getByRole('button', { name: 'Graph of connections' }).click();
       const panel = page.getByRole('complementary', { name: 'Graph of connections' });
       await expect(panel.getByText('22 concepts · 4 folders')).toBeVisible();
       await page.waitForTimeout(2500);
@@ -239,7 +253,7 @@ test('graph: wide panel, drawn on canvas (pixels), node card, legend', async () 
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await setView(1440, 900, 'light');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.getByRole('button', { name: /Open the graph|Graph is open/ }).click();
+  await page.locator('#kb-side').getByRole('button', { name: 'Graph of connections' }).click();
   await expect(page.getByRole('complementary', { name: 'Graph of connections' }).getByText('22 concepts · 4 folders')).toBeVisible();
   const still = await page.evaluate(async () => {
     const c = document.querySelector<HTMLCanvasElement>('[data-testid="graph-canvas"]')!;

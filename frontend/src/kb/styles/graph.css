@@ -26,3 +26,7 @@
 .kb-graph__key { display: inline-flex; align-items: center; gap: 5px; }
 .kb-ringdot { width: 8px; height: 8px; border-radius: 50%; background: var(--kb-muted); box-shadow: 0 0 0 2px var(--kb-pane), 0 0 0 3.5px var(--kb-muted); margin: 0 3px; }
 .kb-dashline { width: 16px; border-top: 1.5px dashed var(--kb-muted); }
+
+/* A long folder name must not widen the folder filter past the panel (I1, real backend audit). */
+.kb-head--graph .kb-select { flex: 0 1 auto; min-width: 72px; max-width: 200px; }
+.kb-head--graph .kb-select select { width: 100%; min-width: 0; text-overflow: ellipsis; }

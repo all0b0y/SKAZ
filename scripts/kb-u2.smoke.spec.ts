@@ -25,7 +25,7 @@ let page: Page;
 let base = '';
 const consoleErrors: string[] = [];
 
-interface Extra { kind: 'small-text' | 'empty-icon' | 'header-height' | 'offscreen'; selector: string; detail: string }
+interface Extra { kind: 'small-text' | 'empty-icon' | 'header-height' | 'offscreen' | 'chip-cut'; selector: string; detail: string }
 
 /** Text under 12px (counter digits excepted), empty icons, fixed chrome heights, nothing off screen. */
 function auditExtras(): Extra[] {
@@ -62,6 +62,17 @@ function auditExtras(): Extra[] {
     const r = el.getBoundingClientRect();
     if (r.right > window.innerWidth + 1 || r.bottom > window.innerHeight + 1 || r.left < -1 || r.top < -1) {
       out.push({ kind: 'offscreen', selector: describe(el), detail: JSON.stringify({ l: r.left, r: r.right, t: r.top, b: r.bottom }) });
+    }
+  }
+  // A source chip keeps its time/page in view and stays inside its pane (long titles shorten instead).
+  for (const chip of Array.from(document.querySelectorAll('.kb-chip'))) {
+    if (!visible(chip)) continue;
+    const pane = chip.closest('[data-pane]');
+    const c = chip.getBoundingClientRect();
+    const p = pane?.getBoundingClientRect();
+    const meta = chip.querySelector('.kb-chip__meta')?.getBoundingClientRect();
+    if ((p && c.right > p.right + 1) || (meta && meta.right > c.right + 1)) {
+      out.push({ kind: 'chip-cut', selector: describe(chip), detail: `${chip.textContent!.trim().slice(0, 40)} → ${Math.round(c.right)} / ${Math.round(p?.right ?? 0)}` });
     }
   }
   return out;

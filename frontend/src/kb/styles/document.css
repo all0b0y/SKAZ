@@ -93,7 +93,9 @@
 .kb-block[data-targeted] { outline: 2px solid var(--kb-accent); outline-offset: 4px; transition: outline-color 1.6s ease 0.8s; }
 .kb-block__label { display: flex; }
 .kb-block__body { line-height: 1.6; overflow-wrap: anywhere; }
-.kb-block__cites { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 2px; vertical-align: middle; }
+.kb-block__cites { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 2px; vertical-align: middle; max-width: 100%; min-width: 0; }
+/* A long material title shortens with an ellipsis; the time or page stays visible (I1, real backend). */
+.kb-block__cites .kb-chip { min-width: 0; }
 .kb-block__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .kb-block__edit { opacity: 0.55; }
 .kb-block:hover .kb-block__edit,
