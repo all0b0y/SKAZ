@@ -3,7 +3,7 @@ import type { BridgeApi } from '../../api/bridge';
 import type { MeterSnapshot } from '../../audio/meter';
 import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { UiStore } from '../state/ui';
-import { captureErrorText, type CaptureEngine, type CaptureFactory } from './capture';
+import { captureErrorText, capturePermission, type CaptureEngine, type CaptureFactory, type PrivacyPane } from './capture';
 import { barsFrom, SILENT_BARS, type Bars } from './level';
 
 /**
@@ -53,6 +53,8 @@ export interface RecordingData {
   optionsLoaded: boolean;
   /** Why Record/Continue didn't start (shown by the capsule). */
   startError: string | null;
+  /** The macOS privacy setting that fixes `startError` (microphone / screen & system audio), if any. */
+  startPermission: PrivacyPane | null;
   /** Recognition stopped on its own; text is saved; nothing continues by itself. */
   failure: RecFailure | null;
   view: LiveView;
@@ -229,6 +231,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       options: { folderId: null, deviceId: '', systemAudio: false, mode: 'transcription', target: 'en' },
       optionsLoaded: false,
       startError: null,
+      startPermission: null,
       failure: null,
       view: 'original',
       stream: null,
@@ -281,7 +284,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
 
       start: async () => {
         if (get().phase !== 'idle') return;
-        set({ phase: 'starting', startError: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS });
+        set({ phase: 'starting', startError: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS });
         report();
         let materialId: string | null = null;
         try {
@@ -306,7 +309,10 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           await engine?.stop().catch(() => false);
           engine = null;
           if (materialId) await settle(materialId, 'stop');
-          set({ phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error), bars: SILENT_BARS });
+          set({
+            phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error),
+            startPermission: materialId ? capturePermission(error) : null, bars: SILENT_BARS,
+          });
           report();
         }
       },
@@ -330,7 +336,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       resume: async () => {
         const { phase, materialId } = get();
         if (phase !== 'paused' || !engine || !materialId) return;
-        set({ phase: 'resuming', startError: null });
+        set({ phase: 'resuming', startError: null, startPermission: null });
         try {
           await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
           await engine.resume(sources());
@@ -338,7 +344,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           tick(true);
           void pollStream();
         } catch (error) {
-          set({ phase: 'paused', startError: captureErrorText(error) });
+          set({ phase: 'paused', startError: captureErrorText(error), startPermission: capturePermission(error) });
         }
         report();
       },
@@ -376,7 +382,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (get().phase !== 'idle') return;
         const failure = get().failure;
         const kept = failure && failure.materialId === materialId ? failure : null;
-        set({ phase: 'starting', startError: null, failure: null, elapsedMs: 0, bars: SILENT_BARS });
+        set({ phase: 'starting', startError: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS });
         report();
         let resumed = false;
         try {
@@ -402,7 +408,10 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           await engine?.stop().catch(() => false);
           engine = null;
           if (resumed) await settle(materialId, 'stop');
-          set({ phase: 'idle', failure: kept, startError: resumed ? captureErrorText(error) : errorText(error), bars: SILENT_BARS });
+          set({
+            phase: 'idle', failure: kept, startError: resumed ? captureErrorText(error) : errorText(error),
+            startPermission: resumed ? capturePermission(error) : null, bars: SILENT_BARS,
+          });
           report();
         }
       },
@@ -413,7 +422,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       },
 
       setView: (view) => set({ view }),
-      clearStartError: () => set({ startError: null }),
+      clearStartError: () => set({ startError: null, startPermission: null }),
 
       prepareQuit: async () => {
         if (get().phase === 'idle') return true;

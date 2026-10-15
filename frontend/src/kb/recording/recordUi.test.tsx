@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import type { CaptureCallbacks, CaptureEngine } from './capture';
+import { SystemAudioUnavailable } from '../../audio/recorder';
 
 function engine() {
   let cb: CaptureCallbacks | null = null;
@@ -136,6 +137,45 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     expect(await within(bar).findByRole('button', { name: 'Record' })).toBeInTheDocument();
     await user.click(within(alert).getByRole('button', { name: 'Continue recording' }));
     expect(await within(bar).findByRole('button', { name: /^Recording/ })).toBeInTheDocument();
+  });
+
+  it('a denied microphone says so and opens the microphone pane of System Settings', async () => {
+    const { user, record, eng, fake } = await start();
+    const open = vi.fn(async () => true);
+    Object.assign(fake.bridge, { openSystemAudioSettings: open });
+    vi.mocked(eng.e.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await user.click(record);
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    expect(popover).toHaveTextContent('Microphone access was denied.');
+    await user.click(within(popover).getByRole('button', { name: 'Open System Settings' }));
+    expect(open).toHaveBeenCalledWith('microphone');
+  });
+
+  it('computer sound refused on Resume: the reason shows on the capsule with the screen & system audio pane', async () => {
+    const { user, bar, record, eng, fake } = await start();
+    const open = vi.fn(async () => false);
+    Object.assign(fake.bridge, { openSystemAudioSettings: open });
+    await user.click(record);
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Pause' }));
+    await user.keyboard('{Escape}');
+    vi.mocked(eng.e.resume).mockRejectedValueOnce(new SystemAudioUnavailable('denied'));
+    await user.click(await within(bar).findByRole('button', { name: 'Resume' }));
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    expect(popover).toHaveTextContent('Computer sound wasn’t allowed.');
+    await user.click(within(popover).getByRole('button', { name: 'Open System Settings' }));
+    expect(open).toHaveBeenCalledWith('system-audio');
+    // main answered false (not macOS, or the pane didn't open): said, not swallowed.
+    expect(await within(popover).findByText(/couldn’t be opened/)).toBeInTheDocument();
+  });
+
+  it('without the macOS bridge method there is no System Settings button, only the reason', async () => {
+    const { user, record, eng } = await start();
+    vi.mocked(eng.e.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await user.click(record);
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    expect(popover).toHaveTextContent('Microphone access was denied.');
+    expect(within(popover).queryByRole('button', { name: 'Open System Settings' })).not.toBeInTheDocument();
   });
 
   it('a stopped recording offers "Continue recording" in its material; other materials do not', async () => {

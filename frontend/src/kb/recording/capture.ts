@@ -45,6 +45,16 @@ export type CaptureFactory = () => CaptureEngine;
 
 type NativeBridge = Pick<BridgeApi, 'request' | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure'>;
 
+/** Which macOS privacy setting would fix this capture error ("Open System Settings"), if any. */
+export type PrivacyPane = 'microphone' | 'system-audio';
+
+export function capturePermission(error: unknown): PrivacyPane | null {
+  if (error instanceof SystemAudioUnavailable) return error.reason === 'denied' ? 'system-audio' : null;
+  const message = error instanceof Error ? error.message : String(error);
+  const name = (error as { name?: string } | null)?.name ?? '';
+  return name === 'NotAllowedError' || /denied|not allowed|permission/i.test(message) ? 'microphone' : null;
+}
+
 export function captureErrorText(error: unknown): string {
   if (error instanceof SystemAudioUnavailable) {
     return error.reason === 'denied'

@@ -94,6 +94,8 @@ export interface BridgeApi {
   droppedMediaFile?(file: File): AudioFileChoice | null;
   /** Reveal the log directory in the OS file manager. */
   openLogsFolder?(): Promise<boolean>;
+  /** macOS only: open the privacy pane that grants microphone or screen & system audio capture. */
+  openSystemAudioSettings?(pane: 'microphone' | 'system-audio'): Promise<boolean>;
   /** Start the local service again after a failed start; false when there is nothing to retry. */
   restartBackend?(): Promise<boolean>;
   /** Native folder chooser; returns a candidate only, never writes preferences. */

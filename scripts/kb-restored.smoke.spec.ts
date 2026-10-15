@@ -88,3 +88,34 @@ test('Settings → Privacy → Activity log reads GET /logs through the real IPC
   await log.getByRole('button', { name: 'Done' }).click();
   await page.keyboard.press('Escape');
 });
+
+test('a denied microphone offers "Open System Settings", which opens the fixed macOS privacy pane', async () => {
+  test.skip(process.platform !== 'darwin', 'The panes exist only in macOS System Settings; elsewhere the button is not offered.');
+  // The capture boundary refuses like a denied permission prompt; no microphone is touched.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+      enumerateDevices: async () => [],
+      getUserMedia: async () => { throw Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }); },
+    } });
+  });
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = [];
+    Object.assign(globalThis, { openedUrls: opened });
+    shell.openExternal = async (url: string) => { opened.push(url); };
+  });
+  await page.getByTestId('titlebar').getByRole('button', { name: 'Record', exact: true }).click();
+  const popover = page.getByRole('dialog', { name: 'Recording didn’t start' });
+  await expect(popover).toContainText('Microphone access was denied.');
+  await shoot('mic-denied');
+  await popover.getByRole('button', { name: 'Open System Settings' }).click();
+  await expect.poll(() => app.evaluate(() => (globalThis as unknown as { openedUrls: string[] }).openedUrls))
+    .toEqual(['x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone']);
+  // The renderer can only name a pane: a URL or an unknown pane opens nothing.
+  const refused = await page.evaluate(async () => {
+    const open = (window.skaz as unknown as { openSystemAudioSettings: (pane: string) => Promise<boolean> }).openSystemAudioSettings;
+    return [await open('https://example.com'), await open('camera')];
+  });
+  expect(refused).toEqual([false, false]);
+  expect(await app.evaluate(() => (globalThis as unknown as { openedUrls: string[] }).openedUrls)).toHaveLength(1);
+  await popover.getByRole('button', { name: 'OK' }).click();
+});

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { listInputDevices, browserDiscovery } from '../../audio/devices';
 import { Button, Icon, Popover, Segmented, Spinner, Switch } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
@@ -120,6 +120,38 @@ function RecordMenu({ onStart, close }: { onStart: () => void; close: () => void
   );
 }
 
+/**
+ * Why Record / Resume / Continue didn't work. A capture permission problem offers the fixed
+ * System Settings pane that fixes it (macOS; the old interface's "Open System Settings").
+ */
+function StartErrorPopover({ anchorRef }: { anchorRef: RefObject<HTMLButtonElement | null> }) {
+  const { recording, bridge } = useServices();
+  const startError = useRecording((s) => s.startError);
+  const permission = useRecording((s) => s.startPermission);
+  const [opened, setOpened] = useState<boolean | null>(null);
+  useEffect(() => { setOpened(null); }, [startError]);
+  const close = () => recording.getState().clearStartError();
+  return (
+    <Popover open={startError !== null} onClose={close} anchorRef={anchorRef}
+      label="Recording didn’t start" placement="bottom-end" autoFocus={false} width={300}>
+      <div className="kb-recerr" role="alert">
+        <Icon name="warning" size={16} />
+        <p>{startError}</p>
+        <div className="kb-recerr__actions">
+          {permission && bridge.openSystemAudioSettings && (
+            <Button size="sm" variant="outline" icon="settings"
+              onClick={async () => setOpened(await bridge.openSystemAudioSettings!(permission).catch(() => false))}>
+              Open System Settings
+            </Button>
+          )}
+          <Button size="sm" variant="quiet" onClick={close}>OK</Button>
+        </div>
+        {opened === false && <p className="kb-inline-error kb-inline-error--flat">System Settings couldn’t be opened. Open it from the Apple menu.</p>}
+      </div>
+    </Popover>
+  );
+}
+
 /** Title-bar recording control: "Record | Folder ▾" → capsule "▮▮▮ 12:41 | Folder" (decisions 26–28). */
 export function RecordControls() {
   const { recording } = useServices();
@@ -127,7 +159,6 @@ export function RecordControls() {
   const elapsed = useRecording((s) => s.elapsedMs);
   const options = useRecording((s) => s.options);
   const loaded = useRecording((s) => s.optionsLoaded);
-  const startError = useRecording((s) => s.startError);
   const view = useRecording((s) => s.view);
   const materialId = useRecording((s) => s.materialId);
   const stream = useRecording((s) => s.stream);
@@ -194,6 +225,7 @@ export function RecordControls() {
           <Button size="sm" variant="outline" icon="play" className="kb-cap__resume" disabled={phase !== 'paused'}
             onClick={() => void recording.getState().resume()}>Resume</Button>
         )}
+        <StartErrorPopover anchorRef={capsuleRef} />
         <Popover open={rowOpen} onClose={() => setRowOpen(false)} anchorRef={capsuleRef} label="Recording controls"
           placement="bottom-end" className="kb-capctl" autoFocus={!rowByHover.current}>
           <div className="kb-capctl__row" onMouseEnter={hoverOpen} onMouseLeave={hoverClose}>
@@ -239,14 +271,7 @@ export function RecordControls() {
         placement="bottom-end" className="kb-recmenu-pop" width={300}>
         <RecordMenu onStart={start} close={() => setMenuOpen(false)} />
       </Popover>
-      <Popover open={startError !== null} onClose={() => recording.getState().clearStartError()} anchorRef={recordRef}
-        label="Recording didn’t start" placement="bottom-end" autoFocus={false} width={300}>
-        <div className="kb-recerr" role="alert">
-          <Icon name="warning" size={16} />
-          <p>{startError}</p>
-          <Button size="sm" variant="quiet" onClick={() => recording.getState().clearStartError()}>OK</Button>
-        </div>
-      </Popover>
+      <StartErrorPopover anchorRef={recordRef} />
     </span>
   );
 }

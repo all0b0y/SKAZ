@@ -72,9 +72,11 @@
 .kb-recmenu__go { padding: 8px 8px 4px; display: flex; }
 .kb-recmenu__go .kb-btn { flex: 1; justify-content: center; }
 .kb-recmenu .kb-namefield { padding: 2px 4px; }
-.kb-recerr { display: flex; align-items: flex-start; gap: 8px; padding: 4px; }
+.kb-recerr { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 6px 8px; padding: 4px; }
 .kb-recerr > .kb-icon { color: var(--kb-danger); margin-top: 2px; }
-.kb-recerr p { flex: 1; font-size: var(--t-sm); }
+.kb-recerr p { font-size: var(--t-sm); }
+.kb-recerr__actions, .kb-recerr > .kb-inline-error { grid-column: 2; }
+.kb-recerr__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 /* ---- Live panel ---- */
 .kb-live { position: relative; }

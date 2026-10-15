@@ -17,7 +17,7 @@ import { createUiStore, type UiState, type UiStore } from './ui';
 
 /** Bridge methods the new interface uses when the host has them (Electron); tests pass a subset. */
 type OptionalBridge = 'chooseStorageRoot' | 'getBackendStatus' | 'onBackendStatus' | 'restartBackend' | 'onPrepareQuit'
-  | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder'
+  | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder' | 'openSystemAudioSettings'
   | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure' | 'reportCaptureState'
   | 'chooseAudioFile' | 'systemAudioSupported';
 

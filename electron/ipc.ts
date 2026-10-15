@@ -8,6 +8,7 @@ import type { BackendManager } from './backend';
 import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
+import { privacySettingsUrl } from './systemAudio';
 import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
 import { AUDIO_EXTENSIONS, MATERIAL_EXTENSIONS } from '../frontend/src/api/bridge';
 
@@ -157,6 +158,15 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.chooseMaterialFiles, (event) => {
     if (!senderTrusted(event)) return [];
     return kb.chooseMaterialFiles();
+  });
+
+  // Fixed destinations only: the renderer names a pane, main picks the System Settings URL.
+  ipcMain.handle(CHANNELS.openSystemAudioSettings, async (event, pane: unknown) => {
+    if (!senderTrusted(event)) return false;
+    const url = privacySettingsUrl(process.platform, pane);
+    if (!url) return false;
+    await shell.openExternal(url);
+    return true;
   });
 
   ipcMain.handle(CHANNELS.openLogsFolder, async (event) => {
