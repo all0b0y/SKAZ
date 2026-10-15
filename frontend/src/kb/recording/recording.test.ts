@@ -206,6 +206,24 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     eng.unsaved();
     await expect(store.getState().prepareQuit()).resolves.toBe(false);
     expect(store.getState().phase).toBe('finishing');
+    expect(store.getState().startErrorWhen).toBe('stop-unsaved');
+  });
+
+  it('each refusal says what didn’t happen: start, resume, continue', async () => {
+    const { store, eng } = setup();
+    vi.mocked(eng.engine.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await store.getState().start();
+    expect(store.getState().startErrorWhen).toBe('start');
+    await store.getState().start();
+    await store.getState().pause();
+    vi.mocked(eng.engine.resume).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await store.getState().resume();
+    expect(store.getState()).toMatchObject({ phase: 'paused', startErrorWhen: 'resume' });
+    await store.getState().stop();
+    await store.getState().continueRecording('not-a-recording');
+    expect(store.getState().startErrorWhen).toBe('continue');
+    store.getState().clearStartError();
+    expect(store.getState()).toMatchObject({ startError: null, startErrorWhen: null });
   });
 
   it('quit barrier: a flush that never confirmed stops and settles, but does not let SKAZ quit silently', async () => {
@@ -218,6 +236,7 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
     expect(store.getState().phase).toBe('idle');
     expect(routes()).toContain(`POST /kb/recordings/${id}/stop`);
     expect(store.getState().startError).toMatch(/last moment of audio/);
+    expect(store.getState().startErrorWhen).toBe('stop-unconfirmed');
     // Nothing is left to save: a second quit is the user's informed choice.
     await expect(store.getState().prepareQuit()).resolves.toBe(true);
   });

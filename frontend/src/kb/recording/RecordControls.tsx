@@ -6,7 +6,7 @@ import { formatTime } from '../library/materialMeta';
 import { NameField } from '../library/NameField';
 import { languageName } from '../material/MaterialView';
 import { useLibrary, useRecording, useServices, useUi } from '../state/context';
-import { isLive, type LiveView, type RecOptions } from './recordingStore';
+import { isLive, type LiveView, type RecErrorWhen, type RecOptions } from './recordingStore';
 import { speechServiceName } from './connection';
 
 const TARGETS = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
@@ -120,23 +120,37 @@ function RecordMenu({ onStart, close }: { onStart: () => void; close: () => void
   );
 }
 
+/** The error window's title: what didn't happen, in this situation. */
+const ERROR_TITLE: Record<RecErrorWhen, string> = {
+  start: 'Recording didn’t start',
+  resume: 'Recording didn’t resume',
+  continue: 'Recording didn’t continue',
+  'stop-unsaved': 'Some audio isn’t saved yet',
+  'stop-unconfirmed': 'The end of the recording isn’t confirmed',
+};
+
 /**
- * Why Record / Resume / Continue didn't work. A capture permission problem offers the fixed
- * System Settings pane that fixes it (macOS; the old interface's "Open System Settings").
+ * Why Record / Resume / Continue didn't work, or what a Stop couldn't confirm. A capture permission
+ * problem offers the fixed System Settings pane that fixes it (macOS; the old "Open System Settings").
  */
 function StartErrorPopover({ anchorRef }: { anchorRef: RefObject<HTMLButtonElement | null> }) {
   const { recording, bridge } = useServices();
   const startError = useRecording((s) => s.startError);
+  const when = useRecording((s) => s.startErrorWhen);
   const permission = useRecording((s) => s.startPermission);
   const [opened, setOpened] = useState<boolean | null>(null);
   useEffect(() => { setOpened(null); }, [startError]);
   const close = () => recording.getState().clearStartError();
+  const title = ERROR_TITLE[when ?? 'start'];
   return (
     <Popover open={startError !== null} onClose={close} anchorRef={anchorRef}
-      label="Recording didn’t start" placement="bottom-end" autoFocus={false} width={300}>
+      label={title} placement="bottom-end" autoFocus={false} width={300}>
       <div className="kb-recerr" role="alert">
         <Icon name="warning" size={16} />
-        <p>{startError}</p>
+        <div className="kb-recerr__body">
+          <p className="kb-recerr__title">{title}</p>
+          <p>{startError}</p>
+        </div>
         <div className="kb-recerr__actions">
           {permission && bridge.openSystemAudioSettings && (
             <Button size="sm" variant="outline" icon="settings"

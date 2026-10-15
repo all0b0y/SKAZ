@@ -75,6 +75,8 @@
 .kb-recerr { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 6px 8px; padding: 4px; }
 .kb-recerr > .kb-icon { color: var(--kb-danger); margin-top: 2px; }
 .kb-recerr p { font-size: var(--t-sm); }
+.kb-recerr__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kb-recerr__title { font-weight: 600; }
 .kb-recerr__actions, .kb-recerr > .kb-inline-error { grid-column: 2; }
 .kb-recerr__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 

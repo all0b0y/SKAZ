@@ -234,7 +234,9 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     await user.keyboard('{Escape}');
     vi.mocked(eng.e.resume).mockRejectedValueOnce(new SystemAudioUnavailable('denied'));
     await user.click(await within(bar).findByRole('button', { name: 'Resume' }));
-    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
+    // Resuming is not starting: the window says what didn't happen.
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t resume' });
+    expect(popover).toHaveTextContent('Recording didn’t resume');
     expect(popover).toHaveTextContent('Computer sound wasn’t allowed.');
     await user.click(within(popover).getByRole('button', { name: 'Open System Settings' }));
     expect(open).toHaveBeenCalledWith('system-audio');
@@ -249,6 +251,30 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     const popover = await screen.findByRole('dialog', { name: 'Recording didn’t start' });
     expect(popover).toHaveTextContent('Microphone access was denied.');
     expect(within(popover).queryByRole('button', { name: 'Open System Settings' })).not.toBeInTheDocument();
+  });
+
+  it('a stop whose last moment is unconfirmed says so in its own words, not "didn’t start"', async () => {
+    const { user, bar, record, eng } = await start();
+    Object.assign(eng.e, { incomplete: () => true });
+    await user.click(record);
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
+    const popover = await screen.findByRole('dialog', { name: 'The end of the recording isn’t confirmed' });
+    expect(popover).toHaveTextContent('Everything received is saved.');
+    expect(screen.queryByRole('dialog', { name: 'Recording didn’t start' })).not.toBeInTheDocument();
+  });
+
+  it('continuing a recording that fails to open says it didn’t continue', async () => {
+    const { user, bar, record, eng, services } = await start();
+    await user.click(record);
+    const materialId = services.recording.getState().materialId!;
+    await user.click(await within(bar).findByRole('button', { name: /^Recording/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Recording controls' })).getByRole('button', { name: 'Stop' }));
+    await within(bar).findByRole('button', { name: 'Record' });
+    vi.mocked(eng.e.start).mockRejectedValueOnce(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+    await act(async () => { await services.recording.getState().continueRecording(materialId); });
+    const popover = await screen.findByRole('dialog', { name: 'Recording didn’t continue' });
+    expect(popover).toHaveTextContent('Microphone access was denied.');
   });
 
   it('a stopped recording offers "Continue recording" in its material; other materials do not', async () => {

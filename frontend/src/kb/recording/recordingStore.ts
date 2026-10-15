@@ -33,6 +33,9 @@ export interface RecOptions {
   target: string;
 }
 
+/** What the capsule's error window is about: each has its own title (RecordControls). */
+export type RecErrorWhen = 'start' | 'resume' | 'continue' | 'stop-unsaved' | 'stop-unconfirmed';
+
 export interface RecFailure {
   materialId: string;
   /** Recording time at which recognition stopped. */
@@ -52,8 +55,10 @@ export interface RecordingData {
   bars: Bars;
   options: RecOptions;
   optionsLoaded: boolean;
-  /** Why Record/Continue didn't start (shown by the capsule). */
+  /** Why Record/Resume/Continue didn't work, or what a Stop couldn't confirm (shown by the capsule). */
   startError: string | null;
+  /** Which of those it is (the window's title); null with no error. */
+  startErrorWhen: RecErrorWhen | null;
   /** The macOS privacy setting that fixes `startError` (microphone / screen & system audio), if any. */
   startPermission: PrivacyPane | null;
   /** Recognition stopped on its own; text is saved; nothing continues by itself. */
@@ -224,6 +229,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       options: { folderId: null, deviceId: '', systemAudio: false, mode: 'transcription', target: 'en' },
       optionsLoaded: false,
       startError: null,
+      startErrorWhen: null,
       startPermission: null,
       failure: null,
       view: 'original',
@@ -277,7 +283,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
 
       start: async () => {
         if (get().phase !== 'idle') return;
-        set({ phase: 'starting', startError: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
+        set({ phase: 'starting', startError: null, startErrorWhen: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
         report();
         let materialId: string | null = null;
         try {
@@ -303,7 +309,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           engine = null;
           if (materialId) await settle(materialId, 'stop');
           set({
-            phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error),
+            phase: 'idle', startError: materialId ? captureErrorText(error) : errorText(error), startErrorWhen: 'start',
             startPermission: materialId ? capturePermission(error) : null, bars: SILENT_BARS,
           });
           report();
@@ -329,7 +335,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       resume: async () => {
         const { phase, materialId } = get();
         if (phase !== 'paused' || !engine || !materialId) return;
-        set({ phase: 'resuming', startError: null, startPermission: null });
+        set({ phase: 'resuming', startError: null, startErrorWhen: null, startPermission: null });
         try {
           await deps.client.call('POST /kb/recordings/{material_id}/resume', { path: { material_id: materialId } });
           await engine.resume(sources());
@@ -337,7 +343,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           tick(true);
           void pollStream();
         } catch (error) {
-          set({ phase: 'paused', startError: captureErrorText(error), startPermission: capturePermission(error) });
+          set({ phase: 'paused', startError: captureErrorText(error), startErrorWhen: 'resume', startPermission: capturePermission(error) });
         }
         report();
       },
@@ -353,7 +359,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         const saved = await (current?.stop() ?? Promise.resolve(true)).catch(() => false);
         if (!saved) {
           // Unsaved audio: keep the quit guard (main warns before closing) and say so.
-          set({ startError: 'Some audio isn’t saved yet. SKAZ keeps it and will not quit silently.' });
+          set({ startError: 'Some audio isn’t saved yet. SKAZ keeps it and will not quit silently.', startErrorWhen: 'stop-unsaved' });
           report();
           return false;
         }
@@ -364,7 +370,10 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         const complete = !(current?.incomplete?.() ?? false);
         set({
           phase: 'idle', bars: SILENT_BARS,
-          ...(complete ? {} : { startError: 'The last moment of audio before stopping couldn’t be confirmed. Everything received is saved.' }),
+          ...(complete ? {} : {
+            startError: 'The last moment of audio before stopping couldn’t be confirmed. Everything received is saved.',
+            startErrorWhen: 'stop-unconfirmed' as const,
+          }),
         });
         report();
         deps.onMaterialsChanged?.();
@@ -375,7 +384,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (get().phase !== 'idle') return;
         const failure = get().failure;
         const kept = failure && failure.materialId === materialId ? failure : null;
-        set({ phase: 'starting', startError: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
+        set({ phase: 'starting', startError: null, startErrorWhen: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
         report();
         let resumed = false;
         try {
@@ -402,7 +411,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
           engine = null;
           if (resumed) await settle(materialId, 'stop');
           set({
-            phase: 'idle', failure: kept, startError: resumed ? captureErrorText(error) : errorText(error),
+            phase: 'idle', failure: kept, startError: resumed ? captureErrorText(error) : errorText(error), startErrorWhen: 'continue',
             startPermission: resumed ? capturePermission(error) : null, bars: SILENT_BARS,
           });
           report();
@@ -415,7 +424,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       },
 
       setView: (view) => set({ view }),
-      clearStartError: () => set({ startError: null, startPermission: null }),
+      clearStartError: () => set({ startError: null, startErrorWhen: null, startPermission: null }),
 
       prepareQuit: async () => {
         if (get().phase === 'idle') return true;

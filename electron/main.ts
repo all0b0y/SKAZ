@@ -8,7 +8,7 @@ import { registerIpc } from './ipc';
 import type { NativeLiveClient } from './nativeLive';
 import { CHANNELS } from './channels';
 import { isAllowedExternalUrl } from './ipcPolicy';
-import { hasUnsentAudio, type CaptureProtectionState } from './captureProtection';
+import { hasUnsentAudio, quitWarning, type CaptureProtectionState } from './captureProtection';
 import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
 import { isTrustedFrame, validateCaptureState } from './ipcSender';
 import { QuitController } from './quitController';
@@ -96,16 +96,16 @@ const quitController = new QuitController({
   saveBeforeQuit: () => mainWindow ? rendererSave.request() : Promise.resolve(!hasUnsentAudio(captureState)),
   hasUnsentAudio: () => hasUnsentAudio(captureState),
   confirmDiscard: () => {
+    // Each situation in its own words: still saving, couldn't save, or the end unconfirmed.
+    const warning = quitWarning(captureState);
     const options: Electron.MessageBoxSyncOptions = {
       type: 'warning',
-      buttons: ['Stay in SKAZ', 'Discard unsaved audio and quit'],
+      buttons: warning.buttons,
       defaultId: 0,
       cancelId: 0,
       noLink: true,
-      message: 'Saving before exit could not be confirmed',
-      detail:
-        'Some captured audio is still being saved or transcribed. Quitting now may lose the unfinished audio. ' +
-        'Stay to let processing finish or retry saving, or explicitly discard it and quit.',
+      message: warning.message,
+      detail: warning.detail,
     };
     const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
     return choice === 1;
