@@ -149,6 +149,11 @@ def test_opening_a_page_never_indexes_a_copy_older_than_a_skaz_write(
         return page
 
     monkeypatch.setattr(service_module, "read_page", read_then_write_meanwhile)
+    # Edited outside since it was indexed: opening re-reads it (an unchanged file is not re-read).
+    record = ready.page_repo.get(PAGE_ID)
+    assert record is not None
+    with (ready.library_root / record.rel_path).open("a", encoding="utf-8") as page_file:
+        page_file.write("\n")
     ready.page(PAGE_ID)
     meanwhile.finish()
     assert "Saved while the page opens." in _block_texts(ready)

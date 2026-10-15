@@ -5,6 +5,8 @@ hashed every indexed page each time to see whether the wiki changed.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from skaz.knowledge.index import indexer
@@ -48,8 +50,11 @@ def test_opening_a_page_reindexes_it_only_after_its_file_changed(ready: Knowledg
     assert record is not None
     written: list[str] = []
     real_put = indexer.put_page
-    monkeypatch.setattr(indexer, "put_page", lambda db, page: (written.append(page.meta.skaz_id),
-                                                                real_put(db, page))[1])
+    def counting(db: Any, page: Any) -> None:
+        written.append(page.meta.skaz_id)
+        real_put(db, page)
+
+    monkeypatch.setattr(indexer, "put_page", counting)
     for _ in range(3):
         assert ready.page("pg-1").entries[0].text == "Statement 1."
     assert written == []
