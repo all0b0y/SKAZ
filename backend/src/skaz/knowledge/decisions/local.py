@@ -32,6 +32,7 @@ from typing import Literal
 import httpx
 
 from ...native_io import disk_call
+from ..processes import CHILDREN
 from .llama import LlamaClient, LocalMode
 from .policy import Thresholds, apply_thresholds
 from .protocol import Answer, DeciderId, Question, Undecided
@@ -456,6 +457,8 @@ class LlamaServerManager:
             self._failure = _DownloadFailed("start_failed",
                                             f"The local decision model couldn't start: {error}.")
             raise LocalUnavailable(self._failure.message) from error
+        # Registered from launch on: quitting while the model still loads must stop it too.
+        CHILDREN.add(process, group=False)
         base = f"http://127.0.0.1:{port}"
         deadline = time.monotonic() + self.start_timeout_s
         while True:
@@ -517,16 +520,19 @@ class LlamaServerManager:
 
 
 async def _terminate(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is not None:
-        return
-    with contextlib.suppress(ProcessLookupError):
-        process.terminate()
     try:
-        await asyncio.wait_for(process.wait(), timeout=5.0)
-    except TimeoutError:
+        if process.returncode is not None:
+            return
         with contextlib.suppress(ProcessLookupError):
-            process.kill()
-        await process.wait()
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.wait()
+    finally:
+        CHILDREN.discard(process)
 
 
 def _gigabytes(value: int) -> str:

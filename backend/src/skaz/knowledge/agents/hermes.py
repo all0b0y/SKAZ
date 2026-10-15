@@ -59,6 +59,7 @@ from ..install.system import (
     run_capture,
 )
 from ..install.terminal import TerminalLauncher
+from ..processes import CHILDREN
 from .acp_client import METHOD_NOT_FOUND, PROTOCOL_VERSION, AcpClosed, AcpConnection, AcpError
 from .engine import (
     AgentEvent,
@@ -372,6 +373,7 @@ class HermesEngine:
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             limit=32 * 1024 * 1024,
         )
+        CHILDREN.add(process, group=True)  # quitting SKAZ signals it first (knowledge.shutdown)
         if active is not None:
             active.process = process
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
@@ -401,6 +403,7 @@ class HermesEngine:
                 except TimeoutError:
                     kill_group(process.pid)
                     await process.wait()
+            CHILDREN.discard(process)
             drain.cancel()
             await asyncio.gather(drain, return_exceptions=True)
 

@@ -59,6 +59,7 @@ from ..install.system import (
     run_capture,
 )
 from ..install.terminal import TerminalLauncher
+from ..processes import CHILDREN
 from .engine import (
     AgentEvent,
     AgentTurn,
@@ -328,6 +329,7 @@ class ClaudeCodeEngine:
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, limit=_LINE_LIMIT,
             )
+            CHILDREN.add(process, group=True)  # quitting SKAZ signals it first (knowledge.shutdown)
             active.process = process
             async for event in self._stream(turn, prompt, process, active):
                 yield event
@@ -341,6 +343,7 @@ class ClaudeCodeEngine:
                 kill_group(running.pid)
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(running.wait(), 5)
+            CHILDREN.discard(running)
             if granted and self.mcp is not None:
                 self.mcp.revoke(run_id)
             shutil.rmtree(run_dir, ignore_errors=True)

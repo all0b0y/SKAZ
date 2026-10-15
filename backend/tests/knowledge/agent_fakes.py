@@ -28,7 +28,16 @@ def record(kind, **data):
     with open(RECORD, "a") as handle:
         handle.write(json.dumps({"kind": kind, **data}) + "\n")
 
-record("start", argv=sys.argv[1:], cwd=os.getcwd(), env=dict(os.environ))
+record("start", argv=sys.argv[1:], cwd=os.getcwd(), env=dict(os.environ), pid=os.getpid())
+
+def stubborn():
+    # Like a CLI busy in a long answer: ignores SIGINT/SIGTERM and has a child of its own.
+    import subprocess
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    child = subprocess.Popen([sys.executable, "-c", "import signal, time; "
+                              "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(600)"])
+    record("stubborn", pid=os.getpid(), child=child.pid)
 """
 
 _CLAUDE = (
@@ -57,6 +66,8 @@ def on_sigint(signum, frame):
     sys.exit(130)
 
 signal.signal(signal.SIGINT, on_sigint)
+if SCENARIO.get("stubborn"):
+    stubborn()
 for item in SCENARIO.get("stream", []):
     print(json.dumps(item), flush=True)
 if SCENARIO.get("hang"):
@@ -76,6 +87,8 @@ if args == ["--version"]:
 if args == ["model"]:
     sys.exit(0)
 assert args == ["acp"], args
+if SCENARIO.get("stubborn"):
+    stubborn()
 waiting = {}
 
 def send(message):

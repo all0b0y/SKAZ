@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from ..processes import CHILDREN
 from .system import kill_group, refuse_sudo
 
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
@@ -74,4 +75,5 @@ class SubprocessExecutor:
             stderr=asyncio.subprocess.STDOUT,
             limit=1024 * 1024,
         )
+        CHILDREN.add(process, group=True)  # an installer must not keep running after SKAZ quits
         return _ProcessStep(process)
