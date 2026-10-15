@@ -223,7 +223,7 @@ async def test_audio_and_video_paths_get_the_same_checks_as_documents(
     api: httpx.AsyncClient, speech_app: Any, soniox: AsyncSoniox, tmp_path: Path,
 ) -> None:
     """Hidden folders and SKAZ's own data are refused after links are followed; ordinary files work."""
-    sessions_before = len((await api.get("/sessions")).json()["sessions"])
+    sessions_before = session_count(speech_app)
     (tmp_path / ".cache").mkdir()
     hidden = Path(media(tmp_path / ".cache", "talk.m4a"))
     data_dir = speech_app.state.runtime.kb.data_dir
@@ -245,7 +245,7 @@ async def test_audio_and_video_paths_get_the_same_checks_as_documents(
         response = await api.post("/kb/imports", json={"path": path})
         assert response.status_code == 400, (path, response.text)
         assert message in response.json()["detail"], (path, response.text)
-    assert len((await api.get("/sessions")).json()["sessions"]) == sessions_before
+    assert session_count(speech_app) == sessions_before
     assert (await api.get("/kb/materials")).json() == []
     # A link to a file in an ordinary folder is followed and imported.
     (tmp_path / "Lecture.m4a").symlink_to(Path(media(tmp_path / "Folder", "real.m4a")))

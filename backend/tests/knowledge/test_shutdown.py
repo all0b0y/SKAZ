@@ -170,7 +170,7 @@ async def test_codex_stops_its_running_answers_together(kb_app: Any) -> None:
             await asyncio.sleep(0.5)
             self.closed = True
 
-    engine = CodexEngine(kb_app.state.runtime.codex.connection, None)
+    engine = CodexEngine(kb_app.state.runtime.codex_connection, None)
     rpcs = [SlowRpc() for _ in range(4)]
     for index, rpc in enumerate(rpcs):
         engine._runs[f"run-{index}"] = _Run(f"run-{index}", rpc=rpc)  # type: ignore[arg-type]
