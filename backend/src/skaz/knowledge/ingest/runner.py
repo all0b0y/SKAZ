@@ -28,11 +28,12 @@ from .jobs import JobRepository, JobStep
 from .matching import decide, find_candidates
 from .model import AnswerInvalid, BlockOut, ConceptsOut, MatchOut, NotesOut, parse_answer
 from .pages import match_key
-from .protocols import ConceptUpdateHook, InstructionDetector, TextLayer
+from .protocols import ConceptUpdateHook, InstructionDetector, RecognitionCheck, RecognitionRequest, TextLayer
 from .sources import DEFAULT_PART_BUDGET, ExclusionsUnreadable, IngestSource, load_source, split_parts
 from .writer import ConceptTarget, WikiWriter, WritePlan, WriteResult
 
 BLOCKED_KIND = "blocked_output"
+SPEECH_KINDS = frozenset({"recording", "audio", "video", "video_link"})
 EXCERPT_CHARS = 300
 
 
@@ -73,7 +74,7 @@ class IngestRun:
     def __init__(self, *, kb: KnowledgeService, jobs: JobRepository, job_id: str, material_id: str,
                  engine: AgentEngine, detector: InstructionDetector, decisions: DecisionLayer | None,
                  text_layer: TextLayer, writer: WikiWriter, hook: ConceptUpdateHook | None, language: str,
-                 limits: Limits) -> None:
+                 limits: Limits, recognition: RecognitionCheck | None = None) -> None:
         self.kb = kb
         self.jobs = jobs
         self.job_id = job_id
@@ -86,6 +87,7 @@ class IngestRun:
         self.hook = hook
         self.language = language
         self.limits = limits
+        self.recognition = recognition
         self.report = RunReport()
         self.current_run: str | None = None
         self.writing = False
@@ -308,6 +310,13 @@ class IngestRun:
             raise IngestFailed(error.message) from error
         if source.excluded:
             await self._log(f"{len(source.excluded)} excluded fragment(s) were left out.")
+        if self.recognition is not None and record.kind in SPEECH_KINDS:
+            # Area W2: recognition errors are corrected (as a separate layer) before the notes are written.
+            await self._step("checking_recognition")
+            request = RecognitionRequest(self.material_id, record.kind, source.excluded, self._ask, self._log)
+            if await self.recognition.check(request):
+                source = await disk_call(load_source, library, self.material_id, record.rel_dir,
+                                         self.text_layer)
         if not source.fragments:
             raise IngestFailed("This material has no text the wiki can use.")
         parts = split_parts(source.fragments, self.limits.part_budget)

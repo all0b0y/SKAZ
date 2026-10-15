@@ -326,6 +326,10 @@ def _set_nav(parts: list[Part], block_id: str, key: str, language: str, body: st
         insert_into_section(parts, key, language, [Block.create(block_id, kind, body)])
 
 
+#: Public for area W2 (folder moves refresh "In folders" the same way ingest does).
+set_nav = _set_nav
+
+
 @dataclass
 class ConceptUpdate:
     """What this material contributes to one concept page."""

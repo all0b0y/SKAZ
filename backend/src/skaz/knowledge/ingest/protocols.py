@@ -7,13 +7,16 @@
   received new blocks. Ingest never picks a winner itself (decision 4).
 * ``EngineResolver`` — the engine registry of area A2: the engine chosen for
   the wiki (``None`` = the default engine), or ``None`` when nothing is ready.
+* ``RecognitionCheck`` — area W2 checks speech for recognition errors before the
+  Notes are written (step ``checking_recognition``), through this job's agent.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from typing import Protocol
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol
 
-from ..agents.engine import AgentEngine
+from ..agents.engine import AgentEngine, TurnMessage
 from ..markdown.source import Fragment
 
 
@@ -43,3 +46,24 @@ class ConceptUpdateHook(Protocol):
 
 
 EngineResolver = Callable[[str | None], AgentEngine | None]
+
+#: ``ask(instructions, messages, schema) -> answer text`` through the job's agent (no tools).
+AskAgent = Callable[[str, Sequence[TurnMessage], dict[str, Any]], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class RecognitionRequest:
+    material_id: str
+    #: Material kind; only speech (recording/audio/video/video_link) is checked.
+    kind: str
+    #: Fragments left out by the poisoning guard: never sent to the model.
+    excluded: frozenset[int]
+    ask: AskAgent
+    #: Appends a code-written line to the job journal.
+    log: Callable[[str], Awaitable[None]]
+
+
+class RecognitionCheck(Protocol):
+    async def check(self, request: RecognitionRequest) -> int:
+        """Propose and store corrections once per material; returns how many were applied."""
+        ...

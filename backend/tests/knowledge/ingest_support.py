@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from skaz.knowledge.agents.engine import AgentTurn, Completed, TextDelta
@@ -77,29 +77,44 @@ def concepts(*items: dict[str, Any], more: bool = False) -> str:
     return json.dumps({"concepts": list(items), "more": more}, ensure_ascii=False)
 
 
+#: "Nothing found" for the W2 calls, so ingest tests of speech run unchanged past the recognition check.
+W2_EMPTY_ANSWERS: dict[str, str] = {
+    "skaz_recognition_check": json.dumps({"corrections": []}),
+    "skaz_discrepancies": json.dumps({"conflicts": []}),
+    "skaz_connections": json.dumps({"connections": []}),
+    "skaz_folder_overview": json.dumps({"blocks": []}),
+}
+
+
 class ScriptedWiki:
     """Answers by schema: queued JSON strings per kind; optional gate before every answer."""
 
     def __init__(self, *, notes: Sequence[str] = (), concepts: Sequence[str] = (),
-                 matches: Sequence[int] = (), gate: asyncio.Event | None = None) -> None:
+                 matches: Sequence[int] = (), gate: asyncio.Event | None = None,
+                 answers: Mapping[str, Sequence[str]] | None = None) -> None:
         self.queues: dict[str, list[str]] = {
             prompts.NOTES_SCHEMA_TITLE: list(notes),
             prompts.CONCEPTS_SCHEMA_TITLE: list(concepts),
             prompts.MATCH_SCHEMA_TITLE: [json.dumps({"choice": choice}) for choice in matches],
         }
+        # W2 answers (recognition check, disagreements, connections, overviews, recheck) by schema title.
+        for title, queued in (answers or {}).items():
+            self.queues[title] = list(queued)
         self.gate = gate
         self.engine = FakeEngine("codex", script=self._answer)
 
     def _answer(self, turn: AgentTurn) -> list[ScriptItem]:
         assert turn.response_schema is not None
         title = str(turn.response_schema["title"])
-        queue = self.queues[title]
+        queue = self.queues.setdefault(title, [])
         if queue:
             text = queue.pop(0)
         elif title == prompts.NOTES_SCHEMA_TITLE:
             text = notes()
         elif title == prompts.CONCEPTS_SCHEMA_TITLE:
             text = concepts()
+        elif title in W2_EMPTY_ANSWERS:
+            text = W2_EMPTY_ANSWERS[title]
         else:
             text = json.dumps({"choice": 0})
         items: list[ScriptItem] = []

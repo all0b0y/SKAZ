@@ -15,10 +15,19 @@ from ..ids import new_id, utc_now
 from ..store.database import KnowledgeDatabase
 
 JOB_KIND = "ingest"
+JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections"]
+#: Every kind run by ingest (W1) and the wiki (W2); ``refresh`` re-ingests after a correction changed.
+JOB_KINDS: tuple[JobKind, ...] = (
+    "ingest", "refresh", "recheck", "connections", "folder_overview", "corrections",
+)
+#: Kinds about one material (``target_id`` is the material id).
+MATERIAL_JOB_KINDS: tuple[JobKind, ...] = ("ingest", "refresh", "corrections")
 JobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
-JobStep = Literal["reading", "writing_notes", "concepts", "saving", "done"]
+JobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
+                  "checking_discrepancies", "finding_connections", "rechecking", "writing_overview"]
 FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted")
 INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the wiki. Retry to start again."
+WIKI_INTERRUPTED_REASON = "SKAZ was closed while this wiki job was running. Start it again when needed."
 #: Bounded journal: the status view never grows without limit.
 MAX_JOURNAL = 200
 
@@ -32,7 +41,8 @@ class JournalEntry:
 @dataclass(frozen=True)
 class JobRecord:
     id: str
-    material_id: str
+    #: The material of the job; ``None`` for wiki-wide work (connections, folder overviews).
+    material_id: str | None
     state: JobState
     step: JobStep | None
     error: str | None
@@ -40,6 +50,9 @@ class JobRecord:
     updated_at: str
     counters: dict[str, int] = field(default_factory=dict)
     journal: tuple[JournalEntry, ...] = ()
+    kind: JobKind = "ingest"
+    #: What the job works on: a material, a page (``recheck``), a folder (``folder_overview``) or nothing.
+    target_id: str | None = None
 
     @property
     def finished(self) -> bool:
@@ -55,25 +68,31 @@ class JobRecord:
         if self.state == "running":
             if self.step == "concepts":
                 return f"Concepts {self.counters.get('concepts_found', 0)}"
-            return {"reading": "Reading", "writing_notes": "Writing notes", "saving": "Saving pages",
-                    "done": "Done"}.get(self.step or "reading", "Reading")
+            return {"reading": "Reading", "checking_recognition": "Checking recognition",
+                    "writing_notes": "Writing notes", "saving": "Saving pages", "done": "Done",
+                    "checking_discrepancies": "Checking for disagreements",
+                    "finding_connections": "Finding connections", "rechecking": "Rechecking",
+                    "writing_overview": "Writing the folder overview"}.get(self.step or "reading", "Reading")
         return {"done": "Done", "failed": "Failed", "cancelled": "Cancelled",
                 "interrupted": "Interrupted"}[self.state]
 
 
 def _record(row: sqlite3.Row) -> JobRecord:
     journal = tuple(JournalEntry(item["at"], item["message"]) for item in json.loads(row["journal"] or "[]"))
+    kind = row["kind"]
+    material_id = row["target_id"] if kind in MATERIAL_JOB_KINDS else None
     return JobRecord(
-        id=row["id"], material_id=row["target_id"], state=row["state"], step=row["step"], error=row["error"],
+        id=row["id"], material_id=material_id, state=row["state"], step=row["step"], error=row["error"],
         created_at=row["created_at"], updated_at=row["updated_at"],
         counters={key: int(value) for key, value in json.loads(row["counters"] or "{}").items()},
-        journal=journal,
+        journal=journal, kind=kind, target_id=row["target_id"],
     )
 
 
+_KINDS_IN = "(" + ", ".join(f"'{kind}'" for kind in JOB_KINDS) + ")"
 _SELECT = (
     "SELECT j.*, COALESCE(d.counters, '{}') AS counters, COALESCE(d.journal, '[]') AS journal "
-    "FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id WHERE j.kind = ?"
+    f"FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id WHERE j.kind IN {_KINDS_IN}"
 )
 
 
@@ -81,14 +100,16 @@ class JobRepository:
     def __init__(self, db: KnowledgeDatabase) -> None:
         self.db = db
 
-    def create(self, material_id: str) -> JobRecord:
+    def create(self, material_id: str | None, *, kind: JobKind = "ingest",
+               step: JobStep = "reading") -> JobRecord:
+        """A running job; ``material_id`` is the target (a page for ``recheck``, a folder for overviews)."""
         job_id = new_id("job")
         now = utc_now()
         with self.db.write() as connection:
             connection.execute(
                 "INSERT INTO jobs(id, kind, target_id, state, step, error, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'running', 'reading', NULL, ?, ?)",
-                (job_id, JOB_KIND, material_id, now, now),
+                "VALUES (?, ?, ?, 'running', ?, NULL, ?, ?)",
+                (job_id, kind, material_id, step, now, now),
             )
             connection.execute("INSERT INTO ingest_jobs(job_id) VALUES (?)", (job_id,))
         record = self.get(job_id)
@@ -97,13 +118,14 @@ class JobRepository:
 
     def get(self, job_id: str) -> JobRecord | None:
         with self.db.read() as connection:
-            row = connection.execute(f"{_SELECT} AND j.id = ?", (JOB_KIND, job_id)).fetchone()
+            row = connection.execute(f"{_SELECT} AND j.id = ?", (job_id,)).fetchone()
         return _record(row) if row else None
 
     def list_all(self, *, material_id: str | None = None) -> list[JobRecord]:
-        where, params = "", [JOB_KIND]
+        where, params = "", []
         if material_id is not None:
-            where, params = " AND j.target_id = ?", [JOB_KIND, material_id]
+            kinds = ", ".join(f"'{kind}'" for kind in MATERIAL_JOB_KINDS)
+            where, params = f" AND j.target_id = ? AND j.kind IN ({kinds})", [material_id]
         with self.db.read() as connection:
             rows = connection.execute(f"{_SELECT}{where} ORDER BY j.created_at DESC, j.rowid DESC",
                                       params).fetchall()
@@ -149,10 +171,11 @@ class JobRepository:
         """Startup: jobs left ``running`` by a previous process become ``interrupted``."""
         with self.db.write() as connection:
             ids = [row[0] for row in connection.execute(
-                "SELECT id FROM jobs WHERE kind = ? AND state = 'running'", (JOB_KIND,))]
+                f"SELECT id FROM jobs WHERE kind IN {_KINDS_IN} AND state = 'running'")]
             connection.execute(
-                "UPDATE jobs SET state = 'interrupted', error = ?, updated_at = ? "
-                "WHERE kind = ? AND state = 'running'",
-                (INTERRUPTED_REASON, utc_now(), JOB_KIND),
+                "UPDATE jobs SET state = 'interrupted', "
+                "error = CASE WHEN kind IN ('ingest', 'refresh') THEN ? ELSE ? END, updated_at = ? "
+                f"WHERE kind IN {_KINDS_IN} AND state = 'running'",
+                (INTERRUPTED_REASON, WIKI_INTERRUPTED_REASON, utc_now()),
             )
         return ids

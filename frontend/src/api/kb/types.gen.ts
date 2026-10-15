@@ -81,6 +81,12 @@ export interface KbBlock {
   citations: KbCitation[];
 }
 
+export interface KbBlockCreate {
+  text: string;
+  after_block_id?: string | null;
+  section?: string | null;
+}
+
 export interface KbBlockHit {
   page_id: string;
   page_title: string;
@@ -89,6 +95,10 @@ export interface KbBlockHit {
   kind: "from_source" | "connection" | "explanation" | "user_note";
   owner: "agent" | "user" | "user_edited";
   snippet: KbSnippetPart[];
+}
+
+export interface KbBlockUpdate {
+  text: string;
 }
 
 export interface KbCitation {
@@ -105,6 +115,31 @@ export interface KbCitation {
 export interface KbClassifyLink {
   url: string;
   probe?: boolean;
+}
+
+export interface KbCorrection {
+  id: string;
+  material_id: string;
+  seg: number;
+  before: string;
+  after: string;
+  reason: string;
+  confidence: number | null;
+  state: "applied" | "doubtful" | "reverted" | "kept";
+  auto: boolean;
+  created_at: string;
+  decided_at: string | null;
+}
+
+export interface KbCorrectionChange {
+  correction: KbCorrection;
+  affected_blocks: number;
+  job: KbJob | null;
+}
+
+export interface KbCorrectionCounts {
+  applied: number;
+  doubtful: number;
 }
 
 export interface KbDecisionProviderUpdate {
@@ -133,6 +168,17 @@ export interface KbDecisions {
   cloud_model: string;
   local: KbLocalDecisions;
   stats: KbDecisionStats;
+}
+
+export interface KbDeletePreview {
+  material_id: string;
+  title: string;
+  claims_removed: number;
+  claims_kept: number;
+  pages_changed: KbPageRef[];
+  pages_removed: KbPageRef[];
+  connections_removed: number;
+  user_notes_kept: number;
 }
 
 export interface KbExcludedFragment {
@@ -172,6 +218,8 @@ export interface KbFragment {
   speaker: string | null;
   page: number | null;
   index: number | null;
+  original_text: string | null;
+  corrections: string[];
 }
 
 export interface KbFragmentHit {
@@ -189,6 +237,29 @@ export interface KbFragmentLocation {
   page: number | null;
   start_ms: number | null;
   label: string;
+}
+
+export interface KbGraph {
+  nodes: KbGraphNode[];
+  edges: KbGraphEdge[];
+}
+
+export interface KbGraphEdge {
+  source: string;
+  target: string;
+  kind: "link" | "connection";
+  cross_folder: boolean;
+  page_id: string | null;
+  block_id: string | null;
+}
+
+export interface KbGraphNode {
+  id: string;
+  kind: "concept" | "note" | "analysis" | "folder";
+  title: string;
+  folder_ids: string[];
+  degree: number;
+  hub: boolean;
 }
 
 export interface KbHiddenFinding {
@@ -238,10 +309,10 @@ export interface KbInstallTask {
 
 export interface KbJob {
   id: string;
-  kind: "ingest";
-  material_id: string;
+  kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections";
+  material_id: string | null;
   state: "running" | "done" | "failed" | "cancelled" | "interrupted";
-  step: "reading" | "writing_notes" | "concepts" | "saving" | "done" | null;
+  step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | null;
   label: string;
   error: string | null;
   can_retry: boolean;
@@ -319,6 +390,7 @@ export interface KbMaterial {
   fragment_count: number;
   origin: KbOrigin | null;
   fragments: KbFragment[];
+  correction_counts: KbCorrectionCounts;
 }
 
 export interface KbMaterialAdded {
@@ -347,6 +419,11 @@ export interface KbMaterialSummary {
   fragment_count: number;
 }
 
+export interface KbMaterialUpdate {
+  title?: string | null;
+  folder_id?: string | null;
+}
+
 export interface KbNotification {
   id: string;
   kind: string;
@@ -356,6 +433,29 @@ export interface KbNotification {
   requires_action: boolean;
   created_at: string;
   dismissed_at: string | null;
+  seq: number;
+  actions: KbNotificationAction[];
+  subject: KbSubjectRef | null;
+  resolved_at: string | null;
+  resolution: string | null;
+}
+
+export interface KbNotificationAction {
+  id: string;
+  label: string;
+  primary: boolean;
+  needs_text: boolean;
+}
+
+export interface KbNotificationFeed {
+  items: KbNotification[];
+  cursor: number;
+  unread: number;
+  requires_action: number;
+}
+
+export interface KbNotificationsRead {
+  up_to_seq: number;
 }
 
 export interface KbOrigin {
@@ -374,6 +474,11 @@ export interface KbPage {
   sources: string[];
   language: string;
   blocks: KbBlock[];
+  related: KbPageRef[];
+  mentioned_in: KbPageRef[];
+  folder_names: string[];
+  updated_at: string | null;
+  is_analysis_source_forbidden: boolean;
 }
 
 export interface KbPageHit {
@@ -381,6 +486,12 @@ export interface KbPageHit {
   title: string;
   kind: "concept" | "note" | "folder" | "analysis";
   matched_alias: string | null;
+}
+
+export interface KbPageRef {
+  id: string;
+  kind: "concept" | "note" | "folder" | "analysis";
+  title: string;
 }
 
 export interface KbPageSummary {
@@ -397,6 +508,15 @@ export interface KbPageSummary {
 export interface KbRecordingCreate {
   folder_id?: string | null;
   title?: string | null;
+}
+
+export interface KbRescanResult {
+  pages_changed: number;
+}
+
+export interface KbResolve {
+  action: string;
+  text?: string | null;
 }
 
 export interface KbRestoredFragment {
@@ -437,12 +557,22 @@ export interface KbSpeechMaterial {
   error: string | null;
 }
 
+/** What a click on a notification opens. */
+export interface KbSubjectRef {
+  type: "material" | "page" | "chat";
+  id: string;
+  block_id: string | null;
+  seg: number | null;
+}
+
 export interface KbWikiSettings {
   wiki_language: string;
   wiki_language_chosen: boolean;
   wiki_engine: "codex" | "claude_code" | "hermes" | null;
   auto_add_files_links: boolean;
   auto_add_text: boolean;
+  background_connections: boolean;
+  auto_corrections: boolean;
 }
 
 /** Only the fields present are changed; ``wiki_engine: null`` returns to the default agent. */
@@ -451,6 +581,8 @@ export interface KbWikiSettingsUpdate {
   wiki_engine?: "codex" | "claude_code" | "hermes" | null;
   auto_add_files_links?: boolean | null;
   auto_add_text?: boolean | null;
+  background_connections?: boolean | null;
+  auto_corrections?: boolean | null;
 }
 
 /** Every /kb route: path and query parameters, JSON body and JSON response. */
@@ -502,6 +634,34 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbAgentLogin | null;
     response: KbAgentLoginResult;
+    status: 200;
+  };
+  "POST /kb/corrections/{correction_id}/accept": {
+    path: { correction_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbCorrectionChange;
+    status: 200;
+  };
+  "POST /kb/corrections/{correction_id}/keep": {
+    path: { correction_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbCorrectionChange;
+    status: 200;
+  };
+  "POST /kb/corrections/{correction_id}/reapply": {
+    path: { correction_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbCorrectionChange;
+    status: 200;
+  };
+  "POST /kb/corrections/{correction_id}/revert": {
+    path: { correction_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbCorrectionChange;
     status: 200;
   };
   "GET /kb/decisions": {
@@ -574,6 +734,13 @@ export interface KbEndpoints {
     response: void;
     status: 204;
   };
+  "GET /kb/graph": {
+    path: Record<string, never>;
+    query: { folder_id?: string | null };
+    body: never;
+    response: KbGraph;
+    status: 200;
+  };
   "POST /kb/imports": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -644,6 +811,13 @@ export interface KbEndpoints {
     response: KbLibrary;
     status: 200;
   };
+  "POST /kb/library/rescan": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbRescanResult;
+    status: 200;
+  };
   "POST /kb/library/retry": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -693,6 +867,34 @@ export interface KbEndpoints {
     response: KbMaterial;
     status: 200;
   };
+  "PATCH /kb/materials/{material_id}": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: KbMaterialUpdate;
+    response: KbMaterial;
+    status: 200;
+  };
+  "DELETE /kb/materials/{material_id}": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbDeletePreview;
+    status: 200;
+  };
+  "GET /kb/materials/{material_id}/corrections": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbCorrection[];
+    status: 200;
+  };
+  "GET /kb/materials/{material_id}/delete-preview": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbDeletePreview;
+    status: 200;
+  };
   "GET /kb/materials/{material_id}/excluded": {
     path: { material_id: string };
     query: Record<string, never>;
@@ -716,15 +918,29 @@ export interface KbEndpoints {
   };
   "GET /kb/notifications": {
     path: Record<string, never>;
-    query: { include_dismissed?: boolean };
+    query: { include_dismissed?: boolean; after?: number | null; wait?: number };
     body: never;
-    response: KbNotification[];
+    response: KbNotificationFeed;
     status: 200;
+  };
+  "POST /kb/notifications/read": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbNotificationsRead;
+    response: void;
+    status: 204;
   };
   "POST /kb/notifications/{notification_id}/dismiss": {
     path: { notification_id: string };
     query: Record<string, never>;
     body: never;
+    response: KbNotification;
+    status: 200;
+  };
+  "POST /kb/notifications/{notification_id}/resolve": {
+    path: { notification_id: string };
+    query: Record<string, never>;
+    body: KbResolve;
     response: KbNotification;
     status: 200;
   };
@@ -791,6 +1007,13 @@ export interface KbEndpoints {
     response: KbWikiSettings;
     status: 200;
   };
+  "POST /kb/wiki/connections/find": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
+  };
   "GET /kb/wiki/pages": {
     path: Record<string, never>;
     query: { kind?: "concept" | "note" | "folder" | "analysis" | null; folder_id?: string | null };
@@ -804,6 +1027,34 @@ export interface KbEndpoints {
     body: never;
     response: KbPage;
     status: 200;
+  };
+  "POST /kb/wiki/pages/{page_id}/blocks": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: KbBlockCreate;
+    response: KbPage;
+    status: 201;
+  };
+  "PUT /kb/wiki/pages/{page_id}/blocks/{block_id}": {
+    path: { page_id: string; block_id: string };
+    query: Record<string, never>;
+    body: KbBlockUpdate;
+    response: KbPage;
+    status: 200;
+  };
+  "DELETE /kb/wiki/pages/{page_id}/blocks/{block_id}": {
+    path: { page_id: string; block_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPage;
+    status: 200;
+  };
+  "POST /kb/wiki/pages/{page_id}/blocks/{block_id}/recheck": {
+    path: { page_id: string; block_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
   };
 }
 

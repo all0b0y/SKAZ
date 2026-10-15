@@ -73,17 +73,28 @@ class KbFragment(BaseModel):
     #: ``seg-<n>``: the block id in the source Markdown; stable forever.
     id: str
     seg: int
+    #: The text with the applied recognition corrections (what the wiki is built from).
     text: str
     start_ms: int | None
     end_ms: int | None
     speaker: str | None
     page: int | None
     index: int | None
+    #: The recognised text when corrections changed it; ``null`` when ``text`` is the original.
+    original_text: str | None
+    #: Ids of the recognition corrections in this fragment (any state).
+    corrections: list[str]
+
+
+class KbCorrectionCounts(BaseModel):
+    applied: int
+    doubtful: int
 
 
 class KbMaterial(KbMaterialSummary):
     origin: KbOrigin | None
     fragments: list[KbFragment]
+    correction_counts: KbCorrectionCounts
 
 
 class KbPageSummary(BaseModel):
@@ -124,8 +135,23 @@ class KbBlock(BaseModel):
     citations: list[KbCitation]
 
 
+class KbPageRef(BaseModel):
+    id: str
+    kind: PageKind
+    title: str
+
+
 class KbPage(KbPageSummary):
     blocks: list[KbBlock]
+    #: Pages this one is connected to (graph edges: its links and agent connections).
+    related: list[KbPageRef]
+    #: Pages that link here (backlinks) and are not already in ``related``.
+    mentioned_in: list[KbPageRef]
+    folder_names: list[str]
+    #: When the page file last changed (ISO-8601 UTC); ``null`` when unknown.
+    updated_at: str | None
+    #: An Analysis (saved chat answer) is never a source for "from source" statements.
+    is_analysis_source_forbidden: bool
 
 
 class KbSnippetPart(BaseModel):
@@ -167,13 +193,38 @@ class KbSearchResults(BaseModel):
     pages: list[KbPageHit]
 
 
+class KbNotificationAction(BaseModel):
+    id: str
+    label: str
+    primary: bool
+    #: The action asks for a text (own note, fixed address).
+    needs_text: bool
+
+
+class KbSubjectRef(BaseModel):
+    """What a click on a notification opens."""
+
+    type: Literal["material", "page", "chat"]
+    id: str
+    block_id: str | None
+    seg: int | None
+
+
 class KbNotification(BaseModel):
     id: str
-    #: Set by the area that raises it (e.g. ``discrepancy``, ``excluded_fragment``).
+    #: Set by the area that raises it (e.g. ``discrepancy``, ``excluded_instruction``).
     kind: str
     title: str
     body: str
     payload: dict[str, Any]
+    #: "Needs a decision" group; the others are "New".
     requires_action: bool
     created_at: str
     dismissed_at: str | None
+    #: Monotonic change cursor (``after`` of the long poll).
+    seq: int
+    actions: list[KbNotificationAction]
+    subject: KbSubjectRef | None
+    resolved_at: str | None
+    #: The id of the chosen action.
+    resolution: str | None

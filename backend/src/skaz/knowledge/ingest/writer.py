@@ -341,6 +341,10 @@ class WikiWriter:
         raise NameTaken("A Notes page with this material's name already exists. "
                         "Rename the material and retry.")
 
+    def refresh_index(self, language: str) -> None:
+        """Rewrite ``Wiki/index.md`` from the page index (W2: after pages are edited or removed)."""
+        self._write_index(self.kb.require(), language)
+
     def _write_index(self, library: Library, language: str) -> None:
         labels = INDEX_TITLES.get(language, INDEX_TITLES["en"])
         lines = ["# Index", ""]

@@ -22,7 +22,9 @@ async def test_ingest_routes_require_the_token(kb_app: Any) -> None:
 async def test_wiki_settings_defaults_and_partial_updates(kb_client: httpx.AsyncClient) -> None:
     defaults = (await kb_client.get("/kb/settings/wiki")).json()
     assert defaults == {"wiki_language": "en", "wiki_language_chosen": False, "wiki_engine": None,
-                        "auto_add_files_links": True, "auto_add_text": False}
+                        "auto_add_files_links": True, "auto_add_text": False,
+                        # W2: background connections need the user's permission; corrections are automatic.
+                        "background_connections": False, "auto_corrections": True}
     updated = (await kb_client.put("/kb/settings/wiki", json={"wiki_language": "ru",
                                                               "wiki_engine": "claude_code"})).json()
     assert updated["wiki_language"] == "ru" and updated["wiki_language_chosen"] is True
@@ -59,7 +61,8 @@ async def test_ingest_job_lifecycle_over_http(kb_app: Any, kb_client: httpx.Asyn
     assert busy.status_code == 409
     assert busy.json() == {"detail": "This material is already being added to the wiki."}
     running = (await kb_client.get(f"/kb/jobs/{job['id']}")).json()
-    assert running["label"] == "Writing notes" and running["step"] == "writing_notes"
+    # W2: a recording's first agent turn is the recognition check, before the notes.
+    assert running["label"] == "Checking recognition" and running["step"] == "checking_recognition"
     gate.set()
     await settle(lambda: not ingest.active_jobs())
     done = (await kb_client.get(f"/kb/jobs/{job['id']}")).json()

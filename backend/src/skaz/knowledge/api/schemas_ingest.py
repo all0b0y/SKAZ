@@ -6,7 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 KbJobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
-KbJobStep = Literal["reading", "writing_notes", "concepts", "saving", "done"]
+KbJobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
+                    "checking_discrepancies", "finding_connections", "rechecking", "writing_overview"]
+KbJobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections"]
 KbEngineId = Literal["codex", "claude_code", "hermes"]
 
 
@@ -31,8 +33,9 @@ class KbJobProgress(BaseModel):
 
 class KbJob(BaseModel):
     id: str
-    kind: Literal["ingest"]
-    material_id: str
+    kind: KbJobKind
+    #: The material of an ingest/refresh/recheck job; ``null`` for wiki-wide work (connections, overviews).
+    material_id: str | None
     state: KbJobState
     step: KbJobStep | None
     #: The status line of the material: "Reading", "Writing notes", "Concepts 3", "Done", "Failed"…
@@ -54,6 +57,10 @@ class KbWikiSettings(BaseModel):
     wiki_engine: KbEngineId | None
     auto_add_files_links: bool
     auto_add_text: bool
+    #: Look for connections across the whole wiki in the background when SKAZ is idle (user's permission).
+    background_connections: bool
+    #: Apply confident recognition corrections automatically; doubtful ones are only highlighted.
+    auto_corrections: bool
 
 
 class KbWikiSettingsUpdate(BaseModel):
@@ -64,3 +71,5 @@ class KbWikiSettingsUpdate(BaseModel):
     wiki_engine: KbEngineId | None = None
     auto_add_files_links: bool | None = None
     auto_add_text: bool | None = None
+    background_connections: bool | None = None
+    auto_corrections: bool | None = None

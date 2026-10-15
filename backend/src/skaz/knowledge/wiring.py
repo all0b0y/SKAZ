@@ -7,6 +7,8 @@
   yields ``None`` (the job fails with a plain reason) — never a silent
   substitute. Claude Code and Hermes reach the SKAZ tools through per-run
   MCP tokens of the A1 server (``McpGrants``).
+* The wiki after ingest (W2): recognition corrections and their check, the
+  discrepancy hook, notification actions (``wire_wiki``).
 * A new material (S1 documents, S2 finished speech — never a paused
   recording) is added to the wiki when the wiki settings say so (decision
   15), and a restored fragment re-runs its material (decision 41).
@@ -27,6 +29,7 @@ from .mcp.tokens import McpRunScope
 from .service import KnowledgeService
 from .sources.guard.detector import Detection, detect_instruction
 from .sources.service import SourceEvent, SourceService
+from .wiki.service import WikiService
 
 log = logging.getLogger(__name__)
 
@@ -135,6 +138,12 @@ def engine_resolver(engines: Mapping[EngineId, AgentEngine],
         return engines.get(wanted) if wanted in ENGINE_IDS else None
 
     return resolve
+
+
+def wire_wiki(wiki: WikiService) -> WikiService:
+    """Area W2: corrections layer, recognition check, discrepancy hook, notification kinds (one line)."""
+    wiki.connect()
+    return wiki
 
 
 def wire(
