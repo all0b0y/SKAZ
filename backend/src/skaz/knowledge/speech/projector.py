@@ -37,6 +37,7 @@ from ..library.library import Library
 from ..markdown.source import Fragment, FragmentInput
 from ..service import KnowledgeService
 from ..sources.guard import strip_invisible
+from ..store.records import FragmentRecord
 from .transcript import TokenCursor, read_draft, read_new_tokens, read_translation, translation_language
 from .translation import TRANSLATION_FILE, one_line, render_translation
 
@@ -44,10 +45,16 @@ from .translation import TRANSLATION_FILE, one_line, render_translation
 SPEECH_KEY = "speech"
 
 LegacyReader = Callable[[], AbstractContextManager[Connection]]
+#: How long the live read waits for a projection of the same material that is appending right now.
+LIVE_WAIT_S = 1.0
 
 
 class CarrierMismatch(RuntimeError):
     """The material's files say another session feeds it; nothing is written."""
+
+
+class LiveBusy(RuntimeError):
+    """The material is being appended to for longer than the live read waits; poll again."""
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,8 @@ class LiveTail:
     after_seg: int
     monologues: list[LiveMonologue]
     partial: LivePartial | None
+    #: Fragments after the caller's ``since_seg`` up to ``after_seg`` (empty when it gave none).
+    fragments: tuple[FragmentRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,11 +108,17 @@ class SpeechProjector:
         self._guard = threading.Lock()
 
     @contextlib.contextmanager
-    def _exclusive(self, material_id: str) -> Iterator[None]:
+    def _exclusive(self, material_id: str, *, timeout: float | None = None) -> Iterator[None]:
+        """Per material. Never held while waiting for ``kb.writing()``: whoever needs both takes
+        ``writing()`` first, so a live read never queues behind a scan or another area's write."""
         with self._guard:
             lock = self._locks.setdefault(material_id, threading.Lock())
-        with lock:
+        if not lock.acquire(timeout=-1 if timeout is None else timeout):
+            raise LiveBusy("The live text is being updated.")
+        try:
             yield
+        finally:
+            lock.release()
 
     def _hint(self, material_id: str) -> str | None:
         record = self.kb.material_repo.get(material_id)
@@ -111,7 +126,12 @@ class SpeechProjector:
 
     def project(self, material_id: str, session_id: str, *, final: bool) -> list[Fragment]:
         """Append the session's newly closed monologues; returns the fragments added."""
-        with self._exclusive(material_id):
+        with self._exclusive(material_id):  # most calls find nothing closed: no write lock for those
+            if not self._closed_speech(material_id, session_id, final=final):
+                return []
+        # A concurrent scan must not undo this append in the index: the write lock first, then the
+        # material's (lock order writing → material), and the speech is read again under both.
+        with self.kb.writing(), self._exclusive(material_id):
             library = self.kb.require()
             hint = self._hint(material_id)
             state = SpeechState.of({SPEECH_KEY: library.manifest_value(material_id, SPEECH_KEY, hint=hint)})
@@ -133,13 +153,25 @@ class SpeechProjector:
                 for group, text in visible if text  # nothing visible left: no fragment
             ]
             cursor = located[closed[-1].tokens[-1].id].cursor()
-            with self.kb.writing():  # a concurrent scan must not undo this append in the index
-                added = library.append_fragments(
-                    material_id, inputs, hint=hint,
-                    manifest_extra={SPEECH_KEY: {"session_id": session_id, "cursor": cursor.to_json()}},
-                )
-                self._index(library, material_id, hint, added)
+            added = library.append_fragments(
+                material_id, inputs, hint=hint,
+                manifest_extra={SPEECH_KEY: {"session_id": session_id, "cursor": cursor.to_json()}},
+            )
+            self._index(library, material_id, hint, added)
             return added
+
+    def _closed_speech(self, material_id: str, session_id: str, *, final: bool) -> bool:
+        """Whether a projection would append anything now (read-only; the caller holds the material)."""
+        library = self.kb.require()
+        hint = self._hint(material_id)
+        state = SpeechState.of({SPEECH_KEY: library.manifest_value(material_id, SPEECH_KEY, hint=hint)})
+        if state.session_id not in (None, session_id):
+            raise CarrierMismatch("This material is fed by another recording.")
+        with self._legacy_read() as connection:
+            tokens = read_new_tokens(connection, session_id, state.cursor)
+        if not tokens:
+            return False
+        return final or len(mono.build([item.token for item in tokens])) > 1
 
     def _index(self, library: Library, material_id: str, hint: str | None, added: list[Fragment]) -> None:
         if indexer.append_fragments(self.kb.db, material_id, added):
@@ -148,15 +180,18 @@ class SpeechProjector:
         indexer.put_material(self.kb.db, ScannedMaterial(
             files, library.relative(files.directory), library.relative(files.source_path)))
 
-    def live(self, material_id: str, session_id: str) -> LiveTail:
+    def live(self, material_id: str, session_id: str, *, since_seg: int | None = None) -> LiveTail:
         """Speech of a running recording that is not in the material yet, for the live panel.
 
         The open monologue (final words after the last written token) and any closed one the
         next projection has not appended yet, then the replaceable non-final words. Read under
         the same lock as ``project``, so ``after_seg`` and the text never overlap or leave a gap:
-        the text continues exactly after fragment ``after_seg``. Nothing is written.
+        the text continues exactly after fragment ``after_seg``. With ``since_seg`` it also returns
+        the fragments after it up to ``after_seg``, so the panel never re-reads the whole material.
+        Waits at most ``LIVE_WAIT_S`` for an append in progress (``LiveBusy``), never for a writer
+        elsewhere in the library. Nothing is written.
         """
-        with self._exclusive(material_id):
+        with self._exclusive(material_id, timeout=LIVE_WAIT_S):
             library = self.kb.require()
             manifest = library.material_manifest(material_id, hint=self._hint(material_id))  # one cheap read
             state = SpeechState.of(manifest.model_extra)
@@ -179,7 +214,11 @@ class SpeechProjector:
             if text or translation:
                 speaker = str(draft.speaker) if draft.speaker is not None else None
                 partial = LivePartial(speaker, text, translation)
-        return LiveTail(after_seg, monologues, partial)
+        fragments: tuple[FragmentRecord, ...] = ()
+        if since_seg is not None and since_seg < after_seg:
+            # Appended and indexed under the material's lock before ``after_seg`` was read: all there.
+            fragments = tuple(self.kb.material_repo.fragments_after(material_id, since_seg, after_seg))
+        return LiveTail(after_seg, monologues, partial, fragments)
 
     def write_translation(self, material_id: str, session_id: str) -> Path | None:
         """Rewrite ``.skaz/translation.md`` from all final translated tokens; ``None`` if there are none."""

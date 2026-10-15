@@ -10,12 +10,13 @@ from ..markdown.page import plain_text
 from ..markdown.source import Fragment
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
-from .scanner import KnownPaths, ScannedMaterial, ScannedPage, ScanResult
+from .scanner import KnownPaths, ScannedMaterial, ScannedPage, ScanResult, ScanStopped, StopCheck
 
-#: Tables rebuilt from files, children first. Corrections and edges belong to
-#: their areas, which rebuild them from their own files after a scan.
-_REBUILT = ("citations", "blocks_fts", "blocks", "aliases", "page_folders", "page_sources", "pages",
-            "fragments_fts", "fragments", "materials", "folders")
+#: Tables rebuilt from files, children first (the FTS tables before their rows, so the delete
+#: triggers find nothing left to drop). Corrections and edges belong to their areas, which rebuild
+#: them from their own files after a scan.
+_REBUILT = ("blocks_fts", "fragments_fts", "citations", "blocks", "aliases", "page_folders", "page_sources",
+            "pages", "fragments", "materials", "folders")
 
 
 def known_paths(db: KnowledgeDatabase) -> KnownPaths:
@@ -27,8 +28,11 @@ def known_paths(db: KnowledgeDatabase) -> KnownPaths:
         )
 
 
-def replace_index(db: KnowledgeDatabase, result: ScanResult) -> None:
-    """Make the index equal to a COMPLETE scan; one transaction, so readers never see half."""
+def replace_index(db: KnowledgeDatabase, result: ScanResult, *, stop: StopCheck | None = None) -> None:
+    """Make the index equal to a COMPLETE scan; one transaction, so readers never see half.
+
+    ``stop()`` returning ``True`` between objects (SKAZ is closing) rolls the whole rebuild back.
+    """
     with db.write() as connection:
         for table in _REBUILT:
             connection.execute(f"DELETE FROM {table}")
@@ -36,8 +40,12 @@ def replace_index(db: KnowledgeDatabase, result: ScanResult) -> None:
             _put_folder(connection, folder.id, folder.name, result.folder_paths[folder.id], folder.system,
                         folder.created_at)
         for material in result.materials:
+            if stop is not None and stop():
+                raise ScanStopped
             _put_material(connection, material)
         for page in result.pages:
+            if stop is not None and stop():
+                raise ScanStopped
             _put_page(connection, page)
 
 
@@ -102,11 +110,8 @@ def _put_material(connection: sqlite3.Connection, material: ScannedMaterial) -> 
     files = material.files
     manifest = files.manifest
     material_id = manifest.id
-    for (stale,) in connection.execute("SELECT id FROM materials WHERE rel_dir = ? AND id != ?",
-                                       (material.rel_dir, material_id)).fetchall():
-        connection.execute("DELETE FROM fragments_fts WHERE material_id = ?", (stale,))
-        connection.execute("DELETE FROM materials WHERE id = ?", (stale,))
-    connection.execute("DELETE FROM fragments_fts WHERE material_id = ?", (material_id,))
+    # FTS rows go with their fragments (trigger ``fragments_fts_forget``, by rowid).
+    connection.execute("DELETE FROM materials WHERE rel_dir = ? AND id != ?", (material.rel_dir, material_id))
     connection.execute("DELETE FROM fragments WHERE material_id = ?", (material_id,))
     connection.execute(
         "INSERT INTO materials(id, folder_id, kind, status, title, rel_dir, source_file, origin, languages, "
@@ -125,23 +130,21 @@ def _put_material(connection: sqlite3.Connection, material: ScannedMaterial) -> 
 
 def _insert_fragment(connection: sqlite3.Connection, material_id: str, ordinal: int,
                      fragment: Fragment) -> None:
-    connection.execute(
+    cursor = connection.execute(
         "INSERT INTO fragments(material_id, seg, ordinal, text, start_ms, end_ms, speaker, page, idx) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (material_id, fragment.seg, ordinal, fragment.text, fragment.start_ms, fragment.end_ms,
          fragment.speaker, fragment.page, fragment.index),
     )
-    connection.execute("INSERT INTO fragments_fts(text, material_id, seg) VALUES (?, ?, ?)",
-                       (fragment.text, material_id, fragment.seg))
+    connection.execute("INSERT INTO fragments_fts(rowid, text, material_id, seg) VALUES (?, ?, ?, ?)",
+                       (cursor.lastrowid, fragment.text, material_id, fragment.seg))
 
 
 def _put_page(connection: sqlite3.Connection, page: ScannedPage) -> None:
     meta = page.meta
-    stale = [row[0] for row in connection.execute("SELECT id FROM pages WHERE rel_path = ? AND id != ?",
-                                                  (page.rel_path, meta.skaz_id))]
-    for page_id in (*stale, meta.skaz_id):
-        connection.execute("DELETE FROM blocks_fts WHERE page_id = ?", (page_id,))
-        connection.execute("DELETE FROM pages WHERE id = ?", (page_id,))
+    # Blocks go by cascade, their FTS rows with them (trigger ``blocks_fts_forget``, by rowid).
+    connection.execute("DELETE FROM pages WHERE rel_path = ? AND id != ?", (page.rel_path, meta.skaz_id))
+    connection.execute("DELETE FROM pages WHERE id = ?", (meta.skaz_id,))
     connection.execute(
         "INSERT INTO pages(id, kind, title, rel_path, original, language, file_sha256, indexed_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -166,14 +169,14 @@ def _put_page(connection: sqlite3.Connection, page: ScannedPage) -> None:
         if block.block_id in seen_blocks:
             continue  # a duplicated block id (copy-paste in an editor): the first one is indexed
         seen_blocks.add(block.block_id)
-        connection.execute(
+        cursor = connection.execute(
             "INSERT INTO blocks(page_id, block_id, ordinal, section, kind, owner, hash, text, marked) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (meta.skaz_id, block.block_id, block.ordinal, block.section, block.kind, block.owner, block.hash,
              block.text, int(block.marked)),
         )
-        connection.execute("INSERT INTO blocks_fts(text, page_id, block_id) VALUES (?, ?, ?)",
-                           (plain_text(block.text), meta.skaz_id, block.block_id))
+        connection.execute("INSERT INTO blocks_fts(rowid, text, page_id, block_id) VALUES (?, ?, ?, ?)",
+                           (cursor.lastrowid, plain_text(block.text), meta.skaz_id, block.block_id))
         for ordinal, (material_id, seg, quote) in enumerate(block.cites, start=1):
             connection.execute(
                 "INSERT INTO citations(page_id, block_id, ordinal, material_id, seg, quote) "

@@ -10,11 +10,12 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Annotated, TypeVar, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ...native_io import disk_call
 from ..errors import KnowledgeError
 from ..speech.service import ImportInput, SpeechService, SpeechView
+from .schemas import KbFragment
 from .schemas_speech import (
     KbImportCreate,
     KbLiveMonologue,
@@ -69,10 +70,12 @@ async def read_recording(material_id: str, speech: SpeechDep) -> KbSpeechMateria
 
 
 @router.get("/kb/recordings/{material_id}/live")
-async def read_recording_live(material_id: str, speech: SpeechDep) -> KbRecordingLive:
+async def read_recording_live(material_id: str, speech: SpeechDep,
+                              since_seg: Annotated[int | None, Query(ge=0)] = None) -> KbRecordingLive:
     """The live panel's text after the material's fragments: the open monologue's final words
-    and the words still being recognised, plus the recorder's stream state. Poll it."""
-    tail, stream = await speech_call(speech.live(material_id))
+    and the words still being recognised, plus the recorder's stream state, and with ``since_seg``
+    the fragments added after it. Poll it (one request at a time)."""
+    tail, stream = await speech_call(speech.live(material_id, since_seg))
     partial = tail.partial
     return KbRecordingLive(
         material_id=material_id, after_seg=tail.after_seg, stream=stream,
@@ -80,6 +83,10 @@ async def read_recording_live(material_id: str, speech: SpeechDep) -> KbRecordin
                                     text=item.text) for item in tail.monologues],
         partial=KbLivePartial(speaker=partial.speaker, text=partial.text, translation=partial.translation)
         if partial else None,
+        fragments=[KbFragment(id=f.id, seg=f.seg, text=f.text, start_ms=f.start_ms, end_ms=f.end_ms,
+                              speaker=f.speaker, page=f.page, index=f.index, original_text=None,
+                              corrections=[])
+                   for f in tail.fragments],
     )
 
 

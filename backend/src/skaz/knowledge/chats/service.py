@@ -77,6 +77,9 @@ NO_TERMINAL = "The agent stopped without finishing the answer."
 EMPTY_ANSWER = "The agent returned an empty answer."
 CHECKPOINT_S = 2.0
 STOP_TIMEOUT_S = 10.0
+#: App shutdown: an answer gets this long to stop after the interrupt, then what it streamed so far is
+#: saved as interrupted and it is cancelled (the knowledge shutdown deadline is 2.5 s in total).
+CLOSE_STOP_S = 1.0
 MENTION_LIMIT = 8
 #: Failure kinds that leave the question open for "Resume" (decision on limits).
 _INTERRUPTING = frozenset({"limit", "network", "auth", "incompatible"})
@@ -128,7 +131,7 @@ class _Run:
 class ChatService:
     def __init__(self, kb: KnowledgeService, *, agents: Callable[[], EngineRegistry], tools: ToolRegistry,
                  text_layer: Callable[[], TextLayer] | None = None, checkpoint_s: float = CHECKPOINT_S,
-                 stop_timeout_s: float = STOP_TIMEOUT_S) -> None:
+                 stop_timeout_s: float = STOP_TIMEOUT_S, close_stop_s: float = CLOSE_STOP_S) -> None:
         self.kb = kb
         self.repo = ChatRepository(kb.db)
         self._agents = agents
@@ -136,6 +139,9 @@ class ChatService:
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
         self._checkpoint_s = checkpoint_s
         self._stop_timeout_s = stop_timeout_s
+        self._close_stop_s = close_stop_s
+        #: One "Save to wiki" per answer at a time: a double click must not write two analysis pages.
+        self._saving: dict[str, asyncio.Lock] = {}
         #: Answers that were streaming when SKAZ stopped are "interrupted" (resumable) from now on.
         self.recovered = self.repo.interrupt_streaming()
         self._feeds: dict[str, ChatFeed] = {}
@@ -241,7 +247,7 @@ class ChatService:
     async def create(self, *, title: str | None = None, engine: EngineId | None = None,
                      model: str | None = None, effort: str | None = None,
                      recording_material_id: str | None = None) -> ChatView:
-        chosen: EngineId = engine or self.registry.default()
+        chosen: EngineId = engine if engine is not None else await disk_call(self.registry.default)
         await self._check_model(chosen, model, effort)
         folder_ids: tuple[str, ...] = ()
         title_auto = True
@@ -617,11 +623,33 @@ class ChatService:
             log.error("Stopping chat answer %s failed: %s", run.run_id, error_note(error))
 
     async def close(self) -> None:
+        """App shutdown: every answer ends as interrupted (resumable) with the text it streamed so far,
+        within ``close_stop_s`` per answer, before the database closes."""
         self._closing = True
         runs = list(self._runs.values())
         for run in runs:
             run.closing = True
-        await asyncio.gather(*(self._stop_run(run) for run in runs), return_exceptions=True)
+        await asyncio.gather(*(self._close_run(run) for run in runs), return_exceptions=True)
+
+    async def _close_run(self, run: _Run) -> None:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(run.engine.interrupt(run.run_id), self._close_stop_s)
+        task = run.task
+        if task is None:
+            return
+        done, _ = await asyncio.wait({task}, timeout=self._close_stop_s)  # never cancels the answer itself
+        if done:
+            return
+        # The engine ignored the interrupt: keep what was streamed, honestly marked, before cancelling.
+        interrupted = replace(run.message, state="interrupted", failure=Failure("other", RESTART_REASON))
+        try:
+            await disk_call(self.repo.save_message, interrupted)
+        except Exception as error:
+            log.error("Saving interrupted chat answer %s failed: %s", run.run_id, error_note(error))
+        task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=self._close_stop_s / 2)
+        if not done:
+            log.warning("chat answer %s was still running at shutdown (saved as interrupted)", run.run_id)
 
     def active_runs(self) -> set[str]:
         return {run.run_id for run in self._runs.values()}
@@ -633,6 +661,12 @@ class ChatService:
         return AnalysisWriter(self.kb, MaterialReader(self.kb, self._text_layer()), settings.language)
 
     async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
+        """The answer as an analysis page; a repeated (also a concurrent) save is 409 ``ALREADY_SAVED``
+        naming the page the first one wrote."""
+        async with self._saving.setdefault(message_id, asyncio.Lock()):
+            return await self._save_message(chat_id, message_id)
+
+    async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
         chat = await self._chat(chat_id)
         message = await self._message(chat_id, message_id)
         if message.role != "assistant" or message.state != "done":

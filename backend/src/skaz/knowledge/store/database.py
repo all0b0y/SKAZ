@@ -69,6 +69,12 @@ class KnowledgeDatabase:
         with self._lock:
             return applied_versions(self._connection)
 
-    def close(self) -> None:
-        with self._lock:
+    def close(self, *, timeout: float | None = None) -> bool:
+        """Close once no statement runs; ``False`` (left open) if one still ran after ``timeout`` s."""
+        if not self._lock.acquire(timeout=-1 if timeout is None else timeout):
+            return False
+        try:
             self._connection.close()
+        finally:
+            self._lock.release()
+        return True

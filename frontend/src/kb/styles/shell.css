@@ -283,3 +283,4 @@ p.kb-row--static { margin-top: 4px; }
 .kb-frag__text { line-height: 1.6; overflow-wrap: anywhere; }
 
 /* Backend gate: the startup screen lives with the mark, frontend/src/brand/LoadingTree.css. */
+.kb-side__note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px 12px 8px; font-size: 12px; }

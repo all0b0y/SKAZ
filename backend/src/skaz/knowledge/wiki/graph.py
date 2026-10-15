@@ -61,14 +61,24 @@ class GraphIndex:
         self.db = db
         self._signature: str | None = None
         self._lock = threading.Lock()
+        #: (the connection's change counter, the signature computed at it).
+        self._computed: tuple[int, str] | None = None
 
     def signature(self) -> str:
-        """Changes whenever any indexed page file changes."""
-        digest = hashlib.sha256()
+        """Changes whenever any indexed page file changes.
+
+        The background tick asks every 2 s: the pages are hashed again only after the index
+        changed at all (the database connection's change counter), not on every tick.
+        """
         with self.db.read() as connection:
+            counter = connection.total_changes
+            if self._computed is not None and self._computed[0] == counter:
+                return self._computed[1]
+            digest = hashlib.sha256()
             for row in connection.execute("SELECT id, file_sha256 FROM pages ORDER BY id"):
                 digest.update(f"{row[0]}:{row[1]};".encode())
-        return digest.hexdigest()
+            self._computed = (counter, digest.hexdigest())
+            return self._computed[1]
 
     def refresh(self, *, force: bool = False) -> bool:
         """Rebuild ``edges`` when pages changed; returns whether it was rebuilt."""

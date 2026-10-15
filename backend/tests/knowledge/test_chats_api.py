@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -482,6 +483,24 @@ async def test_save_answer_as_analysis_with_checked_quotes_only(env: Env) -> Non
                             "saved_page_id": ref["id"]}
 
 
+async def test_a_double_save_to_wiki_writes_one_page(env: Env) -> None:
+    env.agents.scripts["codex"] = lambda _turn: text("Энтропия — мера беспорядка.")
+    chat = await env.chat()
+    answer = await env.answered(chat["id"], "Что такое энтропия?")
+    url = f"/kb/chats/{chat['id']}/messages/{answer['id']}/save"
+
+    async def analyses() -> set[str]:
+        pages = (await env.client.get("/kb/wiki/pages", params={"kind": "analysis"})).json()
+        return {page["id"] for page in pages}
+
+    before = await analyses()
+    first, second = await asyncio.gather(env.client.post(url), env.client.post(url))
+    assert sorted((first.status_code, second.status_code)) == [200, 409]
+    saved, again = (first, second) if first.status_code == 200 else (second, first)
+    assert again.json()["code"] == "ALREADY_SAVED" and again.json()["saved_page_id"] == saved.json()["id"]
+    assert await analyses() - before == {saved.json()["id"]}
+
+
 async def test_saving_an_answer_under_a_taken_name_is_refused_until_the_chat_is_renamed(env: Env) -> None:
     env.agents.scripts["codex"] = lambda _turn: text("Энтропия — мера беспорядка.")
     first = await env.chat()
@@ -656,6 +675,30 @@ async def test_closing_skaz_leaves_the_question_resumable(env: Env) -> None:
     assert "closed" in message["failure"]["message"] and all_text(message) == "Половина"
     refused = await env.client.post(f"/kb/chats/{chat['id']}/messages", json={"text": "ещё"})
     assert refused.status_code == 409 and refused.json()["code"] == "CLOSING"
+
+
+async def test_closing_with_an_agent_that_ignores_the_stop_saves_the_answer_within_the_deadline(
+        env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shutdown deadline is 2.5 s; a deaf agent used to hold the close for STOP_TIMEOUT_S (10 s),
+    so the deadline cancelled it and the answer kept running after the database closed."""
+    from skaz.knowledge import shutdown
+
+    engine = env.agents.engines["codex"]
+
+    async def deaf(_run_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(engine, "interrupt", deaf)
+    env.agents.scripts["codex"] = lambda _turn: [*text("Половина"), Gate(asyncio.Event())]
+    chat = await env.chat()
+    sent = await env.ask(chat["id"], "Вопрос перед закрытием")
+    await settle(lambda: bool(engine.active_runs()))
+    started = time.monotonic()
+    await env.chats.close()
+    assert time.monotonic() - started < shutdown.DEADLINE_S
+    assert not env.chats.active_runs()
+    message = await env.message(chat["id"], sent["assistant"]["id"])
+    assert message["state"] == "interrupted" and all_text(message) == "Половина"
 
 
 async def test_excluded_fragments_stay_out_of_context_and_citations(env: Env) -> None:

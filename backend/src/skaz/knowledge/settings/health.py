@@ -92,8 +92,9 @@ class SettingsHealth:
     # -- reading ------------------------------------------------------------
 
     async def sections(self) -> list[Section]:
-        problems = [*await self._agents(), *self._key_problems(), *await self._decisions(),
-                    *self._speech(), *self._library()]
+        # Settings, keys and the library state are disk/database reads: never on the event loop.
+        problems = [*await self._agents(), *await disk_call(self._key_problems), *await self._decisions(),
+                    *await disk_call(self._speech), *await disk_call(self._library)]
         result = []
         for section in SECTIONS:
             mine = tuple(problem for problem in problems if problem.section == section)
@@ -109,7 +110,7 @@ class SettingsHealth:
 
     async def _agents(self) -> list[Problem]:
         hub = self._runtime.kb_agents
-        default = hub.registry.default()
+        default = await disk_call(hub.registry.default)
         problems = []
         for engine in ENGINE_IDS:
             name = ENGINE_NAMES[engine]
@@ -240,6 +241,11 @@ class SettingsHealth:
                             "What is already indexed can still be searched and read.",
                             "Adding, changing or recording into the library.",
                             actions=(ProblemAction("retry", "Try again", True),))]
+        if view.indexing:
+            return [Problem("library-indexing", "storage", "progress", "Indexing the library",
+                            "SKAZ is reading the library folder for changes made while it was closed.",
+                            "Materials and the wiki can be read; search may miss the newest changes.",
+                            "Changes wait until indexing finishes.")]
         return []
 
     # -- actions ------------------------------------------------------------

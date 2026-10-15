@@ -66,7 +66,17 @@ export function LibraryPanel() {
       </div>
     );
   }
-  return openFolderId ? <FolderView folderId={openFolderId} /> : <Overview />;
+  const body = openFolderId ? <FolderView folderId={openFolderId} /> : <Overview />;
+  if (!library.indexing) return body;
+  return (
+    <>
+      <p className="kb-side__note kb-muted" data-testid="library-indexing">
+        <Spinner label="Indexing the library" size="sm" />
+        <span>Indexing the library… The newest changes may appear in a moment.</span>
+      </p>
+      {body}
+    </>
+  );
 }
 
 function MaterialRow({ material, tone, meta }: { material: KbMaterialSummary; tone?: string; meta?: string }) {

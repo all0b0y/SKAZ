@@ -37,6 +37,9 @@ export interface LibraryActions {
 
 export type LibraryStore = StoreApi<LibraryData & LibraryActions>;
 
+/** While the backend rescans the library (`indexing`), re-read its state this often — one read at a time. */
+export const INDEXING_POLL_MS = 1500;
+
 const newestFirst = (a: KbMaterialSummary, b: KbMaterialSummary) => b.created_at.localeCompare(a.created_at);
 
 /** Inbox first, then by name — the order of the side panel. */
@@ -48,109 +51,135 @@ export function sortFolders(folders: KbFolder[]): KbFolder[] {
 }
 
 export function createLibraryStore(client: KbClient): LibraryStore {
-  return createStore<LibraryData & LibraryActions>()((set, get) => ({
-    library: null,
-    libraryLoad: 'idle',
-    libraryError: null,
-    folders: [],
-    materials: [],
-    contentLoad: 'idle',
-    contentError: null,
-    openFolderId: null,
-    folderMaterials: [],
-    folderLoad: 'idle',
-    folderError: null,
+  let indexingTimer: ReturnType<typeof setTimeout> | null = null;
+  return createStore<LibraryData & LibraryActions>()((set, get) => {
+    /** Follow a running scan: the next read starts after the previous answered; content reloads at the end. */
+    const followIndexing = (library: KbLibrary) => {
+      if (!library.indexing || indexingTimer) return;
+      indexingTimer = setTimeout(() => {
+        void (async () => {
+          let next: KbLibrary;
+          try {
+            next = await client.library();
+          } catch {
+            indexingTimer = null;
+            followIndexing(library); // a missed read changes nothing; try again later
+            return;
+          }
+          indexingTimer = null;
+          set({ library: next });
+          if (!next.indexing && next.state === 'ready') await get().loadContent();
+          followIndexing(next);
+        })();
+      }, INDEXING_POLL_MS);
+    };
+    return {
+      library: null,
+      libraryLoad: 'idle',
+      libraryError: null,
+      folders: [],
+      materials: [],
+      contentLoad: 'idle',
+      contentError: null,
+      openFolderId: null,
+      folderMaterials: [],
+      folderLoad: 'idle',
+      folderError: null,
 
-    loadLibrary: async () => {
-      set({ libraryLoad: 'loading', libraryError: null });
-      try {
-        const library = await client.library();
-        set({ library, libraryLoad: 'ready' });
-        if (library.state === 'ready') await get().loadContent();
-      } catch (error) {
-        set({ libraryLoad: 'error', libraryError: errorText(error) });
-      }
-    },
+      loadLibrary: async () => {
+        set({ libraryLoad: 'loading', libraryError: null });
+        try {
+          const library = await client.library();
+          set({ library, libraryLoad: 'ready' });
+          followIndexing(library);
+          if (library.state === 'ready') await get().loadContent();
+        } catch (error) {
+          set({ libraryLoad: 'error', libraryError: errorText(error) });
+        }
+      },
 
-    loadContent: async () => {
-      set({ contentLoad: 'loading', contentError: null });
-      try {
-        const [folders, materials] = await Promise.all([client.folders(), client.materials()]);
-        set({ folders: sortFolders(folders), materials: [...materials].sort(newestFirst), contentLoad: 'ready' });
-      } catch (error) {
-        set({ contentLoad: 'error', contentError: errorText(error) });
-      }
-    },
+      loadContent: async () => {
+        set({ contentLoad: 'loading', contentError: null });
+        try {
+          const [folders, materials] = await Promise.all([client.folders(), client.materials()]);
+          set({ folders: sortFolders(folders), materials: [...materials].sort(newestFirst), contentLoad: 'ready' });
+        } catch (error) {
+          set({ contentLoad: 'error', contentError: errorText(error) });
+        }
+      },
 
-    connect: async (path) => {
-      try {
-        const library = await client.connectLibrary(path);
-        set({ library, libraryLoad: 'ready', libraryError: null });
-        if (library.state === 'ready') await get().loadContent();
-        return { ok: true, value: library };
-      } catch (error) {
-        return { ok: false, error: errorText(error) };
-      }
-    },
+      connect: async (path) => {
+        try {
+          const library = await client.connectLibrary(path);
+          set({ library, libraryLoad: 'ready', libraryError: null });
+          followIndexing(library);
+          if (library.state === 'ready') await get().loadContent();
+          return { ok: true, value: library };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
 
-    retry: async () => {
-      try {
-        const library = await client.retryLibrary();
-        set({ library, libraryLoad: 'ready', libraryError: null });
-        if (library.state === 'ready') await get().loadContent();
-        return { ok: true, value: library };
-      } catch (error) {
-        return { ok: false, error: errorText(error) };
-      }
-    },
+      retry: async () => {
+        try {
+          const library = await client.retryLibrary();
+          set({ library, libraryLoad: 'ready', libraryError: null });
+          followIndexing(library);
+          if (library.state === 'ready') await get().loadContent();
+          return { ok: true, value: library };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
 
-    createFolder: async (name) => {
-      try {
-        const folder = await client.createFolder(name.trim());
-        set({ folders: sortFolders([...get().folders, folder]) });
-        return { ok: true, value: folder };
-      } catch (error) {
-        return { ok: false, error: errorText(error) };
-      }
-    },
+      createFolder: async (name) => {
+        try {
+          const folder = await client.createFolder(name.trim());
+          set({ folders: sortFolders([...get().folders, folder]) });
+          return { ok: true, value: folder };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
 
-    renameFolder: async (id, name) => {
-      try {
-        const folder = await client.renameFolder(id, name.trim());
-        set({ folders: sortFolders(get().folders.map((f) => (f.id === id ? folder : f))) });
-        return { ok: true, value: folder };
-      } catch (error) {
-        return { ok: false, error: errorText(error) };
-      }
-    },
+      renameFolder: async (id, name) => {
+        try {
+          const folder = await client.renameFolder(id, name.trim());
+          set({ folders: sortFolders(get().folders.map((f) => (f.id === id ? folder : f))) });
+          return { ok: true, value: folder };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
 
-    deleteFolder: async (id) => {
-      try {
-        await client.deleteFolder(id);
-        set({
-          folders: get().folders.filter((f) => f.id !== id),
-          ...(get().openFolderId === id ? { openFolderId: null, folderMaterials: [] } : {}),
-        });
-        return { ok: true, value: undefined };
-      } catch (error) {
-        return { ok: false, error: errorText(error) };
-      }
-    },
+      deleteFolder: async (id) => {
+        try {
+          await client.deleteFolder(id);
+          set({
+            folders: get().folders.filter((f) => f.id !== id),
+            ...(get().openFolderId === id ? { openFolderId: null, folderMaterials: [] } : {}),
+          });
+          return { ok: true, value: undefined };
+        } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
 
-    openFolder: async (id) => {
-      if (id === null) {
-        set({ openFolderId: null, folderMaterials: [], folderLoad: 'idle', folderError: null });
-        return;
-      }
-      set({ openFolderId: id, folderMaterials: [], folderLoad: 'loading', folderError: null });
-      try {
-        const list = await client.materials(id);
-        if (get().openFolderId !== id) return;
-        set({ folderMaterials: [...list].sort(newestFirst), folderLoad: 'ready' });
-      } catch (error) {
-        if (get().openFolderId !== id) return;
-        set({ folderLoad: 'error', folderError: errorText(error) });
-      }
-    },
-  }));
+      openFolder: async (id) => {
+        if (id === null) {
+          set({ openFolderId: null, folderMaterials: [], folderLoad: 'idle', folderError: null });
+          return;
+        }
+        set({ openFolderId: id, folderMaterials: [], folderLoad: 'loading', folderError: null });
+        try {
+          const list = await client.materials(id);
+          if (get().openFolderId !== id) return;
+          set({ folderMaterials: [...list].sort(newestFirst), folderLoad: 'ready' });
+        } catch (error) {
+          if (get().openFolderId !== id) return;
+          set({ folderLoad: 'error', folderError: errorText(error) });
+        }
+      },
+    };
+  });
 }

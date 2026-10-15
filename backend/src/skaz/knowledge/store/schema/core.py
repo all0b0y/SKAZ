@@ -2,9 +2,21 @@
 from __future__ import annotations
 
 NAME = "core"
-VERSION = 2
+VERSION = 3
 
 _TOKENIZE = "tokenize='unicode61 remove_diacritics 2'"
+
+#: The FTS rows of a fragment/block share its ``rowid`` (written by ``index/indexer.py``), so deleting a
+#: material or page — directly, by cascade or by a folder delete — drops its FTS rows by rowid instead
+#: of scanning the whole FTS table for an UNINDEXED column (a full rescan was quadratic).
+TRIGGERS = """
+CREATE TRIGGER IF NOT EXISTS fragments_fts_forget AFTER DELETE ON fragments BEGIN
+    DELETE FROM fragments_fts WHERE rowid = old.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS blocks_fts_forget AFTER DELETE ON blocks BEGIN
+    DELETE FROM blocks_fts WHERE rowid = old.rowid;
+END;
+"""
 
 SQL = f"""
 CREATE TABLE IF NOT EXISTS folders (
@@ -133,9 +145,27 @@ CREATE TABLE IF NOT EXISTS aliases (
     PRIMARY KEY (page_id, alias_key)
 );
 CREATE INDEX IF NOT EXISTS aliases_by_key ON aliases(alias_key);
-"""
+""" + TRIGGERS
 
 #: v2: citations keep the exact quote (marker ``~<base64url>``); pages are re-read on the next scan.
+#: v3: FTS rows keyed by their fragment/block rowid + delete triggers; the FTS tables are rebuilt from the
+#: indexed rows (block text in FTS is plain text, so it is carried over from the old FTS table).
 UPGRADES = {
     2: "ALTER TABLE citations ADD COLUMN quote TEXT;\nUPDATE pages SET file_sha256 = '';\n",
+    3: f"""
+DROP TABLE IF EXISTS fragments_fts;
+CREATE VIRTUAL TABLE fragments_fts USING fts5(
+    text, material_id UNINDEXED, seg UNINDEXED, {_TOKENIZE}
+);
+INSERT INTO fragments_fts(rowid, text, material_id, seg) SELECT rowid, text, material_id, seg FROM fragments;
+ALTER TABLE blocks_fts RENAME TO blocks_fts_v2;
+CREATE VIRTUAL TABLE blocks_fts USING fts5(
+    text, page_id UNINDEXED, block_id UNINDEXED, {_TOKENIZE}
+);
+INSERT INTO blocks_fts(rowid, text, page_id, block_id)
+    SELECT b.rowid, MIN(o.text), b.page_id, b.block_id
+    FROM blocks_fts_v2 o JOIN blocks b ON b.page_id = o.page_id AND b.block_id = o.block_id
+    GROUP BY b.rowid;
+DROP TABLE blocks_fts_v2;
+""" + TRIGGERS,
 }

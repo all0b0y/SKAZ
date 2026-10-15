@@ -105,6 +105,11 @@ class McpServer:
 
     # -- HTTP --------------------------------------------------------------------
 
+    def authorized(self, headers: Mapping[str, str]) -> bool:
+        """Whether the request carries a live run token (checked before its body is read)."""
+        token = _bearer(headers.get("authorization"))
+        return token is not None and self.tokens.resolve(token) is not None
+
     async def handle(self, *, headers: Mapping[str, str], body: bytes, too_large: bool = False) -> McpReply:
         """One POST to the MCP endpoint. ``headers`` must be case-insensitive (Starlette's are).
 

@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { BridgeApi } from '../../api/bridge';
-import type { KbRecordingLive } from '../../api/kb/types.gen';
+import type { KbFragment, KbRecordingLive } from '../../api/kb/types.gen';
 import type { MeterSnapshot } from '../../audio/meter';
 import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { UiStore } from '../state/ui';
@@ -74,6 +74,11 @@ export interface RecordingData {
    * the next recording, so the panel can hand the text over to the material without a gap.
    */
   live: KbRecordingLive | null;
+  /**
+   * Fragments the material gained while recording (`fragments` of the live answers, asked with
+   * `since_seg`): the panels append them instead of re-reading the whole material every poll.
+   */
+  liveFragments: KbFragment[];
 }
 
 export interface RecordingActions {
@@ -126,7 +131,9 @@ export function createRecordingStore(deps: Deps): RecordingStore {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let engine: CaptureEngine | null = null;
   let ticker: ReturnType<typeof setInterval> | null = null;
-  let poller: ReturnType<typeof setInterval> | null = null;
+  let poller: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped whenever polling starts or stops: an answer of an older loop never schedules another. */
+  let pollLoop = 0;
   let attempt = 0;
 
   const store = createStore<RecordingData & RecordingActions>()((set, get) => {
@@ -140,26 +147,46 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         failed: pending.failed,
       });
     };
-    /** The live text after the material's fragments and the stream state, in one small answer. */
+    /**
+     * The live text after the material's fragments, the fragments added since the last answer and
+     * the stream state, in one small answer — never the whole material.
+     */
     const pollStream = async () => {
       const materialId = get().materialId;
       if (get().phase !== 'recording' || !materialId) return;
+      const previous = get().live;
+      const since = previous && previous.material_id === materialId ? previous.after_seg : null;
       try {
-        const live = await deps.client.call('GET /kb/recordings/{material_id}/live', { path: { material_id: materialId } });
+        const live = await deps.client.call('GET /kb/recordings/{material_id}/live', {
+          path: { material_id: materialId }, ...(since !== null ? { query: { since_seg: since } } : {}),
+        });
         if (get().phase !== 'recording' || get().materialId !== materialId) return;
-        set({ stream: STREAM_STATES.find((s) => s === live.stream) ?? null, live });
+        const known = get().liveFragments;
+        const last = known.at(-1)?.seg ?? since ?? 0;
+        const added = (live.fragments ?? []).filter((f) => f.seg > last);
+        set({
+          stream: STREAM_STATES.find((s) => s === live.stream) ?? null, live,
+          ...(added.length ? { liveFragments: [...known, ...added] } : {}),
+        });
       } catch {
         // A missed poll changes nothing on screen; the next one (1.5 s) catches up.
       }
     };
+    /** One poll at a time: the next starts STREAM_POLL_MS after the previous answered. */
+    const pollUntilStopped = async (loop: number) => {
+      poller = null;
+      await pollStream();
+      if (loop === pollLoop) poller = setTimeout(() => { void pollUntilStopped(loop); }, STREAM_POLL_MS);
+    };
     const tick = (on: boolean) => {
       if (ticker) clearInterval(ticker);
-      if (poller) clearInterval(poller);
+      if (poller) clearTimeout(poller);
       ticker = null;
       poller = null;
+      pollLoop += 1;
       if (on) {
         ticker = setInterval(() => { if (engine) set({ elapsedMs: engine.elapsedMs() }); }, 250);
-        poller = setInterval(() => { void pollStream(); }, STREAM_POLL_MS);
+        void pollUntilStopped(pollLoop);
       } else {
         set({ stream: null });
       }
@@ -213,7 +240,6 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       if (id !== attempt) return;
       set({ phase: 'recording', elapsedMs: engine.elapsedMs() });
       tick(true);
-      void pollStream();
       report();
     };
 
@@ -236,6 +262,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       stream: null,
       provider: null,
       live: null,
+      liveFragments: [],
 
       loadOptions: async () => {
         const [defaults, settings] = await Promise.allSettled([
@@ -283,7 +310,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
 
       start: async () => {
         if (get().phase !== 'idle') return;
-        set({ phase: 'starting', startError: null, startErrorWhen: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
+        set({ phase: 'starting', startError: null, startErrorWhen: null, startPermission: null, failure: null, chatId: null, chatError: null, elapsedMs: 0, bars: SILENT_BARS, live: null, liveFragments: [] });
         report();
         let materialId: string | null = null;
         try {
@@ -384,7 +411,7 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         if (get().phase !== 'idle') return;
         const failure = get().failure;
         const kept = failure && failure.materialId === materialId ? failure : null;
-        set({ phase: 'starting', startError: null, startErrorWhen: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS, live: null });
+        set({ phase: 'starting', startError: null, startErrorWhen: null, startPermission: null, failure: null, elapsedMs: 0, bars: SILENT_BARS, live: null, liveFragments: [] });
         report();
         let resumed = false;
         try {

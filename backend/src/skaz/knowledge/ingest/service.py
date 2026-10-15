@@ -176,7 +176,9 @@ class IngestService:
                 await active.run.engine.interrupt(active.run.current_run)
             active.task.cancel()
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Shielded: when the app's shutdown deadline cancels this close, a job saving its pages
+            # keeps going (the database closes after the library write lock is free), never torn.
+            await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
 
     def active_jobs(self) -> set[str]:
         return {job_id for job_id, active in self._active.items() if active.task is not None}

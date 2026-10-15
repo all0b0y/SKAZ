@@ -12,7 +12,7 @@ router = APIRouter(prefix="/kb/library", tags=["kb"])
 
 def _view(view: LibraryView) -> KbLibrary:
     return KbLibrary(state=view.state, root=view.root, suggested_root=view.suggested_root, reason=view.reason,
-                     library_id=view.library_id)
+                     library_id=view.library_id, indexing=view.indexing)
 
 
 @router.get("")

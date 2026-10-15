@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..markdown.source import MaterialStatus
+from .schemas import KbFragment
 
 KbSpeechKind = Literal["recording", "audio", "video", "video_link"]
 KbRecordingState = Literal["recording", "processing", "paused", "stopped"]
@@ -95,6 +96,10 @@ class KbRecordingLive(BaseModel):
     partial: KbLivePartial | None
     #: The recorder's stream: ``connecting``, ``reconnecting``, ``streaming``, ``unavailable``, ``inactive``.
     stream: str
+    #: With ``?since_seg=N``: the material's fragments after ``N`` up to ``after_seg`` (as recognised,
+    #: corrections come after the recording), so the panel appends them instead of re-reading the
+    #: whole material; empty without ``since_seg``.
+    fragments: list[KbFragment] = Field(default_factory=list)
 
 
 class KbDictation(BaseModel):

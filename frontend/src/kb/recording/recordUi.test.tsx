@@ -157,8 +157,9 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
       expect(live.querySelector('.kb-tail')).toHaveTextContent('So cross-entropy in machine learning is');
       expect(within(live).queryByText(/Listening/)).not.toBeInTheDocument();
 
-      // The speaker keeps going and the monologue closes: the answer is a step ahead of the panel's
-      // material. The closed words stay put (never gone, never twice) until the material has them.
+      // The speaker keeps going and the monologue closes: the next live answer brings the closed
+      // monologue as a fragment (asked with since_seg), the panel appends it without re-reading the
+      // material. The closed words stay put — never gone, never twice.
       const id = services.recording.getState().materialId!;
       const material = fake.world.materials.find((m) => m.id === id)!;
       const reads = () => fake.calls.filter((c) => c.method === 'GET' && c.path === `/kb/materials/${id}`).length;
@@ -167,10 +168,10 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
         text: 'So the entropy of a closed system never decreases.', speaker: 'Speaker 1', start_ms: 0, end_ms: 9_000 });
       fake.world.liveOpen = 'Why is that?';
       await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
-      await waitFor(() => expect(reads()).toBeGreaterThan(before));
       await within(live).findByText('Why is that?');
       expect(live).toHaveTextContent('So the entropy of a closed system never decreases.');
       expect(live.textContent!.split('So the entropy of a closed system').length - 1).toBe(1);
+      expect(reads()).toBe(before); // the tail came with the live answer, not the whole material
     } finally {
       vi.useRealTimers();
     }
