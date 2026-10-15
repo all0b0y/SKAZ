@@ -1,6 +1,7 @@
 """``runtime.kb_agents``: engines, their statuses, installs and sign-in in one place."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +43,11 @@ class AgentsHub:
             hermes.sweep_at_start()
 
     async def aclose(self) -> None:
-        await self.installs.aclose()
+        hermes = self.registry.engines.get("hermes")
+        closing = [self.installs.aclose()]
+        if isinstance(hermes, HermesEngine):
+            closing.append(hermes.aclose())  # Hermes 0.22's gateway of SKAZ's folder (B18)
+        await asyncio.gather(*closing)
 
 
 def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexConnection,

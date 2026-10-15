@@ -51,7 +51,8 @@ MCP servers from ``session/new`` are frozen into the session as
 ``acp_adapter/gateway_commands.py`` ``_tools_text`` grouped by toolset (or
 ``Enabled toolsets: …`` before the session's tools are built);
 :func:`tools_listing_allowed` reads both formats and accepts only SKAZ's toolset.
-The daemon may outlive the ``hermes acp`` process (it ends itself when idle).
+The daemon may outlive the ``hermes acp`` process (it ends itself when idle); SKAZ
+stops the one of its own folder when it quits (decision B18, ``hermes_gateway.py``).
 
 History (review B2 #4): Hermes ACP saves every prompted session — the whole
 SKAZ prompt: question, transcript, source excerpts — to ``HERMES_HOME/state.db``
@@ -129,6 +130,7 @@ from .engine import (
     ToolResult,
     Usage,
 )
+from .hermes_gateway import GatewayDaemon, find_gateway
 from .hermes_launchers import LauncherTampered, LauncherWatch, launcher_files, user_store
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .registry import FirstRun
@@ -413,6 +415,7 @@ class HermesEngine:
         self.current_model: str | None = None
         self._history_tasks: set[asyncio.Task[None]] = set()
         self._swept = False
+        self._gateway: GatewayDaemon | None = None
 
     @property
     def id(self) -> EngineId:
@@ -781,6 +784,36 @@ class HermesEngine:
             await asyncio.gather(drain, return_exceptions=True)
             with contextlib.suppress(LauncherTampered):
                 watch.check()  # a late change pointing into SKAZ's folder is put back here too
+            with contextlib.suppress(OSError):
+                await disk_call(self.adopt_gateway)  # Hermes 0.22 started (or used) its gateway
+
+    # -- Hermes 0.22 gateway daemon (decision B18) ---------------------------------
+
+    def adopt_gateway(self) -> GatewayDaemon | None:
+        """Register the running gateway of SKAZ's own Hermes folder with the app's children, so
+        quitting SKAZ stops it (``knowledge.shutdown``); never a process of another folder
+        (``hermes_gateway.find_gateway``). Blocking: call it off the event loop."""
+        daemon = find_gateway(self.home)
+        if daemon is None:
+            return None
+        known = self._gateway
+        if known is None or known.pid != daemon.pid or known.returncode is not None:
+            if known is not None:
+                CHILDREN.discard(known)
+            self._gateway = known = daemon
+            CHILDREN.add(daemon, group=True)
+        return known
+
+    async def aclose(self, *, wait_s: float = 2.0) -> None:
+        """Backend shutdown: stop the gateway of SKAZ's Hermes folder (a planned stop for Hermes) and
+        give it ``wait_s`` to end; ``knowledge.shutdown`` sends SIGKILL to it if it is still there."""
+        with contextlib.suppress(OSError):
+            daemon = await disk_call(self.adopt_gateway)
+            if daemon is None or not await disk_call(daemon.deliver, signal.SIGTERM):
+                return
+            deadline = asyncio.get_running_loop().time() + wait_s
+            while daemon.returncode is None and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.05)
 
     def _startup_failure(self, tail: deque[str], error: BaseException) -> Failed:
         text = " ".join(tail)

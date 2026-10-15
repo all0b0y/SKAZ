@@ -533,3 +533,23 @@ async def test_a_model_confirmation_outside_the_switch_is_rejected(tmp_path: Pat
     assert isinstance(events[-1], Completed)
     assert fake.records("permission_reply")[0]["message"]["result"] == {
         "outcome": {"outcome": "selected", "optionId": "deny"}}
+
+
+async def test_the_gateway_of_skaz_folder_is_registered_after_a_run(tmp_path: Path) -> None:
+    """Hermes 0.22 leaves its gateway running after ``hermes acp`` ends; SKAZ registers it (B18)."""
+    from skaz.knowledge.processes import CHILDREN
+    from tests.knowledge.agent_fakes import FakeGateway
+
+    engine, _fake = engine_for(tmp_path, scenario(version_output=V022_VERSION, updates=UPDATES[1:2]))
+    user = FakeGateway(tmp_path / "fakes", tmp_path / "home" / ".hermes")
+    ours = FakeGateway(tmp_path / "fakes", engine.home)
+    try:
+        assert ours.pid not in CHILDREN.running()
+        events = await drain(engine, turn(tools=None))
+        assert isinstance(events[-1], Completed)
+        assert ours.pid in CHILDREN.running() and user.pid not in CHILDREN.running()
+    finally:
+        if engine._gateway is not None:
+            CHILDREN.discard(engine._gateway)
+        ours.close()
+        user.close()

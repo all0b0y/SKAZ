@@ -73,6 +73,12 @@ class ChildProcesses:
 
 
 def _send(child: _Child, sig: int) -> None:
+    # A process SKAZ did not start itself (Hermes' gateway daemon, ``agents/hermes_gateway.py``)
+    # proves it is still the same process before every signal and picks how it is signalled.
+    deliver = getattr(child.process, "deliver", None)
+    if callable(deliver):
+        deliver(sig)
+        return
     pid = child.process.pid
     if child.group:
         try:
