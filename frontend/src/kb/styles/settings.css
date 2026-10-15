@@ -97,3 +97,14 @@
 .kb-snote { display: flex; gap: 8px; align-items: flex-start; color: var(--kb-muted); font-size: var(--t-sm); flex: none; }
 .kb-snote .kb-icon { color: var(--kb-warn); margin-top: 2px; }
 .kb-snote--quiet .kb-icon { color: var(--kb-muted); }
+
+/* Settings → Privacy → Activity log (F2): read-only list of GET /logs, newest first. */
+.kb-confirm.kb-activity { width: min(620px, calc(100vw - 48px)); }
+.kb-activity__body { max-height: min(60vh, 520px); overflow: hidden; }
+.kb-activity__list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; border-top: 1px solid var(--kb-line); }
+.kb-activity__item { padding: 8px 0; border-bottom: 1px solid var(--kb-line); display: flex; flex-direction: column; gap: 2px; }
+.kb-activity__line { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; min-width: 0; }
+.kb-activity__op { font-weight: 600; overflow-wrap: anywhere; }
+.kb-activity__at { white-space: nowrap; font-size: var(--t-sm); }
+.kb-activity__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--t-sm); }
+.kb-activity__bad { color: var(--kb-danger); }

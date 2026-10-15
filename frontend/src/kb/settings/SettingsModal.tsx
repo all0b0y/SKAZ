@@ -10,6 +10,7 @@ import {
   WikiLanguageRow, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
 import { EngineBadge } from '../ui/EngineBadge';
+import { ActivityLogRow } from './ActivityLog';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -78,6 +79,8 @@ function RowControl({ row }: { row: RowDef }) {
         <Segmented<TextSize> label="Text size" value={textSize} size="sm" onChange={(v) => prefs.getState().set({ textSize: v })}
           options={[{ value: 's', label: 'S', name: 'Small' }, { value: 'm', label: 'M', name: 'Medium' }, { value: 'l', label: 'L', name: 'Large' }]} />
       );
+    case 'log':
+      return <ActivityLogRow />;
     case 'ui-language':
       return <span className="kb-muted">English</span>;
     case 'version':

@@ -36,6 +36,8 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/live$/ },
   { method: 'GET', pattern: /^\/sessions\/[^/]+\/live\/events$/ },
   { method: 'PATCH', pattern: /^\/sessions\/[^/]+$/ },
+  // Settings → Privacy → Activity log (F2): the technical activity log, read-only, no text or keys.
+  { method: 'GET', pattern: /^\/logs$/ },
   // Knowledge library (new interface, frontend/src/kb). Only what the renderer uses: library
   // place, folders (create / rename / delete empty), material list + one material, notification
   // count. Ids are one path segment; nothing here reaches a file path chosen by the renderer

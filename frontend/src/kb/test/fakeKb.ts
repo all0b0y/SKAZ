@@ -69,6 +69,8 @@ export interface FakeWorld {
   settings: Record<string, unknown>;
   /** Unstable words of the live recording (GET /sessions/{id}/live/events → tail). */
   liveTail: string;
+  /** `GET /logs`: the technical activity log (absent = nothing ran yet). */
+  activity?: { entries: Array<Record<string, unknown>>; capacity: number; dropped: number };
   /** The recording's stream state in the same page (`transcription`); absent = streaming. */
   liveTranscription?: 'connecting' | 'reconnecting' | 'streaming' | 'unavailable' | 'inactive';
   /** One-off failures: "METHOD /path" → status + detail. */
@@ -878,6 +880,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
   const { method, path } = req;
   if (method === 'GET' && path === '/settings') return w.settings;
   if (method === 'PUT' && path === '/settings') { Object.assign(w.settings, req.body); return w.settings; }
+  if (method === 'GET' && path === '/logs') return w.activity ?? { entries: [], capacity: 256, dropped: 0 };
   let m = /^\/sessions\/([^/]+)\/live$/.exec(path);
   if (m && method === 'GET') return { session_id: m[1], sample_rate: 48000, saved_samples: 0, next_sequence: 0, transcription: 'inactive', connections: [], gaps: [] };
   m = /^\/sessions\/([^/]+)\/live\/events$/.exec(path);

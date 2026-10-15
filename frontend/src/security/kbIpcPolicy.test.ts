@@ -189,3 +189,12 @@ describe('Electron IPC policy — /kb rules match the real backend routes (I1)',
     expect(FAKE_ROUTES.filter((r) => !backendRoutes.has(r))).toEqual([]);
   });
 });
+
+describe('Electron IPC policy — restored capabilities (F2)', () => {
+  it('lets the activity log be read, and nothing else under /logs', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/logs' })).toBeNull();
+    for (const [method, path] of [['POST', '/logs'], ['DELETE', '/logs'], ['GET', '/logs/1'], ['GET', '/logs/../settings']] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
