@@ -22,6 +22,7 @@ from .library.layout import read_marker, resolve_library_root
 from .library.library import Library, MaterialFiles
 from .markdown.page import PageDocument, PageFormatError
 from .markdown.source import Fragment, FragmentInput, MaterialKind, MaterialStatus, Origin
+from .notifications.actions import NotificationActions
 from .store.database import KNOWLEDGE_DB_NAME, KnowledgeDatabase
 from .store.records import FolderRecord, FragmentRecord, MaterialRecord, NotificationRecord, PageRecord
 from .store.repositories import (
@@ -112,6 +113,8 @@ class KnowledgeService:
         self.material_repo = MaterialRepository(self.db)
         self.page_repo = PageRepository(self.db)
         self.notification_repo = NotificationRepository(self.db)
+        #: Buttons and handlers of notifications that need a decision; areas register their kinds.
+        self.notification_actions = NotificationActions()
         self._library: Library | None = None
         self._reason: str | None = None
         self._state_lock = threading.RLock()
