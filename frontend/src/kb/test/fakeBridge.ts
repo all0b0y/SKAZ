@@ -3,12 +3,20 @@
 import { vi } from 'vitest';
 import type { BridgeRequest, JsonResponse } from '../../api/bridge';
 import type { KbFolder, KbLibrary, KbMaterialSummary, KbNotification } from '../../api/kb/types.gen';
+import { handleU3, u3World, type U3World } from './u3World';
 
 export interface FakeKbState {
   library: KbLibrary;
   folders: KbFolder[];
   materials: KbMaterialSummary[];
   notifications: KbNotification[];
+  /** Package-2 world of the U3 screens (API-B2 shapes); when set it answers first. */
+  u3?: U3World;
+}
+
+/** A ready library served entirely by the U3 world (pages, corrections, graph, recordings…). */
+export function u3State(): FakeKbState {
+  return { ...readyState(), u3: u3World() };
 }
 
 export function material(id: string, title: string, folderId: string, createdAt: string,
@@ -52,6 +60,10 @@ export function createFakeBridge(initial: FakeKbState = readyState()) {
   const calls: BridgeRequest[] = [];
   const request = vi.fn(async (req: BridgeRequest): Promise<JsonResponse<unknown>> => {
     calls.push(req);
+    if (state.u3) {
+      const answer = handleU3(state.u3, req);
+      if (answer) return answer;
+    }
     const { method, path } = req;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const needReady = () => (state.library.state === 'ready' ? null
@@ -132,6 +144,7 @@ export function createFakeBridge(initial: FakeKbState = readyState()) {
     bridge: {
       request: request as unknown as <T = unknown>(req: BridgeRequest) => Promise<JsonResponse<T>>,
       chooseStorageRoot: vi.fn(async () => '/Users/me/Notes'),
+      reportCaptureState: vi.fn(),
       onPrepareQuit: vi.fn((listener: () => Promise<boolean>) => {
         quitListener = listener;
         return () => { if (quitListener === listener) quitListener = null; };

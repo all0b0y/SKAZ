@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { EmptyState, Icon } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { LibraryPanel } from '../library/LibraryPanel';
+import { GraphSide, WikiSide } from '../wiki/WikiSide';
 import { useLibrary, usePrefs } from '../state/context';
 import type { Section } from '../state/prefs';
 
@@ -24,16 +25,8 @@ export function SidePanel({ width }: { width: number }) {
       <div className="kb-side__body" data-section={section}>
         {section === 'chats' && <ChatsSection />}
         {section === 'materials' && <LibraryPanel />}
-        {section === 'wiki' && (
-          <EmptyState icon="wiki" title="Wiki pages">
-            Concepts, notes and analyses built from your materials will be listed here.
-          </EmptyState>
-        )}
-        {section === 'graph' && (
-          <EmptyState icon="graph" title="Graph of connections">
-            How concepts connect across your folders will open from here.
-          </EmptyState>
-        )}
+        {section === 'wiki' && <WikiSide />}
+        {section === 'graph' && <GraphSide />}
         {section === 'notifications' && <NotificationsSection />}
       </div>
     </section>

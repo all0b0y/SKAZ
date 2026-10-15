@@ -6,6 +6,7 @@ import { KbServicesProvider, usePrefs, useServices, useUi, type KbServices } fro
 import { Shell } from './shell/Shell';
 import { SettingsModal } from './settings/SettingsModal';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
+import { AddMaterialModal } from './materials/AddMaterialModal';
 
 /** Mirror theme and text size onto <html>, where the tokens read them. */
 function ThemeSync() {
@@ -50,13 +51,14 @@ function BackendGate({ children }: { children: ReactNode }) {
 }
 
 /**
- * Quit barrier: main asks the renderer to save before closing and waits for an answer. This
- * interface holds no unsaved capture (recording arrives with U3), so it answers "saved" at once —
- * without an answer main would wait 30 s and then warn about unsaved audio that does not exist.
+ * Quit barrier: main asks the renderer to save before closing and waits for an answer. Without a
+ * recording there is nothing unsaved and the answer is immediate; a running or paused recording
+ * is stopped first and the answer says whether its audio reached local storage (false = main
+ * keeps warning instead of losing audio).
  */
 function useQuitAnswer() {
-  const { bridge } = useServices();
-  useEffect(() => bridge.onPrepareQuit?.(async () => true), [bridge]);
+  const { bridge, recording } = useServices();
+  useEffect(() => bridge.onPrepareQuit?.(() => recording.getState().prepareQuit()), [bridge, recording]);
 }
 
 function useSettingsShortcut() {
@@ -87,6 +89,7 @@ function Workspace() {
       <SettingsModal />
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
+      <AddMaterialModal />
     </>
   );
 }

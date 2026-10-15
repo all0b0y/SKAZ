@@ -4,7 +4,7 @@ import {
   CircleDot, Command, Download, Ellipsis, ExternalLink, FileMusic, FileText, FileVideoCamera, Folder, FolderPlus,
   Globe, Inbox, Info, Languages, Library, Link, MessagesSquare, Mic, Minimize2, Maximize2, Monitor, Moon,
   PanelLeft, Paperclip, Pencil, Pin, Play, Plus, Quote, RotateCw, Search, Settings, ShieldCheck, Square,
-  SquarePen, Sun, Trash2, TriangleAlert, Type, Upload, Waypoints, X, Palette, HardDrive, Sparkles, Bell,
+  SquarePen, Sun, Trash2, Pause, LayoutList, LayoutGrid, TriangleAlert, Type, Upload, Waypoints, X, Palette, HardDrive, Sparkles, Bell,
 } from 'lucide-react';
 
 /**
@@ -71,6 +71,10 @@ const ICONS = {
   sun: Sun,
   moon: Moon,
   system: Monitor,
+  // U3
+  pause: Pause,
+  table: LayoutList,
+  cards: LayoutGrid,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;
 
 export type IconName = keyof typeof ICONS;

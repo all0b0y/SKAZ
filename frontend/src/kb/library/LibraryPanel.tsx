@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import type { KbFolder, KbMaterialSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
-import { Tooltip } from '../ui/Tooltip';
 import { useLibrary, useServices, useUi } from '../state/context';
 import { KIND_ICON, folderTone } from './materialMeta';
 import { NameField } from './NameField';
@@ -97,6 +96,9 @@ function Overview() {
   const contentError = useLibrary((s) => s.contentError);
   const { library: store } = useServices();
   const [creating, setCreating] = useState(false);
+  const setAddOpen = useUi((s) => s.setAddMaterialOpen);
+  const showCenter = useUi((s) => s.showCenter);
+  const allOpen = useUi((s) => s.center === 'materials');
 
   const userFolders = folders.filter((f) => !f.system);
   const toneOf = (folderId: string) => {
@@ -107,12 +109,10 @@ function Overview() {
 
   return (
     <div className="kb-side__scroll">
-      <Tooltip text="Adding materials isn’t connected yet" describes>
-        <button type="button" className="kb-row kb-row--action" aria-disabled="true" onClick={(e) => e.preventDefault()}>
-          <Icon name="plus" size={16} className="kb-row__icon" />
-          <span className="kb-row__text">Add material</span>
-        </button>
-      </Tooltip>
+      <button type="button" className="kb-row kb-row--action" aria-haspopup="dialog" onClick={() => setAddOpen(true)}>
+        <Icon name="plus" size={16} className="kb-row__icon" />
+        <span className="kb-row__text">Add material</span>
+      </button>
 
       {contentLoad === 'error' && (
         <div className="kb-side__pad">
@@ -151,9 +151,10 @@ function Overview() {
           onDone={() => setCreating(false)}
         />
       )}
-      <p className="kb-row kb-row--static" data-testid="all-materials">
-        All materials · {materials.length}
-      </p>
+      <button type="button" className={`kb-row kb-row--all${allOpen ? ' is-current' : ''}`} data-testid="all-materials"
+        aria-current={allOpen ? 'true' : undefined} onClick={() => showCenter(allOpen ? 'chat' : 'materials')}>
+        <span className="kb-row__text">All materials · {materials.length}</span>
+      </button>
     </div>
   );
 }
