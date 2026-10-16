@@ -38,6 +38,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean; url?: string | null } | null>(null);
   const [consent, setConsent] = useState(false);
+  const [checkedHere, setCheckedHere] = useState(false);
 
   const running = install?.task.state === 'running';
   const taskId = install?.task.id ?? agent.install_task;
@@ -67,6 +68,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       if (!r.ok) setMessage({ text: r.error, error: true });
       else setMessage({ text: r.value.message, error: false, url: r.value.url });
     } else {
+      setCheckedHere(true);
       const r = await s.check(agent.id);
       if (!r.ok) setMessage({ text: r.error, error: true });
       else setMessage({ text: r.value.state === 'ready' ? 'Connected.' : r.value.reason ?? STATE_TEXT[r.value.state], error: r.value.state !== 'ready' });
@@ -74,7 +76,9 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     setBusy(null);
   };
 
-  const firstCheck = agent.id === 'hermes' && agent.first_run && !agent.first_run.checked;
+  // "Nothing starts until you press Check" is gone once Check was pressed and found no Hermes (QA A5).
+  const firstCheck = agent.id === 'hermes' && agent.first_run && !agent.first_run.checked
+    && !(checkedHere && agent.state === 'not_installed');
   const action = agent.action;
   const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again'
     : action === 'first_check' ? 'Check' : null;

@@ -237,6 +237,25 @@ test('first launch: every step at every width and theme', async () => {
   await expect(dialog.locator('li[data-tone="ok"]', { hasText: 'Library' })).toHaveCount(1);
   await dialog.getByRole('button', { name: 'Open SKAZ' }).click();
   await expect(dialog).toHaveCount(0);
+
+  // QA A1: the ACTIVE rail item's name slides out painted like the others — read the real pixels
+  // of the window (not the DOM) beyond the 36px square, where only the name pill can be.
+  await setView(1440, 860, 'light');
+  const active = page.locator('button.kb-rail__item.is-active');
+  await active.hover();
+  const label = active.getByTestId('rail-label');
+  await expect(label).toBeVisible();
+  await page.waitForTimeout(400);
+  const box = (await label.boundingBox())!;
+  const fill = (await label.evaluate((el) => getComputedStyle(el).backgroundColor)).match(/\d+/g)!.slice(0, 3).map(Number);
+  const pixel = await app.evaluate(async ({ BrowserWindow }, at) => {
+    const image = await BrowserWindow.getAllWindows()[0]!.webContents.capturePage({ x: at.x, y: at.y, width: 1, height: 1 });
+    const [b, g, r] = image.toBitmap();
+    return [r!, g!, b!];
+  }, { x: Math.round(box.x + box.width - 8), y: Math.round(box.y + box.height / 2) });
+  // Colour management may move a channel by a step or two; the side panel behind is far lighter.
+  expect(Math.max(...pixel.map((c, i) => Math.abs(c - fill[i]!))), `the name pill of the active rail item is painted: ${pixel} vs ${fill}`).toBeLessThan(8);
+  await page.mouse.move(700, 500);
 });
 
 test('reduced motion: first-launch art is a still frame', async () => {

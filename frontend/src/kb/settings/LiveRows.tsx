@@ -1,11 +1,11 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { KbDecisions, KbProblem, KbSpeechSettings } from '../../api/kb/types.gen';
 import type { EngineId, KeyProviderId } from '../api/names';
-import { errorText } from '../api/client';
+import { KbApiError, errorText } from '../api/client';
 import { Banner, Button, Icon, Modal, Segmented, Switch } from '../ui';
 import { ENGINE_NAME, ENGINE_ORDER, agentOf } from '../state/agents';
 import { HEALTH_TO_SECTION } from '../state/settings';
-import { useAgents, useServices, useSettings } from '../state/context';
+import { useAgents, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import { AgentCard } from './AgentCard';
 import { LANGUAGES, languageName } from './Languages';
@@ -37,6 +37,7 @@ function useResult(): [ReactNode, (r: { ok: boolean; error?: string }, okText?: 
 /** Problem plates of one settings section: what happened, what still works, what stopped. */
 export function HealthPlates({ section }: { section: SettingsSection }) {
   const { settings } = useServices();
+  const toSection = useUi((s) => s.setSettingsSection);
   const health = useSettings((s) => s.health);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +48,12 @@ export function HealthPlates({ section }: { section: SettingsSection }) {
       {problems.map((p) => (
         <Banner key={p.id} tone={p.severity} title={p.title}
           progress={p.progress !== null ? p.progress * 100 : undefined} progressLabel={p.title}
-          actions={p.actions.length ? (
+          actions={p.actions.length || p.id === 'speech-soniox-key' ? (
             <>
+              {/* No key: the fix is in Accounts & keys — one click there (QA A31). */}
+              {p.id === 'speech-soniox-key' && (
+                <Button size="sm" variant="fill" onClick={() => toSection('conn')}>Add key…</Button>
+              )}
               {p.actions.map((a) => (
                 <Button key={a.id} size="sm" variant={a.primary ? 'fill' : 'outline'} busy={busy === `${p.id}/${a.id}`}
                   onClick={async () => {
@@ -105,7 +110,11 @@ export function KeyRow({ provider }: { provider: KeyProviderId }) {
       : row.valid ? { tone: 'ok', text: 'Key works' } : { tone: 'ok', text: 'Key saved' };
   if (editing) {
     return (
-      <form className="kb-keyform" onSubmit={async (e) => {
+      <form className="kb-keyform" onKeyDown={(e) => {
+        if (e.key !== 'Escape') return;
+        e.stopPropagation(); // QA A17: Esc leaves the key form; the typed key is dropped, Settings stays
+        setEditing(false); setValue('');
+      }} onSubmit={async (e) => {
         e.preventDefault();
         if (!value.trim()) return;
         setBusy('save');
@@ -144,15 +153,51 @@ export function KeyRow({ provider }: { provider: KeyProviderId }) {
 
 const mb = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`);
 
-export function LocalWhisperRow() {
+/**
+ * The local Whisper model's state. With `offerDownload` (first launch, where there is no health
+ * plate — QA A2) it also offers the download right there, with the model's real size, and follows
+ * the progress; in Settings the plate of Recording & speech offers it instead.
+ */
+export function LocalWhisperRow({ offerDownload = false }: { offerDownload?: boolean } = {}) {
   const speech = useSettings((s) => s.speech);
   const { settings } = useServices();
+  const [busy, setBusy] = useState(false);
+  const [result, show] = useResult();
+  const state = speech.value?.local_model.state;
+  // Follow a running download (one read at a time, only while it runs and only where it was offered).
+  useEffect(() => {
+    if (!offerDownload || state !== 'downloading') return undefined;
+    let live = true;
+    let timer: number | undefined;
+    const tick = async () => {
+      await settings.getState().loadSpeech();
+      if (live) timer = window.setTimeout(() => void tick(), 1500);
+    };
+    timer = window.setTimeout(() => void tick(), 1500);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [offerDownload, state, settings]);
   if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
   const m = speech.value.local_model;
   if (m.state === 'ready') return <span className="kb-status kb-status--ok"><Icon name="check" size={13} />Downloaded</span>;
   if (m.state === 'downloading') return <Progress value={m.progress} label="Downloading the speech model" />;
-  // Downloading is offered by the health plate of Recording & speech (S3 action), not a second button here.
-  return <span className={`kb-status kb-status--${m.state === 'failed' ? 'err' : 'warn'}`}><Icon name={m.state === 'failed' ? 'error' : 'warning'} size={13} />{m.state === 'failed' ? m.reason ?? 'Download failed' : 'Not downloaded'}</span>;
+  const status = <span className={`kb-status kb-status--${m.state === 'failed' ? 'err' : 'warn'}`}><Icon name={m.state === 'failed' ? 'error' : 'warning'} size={13} />{m.state === 'failed' ? m.reason ?? 'Download failed' : 'Not downloaded'}</span>;
+  if (!offerDownload) return status;
+  const action = m.state === 'failed' ? 'retry' : 'download';
+  return (
+    <>
+      {status}
+      <Button size="sm" variant="fill" icon={m.state === 'failed' ? 'retry' : undefined} busy={busy} onClick={async () => {
+        setBusy(true);
+        const r = await settings.getState().healthAction('speech-local-model', action);
+        if (r.ok) await settings.getState().loadSpeech();
+        setBusy(false);
+        show(r);
+      }}>
+        {m.state === 'failed' ? 'Try again' : `Download${m.size_bytes ? ` · about ${decimalSize(m.size_bytes)}` : ''}`}
+      </Button>
+      {result}
+    </>
+  );
 }
 
 /** Sizes as Finder shows them (1 MB = 1,000,000 bytes), so the number matches what the user sees there. */
@@ -389,16 +434,25 @@ export function SonioxConsentRow({ label }: { label: string }) {
   );
 }
 
-/** Chosen languages as toggle chips; the settings row (a labelled group) names them. */
-export function SpeechLanguagesRow() {
+/**
+ * Languages the user hears, as toggle chips (pressed = chosen), stored in the backend's speech
+ * settings — the same list recording, imports and dictation use (QA A11: first launch and Settings
+ * write the same place). The settings row (or `labelledBy`) names the group.
+ */
+export function SpeechLanguagesRow({ labelledBy }: { labelledBy?: string } = {}) {
   const { settings } = useServices();
   const speech = useSettings((s) => s.speech);
   const [result, show] = useResult();
+  // Quick clicks build on each other, not on the answer of the previous one still on its way,
+  // and are saved in the order they were made.
+  const [pending, setPending] = useState<string[] | null>(null);
+  const latest = useRef(0);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
   if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
-  const chosen = speech.value.languages;
+  const chosen = pending ?? speech.value.languages;
   return (
     <>
-      <div className="kb-tags">
+      <div className="kb-tags" role={labelledBy ? 'group' : undefined} aria-labelledby={labelledBy}>
         {LANGUAGES.map((l) => {
           const on = chosen.includes(l.code);
           return (
@@ -406,7 +460,13 @@ export function SpeechLanguagesRow() {
               onClick={async () => {
                 const next = on ? chosen.filter((c) => c !== l.code) : [...chosen, l.code];
                 if (!next.length) { show({ ok: false, error: 'Keep at least one language.' }); return; }
-                show(await settings.getState().updateSpeech({ languages: next }));
+                const turn = ++latest.current;
+                setPending(next);
+                const saved = queue.current.then(() => settings.getState().updateSpeech({ languages: next }));
+                queue.current = saved;
+                const r = await saved;
+                if (turn === latest.current) setPending(null);
+                show(r);
               }}>
               {on && <Icon name="check" size={12} />}{l.name}
             </button>
@@ -418,7 +478,8 @@ export function SpeechLanguagesRow() {
   );
 }
 
-export function TranslationRow() {
+/** Default translation of recordings, in the backend's speech settings (shared by first launch and Settings). */
+export function TranslationRow({ optionPrefix = '' }: { optionPrefix?: string } = {}) {
   const { settings } = useServices();
   const speech = useSettings((s) => s.speech);
   const [result, show] = useResult();
@@ -434,7 +495,7 @@ export function TranslationRow() {
           show(await settings.getState().updateSpeech(v ? { translate_by_default: true, translation_language: v } : { translate_by_default: false }));
         }}>
           <option value="">No translation</option>
-          {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+          {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{optionPrefix}{l.name}</option>)}
         </select>
         <Icon name="chevronDown" size={12} className="kb-select__chev" />
       </span>
@@ -510,8 +571,9 @@ export function BackgroundLinksRow({ label }: { label: string }) {
 
 export function FindLinksNowRow() {
   const { client } = useServices();
+  const toSection = useUi((s) => s.setSettingsSection);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
+  const [msg, setMsg] = useState<{ text: string; error: boolean; agent?: boolean } | null>(null);
   return (
     <>
       <Button size="sm" icon="graph" busy={busy} onClick={async () => {
@@ -520,12 +582,14 @@ export function FindLinksNowRow() {
           await client.call('POST /kb/wiki/connections/find');
           setMsg({ text: 'Started. Found connections arrive as notifications.', error: false });
         } catch (e) {
-          setMsg({ text: errorText(e), error: true });
+          // 409: no ready agent — nothing started (QA A13); the fix is one click away.
+          setMsg({ text: errorText(e), error: true, agent: e instanceof KbApiError && e.status === 409 && /agent/i.test(e.detail) });
         } finally {
           setBusy(false);
         }
       }}>Find now</Button>
       {msg && <span className={msg.error ? 'kb-inline-error kb-inline-error--flat' : 'kb-muted'} role={msg.error ? 'alert' : 'status'}>{msg.text}</span>}
+      {msg?.agent && <Button size="sm" variant="outline" onClick={() => toSection('conn')}>Open Accounts &amp; keys</Button>}
     </>
   );
 }

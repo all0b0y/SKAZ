@@ -170,6 +170,8 @@ export class BackendManager {
         ...process.env,
         SKAZ_TOKEN: token,
         SKAZ_DATA_DIR: this.dataDir,
+        // Settings → About shows the app's version, not the backend package's (QA A21).
+        SKAZ_APP_VERSION: app.getVersion(),
         SKAZ_DOCUMENTS_DIR: app.getPath('documents'),
         // Development cannot connect the installed app's document library.
         SKAZ_DOCUMENTS_SANDBOX: app.isPackaged ? '' : (

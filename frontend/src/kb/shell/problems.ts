@@ -22,18 +22,18 @@ export function useProblems(): Problem[] {
   return useMemo(() => {
     const out: Problem[] = [];
     if (libraryLoad === 'error') {
-      out.push({ id: 'library-read', tone: 'error', section: 'storage', short: 'library state could not be read' });
+      out.push({ id: 'library-read', tone: 'error', section: 'storage', short: 'Library state couldn’t be read' });
     } else if (library?.state === 'not_configured') {
-      out.push({ id: 'library-missing', tone: 'warning', section: 'storage', short: 'library isn’t connected' });
+      out.push({ id: 'library-missing', tone: 'warning', section: 'storage', short: 'Library isn’t connected' });
     } else if (library?.state === 'unavailable') {
-      out.push({ id: 'library-unavailable', tone: 'error', section: 'storage', short: 'library folder unavailable' });
+      out.push({ id: 'library-unavailable', tone: 'error', section: 'storage', short: 'Library folder unavailable' });
     }
     for (const section of health?.sections ?? []) {
       if (section.state !== 'warning' && section.state !== 'error') continue;
       const first = section.problems[0];
       const id = `health-${section.id}`;
       if (out.some((p) => p.section === HEALTH_TO_SECTION[section.id])) continue;
-      out.push({ id, tone: section.state, section: HEALTH_TO_SECTION[section.id], short: first ? first.title.replace(/\.$/, '').toLowerCase() : 'needs attention' });
+      out.push({ id, tone: section.state, section: HEALTH_TO_SECTION[section.id], short: first ? first.title.replace(/\.$/, '') : 'Needs attention' });
     }
     // Errors first: the gear opens the most urgent section.
     return out.sort((a, b) => Number(b.tone === 'error') - Number(a.tone === 'error'));

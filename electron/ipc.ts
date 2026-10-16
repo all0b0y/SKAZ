@@ -87,7 +87,7 @@ export function registerIpc(
     choosingRoot = true;
     try {
       const result = await dialog.showOpenDialog(owner, {
-        title: 'Choose Markdown root', defaultPath: app.getPath('documents'),
+        title: 'Choose where the SKAZ library lives', buttonLabel: 'Choose', defaultPath: app.getPath('documents'),
         properties: ['openDirectory', 'createDirectory'],
       });
       return result.canceled ? null : result.filePaths[0] ?? null;

@@ -169,7 +169,7 @@ export function CommandK() {
       <div className="kb-search__wrap" onKeyDown={onKeyDown}>
         <div className="kb-search__field">
           <Icon name="search" size={16} />
-          <input ref={inputRef} className="kb-search__input" type="text" role="combobox" aria-expanded={rows > 0} aria-controls={listId}
+          <input ref={inputRef} className="kb-search__input" type="text" maxLength={500} role="combobox" aria-expanded={rows > 0} aria-controls={listId}
             aria-activedescendant={rows ? `${listId}-${active}` : undefined} aria-label="Search the wiki, materials and chats"
             placeholder="Search the wiki, materials and chats" value={q} onChange={(e) => setQ(e.target.value)} />
           <kbd className="kb-kbd">esc</kbd>

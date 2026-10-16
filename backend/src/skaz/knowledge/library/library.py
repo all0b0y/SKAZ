@@ -57,6 +57,8 @@ from .fsio import (
     write_atomic,
 )
 from .layout import (
+    DEFAULT_NAME,
+    FALLBACK_NAME,
     FOLDER_MARKER,
     LEGACY_STAGING_PATH,
     MARKER_PATH,
@@ -150,7 +152,11 @@ class Library:
             if read_marker(root) is not None:
                 raise LibraryConflict("A SKAZ library already exists here. Open it instead.")
             if visible_entries(root):
-                raise LibraryConflict("This folder already has other files. Choose another folder.")
+                # Name what is in the way: the chosen folder itself may be fine (QA A9).
+                raise LibraryConflict(
+                    f"The “{root.name}” folder here already has other files. Choose another folder."
+                    if root.name in (DEFAULT_NAME, FALLBACK_NAME)
+                    else "This folder already has other files. Choose another folder.")
         root.parent.mkdir(parents=True, exist_ok=True)
         staging = root.parent / f".{root.name}.creating-{uuid4().hex}"
         marker = LibraryMarker(library_id=new_id("lib"), created_at=utc_now())

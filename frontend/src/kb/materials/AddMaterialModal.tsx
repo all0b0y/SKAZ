@@ -3,12 +3,13 @@ import { errorText } from '../api/client';
 import { Banner, Button, Icon, IconButton, Modal, Segmented, Switch } from '../ui';
 import { NameField } from '../library/NameField';
 import { languageName } from '../material/MaterialView';
-import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
+import { useLibrary, useServices, useSettings, useUi } from '../state/context';
 import {
   fileItem, isSpeech, itemMeta, itemTitle, pasteItem, submitItem, wikiDefault, type AddItem, type LinkItem,
 } from './addItems';
 
 const SPOKEN = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
+const NO_LANGUAGES: readonly string[] = [];
 
 interface WikiAuto { files: boolean; text: boolean }
 
@@ -18,7 +19,8 @@ export function AddMaterialModal() {
   const open = useUi((s) => s.addMaterialOpen);
   const setOpen = useUi((s) => s.setAddMaterialOpen);
   const folders = useLibrary((s) => s.folders);
-  const languages = usePrefs((s) => s.languages);
+  // The languages the user hears (Settings → Recording & speech) come first in the spoken list.
+  const languages = useSettings((s) => s.speech.value?.languages) ?? NO_LANGUAGES;
   const [items, setItems] = useState<AddItem[]>([]);
   const [paste, setPaste] = useState('');
   const [folderId, setFolderId] = useState<string>('');

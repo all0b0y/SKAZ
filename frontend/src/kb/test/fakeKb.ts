@@ -576,7 +576,12 @@ const ROUTES: FakeRoutes = {
     b.owner = 'agent';
     return newJob(w, 'recheck', page.sources[0] ?? null, 'done', 'Re-checking against sources');
   }],
-  'POST /kb/wiki/connections/find': [202, (w) => newJob(w, 'connections', null, 'running', 'Finding connections')],
+  'POST /kb/wiki/connections/find': [202, (w) => {
+    // Like WikiService.find_connections_now: no job without a ready wiki agent (QA A13).
+    const agent = w.agents.agents.find((a) => a.id === (w.wiki.wiki_engine ?? w.agents.default));
+    if (agent?.state !== 'ready') fail(409, `Finding connections needs a connected agent. ${agent?.name ?? 'The agent'} is not ready. Set one up in Settings → Accounts & keys.`);
+    return newJob(w, 'connections', null, 'running', 'Finding connections');
+  }],
   'GET /kb/graph': [200, (w, { query }) => {
     if (!query.folder_id) return w.graph;
     const nodes = w.graph.nodes.filter((n) => n.folder_ids.includes(query.folder_id!));
@@ -771,6 +776,10 @@ const ROUTES: FakeRoutes = {
       if (path.action_id === 'allow_soniox') w.speech.cloud_consent = true;
       else if (path.action_id === 'use_local') w.speech.provider = 'local_whisper';
       syncSpeechConsent(w);
+    }
+    // The local Whisper model starts downloading (the backend's runtime.local_models.start).
+    if (path.problem_id === 'speech-local-model' && (path.action_id === 'download' || path.action_id === 'retry')) {
+      w.speech.local_model = { ...w.speech.local_model, state: 'downloading', progress: 0, reason: null };
     }
     for (const s of w.health.sections) {
       s.problems = s.problems.filter((p) => p.id !== path.problem_id);

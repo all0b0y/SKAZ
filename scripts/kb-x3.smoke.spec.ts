@@ -120,9 +120,9 @@ test('error (real backend exit): amber roots, deep pixels fall, the tree above t
   const tree = page.getByTestId('loading-tree');
   await expect(tree).toHaveAttribute('data-phase', 'error', { timeout: 10_000 });
   const alert = page.getByRole('alert');
-  // QA E16: the backend had been running, so it stopped — it did not fail to start.
+  // The service was up before the kill: a stop in plain words, not a failed start (QA A16, E16).
   await expect(alert).toContainText('SKAZ’s local service stopped.');
-  await expect(alert).toContainText('backend exited');
+  await expect(alert).not.toContainText('backend exited');
   await expect(alert.getByRole('button', { name: 'Try again' })).toBeVisible();
   await expect(alert.getByRole('button', { name: 'Open logs folder' })).toBeVisible();
   for (const theme of ['light', 'dark'] as const) {

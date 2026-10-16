@@ -8,11 +8,14 @@ from typing import Any
 import httpx
 import pytest
 
+from skaz.knowledge.agents.engine import EngineStatus
+from skaz.knowledge.agents.fake import FakeEngine
 from skaz.knowledge.decisions.protocol import Answer, Question, YesNoAnswer
 from skaz.knowledge.markdown.page import parse_page
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiki.statements import page_statements
 
+from .ingest_support import PatternDetector
 from .wiki_support import CONNECTIONS, DISCREPANCIES, OVERVIEW, TwoSources, two_sources
 
 ENTROPY = "Энтропия (entropy)"
@@ -277,3 +280,44 @@ async def test_background_connections_never_start_without_permission(ready: Know
     assert len([item for item in case.ingest.list_jobs() if item.kind == "connections"]) == jobs_before + 1
     # Nothing changed since: no second background run.
     assert await service.tick() is None
+
+
+# -- "Find connections now" without a ready agent (QA A13) --------------------------------
+
+
+async def test_find_now_without_a_ready_agent_is_refused_and_starts_no_job(
+    kb_app: Any, kb_client: httpx.AsyncClient
+) -> None:
+    await kb_client.post("/kb/library", json={})
+    runtime = kb_app.state.runtime
+    case = await two_sources(runtime.kb, conflict=False, runtime=runtime)
+    before = len(runtime.kb_ingest.jobs.list_all())
+    not_installed = EngineStatus("codex", installed=False, reason="Codex is not installed.")
+    missing = FakeEngine("codex", status=not_installed)
+    runtime.kb_ingest.engines = lambda _engine_id: missing
+    answer = await kb_client.post("/kb/wiki/connections/find")
+    assert answer.status_code == 409
+    assert answer.json()["detail"] == (
+        "Finding connections needs a connected agent. Codex is not installed. "
+        "Set one up in Settings → Accounts & keys."
+    )
+    # Nothing was started and reported as done.
+    assert len(runtime.kb_ingest.jobs.list_all()) == before
+    assert not case.service.jobs.running("connections")
+    # No engine at all: the same honest refusal.
+    runtime.kb_ingest.engines = lambda _engine_id: None
+    answer = await kb_client.post("/kb/wiki/connections/find")
+    assert answer.status_code == 409 and "needs a connected agent" in answer.json()["detail"]
+
+
+async def test_find_now_on_a_wiki_without_concept_pages_says_so(
+    kb_app: Any, kb_client: httpx.AsyncClient
+) -> None:
+    await kb_client.post("/kb/library", json={})
+    runtime = kb_app.state.runtime
+    runtime.kb_ingest.engines = lambda _engine_id: FakeEngine("codex")
+    runtime.kb_ingest.detector = PatternDetector()
+    answer = await kb_client.post("/kb/wiki/connections/find")
+    assert answer.status_code == 400
+    assert answer.json()["detail"] == "The wiki has no concept pages yet. Add materials to the wiki first."
+    assert runtime.kb_ingest.jobs.list_all() == []
