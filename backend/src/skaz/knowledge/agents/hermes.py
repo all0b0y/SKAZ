@@ -114,6 +114,7 @@ from ..install.system import (
     run_capture,
 )
 from ..install.terminal import TerminalLauncher
+from ..permissions.refusals import HERMES_CLARIFY_TIMEOUT_S, HERMES_MCP_TOOL_CALL_S, OUTSIDE, refused
 from ..processes import CHILDREN
 from .acp_client import METHOD_NOT_FOUND, PROTOCOL_VERSION, AcpClosed, AcpConnection, AcpError
 from .engine import (
@@ -185,7 +186,11 @@ HERMES_POLICY: dict[str, Any] = {
     "platform_toolsets": {"acp": ["no_mcp"]},
     # ``coding_context: focus`` would swap ``platform_toolsets.acp`` for the coding toolsets in a code
     # folder (0.22 ``gateway/session_policy.py:310-312, 433``); SKAZ's sessions never take that posture.
-    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS), "coding_context": "off"},
+    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS), "coding_context": "off",
+              # An agent's question waits for the user without a limit (Q-A2).
+              "clarify_timeout": HERMES_CLARIFY_TIMEOUT_S},
+    # A SKAZ wiki tool waits for the user's Allow / Deny (P3); see ``permissions/refusals.py``.
+    "timeouts": {"mcp": {"tool_call": HERMES_MCP_TOOL_CALL_S}},
     "memory": {"memory_enabled": False, "user_profile_enabled": False},
     "skills": {"project_discovery": False, "external_dirs": []},
 }
@@ -385,8 +390,10 @@ class _Requests:
                 option = model_switch_option(params, *self._switch)
                 if option is not None:
                     return {"outcome": {"outcome": "selected", "optionId": option}}
+            refused("hermes", "permission")
             return _reject(params)
-        raise AcpError(METHOD_NOT_FOUND, "Not available in SKAZ.")
+        refused("hermes", method)
+        raise AcpError(METHOD_NOT_FOUND, OUTSIDE)
 
 
 class HermesEngine:

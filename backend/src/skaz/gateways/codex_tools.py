@@ -48,6 +48,10 @@ class CodexTools:
         self._seen: set[str] = set()
         self._revoked = False
 
+    def refusal(self, method: str) -> dict[str, Any]:
+        """The JSON-RPC error for a server request SKAZ does not serve (approvals, questions…)."""
+        return {"code": -32601, "message": "Action not permitted"}
+
     def revoke(self) -> None:
         self._revoked = True
 

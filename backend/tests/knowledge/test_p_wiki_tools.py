@@ -246,3 +246,42 @@ def test_tool_schemas_have_no_refs(kb_app: Any) -> None:
     for spec in registry.specs({"skaz_wiki_create_page", "skaz_wiki_edit_page"}):
         assert "$ref" not in json.dumps(spec.input_schema) and "$defs" not in json.dumps(spec.input_schema)
     assert Path  # keep import for type hints
+
+
+async def test_over_mcp_a_waiting_call_streams_keepalives_until_the_user_decides(
+        world: Any, kb_app: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Claude Code / Hermes reach the wiki tools over MCP; Hermes' HTTP read limit is 300 s
+    (``tools/mcp_tool_transport.py:571``), so the waiting call sends keep-alive comments."""
+    from skaz.knowledge.mcp import McpRunScope
+    from skaz.knowledge.mcp import router as mcp_router
+
+    runtime, library, _ref = world
+    monkeypatch.setattr(mcp_router, "KEEPALIVE_S", 0.05)
+    token = runtime.kb_mcp.issue_mcp_token(McpRunScope(RUN_ID, frozenset({"skaz_wiki_rename_page"})))
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json, text/event-stream",
+               "MCP-Protocol-Version": "2025-11-25"}
+    body = {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": {"name": "skaz_wiki_rename_page",
+                       "arguments": {"page_id": library.concept, "title": "Хаос"}}}
+
+    async def allow_later() -> None:
+        pending = await _pending(runtime)
+        await asyncio.sleep(0.2)  # a few keep-alives first
+        await runtime.kb_permissions.decide(pending.id, "allow")
+
+    import httpx
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=kb_app),
+                                 base_url="http://127.0.0.1:8765") as client:
+        deciding = asyncio.create_task(allow_later())
+        response = await client.post("/kb/mcp", headers=headers, json=body)
+        await deciding
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/event-stream")
+    frames = response.text.split("\n\n")
+    assert frames[0] == ": waiting for the user" and len(frames) > 3
+    message = next(frame for frame in frames if frame.startswith("event: message"))
+    reply = json.loads(message.split("data: ", 1)[1])
+    assert reply["id"] == 7 and json.loads(reply["result"]["content"][0]["text"])["status"] == "applied"
+
+    # A read tool (and a client that accepts only JSON) still gets plain JSON.
+    plain = await runtime.kb_tools.call("skaz_list_folders", {}, None)
+    assert not plain.is_error

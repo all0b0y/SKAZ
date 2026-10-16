@@ -36,6 +36,7 @@ from ...gateways.codex_connection import parse_codex_version
 from ...gateways.codex_rpc import CodexRpc, CodexRpcError
 from ...gateways.codex_session import DISABLED_FEATURES, dynamic_tool, thread_start_params
 from ...gateways.codex_tools import CodexTools
+from ..permissions.refusals import OUTSIDE, refused
 from ..permissions.waits import RunWaits
 from .engine import (
     AgentEvent,
@@ -154,6 +155,12 @@ class _RunTools(CodexTools):
                 timeouts[name] = None if tool.timeout_s is None else tool.timeout_s + 5
         super().__init__(thread_id, turn_id, {name: handler(name) for name in names}, tool_timeouts=timeouts)
         self._run = run
+
+    def refusal(self, method: str) -> dict[str, Any]:
+        """A-1: an approval (or any other request) Codex sends despite ``approvalPolicy: never`` is
+        refused quietly, with the reason, and one log line without content."""
+        refused("codex", method)
+        return {"code": -32601, "message": OUTSIDE}
 
     async def invoke(self, params: dict[str, Any]) -> dict[str, Any]:
         run = self._run

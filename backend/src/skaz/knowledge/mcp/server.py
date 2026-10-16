@@ -1,4 +1,5 @@
-"""SKAZ MCP server: read-only SKAZ tools over Streamable HTTP (JSON responses, no SSE).
+"""SKAZ MCP server: SKAZ tools over Streamable HTTP (JSON responses; an event stream only for a call
+that waits for the user — 0.3.1 P, see ``router.py``).
 
 Dual-era, as the MCP versioning page allows (checked 2026-10-15 against
 modelcontextprotocol.io, current revision ``2026-07-28``):
@@ -104,6 +105,22 @@ class McpServer:
         self.tokens.revoke_run(run_id)
 
     # -- HTTP --------------------------------------------------------------------
+
+    def waits_for_user(self, headers: Mapping[str, str], body: bytes) -> bool:
+        """A ``tools/call`` of a tool that waits for the user (a wiki change, a question) from a client
+        that accepts an event stream: the reply is streamed with keep-alives (``router.py``)."""
+        if "text/event-stream" not in (headers.get("accept") or ""):
+            return False
+        try:
+            message = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            return False
+        if not isinstance(message, dict) or message.get("method") != "tools/call" or "id" not in message:
+            return False
+        params = message.get("params")
+        name = params.get("name") if isinstance(params, dict) else None
+        tool = self.registry.get(name) if isinstance(name, str) else None
+        return tool is not None and tool.interactive
 
     def authorized(self, headers: Mapping[str, str]) -> bool:
         """Whether the request carries a live run token (checked before its body is read)."""

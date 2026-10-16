@@ -7,6 +7,7 @@ stand-in process (``fixtures/codex_kb_server.py``, the app-server shape of
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 import sys
 from pathlib import Path
@@ -18,7 +19,15 @@ from pydantic import Field
 
 from skaz.gateways.codex_rpc import CodexRpc
 from skaz.knowledge.agents.codex import TOO_LONG, CodexEngine
-from skaz.knowledge.agents.engine import AgentTurn, Completed, Failed, ToolResult, TurnMessage, collect
+from skaz.knowledge.agents.engine import (
+    AgentTurn,
+    Completed,
+    Failed,
+    TextDelta,
+    ToolResult,
+    TurnMessage,
+    collect,
+)
 from skaz.knowledge.agents.tools import TOOLS, SkazTool, ToolContext, ToolRegistry, _Args
 from skaz.knowledge.permissions.broker import (
     ALREADY,
@@ -27,6 +36,7 @@ from skaz.knowledge.permissions.broker import (
     PermissionConflict,
     PermissionInvalid,
 )
+from skaz.knowledge.permissions.refusals import OUTSIDE
 from skaz.knowledge.permissions.store import ControlStore, RunRef
 from skaz.knowledge.permissions.waits import RunWaits
 from skaz.knowledge.service import KnowledgeService
@@ -276,3 +286,24 @@ async def test_codex_deadline_still_ends_a_run_that_is_not_waiting(ready: Knowle
     engine = CodexEngine(FakeConnection(root), registry, run_timeout_s=0.6, waits=waits)
     result = await collect(engine.run(_turn(registry)))
     assert isinstance(result.terminal, Failed) and result.terminal.message == TOO_LONG
+
+
+async def test_a_codex_approval_is_refused_quietly_outside_the_library(
+        ready: KnowledgeService, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A-1: no card, the reason for the agent, one log line without the command or the reason."""
+    registry = ToolRegistry(ready, TOOLS)
+    root = tmp_path / "codex"
+    root.mkdir()
+    engine = CodexEngine(FakeConnection(root), registry)
+    turn = AgentTurn(run_id="run-1", messages=(TurnMessage("user", "case:approval"),), instructions="",
+                     tools=registry.specs({"skaz_list_folders"}))
+    with caplog.at_level(logging.INFO):
+        result = await collect(engine.run(turn))
+    assert isinstance(result.terminal, Completed), result.terminal
+    text = "".join(event.text for event in result.events if isinstance(event, TextDelta))
+    assert text == f"Refused: {OUTSIDE}"
+    lines = [record.getMessage() for record in caplog.records
+             if "outside the SKAZ library" in record.getMessage()]
+    assert lines == [
+        "Refused item/commandExecution/requestApproval request of codex: outside the SKAZ library"]
+    assert "secret" not in caplog.text and "PRIVATE" not in caplog.text
