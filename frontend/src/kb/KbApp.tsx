@@ -76,7 +76,7 @@ function BackendGate({ children }: { children: ReactNode }) {
       {phase === 'ready' ? children : null}
       {phase === 'ready' && gone ? null : (
         <LoadingTree phase={failed ? 'error' : phase === 'ready' ? 'ready' : 'starting'} attempt={attempt}>
-          <Banner tone="error" title="SKAZ couldn’t start its local service."
+          <Banner tone="error" title={status?.stopped ? 'SKAZ’s local service stopped.' : 'SKAZ couldn’t start its local service.'}
             actions={bridge.restartBackend || bridge.openLogsFolder ? (
               <>
                 {bridge.restartBackend && <Button variant="fill" icon="retry" onClick={retry}>Try again</Button>}

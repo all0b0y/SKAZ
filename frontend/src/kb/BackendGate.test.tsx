@@ -95,8 +95,11 @@ describe('Startup gate', () => {
     const { emit } = await renderGate({ initial: { phase: 'ready' } });
     expect(await screen.findByTestId('message-input')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('loading-tree')).toBeNull(), { timeout: 2000 });
-    emit({ phase: 'error', detail: 'backend exited (code null, signal SIGKILL)' });
+    emit({ phase: 'error', detail: 'backend exited (code null, signal SIGKILL)', stopped: true });
     expect(tree()).toHaveAttribute('data-phase', 'error');
     expect(screen.queryByTestId('message-input')).toBeNull();
+    // QA E16: it ran and stopped — not "couldn't start".
+    expect(screen.getByRole('alert')).toHaveTextContent('SKAZ’s local service stopped.');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('couldn’t start');
   });
 });

@@ -13,6 +13,24 @@ const openK = async () => {
 };
 
 describe('⌘K', () => {
+  it('never shows "Nothing found" before the answer for that query has arrived (QA E8)', async () => {
+    renderKb({ world: chatWorld() });
+    const dialog = await openK();
+    const seen: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) record.addedNodes.forEach((node) => seen.push(node.textContent ?? ''));
+    });
+    observer.observe(dialog, { childList: true, subtree: true, characterData: true });
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'entropy' } });
+    await waitFor(() => expect(within(dialog).getAllByRole('option').length).toBeGreaterThan(2));
+    observer.takeRecords().forEach((record) => record.addedNodes.forEach((node) => seen.push(node.textContent ?? '')));
+    observer.disconnect();
+    expect(seen.filter((text) => text.includes('Nothing found'))).toEqual([]);
+    // A query that really has no hits still says so once its answer is in.
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'zzqqxx' } });
+    expect(await within(dialog).findByText('Nothing found for “zzqqxx”.')).toBeInTheDocument();
+  });
+
   it('⌘K and the rail button open it; sections with counts, three per section in All, matches marked', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });

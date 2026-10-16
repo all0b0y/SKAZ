@@ -58,5 +58,10 @@ describe('BackendManager.restart', () => {
     children[0]!.emit('exit', null, 'SIGTERM');
     expect(manager.getStatus().phase).toBe('ready');
     expect(await manager.restart()).toBe(false);
+
+    // QA E16: the running backend is killed — it stopped, it did not fail to start (no install hint).
+    children[1]!.emit('exit', null, 'SIGKILL');
+    expect(manager.getStatus()).toMatchObject({ phase: 'error', stopped: true });
+    expect(manager.getStatus().hint).toBeUndefined();
   });
 });

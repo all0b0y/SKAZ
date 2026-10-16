@@ -90,7 +90,9 @@ export class BackendManager {
   }
 
   private setStatus(status: BackendStatus): void {
-    this.status = status.phase === 'error' && !app.isPackaged ? { ...status, hint: DEV_START_HINT } : status;
+    // The install hint is about starting; a backend that ran and then died was installed fine (QA E16).
+    this.status = status.phase === 'error' && !status.stopped && !app.isPackaged
+      ? { ...status, hint: DEV_START_HINT } : status;
     // Lifecycle transitions are the most useful diagnostic in the log: they
     // explain a stuck splash screen without exposing any session content.
     this.log.write(
@@ -205,6 +207,7 @@ export class BackendManager {
         this.setStatus({
           phase: 'error',
           detail: `backend exited (code ${code ?? 'null'}, signal ${signalName ?? 'none'})`,
+          ...(this.status.phase === 'ready' ? { stopped: true } : {}),
         });
       }
     });

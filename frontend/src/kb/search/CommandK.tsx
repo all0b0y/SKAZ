@@ -81,6 +81,8 @@ export function CommandK() {
   const [chatHits, setChatHits] = useState<KbChatSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** The query the shown results answer; "Nothing found" only for that one (QA E8). */
+  const [answered, setAnswered] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
@@ -105,6 +107,7 @@ export function CommandK() {
         const failed = [s, c].filter((x) => x.status === 'rejected') as PromiseRejectedResult[];
         setError(failed.length ? errorText(failed[0]!.reason) : null);
         setLoading(false);
+        setAnswered(query);
         setActive(0);
       });
     }, 150);
@@ -182,7 +185,7 @@ export function CommandK() {
         <div className="kb-search__results">
           {!query && <p className="kb-search__hint">Type to search. Enter opens, ⌘Enter asks the agent.</p>}
           {query && error && <p className="kb-inline-error kb-inline-error--flat" role="alert">Search: {error}</p>}
-          {query && !loading && shown.length === 0 && !error && <p className="kb-search__hint">Nothing found for “{query}”.</p>}
+          {query && !loading && answered === query && shown.length === 0 && !error && <p className="kb-search__hint">Nothing found for “{query}”.</p>}
           <ul id={listId} role="listbox" aria-label="Results" className="kb-search__list">
             {shown.map((h, i) => {
               const head = tab === 'all' && h.section !== lastSection ? h.section : null;
