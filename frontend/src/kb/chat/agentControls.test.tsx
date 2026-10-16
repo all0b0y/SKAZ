@@ -248,3 +248,81 @@ describe('«Waiting for you»: chat list and the Chats rail icon (nothing pops u
     expect(screen.getByRole('button', { name: 'Chats, waiting for you' })).toBeInTheDocument();
   }, 10_000);
 });
+
+// ---- The agent question (Q-A2, Q-A3: view 1 «Rows with descriptions») -------------------------
+
+const Q = 'Codex asks: Where shall we start reviewing “Lecture 8”?';
+const ASKED = 'Codex asked: Where shall we start reviewing “Lecture 8”?';
+
+describe('Agent question in the chat', () => {
+  it('rows 1–4 with descriptions, the recommended one first and marked; a click answers by the option’s own index', async () => {
+    const world = agentControlsWorld();
+    const q = world.chats.find((c) => c.id === 'c9')!.messages[1]!.parts[0] as unknown as { options: Array<{ recommended: boolean }> };
+    q.options[0]!.recommended = false;
+    q.options[2]!.recommended = true; // «Quick 10» is the agent's recommendation here
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Review lecture 8/ }));
+    const block = await within(centre()).findByRole('region', { name: Q });
+    expect(block).toHaveTextContent('Codex asks · answer now or later — you can just type');
+    const rows = within(within(block).getByRole('list', { name: 'Options' })).getAllByRole('button');
+    expect(rows.map((r) => r.getAttribute('aria-label'))).toEqual(['Quick 10, recommended', 'Hard cards first', 'Everything due today', 'All 12 cards']);
+    expect(rows[0]).toHaveAccessibleDescription('The 10 closest to being forgotten');
+    expect(rows.map((r) => r.getAttribute('aria-keyshortcuts'))).toEqual(['1', '2', '3', '4']);
+    expect(within(block).getByRole('textbox', { name: 'Other answer' })).toHaveAttribute('placeholder', 'Other answer…');
+    await user.click(rows[0]!);
+    expect(decides(fake)).toEqual([['/kb/questions/q1/answer', { option_index: 2 }]]);
+    const done = await within(centre()).findByRole('group', { name: ASKED });
+    expect(done).toHaveTextContent('You chose Quick 10');
+  });
+
+  it('typing in «Other answer…» is not a pick (digits included); Enter sends the text', async () => {
+    const { user, fake } = await openChat(/Review lecture 8/);
+    const block = await within(centre()).findByRole('region', { name: Q });
+    const other = within(block).getByRole('textbox', { name: 'Other answer' });
+    await user.type(other, 'Start with 3 formulas{Enter}');
+    expect(decides(fake)).toEqual([['/kb/questions/q1/answer', { text: 'Start with 3 formulas' }]]);
+    expect(await within(centre()).findByRole('group', { name: ASKED })).toHaveTextContent('You answered Start with 3 formulas');
+  });
+
+  it('with the block focused, a digit picks that row', async () => {
+    const { user, fake } = await openChat(/Review lecture 8/);
+    const block = await within(centre()).findByRole('region', { name: Q });
+    block.focus();
+    await user.keyboard('2');
+    expect(decides(fake)).toEqual([['/kb/questions/q1/answer', { option_index: 1 }]]);
+    expect(await within(centre()).findByRole('group', { name: ASKED })).toHaveTextContent('You chose Everything due today');
+  });
+
+  it('the composer stays free: writing your own message closes the question; «Pick an option» still answers later', async () => {
+    const { user, fake } = await openChat(/Review lecture 8/);
+    await within(centre()).findByRole('region', { name: Q });
+    const input = screen.getByTestId('message-input');
+    expect(input).toHaveAttribute('aria-placeholder', 'Pick an option above, or just type…');
+    await user.click(input);
+    await user.keyboard('which are my worst?');
+    expect(within(centre()).getByRole('button', { name: 'Send' })).not.toHaveAttribute('aria-disabled');
+    await user.keyboard('{Enter}');
+    expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/kb/chats/c9/messages')).toBe(true);
+    const wrote = await within(centre()).findByRole('group', { name: ASKED });
+    expect(wrote).toHaveTextContent('You wrote your own message');
+    await user.click(within(wrote).getByRole('button', { name: 'Pick an option' }));
+    const block = within(centre()).getByRole('region', { name: /^Codex asked: / });
+    await user.click(within(block).getByRole('button', { name: 'Hard cards first, recommended' }));
+    expect(decides(fake)).toEqual([['/kb/questions/q1/answer', { option_index: 0 }]]);
+    expect(await within(centre()).findByRole('group', { name: ASKED })).toHaveTextContent('You chose Hard cards first');
+  });
+
+  it('a waiting permission lets you type but says the request waits; a cancelled question is one quiet line', async () => {
+    const world = agentControlsWorld();
+    const q = world.chats.find((c) => c.id === 'c9')!.messages[1]!.parts[0] as unknown as { status: string };
+    q.status = 'cancelled';
+    const user = userEvent.setup();
+    renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Entropy — edit/ }));
+    await within(centre()).findByRole('region', { name: 'Codex wants to edit Entropy' });
+    expect(screen.getByTestId('message-input')).toHaveAttribute('aria-placeholder', 'You can keep typing — the request waits');
+    await user.click(within(side()).getByRole('button', { name: /Review lecture 8/ }));
+    expect(await within(centre()).findByRole('group', { name: ASKED })).toHaveTextContent('Cancelled');
+  });
+});

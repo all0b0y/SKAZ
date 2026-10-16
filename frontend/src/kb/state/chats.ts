@@ -234,6 +234,12 @@ export function createChatsStore(client: KbClient): ChatsStore {
         list: s.list.map((c) => (c.id === chatId ? { ...c, ...waiting } : c)),
       }));
     };
+    const supersedeQuestions = (chatId: string) => {
+      const open = get().chats[chatId];
+      for (const m of open?.chat?.messages ?? []) {
+        for (const p of partsOf(m)) if (p.type === 'question' && p.status === 'pending') putPart(chatId, { ...p, status: 'superseded' });
+      }
+    };
     const act = async <T,>(fn: () => Promise<T>): Promise<ActionResult<T>> => {
       try {
         return { ok: true, value: await fn() };
@@ -335,6 +341,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
             path: { chat_id: chatId },
             body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context },
           });
+          // Q-A2: a message of your own closes a waiting question (its part_update confirms it).
+          supersedeQuestions(chatId);
           merge(chatId, [res.user, res.assistant]);
           patchSummary(chatId, { updated_at: res.user.created_at });
           set((s) => ({ list: [...s.list].sort(byUpdated) }));

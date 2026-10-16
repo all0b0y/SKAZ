@@ -13,6 +13,7 @@ import { SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 import type { AnyMessagePart, KbPermissionPart, KbQuestionPart } from '../api/permissions';
 import { PermissionCard } from './permission';
+import { QuestionBlock } from './QuestionBlock';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -114,7 +115,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
               onReview={() => ui.getState().openReview(chatId, partId)} />
           );
         }
-        if (b.kind === 'question') return null;
+        if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
