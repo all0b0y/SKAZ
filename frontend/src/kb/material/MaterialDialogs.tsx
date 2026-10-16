@@ -102,8 +102,8 @@ function PreviewSummary({ preview }: { preview: KbDeletePreview }) {
   return (
     <div className="kb-delprev">
       <ul className="kb-delprev__list">
-        <li><b>{plural(preview.claims_removed, 'statement')}</b> from this material leave the wiki.</li>
-        {preview.claims_kept > 0 && <li>{plural(preview.claims_kept, 'statement')} stay: other sources support them.</li>}
+        <li><b>{plural(preview.claims_removed, 'statement')}</b> from this material {preview.claims_removed === 1 ? 'leaves' : 'leave'} the wiki.</li>
+        {preview.claims_kept > 0 && <li>{preview.claims_kept === 1 ? '1 statement stays: another source supports it.' : `${preview.claims_kept} statements stay: other sources support them.`}</li>}
         {preview.connections_removed > 0 && <li>{plural(preview.connections_removed, 'connection')} between pages go away.</li>}
         <li>{preview.user_notes_kept === 1 ? 'Your note on these pages stays untouched.' : preview.user_notes_kept > 1 ? `Your ${preview.user_notes_kept} notes on these pages stay untouched.` : 'Your notes are never touched.'}</li>
       </ul>

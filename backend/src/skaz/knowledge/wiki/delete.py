@@ -28,7 +28,7 @@ from ..service import KnowledgeService
 from .graph import NAV_IDS, GraphIndex
 from .nav import refresh_concept_nav
 from .pages_io import PageChanging, forget_material, forget_page, is_user_part, reindex, user_parts
-from .retract import retract_material
+from .retract import retract_material, strip_links
 
 LOG_DELETED = {"en": "Material deleted", "ru": "Материал удалён"}
 
@@ -117,7 +117,12 @@ def _explanations_of(kb: KnowledgeService, page_id: str, removed: set[str]) -> s
 
 
 def _plan_page(
-    kb: KnowledgeService, library: Library, page_id: str, material_id: str, rel_dir: str
+    kb: KnowledgeService,
+    library: Library,
+    page_id: str,
+    material_id: str,
+    rel_dir: str,
+    gone_links: frozenset[str] = frozenset(),
 ) -> PagePlan | None:
     record = kb.page_repo.get(page_id)
     if record is None:
@@ -133,6 +138,8 @@ def _plan_page(
     extra = _explanations_of(kb, page_id, set(retraction.removed))
     if extra:
         updated, retraction = retract_material(document, material_id, rel_dir, also=extra)
+    # Links to the pages that go with the material (its Notes, concepts left without a source).
+    updated, _unlinked = strip_links(updated, gone_links)
     if updated.meta.kind == "concept":
         updated = refresh_concept_nav(kb, updated, exclude={material_id})
     else:
@@ -164,11 +171,28 @@ def plan_delete(kb: KnowledgeService, graph: GraphIndex, material_id: str) -> De
         raise NotFound("Material not found.")
     library = kb.require()
     plan = DeletePlan(material_id, record.title, record.rel_dir)
-    for page_id in _affected_pages(kb, material_id):
+    affected = _affected_pages(kb, material_id)
+    first: dict[str, PagePlan] = {}
+    for page_id in affected:
         page = _plan_page(kb, library, page_id, material_id, record.rel_dir)
         if page is not None:
+            first[page_id] = page
+    gone_pages = {page_id for page_id, page in first.items() if page.text is None}
+    # Second pass (QA C18): every page that links to a page that goes loses those links too —
+    # "Materials in order" of the folder overview, "Related", agent connections.
+    gone_links = frozenset(
+        rel.removesuffix(".md")
+        for rel in (getattr(kb.page_repo.get(page_id), "rel_path", None) for page_id in gone_pages)
+        if rel
+    )
+    linking = {edge.source for edge in graph.edges() if edge.target in gone_pages} - gone_pages
+    for page_id in sorted(set(affected) | linking):
+        if page_id in gone_pages:
+            plan.pages.append(first[page_id])
+            continue
+        page = _plan_page(kb, library, page_id, material_id, record.rel_dir, gone_links)
+        if page is not None:
             plan.pages.append(page)
-    gone_pages = {page.ref.id for page in plan.pages if page.text is None}
     gone_blocks = {(page.ref.id, block) for page in plan.pages for block in page.removed}
     plan.connections_removed = sum(
         1
