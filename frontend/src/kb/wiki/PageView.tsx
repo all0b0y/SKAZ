@@ -11,7 +11,7 @@ import {
 import { blockMarkdown, inAppTarget, plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
-import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, type ClaimKind } from './blocks';
+import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavigation, namesItsKind, type ClaimKind } from './blocks';
 import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
@@ -246,14 +246,15 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
               <h3 className="kb-psec__head" id={headId}>
                 <button type="button" className="kb-psec__toggle" aria-expanded={open} onClick={() => toggle(section.key)}>
                   <Icon name="chevronDown" size={13} className={`kb-psec__chev${open ? '' : ' is-closed'}`} />
+                  {section.kind && namesItsKind(section) && <Icon name={CLAIM_ICON[section.kind]} size={13} className="kb-psec__kind" />}
                   <span className="kb-psec__title">{title}</span>
                 </button>
-                {section.kind && <ClaimLabel kind={section.kind} />}
+                {section.kind && !namesItsKind(section) && <ClaimLabel kind={section.kind} />}
               </h3>
               {open && (
                 <div className="kb-psec__body">
                   {section.blocks.map((b) => (
-                    <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source'} actions={actions} />
+                    <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source' && !isNavigation(b)} actions={actions} />
                   ))}
                 </div>
               )}

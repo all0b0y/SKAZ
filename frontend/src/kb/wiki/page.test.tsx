@@ -20,9 +20,13 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     expect(within(doc).getByText('Concept')).toBeInTheDocument();
     for (const name of ['Physics', 'Information theory', 'Machine learning']) expect(within(doc).getByText(name)).toBeInTheDocument();
     expect(within(doc).getByText(/3 folders · 3 sources · updated/)).toBeInTheDocument();
-    for (const label of ['From sources', 'Connection — agent inference', 'My note', 'Edited by you']) {
+    for (const label of ['From sources', 'Connection — agent inference', 'Edited by you']) {
       expect(within(doc).getAllByText(label).length).toBeGreaterThan(0);
     }
+    // A heading that already names the kind carries the kind's icon, not a second label (QA C10).
+    const notes = within(doc).getByRole('button', { name: 'My notes' });
+    expect(notes.querySelector('[data-icon="pencil"]')).not.toBeNull();
+    expect(notes.closest('section')!.querySelector('[data-claim="user_note"]')).toBeNull();
     // Labels are not colour only: each carries its own marker for its kind.
     expect(doc.querySelector('[data-claim="connection"] [data-icon="graph"]')).not.toBeNull();
     // Citation wikilinks are not printed as text: the source is a footnote number (v42 A).
@@ -143,6 +147,22 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     const again = (await within(doc).findByText(/Physics:/)).closest('[data-block-id]') as HTMLElement;
     await user.click(within(again).getByRole('button', { name: 'Lecture 7 — the second law' }));
     expect(await within(doc).findByRole('heading', { level: 2, name: 'Lecture 7 — the second law' })).toBeInTheDocument();
+  });
+
+  it('navigation lists carry no statement label and no ✎; a folder overview chip has the folder icon (QA C10, C12)', async () => {
+    const world = docWorld();
+    const entropy = world.pages.find((p) => p.id === 'p-entropy')!;
+    entropy.blocks.push(block('c-related', 'connection', 'Related', '[[Wiki/Concepts/Second law|Second law]], [[Wiki/Concepts/Microstate|Microstate]]'));
+    entropy.related.push({ id: 'p-folder-phys', kind: 'folder', title: 'Physics' });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'page', id: 'p-entropy' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const nav = (await within(doc).findByText(/Second law, Microstate/)).closest('section') as HTMLElement;
+    expect(within(nav).queryByText('Connection — agent inference')).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('button', { name: 'Edit block' })).not.toBeInTheDocument();
+    const folderChip = within(doc).getAllByRole('button', { name: 'Wiki page: Physics' }).at(-1)!;
+    expect(folderChip.querySelector('[data-icon="folder"]')).not.toBeNull();
   });
 
   it('“My note” adds your own note; your note can be deleted', async () => {

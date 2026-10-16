@@ -13,6 +13,14 @@ const SECTIONS: ReadonlyArray<{ kind: PageKind; label: string }> = [
   { kind: 'folder', label: 'Folder overviews' },
 ];
 
+/** How pages of each kind appear, said where the list is empty (QA C24). */
+const EMPTY_HINT: Record<PageKind, string> = {
+  concept: 'Concepts appear as materials are added to the wiki.',
+  note: 'Each material added to the wiki gets its notes here.',
+  analysis: 'Save a chat answer to the wiki (“Save to wiki” under the answer) to keep it here.',
+  folder: 'A folder gets its overview once its materials are in the wiki.',
+};
+
 function PageRow({ page }: { page: KbPageSummary }) {
   const openDocument = useUi((s) => s.openDocument);
   const current = useUi((s) => s.right?.kind === 'doc' && s.right.target.type === 'page' && s.right.target.id === page.id);
@@ -57,7 +65,9 @@ export function WikiSide() {
           <span className="kb-row__text">Wiki</span>
         </button>
         <h3 className="kb-subhead kb-subhead--folder" id="kb-wiki-kind"><Icon name={PAGE_KIND_ICON[kind]} size={14} /><span className="kb-subhead__text">{label}</span></h3>
-        {list.length === 0 ? <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact /> : (
+        {list.length === 0 ? (
+          <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
+        ) : (
           <ul className="kb-list" aria-labelledby="kb-wiki-kind">{list.map((p) => <PageRow key={p.id} page={p} />)}</ul>
         )}
       </div>

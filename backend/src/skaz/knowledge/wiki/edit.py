@@ -41,15 +41,24 @@ def clean_user_text(text: str) -> str:
     value = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not value:
         raise InvalidText("The text is empty.")
+    # Plain words for what would break the page (QA C15).
     if re.search(r"\n[ \t]*\n", value):
-        raise InvalidText("A note is one paragraph. Add another note for the next paragraph.")
+        raise InvalidText("Keep this to one paragraph: an empty line starts a new one. Add the rest as a "
+                          "new note with “My note”.")
     if "%% skaz:" in value:
-        raise InvalidText("The text can't contain SKAZ markers.")
+        raise InvalidText("Remove the “%% skaz: … %%” part: SKAZ writes those marks itself.")
     if _HEADING_LINE.search(value):
-        raise InvalidText("A note can't contain headings.")
+        raise InvalidText("A line can't start with “#”: that would be a new heading on the page.")
     if _TRAILING_ID.search(value):
-        raise InvalidText("The text can't end with a block id.")
+        raise InvalidText("Remove the “^…” at the end: SKAZ uses that mark to find a paragraph.")
     return value
+
+
+def note_paragraphs(text: str) -> list[str]:
+    """A new note may be several paragraphs: each becomes a note of its own (QA C15)."""
+    value = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n")
+    pieces = [piece.strip() for piece in re.split(r"\n[ \t]*\n", value) if piece.strip()]
+    return [clean_user_text(piece) for piece in pieces] or [clean_user_text(value)]
 
 
 def _link_label(target: str, label: str | None) -> str:
@@ -215,10 +224,12 @@ def add_note(
     after_block_id: str | None = None,
     section: str | None = None,
 ) -> str:
-    """A new ``user_note``; returns its block id."""
-    clean = clean_user_text(text)
+    """A new ``user_note`` (one per paragraph, in order); returns the first block id."""
+    blocks = [
+        Block.create(new_note_id(), "user_note", piece, owner="user") for piece in note_paragraphs(text)
+    ]
     library, path = page_path(kb, page_id)
-    block = Block.create(new_note_id(), "user_note", clean, owner="user")
+    block = blocks[0]
 
     def build(document: PageDocument) -> PageDocument:
         parts: list[Part] = list(document.parts)
@@ -230,12 +241,13 @@ def add_note(
                     raise NotFound("Block not found.")
                 index, pieces, position = found
                 head, tail = "".join(pieces[: position + 1]), "".join(pieces[position + 1 :])
-                parts[index : index + 1] = [RawText(head), block, *([RawText(tail)] if tail.strip() else [])]
+                rest = [RawText(tail)] if tail.strip() else []
+                parts[index : index + 1] = [RawText(head), *blocks, *rest]
             else:
                 after = _block_index(document, after_block_id)
                 if after is None:
                     raise NotFound("Block not found.")
-                parts.insert(after + 1, block)
+                parts[after + 1 : after + 1] = blocks
         elif section:
             key = match_key(section)
             heading = next(
@@ -253,9 +265,9 @@ def add_note(
                 (i for i in range(heading + 1, len(parts)) if _level(parts[i]) <= level),
                 len(parts),
             )
-            parts.insert(end, block)
+            parts[end:end] = blocks
         else:
-            insert_into_section(parts, "user_note", document.meta.language or "en", [block])
+            insert_into_section(parts, "user_note", document.meta.language or "en", blocks)
         return replace(document, parts=spaced(parts))
 
     rewrite(library, path, build)

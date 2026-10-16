@@ -36,6 +36,13 @@ MAX_JOURNAL = 200
 AGENT_UNAVAILABLE = "AGENT_UNAVAILABLE"
 
 
+def agent_failure_text(kind: FailureKind, message: str) -> str:
+    """The job's reason for a failed agent turn: an agent that isn't installed or can't be used
+    never started, so it didn't "stop" (QA C26)."""
+    lead = "The agent couldn't start" if kind == "incompatible" else "The agent stopped"
+    return f"{lead}: {message}"
+
+
 def agent_failure_code(kind: FailureKind) -> str | None:
     """The job's ``error_code`` for an agent turn that failed this way (``None``: retrying may help)."""
     return AGENT_UNAVAILABLE if kind in ("auth", "incompatible") else None

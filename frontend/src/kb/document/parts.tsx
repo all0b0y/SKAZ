@@ -54,7 +54,8 @@ export function CitationChip({ citation, showTitle = true }: { citation: KbCitat
 
 export function PageChip({ page }: { page: KbPageRef }) {
   const openDocument = useUi((s) => s.openDocument);
-  return <Chip kind="wiki" label={page.title} onClick={() => openDocument({ type: 'page', id: page.id })} />;
+  // The page's own type icon: a folder overview reads as a folder, Notes as notes (QA C12).
+  return <Chip kind="wiki" icon={PAGE_KIND_ICON[page.kind]} label={page.title} onClick={() => openDocument({ type: 'page', id: page.id })} />;
 }
 
 /** Folder colour by the folder's place among user folders (Inbox and unknown folders: none). */

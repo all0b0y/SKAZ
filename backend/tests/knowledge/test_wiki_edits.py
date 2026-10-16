@@ -103,8 +103,9 @@ async def test_notes_add_and_delete_and_protected_blocks(kb_app: Any, kb_client:
 
     invalid = await kb_client.post(f"/kb/wiki/pages/{page_id}/blocks", json={"text": "## Заголовок"})
     assert invalid.status_code == 422
+    # Two paragraphs make two notes (QA C15); one block still holds one paragraph (test_f3_wiki_low).
     two_paragraphs = await kb_client.post(f"/kb/wiki/pages/{page_id}/blocks", json={"text": "Раз.\n\nДва."})
-    assert two_paragraphs.status_code == 422
+    assert two_paragraphs.status_code == 201
     missing = await kb_client.post(
         f"/kb/wiki/pages/{page_id}/blocks", json={"text": "Текст.", "after_block_id": "c-nope"}
     )
