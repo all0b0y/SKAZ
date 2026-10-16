@@ -6,6 +6,8 @@ import { clockOrDate, dayBucket, groupBy } from '../ui/time';
 import { useChats, useLibrary, useServices, useUi } from '../state/context';
 import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
+import { useChatSelection } from './chatBatch';
+import { SelectionCheckbox } from '../ui/selection/index';
 
 const SIDE_LIMIT = 8;
 
@@ -40,23 +42,27 @@ export function ChatList() {
   const pinned = list.filter((c) => c.pinned);
   const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
   const groups = groupBy(rest, (c) => dayBucket(c.updated_at));
+  const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id), exportMd: null });
 
   const row = (c: KbChatSummary) => {
     const current = center === 'chat' && c.id === currentId;
     return (
-      <li key={c.id}>
-        <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
-          aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
-          {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
-          <span className="kb-row__text">{c.title}</span>
-          <ChatMark chat={c} />
-        </button>
+      <li key={c.id} {...sel.rowProps(c.id)}>
+        <div role="gridcell">
+          <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
+            aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
+            <SelectionCheckbox checked={sel.selected.has(c.id)} />
+            {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
+            <span className="kb-row__text">{c.title}</span>
+            <ChatMark chat={c} />
+          </button>
+        </div>
       </li>
     );
   };
 
   return (
-    <div className="kb-side__scroll">
+    <div className="kb-side__scroll" {...sel.listProps}>
       <button type="button" className={`kb-row kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
         onClick={() => openChat(null)}>
         <Icon name="newChat" size={16} className="kb-row__icon" />
@@ -77,13 +83,13 @@ export function ChatList() {
       {pinned.length > 0 && (
         <section aria-label="Pinned">
           <h3 className="kb-subhead"><span className="kb-subhead__text">Pinned</span></h3>
-          <ul className="kb-list">{pinned.map(row)}</ul>
+          <ul className="kb-list" {...sel.gridProps} aria-label="Pinned">{pinned.map(row)}</ul>
         </section>
       )}
       {groups.map((g) => (
         <section key={g.label} aria-label={g.label}>
           <h3 className="kb-subhead"><span className="kb-subhead__text">{g.label}</span></h3>
-          <ul className="kb-list">{g.items.map(row)}</ul>
+          <ul className="kb-list" {...sel.gridProps} aria-label={g.label}>{g.items.map(row)}</ul>
         </section>
       ))}
       {list.length > 0 && (
@@ -92,6 +98,7 @@ export function ChatList() {
           <span className="kb-row__text">All chats · {list.length}</span>
         </button>
       )}
+      {overlays}
     </div>
   );
 }

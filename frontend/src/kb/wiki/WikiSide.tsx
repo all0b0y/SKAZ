@@ -8,6 +8,9 @@ import { useLibrary, useServices, useUi } from '../state/context';
 import type { WikiFileName } from '../state/document';
 import { errorText } from '../api/client';
 import { Snippet } from '../ui/Highlight';
+import { SelectionCheckbox, type ListSelection } from '../ui/selection/index';
+import { usePageSelection } from './pageBatch';
+import type { DragRowProps } from '../materials/materialBatch';
 
 interface Hit {
   key: string;
@@ -122,17 +125,34 @@ const EMPTY_HINT: Record<PageKind, string> = {
   folder: 'A folder gets its overview once its materials are in the wiki.',
 };
 
-function PageRow({ page }: { page: KbPageSummary }) {
+function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection; drag: DragRowProps }) {
   const openDocument = useUi((s) => s.openDocument);
   const current = useUi((s) => s.right?.kind === 'doc' && s.right.target.type === 'page' && s.right.target.id === page.id);
   return (
-    <li>
-      <button type="button" className={`kb-row${current ? ' is-current' : ''}`} aria-current={current ? 'true' : undefined}
-        onClick={() => openDocument({ type: 'page', id: page.id })}>
-        <Icon name={PAGE_KIND_ICON[page.kind]} size={16} className="kb-row__icon" />
-        <span className="kb-row__text">{page.title}</span>
-      </button>
+    <li {...sel.rowProps(page.id)} {...drag}>
+      <div role="gridcell">
+        <button type="button" className={`kb-row${current ? ' is-current' : ''}`} aria-current={current ? 'true' : undefined}
+          onClick={() => openDocument({ type: 'page', id: page.id })}>
+          <SelectionCheckbox checked={sel.selected.has(page.id)} />
+          <Icon name={PAGE_KIND_ICON[page.kind]} size={16} className="kb-row__icon" />
+          <span className="kb-row__text">{page.title}</span>
+        </button>
+      </div>
     </li>
+  );
+}
+
+/** Pages that can be selected several at once (0.3.1 F4): compact bar, ⌘/ keys, drag to the chat field. */
+function PageList({ pages, labelledBy, resetKey }: { pages: KbPageSummary[]; labelledBy: string; resetKey?: unknown }) {
+  const openDocument = useUi((s) => s.openDocument);
+  const { sel, overlays, dragProps } = usePageSelection({ pages, resetKey, onOpen: (id) => openDocument({ type: 'page', id }), exportMd: null });
+  return (
+    <div className="kb-sellist" {...sel.listProps}>
+      <ul className="kb-list" {...sel.gridProps} aria-labelledby={labelledBy}>
+        {pages.map((p) => <PageRow key={p.id} page={p} sel={sel} drag={dragProps(p)} />)}
+      </ul>
+      {overlays}
+    </div>
   );
 }
 
@@ -175,7 +195,7 @@ export function WikiSide() {
         {list.length === 0 ? (
           <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
         ) : (
-          <ul className="kb-list" aria-labelledby="kb-wiki-kind">{list.map((p) => <PageRow key={p.id} page={p} />)}</ul>
+          <PageList pages={list} labelledBy="kb-wiki-kind" resetKey={kind} />
         )}
       </div>
     );
@@ -208,7 +228,7 @@ export function WikiSide() {
         {FILES.map((f) => (
           <li key={f.name}>
             <button type="button" className={`kb-row${fileOpen === f.name ? ' is-current' : ''}`} aria-current={fileOpen === f.name ? 'true' : undefined}
-              onClick={() => openWikiFile(f.name)}>
+              title="SKAZ keeps Index and Log — they can’t be selected" onClick={() => openWikiFile(f.name)}>
               <Icon name="text" size={16} className="kb-row__icon" />
               <span className="kb-row__text">{f.label}</span>
             </button>
@@ -218,7 +238,7 @@ export function WikiSide() {
       {recentPages.length > 0 && (
         <>
           <h3 className="kb-subhead" id="kb-wiki-recent">Recently opened</h3>
-          <ul className="kb-list" aria-labelledby="kb-wiki-recent">{recentPages.map((p) => <PageRow key={p.id} page={p} />)}</ul>
+          <PageList pages={recentPages} labelledBy="kb-wiki-recent" />
         </>
       )}
       {pages.length === 0 && (
