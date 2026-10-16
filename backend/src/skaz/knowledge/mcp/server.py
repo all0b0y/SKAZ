@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..agents.tools import ToolRegistry
+from ..agents.tools import ToolContext, ToolRegistry
 from .tokens import McpRunScope, McpTokens
 
 MODERN_VERSIONS: tuple[str, ...] = ("2026-07-28",)
@@ -202,8 +202,16 @@ class McpServer:
 
     def _tools(self, scope: McpRunScope) -> list[dict[str, Any]]:
         return [{"name": spec.name, "description": spec.description, "inputSchema": dict(spec.input_schema),
-                 "annotations": TOOL_ANNOTATIONS}
+                 "annotations": self._annotations(spec.name)}
                 for spec in self.registry.specs(scope.tools)]
+
+    def _annotations(self, name: str) -> dict[str, bool]:
+        tool = self.registry.get(name)
+        if tool is None or not tool.interactive:
+            return TOOL_ANNOTATIONS
+        # A wiki change (after the user's Allow) or a question: not read-only, never outside the library.
+        return {"readOnlyHint": False, "destructiveHint": name == "skaz_wiki_delete_page",
+                "idempotentHint": False, "openWorldHint": False}
 
     async def _call(self, identity: Any, params: dict[str, Any], scope: McpRunScope, token: str, *,
                     modern: bool) -> McpReply:
@@ -221,7 +229,7 @@ class McpServer:
         if not self.tokens.count_call(token):
             text, is_error = "Too many tool calls in this run.", True
         else:
-            outcome = await self.registry.call(name, arguments)
+            outcome = await self.registry.call(name, arguments, ToolContext(scope.run_id))
             text, is_error = outcome.text, outcome.is_error
         result: dict[str, Any] = {"content": [{"type": "text", "text": text}], "isError": is_error}
         if modern:
