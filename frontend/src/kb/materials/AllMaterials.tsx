@@ -152,18 +152,19 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         {rows.length > 0 && layout === 'table' && (
           <table className="kb-amt" {...sel.gridProps} aria-label="Materials">
             <colgroup>
-              <col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
+              <col className="kb-amt__c-sel" /><col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
               <col className="kb-amt__c-added" /><col className="kb-amt__c-wiki" />
             </colgroup>
             <thead>
-              <tr><th><SelectAllBox state={allState} onChange={(all) => (all ? sel.selectAll() : sel.clear())} /></th><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
+              <tr><th className="kb-amt__sel"><SelectAllBox state={allState} onChange={(all) => (all ? sel.selectAll() : sel.clear())} /></th><th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
             </thead>
             <tbody>
               {rows.map((m) => (
                 <tr key={m.id} className={openedId === m.id ? 'is-current' : undefined} {...sel.rowProps(m.id)} {...dragProps(m)}
                   onClick={() => openDocument({ type: 'material', id: m.id })}>
+                  {/* Own column, as in mockup lib-v1: the box never shares a cell with the type icon. */}
+                  <td className="kb-amt__sel"><SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} /></td>
                   <td className="kb-amt__type">
-                    <SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} />
                     <Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} />
                   </td>
                   <td className="kb-amt__name">

@@ -133,6 +133,16 @@ export function AddMaterialModal() {
   const taken = typed ? folders.find((f) => sameName(f.name, typed)) ?? null : null;
   const pendingNew = typed !== '' && taken === null;
   const leaveNew = () => { setCreating(false); setNewName(''); setFolderError(null); };
+  // Enter confirms the name alone (the list then shows the new folder); Add would make it too.
+  const makeFolder = async () => {
+    if (!pendingNew || busy) return;
+    setBusy(true);
+    const made = await library.getState().createFolder(typed);
+    setBusy(false);
+    if (!made.ok) { setFolderError(made.error); return; }
+    setFolderId(made.value.id);
+    leaveNew();
+  };
   const submit = async () => {
     if (!sendable.length || (creating ? !pendingNew : !folderId)) return;
     setBusy(true);
@@ -232,7 +242,7 @@ export function AddMaterialModal() {
                     autoFocus value={newName} error={folderError} disabled={busy}
                     onChange={(e) => { setNewName(e.target.value); setFolderError(null); }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); if (ready) void submit(); }
+                      if (e.key === 'Enter') { e.preventDefault(); void makeFolder(); }
                       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); leaveNew(); }
                     }} />
                   <IconButton icon="close" size="sm" label="Back to the folder list" onClick={leaveNew} />

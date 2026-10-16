@@ -21,7 +21,7 @@ describe('All materials (v11, decision 25)', () => {
     const center = await screen.findByRole('region', { name: 'All materials' });
     // A grid since 0.3.1 F2: rows are selectable (aria-multiselectable / aria-selected).
     const table = await within(center).findByRole('grid');
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Name', 'Folder', 'Added', 'Wiki']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', '', 'Name', 'Folder', 'Added', 'Wiki']);
     const row = within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')!;
     expect(row).toHaveTextContent('Physics');
     expect(row).toHaveTextContent('In wiki');
@@ -136,7 +136,7 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder!.id });
   });
 
-  it('Enter in the new folder name does the same as the button; a taken name offers the existing folder (0.3.1 F1)', async () => {
+  it('Enter in the new folder name makes the folder and selects it; a taken name offers the existing folder (0.3.1 F1)', async () => {
     const user = userEvent.setup();
     const { fake } = await ready();
     await user.click(screen.getByTestId('add-material'));
@@ -153,9 +153,12 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue(existing.id);
     await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
     await user.type(within(dialog).getByRole('textbox', { name: 'New folder name' }), 'Seminars{Enter}');
+    const folder = await waitFor(() => fake.world.folders.find((f) => f.name === 'Seminars')!);
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue(folder.id));
+    expect(fake.calls.some((c) => c.path === '/kb/materials/text')).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
-    const folder = fake.world.folders.find((f) => f.name === 'Seminars');
-    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder!.id });
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder.id });
     expect(fake.calls.filter((c) => c.method === 'POST' && c.path === '/kb/folders')).toHaveLength(1);
   });
 
