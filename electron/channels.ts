@@ -13,6 +13,7 @@ export const CHANNELS = {
   statusEvent: 'backend:status-event',
   openLogsFolder: 'app:open-logs-folder',
   openSystemAudioSettings: 'app:open-system-audio-settings',
+  mediaAccess: 'app:media-access',
   chooseStorageRoot: 'app:choose-storage-root',
   chooseAudioFile: 'app:choose-audio-file',
   captureState: 'app:capture-state',

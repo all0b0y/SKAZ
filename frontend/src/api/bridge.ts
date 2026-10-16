@@ -79,6 +79,15 @@ export const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi'] as c
  * `/kb/materials/file`, audio and video to the speech import (`/kb/imports`). */
 export const MATERIAL_EXTENSIONS = [...DOCUMENT_EXTENSIONS, ...SPEECH_EXTENSIONS] as const;
 
+/** macOS privacy state of SKAZ for a capture kind (`systemPreferences.getMediaAccessStatus`). */
+export type MediaAccessStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+
+/** Microphone and Screen & System Audio Recording permission of SKAZ, read by main. */
+export interface MediaAccess {
+  microphone: MediaAccessStatus;
+  screen: MediaAccessStatus;
+}
+
 export interface BridgeApi {
   /**
    * Dictation into the message field: one PCM16 mono WAV clip (≤ 120 s, ≤ 8 MB) is posted by main to
@@ -103,6 +112,8 @@ export interface BridgeApi {
   openLogsFolder?(): Promise<boolean>;
   /** macOS only: open the privacy pane that grants microphone or screen & system audio capture. */
   openSystemAudioSettings?(pane: 'microphone' | 'system-audio'): Promise<boolean>;
+  /** macOS: whether SKAZ may use the microphone and record screen & system audio (read only, asks nothing). */
+  mediaAccess?(): Promise<MediaAccess>;
   /** Start the local service again after a failed start; false when there is nothing to retry. */
   restartBackend?(): Promise<boolean>;
   /** Native folder chooser; returns a candidate only, never writes preferences. */

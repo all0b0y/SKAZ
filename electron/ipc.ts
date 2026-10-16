@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { CHANNELS } from './channels';
@@ -8,7 +8,7 @@ import type { BackendManager } from './backend';
 import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
-import { privacySettingsUrl } from './systemAudio';
+import { mediaAccessOf, privacySettingsUrl } from './systemAudio';
 import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
 import { MATERIAL_EXTENSIONS, SPEECH_EXTENSIONS } from '../frontend/src/api/bridge';
 
@@ -167,6 +167,12 @@ export function registerIpc(
     if (!url) return false;
     await shell.openExternal(url);
     return true;
+  });
+
+  // Read-only privacy state for Settings → Sound; never asks for anything.
+  ipcMain.handle(CHANNELS.mediaAccess, (event) => {
+    if (!senderTrusted(event)) return mediaAccessOf('untrusted', () => 'unknown');
+    return mediaAccessOf(process.platform, (kind) => systemPreferences.getMediaAccessStatus(kind));
   });
 
   ipcMain.handle(CHANNELS.openLogsFolder, async (event) => {

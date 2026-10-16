@@ -63,8 +63,8 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'decisions', section: 'models', group: 'Helpers', label: 'Wiki decisions', hint: 'Where to file a material, whether to merge or link pages', keywords: 'openrouter jev local system one' },
   { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model corrections' },
   // Recording & speech
-  { id: 'mic', section: 'rec', group: 'Sound', label: 'Microphone', keywords: 'input device' },
-  { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound' },
+  { id: 'mic', section: 'rec', group: 'Sound', label: 'Microphone', hint: 'Default for new recordings', keywords: 'input device level permission' },
+  { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound permission' },
   { id: 'asr-service', section: 'rec', group: 'Recognition', label: 'Service', hint: 'Soniox or on this computer', keywords: 'speech recognition asr whisper soniox' },
   { id: 'soniox-consent', section: 'rec', group: 'Recognition', label: 'Send audio to Soniox', hint: 'Needed for Soniox; you can take it back at any time', keywords: 'privacy consent cloud soniox audio permission' },
   { id: 'speech-model', section: 'rec', group: 'Recognition', label: 'Speech model on this computer', hint: 'Whisper files for recognition without internet', keywords: 'local whisper offline delete remove disk space download' },

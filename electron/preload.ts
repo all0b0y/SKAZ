@@ -10,6 +10,7 @@ import type {
   DictationResult,
   JsonResponse,
   MaterialFileChoice,
+  MediaAccess,
   TextFileSave,
 } from '../frontend/src/api/bridge';
 
@@ -45,6 +46,9 @@ const api: BridgeApi = {
   ...(process.platform === 'darwin' ? {
     openSystemAudioSettings(pane: 'microphone' | 'system-audio'): Promise<boolean> {
       return ipcRenderer.invoke(CHANNELS.openSystemAudioSettings, pane) as Promise<boolean>;
+    },
+    mediaAccess(): Promise<MediaAccess> {
+      return ipcRenderer.invoke(CHANNELS.mediaAccess) as Promise<MediaAccess>;
     },
   } : {}),
   restartBackend(): Promise<boolean> {

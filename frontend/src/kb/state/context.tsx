@@ -19,7 +19,7 @@ import { createUiStore, type UiState, type UiStore } from './ui';
 type OptionalBridge = 'chooseStorageRoot' | 'getBackendStatus' | 'onBackendStatus' | 'restartBackend' | 'onPrepareQuit'
   | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder' | 'openSystemAudioSettings'
   | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure' | 'reportCaptureState'
-  | 'chooseAudioFile' | 'systemAudioSupported';
+  | 'chooseAudioFile' | 'systemAudioSupported' | 'mediaAccess';
 
 export type KbBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi, OptionalBridge>>;
 
