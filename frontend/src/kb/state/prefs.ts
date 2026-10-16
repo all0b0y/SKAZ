@@ -23,10 +23,6 @@ export interface Prefs {
   sideOpen: boolean;
   sideWidth: number;
   rightWidth: number;
-  /** Languages the user hears (first launch, step 1). Codes: ru, en, de, es, fr, … */
-  languages: string[];
-  /** Default translation target, or '' for none. */
-  translateTo: string;
   onboardingDone: boolean;
 }
 
@@ -39,8 +35,6 @@ export const DEFAULT_PREFS: Prefs = {
   sideOpen: true,
   sideWidth: SIDE_DEFAULT,
   rightWidth: RIGHT_DEFAULT,
-  languages: [],
-  translateTo: '',
   onboardingDone: false,
 };
 
@@ -69,10 +63,6 @@ export function readPrefs(storage: Pick<Storage, 'getItem'> | null): Prefs {
     sideOpen: typeof raw.sideOpen === 'boolean' ? raw.sideOpen : DEFAULT_PREFS.sideOpen,
     sideWidth: clamp(raw.sideWidth, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT),
     rightWidth: clamp(raw.rightWidth, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT),
-    languages: Array.isArray(raw.languages)
-      ? raw.languages.filter((x): x is string => typeof x === 'string' && /^[a-z]{2,3}$/.test(x)).slice(0, 12)
-      : [],
-    translateTo: typeof raw.translateTo === 'string' && /^([a-z]{2,3})?$/.test(raw.translateTo) ? raw.translateTo : '',
     onboardingDone: raw.onboardingDone === true,
   };
 }
@@ -95,8 +85,8 @@ export function createPrefsStore(storage: Storage | null): PrefsStore {
   store.subscribe((state) => {
     const data: Prefs = {
       theme: state.theme, textSize: state.textSize, section: state.section, sideOpen: state.sideOpen,
-      sideWidth: state.sideWidth, rightWidth: state.rightWidth, languages: state.languages,
-      translateTo: state.translateTo, onboardingDone: state.onboardingDone,
+      sideWidth: state.sideWidth, rightWidth: state.rightWidth,
+      onboardingDone: state.onboardingDone,
     };
     try { storage?.setItem(PREFS_KEY, JSON.stringify(data)); } catch { /* full or unavailable: keep in memory */ }
   });

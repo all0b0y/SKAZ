@@ -9,7 +9,7 @@ const currentStep = (dialog: HTMLElement) =>
   within(dialog).getByRole('list', { name: 'Setup steps' }).querySelector('[aria-current="step"]')?.getAttribute('data-step');
 
 describe('First launch', () => {
-  it('goes Languages → Agent → Speech → Library → Summary; languages are saved', async () => {
+  it('goes Languages → Agent → Speech → Library → Summary', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: without(unconfiguredWorld()), prefs: { onboardingDone: false } });
     const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
@@ -18,11 +18,6 @@ describe('First launch', () => {
     expect(dialog.querySelector('[data-art="lang"]')).toHaveAttribute('data-still', 'false');
     expect(within(dialog).getByRole('heading', { name: 'Which languages do you hear?' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: 'Russian' }));
-    await user.click(within(dialog).getByRole('button', { name: 'English' }));
-    expect(within(dialog).getByRole('button', { name: 'Russian' })).toHaveAttribute('aria-pressed', 'true');
-    await user.selectOptions(within(dialog).getByLabelText('Default translation'), 'ru');
-    expect(storedPrefs()).toMatchObject({ languages: ['ru', 'en'], translateTo: 'ru' });
 
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     expect(currentStep(dialog)).toBe('agent');
@@ -53,6 +48,24 @@ describe('First launch', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Open SKAZ' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Welcome to SKAZ' })).not.toBeInTheDocument());
     expect(storedPrefs().onboardingDone).toBe(true);
+  });
+
+  it('languages and translation go to the backend speech settings — the ones recording and Settings use (QA A11)', async () => {
+    const user = userEvent.setup();
+    const world = unconfiguredWorld();
+    Object.assign(world.speech, { languages: [], translate_by_default: false });
+    const { fake } = renderKb({ world, prefs: { onboardingDone: false } });
+    const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
+    const chips = within(dialog).getAllByRole('group', { name: 'Which languages do you hear?' }).at(-1)!;
+    await user.click(await within(chips).findByRole('button', { name: 'English' }));
+    await waitFor(() => expect(within(chips).getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true'));
+    await user.click(within(chips).getByRole('button', { name: 'Russian' }));
+    await user.selectOptions(within(dialog).getByLabelText('Default translation'), 'ru');
+    await waitFor(() => expect(fake.world.speech).toMatchObject({ languages: ['en', 'ru'], translate_by_default: true, translation_language: 'ru' }));
+    expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/speech', body: { languages: ['en', 'ru'] } }));
+    // Nothing of it is kept on the renderer side only.
+    expect(storedPrefs()).not.toHaveProperty('languages');
+    expect(storedPrefs()).not.toHaveProperty('translateTo');
   });
 
   it('choosing another folder sends that path; a refusal stays on the step in the backend’s words', async () => {

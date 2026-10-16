@@ -389,8 +389,12 @@ export function SonioxConsentRow({ label }: { label: string }) {
   );
 }
 
-/** Chosen languages as toggle chips; the settings row (a labelled group) names them. */
-export function SpeechLanguagesRow() {
+/**
+ * Languages the user hears, as toggle chips (pressed = chosen), stored in the backend's speech
+ * settings — the same list recording, imports and dictation use (QA A11: first launch and Settings
+ * write the same place). The settings row (or `labelledBy`) names the group.
+ */
+export function SpeechLanguagesRow({ labelledBy }: { labelledBy?: string } = {}) {
   const { settings } = useServices();
   const speech = useSettings((s) => s.speech);
   const [result, show] = useResult();
@@ -398,7 +402,7 @@ export function SpeechLanguagesRow() {
   const chosen = speech.value.languages;
   return (
     <>
-      <div className="kb-tags">
+      <div className="kb-tags" role={labelledBy ? 'group' : undefined} aria-labelledby={labelledBy}>
         {LANGUAGES.map((l) => {
           const on = chosen.includes(l.code);
           return (
@@ -418,7 +422,8 @@ export function SpeechLanguagesRow() {
   );
 }
 
-export function TranslationRow() {
+/** Default translation of recordings, in the backend's speech settings (shared by first launch and Settings). */
+export function TranslationRow({ optionPrefix = '' }: { optionPrefix?: string } = {}) {
   const { settings } = useServices();
   const speech = useSettings((s) => s.speech);
   const [result, show] = useResult();
@@ -434,7 +439,7 @@ export function TranslationRow() {
           show(await settings.getState().updateSpeech(v ? { translate_by_default: true, translation_language: v } : { translate_by_default: false }));
         }}>
           <option value="">No translation</option>
-          {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+          {LANGUAGES.map((l) => <option key={l.code} value={l.code}>{optionPrefix}{l.name}</option>)}
         </select>
         <Icon name="chevronDown" size={12} className="kb-select__chev" />
       </span>

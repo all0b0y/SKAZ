@@ -5,8 +5,7 @@ import { EXIT, SPRING_LARGE } from '../ui/motion';
 import { useAgents, useLibrary, useServices, useSettings } from '../state/context';
 import type { KbAgents, KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 import { AgentCards } from '../settings/AgentCard';
-import { AsrRow, KeyRow, LocalWhisperRow } from '../settings/LiveRows';
-import { LanguagePicker, TranslationSelect } from '../settings/Languages';
+import { AsrRow, KeyRow, LocalWhisperRow, SpeechLanguagesRow, TranslationRow } from '../settings/LiveRows';
 import { LibraryPlace, useLibraryChoice } from './LibraryStep';
 import { StepArt, type SummaryTone } from './StepArt';
 
@@ -124,10 +123,10 @@ export function Onboarding({ open, onFinish }: { open: boolean; onFinish: () => 
               <>
                 <Heading id={titleId}>Which languages do you hear?</Heading>
                 <p className="kb-ob__lead">A hint for speech recognition. You can change it in Settings.</p>
-                <LanguagePicker labelledBy={titleId} />
+                <SpeechLanguagesRow labelledBy={titleId} />
                 <div className="kb-srow">
                   <div className="kb-srow__text"><div className="kb-srow__label">Default translation</div></div>
-                  <div className="kb-srow__control"><TranslationSelect /></div>
+                  <div className="kb-srow__control"><TranslationRow optionPrefix="into " /></div>
                 </div>
               </>
             )}
