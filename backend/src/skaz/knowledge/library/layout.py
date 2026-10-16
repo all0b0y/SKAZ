@@ -21,7 +21,13 @@ from .fsio import read_json, visible_entries
 
 SERVICE_DIR = ".skaz"
 MARKER_PATH = Path(SERVICE_DIR) / "library.json"
-STAGING_PATH = Path(SERVICE_DIR) / "tmp"
+#: Where new objects are built before one rename publishes them. Not "tmp": iCloud Drive
+#: (a library in ~/Documents) never syncs a folder named "tmp" or "*.nosync", and macOS
+#: refuses to move a folder between a synced and a never-synced place (EDEADLK,
+#: "Resource deadlock avoided") — every import and delete failed there.
+STAGING_PATH = Path(SERVICE_DIR) / "staging"
+#: The staging folder of earlier builds; emptied and removed when the library opens.
+LEGACY_STAGING_PATH = Path(SERVICE_DIR) / "tmp"
 MATERIALS_DIR = "Materials"
 WIKI_DIR = "Wiki"
 FOLDER_MARKER = Path(SERVICE_DIR) / "folder.json"

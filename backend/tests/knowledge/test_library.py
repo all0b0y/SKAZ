@@ -16,7 +16,7 @@ from skaz.knowledge.errors import (
     NameTaken,
     ProtectedItem,
 )
-from skaz.knowledge.library.layout import MARKER_PATH, resolve_library_root
+from skaz.knowledge.library.layout import LEGACY_STAGING_PATH, MARKER_PATH, STAGING_PATH, resolve_library_root
 from skaz.knowledge.library.library import INBOX_ID, Library
 from skaz.knowledge.library.names import validate_name
 from skaz.knowledge.markdown.page import PageDocument, PageMeta, RawText, parse_page
@@ -80,6 +80,23 @@ def test_existing_foreign_content_is_never_turned_into_a_library(tmp_path: Path)
     with pytest.raises(LibraryConflict):
         Library.create(root)
     assert tree(root) == {"Ungrouped"}
+
+
+def test_staging_is_a_place_icloud_syncs(library: Library) -> None:
+    """A library in ~/Documents is in iCloud Drive; it never syncs "tmp" or "*.nosync" folders and
+    macOS refuses to move a folder between a synced and a never-synced place ("Resource deadlock
+    avoided"): with staging in such a folder every import and delete failed."""
+    name = STAGING_PATH.name.lower()
+    assert name != "tmp" and not name.endswith((".nosync", ".tmp")) and not name.startswith(".")
+    assert (library.root / STAGING_PATH).is_dir()
+
+
+def test_open_removes_the_staging_folder_of_earlier_builds(library: Library) -> None:
+    legacy = library.root / LEGACY_STAGING_PATH
+    (legacy / "delete-1" / "material").mkdir(parents=True)
+    (legacy / "delete-1" / "material" / "a.md").write_text("x", encoding="utf-8")
+    Library.open(library.root, library.library_id)
+    assert not legacy.exists()
 
 
 def test_open_reports_missing_marker_and_other_library(library: Library, tmp_path: Path) -> None:

@@ -2,7 +2,7 @@
 
 All mutations take the library lock, check the name against every entry of
 the target directory (unknown files included) by ``name_key``, build the new
-object in ``<root>/.skaz/tmp`` and publish it with one exclusive rename. A
+object in ``<root>/.skaz/staging`` and publish it with one exclusive rename. A
 refused name therefore leaves nothing behind, and a name taken by another
 process between the check and the publish is refused by the kernel.
 """
@@ -57,6 +57,7 @@ from .fsio import (
 )
 from .layout import (
     FOLDER_MARKER,
+    LEGACY_STAGING_PATH,
     MARKER_PATH,
     MATERIAL_MANIFEST,
     MATERIALS_DIR,
@@ -201,6 +202,7 @@ class Library:
         with contextlib.suppress(OSError):
             for entry in os.listdir(staging):
                 shutil.rmtree(staging / entry, ignore_errors=True)
+        shutil.rmtree(self.root / LEGACY_STAGING_PATH, ignore_errors=True)
 
     @contextlib.contextmanager
     def _staging(self) -> Iterator[Path]:
