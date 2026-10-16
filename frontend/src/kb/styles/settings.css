@@ -101,6 +101,10 @@
 .kb-snote { display: flex; gap: 8px; align-items: flex-start; color: var(--kb-muted); font-size: var(--t-sm); flex: none; }
 .kb-snote .kb-icon { color: var(--kb-warn); margin-top: 2px; }
 .kb-snote--quiet .kb-icon { color: var(--kb-muted); }
+/* Settings → Skills (0.3.1 H3): what the section is about, and when a switch takes effect. */
+.kb-sintro, .kb-shint { margin: 0; color: var(--kb-muted); font-size: var(--t-xs); line-height: 1.4; flex: none; }
+.kb-sintro { margin-bottom: 8px; }
+.kb-shint { margin-top: 8px; }
 
 /* Settings → Privacy → Activity log (F2): read-only list of GET /logs, newest first. */
 .kb-confirm.kb-activity { width: min(620px, calc(100vw - 48px)); }

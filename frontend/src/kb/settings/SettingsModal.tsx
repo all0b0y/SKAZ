@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
-import { usePrefs, useLibrary, useServices, useUi } from '../state/context';
+import { usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
 import {
   AgentRow, AsrRow, BackgroundLinksRow, ChatModelRow, DecisionsRow, DefaultAgentRow, FindLinksNowRow, HealthPlates, KeyRow,
-  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SonioxConsentRow, SpeechLanguagesRow, SpeechModelRow,
+  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SkillEngineRow, SkillSwitchRow, SonioxConsentRow,
+  SpeechLanguagesRow, SpeechModelRow,
   TranslationRow, VersionRow,
   WikiLanguageRow, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
@@ -57,6 +58,10 @@ function RowControl({ row }: { row: RowDef }) {
     case 'auto-fix': return <WikiSwitchRow field="auto_corrections" label={row.label} />;
     case 'bg-links': return <BackgroundLinksRow label={row.label} />;
     case 'links-now': return <FindLinksNowRow />;
+    case 'humanizer': return <SkillSwitchRow skillId="humanizer" label={row.label} />;
+    case 'skill-codex': return <SkillEngineRow skillId="humanizer" engine="codex" />;
+    case 'skill-claude': return <SkillEngineRow skillId="humanizer" engine="claude_code" />;
+    case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
     case 'lib-folder':
       if (library?.state === 'ready' || library?.state === 'unavailable') {
         return (
@@ -113,7 +118,10 @@ function RowControl({ row }: { row: RowDef }) {
   }
 }
 
-const ENGINE_OF_ROW: Record<string, EngineId | undefined> = { 'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes' };
+const ENGINE_OF_ROW: Record<string, EngineId | undefined> = {
+  'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes',
+  'skill-codex': 'codex', 'skill-claude': 'claude_code', 'skill-hermes': 'hermes',
+};
 
 function Row({ row }: { row: RowDef }) {
   const labelId = useId();
@@ -178,12 +186,27 @@ function StorageBanner() {
   return null;
 }
 
+/** When a switch takes effect (H3): from the next answer; running answers finish as they started. */
+function SkillsNote() {
+  const on = useSettings((s) => s.skills.value?.skills.find((k) => k.id === 'humanizer')?.enabled);
+  if (on === undefined) return null;
+  return (
+    <p className="kb-shint">
+      {on ? 'Turning it off applies from the next answer; running answers finish as they started.'
+        : 'Off: agents write without Humanizer from the next answer.'}
+    </p>
+  );
+}
+
 function SectionBody({ section }: { section: SettingsSection }) {
   const rows = ROWS.filter((r) => r.section === section);
   return (
     <>
       {section === 'storage' && <StorageBanner />}
       <HealthPlates section={section} />
+      {section === 'skills' && (
+        <p className="kb-sintro">Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.</p>
+      )}
       {groupsOf(rows).map((g, i) => (
         <section key={`${g.title}-${i}`} className="kb-sgroup" aria-label={g.title || undefined}>
           {g.title && <h4 className="kb-sgroup__title">{g.title}</h4>}
@@ -194,6 +217,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
         <p className="kb-snote"><Icon name="warning" size={14} />If the chosen model is unavailable, SKAZ says so and never switches to another on its own.</p>
       )}
       {section === 'about' && <Licenses />}
+      {section === 'skills' && <SkillsNote />}
     </>
   );
 }
@@ -218,6 +242,7 @@ export function SettingsModal() {
     void s.loadDecisions();
     void s.loadPrivacy();
     void s.loadAbout();
+    void s.loadSkills();
     // Agents: checked by themselves on open (at most every 30 s each; Check forces it).
     agents.getState().autoCheck('open');
   }, [open, settings, agents]);

@@ -542,6 +542,34 @@ export function WikiSwitchRow({ field, label }: { field: WikiFlag; label: string
   );
 }
 
+// ---- Skills (0.3.1 H3) -------------------------------------------------------------------------
+
+/** One SKAZ skill on or off: sent at once; the answer carries the new status of every agent. */
+export function SkillSwitchRow({ skillId, label }: { skillId: string; label: string }) {
+  const { settings } = useServices();
+  const skills = useSettings((s) => s.skills);
+  const [result, show] = useResult();
+  const skill = skills.value?.skills.find((k) => k.id === skillId);
+  if (!skill) return skills.error ? <Failed error={skills.error} retry={() => void settings.getState().loadSkills()} /> : <Reading />;
+  return (
+    <>
+      <Switch label={label} checked={skill.enabled} onChange={async (v) => show(await settings.getState().setSkillEnabled(skillId, v))} />
+      {result}
+    </>
+  );
+}
+
+/** Whether this agent's answers carry the skill now: Loaded, the reason it isn't, or Off. */
+export function SkillEngineRow({ skillId, engine }: { skillId: string; engine: EngineId }) {
+  const { settings } = useServices();
+  const skills = useSettings((s) => s.skills);
+  const status = skills.value?.skills.find((k) => k.id === skillId)?.engines.find((e) => e.engine === engine);
+  if (!status) return skills.error ? <Failed error={skills.error} retry={() => void settings.getState().loadSkills()} /> : <Reading />;
+  if (status.state === 'loaded') return <span className="kb-status kb-status--ok"><Icon name="check" size={13} />Loaded</span>;
+  if (status.state === 'off') return <span className="kb-status kb-status--off">Off</span>;
+  return <span className="kb-status kb-status--warn"><Icon name="warning" size={13} />{status.reason ?? 'Not loaded'}</span>;
+}
+
 /** Background search for connections: switched on only after an explicit "Allow" (W2 §2.5). */
 export function BackgroundLinksRow({ label }: { label: string }) {
   const { settings } = useServices();
