@@ -4,9 +4,11 @@
 
 # SKAZ
 
-**A second pair of ears for lectures and meetings.**
+### Lectures, meetings and documents, turned into a wiki you can ask
 
-[![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2f7c72)](https://github.com/all0b0y/SKAZ/releases/latest)
+Record or add a source · ask with exact citations · a wiki that keeps itself up to date
+
+[![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2c2e31)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
 ![Alpha](https://img.shields.io/badge/status-alpha-orange)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -15,71 +17,70 @@
 
 <br>
 
-<img src="docs/images/skaz-demo.webp" alt="A quick tour of SKAZ: live transcript, answers with sources, search scope, notes and speech providers" width="880">
+<img src="docs/images/skaz-tour.webp" alt="A tour of SKAZ: recording a lecture into a folder, asking about it, opening the cited moment, the wiki page, search and the dark theme" width="880">
 
-<sub>Quick tour · demo profile with authored data · <a href="docs/images/skaz-demo.mp4">Full HD video (MP4, 34 s)</a></sub>
+<sub>Product tour · demo profile with authored data · <a href="docs/images/skaz-tour.mp4">Full HD video (MP4, 23 s)</a></sub>
+
+<br><br>
+
+[**Install**](#-install) · [**Features**](#-features) · [**Privacy**](#-privacy-and-data) · [**How it works**](#-how-it-works) · [**Contributing**](CONTRIBUTING.md)
 
 </div>
 
-SKAZ is a macOS desktop app that turns speech into a readable transcript,
-helps you catch up on what you missed, and keeps questions and notes next to the source.
+---
 
-> **Alpha / early access.** Expect bugs and breaking changes, including changes to
-> stored data. Back up important exports. The current target is macOS on Apple Silicon;
-> Windows, Linux and Intel Macs are not verified. The interface is currently English-only.
+SKAZ is a macOS app for what you listen to and read. Record a lecture or a meeting, or add a PDF,
+an article, a video link or a file. SKAZ keeps every source in your own folder of Markdown files,
+builds a wiki from it, and answers questions with links to the exact moment or page.
 
-## See it in action
+> [!WARNING]
+> **Alpha / early access.** Expect bugs and breaking changes, including changes to stored
+> data. Back up important exports. SKAZ targets macOS on Apple Silicon; Windows, Linux and
+> Intel Macs are not verified. The interface is English-only for now.
+
+## 💡 Why SKAZ
+
+A lecture, last week's meeting, a chapter you read: they end up in different places, and nothing
+connects them. SKAZ keeps them together. Every source gets notes and concept pages in one wiki,
+so the same idea from a lecture and a textbook lands on one page. Ask *"what did she say about the
+second law?"* and follow the footnote back to the second it was said.
+
+AI can be wrong. Citations help you check an answer; they don't guarantee it is correct.
+
+## 👀 See it in action
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/transcript.webp" alt="Live transcript"><br><b>Live transcript</b><br>Speech becomes readable text, grouped by speaker, with the session chat alongside.</td>
-<td width="50%"><img src="docs/images/sources.webp" alt="Answers with sources"><br><b>Answers with sources</b><br>A source link opens the exact line in the transcript.</td>
+<td width="50%"><img src="docs/images/tour-record.webp" alt="Recording a lecture into a folder"><br><b>Record into a folder</b><br>Pick the folder, press Record, and the transcript appears as people speak, by speaker and time.</td>
+<td width="50%"><img src="docs/images/tour-ask.webp" alt="An answer with footnotes"><br><b>Ask with citations</b><br>Every claim has a footnote. Open it and SKAZ jumps to the quote in the source.</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/scope.webp" alt="Search scope"><br><b>Search scope</b><br>Ask about one session, a group or the whole library.</td>
-<td width="50%"><img src="docs/images/notes.webp" alt="Editable notes"><br><b>Editable notes</b><br>Markdown notes in tabs, ready to export.</td>
+<td width="50%"><img src="docs/images/tour-wiki.webp" alt="A wiki concept page"><br><b>A wiki that writes itself</b><br>Concept pages and notes built from your sources, marked with what is quoted and what the agent inferred.</td>
+<td width="50%"><img src="docs/images/tour-search.webp" alt="Searching everything with ⌘K"><br><b>Search everything</b><br>⌘K finds wiki pages, materials and chats, or hands the question to the agent.</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/providers.webp" alt="Your choice of provider"><br><b>Your choice of provider</b><br>Soniox, OpenAI, or Local Whisper running on this Mac.</td>
-<td width="50%"><img src="docs/images/light.webp" alt="Light and dark"><br><b>Light and dark</b><br>Follows your Mac, or pick a theme.</td>
+<td colspan="2" align="center"><img src="docs/images/tour-theme.webp" alt="Switching to the dark theme" width="50%"><br><b>Light and dark</b><br>Follows your Mac, or pick a theme in <b>Settings → Appearance</b>.</td>
 </tr>
 </table>
 
-These are captures of the running application, not mockups. Transcripts, answers and notes
-are authored demonstration data, not real speech recognition or AI output; the tour above was
-assembled from the same captures with [Remotion](https://www.remotion.dev).
+<sub>Built from SKAZ 0.3.0's own interface (its HTML and CSS) with <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
+The lecture, the answer and the wiki pages are authored demonstration data, not real speech
+recognition or AI output.</sub>
 
-## Why SKAZ
+## ✨ Features
 
-Lose the thread for a moment? Ask what you missed instead of searching through a
-whole recording. Read the transcript, follow an answer's source links, and turn
-useful material into notes you can revisit. AI can make mistakes: source links
-help you check an answer; they do not guarantee it is correct.
+| | |
+|---|---|
+| 🎙️ **Live recording** | Microphone, optionally with your Mac's sound (Zoom, videos; macOS 14.2+ and OS permission). Recognition with **Soniox** (cloud streaming, speaker separation, translation) or **Whisper on this computer** (works offline). SKAZ never silently switches services. |
+| 📚 **Any source** | PDF, documents, text and Markdown files, audio and video files, web articles (cleaned up), pasted text of any length, and video links from YouTube, VK Video, RuTube and Vimeo. Use only material you are allowed to process. |
+| 🧠 **A living wiki** | Notes for every source, one page per concept across all folders, and saved analyses. Each statement is marked: quoted from a source, a connection the agent inferred, or an agent's explanation. When sources disagree, both versions are shown and you decide. |
+| 💬 **Chats with footnotes** | Ask about the whole library; the agent knows what is open and whether a recording is running. Footnotes open the exact moment of a recording or the page of a document. Point at a page, a material or a chat with **@**. |
+| 🤖 **Your agent** | **Codex**, **Claude Code** or **Hermes Agent**, with your own subscription or key; SKAZ can install them for you. Agents read the library through read-only SKAZ tools. Small filing decisions can run on a local model or through OpenRouter. |
+| ✍️ **Recognition fixes** | An optional check finds likely recognition errors, fixes the confident ones and only highlights the doubtful ones. Every fix can be undone. |
+| 🗂️ **Plain files** | The library is a folder of `.md` files. Open it in **Obsidian**, or export everything as plain Markdown with sources as footnotes. Your own edits to wiki pages are protected from the agent. |
+| 🔄 **Updates** | SKAZ checks GitHub releases at start and once a day and installs a verified update from **Settings → About**. |
 
-## Features
-
-- **Live transcription and translation:** choose the speech provider in
-  **Settings → Transcription** — Soniox (cloud streaming, full speaker separation,
-  translation), **Local Whisper** (faster-whisper on this Mac, works with the network
-  off; approximate speakers, translation into English only) or OpenAI. Text is
-  grouped by speaker, with access to the original when translating. There is never
-  a silent fallback between providers.
-- **Microphone and system audio:** select a microphone and optionally include your
-  Mac's sound. System-audio capture requires macOS 14.2+ and OS permission.
-- **Questions with context:** ask about one session, a group or the whole library
-  and follow timestamped references back to the transcript.
-- **Notes you can edit:** generate notes, edit Markdown in tabs and export it.
-- **A local library:** organize sessions into groups and optionally mirror text
-  to a chosen folder for tools such as Obsidian.
-- **Media import (experimental):** local audio/video and YouTube import flows.
-  Use only material you are authorized to process; availability and formats vary.
-- **Separate model choices:** configure Assistant and Notes independently, using
-  Codex account sign-in or supported OpenAI, Anthropic and OpenRouter API profiles.
-  In **agent mode**, an API model with tool calling reads the library step by step
-  through the same bounded SKAZ tools Codex uses, instead of answering from passages
-  picked in advance. Live speech uses the transcription provider, not those text models.
-
-## Install and first launch
+## 📦 Install
 
 Paste this into Terminal (Apple Silicon, macOS 13 or later):
 
@@ -88,81 +89,92 @@ curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
 ```
 
 The [script](install.sh) downloads the latest release, checks its SHA-256 checksum and SKAZ's
-signature, installs SKAZ into Applications and opens it. Run the same command to update; your
-sessions, notes and settings stay where they are. SKAZ is not notarized by Apple yet, and an app
-installed this way opens without the "Apple could not verify…" warning.
+signature, installs SKAZ into Applications and opens it. Run the same command to update — your
+library and settings stay where they are. SKAZ is not notarized by Apple yet; an app installed
+this way opens without the "Apple could not verify…" warning.
 
 <details>
-<summary>Install from the DMG or PKG instead</summary>
+<summary><b>Install from the DMG or PKG instead</b></summary>
+<br>
 
 Download `SKAZ-<version>-arm64.dmg` (or the `.pkg` installer) from
-[GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest), open it and drag SKAZ to Applications. On the first launch macOS says
-it could not verify SKAZ: click **Done**, not Move to Trash. Then open **System Settings →
-Privacy & Security** and click **Open Anyway** next to the message about SKAZ. This is needed once
-per downloaded build. Do not disable macOS security protections globally.
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest), open it and drag SKAZ to
+Applications. On the first launch macOS says it could not verify SKAZ: click **Done**, not
+Move to Trash. Then open **System Settings → Privacy & Security** and click **Open Anyway**
+next to the message about SKAZ. This is needed once per downloaded build. Do not disable macOS
+security protections globally.
 
 </details>
 
-To run the current code instead, use [development setup](CONTRIBUTING.md).
+Want to run the current code instead? See the [development setup](CONTRIBUTING.md).
 
-On first launch:
+### 🚀 First launch
 
-1. Choose the languages you expect to hear.
-2. Open **Settings → API keys**, add your Soniox key, enable cloud consent and save —
-   or, to keep audio on this Mac, choose **Local Whisper** in **Settings → Transcription**
-   and download a model (the size is shown first; no key or cloud consent needed).
-3. In **Settings → Transcription**, choose transcription or translation and its target language.
-4. Configure **Assistant** and **Notes** separately. For Codex, install the official
-   [Codex CLI](https://developers.openai.com/codex/cli/) and sign in through SKAZ's
-   Codex settings; SKAZ does not automatically install it. Alternatively, configure
-   an API provider key and model. Provider eligibility, limits and charges apply.
-5. Create a session, choose audio sources, grant the relevant macOS permissions
-   and press **Record**. Pause or stop when needed; open **Notes** to work with the transcript.
+1. **Agent.** Choose Codex, Claude Code or Hermes Agent and sign in with your own account.
+   SKAZ can install the agent for you. Provider eligibility, limits and charges apply.
+2. **Speech.** Add a Soniox key and allow sending audio to Soniox — or pick **Whisper on this
+   computer** and download a speech model (its size is shown first; no key needed).
+3. **Library.** Choose where the library lives; SKAZ suggests a folder in Documents.
+4. **Use it.** Press **Record** (the folder is picked next to it) or **+ Material** to add a
+   file, a link or text. Ask in the chat; open **Wiki** to read what SKAZ built.
 
-Obtain any required consent before recording other people. Soniox and text-model
-services have their own pricing; the MIT license does not include their usage.
+Every choice can be changed later in **Settings**.
 
-## Privacy and data
+> [!IMPORTANT]
+> Get consent before recording other people. Soniox, the agents and OpenRouter have their own
+> pricing and policies; the MIT license does not cover their usage.
 
-- Transcripts, notes and chats are stored locally. There is no permanent live-audio
-  archive for playback; temporary audio may be used for processing or recovery.
-- With Soniox or OpenAI, audio goes to that provider for recognition after consent;
-  with Local Whisper it is transcribed on this Mac and never sent. Assistant and Notes send
-  context to the selected service. Provider retention and training policies apply:
-  **local storage does not mean offline processing**.
-- API keys are stored in an encrypted local file, with its encryption key alongside
-  it. File permissions are the main boundary, not protection from processes running
-  as your user. Protect exports and backups too.
-- The Python backend is loopback-only and uses a fresh token each launch. See
-  [Security](SECURITY.md) for limitations and the current reporting-channel status.
+## 🔒 Privacy and data
 
-## How it works
+| What | Where it lives / goes |
+|---|---|
+| Materials and wiki | Plain `.md` files in the library folder you chose. |
+| Index, chats, settings | Local files in SKAZ's own app folder. |
+| Live audio | Not kept as an archive for playback. Temporary audio may be used for processing or recovery. |
+| Speech recognition | **Soniox:** audio is sent after your consent, which you can take back at any time. **Whisper on this computer:** audio never leaves your Mac. |
+| Agent | Your question and the parts of the library it reads go to the agent you chose; its retention and training policies apply. |
+| Keys | An encrypted local file in SKAZ's app folder, with its encryption key beside it. File permissions are the main boundary — not protection from processes running as your user. |
+| Activity log | Kept without conversation text or keys. |
+| Backend | Python, loopback-only, with a fresh token on every launch. |
+
+Text from your sources is data, never instructions: a passage that addresses an AI is left out of
+the wiki, and SKAZ tells you, with a way to bring it back.
+**Local storage does not mean offline processing.** Protect exports and backups too.
+See the [security policy](SECURITY.md) for limitations and the reporting channel.
+
+## 🧩 How it works
 
 ```text
-Microphone / system audio / media → Electron → Python → Soniox | Local Whisper | OpenAI
-                                      ↓         ↓
-                                  React UI   Local library
-                                                ↕
-                                     Assistant / Notes provider
+Microphone / system audio / files / links → Electron → Python ── Soniox | Whisper on this Mac
+                                              ↓          ↓
+                                          React UI   Library: Materials/*.md, Wiki/*.md
+                                                         ↕  read-only SKAZ tools
+                                              Codex | Claude Code | Hermes Agent
 ```
 
 | Layer | Stack |
 |---|---|
 | Desktop | Electron |
 | Interface | React, TypeScript, CodeMirror |
-| Local backend | Python, FastAPI, SQLite |
+| Local backend | Python, FastAPI, an SQLite index over the Markdown files |
 
-## Development and project information
+## 🗺️ What's next
 
-[Contributing](CONTRIBUTING.md) covers setup, tests and PRs. [Packaging](docs/PACKAGING.md)
-covers building installers. Release notes will live in [GitHub Releases](https://github.com/all0b0y/SKAZ/releases),
-not a separate changelog. Small fixes may go straight to a PR; discuss larger changes first.
+- [ ] Apple notarization for releases
+- [ ] Illustrated answers and notes from PDF presentations
+- [ ] Broader real-world validation
 
-Current priorities include release signing/notarization, reliable long-session
-recovery and broader real-world validation. Experimental import and web-search
-paths are not a promise of production readiness; native Codex web search is currently disabled.
+## 🤝 Contributing
+
+[Contributing](CONTRIBUTING.md) covers setup, tests and pull requests; [Packaging](docs/PACKAGING.md)
+covers building installers. Small fixes can go straight to a PR — please discuss larger changes in
+an issue first. Release notes live in [GitHub Releases](https://github.com/all0b0y/SKAZ/releases).
 
 [Community rules](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md) · [MIT license](LICENSE)
 
-*Skaz* (сказ) is a Russian word for a spoken narrative. The original working name
-was SKAZ. Copyright © 2026 all0b0y.
+---
+
+<div align="center">
+<sub><i>Skaz</i> (сказ) is a Russian word for a spoken narrative. Formerly AudioHelper.<br>
+Copyright © 2026 all0b0y.</sub>
+</div>

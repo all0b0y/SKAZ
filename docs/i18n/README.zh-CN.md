@@ -4,9 +4,11 @@
 
 # SKAZ
 
-**课堂与会议中的第二双耳朵。**
+### 把课堂、会议和文档变成一个可以提问的 wiki
 
-[![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2f7c72)](https://github.com/all0b0y/SKAZ/releases/latest)
+录制或添加来源 · 提问并获得精确引用 · 自动保持更新的 wiki
+
+[![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2c2e31)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
 ![Alpha](https://img.shields.io/badge/status-alpha-orange)
 [![MIT](https://img.shields.io/badge/license-MIT-blue)](../../LICENSE)
@@ -15,138 +17,156 @@
 
 <br>
 
-<img src="../images/skaz-demo.webp" alt="SKAZ 快速浏览：实时转写、带来源的回答、搜索范围、笔记与语音服务商" width="880">
+<img src="../images/skaz-tour.webp" alt="SKAZ 导览：把一堂课录进文件夹、就内容提问、打开被引用的那一刻、wiki 页面、搜索和深色主题" width="880">
 
-<sub>快速浏览 · 使用预设数据的演示配置 · <a href="../images/skaz-demo.mp4">全高清视频（MP4，34 秒）</a></sub>
+<sub>产品导览 · 使用预先编写数据的演示配置 · <a href="../images/skaz-tour.mp4">全高清视频（MP4，23 秒）</a></sub>
+
+<br><br>
+
+[**安装**](#-安装) · [**功能**](#-功能) · [**隐私**](#-隐私与数据) · [**工作原理**](#-工作原理) · [**参与贡献**](../../CONTRIBUTING.md)
 
 </div>
 
-SKAZ 是一款 macOS 桌面应用，可将语音转为易读的文字，帮助你找回错过的内容，
-并将提问、笔记与原始转写放在一起。
+---
 
-> **Alpha / 抢先体验。** 可能存在错误和不兼容的变更，包括数据格式变化。
-> 请备份重要的导出文件。目前面向 Apple Silicon Mac；Windows、Linux 和 Intel Mac
-> 尚未验证。应用界面目前仅提供英语。
+SKAZ 是一款 macOS 应用，用来处理你听到和读到的一切。录制一堂课或一次会议，或者添加 PDF、文章、
+视频链接或文件。SKAZ 把每个来源保存在你自己的 Markdown 文件夹里，据此构建 wiki，并在回答问题时
+附上指向确切时刻或页码的链接。
 
-## 界面预览
+> [!WARNING]
+> **Alpha / 抢先体验。** 可能存在错误和不兼容的变更，包括已存数据的变更。请备份重要的导出内容。
+> SKAZ 面向 Apple Silicon 上的 macOS；Windows、Linux 和 Intel Mac 未经验证。目前界面仅提供英文。
+
+## 💡 为什么选择 SKAZ
+
+一堂课、上周的会议、读过的一章书——它们散落在不同地方，彼此毫无关联。SKAZ 把它们放在一起。
+每个来源都会在同一个 wiki 中生成笔记和概念页面，因此课堂和教材里的同一个概念会出现在同一页上。
+问一句 *“她关于热力学第二定律说了什么？”*，再顺着脚注回到她说出这句话的那一秒。
+
+AI 可能出错。引用能帮你核实答案，但不能保证答案正确。
+
+## 👀 实际效果
 
 <table>
 <tr>
-<td width="50%"><img src="../images/transcript.webp" alt="实时转写"><br><b>实时转写</b><br>语音变成按说话人整理的易读文字，旁边是会话聊天。</td>
-<td width="50%"><img src="../images/sources.webp" alt="带来源的回答"><br><b>带来源的回答</b><br>点击来源链接即可跳到转写中的对应句子。</td>
+<td width="50%"><img src="../images/tour-record.webp" alt="把一堂课录进文件夹"><br><b>录进文件夹</b><br>选好文件夹，按下 Record，转写随讲话实时出现，按说话人和时间排列。</td>
+<td width="50%"><img src="../images/tour-ask.webp" alt="带脚注的回答"><br><b>带引用的回答</b><br>每个论断都有脚注。打开它，SKAZ 就会跳到来源中的那段引文。</td>
 </tr>
 <tr>
-<td width="50%"><img src="../images/scope.webp" alt="搜索范围"><br><b>搜索范围</b><br>可针对单个会话、一个分组或整个资料库提问。</td>
-<td width="50%"><img src="../images/notes.webp" alt="可编辑的笔记"><br><b>可编辑的笔记</b><br>分标签页编辑 Markdown 笔记，随时导出。</td>
+<td width="50%"><img src="../images/tour-wiki.webp" alt="wiki 中的概念页面"><br><b>自动编写的 wiki</b><br>根据你的来源生成概念页面和笔记，并标明哪些是引文、哪些是智能体的推断。</td>
+<td width="50%"><img src="../images/tour-search.webp" alt="用 ⌘K 搜索一切"><br><b>搜索一切</b><br>⌘K 可以找到 wiki 页面、资料和聊天，或把问题交给智能体。</td>
 </tr>
 <tr>
-<td width="50%"><img src="../images/providers.webp" alt="自选服务商"><br><b>自选服务商</b><br>Soniox、OpenAI，或在本机运行的 Local Whisper。</td>
-<td width="50%"><img src="../images/light.webp" alt="浅色与深色"><br><b>浅色与深色</b><br>跟随系统，或自行选择主题。</td>
+<td colspan="2" align="center"><img src="../images/tour-theme.webp" alt="切换到深色主题" width="50%"><br><b>浅色与深色</b><br>跟随系统，或在 <b>Settings → Appearance</b> 中选择主题。</td>
 </tr>
 </table>
 
-以上均为运行中应用的截图，而非设计稿。转写、回答和笔记均为专门编写的演示数据，
-并非真实的语音识别或 AI 输出；上方的快速浏览由这些截图使用 [Remotion](https://www.remotion.dev) 制作。
+<sub>使用 <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a> 由 SKAZ 0.3.0 自身的界面（其 HTML 和 CSS）制作。
+课程、回答和 wiki 页面均为预先编写的演示数据，并非真实的语音识别或 AI 输出。</sub>
 
-## 为什么使用 SKAZ
+## ✨ 功能
 
-一时没跟上？直接询问错过了什么，不必翻找整段录音。阅读转写、查看回答的来源，
-再将有用的内容整理为笔记。AI 可能出错：来源链接有助于核对，但不保证回答正确。
+| | |
+|---|---|
+| 🎙️ **实时录制** | 麦克风，也可同时录制 Mac 的声音（Zoom、视频；需要 macOS 14.2+ 和系统授权）。识别可选 **Soniox**（云端流式、说话人分离、翻译）或 **本机 Whisper**（离线可用）。SKAZ 从不悄悄切换服务。 |
+| 📚 **任何来源** | PDF、文档、文本和 Markdown 文件、音频和视频文件、网页文章（已清理）、任意长度的粘贴文本，以及 YouTube、VK Video、RuTube 和 Vimeo 的视频链接。请仅使用你有权处理的资料。 |
+| 🧠 **活的 wiki** | 每个来源都有笔记，每个概念在所有文件夹中只有一页，还可以保存分析。每条陈述都有标记：来源引文、智能体推断的关联，或智能体的解释。来源之间有矛盾时，两种说法都会列出，由你决定。 |
+| 💬 **带脚注的聊天** | 就整个资料库提问；智能体知道当前打开了什么、是否正在录制。脚注会打开录音中的确切时刻或文档的对应页。用 **@** 指向某个页面、资料或聊天。 |
+| 🤖 **你的智能体** | **Codex**、**Claude Code** 或 **Hermes Agent**，使用你自己的订阅或密钥；SKAZ 可以替你安装。智能体通过只读的 SKAZ 工具读取资料库。归档之类的小决定可以交给本地模型或 OpenRouter。 |
+| ✍️ **识别纠错** | 可选的检查会找出可能的识别错误，修正有把握的部分，只高亮存疑之处。每处修正都可撤销。 |
+| 🗂️ **普通文件** | 资料库就是一个 `.md` 文件夹。可以用 **Obsidian** 打开，或把所有内容导出为普通 Markdown，来源以脚注形式保留。你对 wiki 页面的修改受到保护，智能体不会覆盖。 |
+| 🔄 **更新** | SKAZ 在启动时和每天一次检查 GitHub 发布，并可在 **Settings → About** 中安装经过校验的更新。 |
 
-## 功能
+## 📦 安装
 
-- **实时转写与翻译：** 在 **Settings → Transcription** 中选择语音识别服务——Soniox（云端流式、
-  完整说话人区分、翻译）、**Local Whisper**（在本机运行 faster-whisper，断网可用；说话人区分为近似，
-  仅可翻译为英语）或 OpenAI。按说话人分组，翻译时仍可查看原文。不会在服务之间静默切换。
-- **麦克风与系统音频：** 选择麦克风，也可包含 Mac 播放的声音。
-  系统音频采集需要 macOS 14.2+ 及系统授权。
-- **基于上下文提问：** 查询单个会话、一个分组或整个资料库，通过时间戳引用返回转写。
-- **可编辑笔记：** 生成笔记，在标签页中编辑 Markdown，并导出文件。
-- **本地资料库：** 将会话分组，也可将文本同步输出到指定文件夹，供 Obsidian 等工具使用。
-- **媒体导入（实验性）：** 支持本地音频、视频及 YouTube 导入流程。
-  仅处理你有权使用的材料；可用性及支持格式可能不同。
-- **独立选择模型：** 分别配置 Assistant 和 Notes，使用 Codex 账号登录，
-  或 OpenAI、Anthropic、OpenRouter 的 API 配置。实时语音由所选转写服务处理，而非文本模型。
-
-## 安装与首次启动
-
-在“终端”中粘贴并运行（Apple Silicon，macOS 13 或更高版本）：
+把下面这行粘贴到终端（Apple Silicon，macOS 13 或更高版本）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
 ```
 
-该[脚本](../../install.sh)会下载最新版本，校验 SHA-256 校验和与 SKAZ 的签名，将 SKAZ 安装到“应用程序”并打开。
-更新时运行同一条命令即可，会话、笔记和设置都会保留。SKAZ 尚未经过 Apple 公证，但用这种方式安装后，
-打开时不会再提示 Apple 无法验证该应用。
+该[脚本](../../install.sh)会下载最新版本，校验 SHA-256 校验和与 SKAZ 的签名，把 SKAZ 安装到“应用程序”
+并打开它。更新时再运行同一条命令即可——资料库和设置都会保留。SKAZ 尚未经过 Apple 公证；通过这种方式
+安装的应用打开时不会出现“Apple 无法验证……”的警告。
 
 <details>
-<summary>改用 DMG 或 PKG 安装</summary>
+<summary><b>改用 DMG 或 PKG 安装</b></summary>
+<br>
 
-从 [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest) 下载 `SKAZ-<版本>-arm64.dmg`（或 `.pkg` 安装器），打开后将 SKAZ 拖入“应用程序”。
-首次启动时 macOS 会提示无法验证 SKAZ：请点按 **完成**，不要将其移到废纸篓。然后打开
-**系统设置 → 隐私与安全性**，在关于 SKAZ 的提示旁点按 **仍要打开**。每个下载的版本只需操作一次。
-不要全局关闭 macOS 的安全保护。
+从 [GitHub Releases](https://github.com/all0b0y/SKAZ/releases/latest) 下载 `SKAZ-<version>-arm64.dmg`
+（或 `.pkg` 安装包），打开后把 SKAZ 拖到“应用程序”。首次启动时 macOS 会提示无法验证 SKAZ：请点
+**完成**，不要点“移到废纸篓”。然后打开 **系统设置 → 隐私与安全性**，在关于 SKAZ 的提示旁点
+**仍要打开**。每个下载的版本只需操作一次。请不要全局关闭 macOS 的安全保护。
 
 </details>
 
-如需运行当前代码，请参阅[开发环境设置](../../CONTRIBUTING.md)。
+想运行当前代码？请参阅[开发环境设置](../../CONTRIBUTING.md)。
 
-首次启动时：
+### 🚀 首次启动
 
-1. 选择预计会听到的语言。
-2. 打开 **Settings → API keys**，填入 Soniox 密钥，同意云端处理并保存——
-   或者，为让音频留在本机，在 **Settings → Transcription** 中选择 **Local Whisper** 并下载模型
-   （下载前显示大小；无需密钥或云端同意）。
-3. 在 **Settings → Transcription** 中选择转写或翻译模式，以及翻译目标语言。
-4. 分别配置 **Assistant** 和 **Notes**。使用 Codex 时，先安装官方
-   [Codex CLI](https://developers.openai.com/codex/cli/)，再通过 SKAZ 的 Codex 设置登录；
-   SKAZ 不会自动安装 CLI。也可配置 API 提供商的密钥和模型。
-   服务商的账号资格、限额及收费规则仍然适用。
-5. 创建会话，选择音频来源，授予所需的 macOS 权限，点击 **Record**。
-   按需暂停或停止，打开 **Notes** 整理转写笔记。
+1. **智能体。** 选择 Codex、Claude Code 或 Hermes Agent，并用你自己的账号登录。SKAZ 可以替你
+   安装智能体。服务商的资格条件、额度和费用均适用。
+2. **语音。** 添加 Soniox 密钥并允许向 Soniox 发送音频，或者选择 **Whisper on this computer**
+   并下载语音模型（会先显示大小；无需密钥）。
+3. **资料库。** 选择资料库存放位置；SKAZ 会建议“文稿”中的一个文件夹。
+4. **开始使用。** 按 **Record**（旁边可选择文件夹），或用 **+ Material** 添加文件、链接或文本。
+   在聊天中提问；打开 **Wiki** 查看 SKAZ 构建的内容。
 
-录制他人声音前，请取得必要的同意。Soniox 和文本模型服务有各自的价格，MIT 许可不包含这些服务的用量。
+所有选择之后都可以在 **Settings** 中更改。
 
-## 隐私与数据
+> [!IMPORTANT]
+> 录制他人之前请先征得同意。Soniox、各智能体和 OpenRouter 有各自的价格和政策；MIT 许可证不涵盖它们的使用。
 
-- 转写、笔记和聊天保存在本机。不提供用于回放的永久实时音频存档；
-  处理或恢复过程中可能使用临时音频。
-- 使用 Soniox 或 OpenAI 时，获得同意后音频会发送给该服务；使用 Local Whisper 时在本机识别，
-  不会发送。Assistant 和 Notes 会将上下文发送给
-  所选服务。服务商的数据保留与训练政策适用：**本地存储不等于离线处理**。
-- API 密钥保存在本地加密文件中，加密密钥存放在旁边。主要保护边界是文件权限，
-  无法防御以同一用户身份运行的其他进程。也请保护好导出文件和备份。
-- Python 后端仅监听 loopback，每次启动使用新令牌。
-  限制及当前漏洞报告渠道状态见 [Security](../../SECURITY.md)。
+## 🔒 隐私与数据
 
-## 工作原理
+| 内容 | 存放位置 / 去向 |
+|---|---|
+| 资料和 wiki | 你选择的资料库文件夹中的普通 `.md` 文件。 |
+| 索引、聊天、设置 | SKAZ 自己的应用文件夹中的本地文件。 |
+| 实时音频 | 不会作为可回放的存档保存。可能会使用临时音频进行处理或恢复。 |
+| 语音识别 | **Soniox：** 在你同意后发送音频，你可以随时撤回同意。**本机 Whisper：** 音频不会离开你的 Mac。 |
+| 智能体 | 你的问题以及它读取的资料库内容会发送给你选择的智能体；其数据保留和训练政策适用。 |
+| 密钥 | SKAZ 应用文件夹中的加密本地文件，加密密钥就放在旁边。文件权限是主要的边界，无法防护以你的用户身份运行的进程。 |
+| 活动日志 | 不包含对话文本和密钥。 |
+| 后端 | Python，仅限 loopback，每次启动使用新的令牌。 |
+
+来源中的文本是数据，绝不是指令：面向 AI 的段落会被排除在 wiki 之外，SKAZ 会告诉你，并提供恢复的方式。
+**本地存储不等于离线处理。** 也请保护好导出内容和备份。
+限制与报告渠道请参阅[安全政策](../../SECURITY.md)。
+
+## 🧩 工作原理
 
 ```text
-麦克风 / 系统音频 / 媒体 → Electron → Python → Soniox | Local Whisper | OpenAI
-                              ↓         ↓
-                          React UI   本地资料库
-                                        ↕
-                              Assistant / Notes 服务商
+麦克风 / 系统音频 / 文件 / 链接 → Electron → Python ── Soniox | 本机 Whisper
+                                   ↓          ↓
+                               React UI   资料库：Materials/*.md, Wiki/*.md
+                                              ↕  只读的 SKAZ 工具
+                                   Codex | Claude Code | Hermes Agent
 ```
 
-| 层级 | 技术 |
+| 层 | 技术栈 |
 |---|---|
-| 桌面应用 | Electron |
+| 桌面 | Electron |
 | 界面 | React、TypeScript、CodeMirror |
-| 本地后端 | Python、FastAPI、SQLite |
+| 本地后端 | Python、FastAPI，以及基于 Markdown 文件的 SQLite 索引 |
 
-## 开发与项目状态
+## 🗺️ 下一步
 
-[Contributing](../../CONTRIBUTING.md) 介绍环境设置、测试和 PR；
-[Packaging](../PACKAGING.md) 介绍安装包构建。版本变更将记录在
-[GitHub Releases](https://github.com/all0b0y/SKAZ/releases)，不另设 changelog。
-小修复可直接提交 PR；大型改动请先讨论。
+- [ ] 为发布版本进行 Apple 公证
+- [ ] 基于 PDF 演示文稿的图文回答和笔记
+- [ ] 更广泛的真实场景验证
 
-当前重点包括发布签名与公证、长会话的可靠恢复，以及更多真实场景验证。
-实验性媒体导入和网页搜索不代表已达到生产可用标准；Codex 原生网页搜索目前禁用。
+## 🤝 参与贡献
 
-[社区行为规范](../../CODE_OF_CONDUCT.md) · [安全政策](../../SECURITY.md) · [MIT 许可](../../LICENSE)
+[Contributing](../../CONTRIBUTING.md) 介绍环境设置、测试和 pull request；[Packaging](../PACKAGING.md)
+介绍如何构建安装包。小的修复可以直接提交 PR——较大的改动请先在 issue 中讨论。发布说明见
+[GitHub Releases](https://github.com/all0b0y/SKAZ/releases)。
 
-*Skaz*（сказ）是俄语中指口头叙事的词。项目最初的工作名称为 SKAZ。
-Copyright © 2026 all0b0y.
+[社区规则](../../CODE_OF_CONDUCT.md) · [安全政策](../../SECURITY.md) · [MIT 许可证](../../LICENSE)
+
+---
+
+<div align="center">
+<sub><i>Skaz</i>（сказ）是俄语中“口头叙述”的意思。旧名 AudioHelper。<br>
+Copyright © 2026 all0b0y.</sub>
+</div>
