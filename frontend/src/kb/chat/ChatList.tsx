@@ -42,7 +42,7 @@ export function ChatList() {
   const pinned = list.filter((c) => c.pinned);
   const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
   const groups = groupBy(rest, (c) => dayBucket(c.updated_at));
-  const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id), exportMd: null });
+  const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
 
   const row = (c: KbChatSummary) => {
     const current = center === 'chat' && c.id === currentId;

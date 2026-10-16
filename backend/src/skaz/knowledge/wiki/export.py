@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from ..errors import KnowledgeError
 from ..library.fsio import IGNORABLE_ENTRIES, visible_entries, write_atomic
@@ -286,3 +287,109 @@ def export_library(
             exported += 1
         step()
     return ExportResult(str(dest), len(pages), exported, footnotes)
+
+
+# -- chosen items (0.3.1 F5) ----------------------------------------------------------------
+
+ItemType = Literal["chat", "page", "material"]
+
+
+@dataclass(frozen=True)
+class ItemsResult:
+    #: ``(type, id, file)``: the file is relative to the chosen folder (a material's main ``.md``).
+    written: list[tuple[ItemType, str, str]]
+    #: ``(type, id, reason)`` in plain English.
+    skipped: list[tuple[ItemType, str, str]]
+
+
+@dataclass(frozen=True)
+class ChatFile:
+    file_name: str
+    markdown: str
+
+
+def export_items(
+    kb: KnowledgeService,
+    raw: str,
+    items: Sequence[tuple[ItemType, str]],
+    *,
+    overwrite: bool,
+    chats: Mapping[str, ChatFile | str],
+) -> ItemsResult:
+    """Chosen pages, materials and chats as ``.md`` into ``raw``, same refusals as :func:`export_library`.
+
+    Pages and materials are written exactly as the whole-library export writes them (same paths,
+    footnotes, frontmatter), so a later full export into the same folder agrees with them; chats go
+    to ``Chats/<title>.md`` (``chats`` holds each chat's rendered Markdown, or why it can't be).
+    The same item twice is written once; an unknown id is skipped with its reason.
+    """
+    target = check_target(kb, raw)
+    if target.reason is not None:
+        raise ExportRefused(target.reason)
+    if target.non_empty and not overwrite:
+        raise ExportRefused("The folder isn't empty. Confirm to replace files with the same names.")
+    dest = Path(target.path)
+    dest.mkdir(parents=True, exist_ok=True)
+    library = kb.require()
+    source_of = _sources(kb)
+    written: list[tuple[ItemType, str, str]] = []
+    skipped: list[tuple[ItemType, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    chat_names: set[str] = set()
+    for kind, item_id in items:
+        if (kind, item_id) in seen:
+            continue
+        seen.add((kind, item_id))
+        if kind == "page":
+            page = kb.page_repo.get(item_id)
+            if page is None:
+                skipped.append((kind, item_id, "Page not found."))
+                continue
+            try:
+                text = (library.root / page.rel_path).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                skipped.append((kind, item_id, "Its file isn't in the library any more."))
+                continue
+            try:
+                plain, _count = export_page(parse_page(text), source_of)
+            except PageFormatError:
+                plain = _plain_frontmatter(_strip_skaz(text), page.title)
+            _write(dest, page.rel_path, plain)
+            written.append((kind, item_id, page.rel_path))
+        elif kind == "material":
+            material = kb.material_repo.get(item_id)
+            if material is None:
+                skipped.append((kind, item_id, "Material not found."))
+                continue
+            directory = library.root / material.rel_dir
+            usable = directory.is_dir() and SERVICE_DIR not in Path(material.rel_dir).parts
+            files = _material_files(directory) if usable else []
+            if not files:
+                skipped.append((kind, item_id, "Its text isn't in the library yet."))
+                continue
+            for path in files:
+                plain = _plain_frontmatter(path.read_text(encoding="utf-8"), material.title)
+                _write(dest, library.relative(path), plain)
+            written.append((kind, item_id, material.source_file))
+        else:
+            chat = chats.get(item_id)
+            if chat is None or isinstance(chat, str):
+                skipped.append((kind, item_id, chat or "Chat not found."))
+                continue
+            name = _unique(chat.file_name, chat_names)
+            _write(dest, f"Chats/{name}", chat.markdown)
+            written.append((kind, item_id, f"Chats/{name}"))
+    return ItemsResult(written, skipped)
+
+
+def _unique(name: str, taken: set[str]) -> str:
+    """Two chats with the same title in one export: ``Title.md``, ``Title (2).md`` …"""
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, "md"
+    candidate, n = name, 1
+    while candidate.lower() in taken:
+        n += 1
+        candidate = f"{stem} ({n}).{ext}"
+    taken.add(candidate.lower())
+    return candidate

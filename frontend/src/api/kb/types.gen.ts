@@ -323,9 +323,32 @@ export interface KbExcludedFragment {
   detected_at: string;
 }
 
+export interface KbExportItem {
+  type: "chat" | "page" | "material";
+  id: string;
+}
+
+/** Chosen chats, wiki pages and materials as ``.md`` into a folder (0.3.1 F5). */
+export interface KbExportItemsRequest {
+  path: string;
+  items: KbExportItem[];
+  overwrite?: boolean;
+}
+
+export interface KbExportItemsResult {
+  written: KbExportWritten[];
+  skipped: KbExportSkipped[];
+}
+
 export interface KbExportRequest {
   path: string;
   overwrite?: boolean;
+}
+
+export interface KbExportSkipped {
+  type: "chat" | "page" | "material";
+  id: string;
+  reason: string;
 }
 
 export interface KbExportTarget {
@@ -333,6 +356,12 @@ export interface KbExportTarget {
   reason: string | null;
   non_empty: boolean;
   entries: number;
+}
+
+export interface KbExportWritten {
+  type: "chat" | "page" | "material";
+  id: string;
+  file: string;
 }
 
 export interface KbFailure {
@@ -1283,6 +1312,13 @@ export interface KbEndpoints {
     body: KbExportRequest;
     response: KbJob;
     status: 202;
+  };
+  "POST /kb/export/items": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbExportItemsRequest;
+    response: KbExportItemsResult;
+    status: 200;
   };
   "GET /kb/export/target": {
     path: Record<string, never>;

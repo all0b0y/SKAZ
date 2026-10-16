@@ -145,7 +145,7 @@ function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection;
 /** Pages that can be selected several at once (0.3.1 F4): compact bar, ⌘/ keys, drag to the chat field. */
 function PageList({ pages, labelledBy, resetKey }: { pages: KbPageSummary[]; labelledBy: string; resetKey?: unknown }) {
   const openDocument = useUi((s) => s.openDocument);
-  const { sel, overlays, dragProps } = usePageSelection({ pages, resetKey, onOpen: (id) => openDocument({ type: 'page', id }), exportMd: null });
+  const { sel, overlays, dragProps } = usePageSelection({ pages, resetKey, onOpen: (id) => openDocument({ type: 'page', id }) });
   return (
     <div className="kb-sellist" {...sel.listProps}>
       <ul className="kb-list" {...sel.gridProps} aria-labelledby={labelledBy}>

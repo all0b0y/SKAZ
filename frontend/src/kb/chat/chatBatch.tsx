@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
 import { useServices } from '../state/context';
+import { useExportItems } from '../document/exportItems';
 import {
   BatchDeleteDialog, SelectionBar, ShortcutsPopover, countOf, namesList, resultText, useListSelection,
   type BatchResult, type ListSelection, type SelectionAction,
@@ -20,12 +21,13 @@ async function each(ids: readonly string[], fn: (id: string) => Promise<{ ok: tr
  * Chats in the side panel, several at once (0.3.1 F4, mockup lib-v2 «Chats»): Pin, Export .md,
  * Delete; ⋯ Unpin, Mark as read, Save to wiki as analyses. Selecting never opens a chat.
  */
-export function useChatSelection({ chats: list, onOpen, exportMd }: {
+export function useChatSelection({ chats: list, onOpen }: {
   chats: ReadonlyArray<KbChatSummary>;
   onOpen: (id: string) => void;
-  exportMd: ((list: KbChatSummary[]) => void) | null;
 }): { sel: ListSelection; overlays: ReactNode } {
   const { chats, ui } = useServices();
+  const exp = useExportItems();
+  const exportMd = exp.run ? (picked: KbChatSummary[]) => { exp.run!(picked.map((c) => ({ type: 'chat' as const, id: c.id }))); } : null;
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const byId = new Map(list.map((c) => [c.id, c]));
   const pick = (ids: readonly string[]) => ids.map((id) => byId.get(id)).filter((c): c is KbChatSummary => Boolean(c));
@@ -84,6 +86,7 @@ export function useChatSelection({ chats: list, onOpen, exportMd }: {
   const overlays = (
     <>
       <SelectionBar count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
+      {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
         has={{ delete: true, export: Boolean(exportMd) }} />
       <BatchDeleteDialog open={deleteIds !== null} onClose={() => setDeleteIds(null)} count={doomed.length} testId="delete-chats"

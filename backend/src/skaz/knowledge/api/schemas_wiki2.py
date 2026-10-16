@@ -161,6 +161,38 @@ class KbExportRequest(_Request):
     overwrite: bool = False
 
 
+class KbExportItem(_Request):
+    type: Literal["chat", "page", "material"]
+    id: str = Field(min_length=1, max_length=200)
+
+
+class KbExportItemsRequest(_Request):
+    """Chosen chats, wiki pages and materials as ``.md`` into a folder (0.3.1 F5)."""
+
+    path: str = Field(min_length=1, max_length=4096)
+    items: list[KbExportItem] = Field(min_length=1, max_length=500)
+    #: As for ``POST /kb/export``: the user confirmed a non-empty folder.
+    overwrite: bool = False
+
+
+class KbExportWritten(BaseModel):
+    type: Literal["chat", "page", "material"]
+    id: str
+    #: Relative to the chosen folder (a material's main ``.md``; its other ``.md`` files sit next to it).
+    file: str
+
+
+class KbExportSkipped(BaseModel):
+    type: Literal["chat", "page", "material"]
+    id: str
+    reason: str
+
+
+class KbExportItemsResult(BaseModel):
+    written: list[KbExportWritten]
+    skipped: list[KbExportSkipped]
+
+
 class KbPageFile(BaseModel):
     #: Absolute path of the page's ``.md`` file (main process only).
     path: str

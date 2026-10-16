@@ -213,3 +213,15 @@ describe('Electron IPC policy — restored capabilities (F2)', () => {
     }
   });
 });
+
+describe('Electron IPC policy — exporting chosen items (0.3.1 F5)', () => {
+  it('lets the chosen items be exported next to the whole-library export — nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/export/items', body: { path: '/Users/me/Documents/Out', items: [{ type: 'page', id: 'p1' }] } })).toBeNull();
+    for (const [method, path] of [
+      ['GET', '/kb/export/items'], ['PUT', '/kb/export/items'], ['DELETE', '/kb/export/items'],
+      ['POST', '/kb/export/items/x'], ['POST', '/kb/export/items/../target'], ['POST', '/kb/export/item'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});

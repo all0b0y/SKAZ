@@ -879,6 +879,22 @@ const ROUTES: FakeRoutes = {
     job.progress.parts_done = 3;
     return job;
   }],
+  'POST /kb/export/items': [200, (w, { body }) => {
+    const root = w.library.root ?? '';
+    if (root && (body.path === root || body.path.startsWith(`${root}/`))) fail(409, 'Choose a folder outside the SKAZ library: the export is a separate copy.');
+    if ((w.exportFolders?.[body.path] ?? 0) > 0 && !body.overwrite) fail(409, 'The folder isn\'t empty. Confirm to replace files with the same names.');
+    const written: Array<{ type: 'chat' | 'page' | 'material'; id: string; file: string }> = [];
+    const skipped: Array<{ type: 'chat' | 'page' | 'material'; id: string; reason: string }> = [];
+    for (const item of body.items) {
+      const title = item.type === 'page' ? w.pages.find((p) => p.id === item.id)?.title
+        : item.type === 'material' ? w.materials.find((m) => m.id === item.id)?.title : w.chats.find((c) => c.id === item.id)?.title;
+      const noun = item.type === 'page' ? 'Page' : item.type === 'material' ? 'Material' : 'Chat';
+      if (!title) skipped.push({ type: item.type, id: item.id, reason: `${noun} not found.` });
+      else written.push({ type: item.type, id: item.id, file: `${item.type === 'chat' ? 'Chats' : item.type === 'page' ? 'Wiki' : 'Materials'}/${title}.md` });
+    }
+    w.exportFolders = { ...w.exportFolders, [body.path]: (w.exportFolders?.[body.path] ?? 0) + written.length };
+    return { written, skipped };
+  }],
   'GET /kb/settings/recognition': [200, (w) => structuredClone(w.recognition ?? { engine: 'same_as_wiki', model: null, effort: null })],
   'PUT /kb/settings/recognition': [200, (w, { body }) => {
     const own = body.engine !== 'same_as_wiki' && body.engine !== 'off';

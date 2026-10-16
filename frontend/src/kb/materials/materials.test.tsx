@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
@@ -383,4 +383,25 @@ describe('Selecting several materials in the table (0.3.1 F2/F4/F5)', () => {
     expect(rowOf('Pasted text: problems')).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{Escape}');
   });
+
+  it('⋯ Export .md writes the chosen materials into a folder from the chooser (POST /kb/export/items)', async () => {
+    const user = userEvent.setup();
+    const chooseExportFolder = vi.fn(async () => '/Users/me/Documents/Out');
+    const { fake } = renderKb({ world: docWorld(), prefs: { section: 'materials' }, bridge: { chooseExportFolder } });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('all-materials'));
+    const grid = await within(await screen.findByRole('region', { name: 'All materials' })).findByRole('grid');
+    const rowOf = (name: string) => within(grid).getByRole('button', { name }).closest('tr')!;
+    await user.click(rowOf('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'More actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Export \.md/ }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Exported 2 files to «Out»');
+    expect(chooseExportFolder).toHaveBeenCalledTimes(1);
+    expect(fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/export/items')?.body).toEqual({
+      path: '/Users/me/Documents/Out', overwrite: false,
+      items: [{ type: 'material', id: 'm-ce' }, { type: 'material', id: 'm-txt' }],
+    });
+  });
 });
+

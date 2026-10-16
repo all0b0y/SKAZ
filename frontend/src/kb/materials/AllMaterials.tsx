@@ -98,7 +98,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   const tableRows = layout === 'table' ? rows : [];
   const { sel, overlays, dragProps } = useMaterialSelection({
     rows: tableRows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
-    onOpen: (id) => openDocument({ type: 'material', id }), exportMd: null,
+    onOpen: (id) => openDocument({ type: 'material', id }),
   });
   const selectable = tableRows.filter((m) => !sel.reasonOf(m.id)).length;
   const allState = sel.selected.size === 0 ? 'none' : sel.selected.size >= selectable ? 'all' : 'some';

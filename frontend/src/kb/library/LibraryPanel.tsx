@@ -117,7 +117,7 @@ function MaterialList({ items, label, labelledBy, resetKey, toneOf, metaOf }: {
   metaOf?: (m: KbMaterialSummary) => string | undefined;
 }) {
   const openDoc = useUi((s) => s.openDoc);
-  const { sel, overlays, dragProps } = useMaterialSelection({ rows: items, resetKey, variant: 'compact', onOpen: openDoc, exportMd: null });
+  const { sel, overlays, dragProps } = useMaterialSelection({ rows: items, resetKey, variant: 'compact', onOpen: openDoc });
   return (
     <div className="kb-sellist" {...sel.listProps}>
       <ul className="kb-list" {...sel.gridProps} aria-label={label} aria-labelledby={labelledBy}>

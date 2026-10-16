@@ -3,6 +3,7 @@ import type { KbPageDeletePreview, KbPageSummary } from '../../api/kb/types.gen'
 import { plural } from '../document/text';
 import { useOpenInObsidian } from '../document/fileActions';
 import { useServices } from '../state/context';
+import { useExportItems } from '../document/exportItems';
 import {
   BatchDeleteDialog, SelectionBar, ShortcutsPopover, countOf, endItemsDrag, namesList, resultText, runOneByOne,
   startItemsDrag, useListSelection, type ListSelection, type SelectionAction,
@@ -26,13 +27,14 @@ export function useAskAboutPages() {
  * chat, Export .md, Delete; ⋯ Open in Obsidian. Deleting is the user's own act: one consequences
  * window from the page delete previews, no agent permission card.
  */
-export function usePageSelection({ pages, resetKey, onOpen, exportMd }: {
+export function usePageSelection({ pages, resetKey, onOpen }: {
   pages: ReadonlyArray<KbPageSummary>;
   resetKey?: unknown;
   onOpen: (id: string) => void;
-  exportMd: ((list: KbPageSummary[]) => void) | null;
 }): { sel: ListSelection; overlays: ReactNode; dragProps: (p: KbPageSummary) => DragRowProps } {
   const { client, chats, ui, library } = useServices();
+  const exp = useExportItems();
+  const exportMd = exp.run ? (picked: KbPageSummary[]) => { exp.run!(picked.map((p) => ({ type: 'page' as const, id: p.id }))); } : null;
   const ask = useAskAboutPages();
   const obsidian = useOpenInObsidian();
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
@@ -91,6 +93,7 @@ export function usePageSelection({ pages, resetKey, onOpen, exportMd }: {
     <>
       <SelectionBar count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
       {obsidian.message && <div className="kb-side__pad">{obsidian.message}</div>}
+      {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
         has={{ attach: true, delete: true, export: Boolean(exportMd) }} />
       <BatchDeleteDialog open={deleteIds !== null} onClose={() => setDeleteIds(null)} count={doomed.length} testId="delete-pages"

@@ -378,4 +378,27 @@ describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
     expect(fake.world.chats.some((c) => c.id === 'c1')).toBe(false);
     expect(fake.world.chats.some((c) => c.id === 'c2')).toBe(true);
   });
+
+  it('⌘⇧E exports the chosen chats; a folder that isn’t empty asks first', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    world.exportFolders = { '/Users/me/Documents/Busy': 2 };
+    const { fake } = renderKb({ world, bridge: { chooseExportFolder: vi.fn(async () => '/Users/me/Documents/Busy') } });
+    const panel = side();
+    await within(panel).findByRole('region', { name: 'Pinned' });
+    const rowOf = (name: string) => within(panel).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Seminar questions').querySelector('[data-sel-box]')!);
+    within(rowOf('Seminar questions')).getByRole('button').focus();
+    await user.keyboard('{Meta>}{Shift>}e{/Shift}{/Meta}');
+    const ask = await screen.findByRole('dialog', { name: 'Export into a folder that isn’t empty?' });
+    expect(ask).toHaveTextContent('“Busy” already holds 2 items.');
+    expect(fake.calls.some((c) => c.path === '/kb/export/items')).toBe(false);
+    await user.click(within(ask).getByRole('button', { name: 'Export here' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Exported 2 files to «Busy»');
+    expect(fake.calls.find((c) => c.path === '/kb/export/items')?.body).toEqual({
+      path: '/Users/me/Documents/Busy', overwrite: true, items: [{ type: 'chat', id: 'c6' }, { type: 'chat', id: 'c7' }],
+    });
+  });
 });
+

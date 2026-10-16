@@ -134,6 +134,8 @@ const ROUTES: readonly Route[] = [
   // B20: Wiki/index.md and Wiki/log.md, read-only in the right panel.
   { method: 'GET', pattern: /^\/kb\/wiki\/files\/(?:index|log)$/ },
   { method: 'POST', pattern: /^\/kb\/export$/ },
+  // 0.3.1 F5: the chosen chats, pages and materials as .md into a folder (same folder rules as above).
+  { method: 'POST', pattern: /^\/kb\/export\/items$/ },
 ];
 
 /**

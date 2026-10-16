@@ -10,6 +10,7 @@ import {
   startItemsDrag, useListSelection, type ListSelection, type SelectionAction,
 } from '../ui/selection/index';
 import type { MenuItem } from '../ui/Popover';
+import { useExportItems } from '../document/exportItems';
 
 /**
  * Batch actions on materials (0.3.1 F2/F3/F4), shared by the All materials table and the side
@@ -231,15 +232,16 @@ export function materialActions(list: ReadonlyArray<KbMaterialSummary>, run: {
  * Everything a materials list needs to select several (0.3.1 F2/F3/F4): the hook, the bar,
  * Move to…, the delete window, the right-click menu, ⌘/ and dragging rows out.
  */
-export function useMaterialSelection({ rows, resetKey, variant, onOpen, exportMd }: {
+export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
   rows: ReadonlyArray<KbMaterialSummary>;
   resetKey?: unknown;
   variant: 'full' | 'compact';
   onOpen: (id: string) => void;
-  /** Export .md of these materials, or null where the host can't save files. */
-  exportMd: ((list: KbMaterialSummary[]) => void) | null;
 }): { sel: ListSelection; overlays: ReactNode; dragProps: (m: KbMaterialSummary) => DragRowProps } {
   const batch = useMaterialBatch();
+  const exp = useExportItems();
+  // Export .md (F5), or null where the host can't choose a folder.
+  const exportMd = exp.run ? (list: KbMaterialSummary[]) => { exp.run!(list.map((m) => ({ type: 'material' as const, id: m.id }))); } : null;
   const byId = new Map(rows.map((m) => [m.id, m]));
   const pick = (ids: string[]) => ids.map((id) => byId.get(id)).filter((m): m is KbMaterialSummary => Boolean(m));
   const [moveIds, setMoveIds] = useState<string[] | null>(null);
@@ -293,6 +295,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen, exportMd
       <MoveToMenu open={moveIds !== null} onClose={() => setMoveIds(null)} anchorRef={anchor} count={moveIds?.length ?? 0}
         onPick={(folderId) => { const list = pick(moveIds ?? []); setMoveIds(null); void batch.move(list, folderId).then(() => sel.clear()); }} />
       <DeleteMaterialsDialog list={pick(deleteIds ?? [])} open={deleteIds !== null} onClose={() => setDeleteIds(null)} onDone={sel.clear} />
+      {exp.dialog}
       <ContextMenu at={menu?.at ?? null} onClose={() => setMenu(null)} label="Material actions" items={menuItems} />
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
         has={{ move: true, attach: true, delete: true, export: Boolean(exportMd) }} />
