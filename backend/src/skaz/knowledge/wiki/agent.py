@@ -15,7 +15,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from ..agents.engine import AgentEngine, AgentTurn, Failed, TurnMessage, collect
-from ..ingest.jobs import agent_failure_code
+from ..ingest.jobs import agent_failure_code, agent_failure_text
 from ..ingest.model import AnswerInvalid, parse_answer
 from ..ingest.prompts import repair_message
 
@@ -57,7 +57,7 @@ class AgentCaller:
             when = (
                 f" It should work again after {terminal.retry_at.isoformat()}." if terminal.retry_at else ""
             )
-            raise WikiJobFailed(f"The agent stopped: {terminal.message}{when}",
+            raise WikiJobFailed(agent_failure_text(terminal.kind, terminal.message) + when,
                                 agent_failure_code(terminal.kind))
         return result.text
 

@@ -35,6 +35,7 @@ from .pages import (
     SourceRef,
     build_note,
     description,
+    is_empty_orphan,
     match_key,
     merge_concept,
     new_concept,
@@ -50,9 +51,10 @@ INDEX_TITLES: dict[str, dict[str, str]] = {
 }
 LOG_TEXT: dict[str, dict[str, str]] = {
     "en": {"notes_new": "Notes written", "notes_updated": "Notes rewritten", "added": "concepts added",
-           "updated": "concepts updated", "from": "from"},
+           "updated": "concepts updated", "removed": "concepts left without a source removed",
+           "from": "from"},
     "ru": {"notes_new": "конспект написан", "notes_updated": "конспект переписан", "added": "новые понятия",
-           "updated": "дополнены понятия", "from": "из"},
+           "updated": "дополнены понятия", "removed": "удалены понятия без источников", "from": "из"},
 }
 
 
@@ -84,6 +86,8 @@ class WriteResult:
     updated: list[str] = field(default_factory=list)
     #: Existing concept pages that received new blocks: page id → new block ids (for W2).
     new_blocks: dict[str, list[str]] = field(default_factory=dict)
+    #: Concept pages removed because nothing supports them any more (QA C7).
+    removed: list[str] = field(default_factory=list)
     dropped: Counter[str] = field(default_factory=Counter)
     blocks_written: int = 0
     journal: list[str] = field(default_factory=list)
@@ -277,6 +281,27 @@ class WikiWriter:
 
         for path in dict.fromkeys(touched):
             self._index_page(library, path)
+        # Concept pages left with nothing — no source, no statement, no words of the user (QA C7):
+        # they go, as on Delete, instead of staying as empty pages in the list and the graph.
+        for record in self.kb.pages(kind="concept"):
+            if record.id in written_ids or record.sources:
+                continue
+            path = library.root / record.rel_path
+            try:
+                read_page(library, path)  # an outside edit makes a block the user's first
+                data = path.read_bytes()
+                if not is_empty_orphan(parse_page(data.decode("utf-8"))):
+                    continue
+                if path.read_bytes() != data:
+                    continue  # changed meanwhile: the next pass decides
+                path.unlink()
+            except (OSError, PageFormatError, UnicodeDecodeError):
+                continue
+            with self.kb.db.write() as connection:
+                connection.execute("DELETE FROM pages WHERE id = ?", (record.id,))
+                connection.execute("DELETE FROM wiki_checked WHERE page_id = ?", (record.id,))
+            result.removed.append(record.title)
+
         note_record = next((page for page in self.kb.pages(kind="note")
                             if page.rel_path == library.relative(note_path)), None)
         result.note_page_id = note_record.id if note_record else ""
@@ -376,6 +401,8 @@ class WikiWriter:
             parts.append(f"{text['added']}: {', '.join(result.created)}")
         if result.updated:
             parts.append(f"{text['updated']}: {', '.join(result.updated)}")
+        if result.removed:
+            parts.append(f"{text['removed']}: {', '.join(result.removed)}")
         material = f"[[Materials/{source.folder_name}/{source.title}/{source.file_stem}|{source.title}]]"
         line = f"- {stamp} — {'; '.join(parts)} — {text['from']} {material}\n"
         path = library.wiki_dir / "log.md"

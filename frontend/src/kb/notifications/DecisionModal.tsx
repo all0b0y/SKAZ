@@ -159,7 +159,10 @@ function Discrepancy({ payload }: { payload: KbDiscrepancyPayload }) {
   const sides = payload.sides ?? [];
   return (
     <>
-      <p className="kb-muted">The sources define “{payload.page_title}” differently. The agent doesn’t choose on its own.</p>
+      <p className="kb-muted">
+        The sources define “{payload.page_title}” differently. The agent doesn’t choose on its own: if one is right, the
+        other statement stays on the page with its source, struck through, as your choice.
+      </p>
       {sides.map((s, i) => <Quote key={s.block_id ?? i} side={s.text} citation={s.citation} folder={s.folder_name} title={s.material_title} />)}
       {payload.explanation && (
         <p className="kb-decision__expl"><Icon name="models" size={14} /><span><b>Agent explanation:</b> {payload.explanation}</span></p>

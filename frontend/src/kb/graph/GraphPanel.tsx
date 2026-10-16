@@ -9,6 +9,10 @@ import { useLibrary, useServices, useUi } from '../state/context';
 import { drawGraph, readPalette } from './draw';
 import { createSim, fit, pick, reheat, settle, step, toGraph, zoomAt, type Sim, type View } from './layout';
 
+/** The hint line under the graph ("wheel — zoom …") gets its own strip: never drawn over labels. */
+const HINT_STRIP = 26;
+const fitView = (sim: Sim, w: number, h: number) => fit(sim, w, h, 36, HINT_STRIP);
+
 function NodeCard({ sim, id }: { sim: Sim; id: string }) {
   const { client } = useServices();
   const openDocument = useUi((s) => s.openDocument);
@@ -62,6 +66,10 @@ export function GraphPanel() {
   const { client } = useServices();
   const folders = useLibrary((s) => s.folders);
   const openDocument = useUi((s) => s.openDocument);
+  /** "Show the graph" from a page selects that page (QA C22). */
+  const focus = useUi((s) => (s.right?.kind === 'graph' ? s.right.focus ?? null : null));
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
   const reduce = useReducedMotion() ?? false;
   const [folderId, setFolderId] = useState('');
   const { state, reload } = useLoad<KbGraph>(`graph:${folderId}`, () => client.call('GET /kb/graph', { query: folderId ? { folder_id: folderId } : {} }));
@@ -98,7 +106,7 @@ export function GraphPanel() {
       canvas.height = Math.round(h * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!fittedRef.current) { viewRef.current = fit(sim, w, h); fittedRef.current = true; }
+    if (!fittedRef.current) { viewRef.current = fitView(sim, w, h); fittedRef.current = true; }
     drawGraph(ctx, sim, { view: viewRef.current, hover: hoverRef.current, selected: selectedRef.current },
       readPalette(canvas, slot), w, h);
   }, [slot]);
@@ -110,8 +118,9 @@ export function GraphPanel() {
       frameRef.current = 0;
       const sim = simRef.current;
       const moving = sim && !reduce ? step(sim) : false;
-      // Until the user zooms or pans, the view follows the cooling layout.
-      if (moving && !userViewRef.current) fittedRef.current = false;
+      // Until the user zooms or pans, the view follows the cooling layout — also after a node was
+      // dragged (not while it is held: the node stays under the pointer).
+      if (moving && !userViewRef.current && !dragRef.current?.node) fittedRef.current = false;
       draw();
       if (moving) frameRef.current = requestAnimationFrame(loop);
     });
@@ -126,11 +135,15 @@ export function GraphPanel() {
     simRef.current = sim;
     fittedRef.current = false;
     userViewRef.current = false;
-    if (reduce) { const { w, h } = sizeRef.current; if (w && h) { viewRef.current = fit(sim, w, h); fittedRef.current = true; } }
-    setSelected((s) => (s && sim.byId.has(s) ? s : (sim.nodes.find((n) => n.node.hub)?.id ?? sim.nodes[0]?.id ?? null)));
+    if (reduce) { const { w, h } = sizeRef.current; if (w && h) { viewRef.current = fitView(sim, w, h); fittedRef.current = true; } }
+    const focused = focusRef.current;
+    setSelected((s) => (s && sim.byId.has(s) ? s
+      : focused && sim.byId.has(focused) ? focused
+        : (sim.nodes.find((n) => n.node.hub)?.id ?? sim.nodes[0]?.id ?? null)));
     request();
   }, [graph, reduce, request]);
 
+  useEffect(() => { if (focus && simRef.current?.byId.has(focus)) setSelected(focus); }, [focus]);
   useEffect(() => { request(); }, [selected, request]);
 
   // Theme changes repaint (colours are read from CSS on every frame).
@@ -184,7 +197,6 @@ export function GraphPanel() {
         const n = sim.byId.get(drag.node)!;
         const g = toGraph(viewRef.current, p.x, p.y);
         n.x = g.x; n.y = g.y; n.fixed = true;
-        userViewRef.current = true;
         if (!reduce) reheat(sim);
       } else {
         viewRef.current = { ...viewRef.current, x: drag.vx + (e.clientX - drag.sx), y: drag.vy + (e.clientY - drag.sy) };
@@ -222,7 +234,14 @@ export function GraphPanel() {
     else if (e.key === 'Enter' && selected) { e.preventDefault(); openDocument({ type: 'page', id: selected }); }
     else if (e.key === '+' || e.key === '=') { viewRef.current = zoomAt(viewRef.current, w / 2, h / 2, 1.25); request(); }
     else if (e.key === '-') { viewRef.current = zoomAt(viewRef.current, w / 2, h / 2, 0.8); request(); }
-    else if (e.key === '0') { viewRef.current = fit(sim, w, h); request(); }
+    else if (e.key === '0') {
+      // Fit and follow again (QA C5): a snapshot fit while the layout still moves after a drag
+      // would leave the graph a small blob once it settles.
+      viewRef.current = fitView(sim, w, h);
+      userViewRef.current = false;
+      fittedRef.current = false;
+      request();
+    }
   };
 
   // Native non-passive wheel listener so the page does not scroll while zooming.
@@ -236,12 +255,14 @@ export function GraphPanel() {
 
   const usedFolders = new Set(graph?.nodes.flatMap((n) => n.folder_ids) ?? []);
   const concepts = graph?.nodes.filter((n) => n.kind === 'concept').length ?? 0;
+  // Notes, folder overviews and analyses are drawn too: the count says so (QA C6).
+  const others = (graph?.nodes.length ?? 0) - concepts;
 
   return (
     <>
       <header className="kb-head kb-head--doc kb-head--graph">
         <h2 className="kb-graph__title">Graph of connections</h2>
-        {graph && <span className="kb-muted kb-graph__count">{plural(concepts, 'concept')} · {plural(usedFolders.size, 'folder')}</span>}
+        {graph && <span className="kb-muted kb-graph__count">{[plural(concepts, 'concept'), others > 0 ? plural(others, 'other page') : '', plural(usedFolders.size, 'folder')].filter(Boolean).join(' · ')}</span>}
         <span className="kb-head__spacer" />
         <label className="kb-select kb-select--sm">
           <span className="kb-visually-hidden">Folder</span>

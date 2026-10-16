@@ -353,6 +353,21 @@ def strip_material(document: PageDocument, material_id: str) -> tuple[PageDocume
     return replace(document, parts=parts), removed
 
 
+def is_empty_orphan(document: PageDocument) -> bool:
+    """A concept page nothing supports any more and nobody wrote on (QA C7): no source, no cited
+    statement, none of the user's words — only code-written navigation. It goes, as a page left
+    without a source goes on Delete (decision 7)."""
+    if document.meta.kind != "concept" or document.meta.sources:
+        return False
+    for part in document.parts:
+        if isinstance(part, Block):
+            if part.cites or not _is_agent(part):
+                return False
+        elif isinstance(part, RawText) and part.text.strip():
+            return False
+    return True
+
+
 def cites_material(document: PageDocument, material_id: str) -> bool:
     return any(cite.material_id == material_id for block in document.blocks() for cite in block.cites)
 

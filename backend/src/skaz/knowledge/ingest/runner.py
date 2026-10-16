@@ -24,7 +24,7 @@ from ..service import KnowledgeService
 from . import prompts
 from .checks import CheckedBlock, CheckStats, check_statement, clean_text, clean_title, flags_instructions
 from .drafts import ConceptDraft, DraftSection
-from .jobs import JobRepository, JobStep, agent_failure_code
+from .jobs import JobRepository, JobStep, agent_failure_code, agent_failure_text
 from .matching import decide, find_candidates
 from .model import AnswerInvalid, BlockOut, ConceptsOut, MatchOut, NotesOut, parse_answer
 from .pages import match_key
@@ -134,7 +134,7 @@ class IngestRun:
             when = ""
             if terminal.retry_at is not None:
                 when = f" It should work again after {terminal.retry_at.isoformat()}."
-            raise IngestFailed(f"The agent stopped: {terminal.message}{when}",
+            raise IngestFailed(agent_failure_text(terminal.kind, terminal.message) + when,
                                agent_failure_code(terminal.kind))
         return result.text
 

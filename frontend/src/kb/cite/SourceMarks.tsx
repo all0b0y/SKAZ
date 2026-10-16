@@ -18,6 +18,8 @@ const CLOSE_DELAY_MS = 160;
 function where(c: KbCitation): string | null {
   if (c.start_ms !== null) return clock(c.start_ms);
   if (c.page !== null) return `p. ${c.page}`;
+  // An article or a pasted text: the paragraph, as the .md label says (QA C13).
+  if (typeof c.index === 'number') return `¶ ${c.index}`;
   return null;
 }
 

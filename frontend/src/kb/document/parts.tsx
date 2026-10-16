@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import type { KbCitation, KbPageRef } from '../../api/kb/types.gen';
 import type { PageKind } from '../api/names';
 import { Chip, IconButton, type IconName } from '../ui';
@@ -54,7 +54,8 @@ export function CitationChip({ citation, showTitle = true }: { citation: KbCitat
 
 export function PageChip({ page }: { page: KbPageRef }) {
   const openDocument = useUi((s) => s.openDocument);
-  return <Chip kind="wiki" label={page.title} onClick={() => openDocument({ type: 'page', id: page.id })} />;
+  // The page's own type icon: a folder overview reads as a folder, Notes as notes (QA C12).
+  return <Chip kind="wiki" icon={PAGE_KIND_ICON[page.kind]} label={page.title} onClick={() => openDocument({ type: 'page', id: page.id })} />;
 }
 
 /** Folder colour by the folder's place among user folders (Inbox and unknown folders: none). */
@@ -76,7 +77,7 @@ export function FolderTag({ name, tone }: { name: string; tone?: string }) {
   );
 }
 
-/** ⤢ and ✕ of the right panel; the labels are the ones the shell smoke drives. */
+/** ← (when there is somewhere to go back to), ⤢ and ✕ of the right panel; the labels are the ones the shell smoke drives. */
 export function PanelFrameButtons({ closeLabel = 'Close document', expandable = true, children, more }: {
   closeLabel?: string;
   expandable?: boolean;
@@ -87,8 +88,22 @@ export function PanelFrameButtons({ closeLabel = 'Close document', expandable = 
   const expanded = useUi((s) => s.docExpanded);
   const toggle = useUi((s) => s.toggleDocExpanded);
   const close = useUi((s) => s.closeDoc);
+  const canGoBack = useUi((s) => s.docHistory.length > 0);
+  const goBack = useUi((s) => s.goBack);
+  // ⌘[ (QA C20): back to what the panel showed before, e.g. the page after "Open at quote".
+  useEffect(() => {
+    if (!canGoBack) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key !== '[') return;
+      event.preventDefault();
+      goBack();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [canGoBack, goBack]);
   return (
     <>
+      {canGoBack && <IconButton icon="chevronLeft" label="Back" aria-keyshortcuts="Meta+BracketLeft" className="kb-head__back" onClick={goBack} />}
       {children}
       {expandable && (
         <IconButton

@@ -171,6 +171,25 @@ class KbCitation(BaseModel):
     page: int | None
     #: The verbatim quote the claim rests on; highlight it rather than the whole fragment.
     quote: str | None = None
+    #: Paragraph number of an article or text (``¶ 6``) when there is no time or page (QA C13).
+    index: int | None = None
+
+
+class KbPageRef(BaseModel):
+    id: str
+    kind: PageKind
+    title: str
+
+
+class KbBlockLink(BaseModel):
+    """A wikilink in the block text that is not a citation (QA C1/C2)."""
+
+    #: The target as written in ``[[target|label]]`` (no ``#anchor``, no label).
+    target: str
+    #: The wiki page it opens; ``null`` when it isn't a page (or no such page exists).
+    page: KbPageRef | None = None
+    #: The material it opens (``[[Materials/<Folder>/<Title>/…]]``); ``null`` otherwise.
+    material_id: str | None = None
 
 
 class KbBlock(BaseModel):
@@ -185,12 +204,8 @@ class KbBlock(BaseModel):
     text: str
     hash: str
     citations: list[KbCitation]
-
-
-class KbPageRef(BaseModel):
-    id: str
-    kind: PageKind
-    title: str
+    #: Page/material links in ``text`` and what they open; links to nothing are listed with nulls.
+    links: list[KbBlockLink] = []
 
 
 class KbPage(KbPageSummary):

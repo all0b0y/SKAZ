@@ -351,6 +351,7 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     const del = await screen.findByRole('dialog', { name: /Delete/ });
     expect(await within(del).findByText(/Notes: Lecture 8 — entropy/)).toBeInTheDocument();
     expect(within(del).getByText('Your note on these pages stays untouched.')).toBeInTheDocument();
+    expect(within(del).getByText('1 statement stays: another source supports it.')).toBeInTheDocument(); // QA C18 wording
     await user.click(within(del).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument());
   });

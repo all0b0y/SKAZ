@@ -101,6 +101,8 @@
 .kb-block:hover .kb-block__edit,
 .kb-block:focus-within .kb-block__edit,
 .kb-block__edit:focus-visible { opacity: 1; }
+.kb-block__failed { display: grid; gap: 4px; margin-top: 4px; }
+.kb-block__failed-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .kb-block__busy { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-md .md { display: inline; }
 .kb-md .md p { display: inline; }
@@ -302,3 +304,19 @@
 .kb-delprev__head { font-size: var(--t-xs); font-weight: 600; color: var(--kb-muted); }
 
 .kb-doc .kb-seg { align-self: flex-start; }
+
+/* A wikilink inside a block (QA C1/C2): reads as text with an underline, opens the page/material. */
+.kb-wikilink {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--kb-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.kb-wikilink:hover { text-decoration-color: currentColor; }
+.kb-wikilink:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; border-radius: 2px; }

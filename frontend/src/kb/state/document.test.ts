@@ -53,4 +53,24 @@ describe('Document navigator (openDocument)', () => {
     ui.getState().showCenter('materials');
     expect(ui.getState().center).toBe('materials');
   });
+
+  it('Back returns to what the panel showed before; re-opening the same document is no step; ✕ forgets (QA C20)', () => {
+    const ui = createUiStore();
+    ui.getState().openDocument({ type: 'page', id: 'p1' });
+    ui.getState().openDocument({ type: 'page', id: 'p1', block_id: 'b2' });
+    expect(ui.getState().docHistory).toEqual([]);
+    ui.getState().openDocument({ type: 'material', id: 'm1', seg: 3, quote: 'q' });
+    ui.getState().openGraph('p2');
+    expect(ui.getState().right).toEqual({ kind: 'graph', focus: 'p2' });
+    ui.getState().goBack();
+    expect(ui.getState().right).toMatchObject({ kind: 'doc', target: { type: 'material', id: 'm1', seg: 3, quote: 'q' } });
+    ui.getState().goBack();
+    expect(ui.getState().right).toMatchObject({ kind: 'doc', target: { type: 'page', id: 'p1', block_id: 'b2' } });
+    expect(ui.getState().docHistory).toEqual([]);
+    ui.getState().goBack(); // nothing before: stays
+    expect(ui.getState().right).toMatchObject({ kind: 'doc', target: { id: 'p1' } });
+    ui.getState().openDoc('m2');
+    ui.getState().closeDoc();
+    expect(ui.getState().docHistory).toEqual([]);
+  });
 });

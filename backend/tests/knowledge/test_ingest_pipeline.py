@@ -311,8 +311,9 @@ async def test_reingest_leaves_other_sources_on_concept_pages_untouched(ready: K
     again = page_file.read_text(encoding="utf-8")
     assert second_block in again and "Обновлённое определение." in again
     assert "Мера беспорядка системы." not in again
-    temperature = (wiki_dir(ready) / "Concepts" / "Температура.md").read_text(encoding="utf-8")
-    assert temperature.count("from_source") == 0  # this material no longer contributes to it
+    # This material no longer contributes to "Температура" and nothing else supports it: the empty
+    # page goes instead of staying in the list and the graph (QA C7).
+    assert not (wiki_dir(ready) / "Concepts" / "Температура.md").exists()
 
 
 async def test_concept_from_second_material_merges_via_decision_layer(ready: KnowledgeService) -> None:

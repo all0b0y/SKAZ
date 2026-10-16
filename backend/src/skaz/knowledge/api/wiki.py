@@ -12,7 +12,7 @@ from ..store.records import PageRecord
 from ..wiki.service import PageDetail, WikiService
 from .deps import KbDep, kb_call
 from .ingest import job_view
-from .schemas import KbBlock, KbCitation, KbPage, KbPageRef, KbPageSummary
+from .schemas import KbBlock, KbBlockLink, KbCitation, KbPage, KbPageRef, KbPageSummary
 from .schemas_ingest import KbJob
 from .schemas_wiki2 import (
     KbBlockCreate,
@@ -84,8 +84,19 @@ def page_view(detail: PageDetail) -> KbPage:
                                 end_ms=c.end_ms,
                                 page=c.page,
                                 quote=c.quote,
+                                index=c.index,
                             )
                             for c in entry.citations
+                        ],
+                        "links": [
+                            KbBlockLink(
+                                target=link.target,
+                                page=KbPageRef(id=link.page_id, kind=cast(PageKind, link.page_kind),
+                                               title=link.page_title or "")
+                                if link.page_id else None,
+                                material_id=link.material_id,
+                            )
+                            for link in detail.links.get(entry.id, [])
                         ],
                     }
                 )

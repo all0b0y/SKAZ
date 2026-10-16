@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -88,6 +89,8 @@ class CitationView:
     page: int | None = None
     #: The verbatim quote the claim rests on (highlight it, not the whole fragment); None if unknown.
     quote: str | None = None
+    #: Paragraph number of an article/text fragment (``¶ n``), when it has one.
+    index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,33 @@ class PageView:
     sources: tuple[str, ...]
     rel_path: str
     entries: tuple[EntryView, ...]
+
+
+_CITATION_LINK = re.compile(
+    r"\[\[Materials/[^/\]|\n]+/([^/\]|\n]+)/[^\]|\n#]*#\^seg-(\d+)(?:\|[^\]\n]*)?\]\]"
+)
+
+
+def _gone_title(text: str, seg: int, available: Iterable[tuple[FragmentRecord, str]]) -> str | None:
+    """The title of a source that is no longer indexed, read from the block's citation link —
+    only when it is unambiguous (one title cites that fragment, and it is not an indexed one)."""
+    known = {title for _fragment, title in available}
+    titles = {
+        match.group(1) for match in _CITATION_LINK.finditer(text) if int(match.group(2)) == seg
+    } - known
+    return titles.pop() if len(titles) == 1 else None
+
+
+def _gone(directory: Path) -> bool:
+    """Only a folder that is really not there counts as removed — an unreadable one (iCloud still
+    syncing, no permission) is skipped by the scan, but its material is not deleted for that."""
+    try:
+        directory.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except OSError:
+        return False
+    return False
 
 
 class KnowledgeService:
@@ -146,6 +176,12 @@ class KnowledgeService:
         self._unreadable_notified: frozenset[str] = frozenset()
         self._scanned_at = 0.0
         self.clock: Callable[[], float] = time.monotonic
+        #: The library the index rows belong to (the stored one at start): a scan of the same
+        #: library may tell which materials disappeared since (QA C21); another library may not.
+        self._indexed_library_id: str | None = self._stored[1] if self._stored else None
+        #: Materials the last full scan no longer found (their folder was removed outside SKAZ);
+        #: ``after_scan`` listeners read it (W2 offers the delete cleanup).
+        self.vanished: tuple[MaterialRecord, ...] = ()
 
     # -- library state ------------------------------------------------------
 
@@ -269,8 +305,19 @@ class KnowledgeService:
                 raise LibraryUnavailable(SANDBOX_REASON)
             library = Library.open(root, library_id)
             library.ensure_inbox()
+            before = self.material_repo.list_all() if self._indexed_library_id == library_id else []
             result = scan_library(library, indexer.known_paths(self.db), stop=self._closing)
             indexer.replace_index(self.db, result, stop=self._closing)
+            found = {material.files.manifest.id for material in result.materials}
+            skipped = tuple(result.unreadable)  # QA E9: never "removed" while iCloud still syncs it
+            self.vanished = tuple(
+                record for record in before
+                if record.id not in found
+                and not any(record.rel_dir == path or record.rel_dir.startswith(path.rstrip("/") + "/")
+                            for path in skipped)
+                and _gone(root / record.rel_dir)
+            )
+            self._indexed_library_id = library_id
         except ScanStopped:
             return  # SKAZ is closing: the index stays as it was, the next start scans again
         except LibraryUnavailable as error:
@@ -472,13 +519,14 @@ class KnowledgeService:
         keys = {(cite.material_id, cite.seg) for block in blocks for cite in block.citations}
         fragments = self.material_repo.fragment_map(keys)
 
-        def citation(material_id: str, seg: int, quote: str | None) -> CitationView:
+        def citation(material_id: str, seg: int, quote: str | None, text: str) -> CitationView:
             found = fragments.get((material_id, seg))
-            if found is None:
-                return CitationView(material_id, seg, available=False, quote=quote)
+            if found is None:  # the title the page's own citation link still carries (QA C21)
+                return CitationView(material_id, seg, available=False, quote=quote,
+                                    material_title=_gone_title(text, seg, fragments.values()))
             fragment, title = found
             return CitationView(material_id, seg, True, title, fragment.start_ms, fragment.end_ms,
-                                fragment.page, quote)
+                                fragment.page, quote, fragment.index)
 
         return PageView(
             id=record.id, kind=record.kind, title=record.title, original=record.original,
@@ -487,7 +535,8 @@ class KnowledgeService:
             entries=tuple(
                 EntryView(block.block_id, block.kind, block.owner, block.marked, block.section, block.text,
                           block.hash,
-                          tuple(citation(cite.material_id, cite.seg, cite.quote) for cite in block.citations))
+                          tuple(citation(cite.material_id, cite.seg, cite.quote, block.text)
+                                for cite in block.citations))
                 for block in blocks
             ),
         )

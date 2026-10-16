@@ -1,29 +1,42 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
-import { AnswerMarkdown } from '../ui/AnswerMarkdown';
+import { AnswerMarkdown, type InAppLink } from '../ui/AnswerMarkdown';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import {
   FolderTag, PAGE_KIND_ICON, PAGE_KIND_LABEL, PageChip, PanelFrameButtons, useAskAbout, useFolderTone,
 } from '../document/parts';
-import { plural, readableBlockText, relativeTime } from '../document/text';
+import { blockMarkdown, inAppTarget, plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
-import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, type ClaimKind } from './blocks';
+import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavigation, namesItsKind, type ClaimKind } from './blocks';
 import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 
 const NO_CITES: never[] = [];
 
-/** Block text rendered by the old UI's safe Markdown renderer (no raw HTML, http(s) links only). */
-function BlockMarkdown({ text, quote }: { text: string; quote: QuoteSource }) {
+/**
+ * Block text rendered by the old UI's safe Markdown renderer (no raw HTML, http(s) links only);
+ * its wikilinks to pages and materials open them here (QA C1/C2).
+ */
+function BlockMarkdown({ block, quote }: { block: KbBlock; quote: QuoteSource }) {
+  const openDocument = useUi((s) => s.openDocument);
+  const inAppLink = useCallback<InAppLink>((href, label, key) => {
+    const target = inAppTarget(href);
+    if (!target) return null;
+    return (
+      <button key={key} type="button" className="kb-wikilink" data-link={target.type}
+        onClick={() => openDocument(target)}>{label}</button>
+    );
+  }, [openDocument]);
   // Quotable: a selection here becomes a quote token of this block (ui/Selection.tsx).
   return (
     <div className="kb-md" {...quoteAttrs(quote)}>
-      <AnswerMarkdown content={readableBlockText(text)} citations={NO_CITES} activeSessionId={null} onCite={() => undefined} />
+      <AnswerMarkdown content={blockMarkdown(block.text, block.links, block.owner !== 'user')} citations={NO_CITES}
+        activeSessionId={null} onCite={() => undefined} inAppLink={inAppLink} />
     </div>
   );
 }
@@ -38,11 +51,47 @@ export function ClaimLabel({ kind, edited = false }: { kind: ClaimKind; edited?:
   );
 }
 
+/** A re-check that ended without a result: the job's own reason, and whether Settings fixes it. */
+export interface RecheckFailure {
+  message: string;
+  agentUnavailable: boolean;
+}
+
+/** `KbJob.error_code`: the agent can't work until it is fixed in Settings → Accounts & keys. */
+const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
+
+/** Why a finished re-check job did not change the block, in the words the user reads. */
+export function recheckFailure(job: KbJob): RecheckFailure | null {
+  if (job.state === 'done' || job.state === 'running') return null;
+  const fallback = job.state === 'failed' ? 'The re-check failed.' : 'The re-check was stopped before it finished.';
+  return { message: job.error?.trim() || fallback, agentUnavailable: job.error_code === AGENT_UNAVAILABLE };
+}
+
 interface BlockActions {
   edit: (block: KbBlock, text: string) => Promise<string | null>;
   recheck: (block: KbBlock) => Promise<string | null>;
   remove: (block: KbBlock) => Promise<string | null>;
   rechecking: (blockId: string) => boolean;
+  failure: (blockId: string) => RecheckFailure | null;
+  dismissFailure: (blockId: string) => void;
+}
+
+function RecheckFailed({ failure, onRetry, onDismiss }: { failure: RecheckFailure; onRetry: () => void; onDismiss: () => void }) {
+  const openSettings = useUi((s) => s.openSettings);
+  return (
+    <div className="kb-block__failed" role="alert">
+      <p className="kb-inline-error"><b>Couldn’t re-check against sources.</b> {failure.message}</p>
+      <div className="kb-block__failed-actions">
+        {/* The agent can't work (none connected, signed out, outdated): the fix is in Settings, a
+            retry alone would fail the same way, so it comes first. */}
+        {failure.agentUnavailable && (
+          <Button size="sm" variant="outline" icon="settings" onClick={() => openSettings('conn')}>Open Accounts &amp; keys</Button>
+        )}
+        <Button size="sm" variant="quiet" icon="retry" onClick={onRetry}>Try again</Button>
+        <Button size="sm" variant="quiet" onClick={onDismiss}>Dismiss</Button>
+      </div>
+    </div>
+  );
 }
 
 function BlockEditor({ initial, agentBlock, onSave, onCancel, onRecheck }: {
@@ -100,6 +149,7 @@ function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlo
   const [error, setError] = useState<string | null>(null);
   const edited = isEditedByUser(block);
   const busy = actions.rechecking(block.id);
+  const failure = busy ? null : actions.failure(block.id);
   const agentBlock = block.owner !== 'user';
   const run = async (work: () => Promise<string | null>) => {
     setError(null);
@@ -126,7 +176,7 @@ function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlo
         />
       ) : (
         <div className="kb-block__body">
-          <BlockMarkdown text={block.text} quote={{ source: 'page', id: pageId, block_id: block.id }} />
+          <BlockMarkdown block={block} quote={{ source: 'page', id: pageId, block_id: block.id }} />
           {block.citations.length > 0 && (
             <span className="kb-block__cites"><SourceMarks citations={block.citations} /></span>
           )}
@@ -149,6 +199,10 @@ function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlo
             </button>
           )}
         </div>
+      )}
+      {!editing && failure && (
+        <RecheckFailed failure={failure} onDismiss={() => actions.dismissFailure(block.id)}
+          onRetry={() => void run(() => actions.recheck(block))} />
       )}
       {error && <p className="kb-inline-error" role="alert">{error}</p>}
     </div>
@@ -192,14 +246,15 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
               <h3 className="kb-psec__head" id={headId}>
                 <button type="button" className="kb-psec__toggle" aria-expanded={open} onClick={() => toggle(section.key)}>
                   <Icon name="chevronDown" size={13} className={`kb-psec__chev${open ? '' : ' is-closed'}`} />
+                  {section.kind && namesItsKind(section) && <Icon name={CLAIM_ICON[section.kind]} size={13} className="kb-psec__kind" />}
                   <span className="kb-psec__title">{title}</span>
                 </button>
-                {section.kind && <ClaimLabel kind={section.kind} />}
+                {section.kind && !namesItsKind(section) && <ClaimLabel kind={section.kind} />}
               </h3>
               {open && (
                 <div className="kb-psec__body">
                   {section.blocks.map((b) => (
-                    <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source'} actions={actions} />
+                    <Block key={b.id} pageId={page.id} block={b} label={section.kind === null && b.kind !== 'from_source' && !isNavigation(b)} actions={actions} />
                   ))}
                 </div>
               )}
@@ -251,6 +306,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const [menuOpen, setMenuOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [jobs, setJobs] = useState<Record<string, string>>({});
+  const [failures, setFailures] = useState<Record<string, RecheckFailure>>({});
   const { state, reload, set } = useLoad(target.id, async () => await client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } }));
   const page = state.value;
   useScrollTarget(bodyRef.current, target.block_id ?? null, nonce, state.load === 'ready');
@@ -260,9 +316,13 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
       client.call('GET /kb/jobs/{job_id}', { path: { job_id: jobId } }).then((job: KbJob) => {
         if (job.state === 'running') return;
         setJobs((j) => { const next = { ...j }; delete next[blockId]; return next; });
+        // A failed or stopped re-check says why next to the block (never a silent return).
+        const failed = recheckFailure(job);
+        if (failed) setFailures((f) => ({ ...f, [blockId]: failed }));
         reload();
-      }, () => {
+      }, (error: unknown) => {
         setJobs((j) => { const next = { ...j }; delete next[blockId]; return next; });
+        setFailures((f) => ({ ...f, [blockId]: { message: `SKAZ lost track of the re-check: ${errorText(error)}`, agentUnavailable: false } }));
       });
     }
   });
@@ -276,6 +336,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
     recheck: async (block) => {
       try {
         const job = await client.call('POST /kb/wiki/pages/{page_id}/blocks/{block_id}/recheck', { path: pathOf(block) });
+        setFailures((f) => { const next = { ...f }; delete next[block.id]; return next; });
         setJobs((j) => ({ ...j, [block.id]: job.id }));
         return null;
       } catch (error) { return errorText(error); }
@@ -285,6 +346,8 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
       catch (error) { return errorText(error); }
     },
     rechecking: (blockId) => blockId in jobs,
+    failure: (blockId) => failures[blockId] ?? null,
+    dismissFailure: (blockId) => setFailures((f) => { const next = { ...f }; delete next[blockId]; return next; }),
   };
   const addNote = async (text: string) => {
     try { set(await client.call('POST /kb/wiki/pages/{page_id}/blocks', { path: { page_id: target.id }, body: { text } })); return null; }
@@ -306,7 +369,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
               <IconButton ref={moreRef} icon="more" label="Page actions" aria-haspopup="menu" aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((v) => !v)} />
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Page actions" items={[
-                { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph() },
+                { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
                 { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
               ]} />
             </>

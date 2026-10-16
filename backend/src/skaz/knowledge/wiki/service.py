@@ -13,7 +13,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -38,8 +38,11 @@ from .delete import DeletePlan, MaterialBusy, StillRecording, append_log, execut
 from .discrepancy import KIND as DISCREPANCY_KIND
 from .discrepancy import Discrepancies
 from .edit import add_note, delete_note, update_block
+from .gone import KIND as GONE_KIND
+from .gone import GoneMaterials
 from .graph import Graph, GraphIndex
 from .jobs import JobContext, WikiBusy, WikiJobs
+from .links import LinkResolver, LinkView
 from .move import move_material
 from .overview import FolderOverviews
 from .pages_io import page_path, reindex, rewrite
@@ -78,6 +81,8 @@ class PageDetail:
     mentioned_in: list[PageRefView]
     folder_names: list[str]
     updated_at: str | None
+    #: Non-citation wikilinks per block id, resolved to a page or a material (QA C1/C2).
+    links: dict[str, list[LinkView]] = field(default_factory=dict)
 
 
 def _log_failure(task: asyncio.Task[None]) -> None:
@@ -124,6 +129,8 @@ class WikiService:
         self._loop_task: asyncio.Task[None] | None = None
         self._post_tasks: set[asyncio.Task[None]] = set()
         self._writer = WikiWriter(kb, ingest.write_lock)
+        self.gone = GoneMaterials(kb, self.graph, language=lambda: ingest.settings().language,
+                                  after_cleanup=self._after_cleanup)
 
     # -- wiring -------------------------------------------------------------
 
@@ -141,6 +148,7 @@ class WikiService:
             self.corrections.resolve_notification,
         )
         register_material_kinds(actions, ("excluded_instruction", "blocked_output"))
+        actions.register(GONE_KIND, self.gone.actions, self.gone.resolve)
         self.kb.after_scan.append(self._after_scan)
 
     def _after_scan(self) -> None:
@@ -150,6 +158,24 @@ class WikiService:
         except Exception as error:  # the scan itself succeeded; these indexes are rebuilt on the next one
             logger.error("rebuilding the corrections index or graph after a scan failed: %s",
                          error_note(error))
+        try:  # a material folder removed outside SKAZ: say so, offer the delete cleanup (QA C21)
+            self.gone.notify(self.kb.vanished)
+            for record in self.kb.vanished:
+                self._retire_notices(record.id)
+        except Exception as error:
+            logger.error("telling about materials removed outside SKAZ failed: %s", error_note(error))
+
+    def _retire_notices(self, material_id: str) -> None:
+        """Notices about a material that left the library are dismissed: their actions (Review,
+        Open material) would lead nowhere (QA C19)."""
+        for item in self.kb.notifications():
+            if item.payload.get("material_id") == material_id and not item.dismissed_at:
+                self.kb.dismiss_notification(item.id)
+
+    def _after_cleanup(self) -> None:
+        self.graph.refresh()
+        self._refresh_index()
+        self._touch()
 
     # -- engines ------------------------------------------------------------
 
@@ -388,6 +414,7 @@ class WikiService:
             execute_delete(self.kb, plan)
             library = self.kb.require()
             append_log(library, self.ingest.settings().language, plan.title)
+            self._retire_notices(material_id)
         self.graph.refresh()
         self._refresh_index()
         self._touch()
@@ -434,7 +461,8 @@ class WikiService:
             updated_at = (
                 datetime.fromtimestamp(stamp, UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
             )
-        return PageDetail(view, refs(related), refs(mentioned), names, updated_at)
+        links = LinkResolver(self.kb.db).for_blocks((entry.id, entry.text) for entry in view.entries)
+        return PageDetail(view, refs(related), refs(mentioned), names, updated_at, links)
 
     def _edited(self, page_id: str) -> PageDetail:
         self.graph.refresh()

@@ -27,6 +27,9 @@ _PARAGRAPH_SPLIT = re.compile(r"(\n[ \t]*\n)")
 _HEADING_LINE = re.compile(r"^#{1,6}[ \t]", re.MULTILINE)
 _TRAILING_ID = re.compile(r"\s\^[A-Za-z0-9-]+\s*$")
 _UNMARKED = re.compile(r"u-([1-9]\d*)")
+#: A wikilink: target (with an optional ``#anchor``) and an optional ``|label``.
+_LINK = re.compile(r"\[\[([^\]|\n]+?)(?:\|([^\]\n]+))?\]\]")
+_CITATION_TARGET = re.compile(r"#\^seg-\d+$")
 
 
 class InvalidText(KnowledgeError):
@@ -38,15 +41,86 @@ def clean_user_text(text: str) -> str:
     value = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n").strip()
     if not value:
         raise InvalidText("The text is empty.")
+    # Plain words for what would break the page (QA C15).
     if re.search(r"\n[ \t]*\n", value):
-        raise InvalidText("A note is one paragraph. Add another note for the next paragraph.")
+        raise InvalidText("Keep this to one paragraph: an empty line starts a new one. Add the rest as a "
+                          "new note with “My note”.")
     if "%% skaz:" in value:
-        raise InvalidText("The text can't contain SKAZ markers.")
+        raise InvalidText("Remove the “%% skaz: … %%” part: SKAZ writes those marks itself.")
     if _HEADING_LINE.search(value):
-        raise InvalidText("A note can't contain headings.")
+        raise InvalidText("A line can't start with “#”: that would be a new heading on the page.")
     if _TRAILING_ID.search(value):
-        raise InvalidText("The text can't end with a block id.")
+        raise InvalidText("Remove the “^…” at the end: SKAZ uses that mark to find a paragraph.")
     return value
+
+
+def note_paragraphs(text: str) -> list[str]:
+    """A new note may be several paragraphs: each becomes a note of its own (QA C15)."""
+    value = unicodedata.normalize("NFC", text).replace("\r\n", "\n").replace("\r", "\n")
+    pieces = [piece.strip() for piece in re.split(r"\n[ \t]*\n", value) if piece.strip()]
+    return [clean_user_text(piece) for piece in pieces] or [clean_user_text(value)]
+
+
+def _link_label(target: str, label: str | None) -> str:
+    return label if label is not None else target.split("#", 1)[0].rsplit("/", 1)[-1]
+
+
+def readable_text(body: str) -> str:
+    """What the editor shows (as the page does): links read as their labels, citation links left out.
+
+    The citations themselves live in the block marker and are shown as footnotes next to the block.
+    """
+    def show(match: re.Match[str]) -> str:
+        target, label = match.group(1).strip(), match.group(2)
+        return "" if _CITATION_TARGET.search(target) else _link_label(target, label)
+
+    return re.sub(r"[ \t]{2,}", " ", _LINK.sub(show, body)).strip()
+
+
+def relink(previous: str, text: str) -> str:
+    """The user's edited readable text with the block's links put back (QA C4).
+
+    The editor shows a block without wikilinks; saving that text must not silently drop the
+    page links (graph edges) or the readable citation links of the ``.md``. Every page/material
+    link whose label is still in the text becomes the link again (first free whole-word match,
+    in the old order); the citation links are appended at the end, as the agent wrote them.
+    Links the user typed themselves are kept as they are.
+    """
+    if " ".join(text.split()) == " ".join(readable_text(previous).split()):
+        return previous  # nothing changed but the links being hidden: the block as it was
+    taken: list[tuple[int, int]] = [match.span() for match in _LINK.finditer(text)]
+    out = text
+    citations: list[str] = []
+    cursor = 0
+    for match in _LINK.finditer(previous):
+        raw, target, label = match.group(0), match.group(1).strip(), match.group(2)
+        if _CITATION_TARGET.search(target):
+            citations.append(raw)
+            continue
+        if raw in out:
+            continue
+        shown = _link_label(target, label).strip()
+        if not shown:
+            continue
+        pattern = re.compile(rf"(?<!\w){re.escape(shown)}(?!\w)")
+        found = None
+        for start in (cursor, 0):
+            for candidate in pattern.finditer(out, start):
+                if not any(a < candidate.end() and candidate.start() < b for a, b in taken):
+                    found = candidate
+                    break
+            if found is not None:
+                break
+        if found is None:
+            continue  # the user removed the words: the link goes with them
+        a, b = found.span()
+        out = out[:a] + raw + out[b:]
+        shift = len(raw) - (b - a)
+        taken = [(x + shift if x >= b else x, y + shift if y >= b else y) for x, y in taken]
+        taken.append((a, a + len(raw)))
+        cursor = a + len(raw)
+    missing = [raw for raw in dict.fromkeys(citations) if raw not in out]
+    return f"{out} {' '.join(missing)}" if missing else out
 
 
 def new_note_id() -> str:
@@ -85,11 +159,15 @@ def _unmarked_ordinal(block_id: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _replace_unmarked(document: PageDocument, ordinal: int, text: str | None) -> PageDocument:
+def _replace_unmarked(
+    document: PageDocument, ordinal: int, text: str | None, *, keep_links: bool = False
+) -> PageDocument:
     found = _locate_unmarked(document, ordinal)
     if found is None:
         raise NotFound("This part of the page is no longer there. Reopen the page.")
     index, pieces, position = found
+    if text is not None and keep_links:
+        text = relink(pieces[position].strip("\n"), text)
     pieces[position] = _with_piece(pieces[position], text) if text is not None else ""
     parts = list(document.parts)
     parts[index] = RawText("".join(pieces))
@@ -119,14 +197,17 @@ def update_block(kb: KnowledgeService, page_id: str, block_id: str, text: str) -
     def build(document: PageDocument) -> PageDocument:
         ordinal = _unmarked_ordinal(block_id)
         if ordinal is not None:
-            return _replace_unmarked(document, ordinal, clean)
+            return _replace_unmarked(document, ordinal, clean, keep_links=True)
         index = _block_index(document, block_id)
         if index is None:
             raise NotFound("Block not found.")
         block = document.parts[index]
         assert isinstance(block, Block)
+        body = relink(block.body, clean)
+        if body == block.body:
+            return document  # saved unchanged: the block stays the agent's, byte for byte
         owner = "user_edited" if block.owner == "agent" else block.owner
-        updated = replace(block, body=clean, raw=None).remarked(owner=owner)
+        updated = replace(block, body=body, raw=None).remarked(owner=owner)
         parts = list(document.parts)
         parts[index] = updated
         return replace(document, parts=spaced(parts))
@@ -143,10 +224,12 @@ def add_note(
     after_block_id: str | None = None,
     section: str | None = None,
 ) -> str:
-    """A new ``user_note``; returns its block id."""
-    clean = clean_user_text(text)
+    """A new ``user_note`` (one per paragraph, in order); returns the first block id."""
+    blocks = [
+        Block.create(new_note_id(), "user_note", piece, owner="user") for piece in note_paragraphs(text)
+    ]
     library, path = page_path(kb, page_id)
-    block = Block.create(new_note_id(), "user_note", clean, owner="user")
+    block = blocks[0]
 
     def build(document: PageDocument) -> PageDocument:
         parts: list[Part] = list(document.parts)
@@ -158,12 +241,13 @@ def add_note(
                     raise NotFound("Block not found.")
                 index, pieces, position = found
                 head, tail = "".join(pieces[: position + 1]), "".join(pieces[position + 1 :])
-                parts[index : index + 1] = [RawText(head), block, *([RawText(tail)] if tail.strip() else [])]
+                rest = [RawText(tail)] if tail.strip() else []
+                parts[index : index + 1] = [RawText(head), *blocks, *rest]
             else:
                 after = _block_index(document, after_block_id)
                 if after is None:
                     raise NotFound("Block not found.")
-                parts.insert(after + 1, block)
+                parts[after + 1 : after + 1] = blocks
         elif section:
             key = match_key(section)
             heading = next(
@@ -181,9 +265,9 @@ def add_note(
                 (i for i in range(heading + 1, len(parts)) if _level(parts[i]) <= level),
                 len(parts),
             )
-            parts.insert(end, block)
+            parts[end:end] = blocks
         else:
-            insert_into_section(parts, "user_note", document.meta.language or "en", [block])
+            insert_into_section(parts, "user_note", document.meta.language or "en", blocks)
         return replace(document, parts=spaced(parts))
 
     rewrite(library, path, build)

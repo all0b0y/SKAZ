@@ -98,6 +98,7 @@ export interface KbBlock {
   text: string;
   hash: string;
   citations: KbCitation[];
+  links?: KbBlockLink[];
 }
 
 export interface KbBlockCreate {
@@ -114,6 +115,13 @@ export interface KbBlockHit {
   kind: "from_source" | "connection" | "explanation" | "user_note";
   owner: "agent" | "user" | "user_edited";
   snippet: KbSnippetPart[];
+}
+
+/** A wikilink in the block text that is not a citation (QA C1/C2). */
+export interface KbBlockLink {
+  target: string;
+  page?: KbPageRef | null;
+  material_id?: string | null;
 }
 
 export interface KbBlockUpdate {
@@ -205,6 +213,7 @@ export interface KbCitation {
   end_ms: number | null;
   page: number | null;
   quote?: string | null;
+  index?: number | null;
 }
 
 export interface KbCitePart {
