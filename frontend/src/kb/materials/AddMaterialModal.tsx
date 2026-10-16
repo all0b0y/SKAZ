@@ -110,7 +110,8 @@ export function AddMaterialModal() {
     if (left.length === 0) setOpen(false);
   };
 
-  const ready = items.length > 0 && items.every((i) => i.type !== 'link' || !i.classifying) && folderId !== '';
+  const ready = items.length > 0 && items.every((i) => (i.type !== 'link' || !i.classifying) && (i.type !== 'file' || i.kind !== 'unsupported'))
+    && folderId !== '';
   const spokenOptions = [...new Set([...languages, ...SPOKEN])];
 
   return (
@@ -125,7 +126,7 @@ export function AddMaterialModal() {
         >
           <Icon name="upload" size={22} />
           <b>Drop files here</b>
-          <span className="kb-muted">PDF, documents, audio, video · or <button type="button" className="kb-linkbtn" onClick={() => void choose()}>choose on the computer</button></span>
+          <span className="kb-muted">PDF, Markdown, text, audio, video · or <button type="button" className="kb-linkbtn" onClick={() => void choose()}>choose on the computer</button></span>
         </div>
         {dropError && <p className="kb-inline-error" role="alert">{dropError}</p>}
         <div className="kb-paste">
@@ -143,7 +144,7 @@ export function AddMaterialModal() {
                 <Icon name={item.type === 'text' ? 'text' : item.type === 'link' ? (item.info?.kind === 'video' ? 'video' : 'web') : item.kind === 'speech' ? (item.video ? 'video' : 'audio') : 'pdf'} size={15} />
                 <span className="kb-aqi__main">
                   <span className="kb-aqi__title">{itemTitle(item)}</span>
-                  <span className={`kb-aqi__meta${item.type === 'link' && item.error ? ' is-error' : ''}`}>{itemMeta(item)}</span>
+                  <span className={`kb-aqi__meta${(item.type === 'link' && item.error) || (item.type === 'file' && item.kind === 'unsupported') ? ' is-error' : ''}`}>{itemMeta(item)}</span>
                   {errors[item.id] && <span className="kb-aqi__meta is-error" role="alert">{errors[item.id]}</span>}
                 </span>
                 {item.type === 'link' && item.info?.embedded_video && (

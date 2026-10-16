@@ -230,7 +230,8 @@ def test_text_and_markdown_files(sources: SourceService, tmp_path: Path) -> None
     [
         (lambda tmp: "relative/file.pdf", "absolute"),
         (lambda tmp: str(tmp / "missing.pdf"), "doesn't exist"),
-        (lambda tmp: str(tmp / "song.mp3"), "speech import"),
+        (lambda tmp: str(tmp / "song.mp3"), r"can't read \.mp3 files"),
+        (lambda tmp: str(tmp / "doc.rtf"), r"can't read \.rtf files\. It adds PDF, Markdown"),
         (lambda tmp: str(tmp / ".secret" / "notes.txt"), "hidden folders"),
         (lambda tmp: str(tmp / "folder.pdf"), "regular file"),
     ],

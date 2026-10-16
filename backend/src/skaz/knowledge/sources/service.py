@@ -271,9 +271,10 @@ class SourceService:
         path = given_path(raw, SourceRejected)
         suffix = path.suffix.lower()
         if suffix not in PDF_EXTENSIONS | TEXT_EXTENSIONS:
+            kind = f"{suffix} files" if suffix else "files without an extension"
             raise SourceRejected(
-                "SKAZ adds PDF, Markdown (.md) and text (.txt) files here. "
-                "Audio and video go through the speech import."
+                f"SKAZ can't read {kind}. It adds PDF, Markdown (.md) and text (.txt) documents, "
+                "and audio and video files."
             )
         resolved, info = resolved_file(path, self.kb.data_dir, SourceRejected)
         limit = MAX_PDF_BYTES if suffix in PDF_EXTENSIONS else MAX_TEXT_FILE_BYTES

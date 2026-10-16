@@ -153,6 +153,20 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByText('notes.pdf')).toBeInTheDocument();
   });
 
+  it('a dropped file SKAZ can’t read says so on its row and holds Add until it is removed (QA B2, B15)', async () => {
+    const user = userEvent.setup();
+    const { services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const files = [new File(['x'], 'doc.rtf'), new File(['y'], 'notes.md')];
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files, getData: () => '' } });
+    expect(within(dialog).getByText(/SKAZ can’t read this type/)).toHaveClass('is-error');
+    expect(within(dialog).getByRole('button', { name: 'Add 2' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove doc.rtf' }));
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeEnabled();
+  });
+
   it('the side panel "Add material" opens the same window', async () => {
     const user = userEvent.setup();
     await ready();

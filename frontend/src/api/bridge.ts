@@ -66,11 +66,16 @@ export interface MaterialFileChoice {
   size: number;
 }
 
-/** File types the "+ Material" chooser offers: documents, text, audio and video. */
-export const MATERIAL_EXTENSIONS = [
-  'pdf', 'txt', 'md', 'markdown', 'rtf', 'html', 'htm', 'epub',
-  ...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v',
-] as const;
+/** Documents the backend reads (`sources/intake.py` PDF_EXTENSIONS | TEXT_EXTENSIONS). */
+export const DOCUMENT_EXTENSIONS = ['pdf', 'txt', 'md', 'markdown'] as const;
+/** Audio and video the speech import takes (`speech/media.py`: the provider list + video containers). */
+export const SPEECH_EXTENSIONS = [...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v'] as const;
+/** Video containers among them (`speech/media.py` VIDEO_EXTENSIONS). */
+export const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi'] as const;
+
+/** File types the "+ Material" chooser offers: only what the backend takes (QA B2). Documents go to
+ * `/kb/materials/file`, audio and video to the speech import (`/kb/imports`). */
+export const MATERIAL_EXTENSIONS = [...DOCUMENT_EXTENSIONS, ...SPEECH_EXTENSIONS] as const;
 
 export interface BridgeApi {
   /**
