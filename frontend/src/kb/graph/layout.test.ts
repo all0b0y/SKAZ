@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KbGraph } from '../../api/kb/types.gen';
-import { bounds, createSim, fit, pick, settle, showsLabel, step, toScreen, zoomAt, ZOOM_MAX } from './layout';
+import { bounds, createSim, fit, pick, placeLabels, settle, showsLabel, step, toScreen, zoomAt, ZOOM_MAX } from './layout';
 
 function graph(n: number, edges: Array<[number, number]>, hub: number[] = []): KbGraph {
   return {
@@ -61,5 +61,42 @@ describe('Graph force layout (own, no library)', () => {
     expect(showsLabel(sim.byId.get('n0')!, sim, calm, null, null)).toBe(false);
     expect(showsLabel(sim.byId.get('n0')!, sim, calm, 'n1', null)).toBe(true); // neighbour of hover
     expect(showsLabel(sim.byId.get('n3')!, sim, calm, null, 'n3')).toBe(true); // selected
+  });
+
+  it('labels never sit on each other; the selected one always shows; zooming in shows more (QA C5)', () => {
+    // A dense library: 90 nodes, a third of them hubs, many links (like the QA profile: 96 nodes, 32 hubs).
+    const n = 90;
+    const edges: Array<[number, number]> = [];
+    for (let i = 0; i < n; i += 1) for (let j = 1; j <= 5; j += 1) edges.push([i, (i * 7 + j * 11) % n]);
+    const sim = createSim(graph(n, edges.filter(([a, b]) => a !== b), Array.from({ length: 30 }, (_, i) => i * 3)));
+    settle(sim);
+    const measure = (text: string) => text.length * 6.6;
+    const overlaps = (labels: ReturnType<typeof placeLabels>) => {
+      const box = (l: (typeof labels)[number]) => ({ l: l.x - measure(l.text) / 2, r: l.x + measure(l.text) / 2, t: l.y, b: l.y + 15 });
+      let count = 0;
+      labels.forEach((a, i) => labels.slice(i + 1).forEach((b) => {
+        const p = box(a); const q = box(b);
+        if (p.l < q.r && q.l < p.r && p.t < q.b && q.t < p.b) count += 1;
+      }));
+      return count;
+    };
+    const view = fit(sim, 556, 600, 36, 26);
+    const atRest = placeLabels(sim, view, null, 'n1', measure);
+    expect(overlaps(atRest)).toBe(0);
+    expect(atRest[0]?.id).toBe('n1'); // selected first, even though it isn't a hub
+    expect(atRest.length).toBeGreaterThan(3);
+    const wanted = sim.nodes.filter((x) => showsLabel(x, sim, view, null, 'n1')).length;
+    expect(atRest.length).toBeLessThan(wanted); // the ones that would pile up are left out
+    const closer = placeLabels(sim, zoomAt(view, 278, 300, 3), null, 'n1', measure)
+      .filter((l) => l.x >= 0 && l.x <= 556 && l.y >= 0 && l.y <= 600);
+    expect(overlaps(closer)).toBe(0);
+    expect(closer.length).toBeGreaterThan(atRest.filter((l) => l.x >= 0 && l.x <= 556).length / 2);
+  });
+
+  it('fit leaves the hint strip under the graph free', () => {
+    const sim = createSim(graph(12, [[0, 1], [1, 2], [2, 3]]));
+    settle(sim);
+    const view = fit(sim, 400, 300, 36, 26);
+    expect(toScreen(view, { x: 0, y: bounds(sim).maxY }).y).toBeLessThanOrEqual(300 - 26);
   });
 });

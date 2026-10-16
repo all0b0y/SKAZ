@@ -1,4 +1,4 @@
-import { showsLabel, toScreen, type Sim, type View } from './layout';
+import { placeLabels, toScreen, type Sim, type View } from './layout';
 
 export interface Palette {
   text: string;
@@ -88,19 +88,18 @@ export function drawGraph(ctx: CanvasRenderingContext2D, sim: Sim, state: DrawSt
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (const n of sim.nodes) {
-    if (!showsLabel(n, sim, view, focus, selected)) continue;
-    const p = toScreen(view, n);
-    const r = n.r * scale;
-    ctx.globalAlpha = lit(n.id) ? 1 : 0.2;
-    ctx.font = `${n.id === focus || n.id === selected ? 600 : 400} 12px 'SKAZ Inter', -apple-system, system-ui, sans-serif`;
-    const label = n.node.title.length > 28 ? `${n.node.title.slice(0, 27)}…` : n.node.title;
+  const font = (bold: boolean) => `${bold ? 600 : 400} 12px 'SKAZ Inter', -apple-system, system-ui, sans-serif`;
+  ctx.font = font(true); // measured bold: a label never grows into its neighbour when it becomes bold
+  // Labels that would sit on each other are left out (QA C5); zooming in shows more.
+  for (const label of placeLabels(sim, view, focus, selected, (text) => ctx.measureText(text).width, scale)) {
+    ctx.globalAlpha = lit(label.id) ? 1 : 0.2;
+    ctx.font = font(label.id === focus || label.id === selected);
     // A halo in the pane colour keeps labels readable over edges.
     ctx.lineWidth = 3;
     ctx.strokeStyle = palette.pane;
-    ctx.strokeText(label, p.x, p.y + r + 4);
+    ctx.strokeText(label.text, label.x, label.y);
     ctx.fillStyle = palette.text;
-    ctx.fillText(label, p.x, p.y + r + 4);
+    ctx.fillText(label.text, label.x, label.y);
   }
   ctx.globalAlpha = 1;
 }

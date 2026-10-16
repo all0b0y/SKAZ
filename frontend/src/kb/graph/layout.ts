@@ -124,13 +124,17 @@ export function bounds(sim: Sim): { minX: number; maxX: number; minY: number; ma
   return { minX, maxX, minY, maxY };
 }
 
-/** View that shows the whole graph with a margin. */
-export function fit(sim: Sim, width: number, height: number, margin = 36): View {
+/**
+ * View that shows the whole graph with a margin; `bottom` keeps a strip free under it (the
+ * canvas hint line), so the hint is never drawn over nodes and labels.
+ */
+export function fit(sim: Sim, width: number, height: number, margin = 36, bottom = 0): View {
   const b = bounds(sim);
   const w = Math.max(1, b.maxX - b.minX);
   const h = Math.max(1, b.maxY - b.minY);
-  const k = clampZoom(Math.min((width - margin * 2) / w, (height - margin * 2) / h, 2.2));
-  return { k, x: width / 2 - ((b.minX + b.maxX) / 2) * k, y: height / 2 - ((b.minY + b.maxY) / 2) * k };
+  const free = Math.max(1, height - bottom);
+  const k = clampZoom(Math.min((width - margin * 2) / w, (free - margin * 2) / h, 2.2));
+  return { k, x: width / 2 - ((b.minX + b.maxX) / 2) * k, y: free / 2 - ((b.minY + b.maxY) / 2) * k };
 }
 
 export function clampZoom(k: number): number {
@@ -165,9 +169,55 @@ export function pick(sim: Sim, view: View, mx: number, my: number): SimNode | nu
   return bestD <= hit * hit ? best : null;
 }
 
+export interface PlacedLabel {
+  id: string;
+  text: string;
+  /** Top-centre of the text, in screen pixels. */
+  x: number;
+  y: number;
+}
+
+export const LABEL_MAX = 28;
+const LABEL_H = 15;
+const LABEL_PAD = 3;
+
+export function labelText(title: string): string {
+  return title.length > LABEL_MAX ? `${title.slice(0, LABEL_MAX - 1)}…` : title;
+}
+
+/**
+ * Which labels to draw so none sits on another (QA C5): candidates by importance — the selected
+ * node, the hovered one, its neighbours, then by number of links — and each is placed only if
+ * its box doesn't overlap a placed one. Zooming in makes room, so more labels appear; the
+ * selected and hovered labels always show.
+ */
+export function placeLabels(sim: Sim, view: View, focus: string | null, selected: string | null,
+  measure: (text: string) => number, scale = 1): PlacedLabel[] {
+  const near = focus ? sim.adj.get(focus) : undefined;
+  const rank = (n: SimNode) => (n.id === selected ? 0 : n.id === focus ? 1 : near?.has(n.id) ? 2 : 3);
+  const candidates = sim.nodes
+    .filter((n) => showsLabel(n, sim, view, focus, selected))
+    .sort((a, b) => rank(a) - rank(b) || (sim.adj.get(b.id)!.size - sim.adj.get(a.id)!.size) || a.node.title.localeCompare(b.node.title));
+  const boxes: Array<{ l: number; r: number; t: number; b: number }> = [];
+  const placed: PlacedLabel[] = [];
+  for (const n of candidates) {
+    const text = labelText(n.node.title);
+    const p = toScreen(view, n);
+    const y = p.y + n.r * scale + 4;
+    const half = measure(text) / 2 + LABEL_PAD;
+    const box = { l: p.x - half, r: p.x + half, t: y - 1, b: y + LABEL_H };
+    const must = rank(n) < 2;
+    if (!must && boxes.some((o) => box.l < o.r && o.l < box.r && box.t < o.b && o.t < box.b)) continue;
+    boxes.push(box);
+    placed.push({ id: n.id, text, x: p.x, y });
+  }
+  return placed;
+}
+
 /** Labels only where they help: hubs, the selected node, the hovered one and its neighbours. */
 export function showsLabel(n: SimNode, sim: Sim, view: View, focus: string | null, selected: string | null): boolean {
   if (n.id === focus || n.id === selected || n.node.hub) return true;
   if (focus && sim.adj.get(focus)?.has(n.id)) return true;
-  return view.k > 1.8;
+  // Zoomed in, every node may have a label; placeLabels keeps only those that fit.
+  return view.k > 1.4;
 }

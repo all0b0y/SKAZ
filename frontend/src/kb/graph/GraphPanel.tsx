@@ -9,6 +9,10 @@ import { useLibrary, useServices, useUi } from '../state/context';
 import { drawGraph, readPalette } from './draw';
 import { createSim, fit, pick, reheat, settle, step, toGraph, zoomAt, type Sim, type View } from './layout';
 
+/** The hint line under the graph ("wheel — zoom …") gets its own strip: never drawn over labels. */
+const HINT_STRIP = 26;
+const fitView = (sim: Sim, w: number, h: number) => fit(sim, w, h, 36, HINT_STRIP);
+
 function NodeCard({ sim, id }: { sim: Sim; id: string }) {
   const { client } = useServices();
   const openDocument = useUi((s) => s.openDocument);
@@ -102,7 +106,7 @@ export function GraphPanel() {
       canvas.height = Math.round(h * dpr);
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (!fittedRef.current) { viewRef.current = fit(sim, w, h); fittedRef.current = true; }
+    if (!fittedRef.current) { viewRef.current = fitView(sim, w, h); fittedRef.current = true; }
     drawGraph(ctx, sim, { view: viewRef.current, hover: hoverRef.current, selected: selectedRef.current },
       readPalette(canvas, slot), w, h);
   }, [slot]);
@@ -114,8 +118,9 @@ export function GraphPanel() {
       frameRef.current = 0;
       const sim = simRef.current;
       const moving = sim && !reduce ? step(sim) : false;
-      // Until the user zooms or pans, the view follows the cooling layout.
-      if (moving && !userViewRef.current) fittedRef.current = false;
+      // Until the user zooms or pans, the view follows the cooling layout — also after a node was
+      // dragged (not while it is held: the node stays under the pointer).
+      if (moving && !userViewRef.current && !dragRef.current?.node) fittedRef.current = false;
       draw();
       if (moving) frameRef.current = requestAnimationFrame(loop);
     });
@@ -130,7 +135,7 @@ export function GraphPanel() {
     simRef.current = sim;
     fittedRef.current = false;
     userViewRef.current = false;
-    if (reduce) { const { w, h } = sizeRef.current; if (w && h) { viewRef.current = fit(sim, w, h); fittedRef.current = true; } }
+    if (reduce) { const { w, h } = sizeRef.current; if (w && h) { viewRef.current = fitView(sim, w, h); fittedRef.current = true; } }
     const focused = focusRef.current;
     setSelected((s) => (s && sim.byId.has(s) ? s
       : focused && sim.byId.has(focused) ? focused
@@ -192,7 +197,6 @@ export function GraphPanel() {
         const n = sim.byId.get(drag.node)!;
         const g = toGraph(viewRef.current, p.x, p.y);
         n.x = g.x; n.y = g.y; n.fixed = true;
-        userViewRef.current = true;
         if (!reduce) reheat(sim);
       } else {
         viewRef.current = { ...viewRef.current, x: drag.vx + (e.clientX - drag.sx), y: drag.vy + (e.clientY - drag.sy) };
@@ -230,7 +234,14 @@ export function GraphPanel() {
     else if (e.key === 'Enter' && selected) { e.preventDefault(); openDocument({ type: 'page', id: selected }); }
     else if (e.key === '+' || e.key === '=') { viewRef.current = zoomAt(viewRef.current, w / 2, h / 2, 1.25); request(); }
     else if (e.key === '-') { viewRef.current = zoomAt(viewRef.current, w / 2, h / 2, 0.8); request(); }
-    else if (e.key === '0') { viewRef.current = fit(sim, w, h); request(); }
+    else if (e.key === '0') {
+      // Fit and follow again (QA C5): a snapshot fit while the layout still moves after a drag
+      // would leave the graph a small blob once it settles.
+      viewRef.current = fitView(sim, w, h);
+      userViewRef.current = false;
+      fittedRef.current = false;
+      request();
+    }
   };
 
   // Native non-passive wheel listener so the page does not scroll while zooming.
