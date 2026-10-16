@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { KbDecisions, KbProblem, KbSpeechSettings } from '../../api/kb/types.gen';
 import type { EngineId, KeyProviderId } from '../api/names';
 import { KbApiError, errorText } from '../api/client';
@@ -434,8 +434,13 @@ export function SpeechLanguagesRow({ labelledBy }: { labelledBy?: string } = {})
   const { settings } = useServices();
   const speech = useSettings((s) => s.speech);
   const [result, show] = useResult();
+  // Quick clicks build on each other, not on the answer of the previous one still on its way,
+  // and are saved in the order they were made.
+  const [pending, setPending] = useState<string[] | null>(null);
+  const latest = useRef(0);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
   if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
-  const chosen = speech.value.languages;
+  const chosen = pending ?? speech.value.languages;
   return (
     <>
       <div className="kb-tags" role={labelledBy ? 'group' : undefined} aria-labelledby={labelledBy}>
@@ -446,7 +451,13 @@ export function SpeechLanguagesRow({ labelledBy }: { labelledBy?: string } = {})
               onClick={async () => {
                 const next = on ? chosen.filter((c) => c !== l.code) : [...chosen, l.code];
                 if (!next.length) { show({ ok: false, error: 'Keep at least one language.' }); return; }
-                show(await settings.getState().updateSpeech({ languages: next }));
+                const turn = ++latest.current;
+                setPending(next);
+                const saved = queue.current.then(() => settings.getState().updateSpeech({ languages: next }));
+                queue.current = saved;
+                const r = await saved;
+                if (turn === latest.current) setPending(null);
+                show(r);
               }}>
               {on && <Icon name="check" size={12} />}{l.name}
             </button>

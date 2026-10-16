@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
 import { unconfiguredWorld, baseWorld, without } from '../test/fakeBridge';
+import { serveFake } from '../test/fakeKb';
 import { summaryLines } from './Onboarding';
 
 const currentStep = (dialog: HTMLElement) =>
@@ -60,6 +61,10 @@ describe('First launch', () => {
     await user.click(await within(chips).findByRole('button', { name: 'English' }));
     await waitFor(() => expect(within(chips).getByRole('button', { name: 'English' })).toHaveAttribute('aria-pressed', 'true'));
     await user.click(within(chips).getByRole('button', { name: 'Russian' }));
+    // A quick third click builds on the two before it, even before their answers arrive.
+    fake.requestMock.mockImplementationOnce(async (req) => { await new Promise((r) => setTimeout(r, 30)); return serveFake(fake.world, req)!; });
+    await user.click(within(chips).getByRole('button', { name: 'German' }));
+    await user.click(within(chips).getByRole('button', { name: 'German' }));
     await user.selectOptions(within(dialog).getByLabelText('Default translation'), 'ru');
     await waitFor(() => expect(fake.world.speech).toMatchObject({ languages: ['en', 'ru'], translate_by_default: true, translation_language: 'ru' }));
     expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/speech', body: { languages: ['en', 'ru'] } }));
