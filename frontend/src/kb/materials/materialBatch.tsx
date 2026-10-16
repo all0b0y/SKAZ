@@ -163,7 +163,16 @@ export function MoveToMenu({ open, onClose, anchorRef, count, onPick }: {
   const [creating, setCreating] = useState(false);
   const close = () => { setCreating(false); onClose(); };
   return (
-    <Popover open={open} onClose={close} anchorRef={anchorRef} label="Move to" placement="top-start" width={260} className="kb-moveto">
+    <Popover open={open} onClose={close} anchorRef={anchorRef} label="Move to" placement="top-start" width={260} className="kb-moveto"
+      onKeyDown={(e) => {
+        // ↑↓ through the folders, as in every menu.
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        const all = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+        if (!all.length) return;
+        e.preventDefault();
+        const i = all.indexOf(document.activeElement as HTMLElement);
+        all[(i + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length]!.focus();
+      }}>
       <p className="kb-moveto__head">Move {countOf(count, 'material')} to</p>
       <div role="menu" aria-label="Folders" className="kb-menu__list">
         {folders.map((f: KbFolder) => (

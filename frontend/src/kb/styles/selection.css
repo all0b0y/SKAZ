@@ -193,3 +193,5 @@ tr[data-sel-id]:focus-within > td:first-child { box-shadow: inset 2px 0 0 var(--
 @media (prefers-reduced-motion: reduce) {
   .kb-selbox { transition: none; }
 }
+.kb-moveto { padding: 5px; }
+.kb-moveto__head { margin: 2px 8px 4px; font-size: var(--t-xs); color: var(--kb-muted); }
