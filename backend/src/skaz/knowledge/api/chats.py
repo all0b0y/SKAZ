@@ -30,6 +30,7 @@ from ..chats.model import (
 from ..chats.service import ChatConflict, ChatService, ChatView
 from ..errors import KnowledgeError
 from ..service import KnowledgeService
+from ..store.database import MAX_DB_INT
 from .deps import kb_call
 from .schemas import KbCitation, KbPageRef
 from .schemas_chats import (
@@ -94,7 +95,7 @@ def get_chats(request: Request) -> ChatService:
 
 
 ChatsDep = Annotated[ChatService, Depends(get_chats)]
-After = Annotated[int, Query(ge=0)]
+After = Annotated[int, Query(ge=0, le=MAX_DB_INT)]
 Wait = Annotated[float, Query(ge=0, le=MAX_WAIT_S)]
 
 

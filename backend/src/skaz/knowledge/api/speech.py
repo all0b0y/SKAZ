@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from ...native_io import disk_call
 from ..errors import KnowledgeError
 from ..speech.service import ImportInput, SpeechService, SpeechView
+from ..store.database import MAX_DB_INT
 from .schemas import KbFragment
 from .schemas_speech import (
     KbImportCreate,
@@ -70,8 +71,10 @@ async def read_recording(material_id: str, speech: SpeechDep) -> KbSpeechMateria
 
 
 @router.get("/kb/recordings/{material_id}/live")
-async def read_recording_live(material_id: str, speech: SpeechDep,
-                              since_seg: Annotated[int | None, Query(ge=0)] = None) -> KbRecordingLive:
+async def read_recording_live(
+    material_id: str, speech: SpeechDep,
+    since_seg: Annotated[int | None, Query(ge=0, le=MAX_DB_INT)] = None,
+) -> KbRecordingLive:
     """The live panel's text after the material's fragments: the open monologue's final words
     and the words still being recognised, plus the recorder's stream state, and with ``since_seg``
     the fragments added after it. Poll it (one request at a time)."""

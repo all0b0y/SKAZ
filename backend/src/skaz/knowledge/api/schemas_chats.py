@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
+from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
 
@@ -43,7 +44,7 @@ class KbQuote(BaseModel):
     source: Literal["page", "material", "chat"]
     id: str = Field(min_length=1, max_length=200)
     block_id: str | None = Field(default=None, max_length=200)
-    seg: int | None = Field(default=None, ge=1)
+    seg: int | None = Field(default=None, ge=1, le=MAX_DB_INT)
     message_id: str | None = Field(default=None, max_length=200)
     text: str = Field(min_length=1, max_length=20_000)
 
