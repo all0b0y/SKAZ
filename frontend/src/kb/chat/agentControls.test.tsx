@@ -173,3 +173,25 @@ describe('Chat events: part_update', () => {
     expect(next.cursor).toBe(9);
   });
 });
+
+describe('Review beside the chat (book icon)', () => {
+  it('opens the same request in the right panel with every change; the decision bar at its bottom decides for the card too', async () => {
+    const { user, fake } = await openChat(/Entropy — edit/);
+    const card = await within(centre()).findByRole('region', { name: 'Codex wants to edit Entropy' });
+    await user.click(within(card).getByRole('button', { name: 'Review beside the chat' }));
+    const panel = screen.getByRole('complementary', { name: 'Review' });
+    expect(within(panel).getByRole('heading', { name: 'Entropy' })).toBeInTheDocument();
+    expect(within(panel).getByText('Codex wants to edit · 3 changes')).toBeInTheDocument();
+    expect(within(panel).getByText(/added/)).toBeInTheDocument();
+    expect(within(within(panel).getByRole('list', { name: 'Changes' })).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(panel).queryByRole('button', { name: /Show all/ })).not.toBeInTheDocument();
+    // Deny's reason works here as in the card.
+    await user.click(within(panel).getByRole('button', { name: 'Deny' }));
+    expect(within(panel).getByRole('textbox', { name: 'Reason for Codex (optional)' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    await user.click(within(panel).getByRole('button', { name: 'Allow in this chat' }));
+    expect(decides(fake)).toEqual([['/kb/permissions/perm-edit/decide', { decision: 'allow_chat' }]]);
+    expect(await within(panel).findByRole('group', { name: 'Allowed in this chat: Edited Entropy' })).toBeInTheDocument();
+    expect(within(centre()).getByRole('group', { name: 'Allowed in this chat: Edited Entropy' })).toBeInTheDocument();
+  });
+});

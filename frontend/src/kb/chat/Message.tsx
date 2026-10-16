@@ -6,6 +6,7 @@ import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
 import { quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
+import { useServices } from '../state/context';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
 import { SourcesProvider, SourcesRow } from '../cite/SourceMarks';
@@ -101,12 +102,17 @@ export function plainText(parts: KbMessagePart[]): string {
 
 function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePart[] }) {
   const open = useOpenDocument();
+  const { ui } = useServices();
   return (
     <>
       {toBlocks(parts).map((b, i) => {
         if (b.kind === 'connection') return <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />;
         if (b.kind === 'permission') {
-          return <PermissionCard key={b.part.id} chatId={chatId} part={b.part} onOpen={(id) => open({ type: 'page', id })} />;
+          const partId = b.part.id;
+          return (
+            <PermissionCard key={partId} chatId={chatId} part={b.part} onOpen={(id) => open({ type: 'page', id })}
+              onReview={() => ui.getState().openReview(chatId, partId)} />
+          );
         }
         if (b.kind === 'question') return null;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
