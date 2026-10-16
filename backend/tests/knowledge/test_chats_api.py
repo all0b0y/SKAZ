@@ -726,6 +726,13 @@ async def test_mentions_group_wiki_materials_and_chats(env: Env) -> None:
     assert len(lectures["materials"]) == 1 and lectures["materials"][0]["type"] == "material"
     everything = (await env.client.get("/kb/mentions")).json()
     assert {page["id"] for page in everything["pages"]} == {lib.concept, lib.analysis}
+    # QA D8: several words narrow the list; each word may sit anywhere in the title.
+    await env.chat(title="B5 · quality check")
+    await env.chat(title="B5 · Honeybees")
+    narrowed = (await env.client.get("/kb/mentions", params={"q": "B5 qual"})).json()
+    assert [chat["title"] for chat in narrowed["chats"]] == ["B5 · quality check"]
+    assert [chat["title"] for chat in (await env.client.get(
+        "/kb/mentions", params={"q": "check b5"})).json()["chats"]] == ["B5 · quality check"]
 
 
 async def test_an_analysis_page_never_backs_a_source_claim(env: Env) -> None:

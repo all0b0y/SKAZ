@@ -297,7 +297,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         return;
       }
     }
-    if (mention && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
+    if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void submit();
@@ -370,7 +370,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   };
 
   const placeholderShown = empty && dictation.phase === 'idle';
-  const popupOpen = mention !== null;
+  // A query of several words stays a mention only while something matches; otherwise it is just text.
+  const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
 
   return (

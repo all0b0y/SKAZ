@@ -706,10 +706,11 @@ class ChatService:
     # -- @-mentions -------------------------------------------------------------------
 
     def mentions(self, query: str, limit: int = MENTION_LIMIT) -> MentionResults:
-        key = name_key(query.strip())
+        # Every word of the query must be in the name, in any order ("B5 qual" → "B5 · quality check").
+        words = name_key(query).split()
 
         def hit(*names: str | None) -> bool:
-            return not key or any(name and key in name_key(name) for name in names)
+            return not words or any(name and all(word in name_key(name) for word in words) for name in names)
 
         pages = [(page.id, page.kind, page.title) for page in self.kb.page_repo.list_all()
                  if hit(page.title, page.original, *page.aliases)][:limit]

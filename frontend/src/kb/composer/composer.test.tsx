@@ -78,6 +78,22 @@ describe('Message field', () => {
     expect(picker).toHaveAccessibleName(/Claude Code/);
   });
 
+  it('@ with several words keeps narrowing; words that match nothing are just text (QA D8)', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('@Lecture 8');
+    const popup = await screen.findByTestId('mention-popup');
+    await waitFor(() => expect(within(popup).getAllByRole('option').map((o) => o.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Lecture 8')])));
+    await waitFor(() => expect(within(popup).getAllByRole('option').every((o) => /lecture 8/i.test(o.textContent ?? ''))).toBe(true));
+    await user.keyboard('{Enter}');
+    expect(input.querySelector('.kb-token--mention')).toHaveTextContent(/Lecture 8/);
+    await user.keyboard(' @Lecture zzz');
+    await waitFor(() => expect(screen.queryByTestId('mention-popup')).not.toBeInTheDocument());
+  });
+
   it('each chat keeps its own unsent draft; a hand-off that opens New chat lands in its field (QA D2/D3)', async () => {
     const user = userEvent.setup();
     const w = chatWorld();

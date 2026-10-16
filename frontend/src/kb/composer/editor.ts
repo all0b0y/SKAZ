@@ -111,10 +111,12 @@ export function mentionAtCaret(root: HTMLElement, selection: Selection | null = 
   const node = selection.anchorNode;
   if (node.nodeType !== Node.TEXT_NODE || !root.contains(node)) return null;
   const before = (node.nodeValue ?? '').slice(0, selection.anchorOffset);
-  const match = /(^|[\s(\u00a0])@([^\s@]{0,40})$/.exec(before);
-  if (!match) return null;
+  // The query may have several words (QA D8: "@B5 qual"), single spaces between them, up to 40
+  // characters; a double space or a line break ends it.
+  const match = /(^|[\s(\u00a0])@((?:[^\s@]+[ \u00a0]?){0,8})$/.exec(before);
+  if (!match || match[2]!.length > 40) return null;
   const start = before.length - match[2]!.length - 1;
-  return { node: node as Text, start, end: selection.anchorOffset, query: match[2]! };
+  return { node: node as Text, start, end: selection.anchorOffset, query: match[2]!.replace(/\u00a0/g, ' ') };
 }
 
 function placeCaretAfter(node: Node): void {

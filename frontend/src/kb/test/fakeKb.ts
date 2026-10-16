@@ -718,8 +718,9 @@ const ROUTES: FakeRoutes = {
     touchList(w, c);
   }],
   'GET /kb/mentions': [200, (w, { query }) => {
-    const needle = String(query.q ?? '').toLocaleLowerCase();
-    const has = (t: string) => t.toLocaleLowerCase().includes(needle);
+    // Like the backend: every word of the query is in the title, in any order.
+    const words = String(query.q ?? '').toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    const has = (t: string) => words.every((w) => t.toLocaleLowerCase().includes(w));
     return {
       pages: w.pages.filter((p) => has(p.title)).map(pageRef),
       materials: w.materials.filter((m) => has(m.title)).map((m): KbRef => ({ type: 'material', id: m.id, title: m.title })),
