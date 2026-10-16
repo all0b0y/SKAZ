@@ -7,6 +7,7 @@ import { InlineMarkdown } from './Markdown';
 import { AnswerMarkdown } from '../ui/AnswerMarkdown';
 import { plainText, toBlocks } from './Message';
 import { openTarget } from '../state/document';
+import { forgetInChat } from '../state/chats';
 
 /** Freeze the clock at 14:00 today (only Date; timers stay real). */
 function atMidday() {
@@ -181,6 +182,41 @@ describe('Chats in the side panel', () => {
     await waitFor(() => expect(within(centre).queryByText('Claude Code is not installed.')).not.toBeInTheDocument());
   });
 
+  it('a material deleted while its chat is open: the citation turns "no longer available" at once (QA D4/B9)', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
+    expect(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' }).length).toBeGreaterThan(0);
+    await act(async () => { await services.library.getState().forgetMaterial('m5'); });
+    const sources = within(answer).getByRole('group', { name: 'Sources' });
+    expect(within(sources).getByRole('button', { name: 'Source 1: Lecture 5 (no longer available)' })).toBeInTheDocument();
+    await user.click(within(sources).getByRole('button', { name: /Source 1/ }));
+    expect(await screen.findByText('This source is no longer available.')).toBeInTheDocument();
+  });
+
+  it('a chip to a page that is gone says "Page was removed" and opens nothing; opening a removed page offers Close, not Try again (QA D5)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const answer = world.chats.find((c) => c.id === 'c1')!.messages[1]!;
+    const pagePart = answer.parts.find((p) => p.type === 'page')!;
+    Object.assign(pagePart, { available: false });
+    world.failures['GET /kb/wiki/pages/p-entropy'] = { status: 404, detail: 'Page not found.' };
+    const { services } = renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const article = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
+    const gone = within(article).getAllByRole('note', { name: 'Entropy: page was removed' })[0]!;
+    expect(gone).toHaveTextContent('Page was removed');
+    expect(within(article).queryByRole('button', { name: 'Wiki page: Entropy' })).not.toBeInTheDocument();
+
+    // A page deleted after the chat was read: the panel says so and the chats mark it.
+    act(() => { services.ui.getState().openDocument({ type: 'page', id: 'p-entropy' }); });
+    const panel = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(panel).findByText('Page was removed from the wiki.')).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
   it('Rename: leaving the field saves the change; an unchanged or empty name just closes it (QA D7)', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
@@ -241,6 +277,19 @@ describe('Answer text', () => {
     expect(wiki.querySelector('ol')).toHaveAttribute('start', '3');
     const { container: first } = render(<InlineMarkdown pieces={['1. one']} slot={() => null} />);
     expect(first.querySelector('ol')).not.toHaveAttribute('start');
+  });
+
+  it('forgetInChat: a gone page/material is marked in every part; nothing else changes identity', () => {
+    const chat = chatWorld().chats.find((c) => c.id === 'c1')!;
+    expect(forgetInChat(chat, { material: 'm-unrelated' })).toBe(chat);
+    const after = forgetInChat(forgetInChat(chat, { page: 'p-entropy' }), { material: 'm1' });
+    const parts = after.messages[1]!.parts;
+    expect(parts.filter((p) => p.type === 'page').every((p) => p.type === 'page' && p.available === false)).toBe(true);
+    const conn = parts.find((p) => p.type === 'connection');
+    if (conn?.type !== 'connection') throw new Error('connection expected');
+    expect(conn.folders.find((f) => f.citation.material_id === 'm1')!.citation.available).toBe(false);
+    expect(conn.folders.filter((f) => f.citation.material_id !== 'm1').every((f) => f.citation.available)).toBe(true);
+    expect(after.messages[0]).toBe(chat.messages[0]);
   });
 
   it('parts: text/cite/page flow as one run; a connection is its own block; tools are not text', () => {

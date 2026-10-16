@@ -52,6 +52,8 @@ export interface ChatsActions {
   /** Change agent/model/effort; on an existing chat the backend records it (409 = not available). */
   setAgent: (chatId: string | null, choice: AgentChoice) => Promise<ActionResult>;
   setDraftAgent: (choice: AgentChoice | null) => void;
+  /** A material or page was deleted: mark it gone in every loaded chat (see `forgetInChat`). */
+  forget: (gone: Gone) => void;
 }
 
 export type ChatsStore = StoreApi<ChatsData & ChatsActions>;
@@ -75,6 +77,42 @@ function upsertMessage(messages: KbMessage[], message: KbMessage): KbMessage[] {
   const next = messages.slice();
   next[i] = message;
   return next;
+}
+
+/** What is gone from the library: chips to it in already loaded answers stop pointing at it. */
+export interface Gone {
+  material?: string;
+  page?: string;
+}
+
+/**
+ * A deleted material or page, in the answers of a chat already on screen (QA D4/B9/D5): its
+ * citations become "no longer available" and its page chips "removed", exactly as a fresh read
+ * from the backend would show them — no reload needed. Untouched messages keep their identity.
+ */
+export function forgetInChat(chat: KbChat, gone: Gone): KbChat {
+  const cite = <T extends { material_id: string; available: boolean }>(c: T): T =>
+    (gone.material && c.material_id === gone.material && c.available ? { ...c, available: false } : c);
+  let changed = false;
+  const messages = chat.messages.map((m) => {
+    const parts = m.parts.map((part) => {
+      let next = part;
+      if (part.type === 'cite') {
+        const citation = cite(part.citation);
+        if (citation !== part.citation) next = { ...part, citation };
+      } else if (part.type === 'connection') {
+        const folders = part.folders.map((f) => { const citation = cite(f.citation); return citation === f.citation ? f : { ...f, citation }; });
+        const page = gone.page && part.page?.id === gone.page ? null : part.page;
+        if (page !== part.page || folders.some((f, i) => f !== part.folders[i])) next = { ...part, folders, page };
+      } else if (part.type === 'page' && gone.page && part.page.id === gone.page && part.available !== false) {
+        next = { ...part, available: false };
+      }
+      if (next !== part) changed = true;
+      return next;
+    });
+    return parts.some((p, i) => p !== m.parts[i]) ? { ...m, parts } : m;
+  });
+  return changed ? { ...chat, messages } : chat;
 }
 
 /** Apply long-poll events to a chat. A `message` event is a full snapshot; `delta` appends text. */
@@ -305,6 +343,16 @@ export function createChatsStore(client: KbClient): ChatsStore {
         });
       },
       setDraftAgent: (choice) => set({ draftAgent: choice }),
+      forget: (gone) => set((s) => {
+        let changed = false;
+        const chats: Record<string, OpenChat> = {};
+        for (const [id, open] of Object.entries(s.chats)) {
+          const chat = open.chat ? forgetInChat(open.chat, gone) : null;
+          if (chat !== open.chat) changed = true;
+          chats[id] = chat === open.chat ? open : { ...open, chat };
+        }
+        return changed ? { chats } : {};
+      }),
     };
   });
 }

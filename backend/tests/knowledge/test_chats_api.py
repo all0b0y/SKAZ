@@ -551,6 +551,22 @@ async def test_a_saved_connection_keeps_its_side_links_as_links(env: Env) -> Non
     assert "[[Materials/Химия/Учебник химии/Учебник химии#^seg-1|" in body
 
 
+async def test_a_page_chip_says_when_its_page_is_gone(env: Env) -> None:
+    # QA D5: a chip to a deleted page opened a dead end ("Page not found" + Try again).
+    lib = env.library
+    env.agents.scripts["codex"] = lambda _turn: text(f"Смотри страницу ⟦p:{lib.concept}⟧.")
+    chat = await env.chat()
+    message = await env.answered(chat["id"], "Где про энтропию?")
+    assert [part["available"] for part in chips(message, "page")] == [True]
+    page = env.runtime.kb.page_repo.get(lib.concept)
+    assert page is not None
+    (Path(env.runtime.kb.library_root) / page.rel_path).unlink()
+    await asyncio.to_thread(env.runtime.kb.rescan)
+    again = await env.message(chat["id"], message["id"])
+    pages = [(part["available"], part["page"]["title"]) for part in chips(again, "page")]
+    assert pages == [(False, "Энтропия")]
+
+
 async def test_a_double_save_to_wiki_writes_one_page(env: Env) -> None:
     env.agents.scripts["codex"] = lambda _turn: text("Энтропия — мера беспорядка.")
     chat = await env.chat()

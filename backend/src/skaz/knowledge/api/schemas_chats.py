@@ -66,6 +66,8 @@ class KbPagePart(BaseModel):
     type: Literal["page"]
     page: KbPageRef
     block_id: str | None
+    #: ``False`` once the page is gone from the wiki: the chip says so instead of opening a dead end.
+    available: bool = True
 
 
 class KbConnectionFolder(BaseModel):

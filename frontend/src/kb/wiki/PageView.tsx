@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
-import { errorText } from '../api/client';
+import { errorText, KbApiError } from '../api/client';
 import { AnswerMarkdown } from '../ui/AnswerMarkdown';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
@@ -17,6 +17,7 @@ import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 
 const NO_CITES: never[] = [];
+const PAGE_GONE = 'Page was removed from the wiki.';
 
 /** Block text rendered by the old UI's safe Markdown renderer (no raw HTML, http(s) links only). */
 function BlockMarkdown({ text, quote }: { text: string; quote: QuoteSource }) {
@@ -241,7 +242,7 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
 
 /** Wiki page in the right panel (v7–v8, decisions 20–22). */
 export function PageView({ target, nonce }: { target: DocTarget; nonce: number }) {
-  const { client } = useServices();
+  const { client, chats } = useServices();
   const askAbout = useAskAbout();
   const expanded = useUi((s) => s.docExpanded);
   const openGraph = useUi((s) => s.openGraph);
@@ -251,7 +252,16 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const [menuOpen, setMenuOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [jobs, setJobs] = useState<Record<string, string>>({});
-  const { state, reload, set } = useLoad(target.id, async () => await client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } }));
+  const closeDoc = useUi((s) => s.closeDoc);
+  const { state, reload, set } = useLoad(target.id, async () => await client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } })
+    .catch((e: unknown) => {
+      // Gone from the wiki: retrying can't help (QA D5); chats on screen mark their chips to it.
+      if (e instanceof KbApiError && e.status === 404) {
+        chats.getState().forget({ page: target.id });
+        throw new KbApiError(404, PAGE_GONE);
+      }
+      throw e;
+    }));
   const page = state.value;
   useScrollTarget(bodyRef.current, target.block_id ?? null, nonce, state.load === 'ready');
 
@@ -322,7 +332,9 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         {state.load === 'loading' && !page && <div className="kb-doc__wait"><Spinner label="Opening the page" /></div>}
         {state.load === 'error' && (
           <Banner tone="error" title="Couldn’t open this page."
-            actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
+            actions={state.error === PAGE_GONE
+              ? <Button size="sm" icon="close" onClick={closeDoc}>Close</Button>
+              : <Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {page && (
           <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={page.kind}>
