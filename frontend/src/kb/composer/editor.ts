@@ -93,6 +93,33 @@ export function serialize(root: HTMLElement): EditorValue {
   return { text: text.replace(/\n+$/, ''), mentions, quotes };
 }
 
+/**
+ * Tokens that point at a material deleted since they were put in the field (QA B8): marked as
+ * deleted (struck out, labelled) so the message can't go with them. Returns their titles.
+ */
+export function markGone(root: HTMLElement, gone: ReadonlySet<string>): string[] {
+  const titles: string[] = [];
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-token]'))) {
+    const token = readToken(el);
+    if (!token) continue;
+    const id = token.kind === 'mention' ? (token.ref.type === 'material' ? token.ref.id : null)
+      : token.quote.source === 'material' ? token.quote.id : null;
+    const isGone = id !== null && gone.has(id);
+    if (isGone === el.classList.contains('is-gone')) {
+      if (isGone) titles.push(token.kind === 'mention' ? token.ref.title : quoteLabel(token.quote.text));
+      continue;
+    }
+    el.classList.toggle('is-gone', isGone);
+    const base = token.kind === 'mention' ? `Reference: ${token.ref.title}` : el.getAttribute('aria-label')?.replace(/ \(deleted\)$/, '') ?? '';
+    el.setAttribute('aria-label', isGone ? `${base} (deleted)` : base);
+    if (isGone) {
+      el.title = 'This material was deleted';
+      titles.push(token.kind === 'mention' ? token.ref.title : quoteLabel(token.quote.text));
+    } else el.removeAttribute('title');
+  }
+  return titles;
+}
+
 export function isEmpty(root: HTMLElement): boolean {
   const v = serialize(root);
   return !v.text.trim() && v.mentions.length === 0 && v.quotes.length === 0;
@@ -111,10 +138,12 @@ export function mentionAtCaret(root: HTMLElement, selection: Selection | null = 
   const node = selection.anchorNode;
   if (node.nodeType !== Node.TEXT_NODE || !root.contains(node)) return null;
   const before = (node.nodeValue ?? '').slice(0, selection.anchorOffset);
-  const match = /(^|[\s(\u00a0])@([^\s@]{0,40})$/.exec(before);
-  if (!match) return null;
+  // The query may have several words (QA D8: "@B5 qual"), single spaces between them, up to 40
+  // characters; a double space or a line break ends it.
+  const match = /(^|[\s(\u00a0])@((?:[^\s@]+[ \u00a0]?){0,8})$/.exec(before);
+  if (!match || match[2]!.length > 40) return null;
   const start = before.length - match[2]!.length - 1;
-  return { node: node as Text, start, end: selection.anchorOffset, query: match[2]! };
+  return { node: node as Text, start, end: selection.anchorOffset, query: match[2]!.replace(/\u00a0/g, ' ') };
 }
 
 function placeCaretAfter(node: Node): void {

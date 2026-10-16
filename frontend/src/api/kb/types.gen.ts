@@ -750,6 +750,7 @@ export interface KbPagePart {
   type: "page";
   page: KbPageRef;
   block_id: string | null;
+  available?: boolean;
 }
 
 export interface KbPageRef {

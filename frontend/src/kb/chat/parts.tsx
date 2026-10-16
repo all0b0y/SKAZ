@@ -21,16 +21,23 @@ export function CiteChip({ citation }: { citation: KbCitation }) {
   return <Chip kind={kind} label={label} meta={meta} onClick={() => open(citationRef(citation))} />;
 }
 
-/** Wiki page chip: opens the page on the right. */
-export function PageChip({ page, blockId }: { page: KbPageRef; blockId?: string | null }) {
+/** Wiki page chip: opens the page on the right; a page that is gone says so and opens nothing (QA D5). */
+export function PageChip({ page, blockId, available = true }: { page: KbPageRef; blockId?: string | null; available?: boolean }) {
   const open = useOpenDocument();
+  if (!available) {
+    return (
+      <span className="kb-chip is-gone" role="note" aria-label={`${page.title}: page was removed`} title="Page was removed">
+        <Icon name="error" size={12} />{page.title}<span className="kb-chip__meta">Page was removed</span>
+      </span>
+    );
+  }
   return <Chip kind="wiki" label={page.title} onClick={() => open(pageRef(page, blockId))} />;
 }
 
 /** An inline slot of an answer: one claim's source numbers, or a wiki page chip. */
 export function InlinePart({ part }: { part: InlineSlot }): ReactNode {
   if (part.type === 'cites') return <SourceMarks citations={part.citations} />;
-  return <PageChip page={part.page} blockId={part.block_id} />;
+  return <PageChip page={part.page} blockId={part.block_id} available={part.available !== false} />;
 }
 
 /** Colour of a folder by its place in the library (four folder colours, never the only cue). */

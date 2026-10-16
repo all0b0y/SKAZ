@@ -34,13 +34,24 @@ export function Popover({
   onCloseRef.current = onClose;
 
   useLayoutEffect(() => {
-    if (!open) { setPos(null); return; }
+    if (!open) { setPos(null); return undefined; }
     const anchor = anchorRef.current;
     const pop = ref.current;
-    if (!anchor || !pop) return;
-    const a = anchor.getBoundingClientRect();
-    const p = pop.getBoundingClientRect();
-    setPos(placePopup(a, { width: p.width, height: p.height }, placement, boundaryFor(anchor, { placement })));
+    if (!anchor || !pop) return undefined;
+    const place = () => {
+      const a = anchor.getBoundingClientRect();
+      // offsetWidth/Height: the laid-out size, not the size mid entry animation (scale).
+      const size = { width: pop.offsetWidth || pop.getBoundingClientRect().width, height: pop.offsetHeight || pop.getBoundingClientRect().height };
+      const next = placePopup(a, size, placement, boundaryFor(anchor, { placement }));
+      setPos((now) => (now && now.left === next.left && now.top === next.top ? now : next));
+    };
+    place();
+    // Content that arrives later (a source's fragment text) makes the popup taller: place it again,
+    // so near the window's bottom it flips above its anchor instead of running off-screen (QA B10).
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    ro?.observe(pop);
+    window.addEventListener('resize', place);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', place); };
   }, [open, placement, anchorRef]);
 
   useEffect(() => {

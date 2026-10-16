@@ -115,7 +115,8 @@ function LinkForm({ onDone }: { onDone: (url: string) => void }) {
     onDone(value);
   };
   return (
-    <form className="kb-attachform" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+    // noValidate: the field's own message (below) instead of the browser's bubble in the system language (QA D14).
+    <form className="kb-attachform" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <label htmlFor={id} className="kb-attachform__label">Link to an article or a video</label>
       <input id={id} className="kb-attachform__input" type="url" placeholder="https://" value={url}
         onChange={(e) => { setUrl(e.target.value); setError(null); }} aria-invalid={error ? true : undefined} />

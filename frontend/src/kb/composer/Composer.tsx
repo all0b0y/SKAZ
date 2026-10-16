@@ -9,12 +9,15 @@ import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServi
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
-import { clearEditor, insertText, insertToken, isEmpty, mentionAtCaret, serialize, type MentionMatch } from './editor';
+import { clearEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { QuickQuestions } from './QuickQuestions';
 import { openTarget } from '../state/document';
 import { ingestWhenReady } from '../materials/ingestWhenReady';
+import { AgentFix } from '../chat/AgentFix';
+
+const NEW_CHAT = 'new';
 
 type Dictation = { phase: 'idle' } | { phase: 'recording'; started: number } | { phase: 'transcribing' };
 
@@ -51,6 +54,12 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const [dictation, setDictation] = useState<Dictation>({ phase: 'idle' });
   const [hover, setHover] = useState<{ text: string; left: number; top: number } | null>(null);
   const captureRef = useRef<Capture | null>(null);
+  const drafts = services.composer.getState().drafts;
+  const draftKey = useRef<string | null>(null);
+  /** The chat a message is being sent from (its field must not be put aside as a draft). */
+  const sendingFrom = useRef<string | null>(null);
+  const attachmentsRef = useRef<Attachment[]>([]);
+  attachmentsRef.current = attachments;
   /** The card of the paste just made: ⌘Z right after it puts the text into the field instead. */
   const lastPaste = useRef<string | null>(null);
 
@@ -60,6 +69,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const choice = useAgentChoice(chatId);
   const agents = useAgents((s) => s.agents);
   const folders = useLibrary((s) => s.folders);
+  const goneIds = useLibrary((s) => s.gone);
+  const gone = useMemo(() => new Set(goneIds), [goneIds]);
   const wiki = useSettings((s) => s.wiki.value);
   const speech = useSettings((s) => s.speech.value);
   const doc = useUi(openTarget);
@@ -74,6 +85,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const model = agent?.models.find((m) => m.id === choice?.model);
   const agentReady = agent?.state === 'ready';
   const unavailable = `${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`;
+  /** The error is the agent's (not installed, signed out…): it comes with the way to fix it (QA D6). */
+  const agentError = error === unavailable;
 
   const refresh = useCallback(() => {
     const root = editorRef.current;
@@ -84,35 +97,64 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (!m) setActive(0);
   }, []);
 
-  // Items handed over from elsewhere (selection toolbar, decisions, ⌘K).
+  useEffect(() => {
+    if (focusTick) editorRef.current?.focus({ preventScroll: true });
+  }, [focusTick]);
+
+  useEffect(() => {
+    // Each chat keeps its own unsent draft (QA D3/A22): leaving a chat puts its field aside, coming
+    // back gives it back; another chat starts with its own draft or an empty field. A message that is
+    // being sent moves with the chat it creates.
+    const root = editorRef.current;
+    const key = chatId ?? NEW_CHAT;
+    const previous = draftKey.current;
+    draftKey.current = key;
+    lastPaste.current = null;
+    setError(null);
+    if (!root || previous === key) { refresh(); return; }
+    if (previous !== null && previous === sendingFrom.current) {
+      sendingFrom.current = key;
+      refresh();
+      return;
+    }
+    if (previous !== null) {
+      if (!isEmpty(root) || attachmentsRef.current.length) {
+        drafts.set(previous, { nodes: Array.from(root.childNodes), attachments: attachmentsRef.current });
+      } else drafts.delete(previous);
+    }
+    clearEditor(root);
+    const draft = drafts.get(key);
+    drafts.delete(key);
+    if (draft) root.replaceChildren(...draft.nodes);
+    setAttachments(draft ? (draft.attachments as Attachment[]) : []);
+    refresh();
+  }, [chatId, refresh, drafts]);
+
+  // Items handed over from elsewhere (selection toolbar, decisions). After the chat switch above, so
+  // a hand-off that opens another chat lands in that chat's field (QA D2).
   useEffect(() => {
     if (!queued) return;
     const root = editorRef.current;
     if (!root) return;
-    const { items, send } = services.composer.getState().take();
+    const items = services.composer.getState().take();
     for (const item of items) {
       if (item.kind === 'quote') insertToken(root, { kind: 'quote', quote: item.quote });
       else if (item.kind === 'mention') insertToken(root, { kind: 'mention', ref: item.ref });
       else insertText(root, item.text);
     }
     refresh();
-    if (send) void submit();
-    // submit is stable enough for this hand-off; it reads current state through refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queued]);
 
-  useEffect(() => {
-    if (focusTick) editorRef.current?.focus({ preventScroll: true });
-  }, [focusTick]);
 
+  // A material deleted while it is referenced here (QA B8): its token is marked and its
+  // attachment says so; neither can be sent.
   useEffect(() => {
-    // A new chat starts with an empty field and no attachments.
-    if (editorRef.current) clearEditor(editorRef.current);
-    setAttachments([]);
-    lastPaste.current = null;
-    setError(null);
-    refresh();
-  }, [chatId, refresh]);
+    if (editorRef.current) markGone(editorRef.current, gone);
+    setAttachments((list) => (list.some((a) => a.materialId && gone.has(a.materialId) && a.state !== 'failed')
+      ? list.map((a) => (a.materialId && gone.has(a.materialId) ? { ...a, state: 'failed', error: 'This material was deleted.' } : a))
+      : list));
+  }, [gone, chatId]);
 
   useEffect(() => () => captureRef.current?.cancel(), []);
 
@@ -198,6 +240,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
       && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
     if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
+    const deleted = [...markGone(root, gone), ...attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
+    if (deleted.length) { setError(`“${deleted[0]}” was deleted. Remove it from the message to send.`); return; }
     if (!agentReady) { setError(unavailable); return; }
     if (answering) return;
     setSending(true);
@@ -225,7 +269,9 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     }
     const ready = list.filter((a) => a.state === 'ready' && a.materialId);
     const input: KbMessageInput = { text: value.text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!) };
+    sendingFrom.current = draftKey.current;
     const result = await chats.getState().send(input, openContext());
+    sendingFrom.current = null;
     setSending(false);
     if (!result.ok) { setError(result.error); return; }
     // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
@@ -270,7 +316,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         return;
       }
     }
-    if (mention && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
+    if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void submit();
@@ -343,7 +389,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   };
 
   const placeholderShown = empty && dictation.phase === 'idle';
-  const popupOpen = mention !== null;
+  // A query of several words stays a mention only while something matches; otherwise it is just text.
+  const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
 
   return (
@@ -435,7 +482,11 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
             </Tooltip>
           )}
         </div>
-        {error && <p className="kb-composer__error" role="alert">{error}</p>}
+        {error && (
+          <p className="kb-composer__error" role="alert">
+            {error}{agentError && !agentReady && <> <AgentFix agent={agent} /></>}
+          </p>
+        )}
       </div>
     </>
   );

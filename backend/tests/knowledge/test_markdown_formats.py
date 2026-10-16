@@ -193,6 +193,25 @@ def test_new_page_renders_canonically_and_parses_back() -> None:
     assert again.meta == meta
 
 
+def test_a_code_block_with_blank_lines_is_one_block_with_its_id_after_the_fence() -> None:
+    meta = PageMeta(skaz_id="pg-3", kind="analysis", title="Code", language="en")
+    code = Block.create("c-code1", "explanation", "```python\nprint(1)\n\nprint(2)\n```")
+    table = Block.create("c-tab1", "explanation", "| a | b |\n|---|---|\n| 1 | 2 |")
+    text = render_page(PageDocument(meta=meta, parts=[code, table]))
+    assert "```python\nprint(1)\n\nprint(2)\n```\n^c-code1\n" in text
+    assert "| 1 | 2 | ^c-tab1\n" in text
+    again = parse_page(text)
+    assert [(block.id, block.body) for block in again.blocks()] == [
+        (code.id, code.body), (table.id, table.body)]
+    assert all(block.hash_matches() for block in again.blocks()) and render_page(again) == text
+    # Outside a fence a blank line still ends a block.
+    with pytest.raises(ValueError):
+        Block.create("c-bad1", "explanation", "one\n\ntwo")
+    # A marker whose fence never closes is kept as the user's text; the next block still parses.
+    broken = text.replace("```\n^c-code1\n", "")
+    assert [block.id for block in parse_page(broken).blocks()] == ["c-tab1"]
+
+
 def test_frontmatter_written_by_obsidian_in_block_style_is_read() -> None:
     text = (
         "---\nskaz_id: pg-3\nkind: analysis\ntitle: Разбор\naliases:\n  - один\n  - два\n"

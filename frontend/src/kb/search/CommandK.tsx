@@ -4,8 +4,11 @@ import { errorText } from '../api/client';
 import { Icon, Modal, type IconName } from '../ui';
 import { Highlight, Snippet } from '../ui/Highlight';
 import { clock, shortTime } from '../ui/time';
-import { useServices, useUi } from '../state/context';
-import type { DocRef } from '../state/document';
+import { useAgents, useServices, useUi } from '../state/context';
+import { openTarget, type DocRef } from '../state/document';
+import { agentOf } from '../state/agents';
+import { useAgentChoice } from '../composer/Composer';
+import { AgentFix } from '../chat/AgentFix';
 
 export type Tab = 'all' | 'wiki' | 'materials' | 'chats';
 
@@ -73,7 +76,14 @@ const PER_SECTION = 3;
  * last row. Searches `/kb/search` and `/kb/chats?q=` together.
  */
 export function CommandK() {
-  const { client, ui, chats, composer } = useServices();
+  const { client, ui, chats } = useServices();
+  const choice = useAgentChoice(null);
+  const agents = useAgents((st) => st.agents);
+  const agent = choice ? agentOf(agents, choice.engine) : undefined;
+  const agentReady = agent?.state === 'ready';
+  const unavailable = `${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`;
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState<string | null>(null);
   const open = useUi((s) => s.searchOpen);
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<Tab>('all');
@@ -88,7 +98,7 @@ export function CommandK() {
   const listId = useId();
 
   useEffect(() => {
-    if (!open) { setQ(''); setTab('all'); setRes(null); setChatHits(null); setError(null); setActive(0); }
+    if (!open) { setQ(''); setTab('all'); setRes(null); setChatHits(null); setError(null); setActive(0); setAskError(null); }
   }, [open]);
 
   useEffect(() => {
@@ -138,22 +148,32 @@ export function CommandK() {
       ui.getState().openDocument(hit.open.doc);
     }
   };
-  const ask = () => {
-    if (!query) return;
+  // ⌘K → Ask (QA D2/D3/A22): the question goes, exactly as the row shows it, to a NEW chat. It never
+  // passes through the message field, so a draft there is neither mixed in nor sent, and stays where
+  // it was. If the agent can't answer, nothing is sent: the reason and its fix are shown here and the
+  // question stays in the search field.
+  const ask = async () => {
+    if (!query || asking) return;
+    if (!agentReady) { setAskError(unavailable); return; }
+    setAsking(true);
+    setAskError(null);
+    const doc = openTarget(ui.getState());
+    const context = doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {};
+    const res = await chats.getState().send({ text: query, mentions: [], quotes: [], attachments: [] }, context, { newChat: true });
+    setAsking(false);
+    if (!res.ok) { setAskError(`Couldn’t ask: ${res.error}`); return; }
     close();
-    chats.getState().open(null);
     ui.getState().showCenter('chat');
-    composer.getState().push([{ kind: 'text', text: query }], { focus: true, send: true });
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowDown' && rows) { event.preventDefault(); setActive((i) => (i + 1) % rows); }
     else if (event.key === 'ArrowUp' && rows) { event.preventDefault(); setActive((i) => (i - 1 + rows) % rows); }
-    else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); ask(); }
+    else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void ask(); }
     else if (event.key === 'Enter' && rows) {
       event.preventDefault();
       const hit = shown[active];
-      if (hit) openHit(hit); else ask();
+      if (hit) openHit(hit); else void ask();
     } else if (event.key === 'Tab' && !event.altKey) {
       event.preventDefault();
       event.stopPropagation();
@@ -171,7 +191,7 @@ export function CommandK() {
           <Icon name="search" size={16} />
           <input ref={inputRef} className="kb-search__input" type="text" maxLength={500} role="combobox" aria-expanded={rows > 0} aria-controls={listId}
             aria-activedescendant={rows ? `${listId}-${active}` : undefined} aria-label="Search the wiki, materials and chats"
-            placeholder="Search the wiki, materials and chats" value={q} onChange={(e) => setQ(e.target.value)} />
+            placeholder="Search the wiki, materials and chats" value={q} onChange={(e) => { setQ(e.target.value); setAskError(null); }} />
           <kbd className="kb-kbd">esc</kbd>
         </div>
         <div className="kb-search__tabs" role="tablist" aria-label="Sections">
@@ -216,11 +236,17 @@ export function CommandK() {
               <li role="presentation">
                 <div id={`${listId}-${shown.length}`} role="option" aria-selected={active === shown.length}
                   className={`kb-search__row kb-search__row--ask${active === shown.length ? ' is-active' : ''}`}
-                  onMouseEnter={() => setActive(shown.length)} onClick={ask}>
+                  onMouseEnter={() => setActive(shown.length)} onClick={() => void ask()} aria-busy={asking || undefined}>
                   <span className="kb-search__icon" aria-hidden="true"><Icon name="askAgent" size={14} /></span>
                   <span className="kb-search__main"><span className="kb-search__title">Ask the agent: “{query}”</span></span>
+                  <span className="kb-search__meta">in a new chat</span>
                   <kbd className="kb-kbd">⌘↵</kbd>
                 </div>
+                {askError && (
+                  <p className="kb-inline-error kb-inline-error--flat kb-search__askerror" role="alert">
+                    {askError}{askError === unavailable && <> <AgentFix agent={agent} onOpen={close} /></>}
+                  </p>
+                )}
               </li>
             )}
           </ul>

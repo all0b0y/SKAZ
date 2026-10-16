@@ -85,17 +85,25 @@ export function RenameForm({ title, onSave, onCancel }: { title: string; onSave:
   const [value, setValue] = useState(title);
   const [error, setError] = useState<string | null>(null);
   const id = useId();
+  /** Esc already decided; the blur that follows must not save. */
+  const settled = useRef(false);
+  const commit = async (fromBlur: boolean) => {
+    if (settled.current) return;
+    const next = value.trim();
+    // Leaving the field (QA D7) saves a real change and drops an empty or unchanged one.
+    if (!next) { if (fromBlur) { settled.current = true; onCancel(); } else setError('Enter a name.'); return; }
+    if (next === title) { settled.current = true; onCancel(); return; }
+    settled.current = true;
+    const problem = await onSave(next);
+    settled.current = problem === null;
+    setError(problem);
+  };
   return (
-    <form className="kb-rename" onSubmit={async (e) => {
-      e.preventDefault();
-      const next = value.trim();
-      if (!next) { setError('Enter a name.'); return; }
-      if (next === title) { onCancel(); return; }
-      setError(await onSave(next));
-    }}>
+    <form className="kb-rename" onSubmit={(e) => { e.preventDefault(); void commit(false); }}>
       <label htmlFor={id} className="kb-visually-hidden">Chat name</label>
       <input id={id} className="kb-rename__input" value={value} autoFocus onChange={(e) => { setValue(e.target.value); setError(null); }}
-        onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onCancel(); } }}
+        onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); settled.current = true; onCancel(); } }}
+        onBlur={() => void commit(true)}
         aria-invalid={error ? true : undefined} />
       {error && <p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p>}
     </form>

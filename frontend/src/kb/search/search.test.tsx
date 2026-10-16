@@ -72,9 +72,48 @@ describe('⌘K', () => {
     const { fake } = renderKb({ world: chatWorld() });
     const dialog = await openK();
     await user.type(within(dialog).getByRole('combobox'), 'why log in loss');
+    expect(within(dialog).getByRole('option', { name: /Ask the agent: “why log in loss”\s*in a new chat/ })).toBeInTheDocument();
     await user.keyboard('{Meta>}{Enter}{/Meta}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).not.toBeInTheDocument());
     await waitFor(() => expect(fake.calls.find((c) => c.method === 'POST' && /\/messages$/.test(c.path))?.body).toMatchObject({ text: 'why log in loss' }));
+  });
+
+  it('a draft in the field is never mixed into the question nor sent, and is still there afterwards (QA D3/A22)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ world: chatWorld() });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    await user.click(screen.getByTestId('message-input'));
+    await user.keyboard('DRAFT-X half written');
+    const dialog = await openK();
+    await user.type(within(dialog).getByRole('combobox'), 'hello search');
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).not.toBeInTheDocument());
+    const sent = () => fake.calls.filter((c) => c.method === 'POST' && /\/messages$/.test(c.path)).map((c) => (c.body as { text: string }).text);
+    await waitFor(() => expect(sent()).toEqual(['hello search']));
+    // The question went to a new chat; its field is empty, New chat still holds the draft.
+    await waitFor(() => expect(services.chats.getState().currentId).not.toBeNull());
+    expect(screen.getByTestId('message-input')).toHaveTextContent(/^$/);
+    services.chats.getState().open(null);
+    await waitFor(() => expect(screen.getByTestId('message-input')).toHaveTextContent('DRAFT-X half written'));
+    expect(sent()).toEqual(['hello search']);
+  });
+
+  it('from an open chat with no agent: nothing is sent or lost — the reason and its fix stay in the palette (QA D2/D6)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    w.agents.default = 'hermes';
+    const { fake, services } = renderKb({ world: w });
+    const chatId = w.chats[0]!.id;
+    services.chats.getState().open(chatId);
+    const dialog = await openK();
+    await user.type(within(dialog).getByRole('combobox'), 'What is entropy');
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Hermes Agent can’t answer now: Hermes Agent isn’t installed.');
+    expect(within(dialog).getByRole('combobox')).toHaveValue('What is entropy');
+    expect(fake.calls.some((c) => c.method === 'POST' && /\/messages$/.test(c.path))).toBe(false);
+    expect(services.chats.getState().currentId).toBe(chatId);
+    await user.click(within(dialog).getByRole('button', { name: 'Install in Settings…' }));
+    expect(services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn', searchOpen: false });
   });
 
   it('a chat result opens the chat', async () => {

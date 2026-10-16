@@ -20,7 +20,7 @@ from skaz.knowledge.agents.engine import AgentTurn, EngineId, ModelOption, ToolC
 from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.agents.tools import TOOL_NAMES
 from skaz.knowledge.chats.service import ChatService
-from skaz.knowledge.markdown.page import parse_page
+from skaz.knowledge.markdown.page import Heading, parse_page, render_page
 from tests.knowledge.chat_support import (
     Agents,
     Library,
@@ -484,6 +484,89 @@ async def test_save_answer_as_analysis_with_checked_quotes_only(env: Env) -> Non
                             "saved_page_id": ref["id"]}
 
 
+async def test_save_to_wiki_keeps_the_answers_markdown_and_each_citation_with_its_sentence(env: Env) -> None:
+    # QA D1: code, tables, numbered lists, headings and quotes kept their shape only in the chat.
+    lib = env.library
+    env.agents.scripts["codex"] = lambda _turn: text(
+        "# Итог\n\n## Подробности\n\n",
+        f"Энтропия — мера беспорядка ⟦m:{lib.lecture}:1|мера беспорядка системы⟧. "
+        f"Реакции идут с теплотой ⟦m:{lib.textbook}:1⟧. Конец абзаца.\n\n",
+        "```python\nprint('hello')\n\nfor i in range(3):\n    print(i)  # [[not a link]] %%\n```\n\n",
+        "| Col A | Col B |\n|---|---|\n| 1 | 2 |\n",
+        f"| 3 | 4 ⟦p:{lib.concept}⟧ |\n\n",
+        "1. one\n2. two\n   - nested\n\n3. three\n\n",
+        "> A quote line\n> second line",
+    )
+    chat = await env.chat()
+    message = await env.answered(chat["id"], "Как сохранить ответ?")
+    saved = await env.client.post(f"/kb/chats/{chat['id']}/messages/{message['id']}/save")
+    assert saved.status_code == 200, saved.text
+    path = Path(env.runtime.kb.library_root) / "Wiki" / "Analyses" / f"{saved.json()['title']}.md"
+    written = path.read_text(encoding="utf-8")
+    document = parse_page(written)
+    headings = [(part.level, part.title) for part in document.parts if isinstance(part, Heading)]
+    assert headings == [(2, "Как сохранить ответ?"), (3, "Итог"), (4, "Подробности")]
+    bodies = [block.body for block in document.blocks()]
+    lecture_link = "[[Materials/Физика/Лекция 8/Лекция 8#^seg-1|"
+    textbook_link = "[[Materials/Химия/Учебник химии/Учебник химии#^seg-1|"
+    paragraph = bodies[0]
+    # Each link right after its own sentence, not all at the paragraph's end.
+    assert paragraph.index(lecture_link) < paragraph.index("Реакции") < paragraph.index(textbook_link) \
+        < paragraph.index("Конец абзаца")
+    assert bodies[1] == ("```python\nprint('hello')\n\nfor i in range(3):\n"
+                         "    print(i)  # [ [not a link] ] % %\n```")
+    assert bodies[2].splitlines()[:3] == ["| Col A | Col B |", "|---|---|", "| 1 | 2 |"]
+    assert bodies[2].splitlines()[3] == "| 3 | 4 | [[Wiki/Concepts/Энтропия|Энтропия]]"
+    assert bodies[3] == "1. one\n2. two\n   - nested\n3. three"
+    assert bodies[4] == "> A quote line\n> second line"
+    assert len(bodies) == 5
+    assert [block.kind for block in document.blocks()] == ["from_source", "explanation", "explanation",
+                                                            "explanation", "explanation"]
+    assert [(cite.material_id, cite.seg) for cite in document.blocks()[0].cites] == [(lib.lecture, 1)]
+    # The code block carries its id on a line of its own (a fence line holds nothing else) and
+    # the .md round-trips byte for byte.
+    code_id = document.blocks()[1].id
+    assert f"```\n^{code_id}\n" in written
+    assert render_page(document) == written
+    page = (await env.client.get(f"/kb/wiki/pages/{saved.json()['id']}")).json()
+    assert [block["id"] for block in page["blocks"]] == [block.id for block in document.blocks()]
+
+
+async def test_a_saved_connection_keeps_its_side_links_as_links(env: Env) -> None:
+    lib = env.library
+    good = json.dumps({"folders": [
+        {"folder_id": lib.physics, "text": "энтропия растёт", "cite": f"{lib.lecture}:1"},
+        {"folder_id": lib.chemistry, "text": "направление реакций", "cite": f"{lib.textbook}:1"},
+    ], "inference": "Один закон в двух науках"}, ensure_ascii=False)
+    env.agents.scripts["codex"] = lambda _turn: text("Связь:\n```skaz-connection\n", good, "\n```\n")
+    chat = await env.chat()
+    message = await env.answered(chat["id"], "Связи?")
+    saved = await env.client.post(f"/kb/chats/{chat['id']}/messages/{message['id']}/save")
+    assert saved.status_code == 200, saved.text
+    path = Path(env.runtime.kb.library_root) / "Wiki" / "Analyses" / f"{saved.json()['title']}.md"
+    body = next(block.body for block in parse_page(path.read_text(encoding="utf-8")).blocks()
+                if "Один закон" in block.body)
+    # The side links used to be re-cleaned into "[Materials/…]" — plain text, not links.
+    assert "[[Materials/Физика/Лекция 8/Лекция 8#^seg-1|" in body
+    assert "[[Materials/Химия/Учебник химии/Учебник химии#^seg-1|" in body
+
+
+async def test_a_page_chip_says_when_its_page_is_gone(env: Env) -> None:
+    # QA D5: a chip to a deleted page opened a dead end ("Page not found" + Try again).
+    lib = env.library
+    env.agents.scripts["codex"] = lambda _turn: text(f"Смотри страницу ⟦p:{lib.concept}⟧.")
+    chat = await env.chat()
+    message = await env.answered(chat["id"], "Где про энтропию?")
+    assert [part["available"] for part in chips(message, "page")] == [True]
+    page = env.runtime.kb.page_repo.get(lib.concept)
+    assert page is not None
+    (Path(env.runtime.kb.library_root) / page.rel_path).unlink()
+    await asyncio.to_thread(env.runtime.kb.rescan)
+    again = await env.message(chat["id"], message["id"])
+    pages = [(part["available"], part["page"]["title"]) for part in chips(again, "page")]
+    assert pages == [(False, "Энтропия")]
+
+
 async def test_a_double_save_to_wiki_writes_one_page(env: Env) -> None:
     env.agents.scripts["codex"] = lambda _turn: text("Энтропия — мера беспорядка.")
     chat = await env.chat()
@@ -643,6 +726,13 @@ async def test_mentions_group_wiki_materials_and_chats(env: Env) -> None:
     assert len(lectures["materials"]) == 1 and lectures["materials"][0]["type"] == "material"
     everything = (await env.client.get("/kb/mentions")).json()
     assert {page["id"] for page in everything["pages"]} == {lib.concept, lib.analysis}
+    # QA D8: several words narrow the list; each word may sit anywhere in the title.
+    await env.chat(title="B5 · quality check")
+    await env.chat(title="B5 · Honeybees")
+    narrowed = (await env.client.get("/kb/mentions", params={"q": "B5 qual"})).json()
+    assert [chat["title"] for chat in narrowed["chats"]] == ["B5 · quality check"]
+    assert [chat["title"] for chat in (await env.client.get(
+        "/kb/mentions", params={"q": "check b5"})).json()["chats"]] == ["B5 · quality check"]
 
 
 async def test_an_analysis_page_never_backs_a_source_claim(env: Env) -> None:

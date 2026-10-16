@@ -7,7 +7,7 @@ from skaz.knowledge.agents.engine import TextDelta
 from skaz.knowledge.agents.fake import FakeEngine
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.tools import ToolRegistry
-from skaz.knowledge.chats.analysis import page_title, paragraphs
+from skaz.knowledge.chats.analysis import Chunk, page_title, paragraphs
 from skaz.knowledge.chats.events import ChatFeed, ListFeed
 from skaz.knowledge.chats.model import (
     Chat,
@@ -141,10 +141,24 @@ def test_paragraphs_attach_chips_to_their_text() -> None:
     items = paragraphs([TextPart("Первый абзац"), CitePart("mat-1", 1), TextPart(".\n\n"),
                         CitePart("mat-1", 2),
                         TextPart("Второй\n- пункт один\n- пункт два\n## Заголовок\nконец")])
-    texts = [("".join(item.pieces).strip(), [c.seg for c in item.cites], item.heading)
+    def segs(item: Chunk) -> list[int]:
+        return [chip.seg for chip in (item.chips[n] for n in item.slots()) if isinstance(chip, CitePart)]
+
+    texts = [(item.kind, item.bare().strip(), segs(item))
              for item in items if not isinstance(item, ConnectionPart)]
-    assert texts == [("Первый абзац.", [1, 2], False), ("Второй", [], False), ("- пункт один", [], False),
-                     ("- пункт два", [], False), ("Заголовок", [], True), ("конец", [], False)]
+    # A chip right after a break belongs to the paragraph before; a list is one block (QA D1).
+    assert texts == [("paragraph", "Первый абзац.", [1, 2]), ("paragraph", "Второй", []),
+                     ("list", "- пункт один\n- пункт два", []), ("heading", "Заголовок", []),
+                     ("paragraph", "конец", [])]
+
+
+def test_paragraphs_keep_code_fences_tables_and_setext_headings_whole() -> None:
+    items = paragraphs([TextPart("Title\n===\n\n~~~\na\n\n# not a heading\n~~~\n\n"
+                                 "| a | b |\n| - | - |\n| 1 | 2 |\ntext after\n\n```\nunclosed")])
+    shapes = [(item.kind, item.lines) for item in items if not isinstance(item, ConnectionPart)]
+    assert shapes == [("heading", ["Title"]), ("code", ["~~~", "a", "", "# not a heading", "~~~"]),
+                      ("table", ["| a | b |", "| - | - |", "| 1 | 2 |"]), ("paragraph", ["text after"]),
+                      ("code", ["```", "unclosed", "```"])]
 
 
 def test_a_quote_only_in_an_analysis_page_cannot_back_a_source_claim() -> None:

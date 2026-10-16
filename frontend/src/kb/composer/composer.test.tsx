@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld } from '../test/fixtures';
@@ -78,6 +78,77 @@ describe('Message field', () => {
     expect(picker).toHaveAccessibleName(/Claude Code/);
   });
 
+  it('@ with several words keeps narrowing; words that match nothing are just text (QA D8)', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('@Lecture 8');
+    const popup = await screen.findByTestId('mention-popup');
+    await waitFor(() => expect(within(popup).getAllByRole('option').map((o) => o.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Lecture 8')])));
+    await waitFor(() => expect(within(popup).getAllByRole('option').every((o) => /lecture 8/i.test(o.textContent ?? ''))).toBe(true));
+    await user.keyboard('{Enter}');
+    expect(input.querySelector('.kb-token--mention')).toHaveTextContent(/Lecture 8/);
+    await user.keyboard(' @Lecture zzz');
+    await waitFor(() => expect(screen.queryByTestId('mention-popup')).not.toBeInTheDocument());
+  });
+
+  it('a mentioned material deleted before sending: the token is marked deleted and the message isn’t sent with it (QA B8)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('Explain ');
+    act(() => services.composer.getState().push([{ kind: 'mention', ref: { type: 'material', id: 'm1', title: 'Lecture 8 — entropy' } }]));
+    await waitFor(() => expect(input.querySelector('.kb-token--mention')).not.toBeNull());
+    const token = input.querySelector<HTMLElement>('.kb-token--mention')!;
+    expect(token).toHaveAccessibleName('Reference: Lecture 8 — entropy');
+    await act(async () => { await services.library.getState().forgetMaterial('m1'); });
+    expect(token).toHaveClass('is-gone');
+    expect(token).toHaveAccessibleName('Reference: Lecture 8 — entropy (deleted)');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(await screen.findByText('“Lecture 8 — entropy” was deleted. Remove it from the message to send.')).toBeInTheDocument();
+    expect(sentBody(fake.calls)).toBeUndefined();
+  });
+
+  it('each chat keeps its own unsent draft; a hand-off that opens New chat lands in its field (QA D2/D3)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    const { services } = renderKb({ world: w });
+    const input = await ready();
+    const [a, b] = [w.chats[0]!.id, w.chats[1]!.id];
+    act(() => services.chats.getState().open(a));
+    await user.click(input);
+    await user.keyboard('draft in A');
+    act(() => services.chats.getState().open(b));
+    expect(input).toHaveTextContent(/^$/);
+    act(() => services.chats.getState().open(a));
+    expect(input).toHaveTextContent('draft in A');
+    // "Ask the agent about this": New chat opens and the text is handed over in the same tick.
+    act(() => {
+      services.chats.getState().open(null);
+      services.composer.getState().push([{ kind: 'text', text: 'handed over' }], { focus: true });
+    });
+    await waitFor(() => expect(input).toHaveTextContent('handed over'));
+    expect(input).not.toHaveTextContent('draft in A');
+  });
+
+  it('no agent: the reason is next to the field with the way to fix it (QA D6)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    w.agents.default = 'hermes';
+    const { services, fake } = renderKb({ world: w });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('Why?{Enter}');
+    const error = await screen.findByText(/Hermes Agent can’t answer now: Hermes Agent isn’t installed\./);
+    expect(input).toHaveTextContent('Why?');
+    expect(fake.calls.some((c) => c.method === 'POST' && /\/messages$/.test(c.path))).toBe(false);
+    await user.click(within(error).getByRole('button', { name: 'Install in Settings…' }));
+    expect(services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
+  });
+
   it('"+" → File: saved to Materials (Inbox) at once and held; "In wiki" on from Settings, sent at send; the message carries its id', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
@@ -150,9 +221,25 @@ describe('Message field', () => {
     await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
-    await user.type(await screen.findByLabelText('Link to an article or a video'), 'javascript:alert(1)');
+    const field = await screen.findByLabelText('Link to an article or a video');
+    // Our own message, never the browser's validation bubble in the system language (QA D14).
+    expect(field.closest('form')).toHaveAttribute('novalidate');
+    await user.type(field, 'not a link at all');
     await user.click(screen.getByRole('button', { name: 'Add' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('http:// or https://');
+    await user.clear(field);
+    await user.type(field, 'javascript:alert(1)');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('http:// or https://');
+  });
+
+  it('the agent picker names the agent once when it has no model of its own (QA D13)', async () => {
+    const w = chatWorld();
+    w.agents.default = 'codex';
+    Object.assign(w.agents.agents.find((a) => a.id === 'codex')!, { models: [], current_model: null });
+    renderKb({ world: w });
+    await ready();
+    await waitFor(() => expect(screen.getByTestId('agent-picker')).toHaveAccessibleName('Agent and model: Codex'));
   });
 
   it('dictation: voice → text in the field through bridge.dictate; nothing is sent by itself', async () => {

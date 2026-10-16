@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  Banner, Button, Chip, EmptyState, Icon, ICON_NAMES, ICON_STROKE, Menu, Modal, Segmented, Spinner, Switch, TextField,
+  Banner, Button, Chip, EmptyState, Icon, ICON_NAMES, ICON_STROKE, Menu, Modal, Popover, Segmented, Spinner, Switch, TextField,
 } from './index';
 import { boundaryFor, placePopup } from './geometry';
 
@@ -266,6 +266,40 @@ describe('Other primitives', () => {
     await screen.findByRole('menu');
     await user.keyboard('{Enter}');
     expect(rename).toHaveBeenCalledTimes(1);
+  });
+
+  it('a popover whose content grows after it opened is placed again: near the bottom it flips above (QA B10)', async () => {
+    let observed: (() => void) | null = null;
+    vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { observed = cb; } observe() {} disconnect() {} });
+    let height = 40;
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.anchor) return { left: 100, right: 120, top: 700, bottom: 720, width: 20, height: 20, x: 100, y: 700, toJSON: () => ({}) } as DOMRect;
+      if (this.getAttribute('role') === 'dialog') return { left: 0, right: 300, top: 0, bottom: height, width: 300, height, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      return { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    function Host() {
+      const anchor = useRef<HTMLButtonElement | null>(null);
+      return (
+        <>
+          <button ref={anchor} type="button" data-anchor="1">1</button>
+          <Popover open onClose={() => undefined} anchorRef={anchor} label="Source" autoFocus={false}><p>text</p></Popover>
+        </>
+      );
+    }
+    const innerHeight = window.innerHeight;
+    try {
+      window.innerHeight = 800;
+      render(<Host />);
+      const pop = await screen.findByRole('dialog', { name: 'Source' });
+      await waitFor(() => expect(pop.style.top).toBe('726px')); // small: below the anchor
+      height = 300; // the fragment text arrived
+      act(() => observed?.());
+      await waitFor(() => expect(pop.style.top).toBe('394px')); // flipped above, inside the window
+    } finally {
+      window.innerHeight = innerHeight;
+      rect.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('popups are pulled back inside their column', () => {

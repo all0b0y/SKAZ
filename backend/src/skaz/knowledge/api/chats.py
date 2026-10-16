@@ -138,7 +138,9 @@ class Presenter:
                                             citation=self.citation(part.material_id, part.seg, part.quote)))
         if isinstance(part, PagePart):
             page = self.page_ref(part.page_id, part.title, part.kind)
-            return KbMessagePart(KbPagePart(type="page", page=page, block_id=part.block_id))
+            available = self.kb.page_repo.get(part.page_id) is not None
+            return KbMessagePart(KbPagePart(type="page", page=page, block_id=part.block_id,
+                                            available=available))
         if isinstance(part, ConnectionPart):
             linked = part.page_id is not None and self.kb.page_repo.get(part.page_id) is not None
             folders = [KbConnectionFolder(folder_id=side.folder_id,

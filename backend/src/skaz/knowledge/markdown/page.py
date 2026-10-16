@@ -5,6 +5,11 @@ A SKAZ block is::
     %% skaz:block id=c-<id> kind=<kind> owner=<owner> hash=<sha256-12> cites=mat-x:seg-12~<quote>,… %%
     Paragraph or list item text [[Materials/<Folder>/<Title>/<Title>#^seg-12|<Title> · 08:12]] ^c-<id>
 
+A block body is one Markdown block without blank lines (a paragraph, a whole
+list, a quote, a table). A fenced code block may hold blank lines inside the
+fence; a body that ends with the closing fence carries its id on the next
+line (``^c-<id>`` alone), because a fence line can't hold anything else.
+
 The marker (``cites`` by id) is the machine truth; the wikilink is only a
 presentation. Anything that is not a well-formed block — text the user typed
 in SKAZ or Obsidian, headings, blank lines, a marker that lost its block id —
@@ -51,8 +56,43 @@ _BLOCK_ID = re.compile(r"c-[A-Za-z0-9-]+")
 #: ``mat-x:seg-12`` or, with the exact quote the claim rests on, ``mat-x:seg-12~<base64url(utf-8)>``.
 _CITE = re.compile(r"(mat-[A-Za-z0-9-]+):seg-([1-9]\d*)(?:~([A-Za-z0-9_-]+))?")
 _BLANK_SPLIT = re.compile(r"\n[ \t]*\n")
+#: An opening or closing code fence (CommonMark: three or more backticks or tildes, up to 3 spaces in).
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 _LABELLED_LINK = re.compile(r"\[\[[^\]|\n]+\|([^\]\n]+)\]\]")
 _BARE_LINK = re.compile(r"\[\[([^\]|\n]+)\]\]")
+
+
+def _fence_step(line: str, fence: str | None) -> str | None:
+    """The open fence after ``line`` (``None`` = outside a code block)."""
+    match = _FENCE.fullmatch(line)
+    if fence is None:
+        if match is None or (match.group(1)[0] == "`" and "`" in match.group(2)):
+            return None
+        return match.group(1)
+    if match is not None and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+            and not match.group(2).strip():
+        return None
+    return fence
+
+
+def _blank_outside_fence(body: str) -> bool:
+    fence: str | None = None
+    for line in body.split("\n"):
+        if fence is None and not line.strip():
+            return True
+        fence = _fence_step(line, fence)
+    return False
+
+
+def _ends_with_fence(body: str) -> bool:
+    """The body's last line closes a code block, so the block id goes on a line of its own."""
+    fence: str | None = None
+    closed = False
+    for line in body.split("\n"):
+        before = fence
+        fence = _fence_step(line, fence)
+        closed = before is not None and fence is None
+    return closed
 
 
 def plain_text(body: str) -> str:
@@ -122,7 +162,7 @@ class Block:
                cites: tuple[Cite, ...] = (), owner: Owner = "agent") -> Block:
         if not _BLOCK_ID.fullmatch(block_id):
             raise ValueError("Block ids look like c-<id>.")
-        if not body.strip() or _BLANK_SPLIT.search(body.replace("\r\n", "\n")):
+        if not body.strip() or _blank_outside_fence(body.replace("\r\n", "\n")):
             raise ValueError("A block is one non-empty paragraph or list item.")
         return cls(id=block_id, kind=kind, owner=owner, hash=block_hash(body), cites=cites, body=body)
 
@@ -138,6 +178,8 @@ class Block:
     def render(self) -> str:
         if self.raw is not None:
             return self.raw
+        if _ends_with_fence(self.body):
+            return f"{self.marker_line()}\n{self.body}\n^{self.id}\n"
         return f"{self.marker_line()}\n{self.body} ^{self.id}\n"
 
     def remarked(self, *, owner: Owner | None = None) -> Block:
@@ -325,20 +367,32 @@ def parse_page(text: str) -> PageDocument:
             block_id = marker[0]
             collected: list[str] = []
             closed = False
+            own_line = False  # the id on a line of its own, after a closing code fence
+            fence: str | None = None
             cursor = index + 1
             while cursor < len(lines):
                 candidate = lines[cursor].rstrip("\r\n")
-                if not candidate.strip() or _MARKER.fullmatch(candidate):
+                if _MARKER.fullmatch(candidate) or (fence is None and not candidate.strip()):
+                    break
+                if fence is None and collected and candidate == f"^{block_id}":
+                    collected.append(lines[cursor])
+                    cursor += 1
+                    closed = own_line = True
                     break
                 collected.append(lines[cursor])
                 cursor += 1
-                if candidate.endswith(f" ^{block_id}"):
+                was_open = fence is not None
+                fence = _fence_step(candidate, fence)
+                if not was_open and fence is None and candidate.endswith(f" ^{block_id}"):
                     closed = True
                     break
             if closed:
                 flush()
-                last = collected[-1].rstrip("\r\n")
-                body_text = "".join(collected[:-1]) + last[: -len(f" ^{block_id}")]
+                if own_line:
+                    body_text = "".join(collected[:-1]).removesuffix("\n").removesuffix("\r")
+                else:
+                    last = collected[-1].rstrip("\r\n")
+                    body_text = "".join(collected[:-1]) + last[: -len(f" ^{block_id}")]
                 parts.append(Block(
                     id=block_id, kind=marker[1], owner=marker[2], hash=marker[3], cites=marker[4],
                     body=body_text, raw=line + "".join(collected),

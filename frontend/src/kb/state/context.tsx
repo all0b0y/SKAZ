@@ -57,8 +57,11 @@ export function createServices(
 ): KbServices {
   const client = new KbClient(bridge);
   const ui = createUiStore();
+  const chats = createChatsStore(client);
   const library = createLibraryStore(client, {
     onForget: (id, { keepPanel }) => {
+      // Answers already on screen stop citing it as if it were there (QA D4/B9).
+      chats.getState().forget({ material: id });
       if (keepPanel) return;
       const { right, closeDoc } = ui.getState();
       const shows = right?.kind === 'live' ? right.materialId === id
@@ -78,7 +81,7 @@ export function createServices(
     library,
     ui,
     recording,
-    chats: createChatsStore(client),
+    chats,
     notifications: createNotificationsStore(client),
     agents: createAgentsStore(client),
     settings: createSettingsStore(client),
