@@ -54,6 +54,16 @@ describe('Startup gate', () => {
     await waitFor(() => expect(screen.queryByTestId('loading-tree')).toBeNull(), { timeout: 2000 });
   });
 
+  it('a service that stops after it was up is a stop, not a failed start, in plain words (QA A16)', async () => {
+    const { emit } = await renderGate({ initial: { phase: 'ready' } });
+    emit({ phase: 'error', detail: 'backend exited (code null, signal SIGKILL)' });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('SKAZ’s local service stopped.');
+    expect(alert).toHaveTextContent('Your materials, wiki and chats are safe on disk.');
+    expect(alert).not.toHaveTextContent('couldn’t start');
+    expect(alert).not.toHaveTextContent('SIGKILL');
+  });
+
   it('error: amber tree with the service\'s own reason, Try again and Open logs folder', async () => {
     const user = userEvent.setup();
     const { emit, restartBackend, openLogsFolder } = await renderGate({ initial: { phase: 'starting' } });

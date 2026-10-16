@@ -201,7 +201,7 @@ export function Onboarding({ open, onFinish }: { open: boolean; onFinish: () => 
         </AnimatePresence>
       </div>
       <footer className="kb-ob__foot">
-        {index > 0 && step !== 'summary' && <Button onClick={back}>Back</Button>}
+        {index > 0 && <Button onClick={back}>Back</Button>}
         <span className="kb-ob__spacer" />
         {SKIPPABLE.has(step) && <Button variant="quiet" onClick={next}>Skip</Button>}
         <Button variant="fill" busy={choice.busy} onClick={() => void primary()}>{primaryLabel}</Button>

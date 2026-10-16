@@ -37,6 +37,7 @@ function useResult(): [ReactNode, (r: { ok: boolean; error?: string }, okText?: 
 /** Problem plates of one settings section: what happened, what still works, what stopped. */
 export function HealthPlates({ section }: { section: SettingsSection }) {
   const { settings } = useServices();
+  const toSection = useUi((s) => s.setSettingsSection);
   const health = useSettings((s) => s.health);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +48,12 @@ export function HealthPlates({ section }: { section: SettingsSection }) {
       {problems.map((p) => (
         <Banner key={p.id} tone={p.severity} title={p.title}
           progress={p.progress !== null ? p.progress * 100 : undefined} progressLabel={p.title}
-          actions={p.actions.length ? (
+          actions={p.actions.length || p.id === 'speech-soniox-key' ? (
             <>
+              {/* No key: the fix is in Accounts & keys — one click there (QA A31). */}
+              {p.id === 'speech-soniox-key' && (
+                <Button size="sm" variant="fill" onClick={() => toSection('conn')}>Add key…</Button>
+              )}
               {p.actions.map((a) => (
                 <Button key={a.id} size="sm" variant={a.primary ? 'fill' : 'outline'} busy={busy === `${p.id}/${a.id}`}
                   onClick={async () => {
@@ -105,7 +110,11 @@ export function KeyRow({ provider }: { provider: KeyProviderId }) {
       : row.valid ? { tone: 'ok', text: 'Key works' } : { tone: 'ok', text: 'Key saved' };
   if (editing) {
     return (
-      <form className="kb-keyform" onSubmit={async (e) => {
+      <form className="kb-keyform" onKeyDown={(e) => {
+        if (e.key !== 'Escape') return;
+        e.stopPropagation(); // QA A17: Esc leaves the key form; the typed key is dropped, Settings stays
+        setEditing(false); setValue('');
+      }} onSubmit={async (e) => {
         e.preventDefault();
         if (!value.trim()) return;
         setBusy('save');

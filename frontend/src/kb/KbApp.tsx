@@ -5,6 +5,8 @@ import { Banner, Button } from './ui';
 import { MotionProvider } from './ui/motion';
 import { KbServicesProvider, useLibrary, usePrefs, useServices, useUi, type KbServices } from './state/context';
 import { Shell } from './shell/Shell';
+import { useProblems } from './shell/problems';
+import type { SettingsSection } from './state/ui';
 import { SettingsModal } from './settings/SettingsModal';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
 import { CommandK } from './search/CommandK';
@@ -44,6 +46,9 @@ function BackendGate({ children }: { children: ReactNode }) {
   const phase = status?.phase ?? 'starting';
   const failed = phase === 'error' || phase === 'stopped';
   const previous = useRef(phase);
+  /** The service was up in this window once: a later failure is a stop, not a failed start (QA A16). */
+  const wasReady = useRef(phase === 'ready');
+  if (phase === 'ready') wasReady.current = true;
   useEffect(() => {
     if (!bridge.getBackendStatus) return undefined;
     let live = true;
@@ -65,6 +70,7 @@ function BackendGate({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [phase]);
   const retry = () => {
+    wasReady.current = false; // a failure after Try again is a failed start again
     setStatus({ phase: 'starting' });
     void bridge.restartBackend?.().then((restarted) => {
       // Nothing to retry (the start had not failed after all): show where it really is.
@@ -76,14 +82,14 @@ function BackendGate({ children }: { children: ReactNode }) {
       {phase === 'ready' ? children : null}
       {phase === 'ready' && gone ? null : (
         <LoadingTree phase={failed ? 'error' : phase === 'ready' ? 'ready' : 'starting'} attempt={attempt}>
-          <Banner tone="error" title="SKAZ couldn’t start its local service."
+          <Banner tone="error" title={wasReady.current ? 'SKAZ’s local service stopped.' : 'SKAZ couldn’t start its local service.'}
             actions={bridge.restartBackend || bridge.openLogsFolder ? (
               <>
                 {bridge.restartBackend && <Button variant="fill" icon="retry" onClick={retry}>Try again</Button>}
                 {bridge.openLogsFolder && <Button icon="folder" onClick={() => void bridge.openLogsFolder?.()}>Open logs folder</Button>}
               </>
             ) : undefined}>
-            {status?.detail ?? ''}
+            {wasReady.current ? 'Your materials, wiki and chats are safe on disk. Try again starts it again.' : status?.detail ?? ''}
           </Banner>
         </LoadingTree>
       )}
@@ -105,6 +111,10 @@ function useQuitAnswer() {
 
 function useSettingsShortcut() {
   const { prefs } = useServices();
+  // ⌘, opens where the gear would: the section with the most urgent problem (QA A33).
+  const problems = useProblems();
+  const target = useRef<SettingsSection | undefined>(undefined);
+  target.current = problems[0]?.section;
   const openSettings = useUi((s) => s.openSettings);
   const setSearchOpen = useUi((s) => s.setSearchOpen);
   useEffect(() => {
@@ -114,7 +124,7 @@ function useSettingsShortcut() {
       if (!prefs.getState().onboardingDone) return;
       if (event.key === ',') {
         event.preventDefault();
-        openSettings();
+        openSettings(target.current);
       } else if (event.key.toLowerCase() === 'k') {
         // ⌘K (decision 29): opens over whatever is open; a second ⌘K closes it.
         event.preventDefault();
