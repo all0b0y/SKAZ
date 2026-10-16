@@ -33,6 +33,7 @@ from ..local_models import (
     GIGACHAT_PROVIDER,
     GIGACHAT_REQUIRED_MEMORY_BYTES,
     GIGACHAT_REVISION,
+    MODEL_DOWNLOADS_OFF,
     SPEAKER_PROVIDER,
     CacheSafetyError,
     DeleteResult,
@@ -42,6 +43,7 @@ from ..local_models import (
     download_local_model,
     gigachat_runtime_available,
     local_platform,
+    model_downloads_refused,
     physical_memory_bytes,
     speaker_model_path,
     speaker_runtime_available,
@@ -656,6 +658,9 @@ class LocalModelPreparations:
             known = self._reports.get(key)
             if known is not None and known[0] == "ready":
                 return known
+            if model_downloads_refused():
+                self._reports[key] = ("error", MODEL_DOWNLOADS_OFF)
+                return self._reports[key]
             preflight = self._preflight(provider)
             if preflight is not None:
                 self._reports[key] = preflight

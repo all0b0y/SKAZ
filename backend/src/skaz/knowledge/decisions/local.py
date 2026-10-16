@@ -31,6 +31,7 @@ from typing import Literal
 
 import httpx
 
+from ...local_models import MODEL_DOWNLOADS_OFF, model_downloads_refused
 from ...native_io import disk_call
 from ..processes import CHILDREN
 from .llama import LlamaClient, LocalMode
@@ -303,6 +304,8 @@ class LlamaServerManager:
         if self.installed():
             self._failure = None
             return self.status()
+        if model_downloads_refused():
+            raise LocalUnavailable(MODEL_DOWNLOADS_OFF)
         self._failure = None
         self._downloaded = self._present_bytes()
         self._download_task = asyncio.create_task(self._download_all(), name="decisions-download")
