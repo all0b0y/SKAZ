@@ -1,0 +1,118 @@
+/* Settings window (decisions 30/31): 760×500 modal, menu on the left, flat list on the right. */
+
+.kb-settings {
+  width: 760px;
+  height: 500px;
+  max-height: 86vh;
+}
+.kb-settings__body { flex: 1; display: flex; min-height: 0; }
+.kb-settings__nav {
+  width: 200px;
+  flex: none;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--kb-bg);
+  border-right: 1px solid var(--kb-line);
+}
+.kb-settings__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  margin-bottom: 4px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-pane);
+  color: var(--kb-muted);
+  flex: none;
+}
+.kb-settings__search:focus-within { border-color: var(--kb-accent); }
+.kb-settings__search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--kb-text);
+  font-size: var(--t-sm);
+}
+.kb-settings__search input::placeholder { color: var(--kb-muted); }
+.kb-settings__search input:focus-visible { outline: none; }
+.kb-settings__search input::-webkit-search-cancel-button { display: none; }
+.kb-settings__group {
+  margin: 10px 8px 3px;
+  font-size: var(--t-xs);
+  font-weight: 500;
+  color: var(--kb-muted);
+}
+.kb-settings__items { display: flex; flex-direction: column; gap: 1px; }
+.kb-settings__content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 22px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.kb-settings__title {
+  font-family: var(--kb-font-display);
+  font-size: var(--t-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+/* Flat list: bold group title, rows split by a thin line, no frames. */
+.kb-sgroup { display: flex; flex-direction: column; flex: none; }
+.kb-sgroup__title { font-size: var(--t-sm); font-weight: 700; padding: 4px 0 6px; }
+.kb-srow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--kb-line);
+  min-width: 0;
+}
+.kb-sgroup .kb-srow:last-child { border-bottom: 0; }
+.kb-srow__text { flex: 1; min-width: 0; }
+.kb-srow__label { overflow-wrap: anywhere; }
+.kb-srow__hint { font-size: var(--t-xs); line-height: 1.35; margin-top: 1px; color: var(--kb-muted); }
+.kb-srow__control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  max-width: 62%;
+  min-width: 0;
+}
+.kb-srow__control .kb-tags { justify-content: flex-end; }
+.kb-snote { display: flex; gap: 8px; align-items: flex-start; color: var(--kb-muted); font-size: var(--t-sm); flex: none; }
+.kb-snote .kb-icon { color: var(--kb-warn); margin-top: 2px; }
+.kb-snote--quiet .kb-icon { color: var(--kb-muted); }
+
+/* Settings → Privacy → Activity log (F2): read-only list of GET /logs, newest first. */
+.kb-confirm.kb-activity { width: min(620px, calc(100vw - 48px)); }
+.kb-activity__body { max-height: min(60vh, 520px); overflow: hidden; }
+.kb-activity__list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; border-top: 1px solid var(--kb-line); }
+.kb-activity__item { padding: 8px 0; border-bottom: 1px solid var(--kb-line); display: flex; flex-direction: column; gap: 2px; }
+.kb-activity__line { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; min-width: 0; }
+.kb-activity__op { font-weight: 600; overflow-wrap: anywhere; }
+.kb-activity__at { white-space: nowrap; font-size: var(--t-sm); }
+.kb-activity__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--t-sm); }
+.kb-activity__bad { color: var(--kb-danger); }
+
+/* Settings → Sound (B20): default microphone with a live level, computer sound. */
+.kb-sound { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.kb-obsidian-ask { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.kb-sound .kb-select { max-width: 260px; }
+.kb-meter { position: relative; display: inline-block; width: 96px; height: 6px; border-radius: 3px; background: var(--kb-line); overflow: hidden; flex: none; }
+.kb-meter i { display: block; height: 100%; border-radius: 3px; background: var(--kb-accent); transition: width 90ms linear; }
+@media (prefers-reduced-motion: reduce) { .kb-meter i { transition: none; } }

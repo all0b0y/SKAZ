@@ -1,7 +1,6 @@
 import type { ApiClient } from '../api/client';
 import type { NativeOpened } from '../api/nativeLive';
-import type { AudioChunk } from './uploadQueue';
-import type { PersistedAudioAck } from './persistenceQueue';
+import type { AudioChunk, PersistedAudioAck } from './persistenceQueue';
 
 /** Renderer-side sample clock. Raw bytes remain in PersistenceQueue until a validated transport receipt. */
 export class NativeAudioWriter {

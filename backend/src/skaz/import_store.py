@@ -50,10 +50,6 @@ ImportStatus = Literal[
 #: Statuses a restart must pick back up rather than leave stranded.
 UNSETTLED: tuple[ImportStatus, ...] = ("queued", "downloading", "preparing", "uploading", "processing")
 
-#: Digest of an unreadable source is impossible, but an import must still record
-#: which file it came from; this marks an identity we could not compute.
-UNKNOWN_DIGEST = ""
-
 
 class ImportConflict(ValueError):
     """Invalid transition, unknown import, or a transcript that does not fit."""
@@ -169,24 +165,6 @@ class ImportStore:
                 "SELECT * FROM native_imports WHERE session_id=?", (session_id,)
             ).fetchone()
         return _record(row) if row is not None else None
-
-    def unsettled(self) -> list[ImportRecord]:
-        """Imports a restart must resume, oldest first."""
-        with self.db.read() as connection:
-            rows = connection.execute(
-                f"SELECT * FROM native_imports WHERE status IN ({','.join('?' * len(UNSETTLED))}) "
-                "ORDER BY created_at, rowid", UNSETTLED,
-            ).fetchall()
-        return [_record(row) for row in rows]
-
-    def pending(self) -> list[ImportRecord]:
-        """Unfinished imports, including ones waiting for an explicit decision."""
-        with self.db.read() as connection:
-            rows = connection.execute(
-                "SELECT * FROM native_imports WHERE status NOT IN ('completed','cancelled') "
-                "ORDER BY created_at"
-            ).fetchall()
-        return [_record(row) for row in rows]
 
     def interrupt(self) -> None:
         """Recover durable state without contacting a provider or spawning work."""

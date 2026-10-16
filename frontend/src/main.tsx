@@ -1,16 +1,7 @@
-import './legacyStorage';
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-import './styles/global.css';
-import './styles/app.css';
-import './styles/motion.css';
+import { mount } from './kb/main';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element #root not found');
 
-createRoot(container).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// The Knowledge Wiki interface (frontend/src/kb) is the only interface.
+mount(container);

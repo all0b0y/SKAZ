@@ -99,8 +99,7 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
         if (runtime.native_shutdown or session_id in runtime.native_closing
                 or session_id in runtime.native_tasks):
             raise LiveConflict("Session is closing.")
-        if runtime.imports.active:
-            raise LiveConflict("Finish or cancel the media import before recording.")
+        # No queue: a recording may start while media imports run (they are independent).
         task = asyncio.current_task()
         assert task is not None
         # Reserve ownership before the first disk await (including open).
@@ -130,6 +129,8 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                 cloud=plan.cloud, api_key_provider=plan.api_key_provider,
             )
             runtime.native_streams[session_id] = stream
+        # A speech material fed by this session is recording again (no-op otherwise).
+        runtime.kb_speech.on_stream_opened(session_id)
         saved_samples = connection.start_sample
         await socket.send_json({
             "type": "stream.opened", "connection_id": connection.id,
@@ -182,6 +183,7 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
             if stream.provider == "local-whisper" and stream.state != "unavailable":
                 await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
                 start_finalization(runtime, session_id, stream)
+                runtime.kb_speech.on_stream_processing(session_id)
                 settled = True
                 await socket.send_json({
                     "type": "stream.stopped", "saved_samples": saved_samples,
@@ -190,11 +192,12 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                 break
             complete = await stream.finish()
             await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
-            await disk_call(runtime.session_files.project, session_id)
             settled = True
             completed_owner = runtime.native_tasks.pop(session_id)
             runtime.native_streams.pop(session_id, None)
             completed_owner[1].set()
+            runtime.kb_speech.on_stream_settled(
+                session_id, reason=None if stream.connection_complete else stream.incomplete_reason)
             await socket.send_json({
                 "type": "stream.stopped", "saved_samples": saved_samples,
                 "transcription_complete": complete, "status": end_state,
@@ -226,6 +229,9 @@ async def receive_live_audio(socket: WebSocket, session_id: str) -> None:
                         await disk_call(runtime.live_store.close, connection.id, finished=False)
                 with suppress(OSError, sqlite3.Error):
                     await disk_call(repo.update_session, runtime.db, session_id, status=end_state)
+                runtime.kb_speech.on_stream_settled(session_id, reason=(
+                    stream.failure_reason if stream is not None and stream.failure_reason
+                    else "The recording was interrupted before Stop."))
 
         try:
             with suppress(asyncio.CancelledError):

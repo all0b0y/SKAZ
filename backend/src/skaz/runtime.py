@@ -8,31 +8,37 @@ import os
 import httpx
 
 from .activity import ActivityLog
-from .agent.api_agent import ApiAgentEngine
-from .agent.codex_runtime import CodexRuntime
-from .agent.note_rewrite import PendingRewrites
-from .agent.retrieval import EmbeddingIndex
 from .asr_providers import describe_providers
 from .capabilities import describe
 from .catalog import ProviderCatalogs
 from .config import AppConfig, adopt_legacy_database
 from .db import Database
 from .gateways.asr import LocalModelPreparations
+from .gateways.codex_connection import CodexConnection
 from .import_service import ImportService
-from .ingestion import IngestionService
-from .live_asr import LiveAsrDraftService
-from .live_fragments import LiveAsrFragmentService
-from .live_scheduler import LiveAsrScheduler
+from .knowledge.agents.codex import CodexEngine
+from .knowledge.agents.hub import build_agents_hub
+from .knowledge.agents.tools import ToolRegistry
+from .knowledge.chats import ChatService
+from .knowledge.decisions.service import DecisionService
+from .knowledge.ingest.service import IngestService
+from .knowledge.mcp import McpServer
+from .knowledge.service import KnowledgeService
+from .knowledge.settings.health import SettingsHealth
+from .knowledge.settings.keys import KeyChecks
+from .knowledge.sources.links import ytdlp_probe
+from .knowledge.sources.service import SourceService
+from .knowledge.speech import create_speech_service
+from .knowledge.speech.dictation import Dictation
+from .knowledge.wiki.service import WikiService
+from .knowledge.wiring import McpGrants, wire_fixes_offer, wire_speech, wire_wiki
+from .knowledge.wiring import wire as wire_knowledge
 from .live_store import LiveStore
-from .managed_storage import ManagedStorage
 from .native_stream import NativeStream
 from .schemas import CLOUD_PROVIDERS, Settings, Task
 from .secrets import FileSecretStore, SecretStore
-from .session_files import SessionFiles
 from .settings_store import TASKS, SettingsStore, StoredSettings
 from .verifications import note
-from .web_search import WebSearch
-from .window_asr import WindowAsrPreview
 
 
 class Runtime:
@@ -50,40 +56,61 @@ class Runtime:
         self.config = config
         self.activity_log = ActivityLog(config.activity_log_capacity)
         self.db = Database(config.db_path)
-        self.codex = CodexRuntime(self.db, config.data_dir / "codex")
-        self.embedding_index = EmbeddingIndex(self.db)
-        self.embedding_lock = asyncio.Lock()
-        self.session_files = SessionFiles(
-            self.db, config.session_files_root, data_dir=config.data_dir,
-            suggested_root=config.documents_dir / "SKAZ",
-            allowed_root=config.documents_sandbox,
-        )
-        self.storage = ManagedStorage(self.db, self.session_files, config.audio_dir)
-        self.session_files.storage = self.storage
+        #: The Codex app-server sign-in/connection the knowledge agents run on (areas A1/A2).
+        self.codex_connection = CodexConnection(config.data_dir / "codex" / "account")
         self.live_store = LiveStore(self.db)
         self.live_store.recover_interrupted()
+        #: Knowledge wiki: its own knowledge.sqlite3; touches Documents only after an explicit connect.
+        self.kb = KnowledgeService(
+            config.data_dir, documents_dir=config.documents_dir,
+            documents_sandbox=config.documents_sandbox,
+        )
+        #: Ingest (W1); its detector/decisions/engines are connected by ``wire_knowledge`` below.
+        self.kb_ingest = IngestService(self.kb)
+        #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
+        self.kb_tools = ToolRegistry(self.kb)
+        self.kb_mcp = McpServer(self.kb_tools, url=f"http://{config.host}:{config.port}/kb/mcp")
+        self.kb_codex = CodexEngine(self.codex_connection, self.kb_tools)
+        #: Adding documents, links and pasted text to the knowledge library (area S1).
+        self.kb_sources = SourceService(self.kb, video_probe=ytdlp_probe)
+        #: Agent engines (Codex, Claude Code, Hermes): statuses, installs, sign-in; nothing runs until asked.
+        self.kb_agents = build_agents_hub(config.data_dir, settings=self.kb.settings,
+                                          codex=self.codex_connection, codex_engine=self.kb_codex,
+                                          mcp=McpGrants(self.kb_mcp))
         # Keys live beside the app's own data, not in the OS keychain: see
         # secrets.py for why a keychain item cannot work in the shipped bundle.
         self.secrets: SecretStore = secret_store or FileSecretStore(config.data_dir / "secrets")
         self.http = http_client or httpx.AsyncClient(timeout=config.request_timeout_s)
-        self.web_search = WebSearch(self.db, self.secrets)
-        self.codex.web_search = self.web_search
+        #: Wiki decision layer (System One): provider choice, local llama-server, journal.
+        self.kb_decisions = DecisionService(
+            self.kb.db, self.kb.settings, data_dir=config.data_dir, http=self.http,
+            api_key=lambda: self.secrets.get("openrouter"), activity=self.activity_log,
+        )
+        #: Seams between the knowledge areas (detector, decisions, engines, auto-ingest).
+        self.kb_auto_ingest = wire_knowledge(
+            self.kb, self.kb_ingest, self.kb_sources, self.kb_decisions.layer,
+            self.kb_agents.registry.engines, self.kb_agents.registry.default,
+            decisions_ready=self.kb_decisions.ready,
+        )
+        #: The wiki after ingest (W2): corrections, discrepancies, edits, deletion, connections, graph.
+        self.kb_wiki = wire_wiki(WikiService(self.kb, self.kb_ingest))
+        #: General chats (C1): answers through the engine registry with the SKAZ tools, no queues.
+        self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
+                                    text_layer=lambda: self.kb_ingest.text_layer)
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
-        self.codex.api_agents = ApiAgentEngine(
-            settings=self.settings_store.load, api_key=self.api_key, http=self.http,
-            catalogs=self.catalogs, timeout=config.request_timeout_s,
-        )
-        self.ingestion = IngestionService(self)
         #: File imports. Resumption is started by the app lifespan, not here: a
         #: constructor must not create tasks on a loop it does not own.
         self.imports = ImportService(self)
-        #: Written-but-unapplied note passages, held until the user compares them.
-        self.note_rewrites = PendingRewrites()
-        self.window_asr = WindowAsrPreview(self)
-        self.live_asr = LiveAsrDraftService(self.window_asr, self)
-        self.live_fragments = LiveAsrFragmentService(self)
-        self.live_scheduler = LiveAsrScheduler(self)
+        #: Speech → materials (area S2): links recordings/imports to library materials.
+        self.kb_speech = create_speech_service(self)
+        self.kb_speech.on_finished(self.kb_auto_ingest.material_finished)
+        #: Decision 15: an import's "to wiki" choice is kept before the import can finish (X5).
+        self.kb_speech.keep_wiki_choices(self.kb_auto_ingest.remember)
+        #: ``link_failed`` notifications and their actions (area S3).
+        self.kb_link_failures = wire_speech(self.kb, self.kb_speech)
+        #: One-time "turn on automatic fixes" offer at the first finished speech material (X2-8, X5).
+        self.kb_fixes_offer = wire_fixes_offer(self.kb, self.kb_speech, self.kb_decisions)
         self._close_started = False
         self.native_tasks: dict[str, tuple[asyncio.Task[None], asyncio.Event]] = {}
         self.native_streams: dict[str, NativeStream] = {}
@@ -95,33 +122,14 @@ class Runtime:
         self.allow_model_download = os.environ.get("SKAZ_ALLOW_MODEL_DOWNLOAD", "") == "1"
         #: The explicit "prepare this checkpoint" path; separate from the toggle above.
         self.local_models = LocalModelPreparations(config.local_model_cache_dir)
+        #: Dictation from the composer (area S3): recognised with the chosen service, never stored.
+        self.kb_dictation = Dictation(self)
+        #: New settings (area S3): key checks and the problem list over the existing stores.
+        self.kb_keys = KeyChecks(self.kb.settings, self.api_key, self.http)
+        self.kb_settings_health = SettingsHealth(self, self.kb_keys)
 
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
-
-    @property
-    def contextual_local_enabled(self) -> bool:
-        """The persisted explicit opt-in for the experimental contextual local mode.
-
-        Reading it never enables anything: the value is written only by an explicit
-        settings update, so it also survives a restart without re-enabling itself.
-        """
-        return self.settings_store.load().contextual_local_enabled
-
-    @property
-    def live_finality_enabled(self) -> bool:
-        """Effective stable-prefix finalization for the contextual local path."""
-        return self.config.live_finality_enabled or self.contextual_local_enabled
-
-    @property
-    def local_speech_gate(self) -> bool:
-        """Effective speech-presence gate for the contextual local window decoder.
-
-        The legacy per-chunk path deliberately keeps reading
-        ``config.local_speech_gate`` so the opt-in never changes legacy/cloud
-        transcription behaviour.
-        """
-        return self.config.local_speech_gate or self.contextual_local_enabled
 
     def settings_view(self, stored: StoredSettings | None = None) -> Settings:
         """Sanitised settings for the API: keys reported as presence only, honest verified flags."""
@@ -158,9 +166,6 @@ class Runtime:
             transcript_language=settings.transcript_language,
             output_language=settings.output_language,
             cloud_consent=settings.cloud_consent,
-            import_cost_warning_usd=settings.import_cost_warning_usd,
-            embedding_budget_usd=settings.embedding_budget_usd,
-            contextual_local_enabled=settings.contextual_local_enabled,
             transcription_provider=settings.transcription_provider,
             local_whisper_model=settings.local_whisper_model,
             openai_transcription_model=settings.openai_transcription_model,
@@ -189,15 +194,7 @@ class Runtime:
         if self._close_started:
             return
         self._close_started = True
-        pending = self.live_scheduler.close()
-        if pending is not None:
-            pending.add_done_callback(lambda _task: self._finish_close())
-            return
-        self._finish_close()
-
-    def _finish_close(self) -> None:
-        self.codex.close_storage()
-        self.window_asr.close()
         self.local_models.close()
-        self.ingestion.close()
+        self.kb_decisions.kill_now()
+        self.kb.close()
         self.db.close()

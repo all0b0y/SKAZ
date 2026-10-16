@@ -17,10 +17,12 @@ test.afterAll(async () => {
   await close?.();
 });
 
-test('renders the SKAZ shell', async () => {
-  // The titlebar is a bare drag strip now (no wordmark) — the session rail is
-  // the shell's first real landmark.
-  await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+test('renders the SKAZ shell once the backend is really ready', async () => {
+  // The interface waits for a real /health check; it never claims readiness on its own.
+  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
+    { timeout: 60_000 }).toBe('ready');
+  await expect(page.locator('html[data-kb-ui]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.getByRole('dialog', { name: 'Welcome to SKAZ' })).toBeVisible({ timeout: 30_000 });
 });
 
 test('exposes the secure preload bridge and hides the token', async () => {
@@ -35,31 +37,6 @@ test('exposes the secure preload bridge and hides the token', async () => {
   });
   expect(shape.hasBridge).toBe(true);
   expect(shape.methods).toContain('request');
-  expect(shape.methods).toContain('uploadAudio');
+  expect(shape.methods).toContain('openNative');
   expect(shape.leaks).toBe(false);
-});
-
-test('API keys explains transient audio in the real built window', async ({}, testInfo) => {
-  await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
-    { timeout: 60_000 }).toBe('ready');
-  await page.getByRole('button', { name: 'Russian + English', exact: true }).click();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'API keys', exact: true }).click();
-  await expect(page.getByText('Live transcription. Audio is used for recognition and is not stored.')).toBeVisible();
-  await expect(page.getByText(/Recording requires a Soniox key and cloud consent/)).toBeVisible();
-  await expect(page.getByText(/Disabling this stops live transcription and recording/)).toBeVisible();
-  await expect(page.getByText(/Audio is saved locally|Recording remains local|not local audio recording/)).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath('audio-storage-copy.png') });
-});
-
-test('surfaces the backend lifecycle honestly (ready or truthful error)', async () => {
-  const pill = page.locator('.status-pill');
-  await expect(pill).toBeVisible();
-  // The pill renders as a bare coloured dot; the phase is carried by its
-  // accessible name and tooltip, not by visible text. Either the backend became
-  // ready, or the gate names a truthful error — but the app never claims
-  // readiness without a real health check.
-  const label = (await pill.getAttribute('aria-label'))?.toLowerCase() ?? '';
-  expect(label).toMatch(/backend (ready|error|stopped)|starting backend/);
 });

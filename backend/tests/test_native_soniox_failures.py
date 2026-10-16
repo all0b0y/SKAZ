@@ -11,6 +11,7 @@ from starlette.testclient import TestClient
 from skaz import native_stream
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
+from tests.sessions_support import create_session, session_detail
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -43,7 +44,7 @@ def test_network_stall_never_blocks_audio_ack_and_stop_is_incomplete(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Stall"}).json()["id"]
+        sid = create_session(http, "Stall")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -87,7 +88,7 @@ def test_explicit_auth_retry_uses_current_clock_and_retains_gap(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Reconnect"}).json()["id"]
+        sid = create_session(http, "Reconnect")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -127,7 +128,7 @@ def test_explicit_auth_retry_uses_current_clock_and_retains_gap(
             assert ws.receive_json()["transcription_complete"] is False
         assert calls == 2
         assert second.audio == [packet(2, 3200)[20:]]
-        detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+        detail = session_detail(http, sid)
         assert [(s["text"], s["start_ms"], s["end_ms"]) for s in detail["segments"]] == [
             ("Before", 0, 100), ("Hello", 200, 300),
         ]

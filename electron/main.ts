@@ -8,12 +8,13 @@ import { registerIpc } from './ipc';
 import type { NativeLiveClient } from './nativeLive';
 import { CHANNELS } from './channels';
 import { isAllowedExternalUrl } from './ipcPolicy';
-import { hasUnsentAudio, type CaptureProtectionState } from './captureProtection';
+import { hasUnsentAudio, quitWarning, type CaptureProtectionState } from './captureProtection';
 import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
-import { isTrustedFrame, validateCaptureState, validateCodexActivity } from './ipcSender';
+import { isTrustedFrame, validateCaptureState } from './ipcSender';
 import { QuitController } from './quitController';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
+import { registerUpdates } from './updateRuntime';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
@@ -76,8 +77,6 @@ const DATA_DIR = path.join(app.getPath('userData'), 'data');
 // Latest capture snapshot reported by the renderer (validated). Consulted on
 // close/quit so unsent audio is never dropped without a warning.
 let captureState: CaptureProtectionState = { recorderState: 'idle', pending: 0, failed: 0 };
-// Active Codex tasks last reported by the renderer; only decides whether quit warns.
-let codexActiveTasks = 0;
 
 const manager = new BackendManager({
   repoRoot: REPO_ROOT,
@@ -96,37 +95,18 @@ const rendererSave = new RendererSaveBarrier((id) => {
 
 const quitController = new QuitController({
   saveBeforeQuit: () => mainWindow ? rendererSave.request() : Promise.resolve(!hasUnsentAudio(captureState)),
-  onCancelQuit: () => {
-    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(CHANNELS.cancelQuit);
-  },
   hasUnsentAudio: () => hasUnsentAudio(captureState),
   confirmDiscard: () => {
+    // Each situation in its own words: still saving, couldn't save, or the end unconfirmed.
+    const warning = quitWarning(captureState);
     const options: Electron.MessageBoxSyncOptions = {
       type: 'warning',
-      buttons: ['Stay in SKAZ', 'Discard unsaved audio and quit'],
+      buttons: warning.buttons,
       defaultId: 0,
       cancelId: 0,
       noLink: true,
-      message: 'Saving before exit could not be confirmed',
-      detail:
-        'Some captured audio is still being saved or transcribed. Quitting now may lose the unfinished audio. ' +
-        'Stay to let processing finish or retry saving, or explicitly discard it and quit.',
-    };
-    const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
-    return choice === 1;
-  },
-  hasActiveTasks: () => codexActiveTasks > 0,
-  confirmStopTasks: () => {
-    const options: Electron.MessageBoxSyncOptions = {
-      type: 'warning',
-      buttons: ['Stay', 'Stop tasks and quit'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
-      message: 'Codex is still running tasks',
-      detail:
-        'Quitting stops the tasks. Requests, partial answers and the queue are kept; ' +
-        'after relaunch you can resume them manually — they do not resume by themselves.',
+      message: warning.message,
+      detail: warning.detail,
     };
     const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
     return choice === 1;
@@ -326,15 +306,6 @@ app.whenReady().then(() => {
     })) return;
     rendererSave.acknowledge(id, saved);
   });
-  ipcMain.on(CHANNELS.codexActivity, (event, payload: unknown) => {
-    if (!isTrustedFrame({
-      senderId: event.sender.id,
-      expectedId: mainWindow?.webContents.id ?? null,
-      isMainFrame: event.senderFrame?.parent === null,
-    })) return;
-    const count = validateCodexActivity(payload);
-    if (count !== null) codexActiveTasks = count;
-  });
   ipcMain.on(CHANNELS.captureState, (event, payload: unknown) => {
     const trusted = isTrustedFrame({
       senderId: event.sender.id,
@@ -345,6 +316,12 @@ app.whenReady().then(() => {
     const validated = validateCaptureState(payload);
     if (validated) captureState = validated;
   });
+  // Updates (B20): GitHub Releases at start and daily; the About row reads and drives it.
+  registerUpdates(() => mainWindow, (event) => isTrustedFrame({
+    senderId: event.sender.id,
+    expectedId: mainWindow?.webContents.id ?? null,
+    isMainFrame: event.senderFrame?.parent === null,
+  }));
   createWindow();
 
   // Start the backend after the window exists so status events reach the UI.

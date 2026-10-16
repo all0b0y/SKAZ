@@ -1,0 +1,45 @@
+"""``/kb/*`` routers. Areas append their router to ``ROUTERS``; ``app.py`` mounts them all as protected."""
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from . import (
+    agents,
+    chats,
+    decisions,
+    dictation,
+    export,
+    folders,
+    ingest,
+    library,
+    materials,
+    mentions,
+    notifications,
+    search,
+    settings,
+    sources,
+    speech,
+    wiki,
+)
+
+#: Mounted with the bearer-token dependency. Append-only: one line per area.
+ROUTERS: tuple[APIRouter, ...] = (
+    library.router,
+    folders.router,
+    materials.router,
+    wiki.router,
+    search.router,
+    notifications.router,
+    ingest.router,
+    sources.router,
+    decisions.router,
+    speech.router,
+    agents.router,
+    materials.corrections_router,
+    wiki.graph_router,
+    chats.router,
+    mentions.router,
+    settings.router,
+    dictation.router,
+    export.router,
+)

@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
+from tests.sessions_support import create_session, session_detail
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -44,7 +45,7 @@ def test_speaker_turns_keep_sources_and_do_not_reuse_identity_after_reconnect(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True}).raise_for_status()
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Speakers"}).json()["id"]
+        sid = create_session(http, "Speakers")
         for sequence, start_sample in [(0, 0), (1, 1600)]:
             with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
                 ws.send_json({"type": "open", "sample_rate": 16000})
@@ -64,7 +65,7 @@ def test_speaker_turns_keep_sources_and_do_not_reuse_identity_after_reconnect(
             ("Раз", 3, 1600, 2080), ("Два", 4, 2080, 2560), ("Три", 3, 2560, 3200),
         ]
         assert all(config["enable_speaker_diarization"] is True for config in settings)
-        detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+        detail = session_detail(http, sid)
         source_ids = {segment["id"] for segment in detail["segments"]}
         assert all(t["segment_id"] in source_ids for t in tokens)
         assert len({t["id"] for t in tokens}) == 6

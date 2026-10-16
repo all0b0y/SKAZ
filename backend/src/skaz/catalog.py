@@ -63,8 +63,6 @@ class CatalogEntry:
     input_modalities: tuple[str, ...]
     output_modalities: tuple[str, ...]
     max_output_tokens: int | None = None
-    pricing_amount_usd: float | None = None
-    pricing_unit: str | None = None
     #: Request parameters the provider declares for this model (OpenRouter only).
     #: Empty means *unknown*, exactly like the modality tuples.
     supported_parameters: tuple[str, ...] = ()
@@ -224,12 +222,6 @@ class ProviderCatalogs:
             f"OpenRouter model '{model_id}' has no dedicated transcription or legacy audio-chat contract."
         )
 
-    def cached_entry(self, provider: str, model_id: str) -> CatalogEntry | None:
-        """The entry from memory or the disk cache only: never a network request."""
-        cached = self._memory.get(self._cache_key(provider, None))
-        entries = cached[1] if cached else self._read_disk_cache(provider, None) or []
-        return next((entry for entry in entries if entry.id == model_id), None)
-
     def cached_openrouter_asr_kind(self, model_id: str) -> str | None:
         for entry in self._memory.get(self._cache_key("openrouter", "asr"), (0, []))[1]:
             if entry.id == model_id and entry.emits_transcription:
@@ -328,8 +320,6 @@ class ProviderCatalogs:
                     input_modalities=_modalities(item.get("input_modalities")),
                     output_modalities=_modalities(item.get("output_modalities")),
                     max_output_tokens=item.get("max_output_tokens"),
-                    pricing_amount_usd=item.get("pricing_amount_usd"),
-                    pricing_unit=item.get("pricing_unit"),
                     supported_parameters=_modalities(item.get("supported_parameters")),
                 )
                 for item in raw.get("models", [])
@@ -348,8 +338,6 @@ class ProviderCatalogs:
                     "input_modalities": list(entry.input_modalities),
                     "output_modalities": list(entry.output_modalities),
                     "max_output_tokens": entry.max_output_tokens,
-                    "pricing_amount_usd": entry.pricing_amount_usd,
-                    "pricing_unit": entry.pricing_unit,
                     "supported_parameters": list(entry.supported_parameters),
                 }
                 for entry in entries
@@ -405,25 +393,11 @@ def _openrouter_entry(item: Any) -> CatalogEntry | None:
     top_provider = item.get("top_provider") or {}
     max_output = top_provider.get("max_completion_tokens") if isinstance(top_provider, dict) else None
     max_output = int(max_output) if isinstance(max_output, (int, float)) and max_output > 0 else None
-    pricing_amount: float | None = None
-    pricing_unit: str | None = None
-    # OpenRouter's Qwen model page explicitly defines this registry value as USD/second.
-    # Other catalog prompt prices are not exposed because their units are vendor-dependent.
-    if str(item.get("id")) == RECOMMENDED_OPENROUTER_ASR:
-        pricing = item.get("pricing") or {}
-        try:
-            pricing_amount = float(pricing["prompt"])
-            pricing_unit = "second"
-        except (KeyError, TypeError, ValueError):
-            pricing_amount = None
-            pricing_unit = None
     return CatalogEntry(
         id=str(item["id"]),
         name=str(item.get("name") or item["id"]),
         input_modalities=_modalities(inputs),
         output_modalities=_modalities(outputs),
         max_output_tokens=max_output,
-        pricing_amount_usd=pricing_amount,
-        pricing_unit=pricing_unit,
         supported_parameters=_modalities(item.get("supported_parameters")),
     )

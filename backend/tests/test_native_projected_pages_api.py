@@ -5,6 +5,7 @@ from typing import Any, Literal
 import httpx
 
 from skaz.gateways.soniox import SonioxToken, SonioxTokenRef, SonioxTranslationToken
+from tests.sessions_support import session_detail
 from tests.test_native_event_pages_api import event, recording
 
 
@@ -72,23 +73,13 @@ async def test_draft_outside_history_page_can_invalidate_translation_ownership(
     assert page["projection"]["tail"] is None
 
 
-async def test_native_summary_does_not_load_the_full_transcript(
-    client: httpx.AsyncClient, app: Any,
-) -> None:
-    sid, cid = await recording(client, app)
-    app.state.runtime.live_store.save_event(cid, ordinal=0, event=event("Saved source"))
-    summary = (await client.get(f"/sessions/{sid}", params={"native_window": True})).json()
-    assert summary["segments"] == []
-    assert (await client.get(f"/sessions/{sid}")).json()["segments"][0]["text"] == "Saved source"
-
-
 async def test_citation_locator_and_pre_token_archive_preserve_the_saved_source(
     client: httpx.AsyncClient, app: Any,
 ) -> None:
     sid, cid = await recording(client, app)
     store = app.state.runtime.live_store
     store.save_event(cid, ordinal=0, event=event("Archived original"))
-    detail = (await client.get(f"/sessions/{sid}")).json()
+    detail = session_detail(client, sid)
     source = detail["segments"][0]["id"]
     with app.state.runtime.db.write() as c:
         c.execute("DELETE FROM native_token_events WHERE connection_id=?", (cid,))
@@ -115,7 +106,7 @@ async def test_byte_bounded_citation_page_always_contains_the_requested_source(
     store = app.state.runtime.live_store
     for ordinal in range(40):
         store.save_event(cid, ordinal=ordinal, event=event("word " * 4000))
-    sources = (await client.get(f"/sessions/{sid}")).json()["segments"]
+    sources = session_detail(client, sid)["segments"]
     source = sources[-1]["id"]
     response = await client.get(
         f"/sessions/{sid}/live/events", params={"project": True, "segment_id": source, "limit": 128}

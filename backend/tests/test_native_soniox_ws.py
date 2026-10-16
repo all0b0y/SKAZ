@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
+from tests.sessions_support import create_session, delete, session_detail, session_gone
 from tests.test_native_live_ws import AUTH, packet
 
 
@@ -58,7 +59,7 @@ def test_auth_failure_warns_once_and_allows_explicit_retry(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Retry"}).json()["id"]
+        sid = create_session(http, "Retry")
         url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
@@ -83,7 +84,7 @@ def test_auth_failure_warns_once_and_allows_explicit_retry(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["type"] == "stream.stopped"
         assert attempts == 2
-        assert http.get(f"/sessions/{sid}", headers=AUTH).json()["segments"][0]["text"] == "Hello"
+        assert session_detail(http, sid)["segments"][0]["text"] == "Hello"
 
 
 def test_native_ws_forwards_once_and_persists_final_before_stop(
@@ -100,7 +101,7 @@ def test_native_ws_forwards_once_and_persists_final_before_stop(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Native"}).json()["id"]
+        sid = create_session(http, "Native")
         url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
@@ -116,7 +117,7 @@ def test_native_ws_forwards_once_and_persists_final_before_stop(
             assert ws.receive_json()["transcription_complete"] is True
         assert sockets[0].audio == [packet(0, 0)[20:]]
         assert sockets[0].closed
-        detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+        detail = session_detail(http, sid)
         assert [(s["text"], s["start_ms"], s["end_ms"]) for s in detail["segments"]] == [
             ("Hello", 0, 100),
         ]
@@ -140,7 +141,7 @@ def test_connect_delay_retains_audio_without_blocking_storage(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Delayed"}).json()["id"]
+        sid = create_session(http, "Delayed")
         assert (
             http.put(
                 "/settings",
@@ -182,7 +183,7 @@ def test_connect_delay_retains_audio_without_blocking_storage(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["transcription_complete"] is True
         assert b"".join(socket.audio) == packet(0, 0)[20:] + packet(1, 1600)[20:]
-        detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
+        detail = session_detail(http, sid)
         assert [(s["start_ms"], s["end_ms"]) for s in detail["segments"]] == [(0, 200)]
         snapshot = http.get(f"/sessions/{sid}/live", headers=AUTH).json()
         assert len(snapshot["connections"]) == 1
@@ -206,15 +207,15 @@ def test_delete_active_stream_closes_provider_before_removing_data(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Delete"}).json()["id"]
+        sid = create_session(http, "Delete")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
             ws.send_bytes(packet(0, 0))
             ws.receive_json()
-            assert http.delete(f"/sessions/{sid}", headers=AUTH).status_code == 200
+            delete(http, sid)
             assert socket.closed
-            assert http.get(f"/sessions/{sid}", headers=AUTH).status_code == 404
+            assert session_gone(http, sid)
 
 
 
@@ -255,7 +256,7 @@ def test_stop_after_a_tail_shorter_than_a_millisecond_is_complete(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"cloud_consent": True})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Tail"}).json()["id"]
+        sid = create_session(http, "Tail")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 48_000})
             assert ws.receive_json()["transcription"] == "connecting"
@@ -289,7 +290,7 @@ class RoundingUpProviderSocket(MillisecondProviderSocket):
 
 
 def _record_and_stop(http: Any, socket: ProviderSocket, rate: int, sizes: list[int]) -> dict[str, Any]:
-    sid = http.post("/sessions", headers=AUTH, json={"title": "Stop"}).json()["id"]
+    sid = create_session(http, "Stop")
     with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
         ws.send_json({"type": "open", "sample_rate": rate})
         assert ws.receive_json()["type"] == "stream.opened"

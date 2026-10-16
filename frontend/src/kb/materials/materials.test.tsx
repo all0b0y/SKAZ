@@ -1,0 +1,257 @@
+import { describe, expect, it } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderKb } from '../test/renderKb';
+import { docWorld } from '../test/fakeBridge';
+import { addedLabel } from './AllMaterials';
+import { fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
+import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
+
+async function ready() {
+  const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
+  await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+  return r;
+}
+
+describe('All materials (v11, decision 25)', () => {
+  it('opens over the centre as a table with type, name, folder, added and the wiki state', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const table = await within(center).findByRole('table');
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Name', 'Folder', 'Added', 'Wiki']);
+    const row = within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')!;
+    expect(row).toHaveTextContent('Physics');
+    expect(row).toHaveTextContent('In wiki');
+    expect(within(table).getByRole('button', { name: 'Pasted text: problems' }).closest('tr')).toHaveTextContent('Not in wiki');
+    expect(within(table).getByRole('button', { name: 'Lecture 5 — ML' }).closest('tr')).toHaveTextContent('Adding…');
+    expect(within(table).getByRole('button', { name: 'habr.com/ru/articles/870112' }).closest('tr')).toHaveTextContent('Error');
+    // The chat is hidden, not unmounted, while "All materials" holds the centre.
+    expect(screen.queryByRole('region', { name: 'Chat' })).not.toBeInTheDocument();
+  });
+
+  it('filters by type and folder, sorts, switches to cards, opens a material on the right', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    await within(center).findByRole('table');
+    await user.click(within(center).getByRole('radio', { name: 'Documents' }));
+    expect(within(center).getAllByRole('row')).toHaveLength(2);
+    await user.click(within(center).getByRole('radio', { name: 'All' }));
+    await user.selectOptions(within(center).getByRole('combobox', { name: 'Folder' }), 'ml');
+    expect(within(center).getAllByRole('row')).toHaveLength(4);
+    await user.selectOptions(within(center).getByRole('combobox', { name: 'Sort' }), 'name');
+    const names = within(center).getAllByRole('row').slice(1).map((r) => r.querySelector('.kb-amt__open')!.textContent);
+    expect(names).toEqual([...names].sort((a, b) => a!.localeCompare(b!)));
+    await user.click(within(center).getByRole('radio', { name: 'Cards' }));
+    expect(within(center).getByRole('list', { name: 'Materials' })).toBeInTheDocument();
+    await user.click(within(center).getByRole('button', { name: /Cross-entropy explained/ }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Cross-entropy explained' })).toBeInTheDocument();
+    await user.click(within(center).getByRole('button', { name: 'Close all materials' }));
+    expect(screen.queryByRole('region', { name: 'All materials' })).not.toBeInTheDocument();
+  });
+
+  it('says "today", "yesterday", else a short date', () => {
+    const now = new Date('2026-10-15T15:00:00');
+    expect(addedLabel('2026-10-15T08:00:00', now)).toBe('today');
+    expect(addedLabel('2026-10-14T08:00:00', now)).toBe('yesterday');
+    expect(addedLabel('2026-10-11T08:00:00', now)).toBe('11 Oct');
+  });
+});
+
+describe('+ Material (v11, decisions 15–16)', () => {
+  it('decides link vs text and the wiki default without the UI', () => {
+    expect(pasteItem('https://youtu.be/x')).toMatchObject({ type: 'link', classifying: true });
+    expect(pasteItem('  some notes\nmore  ')).toMatchObject({ type: 'text', text: 'some notes\nmore' });
+    expect(pasteItem('   ')).toBeNull();
+    expect(fileItem('/a/b/lecture.MP4', 'lecture.MP4', 10)).toMatchObject({ kind: 'speech', video: true });
+    expect(fileItem('/a/b.pdf', 'b.pdf', 10)).toMatchObject({ kind: 'document' });
+    const text = pasteItem('notes')!;
+    const link = pasteItem('https://example.org')!;
+    expect(wikiDefault([text], { files: true, text: false })).toBe(false);
+    expect(wikiDefault([text, link], { files: true, text: false })).toBe(true);
+  });
+
+  it('a pasted link is classified; a video link asks the spoken language and translation; Add sends an import', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    expect(within(dialog).getByText('YouTube · 1:04:00')).toBeInTheDocument();
+    // Last-used folder by default (decision 16), wiki on for links with a ready agent (decision 15, QA B4).
+    expect(within(dialog).queryByTestId('add-wiki-no-agent')).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue('phys');
+    expect(within(dialog).getByRole('switch', { name: 'Add to wiki after processing' })).toBeChecked();
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Spoken language' }), 'en');
+    await user.click(within(dialog).getByRole('switch', { name: 'Translate' }));
+    expect(within(dialog).getByText('Translate into Russian')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.find((c) => c.path === '/kb/imports')?.body).toEqual({
+      url: 'https://www.youtube.com/watch?v=abc', folder_id: 'phys', translate: true, language: 'en', to_wiki: true,
+    });
+  });
+
+  it('pasted text goes to the wiki only when asked; the switch travels with the add request', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const box = within(dialog).getByRole('textbox', { name: 'Link or any text' });
+    fireEvent.change(box, { target: { value: 'Seminar notes: the log makes entropy additive.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    const wikiSwitch = within(dialog).getByRole('switch', { name: 'Add to wiki after processing' });
+    expect(wikiSwitch).not.toBeChecked();
+    expect(within(dialog).queryByRole('combobox', { name: 'Spoken language' })).not.toBeInTheDocument();
+    await user.click(wikiSwitch);
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), 'math');
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toEqual({ text: 'Seminar notes: the log makes entropy additive.', folder_id: 'math', to_wiki: true });
+    // The backend adds it once it is ready (AutoIngest honours the flag): no separate request.
+    expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
+  });
+
+  it('with Settings adding files and links automatically, switching "Add to wiki" off is honoured (decision 15)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    const wikiSwitch = within(dialog).getByRole('switch', { name: 'Add to wiki after processing' });
+    expect(wikiSwitch).toBeChecked();
+    await user.click(wikiSwitch);
+    expect(wikiSwitch).not.toBeChecked();
+    expect(within(dialog).queryByText(/can’t hold it back/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.find((c) => c.path === '/kb/imports')?.body).toMatchObject({ to_wiki: false });
+  });
+
+  it('dropped files are listed with their type; one that fails stays with the reason', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const files = [new File(['x'], 'lecture9.m4a', { type: 'audio/mp4' }), new File(['y'], 'notes.pdf', { type: 'application/pdf' })];
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files, getData: () => '' } });
+    expect(within(dialog).getByText('lecture9.m4a')).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Audio · 1 B$/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^PDF · 1 B$/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: 'Spoken language' })).toBeInTheDocument();
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => (req.path === '/kb/materials/file'
+      ? { ok: false, status: 422, detail: 'This file type can’t be read.' }
+      : original(req))) as typeof original;
+    await user.click(within(dialog).getByRole('button', { name: 'Add 2' }));
+    expect(await within(dialog).findByText('This file type can’t be read.')).toBeInTheDocument();
+    expect(within(dialog).queryByText('lecture9.m4a')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('notes.pdf')).toBeInTheDocument();
+  });
+
+  it('without a ready wiki agent "Add to wiki" starts off and says where to connect one (QA B4)', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    world.agents.agents.find((a) => a.id === 'claude_code')!.state = 'not_installed';
+    const r = renderKb({ world, prefs: { section: 'materials' } });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    expect(within(dialog).getByRole('switch', { name: 'Add to wiki after processing' })).not.toBeChecked();
+    expect(within(dialog).getByTestId('add-wiki-no-agent')).toHaveTextContent('Connect an agent in Settings → Accounts & keys to add materials to the wiki.');
+    await user.click(within(dialog).getByRole('button', { name: 'Open Accounts & keys' }));
+    expect(r.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
+  });
+
+  it('audio and video say what they need before Add, per row, with the real Settings place (QA B6)', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    world.speech = { ...world.speech, provider: 'soniox', cloud_consent: false };
+    const r = renderKb({ world, prefs: { section: 'materials' } });
+    r.services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const files = [new File(['x'], 'talk.wav'), new File(['y'], 'clip.mov'), new File(['z'], 'notes.pdf')];
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files, getData: () => '' } });
+    const rows = await within(dialog).findAllByTestId('speech-block');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('Importing sends the audio to Soniox. Turn on “Send audio to Soniox” in Settings → Recording & speech.');
+    expect(within(dialog).getByRole('button', { name: 'Add 3' })).toBeDisabled();
+    expect(within(dialog).queryByText(/Download it below/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Open Recording & speech' }));
+    expect(r.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'rec' });
+    expect(r.fake.calls.some((c) => c.path === '/kb/imports')).toBe(false);
+  });
+
+  it('names the setting each provider needs: key, consent, the model on this computer', () => {
+    const speech = (over: Partial<KbSpeechSettings>): KbSpeechSettings => ({
+      provider: 'soniox', languages: [], translate_by_default: false, translation_language: 'en', cloud_consent: true,
+      local_model: { model: 'small', state: 'ready', progress: null, reason: null, size_bytes: null }, ...over,
+    });
+    const keys = (soniox: boolean): KbKeys => ({ providers: [{ id: 'soniox', configured: soniox, checked_at: null, valid: null }] });
+    expect(speechBlock(speech({}), keys(true))).toBeNull();
+    expect(speechBlock(speech({}), keys(false))).toMatchObject({ section: 'conn', action: 'Open Accounts & keys', reason: 'Soniox has no API key. Add one in Settings → Accounts & keys.' });
+    expect(speechBlock(speech({ cloud_consent: false }), keys(true))?.section).toBe('rec');
+    const local = speech({ provider: 'local_whisper', cloud_consent: false, local_model: { model: 'small', state: 'missing', progress: null, reason: null, size_bytes: 1 } });
+    expect(speechBlock(local, keys(false))).toMatchObject({ section: 'rec', reason: expect.stringMatching(/isn’t downloaded yet\. Download it in Settings → Recording & speech/) });
+    expect(speechBlock(null, null)).toBeNull();
+  });
+
+  it('a dropped file SKAZ can’t read says so on its row and holds Add until it is removed (QA B2, B15)', async () => {
+    const user = userEvent.setup();
+    const { services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const files = [new File(['x'], 'doc.rtf'), new File(['y'], 'notes.md')];
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files, getData: () => '' } });
+    expect(within(dialog).getByText(/SKAZ can’t read this type/)).toHaveClass('is-error');
+    expect(within(dialog).getByRole('button', { name: 'Add 2' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove doc.rtf' }));
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeEnabled();
+  });
+
+  it('Low: link labels once, bad addresses said so, failing links not counted, "None" when nothing was added, focus in the field (QA B14, B22–B24, B33)', async () => {
+    expect(pasteItem('https://exa mple.com')).toMatchObject({ type: 'link', error: NOT_A_LINK });
+    expect(pasteItem('https://example.com is where I read it\nand more')).toMatchObject({ type: 'text' });
+    expect(pasteItem('ftp://example.com/x.pdf')).toMatchObject({ type: 'link', classifying: false, error: NOT_A_LINK });
+    const yt = { ...pasteItem('https://youtu.be/x') as LinkItem, classifying: false };
+    expect(itemMeta({ ...yt, info: { kind: 'video', url: 'u', domain: 'youtube.com', label: 'YouTube · 0:19', platform: 'youtube', video_id: 'x', title: 'T', duration_ms: 19_000, supported: true, note: null, embedded_video: null } }))
+      .toBe('YouTube · 0:19');
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const box = within(dialog).getByRole('textbox', { name: 'Link or any text' });
+    await waitFor(() => expect(box).toHaveFocus());
+    await user.type(box, 'ftp://example.com/x.pdf{Enter}');
+    expect(within(dialog).getByText(NOT_A_LINK)).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: 'Seminar notes.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => (req.path === '/kb/materials/text'
+      ? { ok: false, status: 503, detail: 'The library is busy.' } : original(req))) as typeof original;
+    // The broken link is neither counted nor sent.
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(await within(dialog).findByText('None of these were added.')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('The library is busy.')).toHaveLength(1);
+    expect(fake.calls.some((c) => c.path === '/kb/materials/link' || c.path === '/kb/links/classify')).toBe(false);
+  });
+
+  it('the side panel "Add material" opens the same window', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByRole('button', { name: 'Add material' }));
+    expect(await screen.findByRole('dialog', { name: 'Add material' })).toBeInTheDocument();
+    act(() => undefined);
+  });
+});

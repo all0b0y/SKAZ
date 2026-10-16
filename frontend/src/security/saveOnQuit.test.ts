@@ -10,7 +10,6 @@ function fixture() {
     confirmDiscard: vi.fn(() => false),
     stopBackend: vi.fn(async () => undefined),
     quit: vi.fn(),
-    onCancelQuit: vi.fn(),
   };
   return { controller: new QuitController(deps), deps, resolve };
 }
@@ -39,7 +38,6 @@ describe('save-on-quit lifecycle', () => {
     expect(f.deps.confirmDiscard).toHaveBeenCalledTimes(1);
     expect(f.deps.stopBackend).not.toHaveBeenCalled();
     expect(f.deps.quit).not.toHaveBeenCalled();
-    expect(f.deps.onCancelQuit).toHaveBeenCalledTimes(1);
     expect(f.controller.isShuttingDown).toBe(false);
   });
 

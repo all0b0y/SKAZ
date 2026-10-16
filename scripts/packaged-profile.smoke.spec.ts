@@ -22,19 +22,26 @@ test('packaged installer starts empty and preserves its isolated profile on rest
         const page = await app.firstWindow();
         await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase),
           { timeout: 45_000 }).toBe('ready');
-        const titles = await page.evaluate(async () => {
-          const response = await window.skaz.request<{ sessions: { title: string }[] }>({ method: 'GET', path: '/sessions' });
-          if (!response.ok) throw new Error('Packaged session read failed');
-          return response.data.sessions.map((s) => s.title);
+        const folders = await page.evaluate(async () => {
+          const library = await window.skaz.request<{ state: string }>({ method: 'GET', path: '/kb/library' });
+          if (!library.ok) throw new Error('Packaged library read failed');
+          if (library.data.state !== 'ready') return [];
+          const response = await window.skaz.request<{ name: string; system: boolean }[]>({ method: 'GET', path: '/kb/folders' });
+          if (!response.ok) throw new Error('Packaged folder read failed');
+          return response.data.filter((f) => !f.system).map((f) => f.name);
         });
-        expect(titles).toEqual(launch === 0 ? [] : ['Installer persistence fixture']);
+        expect(folders).toEqual(launch === 0 ? [] : ['Installer persistence fixture']);
         if (launch === 0) {
-          const saved = await page.evaluate(() => window.skaz.request({ method: 'POST', path: '/sessions',
-            body: { title: 'Installer persistence fixture' } }));
-          expect(saved.ok).toBe(true);
+          const saved = await page.evaluate(async () => {
+            const library = await window.skaz.request({ method: 'POST', path: '/kb/library', body: {} });
+            if (!library.ok) return false;
+            const folder = await window.skaz.request({ method: 'POST', path: '/kb/folders', body: { name: 'Installer persistence fixture' } });
+            return folder.ok;
+          });
+          expect(saved).toBe(true);
         }
       } finally { await app.close(); }
     }
-    expect(await fs.stat(path.join(profile, 'data/skaz.sqlite3'))).toBeTruthy();
+    expect(await fs.stat(path.join(profile, 'data/knowledge.sqlite3'))).toBeTruthy();
   } finally { await fs.rm(profile, { recursive: true, force: true }); }
 });

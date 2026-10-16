@@ -9,6 +9,8 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
+from skaz.routes.sessions import delete_session
+from tests.sessions_support import create_session, session_detail, session_gone
 from tests.test_native_live_ws import AUTH, packet
 
 
@@ -22,7 +24,7 @@ def test_disk_sync_does_not_block_event_loop(app: Any, monkeypatch: pytest.Monke
         return bool(real_accept(*args))
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Slow disk"}).json()["id"]
+        sid = create_session(http, "Slow disk")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -60,7 +62,7 @@ def test_session_request_during_disk_sync_keeps_loop_responsive(
         return bool(real_accept(*args))
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Disk race"}).json()["id"]
+        sid = create_session(http, "Disk race")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -68,23 +70,31 @@ def test_session_request_during_disk_sync_keeps_loop_responsive(
                 boundary.setattr(app.state.runtime.live_store, "_accept_transient", blocked_accept)
                 ws.send_bytes(packet(0, 0))
                 assert entered.wait(1)
-                headers = {**AUTH, "x-test-disk-race": "1"}
-                method = http.delete if operation == "delete" else http.get
-                path = f"/sessions/{sid}" + ("/live" if operation == "snapshot" else "")
-                pending = threads.submit(method, path, headers=headers)
+                if operation == "delete":
+                    # Deletion runs on the app loop, as the speech area calls it.
+                    async def deleting() -> None:
+                        request_started.set()
+                        await delete_session(sid, app.state.runtime)
+
+                    assert http.portal is not None
+                    pending = threads.submit(http.portal.call, deleting)
+                else:
+                    pending = threads.submit(http.get, f"/sessions/{sid}/live",
+                                             headers={**AUTH, "x-test-disk-race": "1"})
                 try:
                     assert request_started.wait(1)
                     assert threads.submit(http.get, "/health").result(timeout=0.5).status_code == 200
                     assert not pending.done(), "must wait for the durable transaction"
                 finally:
                     release.set()
-                assert pending.result(timeout=2).status_code == 200
+                result = pending.result(timeout=2)
+                assert result is None if operation == "delete" else result.status_code == 200
             if operation == "snapshot":
                 assert ws.receive_json()["saved_samples"] == 1600
                 ws.send_json({"type": "end"})
                 assert ws.receive_json()["type"] == "stream.stopped"
         if operation == "delete":
-            assert http.get(f"/sessions/{sid}", headers=AUTH).status_code == 404
+            assert session_gone(http, sid)
             assert not (app.state.runtime.config.audio_dir / sid).exists()
 
 
@@ -97,7 +107,7 @@ def test_stopped_ack_waits_for_status_commit_and_allows_immediate_resume(app: An
             release.wait(3)
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Pause barrier"}).json()["id"]
+        sid = create_session(http, "Pause barrier")
         url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as first:
             first.send_json({"type": "open", "sample_rate": 16000})
@@ -113,7 +123,7 @@ def test_stopped_ack_waits_for_status_commit_and_allows_immediate_resume(app: An
                 finally:
                     release.set()
                 assert response.result(timeout=2)["status"] == "paused"
-            assert http.get(f"/sessions/{sid}", headers=AUTH).json()["session"]["status"] == "paused"
+            assert session_detail(http, sid)["session"]["status"] == "paused"
             with http.websocket_connect(url, headers=AUTH) as second:
                 second.send_json({"type": "open", "sample_rate": 16000})
                 assert second.receive_json()["type"] == "stream.opened"
@@ -139,7 +149,7 @@ def test_transcript_storage_failure_closes_idle_intake_without_next_packet(
     secrets.set("soniox", "fixture-key-not-real")
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         assert http.put("/settings", headers=AUTH, json={"cloud_consent": True}).status_code == 200
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Event failure"}).json()["id"]
+        sid = create_session(http, "Event failure")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()

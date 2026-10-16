@@ -10,6 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from skaz import asr_providers
+from tests.sessions_support import create_session, delete, live_status, session_detail, session_gone
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_transcription_providers_api import scripted_local_opener
 
@@ -32,7 +33,7 @@ def test_stop_during_model_load_keeps_audio_until_background_completion(
     monkeypatch.setattr(asr_providers, "_local_opener", delayed)
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Background tail"}).json()["id"]
+        sid = create_session(http, "Background tail")
         url = f"ws://127.0.0.1/sessions/{sid}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
@@ -47,18 +48,18 @@ def test_stop_during_model_load_keeps_audio_until_background_completion(
             assert stopped["transcription_pending"] is True
             assert stopped["transcription_complete"] is False
         expected = "stopped" if action == "stop" else "paused"
-        assert http.get(f"/sessions/{sid}", headers=AUTH).json()["session"]["status"] == expected
-        status = http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()
+        assert session_detail(http, sid)["session"]["status"] == expected
+        status = live_status(http, sid)
         assert status["processing"] is True
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.error"
         if action == "stop":
             time.sleep(3.1)
-            assert http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()["processing"] is True
+            assert live_status(http, sid)["processing"] is True
         release.set()
         for _ in range(200):
-            status = http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()
+            status = live_status(http, sid)
             if not status["processing"]:
                 break
             time.sleep(0.01)
@@ -94,7 +95,7 @@ def test_background_failure_and_deletion_release_ownership_without_claiming_succ
         monkeypatch.setattr("skaz.native_finalization.LOCAL_FINISH_TIMEOUT_S", 0.05)
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = http.post("/sessions", headers=AUTH, json={"title": "Incomplete tail"}).json()["id"]
+        sid = create_session(http, "Incomplete tail")
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -103,13 +104,13 @@ def test_background_failure_and_deletion_release_ownership_without_claiming_succ
             ws.send_json({"type": "end"})
             assert ws.receive_json()["transcription_pending"] is True
         if outcome == "delete":
-            assert http.delete(f"/sessions/{sid}", headers=AUTH).status_code == 200
-            assert http.get(f"/sessions/{sid}", headers=AUTH).status_code == 404
+            delete(http, sid)
+            assert session_gone(http, sid)
             return
         if outcome == "failure":
             release.set()
         for _ in range(200):
-            status = http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()
+            status = live_status(http, sid)
             if not status["processing"]:
                 break
             time.sleep(0.01)

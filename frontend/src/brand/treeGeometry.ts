@@ -1,6 +1,6 @@
 /**
  * Geometry of the SKAZ tree mark, shared by the app icon generator
- * (`scripts/make-icon.mts`) and the in-app tree (`components/brand`).
+ * (`scripts/make-icon.mts`).
  *
  * Coordinates live on a 1024-unit square canvas. The crown and trunk are one
  * solid silhouette; the roots are grid-snapped squares that shrink and thin
@@ -18,8 +18,6 @@ export const GROUND = 608;
 export const DEEP = 944;
 /** Finer grid for the sap that runs inside the trunk and crown. */
 export const SAP_GRID = 26;
-/** Tight box around crown + roots for in-app rendering. */
-export const TREE_VIEWBOX = '140 70 744 890';
 
 type Point = readonly [number, number];
 interface Curve { readonly p0: Point; readonly c: Point; readonly p1: Point }

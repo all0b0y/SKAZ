@@ -15,6 +15,11 @@ import { app } from 'electron';
 
 const HEALTH_TIMEOUT_MS = 30_000;
 const HEALTH_INTERVAL_MS = 300;
+/**
+ * SIGTERM → SIGKILL. The backend stops agent and llama-server processes at once and closes the
+ * knowledge services within 2.5 s (backend/src/skaz/knowledge/shutdown.py DEADLINE_S), leaving the
+ * rest of its shutdown ≥ 1 s; backend/tests/knowledge/test_shutdown.py checks the two stay in step.
+ */
 const SHUTDOWN_GRACE_MS = 4_000;
 /** Added to start failures in development only, where the backend runs from the repo. */
 const DEV_START_HINT = 'Development build: make sure the Python backend is installed (uv sync in backend/).';
@@ -85,7 +90,9 @@ export class BackendManager {
   }
 
   private setStatus(status: BackendStatus): void {
-    this.status = status.phase === 'error' && !app.isPackaged ? { ...status, hint: DEV_START_HINT } : status;
+    // The install hint is about starting; a backend that ran and then died was installed fine (QA E16).
+    this.status = status.phase === 'error' && !status.stopped && !app.isPackaged
+      ? { ...status, hint: DEV_START_HINT } : status;
     // Lifecycle transitions are the most useful diagnostic in the log: they
     // explain a stuck splash screen without exposing any session content.
     this.log.write(
@@ -163,12 +170,13 @@ export class BackendManager {
         ...process.env,
         SKAZ_TOKEN: token,
         SKAZ_DATA_DIR: this.dataDir,
+        // Settings → About shows the app's version, not the backend package's (QA A21).
+        SKAZ_APP_VERSION: app.getVersion(),
         SKAZ_DOCUMENTS_DIR: app.getPath('documents'),
         // Development cannot connect the installed app's document library.
         SKAZ_DOCUMENTS_SANDBOX: app.isPackaged ? '' : (
           process.env.SKAZ_OPTIN_SMOKE_USER_DATA ? app.getPath('userData') : app.getPath('documents')
         ),
-        SKAZ_SESSION_FILES_ROOT: app.isPackaged ? '' : process.env.SKAZ_SESSION_FILES_ROOT ?? '',
         // The backend exits on its own if this process dies without stopping it
         // (crash / force quit), so it never keeps the database and queue locks.
         SKAZ_PARENT_PID: String(process.pid),
@@ -201,6 +209,7 @@ export class BackendManager {
         this.setStatus({
           phase: 'error',
           detail: `backend exited (code ${code ?? 'null'}, signal ${signalName ?? 'none'})`,
+          ...(this.status.phase === 'ready' ? { stopped: true } : {}),
         });
       }
     });

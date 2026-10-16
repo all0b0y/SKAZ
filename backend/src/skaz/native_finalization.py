@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from .native_io import disk_call, drain_on_cancel
+from .native_io import drain_on_cancel
 
 if TYPE_CHECKING:
     from .native_stream import NativeStream
@@ -30,12 +30,15 @@ def start_finalization(runtime: Runtime, session_id: str, stream: NativeStream) 
         try:
             if not stream.finalized:
                 await stream.abort()
-            await disk_call(runtime.session_files.project, session_id)
         finally:
             stream.processing = False
             runtime.native_tasks.pop(session_id, None)
             runtime.native_streams.pop(session_id, None)
             done.set()
+            # The tail is done (or abandoned): a speech material fed by this session settles.
+            runtime.kb_speech.on_stream_settled(session_id, reason=(
+                (None if stream.connection_complete else stream.incomplete_reason) if stream.finalized
+                else stream.failure_reason or "Transcription of the recording's end was interrupted."))
 
     async def run() -> None:
         nonlocal started
