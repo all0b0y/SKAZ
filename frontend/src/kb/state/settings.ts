@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type {
-  KbAbout, KbDecisionProviderUpdate, KbDecisions, KbKeys, KbPrivacy, KbSettingsHealth, KbSpeechSettings, KbSpeechSettingsUpdate, KbWikiSettings, KbWikiSettingsUpdate,
+  KbAbout, KbDecisionProviderUpdate, KbDecisions, KbKeys, KbPrivacy, KbSettingsHealth, KbSkills, KbSpeechSettings, KbSpeechSettingsUpdate, KbWikiSettings, KbWikiSettingsUpdate,
 } from '../../api/kb/types.gen';
 import type { HealthSectionId, KeyProviderId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
@@ -23,6 +23,7 @@ export interface SettingsData {
   decisions: Remote<KbDecisions>;
   privacy: Remote<KbPrivacy>;
   about: Remote<KbAbout>;
+  skills: Remote<KbSkills>;
 }
 
 export interface SettingsActions {
@@ -43,6 +44,10 @@ export interface SettingsActions {
   cancelDecisionModel: () => Promise<ActionResult>;
   loadPrivacy: () => Promise<void>;
   loadAbout: () => Promise<void>;
+  /** 0.3.1 H: SKAZ's own skills and, per agent, whether its answers carry them. */
+  loadSkills: () => Promise<void>;
+  /** Switch one skill; the answer is the whole list with the new status per agent (no reopening). */
+  setSkillEnabled: (skillId: string, enabled: boolean) => Promise<ActionResult>;
 }
 
 export type SettingsStore = StoreApi<SettingsData & SettingsActions>;
@@ -85,7 +90,7 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       ]);
     };
     return {
-      health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(),
+      health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(), skills: empty(),
 
       loadHealth: () => read('health', () => client.call('GET /kb/settings/health')),
       healthAction: (problemId, actionId) => write('health', () =>
@@ -123,6 +128,9 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       cancelDecisionModel: () => write('decisions', () => client.call('POST /kb/decisions/local/cancel')),
       loadPrivacy: () => read('privacy', () => client.call('GET /kb/settings/privacy')),
       loadAbout: () => read('about', () => client.call('GET /kb/settings/about')),
+      loadSkills: () => read('skills', () => client.call('GET /kb/settings/skills')),
+      setSkillEnabled: (skillId, enabled) => write('skills', () =>
+        client.call('PUT /kb/settings/skills/{skill_id}', { path: { skill_id: skillId }, body: { enabled } })),
     };
   });
 }

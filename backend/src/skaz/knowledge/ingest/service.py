@@ -22,6 +22,7 @@ from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..logsafe import error_note
 from ..service import KnowledgeService
+from ..skills.settings import enabled_skills
 from .jobs import AGENT_UNAVAILABLE, INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState
 from .protocols import (
     ConceptUpdateHook,
@@ -220,7 +221,7 @@ class IngestService:
                 kb=self.kb, jobs=self.jobs, job_id=job_id, material_id=active.material_id, engine=engine,
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
                 writer=self._writer, hook=self.hook, language=settings.language, limits=self.limits,
-                recognition=self.recognition,
+                recognition=self.recognition, skills=enabled_skills(self.kb.settings),
             )
             active.run.cancel_requested = active.cancel_requested
             await active.run.execute()

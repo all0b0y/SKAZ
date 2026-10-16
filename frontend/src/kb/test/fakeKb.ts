@@ -13,7 +13,7 @@ import type {
   KbAbout, KbAgents, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
-  KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSpeechMaterial, KbSpeechSettings,
+  KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
   KbWikiSettings, KbRecognitionSettings, KbBlockLink,
 } from '../../api/kb/types.gen';
 import {
@@ -104,6 +104,8 @@ export interface FakeWorld {
   permissionGrants?: Record<string, string[]>;
   /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
   undoRefusals?: Record<string, string>;
+  /** 0.3.1 H: SKAZ skills switched off (absent = every skill on, as the backend's default). */
+  skillsOff?: string[];
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -398,6 +400,24 @@ export function syncSpeechConsent(w: FakeWorld): void {
     speech.state = speech.problems.some((p) => p.severity === 'error') ? 'error' : speech.problems.length ? 'warning' : 'ok';
   }
   for (const flow of w.privacy.flows) if (/soniox/i.test(flow.where)) flow.enabled = w.speech.provider === 'soniox' && w.speech.cloud_consent;
+}
+
+/** The backend's `/kb/settings/skills` (0.3.1 H): the pinned Humanizer, its state per agent from the agents. */
+export function fakeSkills(w: FakeWorld): KbSkills {
+  const enabled = !(w.skillsOff ?? []).includes('humanizer');
+  const engines = w.agents.agents.map((a): KbSkillEngine => {
+    if (!enabled) return { engine: a.id, state: 'off', reason: null };
+    if (a.state === 'ready' || a.state === 'signed_out') return { engine: a.id, state: 'loaded', reason: null };
+    if (a.state === 'not_installed') return { engine: a.id, state: 'not_loaded', reason: `${a.name} is not installed.` };
+    if (a.state === 'outdated') return { engine: a.id, state: 'not_loaded', reason: `This ${a.name} version isn't supported. Update it.` };
+    return { engine: a.id, state: 'not_loaded', reason: `SKAZ couldn't check ${a.name}.` };
+  });
+  return {
+    skills: [{
+      id: 'humanizer', name: 'Humanizer', version: '3.1.0', license: 'MIT',
+      source_url: 'https://github.com/blader/humanizer', enabled, engines,
+    }],
+  };
 }
 
 export function finishAnswer(world: FakeWorld, chatId: string): void {
@@ -970,6 +990,14 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/settings/skills': [200, (w) => fakeSkills(w)],
+  'PUT /kb/settings/skills/{skill_id}': [200, (w, { path, body }) => {
+    if (path.skill_id !== 'humanizer') fail(404, 'Unknown skill.');
+    const off = new Set(w.skillsOff ?? []);
+    if (body.enabled) off.delete(path.skill_id); else off.add(path.skill_id);
+    w.skillsOff = [...off];
+    return fakeSkills(w);
+  }],
   'GET /kb/wiki/files/{name}': [200, (w, { path }) => {
     const file = w.wikiFiles?.[path.name] ?? { text: path.name === 'index' ? '# Index\n' : '# Log\n', links: [] };
     return { name: path.name, text: file.text, links: file.links };

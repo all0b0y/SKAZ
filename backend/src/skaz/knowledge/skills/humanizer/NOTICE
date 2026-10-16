@@ -1,0 +1,9 @@
+Humanizer skill, bundled with SKAZ
+
+Files:   SKILL.md, LICENSE (copied unchanged)
+Source:  https://github.com/blader/humanizer
+Tag:     v3.1.0
+Commit:  225a6f39ac85f76ee48dbad772ea4abe4ed6c9d8
+License: MIT, Copyright (c) 2025 Siqi Chen (see LICENSE in this folder)
+
+SKAZ gives this skill to its agents from this folder only; it is updated with SKAZ releases.

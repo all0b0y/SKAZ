@@ -348,10 +348,10 @@ test('settings: every section at every width and theme', async () => {
       await page.keyboard.press('Meta+Comma');
       const dialog = page.getByRole('dialog', { name: 'Settings' });
       await expect(dialog).toBeVisible();
-      for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Storage', 'Privacy', 'Appearance', 'About']) {
+      for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Skills', 'Storage', 'Privacy', 'Appearance', 'About']) {
         // A section with a problem on this Mac is named "<section> Needs attention" (the dot).
         await dialog.getByRole('navigation').getByRole('button', { name: new RegExp(`^${section}`) }).click();
-        const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance') && v.width !== 1024;
+        const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance' || section === 'Skills') && v.width !== 1024;
         await check(`settings-${section.replace(/\W+/g, '-').toLowerCase()}-${v.width}-${theme}`, shot);
         // A wide control (five options) never lies over its row's label: it moves below instead.
         const overlaps = await dialog.locator('.kb-srow').evaluateAll((rows) => rows.flatMap((r) => {
@@ -425,7 +425,7 @@ test('package 2 on the real backend: chats, notifications, ⌘K, all materials, 
 
   // Every live read of the package-2 screens answers on this backend (no 404 behind a screen).
   for (const route of ['/kb/chats', '/kb/chats/events', '/kb/notifications', '/kb/agents', '/kb/settings/health', '/kb/settings/keys',
-    '/kb/settings/speech', '/kb/settings/wiki', '/kb/settings/privacy', '/kb/settings/about', '/kb/decisions', '/kb/graph', '/kb/wiki/pages', '/kb/jobs']) {
+    '/kb/settings/speech', '/kb/settings/wiki', '/kb/settings/privacy', '/kb/settings/about', '/kb/settings/skills', '/kb/decisions', '/kb/graph', '/kb/wiki/pages', '/kb/jobs']) {
     const res = await bridgeRequest('GET', route);
     expect(res, `GET ${route}`).toMatchObject({ ok: true });
   }

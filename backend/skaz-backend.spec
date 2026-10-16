@@ -38,6 +38,18 @@ for module in ("faster_whisper", "ctranslate2", "onnxruntime", "av", "tokenizers
     datas += collect_data_files(module)  # faster_whisper/assets/silero_vad_v6.onnx
     binaries += collect_dynamic_libs(module)
 
+# SKAZ's own agent skills (0.3.1 H): the pinned SKILL.md/LICENSE/NOTICE files are read at runtime
+# from the package folder, so every non-code file under skills/ ships at the same package path.
+# SPECPATH (the spec's folder): the build runs from the repository root, not backend/.
+import os as _os
+
+_skills_src = _os.path.join(SPECPATH, "src")
+for _dir, _subdirs, _files in _os.walk(_os.path.join(_skills_src, "skaz", "knowledge", "skills")):
+    _subdirs[:] = sorted(d for d in _subdirs if d != "__pycache__")
+    for _name in sorted(_files):
+        if not _name.endswith((".py", ".pyc")):
+            datas.append((_os.path.join(_dir, _name), _os.path.relpath(_dir, _skills_src)))
+
 excludes = [
     "gigachat_audio_mlx",
     "torch",

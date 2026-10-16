@@ -19,7 +19,8 @@ describe('Settings window', () => {
     const nav = within(dialog).getByRole('navigation', { name: 'Settings sections' });
     expect(within(nav).getAllByRole('heading').map((h) => h.textContent)).toEqual(['Connections', 'Work', 'App']);
     expect(within(nav).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      'Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Storage', 'Privacy', 'Appearance', 'About',
+      // 0.3.1 H3 (variant B): Skills in Work, after Wiki.
+      'Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Skills', 'Storage', 'Privacy', 'Appearance', 'About',
     ]);
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument());

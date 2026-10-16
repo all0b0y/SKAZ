@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { BridgeApi } from '../../api/bridge';
+import type { KbAgents } from '../../api/kb/types.gen';
 import { KbClient } from '../api/client';
 import { nativeCapture, type CaptureFactory } from '../recording/capture';
 import { createRecordingStore, type RecordingActions, type RecordingData, type RecordingStore } from '../recording/recordingStore';
@@ -75,6 +76,16 @@ export function createServices(
     capture: options.capture !== undefined ? options.capture : defaultCapture(bridge),
     onMaterialsChanged: () => { void library.getState().loadContent(); },
   });
+  const agents = createAgentsStore(client);
+  const settings = createSettingsStore(client);
+  // 0.3.1 H: whether an agent's answers carry a SKAZ skill follows its state (installed, updated,
+  // checked) — re-read the skills already on screen when an agent's state changes, no reopening.
+  const agentStates = (a: KbAgents | null) => a?.agents.map((x) => `${x.id}:${x.state}`).join(',') ?? '';
+  agents.subscribe((next, prev) => {
+    const loaded = settings.getState().skills;
+    if (agentStates(next.agents) === agentStates(prev.agents) || (!loaded.value && !loaded.error)) return;
+    void settings.getState().loadSkills();
+  });
   return {
     bridge,
     client,
@@ -84,8 +95,8 @@ export function createServices(
     recording,
     chats,
     notifications: createNotificationsStore(client),
-    agents: createAgentsStore(client),
-    settings: createSettingsStore(client),
+    agents,
+    settings,
     composer: createComposerBus(),
   };
 }
