@@ -281,9 +281,10 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen, exportMd
       const ids = sel.selected.has(m.id) ? sel.ordered : [m.id];
       const list = pick(ids);
       const blocked = list.map(dragBlockReason).find(Boolean) ?? null;
-      startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'material', id: x.id })), title: m.title, blocked }, e.currentTarget);
+      startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'material', id: x.id, title: x.title })), title: m.title, blocked }, e.currentTarget);
     },
-    onDragEnd: () => endItemsDrag(),
+    // Dropped somewhere that took it (a folder, the message field): the action is done, the selection goes.
+    onDragEnd: (e) => { endItemsDrag(); if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') sel.clear(); },
   });
 
   const overlays = (
@@ -303,5 +304,5 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen, exportMd
 export interface DragRowProps {
   draggable: boolean;
   onDragStart: (event: DragEvent<HTMLElement>) => void;
-  onDragEnd: () => void;
+  onDragEnd: (event: DragEvent<HTMLElement>) => void;
 }

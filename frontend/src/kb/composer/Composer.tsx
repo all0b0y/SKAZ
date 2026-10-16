@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useMentionDrop } from './MentionDrop';
 import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton } from '../ui';
@@ -388,6 +389,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     setHover({ text: el.dataset.full, left: r.left, top: r.top });
   };
 
+  const mentionDrop = useMentionDrop();
   const placeholderShown = empty && dictation.phase === 'idle';
   // A query of several words stays a mention only while something matches; otherwise it is just text.
   const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
@@ -398,7 +400,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       {recPhase === 'recording' && recId && (
         <QuickQuestions disabledReason={quickReason} onAsk={(q) => void askQuick(q)} onPrefill={prefillQuick} />
       )}
-      <div className="kb-composer" data-testid="composer">
+      <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
+        {mentionDrop.overlay}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
             onPick={pickMention} onHover={setActive} />

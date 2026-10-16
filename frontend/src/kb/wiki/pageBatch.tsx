@@ -81,9 +81,10 @@ export function usePageSelection({ pages, resetKey, onOpen, exportMd }: {
     draggable: true,
     onDragStart: (e) => {
       const list = sel.selected.has(p.id) ? pick(sel.ordered) : [p];
-      startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'page', id: x.id })), title: p.title, blocked: null }, e.currentTarget);
+      startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'page', id: x.id, title: x.title })), title: p.title, blocked: null }, e.currentTarget);
     },
-    onDragEnd: () => endItemsDrag(),
+    // Dropped somewhere that took it (a folder, the message field): the action is done, the selection goes.
+    onDragEnd: (e) => { endItemsDrag(); if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') sel.clear(); },
   });
 
   const overlays = (

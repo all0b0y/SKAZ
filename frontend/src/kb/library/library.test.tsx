@@ -309,4 +309,27 @@ describe('Selecting and dragging materials in the side panel (0.3.1 F3/F4)', () 
     expect(dialog).toHaveTextContent('seminar.pdf');
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: /Folder/ })).toHaveValue('phys'));
   });
+
+  it('dragging the selection onto the message field attaches it as @-mentions (F3), as ⌘↩ does', async () => {
+    const { user, rowOf } = await side();
+    await user.click(rowOf('Pasted text').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Lecture 8').querySelector('[data-sel-box]')!);
+    const composer = screen.getByTestId('composer');
+    const dt = dataTransfer();
+    fireEvent.dragStart(rowOf('Lecture 8'), { dataTransfer: dt });
+    fireEvent.dragOver(composer, { dataTransfer: dt });
+    expect(await within(composer).findByText(/Drop to attach 2 to this message/)).toBeInTheDocument();
+    fireEvent.drop(composer, { dataTransfer: dt });
+    fireEvent.dragEnd(rowOf('Lecture 8'), { dataTransfer: dt });
+    const input = screen.getByTestId('message-input');
+    await waitFor(() => expect([...input.querySelectorAll('.kb-token--mention')].map((t) => t.textContent)).toEqual(
+      [expect.stringContaining('Pasted text: problems'), expect.stringContaining('Lecture 8 — entropy')],
+    ));
+    // ⌘↩ on the focused selection does the same.
+    await user.click(rowOf('Textbook').querySelector('[data-sel-box]')!);
+    within(rowOf('Textbook')).getByRole('button').focus();
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    await waitFor(() => expect(input.querySelectorAll('.kb-token--mention')).toHaveLength(3));
+  });
 });
+

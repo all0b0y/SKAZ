@@ -9,7 +9,8 @@ import { useSyncExternalStore } from 'react';
 export const ITEMS_MIME = 'application/x-skaz-items';
 
 export type DragItemType = 'material' | 'page' | 'chat';
-export interface DragItem { type: DragItemType; id: string }
+/** `title` travels only inside the window (in `currentDrag`); the MIME payload is `{type, id}`. */
+export interface DragItem { type: DragItemType; id: string; title?: string }
 export interface DragInfo {
   items: DragItem[];
   /** Shown on the dragged card: the first title. */
