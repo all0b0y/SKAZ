@@ -166,16 +166,29 @@ def excluded_count(material_dir: Path) -> int:
 INTAKE_FILE = "intake.json"
 
 
-def unreadable_pages(material_dir: Path) -> list[int]:
-    """PDF pages with text SKAZ couldn't read (left out of the material, ``unreadable_pdf_text``)."""
+def read_intake(material_dir: Path) -> dict[str, object]:
+    """``.skaz/intake.json`` of a source (empty when there is none or it can't be read)."""
     try:
         intake = read_json(material_dir / SERVICE_DIR / INTAKE_FILE)
     except FileNotFoundError:
-        return []
+        return {}
     except (OSError, ValueError, UnicodeDecodeError):
         log.warning("The intake record of %s can't be read", _material_id(material_dir))
-        return []
-    hidden = intake.get("hidden") if isinstance(intake, dict) else None
+        return {}
+    return intake if isinstance(intake, dict) else {}
+
+
+def intake_failure(intake: dict[str, object]) -> str | None:
+    """Why no text could be read (a scanned PDF, an empty page…), as the intake recorded it (QA B5)."""
+    failure = intake.get("failure")
+    return failure if isinstance(failure, str) and failure.strip() else None
+
+
+def unreadable_pages(material_dir: Path, intake: dict[str, object] | None = None) -> list[int]:
+    """PDF pages with text SKAZ couldn't read (left out of the material, ``unreadable_pdf_text``)."""
+    if intake is None:
+        intake = read_intake(material_dir)
+    hidden = intake.get("hidden")
     pages = {
         item["page"]
         for item in (hidden if isinstance(hidden, list) else [])

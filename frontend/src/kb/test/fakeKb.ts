@@ -536,6 +536,12 @@ const ROUTES: FakeRoutes = {
     const m = newMaterial(w, name, body.url ? 'video_link' : 'audio', body.folder_id ?? w.lastFolderId, 'processing', []);
     return { ...speechView(m, `s-${m.id}`, null), import_state: 'running', import_stage: 'transcribing' };
   }],
+  'POST /kb/imports/{material_id}/retry': [200, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    if (!m.can_retry) fail(409, 'Only a failed or interrupted import can be retried.');
+    Object.assign(m, { status: 'processing', failure_reason: null, can_retry: false });
+    return { ...speechView(m, `s-${m.id}`, null), import_state: 'running', import_stage: 'transcribing' };
+  }],
 
   // -- recognition fixes --
   'POST /kb/corrections/{correction_id}/revert': [200, (w, { path }) => applyCorrection(w, findCorrection(w, path.correction_id), 'revert')],

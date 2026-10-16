@@ -302,11 +302,16 @@ async def test_a_failed_import_keeps_its_reason_and_retry_continues_the_same_mat
     created = (await api.post("/kb/imports", json={"path": media(tmp_path, "Broken.m4a")})).json()
     failed = await until(api, created["material_id"], status="failed")
     assert failed["import_state"] == "failed" and "fixture error" in failed["error"]
+    # QA E10: the material itself says why and that it can be retried.
+    material = (await api.get(f"/kb/materials/{created['material_id']}")).json()
+    assert "fixture error" in material["failure_reason"] and material["can_retry"] is True
     soniox.failing = False
     retried = await api.post(f"/kb/imports/{created['material_id']}/retry")
     assert retried.status_code == 200, retried.text
     done = await until(api, created["material_id"], status="ready")
     assert done["material_id"] == created["material_id"] and done["error"] is None
+    material = (await api.get(f"/kb/materials/{created['material_id']}")).json()
+    assert material["failure_reason"] is None and material["can_retry"] is False
     assert await fragments(api, created["material_id"]) == [("Hello there", "1"), ("Hi", "2")]
     assert (await api.post(f"/kb/imports/{created['material_id']}/retry")).status_code == 409
 
@@ -378,6 +383,8 @@ async def test_closing_the_app_stops_every_import_and_retry_resumes_each(
         for material_id in ids:
             interrupted = await until(client, material_id, status="failed")
             assert interrupted["import_state"] == "interrupted" and interrupted["error"] == INTERRUPTED_IMPORT
+            material = (await client.get(f"/kb/materials/{material_id}")).json()
+            assert material["failure_reason"] == INTERRUPTED_IMPORT and material["can_retry"] is True
         assert (await client.post(f"/kb/imports/{ids[0]}/retry")).status_code == 200
         await until(client, ids[0], status="ready")
         # The other one is still waiting for its own decision.

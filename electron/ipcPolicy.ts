@@ -95,6 +95,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/materials\/(?:file|link|text)$/ },
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/ingest$/ },
   { method: 'POST', pattern: /^\/kb\/imports$/ },
+  // QA E10: a failed or interrupted import says why on its material and starts again from there.
+  { method: 'POST', pattern: /^\/kb\/imports\/[^/]+\/retry$/ },
   { method: 'POST', pattern: /^\/kb\/links\/classify$/ },
   // U3 (package 2): wiki page list and block edits, rename/move/delete with preview, all recognition
   // fixes, jobs, graph, recordings. Shared routes are listed once, in the U2 block above.

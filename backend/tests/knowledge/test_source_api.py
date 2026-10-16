@@ -99,6 +99,11 @@ async def test_add_file_and_failed_scan(kb_client: httpx.AsyncClient, tmp_path: 
     ).json()
     assert failed["material"]["status"] == "failed"
     assert failed["failure_reason"] == "This PDF has no text layer (scanned pages). OCR isn't supported yet."
+    # QA B5: reopening the material says why, not "the text appears here as soon as it is ready".
+    reopened = (await kb_client.get(f"/kb/materials/{failed['material']['id']}")).json()
+    assert reopened["failure_reason"] == failed["failure_reason"] and reopened["can_retry"] is False
+    good = (await kb_client.get(f"/kb/materials/{added['material']['id']}")).json()
+    assert good["failure_reason"] is None and good["can_retry"] is False
 
     bad = await kb_client.post("/kb/materials/file", json={"path": "relative.pdf", "folder_id": INBOX_ID})
     assert bad.status_code == 422 and "absolute" in bad.json()["detail"]

@@ -55,7 +55,7 @@ from ..service import KnowledgeService
 from ..sources.fragments import sanitize_title
 from ..sources.paths import given_path, resolved_file
 from ..sources.service import SourceService
-from .carriers import IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
+from .carriers import CANCELLED_IMPORT, IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
 from .legacy import (
     IMPORT_CONFLICT,
     IMPORT_INVALID,
@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 LAST_FOLDER_KEY = "last_folder_id"
 INTERRUPTED_RECORDING = "SKAZ closed before this recording was stopped."
 INTERRUPTED_IMPORT = "The import was interrupted when SKAZ closed. Retry to continue."
-CANCELLED_IMPORT = "The import was cancelled."
 STILL_STREAMING = "The recorder is still streaming. Stop or pause it in the recorder first."
 #: App shutdown waits this long for in-flight projections (``close``); Electron's grace is 4 s.
 CLOSE_WAIT_S = 1.0

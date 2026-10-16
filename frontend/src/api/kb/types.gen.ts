@@ -581,6 +581,8 @@ export interface KbMaterial {
   wiki: KbMaterialWiki;
   excluded_count: number;
   unreadable_pages?: number[];
+  failure_reason?: string | null;
+  can_retry?: boolean;
 }
 
 export interface KbMaterialAdded {

@@ -273,6 +273,8 @@
 .kb-pdfpage__n { align-self: flex-end; font-size: var(--t-xs); color: var(--kb-muted); }
 
 .kb-excl { display: flex; flex-direction: column; gap: 6px; }
+.kb-failed__reason { margin: 0; }
+.kb-failed__actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .kb-excl__toggle { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-sm); color: var(--kb-muted); align-self: flex-start; }
 .kb-excl__toggle:hover { color: var(--kb-text); }
 .kb-excl__body { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border-radius: var(--kb-r-md); background: var(--kb-bg); }

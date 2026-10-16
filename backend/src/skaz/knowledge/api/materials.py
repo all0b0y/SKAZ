@@ -16,10 +16,13 @@ from ..sources.material_info import (
     MaterialWiki,
     Translation,
     excluded_count,
+    intake_failure,
+    read_intake,
     read_translation,
     unreadable_pages,
     wiki_states,
 )
+from ..speech.carriers import CarrierRepository
 from ..store.records import MaterialRecord
 from ..wiki.delete import DeletePlan, PageRefView
 from ..wiki.service import WikiService
@@ -82,7 +85,8 @@ def _translation_view(translation: Translation | None) -> KbTranslation | None:
 
 def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, folder_name: str,
                 wiki: MaterialWiki, translation: Translation | None, excluded: int,
-                unreadable: Sequence[int] = ()) -> KbMaterial:
+                unreadable: Sequence[int] = (), failure: str | None = None,
+                can_retry: bool = False) -> KbMaterial:
     """The material with the applied recognition corrections (W2) and its wiki/translation state (S3)."""
     origin = None
     if detail.origin is not None:
@@ -113,6 +117,8 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
         "correction_counts": KbCorrectionCounts(applied=applied, doubtful=doubtful),
         "translation": _translation_view(translation), "wiki": _wiki_view(wiki), "excluded_count": excluded,
         "unreadable_pages": list(unreadable),
+        "failure_reason": failure if detail.status == "failed" else None,
+        "can_retry": can_retry and detail.status == "failed",
     })
 
 
@@ -123,6 +129,10 @@ def material_view(kb: KnowledgeService, material_id: str,
     folder = kb.folder_repo.get(detail.folder_id)
     wiki = wiki_states(kb.db, [material_id]).get(material_id, NOT_IN_WIKI)
     translation, excluded, unreadable = None, 0, list[int]()
+    failure, can_retry = None, False
+    carrier = CarrierRepository(kb.db).get(material_id)
+    if carrier is not None:  # speech: the last attempt's problem (QA E10)
+        failure, can_retry = carrier.attempt_error, carrier.can_retry
     try:
         library = kb.require()
     except LibraryUnavailable:
@@ -131,9 +141,13 @@ def material_view(kb: KnowledgeService, material_id: str,
         directory = library.root / record.rel_dir
         translation = read_translation(directory)
         excluded = excluded_count(directory)
-        unreadable = unreadable_pages(directory)
+        intake = read_intake(directory)
+        unreadable = unreadable_pages(directory, intake)
+        if carrier is None:  # a document: why no text could be read (QA B5)
+            failure = intake_failure(intake)
     return detail_view(detail, corrections, folder_name=folder.name if folder else "", wiki=wiki,
-                       translation=translation, excluded=excluded, unreadable=unreadable)
+                       translation=translation, excluded=excluded, unreadable=unreadable,
+                       failure=failure, can_retry=can_retry)
 
 
 def _material(kb: KbDep, wiki: WikiService, material_id: str) -> KbMaterial:

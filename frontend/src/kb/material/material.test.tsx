@@ -202,6 +202,40 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     for (const li of within(doc).getAllByRole('listitem')) expect(li).toHaveClass('kb-mtext__li--glyph');
   });
 
+  it('a scanned PDF says it has no text layer and offers Delete, never "appears as soon as it is ready" (QA B5)', async () => {
+    const world = docWorld();
+    const tb = world.materials.find((m) => m.id === 'm-tb')!;
+    Object.assign(tb, { status: 'failed', fragments: [], fragment_count: 0,
+      failure_reason: 'This PDF has no text layer (scanned pages). OCR isn’t supported yet.', can_retry: false });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-tb' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'Couldn’t read' });
+    expect(note).toHaveTextContent('This PDF has no text layer (scanned pages).');
+    expect(within(note).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(within(doc).queryByText(/appears here as soon as it is ready/)).not.toBeInTheDocument();
+    await userEvent.setup().click(within(note).getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog', { name: /Delete/ })).toBeInTheDocument();
+  });
+
+  it('an interrupted import says why and Retry starts it again (QA E10)', async () => {
+    const world = docWorld();
+    const speech = world.materials.find((m) => m.kind === 'recording' || m.kind === 'audio' || m.kind === 'video')!;
+    Object.assign(speech, { kind: 'audio', status: 'failed', fragments: [], fragment_count: 0,
+      failure_reason: 'The import was interrupted when SKAZ closed. Retry to continue.', can_retry: true });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: speech.id }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'Recognition failed' });
+    expect(note).toHaveTextContent('The import was interrupted when SKAZ closed. Retry to continue.');
+    await userEvent.setup().click(within(note).getByRole('button', { name: 'Retry' }));
+    expect(r.fake.calls.some((c) => c.method === 'POST' && c.path === `/kb/imports/${speech.id}/retry`)).toBe(true);
+    await waitFor(() => expect(within(doc).queryByRole('note', { name: 'Recognition failed' })).not.toBeInTheDocument());
+    expect(within(doc).getByText('Recognising…')).toBeInTheDocument();
+  });
+
   it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {
     const world = docWorld();
     const tb = world.materials.find((m) => m.id === 'm-tb')!;

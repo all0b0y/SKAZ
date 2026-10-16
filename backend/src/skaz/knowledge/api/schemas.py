@@ -142,6 +142,11 @@ class KbMaterial(KbMaterialSummary):
     #: PDF pages with text SKAZ couldn't read (a font without a usable character map): that text
     #: is left out of the material — never sent to agents, never quoted.
     unreadable_pages: list[int] = Field(default_factory=list)
+    #: ``status == "failed"`` only: why, in plain English (a scanned PDF without a text layer, the
+    #: provider's error, an import interrupted when SKAZ closed); ``null`` when nothing was recorded.
+    failure_reason: str | None = None
+    #: A failed or interrupted import that ``POST /kb/imports/{id}/retry`` can start again (QA E10).
+    can_retry: bool = False
 
 
 class KbPageSummary(BaseModel):

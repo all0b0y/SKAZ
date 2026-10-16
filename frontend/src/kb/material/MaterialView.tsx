@@ -10,6 +10,7 @@ import { useRecording, useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import { ExcludedFragments, useMaterialGuard } from './ExcludedFragments';
 import { UnreadableText } from './UnreadableText';
+import { FailedMaterial } from './FailedMaterial';
 import { isWithoutSpeech, NoSpeech } from './NoSpeech';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
@@ -230,13 +231,17 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             {addError && <p className="kb-inline-error" role="alert">{addError}</p>}
             {note && <p className="kb-mat__note" role="status">{note}</p>}
             <UnreadableText pages={material.unreadable_pages ?? []} />
+            {material.status === 'failed' && (
+              <FailedMaterial material={material} onDelete={() => setDialog('delete')} onRetried={reload} />
+            )}
             {hasTranslation && (
               <Segmented label="Show" size="sm" value={view} options={viewOptions} onChange={setView} />
             )}
             {isWithoutSpeech(material) ? (
               <NoSpeech material={material} onDelete={() => setDialog('delete')} />
             ) : material.fragments.length === 0 ? (
-              <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>
+              material.status === 'failed' ? null
+                : <p className="kb-muted">{material.status === 'ready' ? 'This material has no text.' : 'The text appears here as soon as it is ready.'}</p>
             ) : (
               <Transcript material={material} corrections={data.corrections} view={hasTranslation ? view : 'original'}
                 sideBySide={expanded} target={{ seg: target.seg ?? null, quote: target.quote ?? null }}
