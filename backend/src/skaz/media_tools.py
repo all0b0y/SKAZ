@@ -61,12 +61,40 @@ GENERIC_FAILURE = (
 )
 
 
+#: The tool runs under a tiny ``/bin/sh`` guard in its own process group. The guard keeps the read
+#: end of a pipe whose write end only the backend holds; when the backend dies — even by SIGKILL,
+#: with no ``finally`` — the kernel closes it, ``read`` returns and the guard kills the whole group
+#: (the tool and whatever it started, e.g. yt-dlp's ffmpeg). macOS has no ``PR_SET_PDEATHSIG``;
+#: EOF on a pipe is the one thing a dead parent always delivers (QA E11). The tool's arguments go
+#: through ``"$@"`` untouched: the script is fixed, nothing is parsed by the shell.
+_GUARD_SCRIPT = (
+    'exec 3<&0 </dev/null\n'
+    '"$@" 3<&- &\n'
+    'child=$!\n'
+    '(read -r _ <&3; kill -KILL -$$) >/dev/null 2>&1 &\n'
+    'guard=$!\n'
+    'exec 3<&-\n'
+    'wait "$child"\n'
+    'code=$?\n'
+    'kill "$guard" 2>/dev/null\n'
+    'exit "$code"\n'
+)
+
+
+def guarded(argv: list[str]) -> list[str]:
+    """``argv`` run so that it dies with this process (see ``_GUARD_SCRIPT``); stdin must be a pipe."""
+    return ["/bin/sh", "-c", _GUARD_SCRIPT, "skaz-media-tool", *argv]
+
+
 async def run_tool(argv: list[str], *, timeout: float = 120, max_output: int = 2_000_000,
                    explain: Explain | None = None) -> str:
+    if not argv or shutil.which(argv[0]) is None:  # the guard would only report exit code 127
+        raise MediaError("The media tool could not be started.")
     try:
         process = await asyncio.create_subprocess_exec(
-            *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL, start_new_session=True,
+            *guarded(argv), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            # Never written: the pipe only tells the guard that the backend is alive.
+            stdin=asyncio.subprocess.PIPE, start_new_session=True,
         )
     except OSError as error:
         raise MediaError("The media tool could not be started.") from error
@@ -97,6 +125,8 @@ async def run_tool(argv: list[str], *, timeout: float = 120, max_output: int = 2
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
+        if process.stdin is not None:
+            process.stdin.close()
         for task in readers:
             task.cancel()
         await asyncio.gather(*readers, return_exceptions=True)
