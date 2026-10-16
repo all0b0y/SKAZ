@@ -16,6 +16,8 @@ const KINDS: Record<string, { icon: IconName; tone: Tone; open: string }> = {
   connections_found: { icon: 'graph', tone: 'a', open: 'Open' },
   concept_updated: { icon: 'concept', tone: 'a', open: 'Open' },
   material_ready: { icon: 'ready', tone: 'a', open: 'Open' },
+  // A material folder removed outside SKAZ (backend wiki/gone.py): Clean up the wiki / Keep.
+  material_gone: { icon: 'warning', tone: 'y', open: 'Review' },
 };
 
 /** Icon, tone and "open" word of a kind. An unknown kind is shown as ordinary "New" (API-B2 §1.1). */
