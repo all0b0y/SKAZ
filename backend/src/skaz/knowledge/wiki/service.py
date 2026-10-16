@@ -445,6 +445,8 @@ class WikiService:
         while True:
             await asyncio.sleep(INTERVAL_S)
             try:
+                # A scan that left out unreadable entries (iCloud still syncing) tries again (QA E9).
+                await disk_call(self.kb.retry_unreadable)
                 if await disk_call(self.watcher.poll):
                     await disk_call(self.graph.refresh)
                 await self.tick()

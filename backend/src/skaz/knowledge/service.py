@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ from .errors import LibraryConflict, LibraryUnavailable, NotFound
 from .index import indexer
 from .index.scanner import ScannedMaterial, ScanStopped, read_page, scan_library
 from .index.search import SearchResults, search
+from .library.fsio import os_error_reason
 from .library.layout import read_marker, resolve_library_root
 from .library.library import Library, MaterialFiles
 from .markdown.page import PageDocument, PageFormatError
@@ -44,6 +46,9 @@ CLOSING = "SKAZ is closing."
 #: ``close()`` waits this long for a library write in progress before closing the database.
 CLOSE_WAIT_S = 1.5
 SANDBOX_REASON = "Development libraries must stay inside their profile Documents folder."
+#: A scan that had to leave out unreadable entries (iCloud still syncing them) runs again this often.
+UNREADABLE_RETRY_S = 60.0
+UNREADABLE_KIND = "library_unreadable"
 
 
 @dataclass(frozen=True)
@@ -135,6 +140,11 @@ class KnowledgeService:
         self._stored: tuple[str, str] | None = (stored.root, stored.library_id) if stored else None
         self._indexing = False
         self._closed = False
+        #: Library-relative paths the last full scan could not read (QA E9), and when it ran.
+        self._unreadable: tuple[str, ...] = ()
+        self._unreadable_notified: frozenset[str] = frozenset()
+        self._scanned_at = 0.0
+        self.clock: Callable[[], float] = time.monotonic
 
     # -- library state ------------------------------------------------------
 
@@ -188,7 +198,7 @@ class KnowledgeService:
             self._publish(None, error.message)
             return True  # the scan reports the same, or finds the folder back
         except OSError as error:
-            self._publish(None, f"SKAZ can't use the library folder: {error.strerror or error}.")
+            self._publish(None, os_error_reason(error, root))
             return True
         with self._view_lock:
             self._library, self._reason, self._indexing = library, None, True
@@ -237,6 +247,7 @@ class KnowledgeService:
                 self._set_indexing(False)
 
     def _scan(self, root: Path, library_id: str) -> None:
+        self._scanned_at = self.clock()
         try:
             if not self._inside_sandbox(root):
                 raise LibraryUnavailable(SANDBOX_REASON)
@@ -250,11 +261,48 @@ class KnowledgeService:
             self._publish(None, error.message)
             return
         except OSError as error:
-            self._publish(None, f"SKAZ can't use the library folder: {error.strerror or error}.")
+            self._publish(None, os_error_reason(error, root))
             return
         self._publish(library, None)
+        self._note_unreadable(tuple(result.unreadable))
         for listener in list(self.after_scan):
             listener()
+
+    def _note_unreadable(self, paths: tuple[str, ...]) -> None:
+        """Remember what the scan left out; tell the user once per newly unreadable entry."""
+        self._unreadable, self._scanned_at = paths, self.clock()
+        if paths:
+            logger.warning("library scan left out %d unreadable entries", len(paths))
+        new = [path for path in paths if path not in self._unreadable_notified]
+        self._unreadable_notified = frozenset(paths)
+        if not new:
+            return
+        names = ", ".join(f"“{path}”" for path in new[:3])
+        if len(new) > 3:
+            names += f" and {len(new) - 3} more"
+        it = "it" if len(new) == 1 else "them"
+        self.notify(
+            UNREADABLE_KIND, "iCloud is still syncing part of the library",
+            body=(f"SKAZ can't read {names} yet and left {it} out; the rest of the library works. "
+                  f"SKAZ tries again every minute. If this stays, look at {it} in Finder: a folder "
+                  "you already deleted can come back while iCloud syncs — delete it again."),
+            payload={"paths": list(new)},
+        )
+
+    @property
+    def unreadable(self) -> tuple[str, ...]:
+        """Paths the last full scan could not read (an iCloud placeholder still syncing, no permission)."""
+        return self._unreadable
+
+    def retry_unreadable(self) -> bool:
+        """Rescan when the last scan left something out and ``UNREADABLE_RETRY_S`` has passed.
+
+        Called by a periodic background tick; returns whether a scan ran.
+        """
+        if not self._unreadable or self._closed or self.clock() - self._scanned_at < UNREADABLE_RETRY_S:
+            return False
+        self.rescan()
+        return True
 
     def writing(self) -> threading.RLock:
         """The one lock for every read-then-write of library files and their index rows.
