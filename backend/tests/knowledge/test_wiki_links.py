@@ -109,8 +109,8 @@ async def test_every_discrepancy_action_works(ready: KnowledgeService, action: s
         retired = document.block(loser["block_id"])
         assert retired is not None and retired.owner == "user_edited" and retired.kind == "from_source"
         text = loser["text"]
-        note = f"— superseded by “{winner['material_title']}” (your choice)."
-        assert retired.body.startswith(f"~~{text}~~ {note}")
+        suffix = f"— superseded by “{winner['material_title']}” (your choice)."
+        assert retired.body.startswith(f"~~{text}~~ {suffix}")
         assert "[[Materials/" in retired.body and retired.cites
         assert not any(block.id.startswith("c-sup-") for block in document.blocks())
         assert ids == [block.id for block in parse_page(before).blocks()]
