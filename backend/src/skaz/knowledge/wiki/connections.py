@@ -107,7 +107,8 @@ class Connections:
         )
         language = page.language or self.ctx.settings().language
         answer = await caller.ask_json(
-            instructions_for(CONNECTIONS_INSTRUCTIONS, language), prompt, CONNECTIONS_SCHEMA, ConnectionsOut
+            instructions_for(CONNECTIONS_INSTRUCTIONS, language, skills=self.ctx.skills()),
+            prompt, CONNECTIONS_SCHEMA, ConnectionsOut,
         )
         if answer is None:
             await log(f"The connection search for “{page.title}” was not in the expected format; skipped.")

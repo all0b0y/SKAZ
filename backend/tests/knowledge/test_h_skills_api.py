@@ -17,7 +17,8 @@ from skaz.knowledge.agents.engine import EngineStatus
 from skaz.knowledge.agents.fake import FakeEngine
 from skaz.knowledge.agents.hub import build_agents_hub
 from skaz.knowledge.agents.registry import AgentView
-from skaz.knowledge.skills.settings import enabled_skills, engine_status
+from skaz.knowledge.skills.settings import enabled_skills
+from skaz.knowledge.skills.status import engine_status
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN
 from tests.knowledge.test_agent_install import FakeExecutor

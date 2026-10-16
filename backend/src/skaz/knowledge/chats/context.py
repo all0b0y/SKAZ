@@ -14,6 +14,8 @@ from ..agents.prompting import untrusted_block
 from ..ingest.checks import MIN_QUOTE_CHARS
 from ..markdown.text import format_timestamp
 from ..service import KnowledgeService
+from ..skills import SkazSkill
+from ..skills.prompting import with_skills
 from ..store.records import MaterialRecord
 from .model import Chat, Message, MessageInput, Quote, Ref
 from .resolve import MaterialReader
@@ -87,9 +89,11 @@ Answer in the language of the user's question{language}. Be concise and concrete
 _LANGUAGE_HINT = "; when it is unclear, use the user's wiki language ({code})"
 
 
-def instructions(wiki_language: str | None) -> str:
+def instructions(wiki_language: str | None, skills: Sequence[SkazSkill] = ()) -> str:
+    """SKAZ's chat rules, then the skills that are on (Humanizer, H2) — never above the rules."""
     hint = _LANGUAGE_HINT.format(code=wiki_language) if wiki_language else ""
-    return INSTRUCTIONS.replace("{language}", hint).replace("{min_quote}", str(MIN_QUOTE_CHARS))
+    rules = INSTRUCTIONS.replace("{language}", hint).replace("{min_quote}", str(MIN_QUOTE_CHARS))
+    return with_skills(rules, skills)
 
 
 # -- history ---------------------------------------------------------------------

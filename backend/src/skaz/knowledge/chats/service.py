@@ -51,6 +51,7 @@ from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..service import KnowledgeService
+from ..skills.settings import enabled_skills
 from .analysis import AnalysisWriter, Section
 from .context import ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
@@ -563,8 +564,10 @@ class ChatService:
             assert question.input is not None
             request = await disk_call(builder.request, chat, question.input, self._other_chat)
             language = await disk_call(self._wiki_language)
+            # Read when the turn is built: switching a skill applies from the next answer (H3).
+            skills = await disk_call(enabled_skills, self.kb.settings)
             turn = AgentTurn(run_id=run.run_id, messages=(*history(prior), TurnMessage("user", request)),
-                             instructions=instructions(language), tools=self._tools_for(chat),
+                             instructions=instructions(language, skills), tools=self._tools_for(chat),
                              model=chat.model, effort=chat.effort)
             stream = run.engine.run(turn)
             async for event in stream:

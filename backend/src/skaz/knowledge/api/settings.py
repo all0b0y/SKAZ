@@ -32,7 +32,8 @@ from ..settings.speech import (
     to_legacy,
 )
 from ..skills import SkazSkill, catalog
-from ..skills.settings import engine_statuses, is_enabled, set_enabled
+from ..skills.settings import is_enabled, set_enabled
+from ..skills.status import engine_statuses
 from .schemas_settings import (
     KbAbout,
     KbKeyProvider,

@@ -125,7 +125,7 @@ class Discrepancies:
             await disk_call(self._mark_checked, page_id, [item.block_id for item in new])
             return 0
         language = record.language or self.ctx.settings().language
-        instructions = instructions_for(DISCREPANCY_INSTRUCTIONS, language)
+        instructions = instructions_for(DISCREPANCY_INSTRUCTIONS, language, skills=self.ctx.skills())
         answer = await caller.ask_json(
             instructions,
             discrepancy_prompt(record.title, new, existing),
