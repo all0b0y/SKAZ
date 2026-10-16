@@ -10,11 +10,13 @@ import type { MediaAccess } from '../../api/bridge';
 // row opens the chosen input only while shown and closes it, not how a real microphone sounds.
 const meter = vi.hoisted(() => ({
   open: vi.fn<(deviceId: string, onLevel: (level: number) => void) => Promise<() => void>>(),
+  system: vi.fn<(onLevel: (level: number) => void) => Promise<() => void>>(),
   stop: vi.fn(),
   push: null as ((level: number) => void) | null,
 }));
 vi.mock('../recording/micLevel', () => ({
   browserMicLevel: { open: meter.open },
+  browserSystemAudioLevel: { open: meter.system },
   levelFromRms: () => 0,
 }));
 
@@ -29,6 +31,7 @@ function stubDevices() {
     value: {
       enumerateDevices: vi.fn(async () => MICS),
       getUserMedia: vi.fn(async () => { throw new Error('Settings must not open the microphone itself'); }),
+      getDisplayMedia: vi.fn(async () => { throw new Error('Settings must not open computer audio itself'); }),
     },
   });
 }
@@ -114,19 +117,19 @@ describe('Settings → Microphone and Computer audio (B20)', () => {
     expect(within(mic).getByRole('button', { name: 'Open System Settings' })).toBeInTheDocument();
   });
 
-  it('Computer audio: the default switch, its permission state and the privacy pane', async () => {
+  it('Computer audio: the default switch; never calls it off from the Screen Recording status (QA live 16.10)', async () => {
     const user = userEvent.setup();
     const engine = captureFake();
-    const openPane = vi.fn(async () => true);
     const { fake } = renderKb({
       world: docWorld(), capture: () => engine,
-      bridge: { systemAudioSupported: true, mediaAccess: vi.fn(async () => ({ microphone: 'granted', screen: 'denied' } as MediaAccess)), openSystemAudioSettings: openPane },
+      // Screen Recording off is a different permission: system audio needs "System Audio Recording Only".
+      bridge: { systemAudioSupported: true, mediaAccess: vi.fn(async () => ({ microphone: 'granted', screen: 'denied' } as MediaAccess)), openSystemAudioSettings: vi.fn(async () => true) },
     });
     const dialog = await openSound();
     const sys = row(dialog, 'Computer audio');
-    expect(await within(sys).findByText('Screen & System Audio Recording is off for SKAZ')).toBeInTheDocument();
-    fireEvent.click(within(sys).getByRole('button', { name: 'Open System Settings' }));
-    await waitFor(() => expect(openPane).toHaveBeenCalledWith('system-audio'));
+    expect(await within(sys).findByRole('button', { name: 'Check' })).toBeInTheDocument();
+    expect(within(sys).queryByText(/is off for SKAZ/)).not.toBeInTheDocument();
+    expect(meter.system).not.toHaveBeenCalled(); // nothing is opened until the user asks
     await user.click(within(sys).getByRole('switch', { name: 'Computer audio' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/settings', body: { capture_system_audio: true } })));
     fireEvent.keyDown(dialog, { key: 'Escape' });
@@ -134,6 +137,47 @@ describe('Settings → Microphone and Computer audio (B20)', () => {
     await user.click(await within(screen.getByTestId('titlebar')).findByRole('button', { name: 'Record' }));
     await waitFor(() => expect(engine.start).toHaveBeenCalled());
     expect((engine.start as ReturnType<typeof vi.fn>).mock.calls[0]![0].sources).toEqual({ systemAudio: true });
+  });
+
+  it('Computer audio Check: sound heard → it reaches SKAZ, and the capture is closed', async () => {
+    const stop = vi.fn();
+    meter.system.mockImplementation(async (onLevel) => { setTimeout(() => onLevel(0.4), 0); return stop; });
+    renderKb({ world: docWorld(), bridge: { systemAudioSupported: true } });
+    const dialog = await openSound();
+    const sys = row(dialog, 'Computer audio');
+    fireEvent.click(await within(sys).findByRole('button', { name: 'Check' }));
+    expect(await within(sys).findByText('Computer audio reaches SKAZ')).toBeInTheDocument();
+    expect(stop).toHaveBeenCalled();
+  });
+
+  it('Computer audio Check: macOS refuses → says so with the privacy pane', async () => {
+    const openPane = vi.fn(async () => true);
+    meter.system.mockImplementation(async () => { throw Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }); });
+    renderKb({ world: docWorld(), bridge: { systemAudioSupported: true, openSystemAudioSettings: openPane } });
+    const dialog = await openSound();
+    const sys = row(dialog, 'Computer audio');
+    fireEvent.click(await within(sys).findByRole('button', { name: 'Check' }));
+    expect(await within(sys).findByText('macOS doesn’t let SKAZ record computer audio')).toBeInTheDocument();
+    fireEvent.click(within(sys).getByRole('button', { name: 'Open System Settings' }));
+    await waitFor(() => expect(openPane).toHaveBeenCalledWith('system-audio'));
+  });
+
+  it('Computer audio Check: only silence → says nothing was heard, closes the capture', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const stop = vi.fn();
+      meter.system.mockImplementation(async (onLevel) => { onLevel(0); return stop; });
+      renderKb({ world: docWorld(), bridge: { systemAudioSupported: true, openSystemAudioSettings: vi.fn(async () => true) } });
+      const dialog = await openSound();
+      const sys = row(dialog, 'Computer audio');
+      fireEvent.click(await within(sys).findByRole('button', { name: 'Check' }));
+      expect(await within(sys).findByRole('meter', { name: 'Computer audio level' })).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(5_100);
+      expect(await within(sys).findByText(/Nothing was heard/)).toBeInTheDocument();
+      expect(stop).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Computer audio where this Mac can’t capture it: said plainly, no switch', async () => {

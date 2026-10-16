@@ -3,7 +3,7 @@ import type { MediaAccess, MediaAccessStatus } from '../../api/bridge';
 import { browserDiscovery, listInputDevices } from '../../audio/devices';
 import { Button, Icon, Switch } from '../ui';
 import { useRecording, useServices } from '../state/context';
-import { browserMicLevel } from '../recording/micLevel';
+import { browserMicLevel, browserSystemAudioLevel } from '../recording/micLevel';
 import type { RecOptions } from '../recording/recordingStore';
 
 /**
@@ -101,10 +101,10 @@ function useMicLevel(deviceId: string, active: boolean): MeterState {
   return state;
 }
 
-function LevelMeter({ level }: { level: number }) {
+function LevelMeter({ level, label = 'Microphone level' }: { level: number; label?: string }) {
   const pct = Math.round(level * 100);
   return (
-    <span className="kb-meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+    <span className="kb-meter" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
       <i style={{ width: `${pct}%` }} />
     </span>
   );
@@ -153,25 +153,104 @@ export function MicRow() {
   );
 }
 
+/** How long the Computer audio check listens before it calls the sound missing. */
+export const SYSTEM_AUDIO_CHECK_MS = 5_000;
+const HEARD = 0.02;
+
+type SystemCheck =
+  | { kind: 'idle' } | { kind: 'listening'; level: number } | { kind: 'heard' } | { kind: 'silent' }
+  | { kind: 'denied' } | { kind: 'failed'; reason: string };
+
+/**
+ * Computer audio needs macOS "System Audio Recording Only" for SKAZ. No API reads that permission
+ * (the Screen Recording status Electron offers is a different one), so the row never guesses: Check
+ * listens to the computer's sound for a few seconds and says what really came through.
+ */
+function useSystemAudioCheck(): [SystemCheck, () => void] {
+  const [state, setState] = useState<SystemCheck>({ kind: 'idle' });
+  const stopRef = useRef<(() => void) | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finish = (next: SystemCheck) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    stopRef.current?.();
+    stopRef.current = null;
+    setState(next);
+  };
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); stopRef.current?.(); }, []);
+  const start = () => {
+    if (stopRef.current || !navigator.mediaDevices?.getDisplayMedia) {
+      if (!navigator.mediaDevices?.getDisplayMedia) setState({ kind: 'failed', reason: 'Computer audio can’t be opened here.' });
+      return;
+    }
+    let done = false;
+    setState({ kind: 'listening', level: 0 });
+    browserSystemAudioLevel.open((level) => {
+      if (done) return;
+      if (level >= HEARD) { done = true; finish({ kind: 'heard' }); } else setState({ kind: 'listening', level });
+    }).then(
+      (close) => {
+        if (done) { close(); return; }
+        stopRef.current = close;
+        timerRef.current = setTimeout(() => { done = true; finish({ kind: 'silent' }); }, SYSTEM_AUDIO_CHECK_MS);
+      },
+      (error: unknown) => {
+        done = true;
+        const name = (error as { name?: string } | null)?.name ?? '';
+        finish(name === 'NotAllowedError' || name === 'SecurityError' ? { kind: 'denied' }
+          : { kind: 'failed', reason: error instanceof Error && error.message ? error.message : 'Computer audio couldn’t be opened.' });
+      },
+    );
+  };
+  return [state, start];
+}
+
 export function SystemAudioRow({ label }: { label: string }) {
   const { bridge } = useServices();
   const { options, set, error } = useRecOptions();
-  const access = useMediaAccess();
+  const [check, startCheck] = useSystemAudioCheck();
   if (bridge.systemAudioSupported !== true) return <span className="kb-muted">Not available on this Mac</span>;
-  const screen = access?.screen;
+  const checkButton = (
+    <Button size="sm" variant="outline" disabled={check.kind === 'listening'} onClick={startCheck}>
+      {check.kind === 'idle' ? 'Check' : 'Check again'}
+    </Button>
+  );
   return (
     <span className="kb-sound">
       <Switch label={label} checked={options.systemAudio} onChange={(v) => void set({ systemAudio: v })} />
-      {blocked(screen) ? (
+      {check.kind === 'idle' ? (
         <>
-          <span className="kb-status kb-status--err" role="status"><Icon name="error" size={13} />Screen &amp; System Audio Recording is off for SKAZ</span>
+          <span className="kb-muted">Needs “System Audio Recording Only” for SKAZ in System Settings; macOS asks the first time.</span>
+          {checkButton}
+        </>
+      ) : check.kind === 'listening' ? (
+        <>
+          <LevelMeter level={check.level} label="Computer audio level" />
+          <span className="kb-muted" role="status">Listening… play some sound on this Mac.</span>
+        </>
+      ) : check.kind === 'heard' ? (
+        <>
+          <span className="kb-status kb-status--ok" role="status"><Icon name="check" size={13} />Computer audio reaches SKAZ</span>
+          {checkButton}
+        </>
+      ) : check.kind === 'silent' ? (
+        <>
+          <span className="kb-muted" role="status">Nothing was heard. Play some sound and check again; if it stays silent, turn on SKAZ under “System Audio Recording Only”.</span>
+          {checkButton}
           <PrivacyButton pane="system-audio" />
         </>
-      ) : screen === 'granted' ? (
-        <span className="kb-status kb-status--ok"><Icon name="check" size={13} />Allowed in System Settings</span>
-      ) : options.systemAudio ? (
-        <span className="kb-muted">macOS asks for permission the first time you record with it.</span>
-      ) : null}
+      ) : check.kind === 'denied' ? (
+        <>
+          <span className="kb-status kb-status--err" role="status"><Icon name="error" size={13} />macOS doesn’t let SKAZ record computer audio</span>
+          {checkButton}
+          <PrivacyButton pane="system-audio" />
+        </>
+      ) : (
+        <>
+          <span className="kb-inline-error kb-inline-error--flat" role="alert">{check.reason}</span>
+          {checkButton}
+        </>
+      )}
       {error && <span className="kb-inline-error kb-inline-error--flat" role="alert">{error}</span>}
     </span>
   );

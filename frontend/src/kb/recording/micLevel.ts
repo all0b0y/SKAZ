@@ -21,37 +21,67 @@ export function levelFromRms(rms: number): number {
   return Math.min(1, (dbfs - SILENCE_DBFS) / (-6 - SILENCE_DBFS));
 }
 
+/** Measures an already opened stream until the returned stop is called (which closes the stream too). */
+function measure(stream: MediaStream, onLevel: (level: number) => void): () => void {
+  let context: AudioContext | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = null;
+    for (const track of stream.getTracks()) track.stop();
+    void context?.close().catch(() => undefined);
+    context = null;
+  };
+  try {
+    context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 2048;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Float32Array(analyser.fftSize);
+    timer = setInterval(() => {
+      analyser.getFloatTimeDomainData(samples);
+      let sum = 0;
+      for (const value of samples) sum += value * value;
+      onLevel(levelFromRms(Math.sqrt(sum / samples.length)));
+    }, INTERVAL_MS);
+  } catch (error) {
+    stop();
+    throw error;
+  }
+  return stop;
+}
+
 export const browserMicLevel: MicLevelSource = {
   async open(deviceId, onLevel) {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: deviceId ? { deviceId: { exact: deviceId } } : true,
       video: false,
     });
-    let context: AudioContext | null = null;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const stop = () => {
-      if (timer) clearInterval(timer);
-      timer = null;
-      for (const track of stream.getTracks()) track.stop();
-      void context?.close().catch(() => undefined);
-      context = null;
-    };
-    try {
-      context = new AudioContext();
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 2048;
-      context.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Float32Array(analyser.fftSize);
-      timer = setInterval(() => {
-        analyser.getFloatTimeDomainData(samples);
-        let sum = 0;
-        for (const value of samples) sum += value * value;
-        onLevel(levelFromRms(Math.sqrt(sum / samples.length)));
-      }, INTERVAL_MS);
-    } catch (error) {
-      stop();
-      throw error;
+    return measure(stream, onLevel);
+  },
+};
+
+/**
+ * The level of the computer's own sound, for the Computer audio check: the same whole-system
+ * loopback the recording uses (`getDisplayMedia`, audio only — main grants nothing else). macOS
+ * keeps this permission under "System Audio Recording Only", which no API can read beforehand, so
+ * the only honest answer is to listen for a moment. Rejects like `getDisplayMedia`.
+ */
+export interface SystemAudioLevelSource {
+  open(onLevel: (level: number) => void): Promise<() => void>;
+}
+
+export const browserSystemAudioLevel: SystemAudioLevelSource = {
+  async open(onLevel) {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      video: false,
+    });
+    stream.getVideoTracks().forEach((track) => track.stop());
+    if (!stream.getAudioTracks().some((track) => track.readyState === 'live')) {
+      stream.getTracks().forEach((track) => track.stop());
+      throw Object.assign(new Error('macOS gave SKAZ no computer audio.'), { name: 'NotReadableError' });
     }
-    return stop;
+    return measure(stream, onLevel);
   },
 };
