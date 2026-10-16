@@ -120,7 +120,8 @@ test('error (real backend exit): amber roots, deep pixels fall, the tree above t
   const tree = page.getByTestId('loading-tree');
   await expect(tree).toHaveAttribute('data-phase', 'error', { timeout: 10_000 });
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('SKAZ couldn’t start its local service.');
+  // QA E16: the backend had been running, so it stopped — it did not fail to start.
+  await expect(alert).toContainText('SKAZ’s local service stopped.');
   await expect(alert).toContainText('backend exited');
   await expect(alert.getByRole('button', { name: 'Try again' })).toBeVisible();
   await expect(alert.getByRole('button', { name: 'Open logs folder' })).toBeVisible();
