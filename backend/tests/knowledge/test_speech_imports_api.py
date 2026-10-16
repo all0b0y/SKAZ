@@ -22,7 +22,8 @@ from skaz.gateways.soniox_async import AsyncToken
 from skaz.import_service import LOCAL_BUSY, MAX_LOCAL_RECOGNITIONS
 from skaz.knowledge.ingest.service import NO_SPEECH_FILE
 from skaz.knowledge.library.library import INBOX_ID
-from skaz.knowledge.speech.service import CANCELLED_IMPORT, INTERRUPTED_IMPORT
+from skaz.knowledge.speech.carriers import CANCELLED_IMPORT
+from skaz.knowledge.speech.service import INTERRUPTED_IMPORT
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp
 from tests.sessions_support import adelete, get_session, session_count
@@ -192,7 +193,7 @@ async def test_import_without_cloud_consent_is_refused_and_leaves_no_session_beh
     refused = await api.post("/kb/imports", json={"path": media(tmp_path, "Lecture.m4a")})
 
     assert refused.status_code == 409, refused.text
-    assert "consent" in refused.json()["detail"].lower()
+    assert "Send audio to Soniox" in refused.json()["detail"]  # QA B6: the real place
     assert session_count(speech_app) == sessions_before
     active = await api.get("/kb/imports/active")
     assert active.status_code == 200 and active.json() == []
@@ -502,3 +503,53 @@ async def test_an_import_without_speech_is_ready_without_text_and_never_goes_to_
     refused = await api.post(f"/kb/materials/{material_id}/ingest")
     assert refused.status_code == 409
     assert refused.json()["detail"] == NO_SPEECH_FILE
+
+
+async def test_deleting_an_import_material_stops_it_and_removes_its_temporary_media(
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
+) -> None:
+    """QA E13 / B41: the material goes with its session, its carrier and ``import-temp/<session>``."""
+    soniox.hold_all = True
+    runtime = speech_app.state.runtime
+    created = (await api.post("/kb/imports", json={"path": media(tmp_path, "Clip.mp4")})).json()
+    await until(api, created["material_id"], import_stage="processing")
+    temp = runtime.imports.temp.root / created["session_id"]
+    assert temp.is_dir() and any(temp.iterdir())  # the prepared audio of a video
+    deleted = await api.delete(f"/kb/materials/{created['material_id']}")
+    assert deleted.status_code == 200, deleted.text
+    assert not temp.exists()
+    assert get_session(speech_app, created["session_id"]) is None
+    assert runtime.kb_speech.carriers.get(created["material_id"]) is None
+    assert (await api.get(f"/kb/materials/{created['material_id']}")).status_code == 404
+    soniox.hold.clear()
+
+
+async def test_startup_sweeps_temporary_media_no_import_can_use(
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
+) -> None:
+    """QA E13: media of a gone, finished or cancelled import goes; a failed one keeps it for Retry."""
+    imports = speech_app.state.runtime.imports
+    soniox.failing = True
+    failed = (await api.post("/kb/imports", json={"path": media(tmp_path, "Failed.mp4")})).json()
+    await until(api, failed["material_id"], status="failed")
+    soniox.failing = False
+    done = (await api.post("/kb/imports", json={"path": media(tmp_path, "Done.m4a")})).json()
+    await until(api, done["material_id"], status="ready")
+    for session_id in (failed["session_id"], done["session_id"], "c" * 32):
+        (imports.temp.root / session_id).mkdir(parents=True, exist_ok=True)
+        (imports.temp.root / session_id / "audio.m4a").write_bytes(b"x")
+    (imports.temp.root / "not-an-import").mkdir()
+    assert imports.sweep_temp() == 2
+    left = sorted(path.name for path in imports.temp.root.iterdir())
+    assert left == sorted([failed["session_id"], "not-an-import"])
+
+
+async def test_a_carrier_of_a_deleted_material_is_skipped_quietly_at_start(
+    api: httpx.AsyncClient, speech_app: Any, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """QA B41: no "Speech material … not updated: NotFound" on every start for a material that is gone."""
+    speech = speech_app.state.runtime.kb_speech
+    speech.carriers.add("mat-gone", "d" * 32, "audio")
+    with caplog.at_level("WARNING", logger="skaz.knowledge.speech.service"):
+        await speech._reconcile_all()
+    assert "not updated" not in caplog.text

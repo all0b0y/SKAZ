@@ -372,6 +372,11 @@ class SpeechService:
     async def _reconcile_all(self) -> None:
         await disk_call(self._restore_carriers)
         for carrier in await disk_call(self.carriers.list_all):
+            if await disk_call(self.kb.material_repo.get, carrier.material_id) is None:
+                # Deleted before carriers were let go of, or in another library: nothing to settle
+                # here, and no warning on every start (QA B41). ``_restore_carriers`` relinks it
+                # if the material comes back.
+                continue
             if carrier.is_import:
                 await self._guarded(carrier.material_id, functools.partial(self._reconcile_import, carrier))
                 continue
@@ -682,6 +687,27 @@ class SpeechService:
         async with self._lock(material_id):
             await disk_call(self._remove_material, material_id, record.rel_dir)
 
+    async def release_deleted(self, material_id: str) -> None:
+        """The material is about to be deleted (W2): let go of what feeds it (QA E13, B41).
+
+        Its technical session goes the legacy way — a running import is cancelled and its
+        temporary media removed — and the carrier is forgotten, so no restart tries to settle
+        a material that no longer exists. A material without a carrier is not speech: nothing.
+        """
+        carrier = await disk_call(self.carriers.get, material_id)
+        if carrier is None:
+            return
+        if await disk_call(self.legacy.session_status, carrier.session_id) is not None:
+            await self.legacy.delete_session(carrier.session_id)
+        await disk_call(self._forget_carrier, material_id)
+
+    def _forget_carrier(self, material_id: str) -> None:
+        self.carriers.remove(material_id)
+        with self._map_lock:
+            if self._by_session is not None:
+                self._by_session = {key: value for key, value in self._by_session.items()
+                                    if value != material_id}
+
     def _remove_material(self, material_id: str, rel_dir: str) -> None:
         library = self.kb.require()
         directory = library.locate_material(material_id, hint=rel_dir)
@@ -692,11 +718,7 @@ class SpeechService:
         shutil.rmtree(doomed, ignore_errors=True)
         with self.kb.db.write() as connection:
             connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
-        self.carriers.remove(material_id)
-        with self._map_lock:
-            if self._by_session is not None:
-                self._by_session = {key: value for key, value in self._by_session.items()
-                                    if value != material_id}
+        self._forget_carrier(material_id)
 
     async def retry_import(self, material_id: str) -> SpeechView:
         carrier = await self._import(material_id)

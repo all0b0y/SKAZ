@@ -208,8 +208,31 @@ class ImportService:
         return record
 
     def resume(self) -> None:
-        """Mark unfinished jobs interrupted. Only an explicit retry resumes them."""
+        """Mark unfinished jobs interrupted (only an explicit retry resumes them) and drop the
+        temporary media no import can use any more (QA E13)."""
         self.store.interrupt()
+        self.sweep_temp()
+
+    def sweep_temp(self) -> int:
+        """Remove ``import-temp/<session>`` whose import is gone, finished or cancelled.
+
+        A failed or interrupted import keeps its prepared audio: Retry starts from it. A
+        deleted material's import is cancelled with its session, so its media goes too.
+        """
+        removed = 0
+        for session_id in self.temp.sessions():
+            record = self.store.get(session_id)
+            if record is not None and record.status not in ("completed", "cancelled"):
+                continue
+            try:
+                self.temp.remove(session_id)
+            except (OSError, ValueError) as error:
+                logger.warning("Temporary import media of %s not removed: %s", session_id, error_note(error))
+                continue
+            removed += 1
+        if removed:
+            logger.info("Removed temporary media of %d finished or deleted import(s)", removed)
+        return removed
 
     async def retry(self, session_id: str) -> ImportRecord:
         self._claim()

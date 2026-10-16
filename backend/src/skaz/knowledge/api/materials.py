@@ -215,8 +215,16 @@ async def delete_preview(material_id: str, wiki: WikiDep) -> KbDeletePreview:
 
 
 @router.delete("/{material_id}")
-async def delete_material(material_id: str, wiki: WikiDep) -> KbDeletePreview:
-    """What actually happened. 409 while the material is recorded or being added to the wiki."""
+async def delete_material(material_id: str, wiki: WikiDep, request: Request) -> KbDeletePreview:
+    """What actually happened. 409 while the material is recorded or being added to the wiki.
+
+    A speech material lets go of its technical session first: a running import stops and its
+    temporary media is removed, and no restart tries to settle it again (QA E13, B41).
+    """
+    await kb_call(wiki.check_deletable, material_id)
+    speech = getattr(request.app.state.runtime, "kb_speech", None)
+    if speech is not None:
+        await speech.release_deleted(material_id)
     return preview_view(await kb_call(wiki.delete_material, material_id))
 
 
