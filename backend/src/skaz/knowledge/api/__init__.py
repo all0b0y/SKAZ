@@ -15,6 +15,7 @@ from . import (
     materials,
     mentions,
     notifications,
+    permissions,
     search,
     settings,
     sources,
@@ -42,4 +43,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     settings.router,
     dictation.router,
     export.router,
+    permissions.router,
 )

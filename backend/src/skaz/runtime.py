@@ -23,6 +23,12 @@ from .knowledge.chats import ChatService
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
+from .knowledge.permissions.ask_tool import ask_tool
+from .knowledge.permissions.broker import PermissionBroker
+from .knowledge.permissions.questions import QuestionBroker
+from .knowledge.permissions.store import ControlStore
+from .knowledge.permissions.waits import RunWaits
+from .knowledge.permissions.wiki_tools import WikiEditor
 from .knowledge.service import KnowledgeService
 from .knowledge.settings.health import SettingsHealth
 from .knowledge.settings.keys import KeyChecks
@@ -70,7 +76,11 @@ class Runtime:
         #: Read-only SKAZ agent tools: listed by the MCP server and given to Codex as dynamicTools.
         self.kb_tools = ToolRegistry(self.kb)
         self.kb_mcp = McpServer(self.kb_tools, url=f"http://{config.host}:{config.port}/kb/mcp")
-        self.kb_codex = CodexEngine(self.codex_connection, self.kb_tools)
+        #: Runs waiting for the user (permission or question): their answer deadline stands still (0.3.1 P).
+        self.kb_waits = RunWaits()
+        #: Agents' wiki changes wait for Allow / Allow in this chat / Deny here (0.3.1 P).
+        self.kb_permissions = PermissionBroker(ControlStore(self.kb.db), self.kb_waits)
+        self.kb_codex = CodexEngine(self.codex_connection, self.kb_tools, waits=self.kb_waits)
         #: Adding documents, links and pasted text to the knowledge library (area S1).
         self.kb_sources = SourceService(self.kb, video_probe=ytdlp_probe)
         #: Agent engines (Codex, Claude Code, Hermes): statuses, installs, sign-in; nothing runs until asked.
@@ -95,8 +105,19 @@ class Runtime:
         #: The wiki after ingest (W2): corrections, discrepancies, edits, deletion, connections, graph.
         self.kb_wiki = wire_wiki(WikiService(self.kb, self.kb_ingest))
         #: General chats (C1): answers through the engine registry with the SKAZ tools, no queues.
+        #: The four wiki tools of chat agents: checked, asked, applied by SKAZ's writer, undoable (0.3.1 P).
+        self.kb_wiki_edits = WikiEditor(self.kb, self.kb_wiki, self.kb_permissions,
+                                        language=lambda: self.kb_ingest.settings().language,
+                                        text_layer=lambda: self.kb_ingest.text_layer)
+        self.kb_tools.add(self.kb_wiki_edits.tools())
+        #: Agents' questions (Hermes ``clarify``, ``skaz_ask_user``) wait for the user here (0.3.1 P).
+        self.kb_questions = QuestionBroker(self.kb_permissions.store, self.kb_waits)
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
-                                    text_layer=lambda: self.kb_ingest.text_layer)
+                                    text_layer=lambda: self.kb_ingest.text_layer,
+                                    permissions=self.kb_permissions, questions=self.kb_questions)
+        self.kb_wiki_edits.runs = self.kb_chats.run_ref
+        #: SKAZ's own question tool for agents whose native one can't work with SKAZ (Q-A1).
+        self.kb_tools.add((ask_tool(self.kb_questions, self.kb_chats.run_ref),))
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
         #: File imports. Resumption is started by the app lifespan, not here: a

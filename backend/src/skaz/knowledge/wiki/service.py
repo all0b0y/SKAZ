@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -662,6 +663,19 @@ class WikiService:
         with self.ctx.write_lock:
             delete_note(self.kb, page_id, block_id)
         return self._edited(page_id)
+
+    # -- changes by chat agents (0.3.1 P: applied by SKAZ after the user allowed them) ----------
+
+    @property
+    def write_lock(self) -> threading.RLock:
+        """The one library write lock (re-entrant); hold it only in worker threads."""
+        return self.kb.writing()
+
+    def after_change(self) -> None:
+        """An agent's change landed or was undone: the graph and ``Wiki/index.md`` follow."""
+        self.graph.refresh(force=True)
+        self._refresh_index()
+        self._touch()
 
     def graph_view(self, folder_id: str | None) -> Graph:
         if folder_id is not None and self.kb.folder_repo.get(folder_id) is None:

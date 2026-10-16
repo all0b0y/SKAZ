@@ -171,9 +171,9 @@ class CodexRpc:
                             else:
                                 self._tool_task = asyncio.create_task(self._run_tool(message))
                         else:
-                            await self._send({"id": message["id"], "error": {
-                                "code": -32601, "message": "Action not permitted",
-                            }})
+                            error = (self._tools.refusal(message["method"]) if self._tools is not None
+                                     else {"code": -32601, "message": "Action not permitted"})
+                            await self._send({"id": message["id"], "error": error})
                     else:
                         if message["method"] == "turn/completed" and self._tools is not None:
                             params = message.get("params", {})

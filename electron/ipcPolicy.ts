@@ -136,6 +136,9 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/export$/ },
   // 0.3.1 F5: the chosen chats, pages and materials as .md into a folder (same folder rules as above).
   { method: 'POST', pattern: /^\/kb\/export\/items$/ },
+  // 0.3.1 P: the user's answers to agents — Allow / Allow in this chat / Deny, Undo, a question's answer.
+  { method: 'POST', pattern: /^\/kb\/permissions\/[^/]+\/(?:decide|undo)$/ },
+  { method: 'POST', pattern: /^\/kb\/questions\/[^/]+\/answer$/ },
 ];
 
 /**
