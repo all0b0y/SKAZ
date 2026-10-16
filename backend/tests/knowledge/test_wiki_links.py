@@ -68,8 +68,8 @@ async def test_a_contradiction_is_marked_with_both_versions_and_a_notification(
     ]
     assert actions == [
         ("keep_both", "Keep both", True, False),
-        ("prefer_0", "Correct in Лекция 8", False, False),
-        ("prefer_1", "Correct in Учебник", False, False),
+        ("prefer_0", "“Лекция 8” is right", False, False),
+        ("prefer_1", "“Учебник” is right", False, False),
         ("own_note", "Write my own note", False, True),
     ]
     # Reported once: the statements are remembered as compared.
@@ -104,9 +104,16 @@ async def test_every_discrepancy_action_works(ready: KnowledgeService, action: s
     else:
         loser = new if action == "prefer_0" else old
         winner = old if action == "prefer_0" else new
-        superseded = document.blocks()[ids.index(loser["block_id"]) + 1]
-        assert superseded.id.startswith("c-sup-") and superseded.kind == "explanation"
-        assert superseded.body == f"Superseded by “{winner['material_title']}” — your choice."
+        # The loser is retired in place, struck through, as the user's decision (QA C16): no extra
+        # "agent explanation" block, its source kept, ingest never brings it back as plain.
+        retired = document.block(loser["block_id"])
+        assert retired is not None and retired.owner == "user_edited" and retired.kind == "from_source"
+        text = loser["text"]
+        note = f"— superseded by “{winner['material_title']}” (your choice)."
+        assert retired.body.startswith(f"~~{text}~~ {note}")
+        assert "[[Materials/" in retired.body and retired.cites
+        assert not any(block.id.startswith("c-sup-") for block in document.blocks())
+        assert ids == [block.id for block in parse_page(before).blocks()]
     with pytest.raises(Exception, match="already resolved"):
         await case.service.feed.resolve(notice.id, "keep_both", None)
 

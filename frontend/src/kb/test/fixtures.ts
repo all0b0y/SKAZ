@@ -280,8 +280,8 @@ export function chatWorld(): FakeWorld {
       requires_action: true,
       actions: [
         { id: 'keep_both', label: 'Keep both', primary: true, needs_text: false },
-        { id: 'prefer_0', label: 'Correct in Lecture 8', primary: false, needs_text: false },
-        { id: 'prefer_1', label: 'Correct in Textbook', primary: false, needs_text: false },
+        { id: 'prefer_0', label: '“Lecture 8” is right', primary: false, needs_text: false },
+        { id: 'prefer_1', label: '“Textbook” is right', primary: false, needs_text: false },
         { id: 'own_note', label: 'My own note', primary: false, needs_text: true },
       ],
       subject: { type: 'page', id: PAGES.entropy.id, block_id: 'b1', seg: null },

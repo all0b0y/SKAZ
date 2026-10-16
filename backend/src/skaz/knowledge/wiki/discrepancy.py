@@ -11,6 +11,7 @@ terms — and raises a ``discrepancy`` notification with four actions.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, replace
 from uuid import uuid4
@@ -44,9 +45,11 @@ QUESTION = (
     "detail, in the viewpoint of a discipline, in terms, or in the conditions they describe?"
 )
 LABELS = {
-    "en": {"disagree": "Sources disagree", "superseded": "Superseded by “{winner}” — your choice."},
-    "ru": {"disagree": "Источники расходятся", "superseded": "Заменено версией из «{winner}» — ваш выбор."},
+    "en": {"disagree": "Sources disagree", "superseded": "— superseded by “{winner}” (your choice)."},
+    "ru": {"disagree": "Источники расходятся", "superseded": "— заменено версией из «{winner}» (ваш выбор)."},
 }
+#: A citation wikilink in a block body (``[[Materials/…#^seg-N|…]]``).
+_CITATION_LINK = re.compile(r"\s*\[\[[^\]|\n]*#\^seg-\d+(?:\|[^\]\n]*)?\]\]")
 MAX_NEW = 12
 MAX_EXISTING = 24
 
@@ -249,7 +252,8 @@ class Discrepancies:
             ]
         return (
             ActionSpec("keep_both", "Keep both", primary=True),
-            *(ActionSpec(f"prefer_{index}", f"Correct in {title}") for index, title in enumerate(titles)),
+            # "<X> is right" — the user picks the source that is right, not one to fix (QA C16).
+            *(ActionSpec(f"prefer_{index}", f"“{title}” is right") for index, title in enumerate(titles)),
             ActionSpec("own_note", "Write my own note", needs_text=True),
         )
 
@@ -287,6 +291,12 @@ class Discrepancies:
         return any(block.block_id == block_id for block in self.ctx.kb.page_repo.blocks(page_id))
 
     def _supersede(self, page_id: str, loser_id: str, winner_title: str) -> None:
+        """The losing statement is retired visibly, as the user's decision (QA C16).
+
+        It stays where it was, with its source (the source did say it), but struck through and
+        followed by "superseded by <winner> (your choice)"; the block becomes the user's
+        (``user_edited``), so ingest never brings it back as a plain statement.
+        """
         with self.ctx.write_lock:
             library, path = page_path(self.ctx.kb, page_id)
 
@@ -301,14 +311,18 @@ class Discrepancies:
                 )
                 if index is None:
                     raise SideGone("That statement is no longer on the page.")
+                loser = document.parts[index]
+                assert isinstance(loser, Block)
                 language = document.meta.language or "en"
-                note = Block.create(
-                    f"c-sup-{uuid4().hex[:12]}",
-                    "explanation",
-                    _labels(language)["superseded"].format(winner=winner_title),
-                )
+                links = "".join(match.group(0) for match in _CITATION_LINK.finditer(loser.body))
+                text = _CITATION_LINK.sub("", loser.body).strip()
+                if text.startswith("~~"):
+                    return document  # already retired
+                note = _labels(language)["superseded"].format(winner=winner_title)
+                body = f"~~{text}~~ {note}{links}"
+                retired = replace(loser, body=body, raw=None).remarked(owner="user_edited")
                 parts = list(document.parts)
-                parts.insert(index + 1, note)
+                parts[index] = retired
                 return replace(document, parts=spaced(parts))
 
             rewrite(library, path, build)

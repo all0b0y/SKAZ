@@ -75,7 +75,9 @@ describe('Decision window', () => {
     expect(within(dialog).getByText('“Entropy is a measure of the disorder of a system”')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Recording: Lecture 8 — entropy, 08:12' })).toBeInTheDocument();
     expect(within(dialog).getByText(/two sides of one concept/)).toBeInTheDocument();
-    expect(within(dialog).getAllByRole('button').map((b) => b.textContent).filter((t) => /Keep both|Correct in|My own note/.test(t ?? ''))).toHaveLength(4);
+    expect(within(dialog).getAllByRole('button').map((b) => b.textContent).filter((t) => /Keep both|is right|My own note/.test(t ?? ''))).toHaveLength(4);
+    // What picking a side does is said before it is done (QA C16).
+    expect(within(dialog).getByText(/struck through, as your choice/)).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('button', { name: 'Next decision' }));
     expect(await screen.findByRole('dialog', { name: '2 doubtful corrections' })).toBeInTheDocument();
