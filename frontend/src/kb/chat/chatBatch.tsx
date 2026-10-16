@@ -21,9 +21,13 @@ async function each(ids: readonly string[], fn: (id: string) => Promise<{ ok: tr
  * Chats in the side panel, several at once (0.3.1 F4, mockup lib-v2 «Chats»): Pin, Export .md,
  * Delete; ⋯ Unpin, Mark as read, Save to wiki as analyses. Selecting never opens a chat.
  */
-export function useChatSelection({ chats: list, onOpen }: {
+export function useChatSelection({ chats: list, onOpen, variant = 'compact', resetKey }: {
   chats: ReadonlyArray<KbChatSummary>;
   onOpen: (id: string) => void;
+  /** The side panel is narrow (icons); "All chats" over the centre has room for labels. */
+  variant?: 'full' | 'compact';
+  /** Another search, filter or folder: the selection starts over. */
+  resetKey?: unknown;
 }): { sel: ListSelection; overlays: ReactNode } {
   const { chats, ui } = useServices();
   const exp = useExportItems();
@@ -36,6 +40,7 @@ export function useChatSelection({ chats: list, onOpen }: {
     onOpen,
     onDelete: (ids) => setDeleteIds(ids),
     onExport: exportMd ? (ids) => exportMd(pick(ids)) : undefined,
+    resetKey,
   });
   const toast = (text: string, res: BatchResult, undo?: () => void) => ui.getState().showToast({
     text, tone: res.skipped.length ? 'problem' : 'done', action: undo && res.done.length ? { label: 'Undo', run: undo } : undefined,
@@ -85,7 +90,7 @@ export function useChatSelection({ chats: list, onOpen }: {
   const answering = doomed.filter((c) => c.state === 'answering');
   const overlays = (
     <>
-      <SelectionBar count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
+      <SelectionBar count={sel.selected.size} variant={variant} actions={actions} more={more} onClear={sel.clear} />
       {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
         has={{ delete: true, export: Boolean(exportMd) }} />

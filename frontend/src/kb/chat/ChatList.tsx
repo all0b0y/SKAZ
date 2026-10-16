@@ -135,6 +135,10 @@ export function AllChats() {
   }, [client, q, filter, folder, listVersion]);
 
   const groups = groupBy(rows ?? [], (c) => dayBucket(c.updated_at));
+  // 0.3.1 F4: the same selection as the side panel, with labelled actions (there is room here).
+  const { sel, overlays } = useChatSelection({
+    chats: groups.flatMap((g) => g.items), onOpen: (id) => openChat(id), variant: 'full', resetKey: `${q}\n${filter}\n${folder}`,
+  });
   const folderName = (id: string) => folders.find((f) => f.id === id)?.name;
 
   return (
@@ -167,16 +171,17 @@ export function AllChats() {
         </span>
       </div>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
-      <div className="kb-allchats__body">
+      <div className="kb-allchats__body" {...sel.listProps}>
         {error && <Banner tone="error" title="Chats couldn’t be loaded.">{error}</Banner>}
         {rows === null && !error && <div className="kb-chat__wait"><Spinner label="Loading chats" /></div>}
         {rows?.length === 0 && <EmptyState icon="chats" title={q ? `No chats match “${q.trim()}”` : 'No chats here'} compact />}
         {groups.map((g) => (
           <section key={g.label} aria-label={g.label} className="kb-allchats__group">
             <h2 className="kb-subhead"><span className="kb-subhead__text">{g.label}</span></h2>
-            <ul className="kb-allchats__list">
+            <ul className="kb-allchats__list" {...sel.gridProps} aria-label={g.label}>
               {g.items.map((c) => (
-                <li key={c.id} className="kb-allchats__row">
+                <li key={c.id} className="kb-allchats__row" {...sel.rowProps(c.id)}>
+                  <SelectionCheckbox checked={sel.selected.has(c.id)} />
                   <button type="button" className="kb-allchats__main" onClick={() => openChat(c.id)}>
                     <span className="kb-allchats__title">{c.pinned && <Icon name="pin" size={13} />}{c.title}</span>
                     <span className="kb-allchats__preview">{c.last_preview}</span>
@@ -188,12 +193,13 @@ export function AllChats() {
                     ))}
                   </span>
                   <span className="kb-allchats__time">{clockOrDate(c.updated_at)}</span>
-                  <ChatMenu chat={c} size="sm" onNotice={setNotice} />
+                  <span data-sel-ignore><ChatMenu chat={c} size="sm" onNotice={setNotice} /></span>
                 </li>
               ))}
             </ul>
           </section>
         ))}
+        {overlays}
       </div>
     </section>
   );

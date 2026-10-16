@@ -35,6 +35,7 @@
 li[aria-selected='true'] > [role='gridcell'] > .kb-row,
 li[aria-selected='true'] .kb-row { background: color-mix(in srgb, var(--kb-text) 10%, transparent); }
 tr[aria-selected='true'] > td { background: color-mix(in srgb, var(--kb-text) 8%, transparent); }
+.kb-allchats__row[aria-selected='true'] { background: color-mix(in srgb, var(--kb-text) 8%, transparent); }
 tr[data-sel-id]:focus-within > td:first-child { box-shadow: inset 2px 0 0 var(--kb-text); }
 [data-sel-dragging] > td, li[data-sel-dragging] .kb-row { opacity: 0.45; }
 [role='gridcell'] { min-width: 0; }

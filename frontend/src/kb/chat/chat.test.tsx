@@ -331,6 +331,30 @@ describe('Answer text', () => {
   });
 });
 
+describe('Selecting several chats in "All chats" (0.3.1 F4)', () => {
+  it('ticks rows without opening them; Pin pins both; a new search starts the selection over', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: 'All chats · 7' }));
+    const all = screen.getByRole('region', { name: 'All chats' });
+    const rowOf = (name: string) => within(all).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    await waitFor(() => expect(rowOf('Transformer paper review')).toBeTruthy());
+    const before = services.chats.getState().currentId;
+    await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
+    await user.keyboard('{Meta>}');
+    await user.click(within(rowOf('Compare regularisation')).getByRole('button', { name: /^Compare regularisation/ }));
+    await user.keyboard('{/Meta}');
+    expect(services.chats.getState().currentId).toBe(before);
+    const bar = within(all).getByRole('toolbar', { name: '2 selected' });
+    await user.click(within(bar).getByRole('button', { name: /^Pin/ }));
+    await waitFor(() => expect(fake.world.chats.filter((c) => c.pinned).map((c) => c.id)).toEqual(expect.arrayContaining(['c3', 'c6'])));
+    await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
+    expect(within(all).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
+    await user.type(within(all).getByRole('searchbox', { name: 'Find in chats' }), 'x');
+    await waitFor(() => expect(within(all).queryByRole('toolbar', { name: /selected/ })).not.toBeInTheDocument());
+  });
+});
+
 describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
   async function chats() {
     const user = userEvent.setup();
