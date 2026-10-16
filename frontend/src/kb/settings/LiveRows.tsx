@@ -1,11 +1,11 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { KbDecisions, KbProblem, KbSpeechSettings } from '../../api/kb/types.gen';
 import type { EngineId, KeyProviderId } from '../api/names';
-import { errorText } from '../api/client';
+import { KbApiError, errorText } from '../api/client';
 import { Banner, Button, Icon, Modal, Segmented, Switch } from '../ui';
 import { ENGINE_NAME, ENGINE_ORDER, agentOf } from '../state/agents';
 import { HEALTH_TO_SECTION } from '../state/settings';
-import { useAgents, useServices, useSettings } from '../state/context';
+import { useAgents, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import { AgentCard } from './AgentCard';
 import { LANGUAGES, languageName } from './Languages';
@@ -551,8 +551,9 @@ export function BackgroundLinksRow({ label }: { label: string }) {
 
 export function FindLinksNowRow() {
   const { client } = useServices();
+  const toSection = useUi((s) => s.setSettingsSection);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
+  const [msg, setMsg] = useState<{ text: string; error: boolean; agent?: boolean } | null>(null);
   return (
     <>
       <Button size="sm" icon="graph" busy={busy} onClick={async () => {
@@ -561,12 +562,14 @@ export function FindLinksNowRow() {
           await client.call('POST /kb/wiki/connections/find');
           setMsg({ text: 'Started. Found connections arrive as notifications.', error: false });
         } catch (e) {
-          setMsg({ text: errorText(e), error: true });
+          // 409: no ready agent — nothing started (QA A13); the fix is one click away.
+          setMsg({ text: errorText(e), error: true, agent: e instanceof KbApiError && e.status === 409 && /agent/i.test(e.detail) });
         } finally {
           setBusy(false);
         }
       }}>Find now</Button>
       {msg && <span className={msg.error ? 'kb-inline-error kb-inline-error--flat' : 'kb-muted'} role={msg.error ? 'alert' : 'status'}>{msg.text}</span>}
+      {msg?.agent && <Button size="sm" variant="outline" onClick={() => toSection('conn')}>Open Accounts &amp; keys</Button>}
     </>
   );
 }

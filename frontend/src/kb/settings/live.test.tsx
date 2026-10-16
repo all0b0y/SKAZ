@@ -114,6 +114,22 @@ describe('Live settings (package 2)', () => {
     expect(await within(dialog).findByText(/Found connections arrive as notifications/)).toBeInTheDocument();
   });
 
+  it('"Find now" without a ready agent says so next to the button, starts nothing and leads to Accounts & keys (QA A13)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    for (const a of world.agents.agents) a.state = 'not_installed';
+    const { fake } = renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: 'Wiki' }));
+    const findRow = row(dialog, 'Find connections now');
+    await user.click(within(findRow).getByRole('button', { name: 'Find now' }));
+    expect(await within(findRow).findByRole('alert')).toHaveTextContent('Finding connections needs a connected agent.');
+    expect(within(dialog).queryByText(/Started/)).not.toBeInTheDocument();
+    expect(fake.world.jobs.some((j) => j.kind === 'connections')).toBe(false);
+    await user.click(within(findRow).getByRole('button', { name: 'Open Accounts & keys' }));
+    expect(within(dialog).getByRole('heading', { name: 'Accounts & keys', level: 3 })).toBeInTheDocument();
+  });
+
   it('sending audio to Soniox: allowed only by the user (plate or switch), shown with what goes where, revocable', async () => {
     const user = userEvent.setup();
     const state = chatWorld();

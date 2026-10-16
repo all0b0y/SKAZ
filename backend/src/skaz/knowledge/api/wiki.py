@@ -148,7 +148,7 @@ async def recheck_block(page_id: str, block_id: str, wiki: WikiDep) -> KbJob:
 async def find_connections(wiki: WikiDep) -> KbJob:
     """ "Find connections" across the whole wiki (and disagreements between sources). 409 while one runs."""
     try:
-        return job_view(await wiki.find_connections())
+        return job_view(await wiki.find_connections_now())
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
 

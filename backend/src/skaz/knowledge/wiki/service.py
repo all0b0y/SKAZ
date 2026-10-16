@@ -49,8 +49,19 @@ from .watch import INTERVAL_S, WikiWatcher
 
 logger = logging.getLogger(__name__)
 NO_ENGINE = "No agent is ready to write the wiki. Connect one in Settings → Models, then retry."
+NEEDS_AGENT = "Finding connections needs a connected agent."
+SET_UP_AGENT = "Set one up in Settings → Accounts & keys."
+NO_CONCEPTS = "The wiki has no concept pages yet. Add materials to the wiki first."
+#: How long the pre-flight agent check of a user-started job may take.
+AGENT_CHECK_S = 30.0
 #: Background "Find connections": only after this long without wiki work, and only when the wiki changed.
 IDLE_AFTER_S = 300.0
+
+
+class AgentNotReady(KnowledgeError):
+    """User-started agent work refused up front: the wiki agent can't run now."""
+
+    status_code = 409
 
 
 @dataclass(frozen=True)
@@ -198,6 +209,32 @@ class WikiService:
                 await self.find_connections(pages)
 
     # -- jobs -----------------------------------------------------------------
+
+    async def _require_ready_agent(self, needs: str) -> None:
+        """Refuse before any job exists when the wiki agent can't run (QA A13).
+
+        Without this a job was created and finished at once with nothing done, while the
+        user was told it had started.
+        """
+        try:
+            engine = self._engine()
+        except WikiJobFailed as failure:
+            raise AgentNotReady(f"{needs} {SET_UP_AGENT}") from failure
+        try:
+            async with asyncio.timeout(AGENT_CHECK_S):
+                status = await engine.status()
+        except Exception as error:  # a failing or slow check is "not ready", said plainly
+            raise AgentNotReady(f"{needs} SKAZ couldn't check the agent. Try again.") from error
+        if not status.ready:
+            reason = f" {status.reason}" if status.reason else ""
+            raise AgentNotReady(f"{needs}{reason} {SET_UP_AGENT}")
+
+    async def find_connections_now(self) -> JobRecord:
+        """The user's "Find connections now": refused honestly when it can't do anything."""
+        await self._require_ready_agent(NEEDS_AGENT)
+        if not await disk_call(lambda: self.kb.pages(kind="concept")):
+            raise KnowledgeError(NO_CONCEPTS)
+        return await self.find_connections()
 
     async def find_connections(self, page_ids: Sequence[str] | None = None) -> JobRecord:
         """``connections`` job: disagreements and connections, around ``page_ids`` or the whole wiki."""

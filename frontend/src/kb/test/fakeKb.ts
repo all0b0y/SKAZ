@@ -576,7 +576,12 @@ const ROUTES: FakeRoutes = {
     b.owner = 'agent';
     return newJob(w, 'recheck', page.sources[0] ?? null, 'done', 'Re-checking against sources');
   }],
-  'POST /kb/wiki/connections/find': [202, (w) => newJob(w, 'connections', null, 'running', 'Finding connections')],
+  'POST /kb/wiki/connections/find': [202, (w) => {
+    // Like WikiService.find_connections_now: no job without a ready wiki agent (QA A13).
+    const agent = w.agents.agents.find((a) => a.id === (w.wiki.wiki_engine ?? w.agents.default));
+    if (agent?.state !== 'ready') fail(409, `Finding connections needs a connected agent. ${agent?.name ?? 'The agent'} is not ready. Set one up in Settings → Accounts & keys.`);
+    return newJob(w, 'connections', null, 'running', 'Finding connections');
+  }],
   'GET /kb/graph': [200, (w, { query }) => {
     if (!query.folder_id) return w.graph;
     const nodes = w.graph.nodes.filter((n) => n.folder_ids.includes(query.folder_id!));
