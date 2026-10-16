@@ -21,10 +21,14 @@ export interface DocTarget {
   quote?: string | null;
 }
 
+/** The two code-written wiki files shown read-only (B20). */
+export type WikiFileName = 'index' | 'log';
+
 export type RightView =
   | { kind: 'doc'; target: DocTarget; nonce: number }
   | { kind: 'graph'; focus?: string }
-  | { kind: 'live'; materialId: string };
+  | { kind: 'live'; materialId: string }
+  | { kind: 'wikifile'; name: WikiFileName };
 
 /** What the centre column shows: the open chat, or a full-width list (decisions v16, 25). */
 export type CenterView = 'chat' | 'allChats' | 'materials';
@@ -54,6 +58,8 @@ export interface NavActions {
   /** Back to what the right panel showed before (no-op without history). */
   goBack: () => void;
   openLive: (materialId: string) => void;
+  /** `Wiki/index.md` or `Wiki/log.md`, read-only (B20). */
+  openWikiFile: (name: WikiFileName) => void;
   /** Close the right panel, whatever it shows. */
   closeDoc: () => void;
   toggleDocExpanded: () => void;
@@ -69,6 +75,7 @@ function samePlace(a: RightView, b: RightView): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === 'doc' && b.kind === 'doc') return a.target.type === b.target.type && a.target.id === b.target.id;
   if (a.kind === 'live' && b.kind === 'live') return a.materialId === b.materialId;
+  if (a.kind === 'wikifile' && b.kind === 'wikifile') return a.name === b.name;
   return true;
 }
 
@@ -122,6 +129,7 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
       return show(right, s.docHistory.slice(0, -1))(s);
     }),
     openLive: (materialId) => set(show({ kind: 'live', materialId })),
+    openWikiFile: (name) => set(show({ kind: 'wikifile', name })),
     closeDoc: () => set({ right: null, docMaterialId: null, docExpanded: false, docHistory: [] }),
     toggleDocExpanded: () => set((s) => ({ docExpanded: s.right ? !s.docExpanded : false })),
     showCenter: (view) => set({ center: view }),

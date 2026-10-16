@@ -25,7 +25,7 @@ describe('Electron IPC policy — knowledge library (/kb) routes of the new inte
       ['DELETE', '/kb/library'], ['PUT', '/kb/library'],
       ['DELETE', '/kb/folders'], ['GET', '/kb/folders/fld_1/files'],
       ['POST', '/kb/materials'], ['PUT', '/kb/materials/mat_1'], ['GET', '/kb/materials/mat_1/file'],
-      ['GET', '/kb/notifications/n1'], ['DELETE', '/kb/wiki/pages/p1'], ['GET', '/kb'],
+      ['GET', '/kb/notifications/n1'], ['PUT', '/kb/wiki/pages/p1'], ['POST', '/kb/wiki/pages/p1/delete-preview'], ['GET', '/kb'],
     ];
     for (const [method, path] of refused) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
@@ -154,7 +154,7 @@ function sourceFiles(dir: string): string[] {
 const uiRoutes = new Set(sourceFiles(`${repoRoot}/frontend/src/kb`).flatMap((file) => routesIn(readFileSync(file, 'utf8'))));
 
 /** A concrete request path for a route template: a sample value per path parameter. */
-const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox' };
+const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox', name: 'index' };
 function instance(route: string): { method: string; path: string } {
   const space = route.indexOf(' ');
   return { method: route.slice(0, space), path: route.slice(space + 1).replace(/\{([^}]+)\}/g, (_, name: string) => SAMPLE[name] ?? 'x1') };

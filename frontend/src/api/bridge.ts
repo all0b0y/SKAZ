@@ -79,6 +79,38 @@ export const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi'] as c
  * `/kb/materials/file`, audio and video to the speech import (`/kb/imports`). */
 export const MATERIAL_EXTENSIONS = [...DOCUMENT_EXTENSIONS, ...SPEECH_EXTENSIONS] as const;
 
+/** macOS privacy state of SKAZ for a capture kind (`systemPreferences.getMediaAccessStatus`). */
+export type MediaAccessStatus = 'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown';
+
+/** Microphone and Screen & System Audio Recording permission of SKAZ, read by main. */
+export interface MediaAccess {
+  microphone: MediaAccessStatus;
+  screen: MediaAccessStatus;
+}
+
+/** What "Show in Finder" / "Open in Obsidian" may open: named targets only, main resolves the path. */
+export type RevealTarget = { kind: 'library' } | { kind: 'page'; id: string } | { kind: 'export'; path: string };
+
+export type UpdatePhase =
+  | 'off' | 'idle' | 'checking' | 'up_to_date' | 'couldnt_check' | 'available'
+  | 'downloading' | 'verifying' | 'ready' | 'installing' | 'failed';
+
+/** Updates (B20), as main reports them: the check of GitHub Releases, the download and its checks. */
+export interface UpdateState {
+  current: string;
+  phase: UpdatePhase;
+  /** The newer version and its release page, once known. */
+  available: { version: string; page: string } | null;
+  checkedAt: string | null;
+  /** 0..1 while downloading. */
+  progress: number | null;
+  /** Why the download, its checks or the install failed ("Couldn't check" after a failed check). */
+  error: string | null;
+  /** False in development builds and in runs with update checks off: Update says why instead. */
+  canInstall: boolean;
+  disabledReason: string | null;
+}
+
 export interface BridgeApi {
   /**
    * Dictation into the message field: one PCM16 mono WAV clip (≤ 120 s, ≤ 8 MB) is posted by main to
@@ -103,8 +135,22 @@ export interface BridgeApi {
   openLogsFolder?(): Promise<boolean>;
   /** macOS only: open the privacy pane that grants microphone or screen & system audio capture. */
   openSystemAudioSettings?(pane: 'microphone' | 'system-audio'): Promise<boolean>;
+  /** macOS: whether SKAZ may use the microphone and record screen & system audio (read only, asks nothing). */
+  mediaAccess?(): Promise<MediaAccess>;
   /** Start the local service again after a failed start; false when there is nothing to retry. */
   restartBackend?(): Promise<boolean>;
+  /** Native folder chooser for an export (B20); the chosen folder becomes one "Show in Finder" may open. */
+  chooseExportFolder?(): Promise<string | null>;
+  /** Reveal a library target in Finder (the library, a wiki page's file, a folder chosen for an export). */
+  showInFinder?(target: RevealTarget): Promise<boolean>;
+  /** Open the library (as a vault) or one page in Obsidian; `not_installed` when Obsidian isn't on this Mac. */
+  openInObsidian?(target: { kind: 'library' } | { kind: 'page'; id: string }): Promise<{ ok: true } | { ok: false; reason: 'not_installed' | 'unavailable' }>;
+  /** Updates (B20): the current state, "Check now", download + verify, install (SKAZ closes), changes. */
+  updateState?(): Promise<UpdateState>;
+  checkForUpdates?(): Promise<UpdateState>;
+  prepareUpdate?(): Promise<UpdateState>;
+  installUpdate?(): Promise<boolean>;
+  onUpdateState?(listener: (state: UpdateState) => void): () => void;
   /** Native folder chooser; returns a candidate only, never writes preferences. */
   chooseStorageRoot?(): Promise<string | null>;
   /** Current backend lifecycle phase. */

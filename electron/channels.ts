@@ -13,6 +13,7 @@ export const CHANNELS = {
   statusEvent: 'backend:status-event',
   openLogsFolder: 'app:open-logs-folder',
   openSystemAudioSettings: 'app:open-system-audio-settings',
+  mediaAccess: 'app:media-access',
   chooseStorageRoot: 'app:choose-storage-root',
   chooseAudioFile: 'app:choose-audio-file',
   captureState: 'app:capture-state',
@@ -22,4 +23,14 @@ export const CHANNELS = {
   dictate: 'kb:dictate',
   saveTextFile: 'app:save-text-file',
   chooseMaterialFiles: 'app:choose-material-files',
+  // Library file actions (B20).
+  chooseExportFolder: 'app:choose-export-folder',
+  showInFinder: 'app:show-in-finder',
+  openInObsidian: 'app:open-in-obsidian',
+  // Updates (B20).
+  updateGet: 'app:update-get',
+  updateCheck: 'app:update-check',
+  updatePrepare: 'app:update-prepare',
+  updateInstall: 'app:update-install',
+  updateState: 'app:update-state',
 } as const;

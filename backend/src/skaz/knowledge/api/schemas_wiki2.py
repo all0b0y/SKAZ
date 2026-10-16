@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..store.database import MAX_DB_INT
-from .schemas import KbNotification, KbPageRef
+from .schemas import KbBlockLink, KbNotification, KbPageRef
 from .schemas_ingest import KbJob
 
 KbCorrectionState = Literal["applied", "doubtful", "reverted", "kept"]
@@ -124,3 +124,83 @@ class KbGraphEdge(BaseModel):
 class KbGraph(BaseModel):
     nodes: list[KbGraphNode]
     edges: list[KbGraphEdge]
+
+
+KbRecognitionEngine = Literal["same_as_wiki", "off", "codex", "claude_code", "hermes"]
+
+
+class KbRecognitionSettings(BaseModel):
+    """Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it."""
+
+    engine: KbRecognitionEngine
+    #: Only with a chosen agent; ``null`` = that agent's default.
+    model: str | None
+    effort: str | None
+
+
+class KbRecognitionSettingsUpdate(_Request):
+    """The whole choice; a model and effort go only with a chosen agent."""
+
+    engine: KbRecognitionEngine
+    model: str | None = Field(default=None, max_length=100)
+    effort: str | None = Field(default=None, max_length=100)
+
+
+class KbExportTarget(BaseModel):
+    path: str
+    #: Why this folder can't be used; ``null`` when it can (after a confirmation if ``non_empty``).
+    reason: str | None
+    non_empty: bool
+    #: Items already in the folder.
+    entries: int
+
+
+class KbExportRequest(_Request):
+    path: str = Field(min_length=1, max_length=4096)
+    #: The user confirmed exporting into a non-empty folder (same names are replaced, others stay).
+    overwrite: bool = False
+
+
+class KbPageFile(BaseModel):
+    #: Absolute path of the page's ``.md`` file (main process only).
+    path: str
+
+
+class KbWikiFile(BaseModel):
+    """``Wiki/index.md`` / ``Wiki/log.md`` for the read-only view (B20)."""
+
+    name: Literal["index", "log"]
+    #: The file's Markdown; empty while the wiki has none yet.
+    text: str
+    #: Its wikilinks resolved to pages and materials (as for page blocks).
+    links: list[KbBlockLink]
+
+
+class KbPageRename(_Request):
+    #: The new name; the same rules as material names (no slashes, not hidden, not too long).
+    title: str = Field(min_length=1, max_length=200)
+
+
+class KbPageLinking(BaseModel):
+    page: KbPageRef
+    #: Links to the deleted page that get unlinked on this page.
+    links: int
+    #: How many of them are in the user's own words (they keep their text, lose the link).
+    in_your_notes: int
+
+
+class KbSourceKept(BaseModel):
+    id: str
+    title: str
+
+
+class KbPageDeletePreview(BaseModel):
+    """What deleting a page does (B20); the same shape answers the deletion itself."""
+
+    page: KbPageRef
+    linking_pages: list[KbPageLinking]
+    links_unlinked: int
+    #: The user's own notes / edited statements on the page: they go with it.
+    user_notes: int
+    #: Materials the page cites: they stay in the library.
+    sources: list[KbSourceKept]

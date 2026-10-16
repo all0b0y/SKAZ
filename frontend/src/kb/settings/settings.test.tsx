@@ -81,9 +81,10 @@ describe('Settings window', () => {
     renderKb({ world: without(baseWorld()) });
     const dialog = await openWithShortcut();
     await user.click(within(dialog).getByRole('button', { name: 'Models' }));
-    // The wiki/decision reads fail on this backend: each says so with a retry instead of a fake choice.
-    await waitFor(() => expect(within(dialog).getAllByText(/Couldn’t read/).length).toBeGreaterThanOrEqual(2));
-    expect(within(dialog).getAllByText('Not connected yet').length).toBeGreaterThanOrEqual(1);
+    // The wiki/decision/recognition-check reads fail on this backend: each says so with a retry
+    // instead of a fake choice (B20: the recognition check has its route now, so no "Not connected yet").
+    await waitFor(() => expect(within(dialog).getAllByText(/Couldn’t read/).length).toBeGreaterThanOrEqual(3));
+    expect(within(dialog).queryAllByText('Not connected yet')).toHaveLength(0);
     await user.click(within(dialog).getByRole('button', { name: 'Wiki' }));
     await waitFor(() => expect(within(dialog).getAllByText(/Couldn’t read/).length).toBeGreaterThanOrEqual(4));
     expect(within(dialog).queryAllByRole('switch')).toHaveLength(0);

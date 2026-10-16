@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..corrections.settings import RecognitionSettings
 from ..errors import KnowledgeError
 from ..markdown.page import PageKind
 from ..store.records import PageRecord
+from ..wiki.links import LinkView
+from ..wiki.page_ops import PageDeletePlan
 from ..wiki.service import PageDetail, WikiService
 from .deps import KbDep, kb_call
 from .ingest import job_view
@@ -22,7 +25,15 @@ from .schemas_wiki2 import (
     KbGraphEdge,
     KbGraphNode,
     KbNodeKind,
+    KbPageDeletePreview,
+    KbPageFile,
+    KbPageLinking,
+    KbPageRename,
+    KbRecognitionSettings,
+    KbRecognitionSettingsUpdate,
     KbRescanResult,
+    KbSourceKept,
+    KbWikiFile,
 )
 
 router = APIRouter(prefix="/kb/wiki", tags=["kb"])
@@ -49,6 +60,15 @@ def summary_view(record: PageRecord) -> KbPageSummary:
             "sources": list(record.sources),
             "language": record.language,
         }
+    )
+
+
+def _link_view(link: LinkView) -> KbBlockLink:
+    return KbBlockLink(
+        target=link.target,
+        page=KbPageRef(id=link.page_id, kind=cast(PageKind, link.page_kind), title=link.page_title or "")
+        if link.page_id else None,
+        material_id=link.material_id,
     )
 
 
@@ -88,16 +108,7 @@ def page_view(detail: PageDetail) -> KbPage:
                             )
                             for c in entry.citations
                         ],
-                        "links": [
-                            KbBlockLink(
-                                target=link.target,
-                                page=KbPageRef(id=link.page_id, kind=cast(PageKind, link.page_kind),
-                                               title=link.page_title or "")
-                                if link.page_id else None,
-                                material_id=link.material_id,
-                            )
-                            for link in detail.links.get(entry.id, [])
-                        ],
+                        "links": [_link_view(link) for link in detail.links.get(entry.id, [])],
                     }
                 )
                 for entry in view.entries
@@ -122,6 +133,58 @@ async def list_pages(
 async def read_page(page_id: str, wiki: WikiDep) -> KbPage:
     """Re-reads the page file first: an external edit is detected when the page is opened."""
     return page_view(await kb_call(wiki.page, page_id))
+
+
+@router.get("/files/{name}")
+async def read_wiki_file(name: Literal["index", "log"], wiki: WikiDep) -> KbWikiFile:
+    """``Wiki/index.md`` or ``Wiki/log.md``, read-only, with its links resolved (B20)."""
+    text, links = await kb_call(wiki.wiki_file, name)
+    return KbWikiFile(name=name, text=text, links=[_link_view(link) for link in links])
+
+
+@router.get("/pages/{page_id}/file")
+async def page_file(page_id: str, wiki: WikiDep) -> KbPageFile:
+    """The page's file on disk, for the main process only (Show in Finder, Open in Obsidian, B20).
+
+    The renderer never calls it (the IPC policy refuses it): main checks the path lies inside the
+    library root before it hands it to Finder or Obsidian.
+    """
+    return KbPageFile(path=await kb_call(wiki.page_file, page_id))
+
+
+@router.patch("/pages/{page_id}")
+async def rename_page(page_id: str, body: KbPageRename, wiki: WikiDep) -> KbPage:
+    """Rename a page; every [[link]] to it is rewritten (B20). 409 for a taken name."""
+    return page_view(await kb_call(wiki.rename_page, page_id, body.title))
+
+
+def _delete_view(plan: PageDeletePlan) -> KbPageDeletePreview:
+    return KbPageDeletePreview(
+        page=KbPageRef(id=plan.page.id, kind=cast(PageKind, plan.page.kind), title=plan.page.title),
+        linking_pages=[
+            KbPageLinking(
+                page=KbPageRef(id=item.ref.id, kind=cast(PageKind, item.ref.kind), title=item.ref.title),
+                links=item.links,
+                in_your_notes=item.in_user_text,
+            )
+            for item in plan.linking
+        ],
+        links_unlinked=plan.links_unlinked,
+        user_notes=plan.user_notes,
+        sources=[KbSourceKept(id=material_id, title=title) for material_id, title in plan.sources],
+    )
+
+
+@router.get("/pages/{page_id}/delete-preview")
+async def page_delete_preview(page_id: str, wiki: WikiDep) -> KbPageDeletePreview:
+    """What deleting the page would do; changes nothing."""
+    return _delete_view(await kb_call(wiki.page_delete_preview, page_id))
+
+
+@router.delete("/pages/{page_id}")
+async def delete_page(page_id: str, wiki: WikiDep) -> KbPageDeletePreview:
+    """Delete the page: links to it are unlinked, its sources stay."""
+    return _delete_view(await kb_call(wiki.delete_page, page_id))
 
 
 @router.put("/pages/{page_id}/blocks/{block_id}")
@@ -160,6 +223,33 @@ async def find_connections(wiki: WikiDep) -> KbJob:
     """ "Find connections" across the whole wiki (and disagreements between sources). 409 while one runs."""
     try:
         return job_view(await wiki.find_connections_now())
+    except KnowledgeError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+
+def recognition_view(settings: RecognitionSettings) -> KbRecognitionSettings:
+    return KbRecognitionSettings(engine=settings.engine, model=settings.model, effort=settings.effort)
+
+
+@graph_router.get("/kb/settings/recognition")
+async def read_recognition_settings(wiki: WikiDep) -> KbRecognitionSettings:
+    return recognition_view(await kb_call(wiki.recognition_settings))
+
+
+@graph_router.put("/kb/settings/recognition")
+async def update_recognition_settings(
+    body: KbRecognitionSettingsUpdate, wiki: WikiDep
+) -> KbRecognitionSettings:
+    return recognition_view(
+        await kb_call(wiki.update_recognition, engine=body.engine, model=body.model, effort=body.effort)
+    )
+
+
+@graph_router.post("/kb/materials/{material_id}/recognition-check", status_code=202)
+async def check_recognition_again(material_id: str, wiki: WikiDep) -> KbJob:
+    """"Check recognition again" of a recording: a ``corrections`` job; 409 when it can't run now."""
+    try:
+        return job_view(await wiki.check_recognition_again(material_id))
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
 

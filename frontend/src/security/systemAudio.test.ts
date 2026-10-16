@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { privacySettingsUrl, systemAudioSupported } from '../../../electron/systemAudio';
+import { mediaAccessOf, privacySettingsUrl, systemAudioSupported } from '../../../electron/systemAudio';
 
 describe('system audio support', () => {
   it('needs macOS 14.2 or later', () => {
@@ -29,5 +29,19 @@ describe('Open System Settings for a capture permission', () => {
     }
     expect(privacySettingsUrl('win32', 'microphone')).toBeNull();
     expect(privacySettingsUrl('linux', 'system-audio')).toBeNull();
+  });
+});
+
+describe('macOS privacy state for Settings → Sound (B20)', () => {
+  it('passes the known statuses through and reads each kind', () => {
+    const read = (kind: 'microphone' | 'screen') => (kind === 'microphone' ? 'granted' : 'denied');
+    expect(mediaAccessOf('darwin', read)).toEqual({ microphone: 'granted', screen: 'denied' });
+    expect(mediaAccessOf('darwin', () => 'not-determined')).toEqual({ microphone: 'not-determined', screen: 'not-determined' });
+  });
+
+  it('anything unexpected, a failing read or another system is unknown', () => {
+    expect(mediaAccessOf('darwin', () => 'weird')).toEqual({ microphone: 'unknown', screen: 'unknown' });
+    expect(mediaAccessOf('darwin', () => { throw new Error('no'); })).toEqual({ microphone: 'unknown', screen: 'unknown' });
+    expect(mediaAccessOf('linux', () => 'granted')).toEqual({ microphone: 'unknown', screen: 'unknown' });
   });
 });

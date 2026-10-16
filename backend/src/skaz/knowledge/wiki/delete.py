@@ -32,6 +32,8 @@ from .retract import retract_material, strip_links
 
 LOG_DELETED = {"en": "Material deleted", "ru": "Материал удалён"}
 LOG_GONE = {"en": "Material removed outside SKAZ", "ru": "Материал удалён вне SKAZ"}
+LOG_PAGE_DELETED = {"en": "Page deleted", "ru": "Страница удалена"}
+LOG_PAGE_RENAMED = {"en": "Page renamed", "ru": "Страница переименована"}
 
 
 class StillRecording(KnowledgeError):
@@ -272,9 +274,18 @@ def execute_delete(kb: KnowledgeService, plan: DeletePlan) -> None:
         )
 
 
+def append_page_log(library: Library, language: str, title: str, *, renamed: bool = False) -> None:
+    """A line in ``Wiki/log.md`` for a page the user deleted or renamed (B20)."""
+    labels = LOG_PAGE_RENAMED if renamed else LOG_PAGE_DELETED
+    _append(library, labels.get(language, labels["en"]), title)
+
+
 def append_log(library: Library, language: str, title: str, *, outside: bool = False) -> None:
     labels = LOG_GONE if outside else LOG_DELETED
-    label = labels.get(language, labels["en"])
+    _append(library, labels.get(language, labels["en"]), title)
+
+
+def _append(library: Library, label: str, title: str) -> None:
     stamp = utc_now().replace("T", " ").removesuffix("Z")[:16] + " UTC"
     path = library.wiki_dir / "log.md"
     try:

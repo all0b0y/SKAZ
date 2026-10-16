@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink,
 } from '../../api/kb/types.gen';
 
 // ---- The world -------------------------------------------------------------------------------
@@ -85,6 +85,12 @@ export interface FakeWorld {
   /** Every request served, for assertions. */
   log: Array<{ method: string; path: string; body?: unknown }>;
   seq: number;
+  /** Wiki/index.md and Wiki/log.md (absent = just their headings). */
+  wikiFiles?: Partial<Record<'index' | 'log', { text: string; links: KbBlockLink[] }>>;
+  /** Export targets that already hold files: path → number of entries (absent = empty). */
+  exportFolders?: Record<string, number>;
+  /** Settings → Models → Recognition check (absent = same as the wiki pages). */
+  recognition?: KbRecognitionSettings;
   /** Fixed clock of the fixtures (ISO), or null to follow the real clock (scenes with "Today"). */
   now: string | null;
   /** What a new streamed answer cites (defaults: the first concept page, the last fragment of the first material). */
@@ -559,6 +565,33 @@ const ROUTES: FakeRoutes = {
   'GET /kb/wiki/pages': [200, (w, { query }) => w.pages.filter((p) => (!query.kind || p.kind === query.kind)
     && (!query.folder_id || p.folders.includes(query.folder_id))).map(pageSummary)],
   'GET /kb/wiki/pages/{page_id}': [200, (w, { path }) => findPage(w, path.page_id)],
+  // B20: rename (links follow), delete with a preview (links unlinked, sources kept).
+  'PATCH /kb/wiki/pages/{page_id}': [200, (w, { path, body }) => {
+    const page = findPage(w, path.page_id);
+    const title = body.title.trim();
+    if (!title || title.includes('/')) fail(422, 'A name can’t contain “/”.');
+    if (w.pages.some((p) => p.id !== page.id && p.kind === page.kind && p.title.toLowerCase() === title.toLowerCase())) {
+      fail(409, 'A page with this name already exists here. Choose another name.');
+    }
+    page.title = title;
+    for (const other of w.pages) {
+      for (const ref of [...other.related, ...other.mentioned_in]) if (ref.id === page.id) ref.title = title;
+      for (const b of other.blocks) for (const l of b.links ?? []) if (l.page?.id === page.id) l.page.title = title;
+    }
+    return page;
+  }],
+  'GET /kb/wiki/pages/{page_id}/delete-preview': [200, (w, { path }) => pageDeletePreview(w, findPage(w, path.page_id))],
+  'DELETE /kb/wiki/pages/{page_id}': [200, (w, { path }) => {
+    const page = findPage(w, path.page_id);
+    const preview = pageDeletePreview(w, page);
+    w.pages = w.pages.filter((p) => p.id !== page.id);
+    for (const other of w.pages) {
+      other.related = other.related.filter((r) => r.id !== page.id);
+      other.mentioned_in = other.mentioned_in.filter((r) => r.id !== page.id);
+      for (const b of other.blocks) if (b.links) b.links = b.links.filter((l) => l.page?.id !== page.id);
+    }
+    return preview;
+  }],
   'POST /kb/wiki/pages/{page_id}/blocks': [201, (w, { path, body }) => {
     const page = findPage(w, path.page_id);
     page.blocks.push(block(`u${++w.seq}`, 'user_note', body.section ?? 'My notes', body.text));
@@ -825,6 +858,42 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/wiki/files/{name}': [200, (w, { path }) => {
+    const file = w.wikiFiles?.[path.name] ?? { text: path.name === 'index' ? '# Index\n' : '# Log\n', links: [] };
+    return { name: path.name, text: file.text, links: file.links };
+  }],
+  'GET /kb/export/target': [200, (w, { query }) => {
+    const path = String(query.path ?? '');
+    const root = w.library.root ?? '';
+    if (root && (path === root || path.startsWith(`${root}/`))) {
+      return { path, reason: 'Choose a folder outside the SKAZ library: the export is a separate copy.', non_empty: false, entries: 0 };
+    }
+    const entries = w.exportFolders?.[path] ?? 0;
+    return { path, reason: null, non_empty: entries > 0, entries };
+  }],
+  'POST /kb/export': [202, (w, { body }) => {
+    if ((w.exportFolders?.[body.path] ?? 0) > 0 && !body.overwrite) fail(409, 'The folder isn\'t empty. Confirm to replace files with the same names.');
+    const job = newJob(w, 'export', null, 'running', 'Exporting');
+    job.step = 'exporting';
+    job.progress.parts_total = 10;
+    job.progress.parts_done = 3;
+    return job;
+  }],
+  'GET /kb/settings/recognition': [200, (w) => structuredClone(w.recognition ?? { engine: 'same_as_wiki', model: null, effort: null })],
+  'PUT /kb/settings/recognition': [200, (w, { body }) => {
+    const own = body.engine !== 'same_as_wiki' && body.engine !== 'off';
+    if (!own && (body.model || body.effort)) fail(422, 'Choose an agent first: a model and effort go with a chosen agent.');
+    w.recognition = { engine: body.engine, model: own ? body.model ?? null : null, effort: own ? body.effort ?? null : null };
+    return structuredClone(w.recognition);
+  }],
+  'POST /kb/materials/{material_id}/recognition-check': [202, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    if (!['recording', 'audio', 'video', 'video_link'].includes(m.kind)) fail(409, 'Only recordings, audio and video are checked for recognition errors.');
+    if (w.recognition?.engine === 'off') fail(409, 'The recognition check is off. Turn it on in Settings → Models.');
+    const job = newJob(w, 'corrections', m.id, 'running', 'Checking recognition');
+    job.step = 'checking_recognition';
+    return job;
+  }],
   'GET /kb/settings/wiki': [200, (w) => structuredClone(w.wiki)],
   'PUT /kb/settings/wiki': [200, (w, { body }) => {
     for (const [k, v] of Object.entries(body)) if (v !== undefined && k !== 'wiki_engine') (w.wiki as unknown as Record<string, unknown>)[k] = v;
@@ -897,6 +966,22 @@ const ROUTES: FakeRoutes = {
 
 function findCorrection(w: FakeWorld, id: string): KbCorrection {
   return w.corrections.find((c) => c.id === id) ?? fail(404, 'Correction not found.');
+}
+
+function pageDeletePreview(w: FakeWorld, page: KbPage) {
+  const linking = w.pages.filter((p) => p.id !== page.id).flatMap((p) => {
+    const links = p.blocks.flatMap((b) => (b.links ?? []).filter((l) => l.page?.id === page.id).map(() => b.owner));
+    const related = links.length ? 0 : [...p.related, ...p.mentioned_in].some((r) => r.id === page.id) ? 1 : 0;
+    const total = links.length + related;
+    return total ? [{ page: pageRef(p), links: total, in_your_notes: links.filter((o) => o !== 'agent').length }] : [];
+  });
+  return {
+    page: pageRef(page),
+    linking_pages: linking,
+    links_unlinked: linking.reduce((n, l) => n + l.links, 0),
+    user_notes: page.blocks.filter((b) => b.owner !== 'agent').length,
+    sources: page.sources.map((id) => ({ id, title: w.materials.find((m) => m.id === id)?.title ?? id })),
+  };
 }
 
 function findPage(w: FakeWorld, id: string): KbPage {

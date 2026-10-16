@@ -37,6 +37,7 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
         SKAZ_OPTIN_SMOKE_USER_DATA: profile,
         PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
         SKAZ_ALLOW_MODEL_DOWNLOAD: '0',
+        SKAZ_UPDATE_CHECK: '0',
         ...options.env,
       },
     });

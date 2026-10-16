@@ -61,10 +61,10 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'chat-model', section: 'models', group: 'Agent', label: 'Chat', hint: 'Can also be changed in the message field', keywords: 'model effort' },
   { id: 'wiki-model', section: 'models', group: 'Agent', label: 'Wiki pages and notes', keywords: 'model effort summary' },
   { id: 'decisions', section: 'models', group: 'Helpers', label: 'Wiki decisions', hint: 'Where to file a material, whether to merge or link pages', keywords: 'openrouter jev local system one' },
-  { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model corrections' },
+  { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model effort corrections agent off' },
   // Recording & speech
-  { id: 'mic', section: 'rec', group: 'Sound', label: 'Microphone', keywords: 'input device' },
-  { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound' },
+  { id: 'mic', section: 'rec', group: 'Sound', label: 'Microphone', hint: 'Default for new recordings', keywords: 'input device level permission' },
+  { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound permission' },
   { id: 'asr-service', section: 'rec', group: 'Recognition', label: 'Service', hint: 'Soniox or on this computer', keywords: 'speech recognition asr whisper soniox' },
   { id: 'soniox-consent', section: 'rec', group: 'Recognition', label: 'Send audio to Soniox', hint: 'Needed for Soniox; you can take it back at any time', keywords: 'privacy consent cloud soniox audio permission' },
   { id: 'speech-model', section: 'rec', group: 'Recognition', label: 'Speech model on this computer', hint: 'Whisper files for recognition without internet', keywords: 'local whisper offline delete remove disk space download' },
@@ -79,8 +79,8 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'links-now', section: 'wiki', group: 'Upkeep', label: 'Find connections now', keywords: 'links graph run' },
   // Storage
   { id: 'lib-folder', section: 'storage', group: 'Library', label: 'Folder', hint: 'Materials and wiki are plain .md files', keywords: 'library path location documents' },
-  { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The wiki folder works as an Obsidian vault', keywords: 'vault' },
-  { id: 'export', section: 'storage', group: 'Library', label: 'Export', hint: 'The whole wiki as .md', keywords: 'markdown backup' },
+  { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The library folder works as an Obsidian vault. If Obsidian doesn’t know it yet, choose “Open folder as vault” there once.', keywords: 'vault obsidian markdown' },
+  { id: 'export', section: 'storage', group: 'Library', label: 'Export', hint: 'The whole wiki and materials as plain .md, sources as footnotes', keywords: 'markdown backup copy folder footnotes' },
   // Privacy
   { id: 'p-soniox', section: 'privacy', group: 'Where data goes', label: 'Soniox', keywords: 'privacy data cloud' },
   { id: 'p-agent', section: 'privacy', group: 'Where data goes', label: 'Your agent', hint: 'Codex, Claude Code or Hermes Agent', keywords: 'privacy data cloud' },
@@ -93,7 +93,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'ui-language', section: 'look', group: '', label: 'Interface language', hint: 'Answer and wiki language are set separately', keywords: 'english' },
   // About
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },
-  { id: 'updates', section: 'about', group: '', label: 'Updates', keywords: 'update check' },
+  { id: 'updates', section: 'about', group: '', label: 'Updates', hint: 'From GitHub releases, checked at start and once a day', keywords: 'update check new version install download release' },
   { id: 'github', section: 'about', group: '', label: 'GitHub', keywords: 'source code repository' },
 ];
 

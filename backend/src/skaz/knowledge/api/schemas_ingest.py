@@ -7,8 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 KbJobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
 KbJobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
-                    "checking_discrepancies", "finding_connections", "rechecking", "writing_overview"]
-KbJobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections"]
+                    "checking_discrepancies", "finding_connections", "rechecking", "writing_overview",
+                    "exporting"]
+KbJobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export"]
 KbEngineId = Literal["codex", "claude_code", "hermes"]
 
 

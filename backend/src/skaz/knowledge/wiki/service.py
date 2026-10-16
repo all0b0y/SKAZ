@@ -15,16 +15,19 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from ...native_io import disk_call
 from ..agents.engine import AgentEngine
-from ..corrections.check import RecognitionChecker
+from ..corrections.check import NotSpeech, RecognitionChecker, RecognitionOff
 from ..corrections.model import apply_to_text
 from ..corrections.service import CorrectionChange, CorrectionService
+from ..corrections.settings import RecognitionSettings, read_recognition, update_recognition
 from ..corrections.store import CorrectionsLayer, CorrectionStore
 from ..errors import KnowledgeError, NotFound
 from ..ingest.jobs import JobRecord
+from ..ingest.runner import SPEECH_KINDS
 from ..ingest.service import IngestService
 from ..ingest.writer import WikiWriter
 from ..logsafe import error_note
@@ -34,10 +37,19 @@ from ..service import KnowledgeService, MaterialDetail, PageView
 from .agent import AgentCaller, WikiJobFailed
 from .connections import Connections
 from .context import NO_DETECTOR, WikiContext
-from .delete import DeletePlan, MaterialBusy, StillRecording, append_log, execute_delete, plan_delete
+from .delete import (
+    DeletePlan,
+    MaterialBusy,
+    StillRecording,
+    append_log,
+    append_page_log,
+    execute_delete,
+    plan_delete,
+)
 from .discrepancy import KIND as DISCREPANCY_KIND
 from .discrepancy import Discrepancies
 from .edit import add_note, delete_note, update_block
+from .export import ExportRefused, ExportTarget, check_target, export_library
 from .gone import KIND as GONE_KIND
 from .gone import GoneMaterials
 from .graph import Graph, GraphIndex
@@ -45,6 +57,7 @@ from .jobs import JobContext, WikiBusy, WikiJobs
 from .links import LinkResolver, LinkView
 from .move import move_material
 from .overview import FolderOverviews
+from .page_ops import PageDeletePlan, execute_page_delete, plan_page_delete, rename_page
 from .pages_io import page_path, reindex, rewrite
 from .recheck import Recheck
 from .retract import retract_unquoted
@@ -55,6 +68,9 @@ NO_ENGINE = "No agent is ready to write the wiki. Connect one in Settings → Mo
 NEEDS_AGENT = "Finding connections needs a connected agent."
 SET_UP_AGENT = "Set one up in Settings → Accounts & keys."
 NO_CONCEPTS = "The wiki has no concept pages yet. Add materials to the wiki first."
+NEEDS_CHECK_AGENT = "Checking recognition needs a connected agent."
+EXPORT_DONE = "export_done"
+EXPORT_FAILED = "export_failed"
 #: How long the pre-flight agent check of a user-started job may take.
 AGENT_CHECK_S = 30.0
 #: Background "Find connections": only after this long without wiki work, and only when the wiki changed.
@@ -121,6 +137,8 @@ class WikiService:
             decisions=lambda: ingest.decisions,
             detector=lambda: ingest.detector,
             auto=lambda: ingest.settings().auto_corrections,
+            choice=self.recognition_settings,
+            engine_for=self._recognition_engine,
         )
         self.idle_after_s = IDLE_AFTER_S
         self.clock = time.monotonic
@@ -188,6 +206,21 @@ class WikiService:
             raise WikiJobFailed(NO_ENGINE)
         return engine
 
+    def _recognition_engine(self, choice: RecognitionSettings) -> AgentEngine | None:
+        """The agent of the recognition check: its own choice, or the wiki's (never a substitute)."""
+        resolve = self.ingest.engines
+        if resolve is None or choice.off:
+            return None
+        return resolve(choice.own_agent or self.ingest.settings().engine)
+
+    def recognition_settings(self) -> RecognitionSettings:
+        return read_recognition(self.kb.settings)
+
+    def update_recognition(
+        self, *, engine: str, model: str | None, effort: str | None
+    ) -> RecognitionSettings:
+        return update_recognition(self.kb.settings, engine=engine, model=model, effort=effort)
+
     def _caller(self, prefix: str) -> AgentCaller:
         return AgentCaller(self._engine(), f"{prefix}-{uuid4().hex[:8]}")
 
@@ -236,16 +269,17 @@ class WikiService:
 
     # -- jobs -----------------------------------------------------------------
 
-    async def _require_ready_agent(self, needs: str) -> None:
-        """Refuse before any job exists when the wiki agent can't run (QA A13).
+    async def _require_ready_agent(self, needs: str, engine: AgentEngine | None = None) -> None:
+        """Refuse before any job exists when the wiki agent (or ``engine``) can't run (QA A13).
 
         Without this a job was created and finished at once with nothing done, while the
         user was told it had started.
         """
-        try:
-            engine = self._engine()
-        except WikiJobFailed as failure:
-            raise AgentNotReady(f"{needs} {SET_UP_AGENT}") from failure
+        if engine is None:
+            try:
+                engine = self._engine()
+            except WikiJobFailed as failure:
+                raise AgentNotReady(f"{needs} {SET_UP_AGENT}") from failure
         try:
             async with asyncio.timeout(AGENT_CHECK_S):
                 status = await engine.status()
@@ -314,6 +348,96 @@ class WikiService:
             await self.rechecks.run(page_id, block_id, self._caller("recheck"), job.log)
 
         return await self.jobs.start("recheck", page_id, "rechecking", work)
+
+    async def check_recognition_again(self, material_id: str) -> JobRecord:
+        """"Check recognition again" of a recording (B20): a ``corrections`` job on the chosen agent.
+
+        Refused before a job exists when it can't do anything: not speech, still being made, the
+        check is off, no ready agent, or the material is being added to the wiki right now.
+        """
+        record = await disk_call(self.kb.material_repo.get, material_id)
+        if record is None:
+            raise NotFound("Material not found.")
+        if record.kind not in SPEECH_KINDS:
+            raise NotSpeech()
+        if record.status != "ready":
+            raise MaterialBusy("The recording isn't finished yet. Check it when its text is ready.")
+        if record.fragment_count == 0:
+            raise MaterialBusy("No speech was recognised in this recording, so there is nothing to check.")
+        choice = await disk_call(self.recognition_settings)
+        if choice.off:
+            raise RecognitionOff()
+        engine = self._recognition_engine(choice)
+        if engine is None:
+            raise AgentNotReady(f"{NEEDS_CHECK_AGENT} {SET_UP_AGENT}")
+        await self._require_ready_agent(NEEDS_CHECK_AGENT, engine)
+        if self.jobs.running("corrections", material_id):
+            raise WikiBusy("The recognition of this recording is already being checked.")
+        material_jobs = await disk_call(self.ingest.list_jobs, material_id=material_id)
+        if any(job.state == "running" for job in material_jobs):
+            raise MaterialBusy("This material is being added to the wiki. Check it again when that finishes.")
+        self._touch()
+
+        async def work(job: JobContext) -> None:
+            entries = await self.recognition.recheck(material_id, job.log)
+            segs = {entry.seg for entry in entries if entry.state == "applied"}
+            if segs:  # the wiki was built from the old text: take broken quotes down and refresh
+                removed, refresh = await self._text_changed(material_id, segs)
+                if removed:
+                    await job.log(
+                        f"{removed} statement(s) no longer matched the corrected text and were taken down."
+                    )
+                if refresh is not None:
+                    await job.log("The wiki pages of this material are being refreshed.")
+
+        return await self.jobs.start("corrections", material_id, "checking_recognition", work)
+
+    # -- export ---------------------------------------------------------------
+
+    def export_target(self, path: str) -> ExportTarget:
+        return check_target(self.kb, path)
+
+    async def export(self, path: str, *, overwrite: bool) -> JobRecord:
+        """Export the wiki and the materials' .md into ``path`` (B20): an ``export`` job with progress.
+
+        Refused before a job exists for a folder inside the library, an unusable path, or a
+        non-empty folder the user didn't confirm. The result is a notification with the folder.
+        """
+        target = await disk_call(check_target, self.kb, path)
+        if target.reason is not None:
+            raise ExportRefused(target.reason)
+        if target.non_empty and not overwrite:
+            raise ExportRefused("The folder isn't empty. Confirm to replace files with the same names.")
+        if self.jobs.running("export"):
+            raise WikiBusy("An export is already running.")
+
+        async def work(job: JobContext) -> None:
+            def progress(done: int, total: int) -> None:
+                self.ingest.jobs.update_counters(job.job_id, {"parts_done": done, "parts_total": total})
+
+            name = Path(target.path).name or target.path
+            try:
+                result = await disk_call(
+                    export_library, self.kb, target.path, overwrite=overwrite, progress=progress
+                )
+            except (KnowledgeError, OSError) as error:
+                reason = error.message if isinstance(error, KnowledgeError) else (
+                    f"SKAZ couldn't write there: {error.strerror or error}."
+                )
+                await disk_call(self.kb.notify, EXPORT_FAILED, "The export didn't finish",
+                                body=f"Into “{name}”: {reason}", payload={"path": target.path})
+                raise
+            await job.log(
+                f"Exported {result.pages} wiki page(s) and {result.materials} material(s) with "
+                f"{result.footnotes} source footnote(s)."
+            )
+            await disk_call(
+                self.kb.notify, EXPORT_DONE, "Export finished",
+                body=f"{result.pages} wiki page(s) and {result.materials} material(s) are in “{name}”.",
+                payload={"path": result.path, "pages": result.pages, "materials": result.materials},
+            )
+
+        return await self.jobs.start("export", None, "exporting", work)
 
     # -- corrections ----------------------------------------------------------
 
@@ -463,6 +587,59 @@ class WikiService:
             )
         links = LinkResolver(self.kb.db).for_blocks((entry.id, entry.text) for entry in view.entries)
         return PageDetail(view, refs(related), refs(mentioned), names, updated_at, links)
+
+    def wiki_file(self, name: str) -> tuple[str, list[LinkView]]:
+        """``Wiki/index.md`` or ``Wiki/log.md`` as text with its links resolved (read-only view, B20).
+
+        Not written yet (an empty wiki) is an empty text, not an error.
+        """
+        if name not in ("index", "log"):
+            raise NotFound("Only the wiki index and log can be read here.")
+        library = self.kb.require()
+        try:
+            text = (library.wiki_dir / f"{name}.md").read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return "", []
+        except UnicodeDecodeError as error:
+            raise KnowledgeError(f"Wiki/{name}.md isn't readable text.") from error
+        return text, LinkResolver(self.kb.db).links(text)
+
+    def rename_page(self, page_id: str, title: str) -> PageDetail:
+        """Rename a page; every link to it follows (B20). 409 for a taken name, 422 for a bad one."""
+        with self.ctx.write_lock:
+            before = self.kb.page_repo.get(page_id)
+            renamed = rename_page(self.kb, self.graph, page_id, title)
+            if before is not None and renamed.stem != Path(before.rel_path).stem:
+                append_page_log(self.kb.require(), self.ingest.settings().language,
+                                f"{Path(before.rel_path).stem} → {renamed.stem}", renamed=True)
+        self.graph.refresh(force=True)
+        self._refresh_index()
+        self._touch()
+        return self.page(page_id)
+
+    def page_delete_preview(self, page_id: str) -> PageDeletePlan:
+        return plan_page_delete(self.kb, self.graph, page_id)
+
+    def delete_page(self, page_id: str) -> PageDeletePlan:
+        """Delete a page: links to it are unlinked, its sources stay (B20)."""
+        with self.ctx.write_lock:
+            plan = plan_page_delete(self.kb, self.graph, page_id)
+            execute_page_delete(self.kb, plan)
+            append_page_log(self.kb.require(), self.ingest.settings().language, plan.page.title)
+            for item in self.kb.notifications():
+                subject = item.subject or {}
+                about = subject.get("id") == page_id or item.payload.get("page_id") == page_id
+                if about and not item.dismissed_at:
+                    self.kb.dismiss_notification(item.id)
+        self.graph.refresh(force=True)
+        self._refresh_index()
+        self._touch()
+        return plan
+
+    def page_file(self, page_id: str) -> str:
+        """Absolute path of a page's file (404 when the page or its file is gone)."""
+        _library, path = page_path(self.kb, page_id)
+        return str(path)
 
     def _edited(self, page_id: str) -> PageDetail:
         self.graph.refresh()

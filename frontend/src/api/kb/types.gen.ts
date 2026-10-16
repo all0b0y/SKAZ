@@ -323,6 +323,18 @@ export interface KbExcludedFragment {
   detected_at: string;
 }
 
+export interface KbExportRequest {
+  path: string;
+  overwrite?: boolean;
+}
+
+export interface KbExportTarget {
+  path: string;
+  reason: string | null;
+  non_empty: boolean;
+  entries: number;
+}
+
 export interface KbFailure {
   kind: "limit" | "auth" | "incompatible" | "network" | "cancelled" | "other";
   message: string;
@@ -448,10 +460,10 @@ export interface KbInstallTask {
 
 export interface KbJob {
   id: string;
-  kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections";
+  kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections" | "export";
   material_id: string | null;
   state: "running" | "done" | "failed" | "cancelled" | "interrupted";
-  step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | null;
+  step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | "exporting" | null;
   label: string;
   error: string | null;
   error_code: string | null;
@@ -739,11 +751,30 @@ export interface KbPage {
   is_analysis_source_forbidden: boolean;
 }
 
+/** What deleting a page does (B20); the same shape answers the deletion itself. */
+export interface KbPageDeletePreview {
+  page: KbPageRef;
+  linking_pages: KbPageLinking[];
+  links_unlinked: number;
+  user_notes: number;
+  sources: KbSourceKept[];
+}
+
+export interface KbPageFile {
+  path: string;
+}
+
 export interface KbPageHit {
   id: string;
   title: string;
   kind: "concept" | "note" | "folder" | "analysis";
   matched_alias: string | null;
+}
+
+export interface KbPageLinking {
+  page: KbPageRef;
+  links: number;
+  in_your_notes: number;
 }
 
 export interface KbPagePart {
@@ -756,6 +787,10 @@ export interface KbPagePart {
 export interface KbPageRef {
   id: string;
   kind: "concept" | "note" | "folder" | "analysis";
+  title: string;
+}
+
+export interface KbPageRename {
   title: string;
 }
 
@@ -806,6 +841,20 @@ export interface KbQuote {
   seg?: number | null;
   message_id?: string | null;
   text: string;
+}
+
+/** Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it. */
+export interface KbRecognitionSettings {
+  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes";
+  model: string | null;
+  effort: string | null;
+}
+
+/** The whole choice; a model and effort go only with a chosen agent. */
+export interface KbRecognitionSettingsUpdate {
+  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes";
+  model?: string | null;
+  effort?: string | null;
 }
 
 export interface KbRecordingCreate {
@@ -888,6 +937,11 @@ export interface KbSnippetPart {
   match: boolean;
 }
 
+export interface KbSourceKept {
+  id: string;
+  title: string;
+}
+
 export interface KbSpeechDefaults {
   folder_id: string;
 }
@@ -954,6 +1008,13 @@ export interface KbTranslationFragment {
   seg: number | null;
   speaker: string | null;
   text: string;
+}
+
+/** ``Wiki/index.md`` / ``Wiki/log.md`` for the read-only view (B20). */
+export interface KbWikiFile {
+  name: "index" | "log";
+  text: string;
+  links: KbBlockLink[];
 }
 
 export interface KbWikiSettings {
@@ -1216,6 +1277,20 @@ export interface KbEndpoints {
     response: KbDictation;
     status: 200;
   };
+  "POST /kb/export": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbExportRequest;
+    response: KbJob;
+    status: 202;
+  };
+  "GET /kb/export/target": {
+    path: Record<string, never>;
+    query: { path: string };
+    body: never;
+    response: KbExportTarget;
+    status: 200;
+  };
   "GET /kb/folders": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -1426,6 +1501,13 @@ export interface KbEndpoints {
     response: KbJob;
     status: 202;
   };
+  "POST /kb/materials/{material_id}/recognition-check": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
+  };
   "GET /kb/mentions": {
     path: Record<string, never>;
     query: { q?: string; limit?: number };
@@ -1566,6 +1648,20 @@ export interface KbEndpoints {
     response: KbPrivacy;
     status: 200;
   };
+  "GET /kb/settings/recognition": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbRecognitionSettings;
+    status: 200;
+  };
+  "PUT /kb/settings/recognition": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbRecognitionSettingsUpdate;
+    response: KbRecognitionSettings;
+    status: 200;
+  };
   "GET /kb/settings/speech": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -1608,6 +1704,13 @@ export interface KbEndpoints {
     response: KbJob;
     status: 202;
   };
+  "GET /kb/wiki/files/{name}": {
+    path: { name: "index" | "log" };
+    query: Record<string, never>;
+    body: never;
+    response: KbWikiFile;
+    status: 200;
+  };
   "GET /kb/wiki/pages": {
     path: Record<string, never>;
     query: { kind?: "concept" | "note" | "folder" | "analysis" | null; folder_id?: string | null };
@@ -1620,6 +1723,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbPage;
+    status: 200;
+  };
+  "PATCH /kb/wiki/pages/{page_id}": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: KbPageRename;
+    response: KbPage;
+    status: 200;
+  };
+  "DELETE /kb/wiki/pages/{page_id}": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageDeletePreview;
     status: 200;
   };
   "POST /kb/wiki/pages/{page_id}/blocks": {
@@ -1649,6 +1766,20 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/wiki/pages/{page_id}/delete-preview": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageDeletePreview;
+    status: 200;
+  };
+  "GET /kb/wiki/pages/{page_id}/file": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageFile;
+    status: 200;
   };
 }
 

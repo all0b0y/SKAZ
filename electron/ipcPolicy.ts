@@ -78,8 +78,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/excluded\/\d+\/restore$/ },
   { method: 'GET', pattern: /^\/kb\/search$/ },
   { method: 'GET', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
-  { method: 'GET', pattern: /^\/kb\/settings\/(?:health|keys|speech|privacy|about|wiki)$/ },
-  { method: 'PUT', pattern: /^\/kb\/settings\/(?:speech|wiki)$/ },
+  { method: 'GET', pattern: /^\/kb\/settings\/(?:health|keys|speech|privacy|about|wiki|recognition)$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/(?:speech|wiki|recognition)$/ },
   { method: 'POST', pattern: /^\/kb\/settings\/health\/[^/]+\/[^/]+$/ },
   { method: 'PUT', pattern: /^\/kb\/settings\/keys\/(?:openrouter|soniox|openai)$/ },
   { method: 'POST', pattern: /^\/kb\/settings\/keys\/(?:openrouter|soniox|openai)\/check$/ },
@@ -105,6 +105,10 @@ const ROUTES: readonly Route[] = [
   { method: 'PUT', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+\/recheck$/ },
+  // B20: rename and delete a page (with its preview); its file path stays main-only.
+  { method: 'PATCH', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/wiki\/pages\/[^/]+\/delete-preview$/ },
   { method: 'PATCH', pattern: /^\/kb\/materials\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/kb\/materials\/[^/]+$/ },
   { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/delete-preview$/ },
@@ -122,6 +126,14 @@ const ROUTES: readonly Route[] = [
   // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
   { method: 'POST', pattern: /^\/kb\/agents\/codex\/logout$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
+  // B20: "Check recognition again" of a recording (a backend job on the chosen agent).
+  { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/recognition-check$/ },
+  // B20: export into a folder from the native chooser (the backend refuses one inside the library,
+  // and a non-empty one without the user's confirmation; development runs keep to their Documents).
+  { method: 'GET', pattern: /^\/kb\/export\/target$/ },
+  // B20: Wiki/index.md and Wiki/log.md, read-only in the right panel.
+  { method: 'GET', pattern: /^\/kb\/wiki\/files\/(?:index|log)$/ },
+  { method: 'POST', pattern: /^\/kb\/export$/ },
 ];
 
 /**

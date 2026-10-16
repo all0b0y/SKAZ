@@ -14,6 +14,7 @@ import { isTrustedFrame, validateCaptureState } from './ipcSender';
 import { QuitController } from './quitController';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
+import { registerUpdates } from './updateRuntime';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
@@ -315,6 +316,12 @@ app.whenReady().then(() => {
     const validated = validateCaptureState(payload);
     if (validated) captureState = validated;
   });
+  // Updates (B20): GitHub Releases at start and daily; the About row reads and drives it.
+  registerUpdates(() => mainWindow, (event) => isTrustedFrame({
+    senderId: event.sender.id,
+    expectedId: mainWindow?.webContents.id ?? null,
+    isMainFrame: event.senderFrame?.parent === null,
+  }));
   createWindow();
 
   // Start the backend after the window exists so status events reach the UI.
