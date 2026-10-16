@@ -7,22 +7,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import sqlite3
 import uuid
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from .db import Database
 from .gateways.soniox import SonioxConfig, SonioxEvent
-from .knowledge.logsafe import error_note
 from .native_tokens import persist_tokens, read_tokens
 from .native_translation import project_final_translation, project_live_translation
 from .schemas import NativeRecordingMode
 
-logger = logging.getLogger(__name__)
 
 class LiveConflict(ValueError):
     """Invalid order, stale connection or conflicting replay; no data applied."""
@@ -47,20 +43,6 @@ def _now() -> str:
 class LiveStore:
     def __init__(self, db: Database) -> None:
         self.db = db
-        #: Called with the session id after an event with new data has committed
-        #: (on the thread that saved it). Listeners must be cheap and never raise.
-        self._listeners: list[Callable[[str], None]] = []
-
-    def add_listener(self, listener: Callable[[str], None]) -> None:
-        self._listeners.append(listener)
-
-    def _notify(self, session_id: str) -> None:
-        for listener in self._listeners:
-            try:
-                listener(session_id)
-            except Exception as error:  # a listener never breaks the recording
-                # Ids and types only: the message/traceback can quote a title or recognised text.
-                logger.error("Live event listener failed for %s: %s", session_id, error_note(error))
 
     def open(
         self, session_id: str, *, sample_rate: int, model: str,
@@ -188,12 +170,6 @@ class LiveStore:
         return True
 
     def save_event(self, identity: str, *, ordinal: int, event: SonioxEvent) -> list[str]:
-        ids, session_id, fresh = self._save_event(identity, ordinal=ordinal, event=event)
-        if fresh:
-            self._notify(session_id)  # after the commit, outside the database lock
-        return ids
-
-    def _save_event(self, identity: str, *, ordinal: int, event: SonioxEvent) -> tuple[list[str], str, bool]:
         if type(ordinal) is not int or ordinal < 0:
             raise LiveConflict("Invalid event ordinal.")
         payload = asdict(event)
@@ -218,7 +194,7 @@ class LiveStore:
             if previous:
                 if previous["digest"] != digest:
                     raise LiveConflict("Conflicting event replay.")
-                return list(json.loads(previous["segment_ids"])), row["session_id"], False
+                return list(json.loads(previous["segment_ids"]))
             if ordinal != row["next_event"]:
                 raise LiveConflict("ASR events must be ordered.")
             rate, anchor = row["sample_rate"], row["start_sample"]
@@ -275,7 +251,7 @@ class LiveStore:
             connection.execute("INSERT INTO native_asr_events VALUES (?,?,?,?)",
                                (identity, ordinal, digest, json.dumps(ids)))
             persist_tokens(connection, row, ordinal, event, ids[0] if ids else None)
-            return ids, row["session_id"], True
+            return ids
 
     def reconnect(self, identity: str) -> LiveConnection:
         """Rotate at the durably confirmed boundary; transport clock never rewinds."""
@@ -328,6 +304,15 @@ class LiveStore:
             # interrupted (crash, force quit) or never started; it resumes as paused,
             # the same state a recovered library session gets.
             connection.execute("UPDATE sessions SET status='paused' WHERE status='recording'")
+
+    def last_incomplete(self, session_id: str) -> bool:
+        """Small status read, without loading a recording's tokens/projections."""
+        with self.db.read() as connection:
+            row = connection.execute(
+                "SELECT status,final_sample,end_sample FROM asr_connections "
+                "WHERE session_id=? ORDER BY rowid DESC LIMIT 1", (session_id,),
+            ).fetchone()
+            return bool(row and row["status"] == "incomplete" and row["final_sample"] < row["end_sample"])
 
     def snapshot(self, session_id: str) -> dict[str, Any]:
         with self.db.read() as connection:

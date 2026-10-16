@@ -117,6 +117,10 @@ class CodexConnection:
             marker.unlink(missing_ok=True)
         self.view["relogin_available"] = value
 
+    def has_saved_login(self) -> bool:
+        """A sign-in file exists in SKAZ's own profile (not proof it is still valid)."""
+        return (self.root / "profile" / "auth.json").is_file() or self.consented()
+
     def environment(self) -> dict[str, str]:
         for name in ("home", "profile", "work", "tmp"):
             (self.root / name).mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -126,7 +130,7 @@ class CodexConnection:
             "TMPDIR": str(self.root / "tmp"), "LANG": "en_US.UTF-8", "PATH": path,
         }
 
-    def rpc(self, *, max_message_bytes: int = 1024 * 1024) -> CodexRpc:
+    def rpc(self) -> CodexRpc:
         if self.binary is None:
             raise ValueError("Check the Codex connection first")
         command = [self.binary, "app-server", "--listen", "stdio://",
@@ -135,7 +139,7 @@ class CodexConnection:
         for feature in DISABLED_FEATURES:
             command.extend(("-c", f"features.{feature}=false"))
         env = self.environment()
-        return CodexRpc(tuple(command), cwd=self.cwd, env=env, max_message_bytes=max_message_bytes)
+        return CodexRpc(tuple(command), cwd=self.cwd, env=env)
 
     async def check(self) -> dict[str, Any]:
         async with self._lock:

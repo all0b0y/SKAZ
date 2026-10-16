@@ -1,0 +1,27 @@
+.used-languages {
+  border: 1px solid var(--edge-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+}
+.used-languages summary {
+  padding: var(--space-3);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.used-languages__options {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--edge);
+}
+.used-languages__options label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  cursor: pointer;
+}
+.used-languages__options input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--accent);
+}

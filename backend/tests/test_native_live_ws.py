@@ -9,7 +9,6 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from tests.conftest import TOKEN
-from tests.sessions_support import create_session
 
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
@@ -20,7 +19,7 @@ def packet(sequence: int, start: int, samples: int = 1600) -> bytes:
 
 def test_ws_saves_pcm_without_asr_and_resume_keeps_sample_clock(app: Any) -> None:
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        session_id = create_session(http, "Offline")
+        session_id = http.post("/sessions", headers=AUTH, json={"title": "Offline"}).json()["id"]
         url = f"ws://127.0.0.1/sessions/{session_id}/live/stream"
         with http.websocket_connect(url, headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
@@ -59,7 +58,7 @@ def test_ws_saves_pcm_without_asr_and_resume_keeps_sample_clock(app: Any) -> Non
 ])
 def test_ws_rejects_unauthorized_handshakes(app: Any, headers: dict[str, str]) -> None:
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        session_id = create_session(http, "Protected")
+        session_id = http.post("/sessions", headers=AUTH, json={"title": "Protected"}).json()["id"]
         with (
             pytest.raises(WebSocketDisconnect) as denied,
             http.websocket_connect(f"ws://127.0.0.1/sessions/{session_id}/live/stream", headers=headers),

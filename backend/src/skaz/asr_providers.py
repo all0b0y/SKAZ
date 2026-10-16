@@ -161,11 +161,9 @@ def readiness(runtime: Runtime, settings: StoredSettings, provider: str) -> tupl
     """
     capabilities = CAPABILITIES[provider]
     if capabilities.requires_cloud_consent and not settings.cloud_consent:
-        return False, ("Cloud processing is off. Turn on “Send audio to Soniox” in "
-                       "Settings → Recording & speech, or choose recognition on this computer.")
+        return False, "Cloud processing is off. Turn it on under API keys, or choose Local Whisper."
     if capabilities.api_key_provider and not runtime.api_key(capabilities.api_key_provider):
-        return False, (f"No {LABELS[capabilities.api_key_provider]} API key is stored. "
-                       "Add it in Settings → Accounts & keys.")
+        return False, f"No {LABELS[capabilities.api_key_provider]} API key is stored. Add it under API keys."
     if provider == "local-whisper":
         if not local_asr_available():
             return False, ("faster-whisper is not installed in this backend. Install the 'local-asr' extra.")
@@ -176,8 +174,7 @@ def readiness(runtime: Runtime, settings: StoredSettings, provider: str) -> tupl
         except ValueError:
             present = False
         if not present:
-            return False, (f"The Local Whisper model '{model}' is not downloaded yet. Download it in "
-                           "Settings → Recording & speech → Speech model on this computer.")
+            return False, f"The Local Whisper model '{model}' is not downloaded yet. Download it below."
     return True, None
 
 
@@ -396,6 +393,12 @@ def _openai_opener(
 
 # ── Media import ─────────────────────────────────────────────────────────────
 
+#: Advertised OpenAI transcription rates, US dollars per hour of audio.
+OPENAI_RATE_PER_HOUR_USD: dict[str, float] = {
+    "whisper-1": 0.36, "gpt-4o-transcribe": 0.36, "gpt-4o-mini-transcribe": 0.18,
+}
+
+
 def import_model(settings: StoredSettings) -> str:
     """The model identity an import records; its prefix names the provider."""
     if settings.transcription_provider == "soniox":
@@ -459,8 +462,7 @@ async def transcribe_import(
             raise ProviderNotConfigured("Importing with OpenAI sends audio to OpenAI; enable cloud consent.")
         key = runtime.api_key("openai")
         if not key:
-            raise ProviderNotConfigured(
-                "OpenAI has no API key stored. Add one in Settings → Accounts & keys.")
+            raise ProviderNotConfigured("OpenAI has no API key stored; add one in settings.")
         decoder = OpenAIWindowDecoder(runtime.http, api_key=key, model=name,
                                       timeout=max(runtime.config.request_timeout_s, 600.0))
         return await transcribe_pcm_file(

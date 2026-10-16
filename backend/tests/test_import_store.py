@@ -7,12 +7,10 @@ serves a microphone recording.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
 
-from skaz import monologues as mono
 from skaz.db import Database
 from skaz.gateways.soniox_async import ASYNC_MODEL, AsyncToken
 from skaz.import_store import (
@@ -23,13 +21,9 @@ from skaz.import_store import (
     digest_file,
     segment_tokens,
 )
-from skaz.knowledge.speech.transcript import read_new_tokens
 from skaz.repository import create_session
+from skaz.transcript_monologues import build_monologues
 
-
-def monologues_of(connection: sqlite3.Connection, session_id: str) -> list[mono.Monologue]:
-    """What the speech area makes of a session: the app's token reader, grouped by ``monologues.build``."""
-    return mono.build([found.token for found in read_new_tokens(connection, session_id, None)])
 
 @pytest.fixture
 def db(tmp_path: Path) -> Database:
@@ -96,7 +90,7 @@ def test_transcript_becomes_monologues_through_the_live_pipeline(
         segments = connection.execute(
             "SELECT * FROM segments WHERE session_id=? ORDER BY start_ms", (session_id,)
         ).fetchall()
-        monologues = monologues_of(connection, session_id)
+        monologues = build_monologues(connection, session_id, [])
         speakers = connection.execute(
             "SELECT number FROM native_speakers WHERE session_id=? ORDER BY number", (session_id,)
         ).fetchall()
@@ -119,7 +113,7 @@ def test_monologue_timestamps_round_trip_through_samples(
     ], audio_duration_ms=7_200_000)
 
     with db.read() as connection:
-        monologues = monologues_of(connection, session_id)
+        monologues = build_monologues(connection, session_id, [])
 
     assert monologues[0].start_ms == 1
     assert monologues[-1].end_ms == 7_199_999
@@ -180,19 +174,16 @@ def test_a_microphone_cannot_continue_an_imported_session(
         LiveStore(db).open(session_id, sample_rate=48_000, model="stt-rt-v5")
 
 
-def test_a_restart_interrupts_unsettled_imports_and_keeps_their_job(
+def test_unsettled_imports_are_listed_for_restart_recovery(
     store: ImportStore, db: Database, tmp_path: Path,
 ) -> None:
     processing = start(store, db, tmp_path)
     done = start(store, db, tmp_path)
     store.apply_transcript(done, tokens=[token("готово", 0, 100)], audio_duration_ms=200)
 
-    store.interrupt()  # what ``ImportService.resume`` does at start-up
-    interrupted, completed = store.get(processing), store.get(done)
-    assert interrupted is not None and completed is not None
-    assert interrupted.status == "interrupted"
-    assert interrupted.transcription_id == "a" * 32
-    assert completed.status == "completed"
+    pending = store.unsettled()
+    assert [record.session_id for record in pending] == [processing]
+    assert pending[0].transcription_id == "a" * 32
 
 
 def test_failure_records_the_provider_reason_and_settles(
@@ -204,9 +195,7 @@ def test_failure_records_the_provider_reason_and_settles(
     assert record.status == "failed"
     assert "audio_decode" in (record.error or "")
     assert record.settled_at is not None
-    store.interrupt()
-    settled = store.get(session_id)
-    assert settled is not None and settled.status == "failed"
+    assert store.unsettled() == []
 
 
 def test_a_settled_import_cannot_silently_resume(

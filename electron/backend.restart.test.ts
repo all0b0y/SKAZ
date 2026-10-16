@@ -8,19 +8,17 @@ class FakeChild extends EventEmitter {
   kill = vi.fn(() => true);
 }
 const children: FakeChild[] = [];
-const spawnEnvs: Array<Record<string, string | undefined>> = [];
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
-  const spawn = vi.fn((_command: string, _args: string[], options: { env?: Record<string, string | undefined> }) => {
-    spawnEnvs.push(options.env ?? {});
+  const spawn = vi.fn(() => {
     const child = new FakeChild();
     children.push(child);
     return child;
   });
   return { ...actual, default: { ...actual, spawn }, spawn };
 });
-vi.mock('electron', () => ({ app: { isPackaged: false, getVersion: () => '9.8.7', getPath: (name: string) => `/tmp/skaz-restart-test/${name}` } }));
+vi.mock('electron', () => ({ app: { isPackaged: false, getPath: (name: string) => `/tmp/skaz-restart-test/${name}` } }));
 vi.mock('./shellPath', () => ({ readLoginShellPath: async () => null }));
 vi.mock('./logFile', () => ({
   AppLog: class {
@@ -46,8 +44,6 @@ describe('BackendManager.restart', () => {
 
     const first = manager.start().catch((error: unknown) => error);
     await vi.waitFor(() => expect(children).toHaveLength(1));
-    // Settings → About reads the app's own version from here (QA A21).
-    expect(spawnEnvs.at(-1)!.SKAZ_APP_VERSION).toBe('9.8.7');
     children[0]!.emit('exit', 1, null);
     await first;
     expect(manager.getStatus().phase).toBe('error');
@@ -62,10 +58,5 @@ describe('BackendManager.restart', () => {
     children[0]!.emit('exit', null, 'SIGTERM');
     expect(manager.getStatus().phase).toBe('ready');
     expect(await manager.restart()).toBe(false);
-
-    // QA E16: the running backend is killed — it stopped, it did not fail to start (no install hint).
-    children[1]!.emit('exit', null, 'SIGKILL');
-    expect(manager.getStatus()).toMatchObject({ phase: 'error', stopped: true });
-    expect(manager.getStatus().hint).toBeUndefined();
   });
 });

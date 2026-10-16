@@ -34,6 +34,10 @@ export function linearToDbfs(value: number): number {
   return Number.isFinite(db) ? Math.max(FLOOR_DBFS, db) : FLOOR_DBFS;
 }
 
+export function idleMeterSnapshot(): MeterSnapshot {
+  return { dbfs: FLOOR_DBFS, peakDbfs: FLOOR_DBFS, clipping: false };
+}
+
 /**
  * Aggregates raw per-frame rms/peak samples (delivered at worklet frame
  * cadence, e.g. every ~128 samples) into a time-windowed, throttled meter

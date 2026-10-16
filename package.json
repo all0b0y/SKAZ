@@ -20,11 +20,17 @@
     "dist:mac": "npm run icon && npm run build:media && npm run build:backend && npm run build && electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.7.2",
-    "lucide-react": "^1.57.0",
-    "motion": "^14.2.0",
+    "clsx": "^2.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "simple-icons": "^16.33.0",
     "ws": "^8.22.0",
     "zustand": "^5.0.15"
   },

@@ -31,6 +31,7 @@ from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
+SERVICE_NAME = "SKAZ"
 
 #: Environment variables accepted as a source for a provider key. Read only in an
 #: explicit development/CI run (see ``env_fallback_enabled``); a normal desktop run
@@ -47,6 +48,11 @@ ENV_FALLBACK_FLAG = "SKAZ_ALLOW_ENV_KEYS"
 
 #: Serialises read-modify-write cycles; two writers would drop each other's keys.
 _VAULT_LOCK = threading.Lock()
+
+
+def service_name(provider: str) -> str:
+    """Per-provider label, kept for log and diagnostic identity."""
+    return f"{SERVICE_NAME}:{provider}"
 
 
 def env_fallback_enabled(env: Mapping[str, str] | None = None) -> bool:

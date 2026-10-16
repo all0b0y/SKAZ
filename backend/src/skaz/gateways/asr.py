@@ -33,7 +33,6 @@ from ..local_models import (
     GIGACHAT_PROVIDER,
     GIGACHAT_REQUIRED_MEMORY_BYTES,
     GIGACHAT_REVISION,
-    MODEL_DOWNLOADS_OFF,
     SPEAKER_PROVIDER,
     CacheSafetyError,
     DeleteResult,
@@ -42,8 +41,8 @@ from ..local_models import (
     delete_local_model_cache,
     download_local_model,
     gigachat_runtime_available,
+    local_model_cache_present,
     local_platform,
-    model_downloads_refused,
     physical_memory_bytes,
     speaker_model_path,
     speaker_runtime_available,
@@ -56,6 +55,14 @@ OPENAI_BASE_URL = "https://api.openai.com/v1"
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_TRANSCRIPTIONS_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 WHISPER_SAMPLE_RATE = 16_000
+LOCAL_SPEECH_GATE_DEPENDENCY_DETAIL = (
+    "Local speech presence detection is unavailable. Install the backend with the "
+    "'local-asr' extra, or disable SKAZ_LOCAL_SPEECH_GATE."
+)
+LOCAL_SPEECH_GATE_FAILURE_DETAIL = (
+    "Local speech presence detection failed. Disable SKAZ_LOCAL_SPEECH_GATE "
+    "and retry the original stored audio."
+)
 
 TRANSCRIPTION_PROMPT = (
     "Transcribe the speech exactly in its original language. Return only the spoken words, "
@@ -84,6 +91,15 @@ class TranscriptPiece:
     duration_ms: int
     text: str
     language: str | None = None
+
+
+@dataclass(frozen=True)
+class TranscriptWord:
+    """Untrusted local decoder word evidence; validation belongs to live finality."""
+
+    text: str
+    start_s: float
+    end_s: float
 
 
 class Transcriber(Protocol):
@@ -360,6 +376,22 @@ async def _to_thread_until_finished(
         raise cancelled
 
 
+def detect_speech_presence(samples: Any) -> bool:
+    """Detect any speech in a complete 16 kHz window using faster-whisper defaults.
+
+    This is only a presence test. It does not classify music, television, speakers,
+    or sentence boundaries, and its timestamps are never used to trim model input.
+    """
+    try:
+        from faster_whisper.vad import get_speech_timestamps
+    except ImportError as error:
+        raise ProviderNotConfigured(LOCAL_SPEECH_GATE_DEPENDENCY_DETAIL) from error
+    try:
+        return bool(get_speech_timestamps(samples))
+    except Exception as error:
+        raise ProviderError(LOCAL_SPEECH_GATE_FAILURE_DETAIL) from error
+
+
 class LocalWhisperTranscriber:
     """faster-whisper running on this machine. Weights are never downloaded implicitly."""
 
@@ -372,10 +404,12 @@ class LocalWhisperTranscriber:
         *,
         model: str,
         allow_download: bool,
+        speech_gate_enabled: bool = False,
         cache_dir: Path | None = None,
     ) -> None:
         self.model = model
         self._allow_download = allow_download
+        self._speech_gate_enabled = speech_gate_enabled
         self._cache_dir = cache_dir
 
     @observed_transcription
@@ -386,8 +420,40 @@ class LocalWhisperTranscriber:
             raise LocalAsrDependencyMissing(LOCAL_ASR_DEPENDENCY_DETAIL) from error
 
         samples = np.asarray(audio.resampled(WHISPER_SAMPLE_RATE).to_float32(), dtype="float32")
+        if self._speech_gate_enabled:
+            try:
+                speech_present = await asyncio.to_thread(detect_speech_presence, samples)
+            except (ProviderError, ProviderNotConfigured):
+                raise
+            except Exception as error:
+                raise ProviderError(LOCAL_SPEECH_GATE_FAILURE_DETAIL) from error
+            if not speech_present:
+                return []
         engine = await _to_thread_until_finished(self._engine)
         return await _to_thread_until_finished(self._run, engine, samples, language)
+
+    @observed_transcription
+    async def transcribe_with_word_timestamps(
+        self, audio: WavAudio, *, language: str | None
+    ) -> tuple[list[TranscriptPiece], tuple[TranscriptWord, ...] | None]:
+        """Decode local live evidence without changing the ordinary ASR call contract."""
+        try:
+            import numpy as np
+        except ImportError as error:
+            raise LocalAsrDependencyMissing(LOCAL_ASR_DEPENDENCY_DETAIL) from error
+
+        samples = np.asarray(audio.resampled(WHISPER_SAMPLE_RATE).to_float32(), dtype="float32")
+        if self._speech_gate_enabled:
+            try:
+                speech_present = await asyncio.to_thread(detect_speech_presence, samples)
+            except (ProviderError, ProviderNotConfigured):
+                raise
+            except Exception as error:
+                raise ProviderError(LOCAL_SPEECH_GATE_FAILURE_DETAIL) from error
+            if not speech_present:
+                return [], ()
+        engine = await _to_thread_until_finished(self._engine)
+        return await _to_thread_until_finished(self._run_with_words, engine, samples, language)
 
     def _engine(self) -> Any:
         cache_key = (self.model, self._allow_download, str(self._cache_dir or ""))
@@ -408,7 +474,7 @@ class LocalWhisperTranscriber:
         except Exception as error:  # missing weights, unsupported device, corrupt cache
             raise ProviderNotConfigured(
                 f"Local Whisper model '{self.model}' could not be loaded: {error}. "
-                "Prepare it in Settings → Speech, or set "
+                "Prepare it explicitly (POST /models/local/prepare), or set "
                 "SKAZ_ALLOW_MODEL_DOWNLOAD=1 to allow downloading the weights."
             ) from error
         LocalWhisperTranscriber._models[cache_key] = engine
@@ -441,6 +507,38 @@ class LocalWhisperTranscriber:
             pieces.append(TranscriptPiece(offset, int(segment.end * 1000) - offset, text, detected))
         return pieces
 
+    def _run_with_words(
+        self, engine: Any, samples: Any, language: str | None
+    ) -> tuple[list[TranscriptPiece], tuple[TranscriptWord, ...] | None]:
+        import numpy as np
+
+        segments, info = engine.transcribe(
+            np.asarray(samples, dtype="float32"),
+            language=None if not language or language == "auto" else language,
+            vad_filter=False,
+            word_timestamps=True,
+        )
+        detected = getattr(info, "language", None)
+        pieces: list[TranscriptPiece] = []
+        words: list[TranscriptWord] = []
+        evidence_available = True
+        for segment in segments:
+            text = (getattr(segment, "text", None) or "").strip()
+            if text:
+                pieces.append(TranscriptPiece(0, 0, text, detected))
+            segment_words = getattr(segment, "words", None)
+            if segment_words is None:
+                evidence_available = False
+                continue
+            for word in segment_words:
+                words.append(
+                    TranscriptWord(
+                        text=str(getattr(word, "word", "")),
+                        start_s=float(getattr(word, "start", float("nan"))),
+                        end_s=float(getattr(word, "end", float("nan"))),
+                    )
+                )
+        return pieces, tuple(words) if evidence_available else None
 
 
 class LocalGigaChatTranscriber:
@@ -628,8 +726,18 @@ class LocalModelPreparations:
     def _key(provider: str, model: str) -> str:
         return f"{provider}:{model}"
 
+    @property
+    def shared_cache(self) -> bool:
+        return self._cache_dir is None
+
     def progress(self, provider: str, model: str) -> DownloadProgress | None:
         return self._progress.get(self._key(provider, model))
+
+    def cached(self, provider: str, model: str) -> bool:
+        return local_model_cache_present(provider, model, cache_dir=self._cache_dir)
+
+    def hardware(self, provider: str) -> HostStatus | None:
+        return gigachat_host_status() if provider == GIGACHAT_PROVIDER else None
 
     def _preflight(self, provider: str) -> LocalModelReport | None:
         if provider == GIGACHAT_PROVIDER:
@@ -645,6 +753,54 @@ class LocalModelPreparations:
             return "dependency_missing", LOCAL_ASR_DEPENDENCY_DETAIL
         return None
 
+    async def report(self, model: str, provider: str = "local-whisper") -> LocalModelReport:
+        """The known state, verifying the local files once per process when unknown."""
+        key = self._key(provider, model)
+        async with self._lock:
+            if key in self._deleting:
+                raise LocalModelBusy(key)
+            engine_cached = (
+                LocalGigaChatTranscriber.has_cached_engine(self._cache_dir)
+                if provider == GIGACHAT_PROVIDER
+                else provider == "local-whisper"
+                and LocalWhisperTranscriber.has_cached_engine(model, self._cache_dir)
+            )
+            if engine_cached:
+                self._reports[key] = ("ready", None)
+                return "ready", None
+            if self._in_use.get(key, 0) > 0:
+                raise LocalModelBusy(key)
+            known = self._reports.get(key)
+            if known is not None:
+                return known
+            preflight = self._preflight(provider)
+            if preflight is not None:
+                self._reports[key] = preflight
+                return preflight
+            if key in self._checking:
+                return "verifying", None
+            self._checking.add(key)
+            self._reports[key] = ("verifying", None)
+            self._progress[key] = DownloadProgress()
+        try:
+            verified = await self._verify(provider, model)
+        except asyncio.CancelledError:
+            # The worker has finished (see _to_thread_until_finished), but this
+            # HTTP status request no longer has a consumer. Drop the transitional
+            # cache so the next GET performs a fresh offline verification.
+            async with self._lock:
+                self._reports.pop(key, None)
+                self._progress.pop(key, None)
+            raise
+        finally:
+            async with self._lock:
+                self._checking.discard(key)
+        async with self._lock:
+            self._reports[key] = verified
+            if verified[0] != "verifying":
+                self._progress.pop(key, None)
+            return verified
+
     async def start(self, model: str, provider: str = "local-whisper") -> LocalModelReport:
         """Begin preparing ``model``. Idempotent for the model already being prepared."""
         key = self._key(provider, model)
@@ -658,9 +814,6 @@ class LocalModelPreparations:
             known = self._reports.get(key)
             if known is not None and known[0] == "ready":
                 return known
-            if model_downloads_refused():
-                self._reports[key] = ("error", MODEL_DOWNLOADS_OFF)
-                return self._reports[key]
             preflight = self._preflight(provider)
             if preflight is not None:
                 self._reports[key] = preflight
@@ -907,6 +1060,7 @@ def build_transcriber(
     api_key: str | None,
     timeout: float,
     allow_download: bool,
+    speech_gate_enabled: bool = False,
     openrouter_kind: str | None = None,
     local_model_cache_dir: Path | None = None,
 ) -> Transcriber:
@@ -916,6 +1070,7 @@ def build_transcriber(
         return LocalWhisperTranscriber(
             model=model,
             allow_download=allow_download,
+            speech_gate_enabled=speech_gate_enabled,
             cache_dir=local_model_cache_dir,
         )
     if provider == GIGACHAT_PROVIDER:

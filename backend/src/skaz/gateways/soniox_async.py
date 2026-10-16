@@ -24,6 +24,8 @@ from ..languages import validate_languages
 
 SONIOX_API_BASE = "https://api.soniox.com/v1"
 ASYNC_MODEL = "stt-async-v5"
+#: Fixed provider limit: a single file may not exceed 300 minutes of audio.
+MAX_FILE_DURATION_MS = 300 * 60 * 1000
 #: Container formats the provider documents for automatic detection.
 SUPPORTED_EXTENSIONS: tuple[str, ...] = (
     "aac", "aiff", "amr", "asf", "flac", "m4a", "mp3", "mp4", "ogg", "wav", "webm",

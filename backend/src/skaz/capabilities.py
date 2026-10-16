@@ -17,6 +17,8 @@ from .local_models import GIGACHAT_MODEL_ID, GIGACHAT_PROVIDER
 from .schemas import Profile, Task
 from .settings_store import StoredProfile
 
+CHAT_PROVIDERS = ("openai", "openrouter", "anthropic")
+
 
 class IncompatibleProfile(ValueError):
     """The requested provider+model cannot serve the requested task."""

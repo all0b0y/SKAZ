@@ -56,10 +56,7 @@ def _connection(
                         lambda: CodexLocation(binary=str(binary), node_dir=None))
     connection = CodexConnection(tmp_path / "account")
     rpc = _Rpc(replies if replies is not None else {"account/read": ACCOUNT, "model/list": MODELS})
-    def fake_rpc() -> Any:
-        return rpc
-
-    connection.rpc = fake_rpc  # type: ignore[assignment,method-assign]
+    connection.rpc = lambda: rpc  # type: ignore[assignment,method-assign,return-value]
     return connection, rpc
 
 

@@ -5,11 +5,11 @@ from typing import Any
 
 import httpx
 
-from tests.sessions_support import create_session
+from tests.conftest import make_wav
 
 
-async def test_native_snapshot_is_authenticated_and_has_no_paths(client: httpx.AsyncClient, app: Any) -> None:
-    session_id = create_session(client, "Native")
+async def test_native_snapshot_and_legacy_upload_isolation(client: httpx.AsyncClient, app: Any) -> None:
+    session_id = (await client.post("/sessions", json={"title": "Native"})).json()["id"]
     store = app.state.runtime.live_store
     connection = store.open(session_id, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x00\x00" * 1600)
@@ -19,6 +19,13 @@ async def test_native_snapshot_is_authenticated_and_has_no_paths(client: httpx.A
     assert "path" not in response.text
     denied = await client.get(f"/sessions/{session_id}/live", headers={"Authorization": ""})
     assert denied.status_code == 401
+    legacy = await client.post(
+        f"/sessions/{session_id}/audio/buffer",
+        params={"sequence": 1, "start_ms": 100, "end_ms": 200},
+        content=make_wav(.1), headers={"Content-Type": "audio/wav"},
+    )
+    assert legacy.status_code == 409
+    assert (await client.get(f"/sessions/{session_id}/live")).json()["saved_samples"] == 1600
 
 
 async def test_missing_native_snapshot_is_not_an_empty_success(client: httpx.AsyncClient) -> None:

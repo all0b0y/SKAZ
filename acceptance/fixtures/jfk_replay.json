@@ -1,0 +1,78 @@
+{
+  "id": "jfk-11s-replay-v1",
+  "source": {
+    "audio": "public JFK inaugural excerpt, 11 s (.runtime/jfk.wav)",
+    "audio_sha256": "4d968ac99a1d0d4bc42ae8dd1552f4235e7b952a8121b39797f3dc2ca16123e9",
+    "reference": "And so my fellow Americans ask not what your country can do for you ask what you can do for your country",
+    "asr": "REPLAY ONLY. The segments below are the transcript stored by earlier live runs; running this fixture performs no ASR and proves nothing about any ASR model.",
+    "requested_asr_model": "qwen/qwen3-asr-1.7b",
+    "runs": [
+      ".runtime/live-20260908-071734-6efe86/report.json",
+      ".runtime/live-20260908-072120-639f9b/report.json"
+    ],
+    "known_defect": "The 5-second recorder windows cut the sentence after 'ask not', and the ASR punctuated each window on its own. The stored transcript therefore reads as three complete sentences and the negation is detached from what it negates."
+  },
+  "segments": [
+    {"sequence": 0, "start_ms": 0, "end_ms": 5000, "text": "And so, my fellow Americans, ask not."},
+    {"sequence": 1, "start_ms": 5000, "end_ms": 10000, "text": "What your country can do for you, ask what you can do for your."},
+    {"sequence": 2, "start_ms": 10000, "end_ms": 11000, "text": "Country."}
+  ],
+  "questions": [
+    {
+      "key": "missed_recent",
+      "question": "Что я пропустил из последнего? Ответь кратко по-русски.",
+      "scope": "auto",
+      "window_minutes": 5,
+      "language": "ru",
+      "checks": ["contrast_negation"],
+      "rubric": [
+        "Обе стороны противопоставления присутствуют: (а) что страна может сделать для вас, (б) что вы можете сделать для страны.",
+        "Отрицание сохранено: сторона (а) подана как то, о чём НЕ надо спрашивать; ни одна формулировка не превращает её в утверждение или в призыв.",
+        "Если формулировка транскрипта оборвана и смысл неоднозначен — ответ прямо говорит о неопределённости, а не выдаёт уверенную цитату.",
+        "Ссылки указывают на реально сохранённые сегменты и не шире того, на чём стоит утверждение."
+      ]
+    },
+    {
+      "key": "absent_budget",
+      "question": "Какой бюджет проекта назвали в долларах?",
+      "scope": "all",
+      "window_minutes": 5,
+      "language": "ru",
+      "checks": [],
+      "rubric": [
+        "Ответ говорит, что в записи такого нет, и не называет никакой суммы.",
+        "Отсутствие не выдаётся за факт о всей записи шире, чем даёт предоставленный фрагмент."
+      ]
+    }
+  ],
+  "observed_outputs": [
+    {
+      "run": ".runtime/live-20260908-071734-6efe86/report.json",
+      "question_key": "missed_recent",
+      "label": "known bad — half of the contrast is missing",
+      "answer": "Вы пропустили фразу: «спросите, что вы можете сделать для своей страны» [S2-S3].",
+      "expected_defects": ["contrast_incomplete"]
+    },
+    {
+      "run": ".runtime/live-20260908-072120-639f9b/report.json",
+      "question_key": "missed_recent",
+      "label": "known bad — the negation is reversed into an instruction",
+      "answer": "Вы пропустили фразу: «Что ваша страна может сделать для вас, спросите, что вы можете сделать для своей страны» [S1-S3].",
+      "expected_defects": ["negation_dropped"]
+    },
+    {
+      "run": ".runtime/live-20260908-071734-6efe86/report.json",
+      "question_key": "missed_recent",
+      "label": "reference wording — the notes of the same run, which kept both sides and the negation; not a Q&A output",
+      "answer": "Приветствие и призыв к гражданской ответственности: обращение к американцам с призывом задуматься не о том, что страна может сделать для них, а о том, что они могут сделать для своей страны.",
+      "expected_defects": []
+    },
+    {
+      "run": ".runtime/live-20260908-072120-639f9b/report.json",
+      "question_key": "missed_recent",
+      "label": "reference wording — the notes of the same run; not a Q&A output",
+      "answer": "Цитата из известной речи: «Так что, мои fellow Americans, не спрашивайте, что ваша страна может сделать для вас, спрашивайте, что вы можете сделать для своей страны».",
+      "expected_defects": []
+    }
+  ]
+}

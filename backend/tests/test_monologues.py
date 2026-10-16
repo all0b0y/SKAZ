@@ -60,6 +60,7 @@ def test_undiarised_speech_is_never_given_a_speaker() -> None:
     ])
     assert len(built) == 1
     assert built[0].speaker is None
+    assert mono.speaker_label(built[0]) == "Спикер не определён"
 
 
 def test_numbering_is_display_only_and_recomputed() -> None:

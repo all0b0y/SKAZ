@@ -27,6 +27,13 @@ async def test_a_provider_key_storage_failure_is_sanitized(
     assert (await client.get("/settings")).json()["provider_has_api_key"]["openai"] is False
 
 
+def test_stored_keys_are_scoped_per_provider() -> None:
+    """One provider's label must not stand for every provider's credential."""
+    names = {p: secrets_module.service_name(p) for p in ("openai", "anthropic", "openrouter")}
+    assert len(set(names.values())) == 3
+    assert all(name.startswith(f"{secrets_module.SERVICE_NAME}:") for name in names.values())
+
+
 def test_environment_keys_are_ignored_unless_explicitly_allowed(tmp_path: Path) -> None:
     """A normal desktop run must not pick a credential out of the ambient environment."""
     env = {"OPENAI_API_KEY": "env-fixture-only"}

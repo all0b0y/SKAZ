@@ -1,18 +1,35 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
-import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, dialog, ipcMain, shell, ShareMenu, type IpcMainInvokeEvent } from 'electron';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { CHANNELS } from './channels';
+import { SYSTEM_AUDIO_SETTINGS_URL } from './systemAudio';
 import { NativeLiveClient } from './nativeLive';
 import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeLive';
 import type { BackendManager } from './backend';
-import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
+import { audioUploadPath, requestTimeoutMs, shareFileName, validateAudioUpload, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
-import { kbBridgeHandlers } from './kbBridge';
-import { ExportFolders, openInObsidian, resolveTarget, type LibraryActionDeps } from './libraryActions';
-import { obsidianDeps } from './obsidianHost';
-import { mediaAccessOf, privacySettingsUrl } from './systemAudio';
-import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
-import { MATERIAL_EXTENSIONS, SPEECH_EXTENSIONS } from '../frontend/src/api/bridge';
+import type {
+  AudioFileChoice,
+  AudioUploadMeta,
+  BridgeRequest,
+  HttpMethod,
+  JsonResponse,
+  SharedNote,
+} from '../frontend/src/api/bridge';
+import { AUDIO_EXTENSIONS } from '../frontend/src/api/bridge';
+
+/** Private scratch for shared notes, cleared on quit. */
+let shareDirectory: string | null = null;
+function shareRoot(): string {
+  if (!shareDirectory) {
+    shareDirectory = mkdtempSync(join(app.getPath('temp'), 'skaz-share-'));
+    app.once('will-quit', () => {
+      if (shareDirectory) rmSync(shareDirectory, { recursive: true, force: true });
+    });
+  }
+  return shareDirectory;
+}
 
 // Registers the request-scoped IPC handlers. Every call is proxied to the
 // loopback backend with the per-run bearer token attached here in main, so the
@@ -21,6 +38,7 @@ import { MATERIAL_EXTENSIONS, SPEECH_EXTENSIONS } from '../frontend/src/api/brid
 // window before doing anything.
 
 const ALLOWED_METHODS: readonly HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const REQUEST_TIMEOUT_MS = 120_000;
 
 /** A window-id getter so the guard tracks the current main window lazily. */
 type ExpectedWebContentsId = () => number | null;
@@ -89,7 +107,7 @@ export function registerIpc(
     choosingRoot = true;
     try {
       const result = await dialog.showOpenDialog(owner, {
-        title: 'Choose where the SKAZ library lives', buttonLabel: 'Choose', defaultPath: app.getPath('documents'),
+        title: 'Choose Markdown root', defaultPath: app.getPath('documents'),
         properties: ['openDirectory', 'createDirectory'],
       });
       return result.canceled ? null : result.filePaths[0] ?? null;
@@ -112,13 +130,13 @@ export function registerIpc(
         defaultPath: app.getPath('downloads'),
         // One file per import: each import is one priced confirmation.
         properties: ['openFile'],
-        filters: [{ name: 'Audio and video', extensions: [...SPEECH_EXTENSIONS] }],
+        filters: [{ name: 'Audio and video', extensions: [...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v'] }],
       });
       const chosen = result.canceled ? null : result.filePaths[0] ?? null;
       if (!chosen) return null;
       // The renderer needs a playable URL only to read the duration from the
       // container metadata; the bytes themselves are never sent through IPC.
-      return { path: chosen, name: basename(chosen) };
+      return { path: chosen, name: basename(chosen), url: pathToFileURL(chosen).href };
     } catch {
       throw new Error('The file dialog is unavailable.');
     } finally {
@@ -126,112 +144,36 @@ export function registerIpc(
     }
   });
 
-  // Knowledge interface (API-B2 §5): dictation clip → POST /kb/dictation with this run's token;
-  // chat export through the native save dialog; material files through the native chooser.
-  const kb = kbBridgeHandlers({
-    handle: () => manager.getHandle(),
-    fetch: (input, init) => fetch(input, init),
-    showSaveDialog: async (options) => {
-      const owner = BrowserWindow.getFocusedWindow();
-      return owner ? dialog.showSaveDialog(owner, options) : dialog.showSaveDialog(options);
-    },
-    showOpenDialog: async (options) => {
-      const owner = BrowserWindow.getFocusedWindow();
-      const props = options.properties as Array<'openFile' | 'multiSelections'>;
-      return owner ? dialog.showOpenDialog(owner, { ...options, properties: props })
-        : dialog.showOpenDialog({ ...options, properties: props });
-    },
-    writeTextFile: (path, text) => writeFileSync(path, text, { encoding: 'utf8' }),
-    fileSize: (path) => {
-      try { const st = statSync(path); return st.isFile() ? st.size : null; } catch { return null; }
-    },
-    documentsDir: app.getPath('documents'),
-    downloadsDir: app.getPath('downloads'),
-    materialExtensions: MATERIAL_EXTENSIONS,
-  });
-  ipcMain.handle(CHANNELS.dictate, (event, wav: unknown, language: unknown) => {
-    if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
-    return kb.dictate(wav, language);
-  });
-  ipcMain.handle(CHANNELS.saveTextFile, (event, file: unknown) => {
-    if (!senderTrusted(event)) return { saved: false };
-    return kb.saveTextFile(file);
-  });
-  ipcMain.handle(CHANNELS.chooseMaterialFiles, (event) => {
-    if (!senderTrusted(event)) return [];
-    return kb.chooseMaterialFiles();
-  });
-
-  // Library file actions (B20): the renderer names a target, main finds and checks the path.
-  const exportFolders = new ExportFolders({
-    read: () => { try { return readFileSync(join(app.getPath('userData'), 'export-folders.json'), 'utf8'); } catch { return null; } },
-    write: (text) => writeFileSync(join(app.getPath('userData'), 'export-folders.json'), text, { encoding: 'utf8', mode: 0o600 }),
-  });
-  const actionDeps: LibraryActionDeps = {
-    getJson: async (route) => {
-      const handle = manager.getHandle();
-      if (!handle) return null;
-      try {
-        const res = await fetch(`http://127.0.0.1:${handle.port}${route}`, {
-          headers: { Authorization: `Bearer ${handle.token}` }, signal: AbortSignal.timeout(10_000),
-        });
-        return res.ok ? await res.json() as unknown : null;
-      } catch {
-        return null;
-      }
-    },
-    realPath: (p) => { try { return realpathSync(p); } catch { return null; } },
-    isDirectory: (p) => { try { return statSync(p).isDirectory(); } catch { return false; } },
-    isFile: (p) => { try { return statSync(p).isFile(); } catch { return false; } },
-  };
-  let choosingExport = false;
-  ipcMain.handle(CHANNELS.chooseExportFolder, async (event): Promise<string | null> => {
-    if (!senderTrusted(event) || choosingExport) return null;
+  let sharing = false;
+  ipcMain.handle(CHANNELS.shareNote, async (event, note: SharedNote): Promise<boolean> => {
+    if (!senderTrusted(event) || sharing || process.platform !== 'darwin') return false;
     const owner = BrowserWindow.fromWebContents(event.sender);
-    if (!owner) return null;
-    choosingExport = true;
+    const name = shareFileName(note);
+    if (!owner || !name) return false;
+    sharing = true;
     try {
-      const result = await dialog.showOpenDialog(owner, {
-        title: 'Choose a folder for the export', buttonLabel: 'Export here', defaultPath: app.getPath('documents'),
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      const chosen = result.canceled ? null : result.filePaths[0] ?? null;
-      if (chosen) exportFolders.remember(chosen);
-      return chosen;
+      // A private per-share directory: the file keeps the note's own name for the
+      // recipient, and two shares of same-named notes never collide. It lives
+      // only as long as the app does; the session folder is never touched.
+      const directory = mkdtempSync(join(shareRoot(), 'note-'));
+      const file = join(directory, name);
+      writeFileSync(file, note.content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      const x = Number.isFinite(note.x) ? Math.round(note.x) : undefined;
+      const y = Number.isFinite(note.y) ? Math.round(note.y) : undefined;
+      new ShareMenu({ filePaths: [file] }).popup({ window: owner, x, y });
+      return true;
     } catch {
-      return null;
+      return false;
     } finally {
-      choosingExport = false;
+      sharing = false;
     }
   });
-  ipcMain.handle(CHANNELS.showInFinder, async (event, target: unknown) => {
-    if (!senderTrusted(event)) return false;
-    const resolved = await resolveTarget(target, actionDeps, exportFolders);
-    if (!resolved) return false;
-    if (resolved.directory) return (await shell.openPath(resolved.path)) === '';
-    shell.showItemInFolder(resolved.path);
-    return true;
-  });
 
-  ipcMain.handle(CHANNELS.openInObsidian, async (event, target: unknown, options: unknown) => {
-    if (!senderTrusted(event)) return { ok: false, reason: 'unavailable' };
-    const restart = (options as { restart?: unknown } | null)?.restart === true;
-    return openInObsidian(target, { ...actionDeps, ...obsidianDeps() }, exportFolders, { restart });
-  });
-
-  // Fixed destinations only: the renderer names a pane, main picks the System Settings URL.
-  ipcMain.handle(CHANNELS.openSystemAudioSettings, async (event, pane: unknown) => {
-    if (!senderTrusted(event)) return false;
-    const url = privacySettingsUrl(process.platform, pane);
-    if (!url) return false;
-    await shell.openExternal(url);
-    return true;
-  });
-
-  // Read-only privacy state for Settings → Sound; never asks for anything.
-  ipcMain.handle(CHANNELS.mediaAccess, (event) => {
-    if (!senderTrusted(event)) return mediaAccessOf('untrusted', () => 'unknown');
-    return mediaAccessOf(process.platform, (kind) => systemPreferences.getMediaAccessStatus(kind));
+  // Read-only tail of the app log. No session content reaches this file, so
+  // exposing it to the renderer adds no new disclosure surface.
+  ipcMain.handle(CHANNELS.readLogs, (event) => {
+    if (!senderTrusted(event)) return '';
+    return manager.getLog().read();
   });
 
   ipcMain.handle(CHANNELS.openLogsFolder, async (event) => {
@@ -246,6 +188,13 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.restartBackend, (event) => {
     if (!senderTrusted(event)) return false;
     return manager.restart();
+  });
+
+  // Fixed destination only: the renderer cannot choose what gets opened.
+  ipcMain.handle(CHANNELS.openSystemAudioSettings, async (event) => {
+    if (!senderTrusted(event) || !SYSTEM_AUDIO_SETTINGS_URL) return false;
+    await shell.openExternal(SYSTEM_AUDIO_SETTINGS_URL);
+    return true;
   });
 
   ipcMain.handle(CHANNELS.request, async (event, req: BridgeRequest): Promise<JsonResponse<unknown>> => {
@@ -267,7 +216,7 @@ export function registerIpc(
           ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
         },
         body: hasBody ? JSON.stringify(req.body) : undefined,
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(requestTimeoutMs(req)),
       });
       if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
       const text = await res.text();
@@ -277,6 +226,78 @@ export function registerIpc(
       return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  ipcMain.handle(
+    CHANNELS.uploadAudio,
+    async (
+      event,
+      sessionId: string,
+      meta: AudioUploadMeta,
+      wav: ArrayBuffer,
+    ): Promise<JsonResponse<unknown>> => {
+      if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
+      const handle = manager.getHandle();
+      if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
+      const uploadError = validateAudioUpload(sessionId, meta, wav);
+      if (uploadError) return { ok: false, status: 0, detail: uploadError };
+      try {
+        const url = buildUrl(handle.port, audioUploadPath(sessionId, 'transcribe'), {
+          sequence: meta.sequence,
+          start_ms: meta.startMs,
+          end_ms: meta.endMs,
+        });
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${handle.token}`,
+            'Content-Type': 'audio/wav',
+          },
+          body: Buffer.from(wav),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
+        return { ok: true, status: res.status, data: (await res.json()) as unknown };
+      } catch (err) {
+        return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    CHANNELS.bufferAudio,
+    async (
+      event,
+      sessionId: string,
+      meta: AudioUploadMeta,
+      wav: ArrayBuffer,
+    ): Promise<JsonResponse<unknown>> => {
+      if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
+      const handle = manager.getHandle();
+      if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
+      const uploadError = validateAudioUpload(sessionId, meta, wav);
+      if (uploadError) return { ok: false, status: 0, detail: uploadError };
+      try {
+        const url = buildUrl(handle.port, audioUploadPath(sessionId, 'store'), {
+          sequence: meta.sequence,
+          start_ms: meta.startMs,
+          end_ms: meta.endMs,
+        });
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${handle.token}`,
+            'Content-Type': 'audio/wav',
+          },
+          body: Buffer.from(wav),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
+        return { ok: true, status: res.status, data: (await res.json()) as unknown };
+      } catch (err) {
+        return { ok: false, status: 0, detail: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
   return native;
 }

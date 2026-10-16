@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import pytest
 
@@ -50,7 +49,7 @@ async def test_empty_results_after_speech_keep_progress_and_preserve_confirmed_w
         decoder=decoder, vad=ContinuousSpeech(),
     )
     events = session.events()
-    confirmed: list[Any] = []
+    confirmed = []
     try:
         for second in range(1, 181):
             decoder.empty = second > 120

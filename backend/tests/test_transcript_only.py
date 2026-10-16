@@ -29,8 +29,7 @@ def test_transcript_survives_restart_without_audio(tmp_path: Path) -> None:
     event = SonioxEvent((SonioxToken('Hello', 0, 1900, .9, True, 'en'),), (), (), 2000, 2000, False)
     ids = store.save_event(c.id, ordinal=0, event=event)
     assert repo.list_segments(db, sid)[0].sources == []
-    with db.read() as reader:
-        assert reader.execute("SELECT COUNT(*) FROM chunks WHERE session_id = ?", (sid,)).fetchone()[0] == 0
+    assert repo.get_chunk(db, sid, 0) is None
     store.close(c.id, finished=True)
     db.close()
     db = Database(path)

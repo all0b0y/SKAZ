@@ -1,9 +1,4 @@
-export interface AudioChunk {
-  sequence: number;
-  startMs: number;
-  endMs: number;
-  wav: ArrayBuffer;
-}
+import type { AudioChunk } from './uploadQueue';
 
 export interface PersistedAudioAck {
   sequence: number;

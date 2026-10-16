@@ -37,8 +37,6 @@ export function auditPanes(): PaneViolation[] {
     for (const el of Array.from(pane.querySelectorAll<HTMLElement>('*'))) {
       const cs = getComputedStyle(el);
       if (cs.display === 'none' || cs.visibility === 'hidden' || el.closest('[hidden]')) continue;
-      // A deliberate overlay that reaches out of its column (the rail's sliding name) is not a spill.
-      if (el.closest('[data-overlay]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;
       // Clip by every scrolling/clipping ancestor below the column.

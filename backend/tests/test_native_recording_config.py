@@ -14,7 +14,6 @@ from skaz.config import AppConfig
 from skaz.gateways import soniox
 from skaz.secrets import MemorySecretStore
 from tests.conftest import FakeHttp
-from tests.sessions_support import create_session, session_detail
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_native_soniox_ws import ProviderSocket
 
@@ -69,7 +68,7 @@ def test_recording_config_survives_pause_restart_and_reaches_provider(
                     "used_languages": ["ru", "en"],
                     "cloud_consent": True,
                 }).status_code == 200
-                sid = create_session(http, "Translate")
+                sid = http.post("/sessions", headers=AUTH, json={"title": "Translate"}).json()["id"]
             with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
                 ws.send_json({"type": "open", "sample_rate": 16000})
                 assert ws.receive_json()["saved_samples"] == index * 1600
@@ -120,7 +119,7 @@ def test_recording_config_survives_pause_restart_and_reaches_provider(
                 assert [t["text"] for t in snapshot["final_translation_tokens"]] == expected
             else:
                 assert [t["text"] for t in snapshot["final_tokens"]] == ["Hello"] * (index + 1)
-            detail = session_detail(http, sid)
+            detail = http.get(f"/sessions/{sid}", headers=AUTH).json()
             assert [s["text"] for s in detail["segments"]] == ["Hello"] * (index + 1)
     assert len(configs) == 2
 
@@ -130,7 +129,7 @@ def test_v3_recording_migrates_as_transcription_not_current_preferences(
 ) -> None:
     app = create_app(config, secret_store=MemorySecretStore(), http_client=outbound.client())
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        sid = create_session(http, "Old native")
+        sid = http.post("/sessions", headers=AUTH, json={"title": "Old native"}).json()["id"]
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()

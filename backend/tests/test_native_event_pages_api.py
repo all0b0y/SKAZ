@@ -11,7 +11,6 @@ from skaz.config import AppConfig
 from skaz.gateways.soniox import SonioxEvent, SonioxToken, SonioxTokenRef, SonioxTranslationToken
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp
-from tests.sessions_support import create_session
 
 
 def event(text: str) -> SonioxEvent:
@@ -22,7 +21,7 @@ def event(text: str) -> SonioxEvent:
 
 
 async def recording(client: httpx.AsyncClient, app: Any) -> tuple[str, str]:
-    sid = create_session(client, "Pages")
+    sid = (await client.post("/sessions", json={"title": "Pages"})).json()["id"]
     store = app.state.runtime.live_store
     connection = store.open(sid, sample_rate=16000, model="stt-rt-v5")
     store.append_audio(connection.id, sequence=0, start_sample=0, pcm=b"\x00\x00" * 1600)
@@ -244,7 +243,7 @@ async def test_page_lookup_does_not_scan_unrelated_connection_history(
 async def test_empty_native_recording_is_distinct_from_missing_recording(
     client: httpx.AsyncClient, app: Any,
 ) -> None:
-    sid = create_session(client, "Empty")
+    sid = (await client.post("/sessions", json={"title": "Empty"})).json()["id"]
     url = f"/sessions/{sid}/live/events"
     assert (await client.get(url)).status_code == 404
     # Native import rows exist before the provider has created a connection.

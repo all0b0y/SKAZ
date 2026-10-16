@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from tests.sessions_support import create_session
 from tests.test_native_live_ws import AUTH, packet
 
 
@@ -15,7 +14,7 @@ from tests.test_native_live_ws import AUTH, packet
                                   packet(0, 0, 16000), packet(2**63, 0)])
 def test_bad_packet_never_acknowledges_or_extends_recording(app: Any, data: bytes) -> None:
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        identity = create_session(http, "Bad packet")
+        identity = http.post("/sessions", headers=AUTH, json={"title": "Bad packet"}).json()["id"]
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{identity}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()
@@ -26,7 +25,7 @@ def test_bad_packet_never_acknowledges_or_extends_recording(app: Any, data: byte
 
 def test_binary_configuration_is_rejected_without_internal_exception(app: Any) -> None:
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        identity = create_session(http, "Bad hello")
+        identity = http.post("/sessions", headers=AUTH, json={"title": "Bad hello"}).json()["id"]
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{identity}/live/stream", headers=AUTH) as ws:
             ws.send_bytes(struct.pack("!I", 7))
             assert ws.receive_json() == {"type": "stream.error", "code": "invalid_stream"}
@@ -35,7 +34,7 @@ def test_binary_configuration_is_rejected_without_internal_exception(app: Any) -
 
 def test_sqlite_write_failure_does_not_escape_or_acknowledge(app: Any) -> None:
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        identity = create_session(http, "DB error")
+        identity = http.post("/sessions", headers=AUTH, json={"title": "DB error"}).json()["id"]
         url = f"ws://127.0.0.1/sessions/{identity}/live/stream"
         try:
             with http.websocket_connect(url, headers=AUTH) as ws:
@@ -57,7 +56,7 @@ def test_receipt_write_failure_is_disclosed_without_ack(app: Any, monkeypatch: p
         raise OSError("private disk information")
 
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
-        identity = create_session(http, "Disk error")
+        identity = http.post("/sessions", headers=AUTH, json={"title": "Disk error"}).json()["id"]
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{identity}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             ws.receive_json()

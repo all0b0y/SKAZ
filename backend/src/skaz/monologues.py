@@ -187,3 +187,8 @@ def resolve(anchor_: Anchor, monologues: list[Monologue]) -> ResolvedAnchor | No
             tokens=monologue.tokens[start : end + 1],
         )
     return None
+
+
+def speaker_label(monologue: Monologue) -> str:
+    """What the reader sees. Undiarised speech says so instead of guessing a number."""
+    return "Спикер не определён" if monologue.speaker is None else f"Спикер {monologue.speaker}"

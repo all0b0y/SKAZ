@@ -3,30 +3,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export interface IsolatedSmokeOptions {
-  /** Reopen this existing isolated profile (a restart) instead of creating a new one. */
-  profile?: string;
-  /** Leave the profile on disk when closing, so the next launch can reopen it. */
-  keepProfile?: boolean;
-  /** Extra environment for the app and its backend (fixtures such as scripts/fake-soniox). */
-  env?: Record<string, string>;
-}
-
 /** Prove isolation before returning a window that a smoke may interact with. */
-export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmokeOptions = {}): Promise<{
+export async function launchIsolatedSmoke(prefix: string): Promise<{
   app: ElectronApplication;
   close: () => Promise<void>;
-  profile: string;
 }> {
   const root = path.resolve(__dirname, '..');
-  const profile = options.profile
-    ? fs.realpathSync(options.profile)
-    : fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const profile = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   let app: ElectronApplication | undefined;
   const close = async () => {
     // Do not delete an in-use profile if closing Electron fails.
     await app?.close();
-    if (!options.keepProfile) fs.rmSync(profile, { recursive: true, force: true });
+    fs.rmSync(profile, { recursive: true, force: true });
   };
   try {
     app = await electron.launch({
@@ -36,9 +24,7 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
         PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
         SKAZ_OPTIN_SMOKE_USER_DATA: profile,
         PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
-        SKAZ_ALLOW_MODEL_DOWNLOAD: '0',
-        SKAZ_UPDATE_CHECK: '0',
-        ...options.env,
+        SKAZ_ALLOW_MODEL_DOWNLOAD: '0', SKAZ_LIVE_FINALITY: '0', SKAZ_LOCAL_SPEECH_GATE: '0',
       },
     });
     const actual = await app.evaluate(({ app: main }) => ({
@@ -49,7 +35,7 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
       || fs.realpathSync(actual.documents) !== path.join(profile, 'Documents')) {
       throw new Error('Smoke profile isolation failed; refusing UI interaction.');
     }
-    return { app, close, profile };
+    return { app, close };
   } catch (error) {
     await close();
     throw error;

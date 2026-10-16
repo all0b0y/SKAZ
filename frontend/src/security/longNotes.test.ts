@@ -1,21 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from '../../../electron/ipcPolicy';
+import { requestTimeoutMs, validateBridgeRequest } from '../../../electron/ipcPolicy';
 
-describe('long Knowledge Wiki IPC', () => {
-  it('accepts pasted sources without the ordinary settings body limit', () => {
-    const body = { text: 'Подробное объяснение. '.repeat(80_000), title: 'Lecture' };
-    expect(validateBridgeRequest({ method: 'POST', path: '/kb/materials/text', body })).toBeNull();
+describe('long Notes IPC', () => {
+  it('allows editing a full-size note without enlarging unrelated request budgets', () => {
+    const body = { content: 'Подробное объяснение. '.repeat(8000), expected_revision: 1 };
+    expect(validateBridgeRequest({ method: 'PATCH', path: '/sessions/s/notes/n', body })).toBeNull();
     expect(validateBridgeRequest({ method: 'PUT', path: '/settings', body })).toMatch(/too large/);
-    expect(validateBridgeRequest({ method: 'POST', path: '/kb/materials/link', body })).toMatch(/too large/);
+    expect(validateBridgeRequest({ method: 'PATCH', path: '/sessions/s/notes/n',
+      body: { content: 'x'.repeat(1_300_001) } })).toMatch(/too large/);
   });
 
-  it('allows the full chat text budget including JSON escaping and metadata', () => {
-    const body = { text: '\u0001'.repeat(100_000), model: 'chosen-model' };
-    expect(validateBridgeRequest({ method: 'POST', path: '/kb/chats/c/messages', body })).toBeNull();
-    expect(validateBridgeRequest({ method: 'PATCH', path: '/kb/chats/c', body })).toMatch(/too large/);
-  });
-
-  it('keeps a finite transport deadline; generation runs asynchronously', () => {
-    expect(REQUEST_TIMEOUT_MS).toBe(120_000);
+  it('gives multi-pass generation time without extending ordinary requests', () => {
+    expect(requestTimeoutMs({ method: 'POST', path: '/sessions/s/notes' })).toBe(3_600_000);
+    expect(requestTimeoutMs({ method: 'POST', path: '/sessions/s/notes/n/rewrite' })).toBe(3_600_000);
+    for (const request of [
+      { method: 'GET', path: '/sessions/s/notes' },
+      { method: 'POST', path: '/sessions/s/notes/empty' },
+      { method: 'POST', path: '/sessions/s/notes/n/rewrite/apply' },
+      { method: 'POST', path: '/codex/sessions/s/notes' },
+    ]) expect(requestTimeoutMs(request)).toBe(120_000);
   });
 });

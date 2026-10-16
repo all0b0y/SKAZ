@@ -32,9 +32,6 @@ extraResources:
     to: media-tools
     filter:
       - '**/*'
-  # The one-line installer: Settings → About → Update runs it on the verified download (B20).
-  - from: install.sh
-    to: install.sh
 
 asar: true
 

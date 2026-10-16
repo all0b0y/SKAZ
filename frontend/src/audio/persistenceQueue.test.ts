@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PersistenceQueue, type PersistedAudioAck } from './persistenceQueue';
-import type { AudioChunk } from './persistenceQueue';
+import type { AudioChunk } from './uploadQueue';
 
 const chunk = (sequence: number, bytes = [sequence, 0, sequence + 1]): AudioChunk => ({
   sequence,

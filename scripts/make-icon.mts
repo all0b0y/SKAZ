@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 /**
- * Build the SKAZ app icon (decision 38, «Роща + цветные корни») from the shared tree
- * geometry. The document itself — palette, grove, layers — is described by
- * frontend/src/brand/appIcon.ts; this script writes it and renders it.
+ * Build the SKAZ app icon from the shared tree geometry.
  *
  *   build/icon.icon  Icon Composer document; macOS 26 renders its Default, Dark,
  *                    Clear and Tinted appearances (electron-builder compiles it).
@@ -11,8 +9,7 @@
  *   icon/icon.png    The same 1024 render: README and the dev-mode Dock.
  *
  * Usage: node scripts/make-icon.mts [--previews <dir>]
- *   --previews renders every appearance to <dir> for review, plus Default and Dark
- *   at 1024/128/64/32/16 px.
+ *   --previews renders every appearance to <dir> for review.
  * Requires Xcode 26+ (Icon Composer's ictool) and macOS sips/iconutil.
  */
 import { execFileSync } from 'node:child_process';
@@ -20,17 +17,76 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { iconAssets, iconDocument } from '../frontend/src/brand/appIcon.ts';
+import { CANVAS, CROWN_CIRCLES, ROOT_CELLS, TRUNK_PATH } from '../frontend/src/brand/treeGeometry.ts';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICON_DOC = path.join(REPO_ROOT, 'build', 'icon.icon');
 const ICNS = path.join(REPO_ROOT, 'build', 'icon.icns');
 const PNG = path.join(REPO_ROOT, 'icon', 'icon.png');
 
+/** «Тил монохром»: one-tone tree, roots in a paler teal; graphite plate in Dark. */
+const PALETTE = {
+  default: { plate: ['#2f7c72', '#1b4a44'], tree: '#f3f6f4', roots: '#9fd6cb' },
+  dark: { plate: ['#242c2a', '#111715'], tree: '#e7eeeb', roots: '#87c4b8' },
+} as const;
+
 /** ictool rendition names for the review set. */
 const RENDITIONS = ['Default', 'Dark', 'ClearLight', 'ClearDark', 'TintedLight', 'TintedDark'] as const;
-/** Extra review sizes of the Default and Dark appearances (plate full-bleed, like the mockup). */
-const PREVIEW_SIZES = [1024, 128, 64, 32, 16] as const;
+
+function srgb(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return `srgb:${r!.toFixed(5)},${g!.toFixed(5)},${b!.toFixed(5)},1.00000`;
+}
+
+function svg(body: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">${body}</svg>\n`;
+}
+
+/** Artwork is white; Icon Composer recolours each layer per appearance. */
+function treeSvg(): string {
+  const crown = CROWN_CIRCLES.map(([cx, cy, r]) => `<circle cx="${cx}" cy="${cy}" r="${r}"/>`).join('');
+  return svg(`<g fill="#ffffff">${crown}<path d="${TRUNK_PATH}"/></g>`);
+}
+
+function rootsSvg(): string {
+  const pixels = ROOT_CELLS.map(
+    (c) => `<rect x="${c.x}" y="${c.y}" width="${c.size}" height="${c.size}" rx="2" opacity="${c.opacity}"/>`,
+  ).join('');
+  return svg(`<g fill="#ffffff">${pixels}</g>`);
+}
+
+function layerFill(key: 'tree' | 'roots') {
+  return [
+    { value: { solid: srgb(PALETTE.default[key]) } },
+    { appearance: 'dark', value: { solid: srgb(PALETTE.dark[key]) } },
+  ];
+}
+
+function iconJson() {
+  return {
+    'fill-specializations': [
+      { value: { 'linear-gradient': PALETTE.default.plate.map(srgb) } },
+      { appearance: 'dark', value: { 'linear-gradient': PALETTE.dark.plate.map(srgb) } },
+    ],
+    groups: [
+      {
+        name: 'Tree',
+        layers: [{ name: 'tree', 'image-name': 'tree.svg', glass: true, 'fill-specializations': layerFill('tree') }],
+        shadow: { kind: 'neutral', opacity: 0.5 },
+        translucency: { enabled: true, value: 0.4 },
+        specular: true,
+      },
+      {
+        name: 'Roots',
+        layers: [{ name: 'roots', 'image-name': 'roots.svg', glass: false, 'fill-specializations': layerFill('roots') }],
+        shadow: { kind: 'neutral', opacity: 0.3 },
+        translucency: { enabled: false, value: 0 },
+        specular: false,
+      },
+    ],
+    'supported-platforms': { squares: 'shared' },
+  };
+}
 
 function ictoolPath(): string {
   const developer = execFileSync('xcode-select', ['-p'], { encoding: 'utf8' }).trim();
@@ -54,8 +110,9 @@ function renderOnGrid(ictool: string, size: number, output: string, work: string
 function writeIconDocument(): void {
   rmSync(ICON_DOC, { recursive: true, force: true });
   mkdirSync(path.join(ICON_DOC, 'Assets'), { recursive: true });
-  for (const [name, svg] of Object.entries(iconAssets())) writeFileSync(path.join(ICON_DOC, 'Assets', name), svg);
-  writeFileSync(path.join(ICON_DOC, 'icon.json'), `${JSON.stringify(iconDocument(), null, 2)}\n`);
+  writeFileSync(path.join(ICON_DOC, 'Assets', 'tree.svg'), treeSvg());
+  writeFileSync(path.join(ICON_DOC, 'Assets', 'roots.svg'), rootsSvg());
+  writeFileSync(path.join(ICON_DOC, 'icon.json'), `${JSON.stringify(iconJson(), null, 2)}\n`);
 }
 
 /** Legacy .icns (DMG volume icon) and the 1024 PNG, both rendered from the document itself. */
@@ -86,12 +143,9 @@ function main(argv: string[]): void {
   if (previews) {
     mkdirSync(previews, { recursive: true });
     for (const rendition of RENDITIONS) render(ictool, rendition, path.join(previews, `${rendition}.png`));
-    for (const rendition of ['Default', 'Dark'] as const) {
-      for (const size of PREVIEW_SIZES) render(ictool, rendition, path.join(previews, `${rendition}-${size}.png`), size);
-    }
   }
   console.log(`wrote ${path.relative(REPO_ROOT, ICON_DOC)}, ${path.relative(REPO_ROOT, ICNS)}, ${path.relative(REPO_ROOT, PNG)}` +
-    (previews ? ` and ${RENDITIONS.length + 2 * PREVIEW_SIZES.length} previews in ${previews}` : ''));
+    (previews ? ` and ${RENDITIONS.length} previews in ${previews}` : ''));
 }
 
 main(process.argv.slice(2));

@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const root = path.resolve(__dirname, '..');
 
-test('dev and test use distinct real databases and knowledge libraries and persist after restart', async () => {
+test('dev and test use distinct real databases and libraries and persist after restart', async () => {
   test.setTimeout(120_000);
   const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'skaz-profiles-')));
   const launch = (profile: 'dev' | 'test') => electron.launch({
@@ -25,24 +25,24 @@ test('dev and test use distinct real databases and knowledge libraries and persi
         const page = await app.firstWindow();
         await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase)).toBe('ready');
         const library = path.join(actual.documents, 'SKAZ');
-        const result = await page.evaluate(async ({ profile, production }) => {
-          type Folder = { name: string; system: boolean };
-          const state = await window.skaz.request<{ state: string; root: string | null }>({ method: 'GET', path: '/kb/library' });
-          if (!state.ok) throw new Error('Library read failed');
-          if (state.data.state !== 'ready') {
-            const refused = await window.skaz.request({ method: 'POST', path: '/kb/library', body: { path: production } });
+        const result = await page.evaluate(async ({ profile, library, production }) => {
+          const sessions = await window.skaz.request<{ sessions: { title: string }[] }>({ method: 'GET', path: '/sessions' });
+          if (!sessions.ok) throw new Error('Session read failed');
+          if (sessions.data.sessions.length === 0) {
+            const refused = await window.skaz.request({ method: 'PUT', path: '/storage/root',
+              body: { root: production, expected_root: null } });
             if (refused.ok) throw new Error('Production library accepted by development!');
-            const chosen = await window.skaz.request({ method: 'POST', path: '/kb/library', body: {} });
+            const chosen = await window.skaz.request({ method: 'PUT', path: '/storage/root',
+              body: { root: library, expected_root: null } });
             if (!chosen.ok) throw new Error('Profile library refused');
-            const created = await window.skaz.request({ method: 'POST', path: '/kb/folders', body: { name: profile } });
-            if (!created.ok) throw new Error('Folder create failed');
+            const created = await window.skaz.request({ method: 'POST', path: '/sessions', body: { title: profile } });
+            if (!created.ok) throw new Error('Session create failed');
           }
-          const again = await window.skaz.request<{ root: string | null }>({ method: 'GET', path: '/kb/library' });
-          const folders = await window.skaz.request<Folder[]>({ method: 'GET', path: '/kb/folders' });
-          if (!again.ok || !folders.ok) throw new Error('Readback failed');
-          return { root: again.data.root, folders: folders.data.filter((f) => !f.system).map((f) => f.name) };
-        }, { profile, production: path.join(home, 'Documents/SKAZ') });
-        expect(result).toEqual({ root: library, folders: [profile] });
+          const again = await window.skaz.request<{ sessions: { title: string }[] }>({ method: 'GET', path: '/sessions' });
+          if (!again.ok) throw new Error('Readback failed');
+          return again.data.sessions.map((s) => s.title);
+        }, { profile, library, production: path.join(home, 'Documents/SKAZ') });
+        expect(result).toEqual([profile]);
       } finally { await app.close(); }
     }
     expect(await fs.readdir(path.join(home, '.skaz'))).toEqual(['dev', 'test']);

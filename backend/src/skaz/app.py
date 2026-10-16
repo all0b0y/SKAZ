@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import logging
-import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -15,28 +12,26 @@ from fastapi.responses import JSONResponse
 
 from .activity import current_activity
 from .config import AppConfig
-from .knowledge.api import ROUTERS as KB_ROUTERS
-from .knowledge.logsafe import error_note
-from .knowledge.mcp.router import router as kb_mcp_router
-from .knowledge.shutdown import close_knowledge
+from .managed_storage import StorageConflict
 from .native_io import disk_call
-from .routes import health, live, logs, sessions, settings
+from .routes import (
+    agent,
+    asr,
+    codex,
+    health,
+    imports,
+    live,
+    logs,
+    models,
+    sessions,
+    settings,
+    storage,
+    web_search,
+)
 from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
 from .security import local_access_error, require_token
-
-logger = logging.getLogger(__name__)
-
-#: The startup library scan runs in the background; the app waits this long for a small library
-#: before it starts answering (``/health``), never for the whole scan of a large one.
-STARTUP_SCAN_WAIT_S = 1.0
-
-
-def _log_scan_failure(task: asyncio.Task[None]) -> None:
-    error = None if task.cancelled() else task.exception()
-    if error is not None:
-        logger.error("startup library scan failed: %s", error_note(error))
 
 
 def create_app(
@@ -50,37 +45,27 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
-            # Reopen the connected knowledge library (never creates one) and rescan it in the
-            # background: the app answers meanwhile and the library says "indexing" (Electron
-            # gives the backend 30 s to answer /health; a large library takes longer to scan).
-            if await disk_call(runtime.kb.open_connected):
-                scan = asyncio.create_task(disk_call(runtime.kb.rescan), name="kb-startup-scan")
-                scan.add_done_callback(_log_scan_failure)
-                app.state.kb_startup_scan = scan
-                await asyncio.wait({scan}, timeout=STARTUP_SCAN_WAIT_S)
-            runtime.kb_auto_ingest.bind_loop(asyncio.get_running_loop())
-            # Outside edits of Wiki/ (every 2 s) and background connections when the user allowed them.
-            await runtime.kb_wiki.start()
+            await disk_call(runtime.session_files.reconcile)
             # Imports outlive the process that started them: a paid job keeps
             # running at the provider, so re-attach instead of abandoning it.
             runtime.imports.resume()
-            # Speech materials interrupted by the last shutdown settle in the background.
-            await runtime.kb_speech.start()
-            # Agents' housekeeping in the background (Hermes' leftover sessions, once prepared).
-            runtime.kb_agents.start()
+            runtime.codex.start()
             yield
         finally:
-            # Agents and llama-server first, then the wiki services, within Electron's grace.
-            await close_knowledge(runtime)
-            await runtime.codex_connection.close()
+            await runtime.codex.close()
             await runtime.imports.close()
             await runtime.stop_native()
-            await runtime.kb_speech.close()
             await runtime.http.aclose()
             runtime.close()
 
     app = FastAPI(title="SKAZ backend", version="0.1.0", lifespan=lifespan)
     app.state.runtime = runtime
+
+    @app.exception_handler(StorageConflict)
+    async def storage_conflict(_request: Request, _error: StorageConflict) -> JSONResponse:
+        return JSONResponse(status_code=409, content={
+            "detail": "Storage needs attention. Pause recording and check storage recovery.",
+        })
 
     @app.middleware("http")
     async def local_only(
@@ -92,11 +77,6 @@ def create_app(
         token = current_activity.set(runtime.activity_log)
         try:
             return await call_next(request)
-        except Exception as error:
-            # QA E1: an exception that left this middleware made uvicorn close the kept-alive
-            # socket after its 500, so the bridge's next request failed with "fetch failed".
-            # Answer here instead: JSON 500 (string ``detail``), an id to match the log line.
-            return _internal_error(request, error)
         finally:
             current_activity.reset(token)
 
@@ -109,28 +89,17 @@ def create_app(
     # WebSocket authentication is explicit in the route, not the HTTP dependency.
     app.include_router(live.router)
     protected = [Depends(require_token)]
-    # Legacy routes the Knowledge Wiki still calls: recording options (/settings), the live
-    # transcript of a recording and its status fallback (/sessions/{id}/live…, PATCH).
     app.include_router(settings.router, dependencies=protected)
+    app.include_router(storage.router, dependencies=protected)
+    app.include_router(asr.router, dependencies=protected)
     app.include_router(sessions.router, dependencies=protected)
+    app.include_router(imports.router, dependencies=protected)
+    app.include_router(agent.router, dependencies=protected)
+    app.include_router(codex.router, dependencies=protected)
+    app.include_router(web_search.router, dependencies=protected)
+    app.include_router(models.router, dependencies=protected)
     app.include_router(logs.router, dependencies=protected)
-    for kb_router in KB_ROUTERS:
-        app.include_router(kb_router, dependencies=protected)
-    # MCP for agent runs: its own per-run bearer token, never the app token (Host/Origin checked above).
-    app.include_router(kb_mcp_router)
     return app
-
-
-def _internal_error(request: Request, error: Exception) -> JSONResponse:
-    error_id = f"err-{secrets.token_hex(4)}"
-    # Route template, not the URL (ids only, no user text); the error's type and frames, no message.
-    route = getattr(request.scope.get("route"), "path", None) or "unknown route"
-    logger.error("unhandled error %s in %s %s: %s", error_id, request.method, route, error_note(error))
-    return JSONResponse(status_code=500, content={
-        "detail": f"Something went wrong inside SKAZ (error {error_id}). Try again; if it keeps "
-                  "happening, send the logs from Settings.",
-        "error_id": error_id,
-    })
 
 
 def _describe_validation(error: RequestValidationError) -> str:

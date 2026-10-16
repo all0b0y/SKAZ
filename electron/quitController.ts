@@ -17,6 +17,8 @@
 export interface QuitDeps {
   /** Stop capture and await durable renderer/backend ACKs before shutdown. */
   saveBeforeQuit?: () => Promise<boolean>;
+  /** Release the renderer quit lock if saving failed and the user stays. */
+  onCancelQuit?: () => void;
   /** Is there audio worth protecting (recording/draining/failed)? */
   hasUnsentAudio: () => boolean;
   /** Show the blocking warning. Returns true if the user chose to discard + quit. */
@@ -27,6 +29,14 @@ export interface QuitDeps {
   quit: () => void;
   /** Report a shutdown failure (optional). The app still quits afterwards. */
   onShutdownError?: (error: unknown) => void;
+  /** Are Codex tasks still active (running or waiting in the queue)? */
+  hasActiveTasks?: () => boolean;
+  /**
+   * Warn before quitting over active Codex tasks: true means "stop tasks and
+   * quit", false means "stay". Asked once per quit attempt, before any save or
+   * shutdown starts, so staying leaves recording and tasks untouched.
+   */
+  confirmStopTasks?: () => boolean;
 }
 
 type Phase = 'idle' | 'saving' | 'draining' | 'settled';
@@ -35,6 +45,7 @@ export class QuitController {
   private phase: Phase = 'idle';
   private authorized = false;
   private deciding = false;
+  private tasksAuthorized = false;
   private pending: Promise<void> | null = null;
 
   constructor(private readonly deps: QuitDeps) {}
@@ -47,6 +58,7 @@ export class QuitController {
   onBeforeQuit(): boolean {
     if (this.phase === 'settled') return false; // shutdown finished → let the real quit proceed
     if (this.phase === 'saving' || this.phase === 'draining') return true;
+    if (!this.authorizeTasks()) return true;
     if (this.deps.saveBeforeQuit) { this.beginSave(); return true; }
     if (!this.decide()) return true; // cancelled or a dialog is open → block, stay alive
     this.beginShutdown();
@@ -58,6 +70,7 @@ export class QuitController {
     if (this.phase === 'settled') return false;
     if (this.phase === 'saving' || (this.phase === 'draining' && this.deps.saveBeforeQuit)) return true;
     if (this.phase === 'draining') return false;
+    if (!this.authorizeTasks()) return true;
     if (this.deps.saveBeforeQuit) { this.beginSave(); return true; }
     if (!this.deps.hasUnsentAudio()) return false; // nothing to protect → allow
     if (!this.decide()) return true; // cancelled → block, backend preserved
@@ -68,6 +81,20 @@ export class QuitController {
   /** Resolves once any in-flight shutdown finishes (test + teardown helper). */
   settled(): Promise<void> {
     return this.pending ?? Promise.resolve();
+  }
+
+  // Active Codex tasks: one warning per quit attempt. The backend keeps their
+  // requests and partial results; after restart they wait for a manual resume.
+  private authorizeTasks(): boolean {
+    if (this.tasksAuthorized || !this.deps.hasActiveTasks?.() || !this.deps.confirmStopTasks) return true;
+    if (this.deciding) return false;
+    this.deciding = true;
+    try {
+      this.tasksAuthorized = this.deps.confirmStopTasks();
+    } finally {
+      this.deciding = false;
+    }
+    return this.tasksAuthorized;
   }
 
   // Synchronous authorization gate. Returns true only when quit is allowed.
@@ -97,6 +124,8 @@ export class QuitController {
       if (!saved && !this.deps.confirmDiscard()) {
         this.phase = 'idle';
         this.authorized = false;
+        this.tasksAuthorized = false;
+        this.deps.onCancelQuit?.();
         return;
       }
       this.authorized = true;

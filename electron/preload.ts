@@ -3,17 +3,13 @@ import { CHANNELS } from './channels';
 import { systemAudioSupported } from './systemAudio';
 import type {
   AudioFileChoice,
+  AudioUploadMeta,
   BackendStatus,
   BridgeApi,
   BridgeRequest,
   CaptureState,
-  DictationResult,
   JsonResponse,
-  MaterialFileChoice,
-  MediaAccess,
-  RevealTarget,
-  UpdateState,
-  TextFileSave,
+  SharedNote,
 } from '../frontend/src/api/bridge';
 
 // The only object exposed to the renderer. Context isolation is on and node
@@ -32,55 +28,28 @@ const api: BridgeApi = {
   request<T = unknown>(req: BridgeRequest): Promise<JsonResponse<T>> {
     return ipcRenderer.invoke(CHANNELS.request, req) as Promise<JsonResponse<T>>;
   },
-  dictate(wav: ArrayBuffer, language?: string): Promise<JsonResponse<DictationResult>> {
-    return ipcRenderer.invoke(CHANNELS.dictate, wav, language) as Promise<JsonResponse<DictationResult>>;
+  uploadAudio<T = unknown>(
+    sessionId: string,
+    meta: AudioUploadMeta,
+    wav: ArrayBuffer,
+  ): Promise<JsonResponse<T>> {
+    return ipcRenderer.invoke(CHANNELS.uploadAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
   },
-  saveTextFile(file: TextFileSave): Promise<{ saved: boolean; path?: string }> {
-    return ipcRenderer.invoke(CHANNELS.saveTextFile, { suggested_name: file.suggested_name, text: file.text }) as Promise<{ saved: boolean; path?: string }>;
+  bufferAudio<T = unknown>(
+    sessionId: string,
+    meta: AudioUploadMeta,
+    wav: ArrayBuffer,
+  ): Promise<JsonResponse<T>> {
+    return ipcRenderer.invoke(CHANNELS.bufferAudio, sessionId, meta, wav) as Promise<JsonResponse<T>>;
   },
-  chooseMaterialFiles(): Promise<MaterialFileChoice[]> {
-    return ipcRenderer.invoke(CHANNELS.chooseMaterialFiles) as Promise<MaterialFileChoice[]>;
+  readLogs(): Promise<string> {
+    return ipcRenderer.invoke(CHANNELS.readLogs) as Promise<string>;
   },
   openLogsFolder(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.openLogsFolder) as Promise<boolean>;
   },
-  // Only where System Settings has these panes (macOS): elsewhere the button is not offered at all.
-  ...(process.platform === 'darwin' ? {
-    openSystemAudioSettings(pane: 'microphone' | 'system-audio'): Promise<boolean> {
-      return ipcRenderer.invoke(CHANNELS.openSystemAudioSettings, pane) as Promise<boolean>;
-    },
-    mediaAccess(): Promise<MediaAccess> {
-      return ipcRenderer.invoke(CHANNELS.mediaAccess) as Promise<MediaAccess>;
-    },
-  } : {}),
   restartBackend(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.restartBackend) as Promise<boolean>;
-  },
-  chooseExportFolder(): Promise<string | null> {
-    return ipcRenderer.invoke(CHANNELS.chooseExportFolder) as Promise<string | null>;
-  },
-  showInFinder(target: RevealTarget): Promise<boolean> {
-    return ipcRenderer.invoke(CHANNELS.showInFinder, target) as Promise<boolean>;
-  },
-  openInObsidian(target, options) {
-    return ipcRenderer.invoke(CHANNELS.openInObsidian, target, { restart: options?.restart === true }) as ReturnType<NonNullable<BridgeApi['openInObsidian']>>;
-  },
-  updateState(): Promise<UpdateState> {
-    return ipcRenderer.invoke(CHANNELS.updateGet) as Promise<UpdateState>;
-  },
-  checkForUpdates(): Promise<UpdateState> {
-    return ipcRenderer.invoke(CHANNELS.updateCheck) as Promise<UpdateState>;
-  },
-  prepareUpdate(): Promise<UpdateState> {
-    return ipcRenderer.invoke(CHANNELS.updatePrepare) as Promise<UpdateState>;
-  },
-  installUpdate(): Promise<boolean> {
-    return ipcRenderer.invoke(CHANNELS.updateInstall) as Promise<boolean>;
-  },
-  onUpdateState(listener: (state: UpdateState) => void): () => void {
-    const handler = (_event: unknown, state: UpdateState): void => listener(state);
-    ipcRenderer.on(CHANNELS.updateState, handler);
-    return () => ipcRenderer.removeListener(CHANNELS.updateState, handler);
   },
   chooseStorageRoot(): Promise<string | null> {
     return ipcRenderer.invoke(CHANNELS.chooseStorageRoot) as Promise<string | null>;
@@ -91,7 +60,10 @@ const api: BridgeApi = {
   droppedMediaFile(file: File): AudioFileChoice | null {
     const path = webUtils.getPathForFile(file);
     // Sandboxed preloads cannot import Node path/url. Metadata is read by the backend.
-    return path ? { path, name: file.name } : null;
+    return path ? { path, name: file.name, url: '' } : null;
+  },
+  shareNote(note: SharedNote): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.shareNote, note) as Promise<boolean>;
   },
   getBackendStatus(): Promise<BackendStatus> {
     return ipcRenderer.invoke(CHANNELS.status) as Promise<BackendStatus>;
@@ -104,6 +76,9 @@ const api: BridgeApi = {
   reportCaptureState(state: CaptureState): void {
     ipcRenderer.send(CHANNELS.captureState, state);
   },
+  reportCodexActivity(activeTasks: number): void {
+    ipcRenderer.send(CHANNELS.codexActivity, activeTasks);
+  },
   onPrepareQuit(listener) {
     const handler = (_event: unknown, id: unknown): void => {
       if (!Number.isSafeInteger(id)) return;
@@ -115,6 +90,15 @@ const api: BridgeApi = {
     ipcRenderer.on(CHANNELS.prepareQuit, handler);
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
   },
+  onQuitCancelled(listener) {
+    const handler = (): void => listener();
+    ipcRenderer.on(CHANNELS.cancelQuit, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.cancelQuit, handler);
+  },
+  openSystemAudioSettings(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.openSystemAudioSettings) as Promise<boolean>;
+  },
+  platform: process.platform,
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
 };
 

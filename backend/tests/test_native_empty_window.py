@@ -9,7 +9,6 @@ from starlette.testclient import TestClient
 
 from skaz import asr_providers
 from skaz.gateways.whisper_stream import StreamSettings, WhisperStreamSession
-from tests.sessions_support import create_session, live_status
 from tests.test_native_live_ws import AUTH, packet
 from tests.test_whisper_progress import ContinuousSpeech, RevisingDecoder
 
@@ -28,7 +27,7 @@ def test_empty_completed_windows_release_replay_and_allow_long_capture(
     monkeypatch.setattr(asr_providers, "_local_opener", opener)
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as http:
         http.put("/settings", headers=AUTH, json={"transcription_provider": "local-whisper"})
-        sid = create_session(http, "Empty window regression")
+        sid = http.post("/sessions", headers=AUTH, json={"title": "Empty window regression"}).json()["id"]
         with http.websocket_connect(f"ws://127.0.0.1/sessions/{sid}/live/stream", headers=AUTH) as ws:
             ws.send_json({"type": "open", "sample_rate": 16000})
             assert ws.receive_json()["type"] == "stream.opened"
@@ -51,7 +50,7 @@ def test_empty_completed_windows_release_replay_and_allow_long_capture(
             ws.send_json({"type": "end"})
             assert ws.receive_json()["type"] == "stream.stopped"
         deadline = time.monotonic() + 2
-        while live_status(http, sid)["processing"]:
+        while http.get(f"/sessions/{sid}/live/status", headers=AUTH).json()["processing"]:
             assert time.monotonic() < deadline
             time.sleep(0.005)
         snapshot = http.get(f"/sessions/{sid}/live", headers=AUTH).json()

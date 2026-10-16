@@ -75,8 +75,8 @@ def test_transport_clock_and_final_survive_reopen_without_audio(tmp_path: Path) 
             {"connection_id": connection.id, "provider_id": "1", "number": 1},
         ]
         assert repo.list_segments(db, session.id)[0].id == ids[0]
-        with db.read() as reader:  # a native recording never writes an audio chunk row
-            assert reader.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 0
+        chunk = repo.get_chunk(db, session.id, 0)
+        assert chunk is None
         assert not (tmp_path / "audio").exists()
     finally:
         db.close()
@@ -130,6 +130,18 @@ def test_translation_is_durable_separate_and_idempotent_without_invented_sources
     try:
         reopened = LiveStore(db).snapshot(session.id)
         assert reopened["final_translation_tokens"] == translations
+    finally:
+        db.close()
+
+
+def test_native_recording_rejects_old_transcript_writer_before_first_final(tmp_path: Path) -> None:
+    db = Database(":memory:")
+    try:
+        session = repo.create_session(db, "Native")
+        store = LiveStore(db)
+        store.open(session.id, sample_rate=16000, model="stt-rt-v5")
+        with pytest.raises(repo.FinalWriterConflict):
+            repo.replace_chunk_segments(db, session.id, 0, [])
     finally:
         db.close()
 

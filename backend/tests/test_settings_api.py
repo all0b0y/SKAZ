@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
-
 import httpx
 import pytest
 
 from skaz.secrets import MemorySecretStore
-from skaz.settings_store import DEFAULT_SETTINGS
 from tests.conftest import FakeHttp
 
 CATALOG = {
@@ -211,42 +208,3 @@ async def test_updates_languages_and_consent(client: httpx.AsyncClient) -> None:
     assert body["output_language"] == "en"
     assert body["cloud_consent"] is True
     assert body["transcript_language"] == "auto"
-
-
-async def test_unknown_settings_fields_are_still_rejected(client: httpx.AsyncClient) -> None:
-    # Moved from the removed contextual-local tests: an unknown field is refused, not ignored.
-    response = await client.put("/settings", json={"contextual_local": True})
-    assert response.status_code == 422
-
-
-async def test_settings_saved_with_retired_money_fields_still_load(client: httpx.AsyncClient) -> None:
-    """An install that stored the import-cost warning and the embedding budget keeps working.
-
-    The fields are gone (nothing estimates money any more): the stored document loads,
-    they are not reported, the next save drops them and a request naming them is refused.
-    """
-    runtime = client._transport.app.state.runtime  # type: ignore[attr-defined]
-    with runtime.db.write() as connection:
-        connection.execute(
-            "INSERT INTO app_settings(id, doc) VALUES (1, ?)"
-            " ON CONFLICT(id) DO UPDATE SET doc = excluded.doc",
-            (json.dumps({**DEFAULT_SETTINGS.model_dump(), "output_language": "en",
-                         "import_cost_warning_usd": 0.3, "embedding_budget_usd": 0.01}),),
-        )
-
-    loaded = await client.get("/settings")
-    assert loaded.status_code == 200, loaded.text
-    assert loaded.json()["output_language"] == "en"
-    assert "import_cost_warning_usd" not in loaded.json()
-    assert "embedding_budget_usd" not in loaded.json()
-
-    saved = await client.put("/settings", json={"cloud_consent": True})
-    assert saved.status_code == 200, saved.text
-    with runtime.db.read() as connection:
-        doc = json.loads(connection.execute("SELECT doc FROM app_settings WHERE id = 1").fetchone()["doc"])
-    assert doc["output_language"] == "en"
-    assert "import_cost_warning_usd" not in doc and "embedding_budget_usd" not in doc
-
-    for field, value in (("import_cost_warning_usd", 1.0), ("embedding_budget_usd", 0.01),
-                         ("clear_import_cost_warning", True)):
-        assert (await client.put("/settings", json={field: value})).status_code == 422

@@ -33,3 +33,12 @@ def note(db: Database, provider: str, model: str, task: Task) -> str | None:
     if row is None:
         return None
     return f"{row['detail']} (verified {row['verified_at']})"
+
+
+def notes_for_task(db: Database, provider: str, task: Task) -> dict[str, str]:
+    with db.read() as connection:
+        rows = connection.execute(
+            "SELECT model, verified_at, detail FROM verifications WHERE provider = ? AND task = ?",
+            (provider, task),
+        ).fetchall()
+    return {row["model"]: f"{row['detail']} (verified {row['verified_at']})" for row in rows}

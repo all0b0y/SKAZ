@@ -19,10 +19,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from . import media_tools
 from .asr_providers import LABELS, check_import, import_model, import_provider, transcribe_import
@@ -35,13 +34,11 @@ from .gateways.soniox_async import (
 )
 from .import_store import UNSETTLED, ImportConflict, ImportRecord, ImportSource, ImportStore, digest_file
 from .import_temp import ImportTemp
-from .knowledge.logsafe import error_note
-from .media_source import PLATFORM_LABELS, video_source
+from .media_source import youtube_source
 from .native_io import disk_call
 
 if TYPE_CHECKING:  # pragma: no cover
     from .runtime import Runtime
-    from .settings_store import StoredSettings
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +46,8 @@ logger = logging.getLogger(__name__)
 POLL_SCHEDULE: tuple[float, ...] = (2.0, 2.0, 3.0, 5.0, 8.0, 10.0)
 #: A job still unfinished after this long is reported, not polled forever.
 MAX_WAIT_S = 6 * 60 * 60
-#: No queue: imports run side by side and beside a recording. The only bound is
-#: protective — on-device recognition shares this computer's CPU, so at most this
-#: many Local Whisper recognitions (imports plus live streams) may run at once;
-#: the next one is refused with a reason, never queued. Cloud imports are unbounded.
-MAX_LOCAL_RECOGNITIONS = 4
-LOCAL_BUSY = (f"{MAX_LOCAL_RECOGNITIONS} on-device transcriptions are already running on this computer. "
-              "Wait for one to finish, or use a cloud provider.")
-DUPLICATE_VIDEO = "This video already has a session. Open it or confirm Transcribe again."
-#: Where the user fixes it, by the names the Settings window shows (QA B6).
-SONIOX_NO_KEY = "Soniox has no API key stored. Add one in Settings → Accounts & keys."
+#: One active import; additional admissions are rejected, never queued.
+MAX_CONCURRENT_IMPORTS = 1
 #: Transport failures tolerated in a row before the import is called failed.
 MAX_TRANSPORT_FAILURES = 30
 
@@ -76,10 +65,6 @@ class ImportRequest:
     url: str | None = None
     prepare_media: bool = False
     allow_duplicate: bool = False
-    #: Spoken-language hints for this import only; ``None`` = the saved setting.
-    used_languages: tuple[str, ...] | None = None
-    #: Video metadata the caller already fetched (``media_tools.youtube_metadata``).
-    metadata: dict[str, Any] | None = None
 
 
 class ImportService:
@@ -87,166 +72,84 @@ class ImportService:
         self._runtime = runtime
         self.store = ImportStore(runtime.db)
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._slots = asyncio.Semaphore(MAX_CONCURRENT_IMPORTS)
         self._closing = False
-        #: Admissions between the request and the spawned task (each may await).
-        self._admitting = 0
-        #: Local Whisper admissions reserved before their task exists.
-        self._local_admitting = 0
-        #: Video ids being admitted: two simultaneous requests for one video
-        #: must not both pass the duplicate check.
-        self._videos_admitting: set[str] = set()
-        #: Sessions whose running task recognises on this computer.
-        self._local_sessions: set[str] = set()
-        #: Called with the session id when an import starts, settles or is cancelled.
-        self._listeners: list[Callable[[str], None]] = []
+        self._admitting = False
         self.temp = ImportTemp(runtime.config.data_dir / "import-temp")
-
-    def add_listener(self, listener: Callable[[str], None]) -> None:
-        self._listeners.append(listener)
-
-    def _notify(self, session_id: str) -> None:
-        for listener in self._listeners:
-            try:
-                listener(session_id)
-            except Exception as error:  # a listener never breaks an import
-                # Ids and types only: the message/traceback can quote a file name or recognised text.
-                logger.error("Import listener failed for %s: %s", session_id, error_note(error))
 
     @property
     def active(self) -> int:
-        return self._admitting + sum(1 for task in self._tasks.values() if not task.done())
-
-    def _local_running(self) -> int:
-        """On-device recognitions now: local imports (running or admitted) and local live streams."""
-        imports = sum(1 for session_id, task in self._tasks.items()
-                      if not task.done() and session_id in self._local_sessions)
-        streams = sum(1 for stream in self._runtime.native_streams.values()
-                      if stream.provider == "local-whisper")
-        return imports + self._local_admitting + streams
-
-    def _reserve_local(self) -> None:
-        """Synchronous check-and-reserve: no await between them, so no race past the bound."""
-        if self._local_running() >= MAX_LOCAL_RECOGNITIONS:
-            raise ImportConflict(LOCAL_BUSY)
-        self._local_admitting += 1
+        return int(self._admitting) + sum(1 for task in self._tasks.values() if not task.done())
 
     async def start(self, request: ImportRequest) -> ImportRecord:
-        """Admit at once or refuse; simultaneous requests never form a queue."""
+        """Reserve before any await: simultaneous requests must not form a queue."""
         self._claim()
         try:
             return await self._start(request)
         finally:
-            self._admitting -= 1
+            self._admitting = False
 
     def _claim(self) -> None:
-        if self._closing:
-            raise ImportConflict("SKAZ is closing. Start the import again after it restarts.")
-        self._admitting += 1
+        if self._closing or self.active:
+            raise ImportConflict("Another import is active. Open it to continue or cancel.")
+        if self._runtime.native_tasks or self._runtime.native_closing:
+            raise ImportConflict("Stop recording before importing media.")
+        self._admitting = True
 
     async def _start(self, request: ImportRequest) -> ImportRecord:
         settings = await disk_call(self._runtime.settings_store.load)
-        local = settings.transcription_provider == "local-whisper"
-        if local:
-            self._reserve_local()  # no await since the provider became known
-        video_id: str | None = None
-        try:
-            if request.url:
-                video_id = video_source(request.url).video_id
-                if video_id in self._videos_admitting:
-                    raise ImportConflict(DUPLICATE_VIDEO)
-                self._videos_admitting.add(video_id)
-            return await self._admit(request, settings)
-        finally:
-            if local:
-                self._local_admitting -= 1
-            if video_id is not None:
-                self._videos_admitting.discard(video_id)
-
-    async def _admit(self, request: ImportRequest, settings: StoredSettings) -> ImportRecord:
         if settings.transcription_provider == "soniox":
             if not settings.cloud_consent:
                 raise ProviderNotConfigured(
-                    "Importing a file sends its audio to Soniox. Turn on “Send audio to Soniox” in "
-                    "Settings → Recording & speech."
+                    "Importing a file sends its audio to Soniox; enable cloud consent in settings."
                 )
             if not await disk_call(self._runtime.api_key, "soniox"):
-                raise ProviderNotConfigured(SONIOX_NO_KEY)
+                raise ProviderNotConfigured("Soniox has no API key stored; add one in settings.")
         else:
             # The provider is fixed now and recorded on the import; a later settings
             # change never silently moves this file to another provider.
             await disk_call(check_import, self._runtime, settings, translate=request.translate)
         duration = request.declared_duration_ms
         if request.url:
-            # Any host of the video table (decision 40). The stored kind stays "youtube":
-            # it means "a video link" to the legacy store and archive (A-n in the S3 report).
-            video = video_source(request.url)
+            youtube = youtube_source(request.url)
             if not request.allow_duplicate and bool(
-                await disk_call(self.store.matching_video, video.video_id)
+                await disk_call(self.store.matching_video, youtube.video_id)
             ):
-                raise ImportConflict(DUPLICATE_VIDEO)
-            info = request.metadata or await media_tools.video_metadata(video.url)
+                raise ImportConflict("This video already has a session. Open it or confirm Transcribe again.")
+            info = await media_tools.youtube_metadata(youtube.url)
             duration = info["duration_ms"]
-            title = str(info.get("title") or f"{PLATFORM_LABELS[video.platform]} video")
-            source = ImportSource("", title, 0, 0, "", "youtube", video.url, video.video_id, True)
+            source = ImportSource("", info["title"], 0, 0, "", "youtube", youtube.url,
+                                  youtube.video_id, True)
         else:
             source = await disk_call(_describe_source, request.path)
             if request.prepare_media:
-                info = request.metadata or await media_tools.local_metadata(request.path)
+                info = await media_tools.local_metadata(request.path)
                 duration = info["duration_ms"]
                 source = replace(source, prepare_media=True)
-        languages = request.used_languages
-        if languages is None and settings.used_languages is not None:
-            languages = tuple(settings.used_languages)
         record = await disk_call(
             self.store.create, request.session_id, source=source, model=import_model(settings),
             translate=request.translate,
             translation_target_language=settings.translation_target_language,
-            used_languages=languages,
+            used_languages=(tuple(settings.used_languages)
+                            if settings.used_languages is not None else None),
             declared_duration_ms=duration,
         )
+        await disk_call(self._runtime.storage.ensure_import_directory, request.session_id)
         self._spawn(record)
         return record
 
     def resume(self) -> None:
-        """Mark unfinished jobs interrupted (only an explicit retry resumes them) and drop the
-        temporary media no import can use any more (QA E13)."""
+        """Mark unfinished jobs interrupted. Only an explicit retry resumes them."""
         self.store.interrupt()
-        self.sweep_temp()
-
-    def sweep_temp(self) -> int:
-        """Remove ``import-temp/<session>`` whose import is gone, finished or cancelled.
-
-        A failed or interrupted import keeps its prepared audio: Retry starts from it. A
-        deleted material's import is cancelled with its session, so its media goes too.
-        """
-        removed = 0
-        for session_id in self.temp.sessions():
-            record = self.store.get(session_id)
-            if record is not None and record.status not in ("completed", "cancelled"):
-                continue
-            try:
-                self.temp.remove(session_id)
-            except (OSError, ValueError) as error:
-                logger.warning("Temporary import media of %s not removed: %s", session_id, error_note(error))
-                continue
-            removed += 1
-        if removed:
-            logger.info("Removed temporary media of %d finished or deleted import(s)", removed)
-        return removed
 
     async def retry(self, session_id: str) -> ImportRecord:
         self._claim()
-        local = False
         try:
             settings = await disk_call(self._runtime.settings_store.load)
             previous = await disk_call(self.store.get, session_id)
             if previous is None or previous.status not in ("failed", "interrupted"):
                 raise ImportConflict("Only a failed or interrupted import can be retried.")
-            if session_id in self._tasks and not self._tasks[session_id].done():
-                raise ImportConflict("This import is still running.")
             if import_provider(previous.model) == "local-whisper":
-                self._reserve_local()
-                local = True
                 # On-device work has no remote job to reconcile: run it again.
                 record = await disk_call(self.store.retry, session_id)
                 self._spawn(record)
@@ -268,29 +171,21 @@ class ImportService:
             self._spawn(record)
             return record
         finally:
-            self._admitting -= 1
-            if local:
-                self._local_admitting -= 1
+            self._admitting = False
 
     def _spawn(self, record: ImportRecord) -> None:
         if self._closing:
             return
-        session_id = record.session_id
-        if import_provider(record.model) == "local-whisper":
-            self._local_sessions.add(session_id)
-        task = asyncio.create_task(self._run(session_id), name=f"import-{session_id}")
-        self._tasks[session_id] = task
-        task.add_done_callback(lambda finished: self._forget(session_id, finished))
-        self._notify(session_id)
+        task = asyncio.create_task(self._run(record.session_id), name=f"import-{record.session_id}")
+        self._tasks[record.session_id] = task
+        task.add_done_callback(lambda finished: self._forget(record.session_id, finished))
 
     def _forget(self, session_id: str, task: asyncio.Task[None]) -> None:
         if self._tasks.get(session_id) is task:
             self._tasks.pop(session_id, None)
-            self._local_sessions.discard(session_id)
         if not task.cancelled() and task.exception() is not None:
             logger.warning("Import task for %s ended unexpectedly", session_id,
                            exc_info=task.exception())
-        self._notify(session_id)
 
     async def cancel(self, session_id: str) -> ImportRecord:
         """Stop an in-flight import, then release provider-side resources.
@@ -315,7 +210,6 @@ class ImportService:
         cancelled = await disk_call(self.store.mark_cancelled, session_id)
         await self._release(settled or record, delete_job=True)
         await disk_call(self.temp.remove, session_id)
-        self._notify(session_id)
         return cancelled
 
     async def prepare_delete(self, session_id: str) -> None:
@@ -328,19 +222,21 @@ class ImportService:
             await asyncio.gather(task, return_exceptions=True)
 
     async def _run(self, session_id: str) -> None:
-        record = await disk_call(self.store.get, session_id)
-        if record is None or record.status not in UNSETTLED:
-            return
-        try:
-            await self._execute(record)
-        except asyncio.CancelledError:
-            raise
-        except (SonioxAsyncError, LiveAsrError) as error:
-            await self._fail(session_id, str(error))
-        except (ImportConflict, ProviderNotConfigured, OSError, media_tools.MediaError) as error:
-            await self._fail(session_id, str(error))
+        async with self._slots:
+            record = await disk_call(self.store.get, session_id)
+            if record is None or record.status not in UNSETTLED:
+                return
+            try:
+                await self._execute(record)
+            except asyncio.CancelledError:
+                raise
+            except (SonioxAsyncError, LiveAsrError) as error:
+                await self._fail(session_id, str(error))
+            except (ImportConflict, ProviderNotConfigured, OSError, media_tools.MediaError) as error:
+                await self._fail(session_id, str(error))
 
     async def _execute(self, record: ImportRecord) -> None:
+        await disk_call(self._runtime.storage.ensure_import_directory, record.session_id)
         if import_provider(record.model) != "soniox":
             await self._execute_direct(record)
             return
@@ -379,6 +275,7 @@ class ImportService:
             self.store.apply_transcript, session_id, tokens=transcript.tokens,
             audio_duration_ms=job.audio_duration_ms or 0,
         )
+        await disk_call(self._runtime.session_files.project, session_id)
         self._runtime.mark_verified(
             "asr", "soniox", record.model, "Transcribed an imported audio file through this installation",
         )
@@ -402,6 +299,7 @@ class ImportService:
             self.store.apply_transcript, session_id, tokens=transcript.tokens,
             audio_duration_ms=transcript.duration_ms,
         )
+        await disk_call(self._runtime.session_files.project, session_id)
         self._runtime.mark_verified(
             "asr", provider, record.model.partition("/")[2],
             f"Transcribed an imported audio file with {LABELS[provider]} through this installation",
@@ -479,7 +377,7 @@ class ImportService:
     async def _gateway(self) -> SonioxAsyncGateway:
         key = await disk_call(self._runtime.api_key, "soniox")
         if not key:
-            raise ProviderNotConfigured(SONIOX_NO_KEY)
+            raise ProviderNotConfigured("Soniox has no API key stored; add one in settings.")
         return SonioxAsyncGateway(api_key=key, http=self._runtime.http)
 
     async def close(self) -> None:
