@@ -109,6 +109,18 @@ describe('Source marks and popup', () => {
     expect(pop.querySelector('[data-icon="play"]')).not.toBeNull();
   });
 
+  it('a pasted text or article says which paragraph (QA C13)', async () => {
+    const user = userEvent.setup();
+    const text = (seg: number, index: number, quote: string): KbCitation => ({
+      material_id: 't1', seg, available: true, material_title: 'Pasted notes', start_ms: null, end_ms: null, page: null, quote, index,
+    });
+    harness(<p>Claim<SourceMarks citations={[text(1, 1, 'first words'), text(6, 6, 'sixth words')]} /></p>);
+    await user.hover(screen.getByRole('button', { name: 'Source 1: Pasted notes' }));
+    const pop = await screen.findByRole('dialog', { name: 'Pasted notes' });
+    expect(within(pop).getByText('¶ 1')).toBeInTheDocument();
+    expect(within(pop).getByText('¶ 6')).toBeInTheDocument();
+  });
+
   it('a removed source: muted dashed number, the popup says it is gone and offers no opening', async () => {
     const user = userEvent.setup();
     harness(<p>Claim<SourceMarks citations={[doc('s3', 'Old notes', 1, 2, 'gone words', false)]} /></p>);

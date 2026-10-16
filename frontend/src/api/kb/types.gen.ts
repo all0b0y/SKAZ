@@ -213,6 +213,7 @@ export interface KbCitation {
   end_ms: number | null;
   page: number | null;
   quote?: string | null;
+  index?: number | null;
 }
 
 export interface KbCitePart {

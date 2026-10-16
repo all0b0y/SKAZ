@@ -83,6 +83,8 @@ class CitationView:
     page: int | None = None
     #: The verbatim quote the claim rests on (highlight it, not the whole fragment); None if unknown.
     quote: str | None = None
+    #: Paragraph number of an article/text fragment (``¶ n``), when it has one.
+    index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -454,7 +456,7 @@ class KnowledgeService:
                                     material_title=_gone_title(text, seg, fragments.values()))
             fragment, title = found
             return CitationView(material_id, seg, True, title, fragment.start_ms, fragment.end_ms,
-                                fragment.page, quote)
+                                fragment.page, quote, fragment.index)
 
         return PageView(
             id=record.id, kind=record.kind, title=record.title, original=record.original,

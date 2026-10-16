@@ -84,6 +84,7 @@ def page_view(detail: PageDetail) -> KbPage:
                                 end_ms=c.end_ms,
                                 page=c.page,
                                 quote=c.quote,
+                                index=c.index,
                             )
                             for c in entry.citations
                         ],

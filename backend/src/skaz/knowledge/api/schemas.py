@@ -166,6 +166,8 @@ class KbCitation(BaseModel):
     page: int | None
     #: The verbatim quote the claim rests on; highlight it rather than the whole fragment.
     quote: str | None = None
+    #: Paragraph number of an article or text (``¶ 6``) when there is no time or page (QA C13).
+    index: int | None = None
 
 
 class KbPageRef(BaseModel):
