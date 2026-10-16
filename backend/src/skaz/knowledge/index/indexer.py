@@ -52,6 +52,17 @@ def replace_index(db: KnowledgeDatabase, result: ScanResult, *, stop: StopCheck 
             _put_page(connection, page)
 
 
+def clear_index(db: KnowledgeDatabase) -> None:
+    """Empty every table rebuilt from library files, the areas' derived ones included.
+
+    For a switch to another library: the previous library's rows must not be served as if they
+    were the new one's while the new one can't be read (QA E15).
+    """
+    with db.write() as connection:
+        for table in (*_REBUILT, "edges", "corrections"):
+            connection.execute(f"DELETE FROM {table}")
+
+
 def _under(path: str, prefixes: Sequence[str]) -> bool:
     return any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
 

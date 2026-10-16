@@ -223,9 +223,17 @@ class KnowledgeService:
             raise LibraryConflict(SANDBOX_REASON)
         with self._state_lock:
             library = Library.create(root) if read_marker(root) is None else Library.open(root, None)
+            previous = self._stored
             self.library_state.set(str(root), library.library_id)
             with self._view_lock:
                 self._stored = (str(root), library.library_id)
+            if previous is not None and previous[1] != library.library_id:
+                # Another library: nothing of the previous one is served under its name, even
+                # when the new one can't be read yet (its scan fails) — QA E15.
+                with self._view_lock:
+                    self._library, self._reason = None, NOT_CONNECTED
+                indexer.clear_index(self.db)
+                self._note_unreadable(())
             self._open_and_scan(root, library.library_id)
         return self.view()
 
