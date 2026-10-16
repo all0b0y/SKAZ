@@ -3,8 +3,8 @@
 Every path runs: extract → clean (layer 2) → fragments → instruction
 detector (layer 3) → ``KnowledgeService.create_material`` (status
 ``processing``) → evidence and guard files in the material's ``.skaz/`` →
-``ready`` (or ``failed`` with a reason). A name collision refuses the whole
-add before anything is written.
+``ready`` (or ``failed`` with a reason). A derived title that is taken gets
+`` (2)``…; a title the user typed is refused before anything is written.
 
 Material ``.skaz/`` files written here:
 
@@ -281,18 +281,21 @@ class SourceService:
             raise SourceRejected(f"This file is larger than {limit // (1024 * 1024)} MB.")
         return resolved
 
-    def _title(self, prepared: Prepared, title: str | None) -> str:
+    @staticmethod
+    def _title(prepared: Prepared, title: str | None) -> tuple[str, bool]:
+        """The name and whether the user typed it (a typed name is refused when taken, QA B1)."""
         if title is not None and title.strip():
-            return validate_name(title)
-        return prepared.title or prepared.fallback_title
+            return validate_name(title), True
+        return prepared.title or prepared.fallback_title, False
 
     def _publish(self, prepared: Prepared, folder_id: str, title: str | None,
                  to_wiki: bool | None = None) -> IntakeResult:
-        name = self._title(prepared, title)
+        name, typed = self._title(prepared, title)
         detections = [detect_instruction(fragment.text) for fragment in prepared.fragments]
         status: MaterialStatus = "failed" if prepared.failure else "processing"
         files = self.kb.create_material(
-            folder_id, name, prepared.kind, prepared.fragments, status=status, origin=prepared.origin
+            folder_id, name, prepared.kind, prepared.fragments, status=status, origin=prepared.origin,
+            unique=not typed,
         )
         material_id = files.manifest.id
         try:

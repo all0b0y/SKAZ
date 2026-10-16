@@ -24,6 +24,17 @@ def _reject(reason: str) -> NameRejected:
     return NameRejected(f"{reason} Choose another name.")
 
 
+def numbered_name(name: str, number: int) -> str:
+    """``name (n)`` as Finder numbers a copy (QA B1, decision B19); the base is cut so it stays valid."""
+    if number < 2:
+        return name
+    suffix = f" ({number})"
+    base = name
+    while base and len(unicodedata.normalize("NFD", base + suffix).encode("utf-8")) > MAX_NAME_BYTES:
+        base = base[:-1]
+    return base.rstrip() + suffix
+
+
 def validate_name(raw: str, *, reserved: Iterable[str] = ()) -> str:
     name = unicodedata.normalize("NFC", raw).strip()
     if not name:

@@ -324,11 +324,12 @@ class KnowledgeService:
     def create_material(
         self, folder_id: str, title: str, kind: MaterialKind, fragments: Sequence[FragmentInput], *,
         status: MaterialStatus = "ready", origin: Origin | None = None, languages: Sequence[str] = (),
+        unique: bool = False,
     ) -> MaterialFiles:
         with self.writing():
             library = self.require()
             files = library.create_material(folder_id, title, kind, fragments, status=status, origin=origin,
-                                            languages=languages)
+                                            languages=languages, unique=unique)
             self._index_material(library, files)
         return files
 

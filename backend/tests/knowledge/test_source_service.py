@@ -72,11 +72,21 @@ def test_pasted_text_gets_first_words_as_title_and_is_ready(sources: SourceServi
     assert (directory / ".skaz" / "original.txt").read_text(encoding="utf-8") == text
 
 
-def test_title_collision_is_refused_and_nothing_is_created(sources: SourceService) -> None:
+def test_a_derived_title_that_is_taken_is_numbered(sources: SourceService) -> None:
+    """QA B1 / decision B19: SKAZ's own title gets " (2)", " (3)"… like Finder."""
+    first = sources.add_text("Same words here.\n\nBody.", INBOX_ID)
+    second = sources.add_text("Same words here.\n\nOther body.", INBOX_ID)
+    third = sources.add_text("same words here.\n\nThird.", INBOX_ID)
+    assert [first.title, second.title, third.title] == [
+        "Same words here", "Same words here (2)", "same words here (3)"]
+    assert (material_dir(sources.kb, second.material_id) / "Same words here (2).md").is_file()
+
+
+def test_a_typed_title_that_is_taken_is_refused_and_nothing_is_created(sources: SourceService) -> None:
     sources.add_text("Same words here.\n\nBody.", INBOX_ID)
     before = sources.kb.materials()
     with pytest.raises(NameTaken):
-        sources.add_text("Same words here.\n\nOther body.", INBOX_ID)
+        sources.add_text("Other words.", INBOX_ID, title="same words here")
     assert sources.kb.materials() == before
     assert (
         sources.add_text("Same words here.", INBOX_ID, title="Same words, second").title

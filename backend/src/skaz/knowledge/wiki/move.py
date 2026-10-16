@@ -136,7 +136,7 @@ def move_material(
             reindex(kb, library, path)
         except (KnowledgeError, OSError, UnicodeDecodeError, ValueError):
             journal.append(f"“{page.title}” could not be updated; its links are rebuilt on the next change.")
-    if title is not None:
+    if title is not None or files.title != old_files.title:  # typed, or numbered on a move (QA B1)
         journal.extend(_rename_note(kb, library, material_id, files.title))
     return journal
 

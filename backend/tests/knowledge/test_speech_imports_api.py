@@ -214,10 +214,23 @@ async def test_requests_are_checked_before_anything_starts(
         response = await api.post("/kb/imports", json=body)
         assert response.status_code == status, (body, response.text)
     await api.post("/kb/imports", json={"path": media(tmp_path, "Same.m4a")})
-    taken = await api.post("/kb/imports", json={"path": media(tmp_path, "same.m4a")})
-    assert taken.status_code == 409 and "already exists" in taken.json()["detail"]
+    taken = await api.post("/kb/imports", json={"path": media(tmp_path, "other.m4a"), "title": "same"})
+    assert taken.status_code == 409 and "already exists" in taken.json()["detail"]  # typed: refused
     assert session_count(speech_app) == sessions_before + 1
     assert len(soniox.jobs) <= 1
+
+
+async def test_a_derived_import_title_that_is_taken_is_numbered(
+    api: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    """QA B1 / decision B19: the file's own name gets " (2)" instead of a dead-end refusal."""
+    first = await api.post("/kb/imports", json={"path": media(tmp_path, "Lecture.m4a")})
+    (tmp_path / "again").mkdir()
+    path = tmp_path / "again" / "lecture.m4a"
+    path.write_bytes(b"\x02\x03" * 2048)
+    second = await api.post("/kb/imports", json={"path": str(path)})
+    assert first.status_code == 201 and second.status_code == 201, second.text
+    assert [first.json()["title"], second.json()["title"]] == ["Lecture", "lecture (2)"]
 
 
 async def test_audio_and_video_paths_get_the_same_checks_as_documents(
