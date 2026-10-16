@@ -6,10 +6,14 @@ import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
 import { quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
+import { useServices } from '../state/context';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
 import { SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
+import type { AnyMessagePart, KbPermissionPart, KbQuestionPart } from '../api/permissions';
+import { PermissionCard } from './permission';
+import { QuestionBlock } from './QuestionBlock';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -18,14 +22,16 @@ export type InlineSlot =
 
 type Block =
   | { kind: 'inline'; pieces: Array<string | number>; slots: InlineSlot[] }
-  | { kind: 'connection'; part: Extract<KbMessagePart, { type: 'connection' }> };
+  | { kind: 'connection'; part: Extract<KbMessagePart, { type: 'connection' }> }
+  | { kind: 'permission'; part: KbPermissionPart }
+  | { kind: 'question'; part: KbQuestionPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
  * standing next to each other (only spaces between) are one claim's sources: one slot, so the
  * marks merge duplicates; the spaces before them go, so the number sits on the sentence.
  */
-export function toBlocks(parts: KbMessagePart[]): Block[] {
+export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
   const out: Block[] = [];
   let run: Extract<Block, { kind: 'inline' }> | null = null;
   let pendingSpace: string | null = null;
@@ -40,10 +46,11 @@ export function toBlocks(parts: KbMessagePart[]): Block[] {
   };
   for (const part of parts) {
     if (part.type === 'tool') continue;
-    if (part.type === 'connection') {
+    if (part.type === 'connection' || part.type === 'permission' || part.type === 'question') {
+      // A connection, a permission request and an agent question are blocks of their own (0.3.1 P).
       flushSpace();
       run = null;
-      out.push({ kind: 'connection', part });
+      out.push(part.type === 'connection' ? { kind: 'connection', part } : part.type === 'permission' ? { kind: 'permission', part } : { kind: 'question', part });
       continue;
     }
     if (!run) { run = { kind: 'inline', pieces: [], slots: [] }; out.push(run); }
@@ -94,12 +101,23 @@ export function plainText(parts: KbMessagePart[]): string {
   }).join('').trim();
 }
 
-function Parts({ parts }: { parts: KbMessagePart[] }) {
+function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePart[] }) {
+  const open = useOpenDocument();
+  const { ui } = useServices();
   return (
     <>
-      {toBlocks(parts).map((b, i) => (b.kind === 'connection'
-        ? <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />
-        : <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />))}
+      {toBlocks(parts).map((b, i) => {
+        if (b.kind === 'connection') return <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />;
+        if (b.kind === 'permission') {
+          const partId = b.part.id;
+          return (
+            <PermissionCard key={partId} chatId={chatId} part={b.part} onOpen={(id) => open({ type: 'page', id })}
+              onReview={() => ui.getState().openReview(chatId, partId)} />
+          );
+        }
+        if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
+        return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
+      })}
     </>
   );
 }
@@ -161,7 +179,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
         {empty && message.state === 'streaming' && <p className="kb-msg__wait" role="status">Writing an answer…</p>}
         <SourcesProvider index={sources}>
-          <Parts parts={message.parts} />
+          <Parts chatId={chatId} parts={message.parts} />
         </SourcesProvider>
       </div>
       <SourcesRow index={sources} />

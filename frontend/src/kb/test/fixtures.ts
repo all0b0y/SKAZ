@@ -11,6 +11,7 @@ import type {
 } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { block, chatMessage, fragment, materialWiki, pageRef, type FakeWorld } from './fakeKb';
+import type { AnyMessagePart, KbPermissionPart, KbQuestionPart } from '../api/permissions';
 
 const NOW = '2026-10-15T09:00:00Z';
 const MIN = 60_000;
@@ -471,4 +472,80 @@ export function docWorld(): FakeWorld {
     }],
     lastFolderId: 'phys',
   });
+}
+
+// ---- agent permissions and questions (0.3.1 phase P) -------------------------------------------
+
+const asPart = (p: AnyMessagePart) => p as KbMessagePart;
+
+/** A permission request in the contract's shape (Entropy page, edit by Codex, waiting by default). */
+export function permissionPart(id: string, extra: Partial<KbPermissionPart> = {}): KbPermissionPart {
+  return {
+    type: 'permission', id, kind: 'edit', engine: 'codex', page_id: 'p-entropy', title: 'Entropy', status: 'pending', auto: false, reason: null,
+    summary: { added: 2, changed: 1, removed: 0, user_notes_untouched: true },
+    changes: [
+      { op: 'replace', block_id: 'b1', label: 'From sources', block_kind: 'from_source', before: 'A measure of the disorder of a system.', after: 'A measure of the disorder of a system: the logarithm of the number of microstates.' },
+      { op: 'add', block_id: null, label: 'Agent explanation', block_kind: 'explanation', before: null, after: 'Like counting the ways to arrange a messy room.' },
+      { op: 'add', block_id: null, label: 'Connections (agent inference)', block_kind: 'connection', before: null, after: 'Linked to “Cross-entropy”: the same formula in ML.' },
+    ],
+    ...extra,
+  };
+}
+
+/** An agent question in the contract's shape (Codex, four rows, the first recommended). */
+export function questionPart(id: string, extra: Partial<KbQuestionPart> = {}): KbQuestionPart {
+  return {
+    type: 'question', id, engine: 'codex', question: 'Where shall we start reviewing “Lecture 8”?', allow_other: true, status: 'pending', answer: null,
+    options: [
+      { label: 'Hard cards first', description: '3 cards you often forget, then due ones', recommended: true },
+      { label: 'Everything due today', description: '8 cards whose review date has come', recommended: false },
+      { label: 'Quick 10', description: 'The 10 closest to being forgotten', recommended: false },
+      { label: 'All 12 cards', description: 'Practice: only Again changes the schedule', recommended: false },
+    ],
+    ...extra,
+  };
+}
+
+/**
+ * chatWorld plus the phase-P chats: an edit waiting for the user (c8), a question waiting (c9), a chat
+ * with decided requests — allowed in this chat (Undo), denied with a reason, cancelled (c10) — and a
+ * delete waiting (c11).
+ */
+export function agentControlsWorld(): FakeWorld {
+  const w = chatWorld();
+  const chat = (id: string, title: string, minutesAgo: number, messages: KbChat['messages'], answering: boolean): KbChat => ({
+    id, title, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+    created_at: ago(minutesAgo + 10), updated_at: ago(minutesAgo), last_preview: '', recording_material_id: null,
+    folder_ids: [], state: answering ? 'answering' : 'idle', unread: false, messages, cursor: 0,
+  });
+  const ask = (id: string, text: string, min: number) => chatMessage(id, 1, 'user', ago(min), [{ type: 'text', text }]);
+  const answer = (id: string, min: number, parts: AnyMessagePart[], state: 'streaming' | 'done') =>
+    chatMessage(id, 2, 'assistant', ago(min), parts.map(asPart), { engine: 'codex', model: 'gpt-5.6-luna', state });
+  w.chats.push(
+    chat('c8', 'Entropy — edit', 1, [
+      ask('c8-u1', 'Add the microstates to “Entropy” and explain it simply', 2),
+      answer('c8-a1', 1, [{ type: 'text', text: 'I propose an edit of the page: the formula from the lecture and a plain explanation.' }, permissionPart('perm-edit')], 'streaming'),
+    ], true),
+    chat('c9', 'Review lecture 8', 1.5, [
+      ask('c9-u1', 'Let’s review lecture 8', 2),
+      answer('c9-a1', 1.5, [questionPart('q1')], 'streaming'),
+    ], true),
+    chat('c10', 'Wiki tidy-up', 2, [
+      ask('c10-u1', 'Tidy the entropy pages', 3),
+      answer('c10-a1', 2, [
+        permissionPart('perm-auto', { status: 'allowed', auto: true, title: 'Cross-entropy', page_id: 'p-xent' }),
+        permissionPart('perm-denied', { status: 'denied', reason: 'Only from the lecture, no comparisons' }),
+        permissionPart('perm-cancelled', { kind: 'create', status: 'cancelled', title: 'Microstate', page_id: null }),
+      ], 'done'),
+    ], false),
+    chat('c11', 'Remove Spike', 2.5, [
+      ask('c11-u1', 'Delete the page about spikes', 3),
+      answer('c11-a1', 2.5, [permissionPart('perm-del', {
+        kind: 'delete', title: 'Spike', page_id: 'p-spike', summary: { added: 0, changed: 0, removed: 3, user_notes_untouched: true },
+        changes: [{ op: 'remove', block_id: null, label: 'Whole page', block_kind: 'page', before: '“Spike” — 3 blocks, made by the agent', after: null }],
+      })], 'streaming'),
+    ], true),
+  );
+  for (const id of ['c8', 'c9', 'c10', 'c11']) w.chatEvents[id] = [];
+  return w;
 }

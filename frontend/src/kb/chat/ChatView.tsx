@@ -8,6 +8,16 @@ import { AgentFix } from './AgentFix';
 import { useOpenDocument } from '../state/document';
 import { ChatMenu, RenameForm } from './ChatMenu';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message';
+import { partsOf } from '../api/permissions';
+import type { KbChat } from '../../api/kb/types.gen';
+
+/** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
+function waitingHint(chat: KbChat | null): string | null {
+  const parts = chat?.messages.flatMap((m) => partsOf(m)) ?? [];
+  if (parts.some((p) => p.type === 'question' && p.status === 'pending')) return 'Pick an option above, or just type…';
+  if (parts.some((p) => p.type === 'permission' && p.status === 'pending')) return 'You can keep typing — the request waits';
+  return null;
+}
 
 function useNotice(): [string | null, (text: string | null) => void] {
   const [notice, setNotice] = useState<string | null>(null);
@@ -140,7 +150,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           </div>
         )}
       </div>
-      <Composer chatId={currentId} placeholder={recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference'} />
+      <Composer chatId={currentId}
+        placeholder={waitingHint(chat) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
     </section>
   );
 }

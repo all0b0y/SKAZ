@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { m } from 'motion/react';
 import { Icon, type IconName } from '../ui';
-import { useNotifications, usePrefs, useServices, useUi } from '../state/context';
+import { useChats, useNotifications, usePrefs, useServices, useUi } from '../state/context';
+import { isWaitingForUser } from '../api/permissions';
 import type { Section } from '../state/prefs';
 import { useProblems } from './problems';
 
@@ -134,9 +135,15 @@ export function Rail() {
   const openSettings = useUi((s) => s.openSettings);
   const settingsOpen = useUi((s) => s.settingsOpen);
   const searchOpen = useUi((s) => s.searchOpen);
+  const center = useUi((s) => s.center);
   const setSearchOpen = useUi((s) => s.setSearchOpen);
   const problems = useProblems();
   const labels = useRailLabels();
+  // 0.3.1 P4: a chat other than the one in front of you waits for an answer — a dot, nothing pops up.
+  const waiting = useChats((s) => {
+    const shown = center === 'chat' ? s.currentId : null;
+    return s.list.some((c) => c.id !== shown && isWaitingForUser(c));
+  });
 
   return (
     <nav className="kb-rail" data-pane="rail" aria-label="Sections">
@@ -144,15 +151,17 @@ export function Rail() {
         {ITEMS.map((item) => {
           const active = sideOpen && (section === item.id || (item.id === 'wiki' && section === 'graph'));
           const badge = item.id === 'notifications' ? unread : 0;
+          const waits = item.id === 'chats' && waiting;
           return (
             <li key={item.id}>
               <RailButton
-                id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : undefined} icon={item.icon} active={active} labels={labels}
-                ariaLabel={badge > 0 ? `${item.label}, ${badge} unread` : item.label}
+                id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : waits ? 'Waiting for you' : undefined} icon={item.icon} active={active} labels={labels}
+                ariaLabel={badge > 0 ? `${item.label}, ${badge} unread` : waits ? `${item.label}, waiting for you` : item.label}
                 attrs={{ 'aria-current': active ? 'page' : undefined }}
                 onClick={() => prefs.getState().set({ section: item.id, sideOpen: true })}
               >
                 {badge > 0 && <span className="kb-badge" aria-hidden="true">{badge > 99 ? '99+' : badge}</span>}
+                {waits && <span className="kb-dot kb-dot--waiting" aria-hidden="true" data-testid="chats-waiting-dot" />}
               </RailButton>
             </li>
           );
