@@ -116,6 +116,48 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
   });
 
+  it('a typed new folder name is created by Add itself and the materials land in it (0.3.1 F1)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Link or any text' }), { target: { value: 'Seminar notes on attention.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
+    await user.type(within(dialog).getByRole('textbox', { name: 'New folder name' }), 'Психология 2026');
+    // No Enter: the button says what one press does.
+    await user.click(within(dialog).getByRole('button', { name: 'Create «Психология 2026» and add 1' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    const created = fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/folders');
+    expect(created?.body).toEqual({ name: 'Психология 2026' });
+    const folder = fake.world.folders.find((f) => f.name === 'Психология 2026');
+    expect(folder).toBeDefined();
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder!.id });
+  });
+
+  it('Enter in the new folder name does the same as the button; a taken name offers the existing folder (0.3.1 F1)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Link or any text' }), { target: { value: 'Seminar notes on entropy.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
+    const name = within(dialog).getByRole('textbox', { name: 'New folder name' });
+    const existing = fake.world.folders.find((f) => !f.system)!;
+    await user.type(name, existing.name.toLocaleUpperCase());
+    expect(within(dialog).getByText('A folder with this name exists.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: `Add to «${existing.name}»` }));
+    expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue(existing.id);
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
+    await user.type(within(dialog).getByRole('textbox', { name: 'New folder name' }), 'Seminars{Enter}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    const folder = fake.world.folders.find((f) => f.name === 'Seminars');
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder!.id });
+    expect(fake.calls.filter((c) => c.method === 'POST' && c.path === '/kb/folders')).toHaveLength(1);
+  });
+
   it('with Settings adding files and links automatically, switching "Add to wiki" off is honoured (decision 15)', async () => {
     const user = userEvent.setup();
     const { fake } = await ready();
