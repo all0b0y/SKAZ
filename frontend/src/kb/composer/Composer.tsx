@@ -9,7 +9,7 @@ import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServi
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
-import { clearEditor, insertText, insertToken, isEmpty, mentionAtCaret, serialize, type MentionMatch } from './editor';
+import { clearEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { QuickQuestions } from './QuickQuestions';
@@ -69,6 +69,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const choice = useAgentChoice(chatId);
   const agents = useAgents((s) => s.agents);
   const folders = useLibrary((s) => s.folders);
+  const goneIds = useLibrary((s) => s.gone);
+  const gone = useMemo(() => new Set(goneIds), [goneIds]);
   const wiki = useSettings((s) => s.wiki.value);
   const speech = useSettings((s) => s.speech.value);
   const doc = useUi(openTarget);
@@ -144,6 +146,15 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queued]);
 
+
+  // A material deleted while it is referenced here (QA B8): its token is marked and its
+  // attachment says so; neither can be sent.
+  useEffect(() => {
+    if (editorRef.current) markGone(editorRef.current, gone);
+    setAttachments((list) => (list.some((a) => a.materialId && gone.has(a.materialId) && a.state !== 'failed')
+      ? list.map((a) => (a.materialId && gone.has(a.materialId) ? { ...a, state: 'failed', error: 'This material was deleted.' } : a))
+      : list));
+  }, [gone, chatId]);
 
   useEffect(() => () => captureRef.current?.cancel(), []);
 
@@ -223,6 +234,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
       && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
     if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
+    const deleted = [...markGone(root, gone), ...attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
+    if (deleted.length) { setError(`“${deleted[0]}” was deleted. Remove it from the message to send.`); return; }
     if (!agentReady) { setError(unavailable); return; }
     if (answering) return;
     setSending(true);

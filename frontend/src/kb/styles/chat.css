@@ -197,6 +197,7 @@
   vertical-align: bottom;
   user-select: all;
 }
+.kb-token.is-gone { text-decoration: line-through; color: var(--kb-muted); background: transparent; outline: 1px dashed var(--kb-muted); outline-offset: -1px; }
 .kb-token::before {
   content: '';
   width: 12px;

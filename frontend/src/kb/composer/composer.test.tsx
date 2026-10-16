@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld } from '../test/fixtures';
@@ -92,6 +92,24 @@ describe('Message field', () => {
     expect(input.querySelector('.kb-token--mention')).toHaveTextContent(/Lecture 8/);
     await user.keyboard(' @Lecture zzz');
     await waitFor(() => expect(screen.queryByTestId('mention-popup')).not.toBeInTheDocument());
+  });
+
+  it('a mentioned material deleted before sending: the token is marked deleted and the message isn’t sent with it (QA B8)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ world: chatWorld() });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('Explain ');
+    act(() => services.composer.getState().push([{ kind: 'mention', ref: { type: 'material', id: 'm1', title: 'Lecture 8 — entropy' } }]));
+    await waitFor(() => expect(input.querySelector('.kb-token--mention')).not.toBeNull());
+    const token = input.querySelector<HTMLElement>('.kb-token--mention')!;
+    expect(token).toHaveAccessibleName('Reference: Lecture 8 — entropy');
+    await act(async () => { await services.library.getState().forgetMaterial('m1'); });
+    expect(token).toHaveClass('is-gone');
+    expect(token).toHaveAccessibleName('Reference: Lecture 8 — entropy (deleted)');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(await screen.findByText('“Lecture 8 — entropy” was deleted. Remove it from the message to send.')).toBeInTheDocument();
+    expect(sentBody(fake.calls)).toBeUndefined();
   });
 
   it('each chat keeps its own unsent draft; a hand-off that opens New chat lands in its field (QA D2/D3)', async () => {
