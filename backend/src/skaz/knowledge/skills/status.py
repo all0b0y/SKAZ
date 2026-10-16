@@ -33,8 +33,9 @@ def engine_status(enabled: bool, view: AgentView) -> EngineSkillStatus:
     if view.state == "not_installed":
         return EngineSkillStatus(view.engine, "not_loaded", f"{name} is not installed.")
     if view.state == "outdated":
+        # Also a launcher SKAZ can't trust or start: the agent's own reason says which.
         return EngineSkillStatus(view.engine, "not_loaded",
-                                 f"This {name} version isn't supported. Update it.")
+                                 view.status.reason or f"This {name} version isn't supported. Update it.")
     if view.state == "preparing":
         return EngineSkillStatus(view.engine, "not_loaded", f"{name} is being checked.")
     if view.action == "first_check":
