@@ -184,3 +184,49 @@ async def test_page_rename_and_delete_over_http(kb_app: Any, kb_client: httpx.As
     assert (await kb_client.get(f"/kb/wiki/pages/{temperature}")).status_code == 404
     assert (await kb_client.delete("/kb/wiki/pages/pg-missing")).status_code == 404
     assert (await kb_client.patch("/kb/wiki/pages/pg-missing", json={"title": "X"})).status_code == 404
+
+
+async def test_rename_a_notes_page_named_like_its_material_keeps_material_links(ready: Any) -> None:
+    """Live 16.10: renaming "B5 · Вулканы" (the notes page of the material "B5 · Вулканы") rewrote
+    every citation ``[[Materials/…/B5 · Вулканы#^seg-1|…]]`` and the "In folders" material links into
+    links to the renamed page — the citations stopped being sources. A link names this page only when
+    it resolves to it the way the graph and the reader resolve it."""
+    world = await two_sources(ready, conflict=False)
+    notes = [page for page in world.kb.pages() if page.kind == "note"]
+    assert notes
+    note = notes[0]
+    def material_links_of(page_id: str) -> list[str]:
+        text = page_text(world, page_id)
+        return [m.group(0) for m in _LINK.finditer(text) if m.group(1).startswith("Materials/")]
+
+    material_links = {page.id: material_links_of(page.id) for page in world.kb.pages()}
+    assert any(material_links.values())
+    # The note is named exactly like its material (as SKAZ names it): the material link's last part
+    # is the page's name.
+    assert any(link.split("/")[-1].split("#")[0].split("|")[0].split("]")[0] == Path(note.rel_path).stem
+               for links in material_links.values() for link in links), (note.rel_path, material_links)
+
+    world.service.rename_page(note.id, Path(note.rel_path).stem + " (renamed)")
+
+    for page in world.kb.pages():
+        assert material_links_of(page.id) == material_links[page.id], page.title
+        # No citation was turned into a link to a page.
+        assert not re.search(r"\[\[Wiki/[^\]|]*#\^seg-", page_text(world, page.id)), page.title
+
+
+async def test_delete_a_notes_page_named_like_its_material_keeps_its_citations(ready: Any) -> None:
+    """The same flaw on Delete: unlinking "links to the page" must not strip the material citations
+    that only share its name."""
+    world = await two_sources(ready, conflict=False)
+    note = next(page for page in world.kb.pages() if page.kind == "note")
+
+    def material_links_of(page_id: str) -> list[str]:
+        text = page_text(world, page_id)
+        return [m.group(0) for m in _LINK.finditer(text) if m.group(1).startswith("Materials/")]
+
+    others = {page.id: material_links_of(page.id) for page in world.kb.pages() if page.id != note.id}
+    assert any(others.values())
+    world.service.delete_page(note.id)
+    for page_id, links in others.items():
+        if world.kb.page_repo.get(page_id) is not None:
+            assert material_links_of(page_id) == links, page_id

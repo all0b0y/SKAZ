@@ -30,6 +30,7 @@ from ..markdown.page import Block, PageDocument, Part, RawText, parse_page, rend
 from ..markdown.text import name_key
 from ..service import KnowledgeService
 from .graph import GraphIndex
+from .links import LinkResolver
 from .pages_io import PageChanging, forget_page, is_user_part, page_path, reindex, user_parts
 from .retract import LIST_BLOCKS, _strip_inline, _strip_list
 
@@ -70,27 +71,24 @@ class PageDeletePlan:
 
 
 class _Target:
-    """Which written link targets point at one page: its path, or its bare name when unique."""
+    """Which written links point at one page — resolved exactly as the reader and the graph resolve
+    them (``links.LinkResolver``): its path, or its bare name when that name is unique among pages.
+    A material link (``[[Materials/…/<Title>/<Title>…]]``) is never this page, even though a note
+    page carries its material's name; nor is a citation (``#^seg-N``), which always names a source."""
 
     def __init__(self, kb: KnowledgeService, page_id: str) -> None:
         record = kb.page_repo.get(page_id)
         if record is None:
             raise NotFound("Page not found.")
         self.record = record
+        self.page_id = page_id
         self.path = record.rel_path.removesuffix(".md")
-        self.name = name_key(Path(record.rel_path).stem)
-        with kb.db.read() as connection:
-            rows = connection.execute("SELECT id, title, rel_path FROM pages").fetchall()
-        self._paths = {row["rel_path"].removesuffix(".md") for row in rows}
-        self._unique = sum(1 for row in rows if name_key(row["title"]) == self.name) == 1
+        self._resolver = LinkResolver(kb.db)
 
-    def matches(self, written: str) -> bool:
-        target = written.strip()
-        if target == self.path:
-            return True
-        if target in self._paths:
-            return False  # another page's own path
-        return self._unique and name_key(target.rsplit("/", 1)[-1]) == self.name
+    def matches(self, written: str, anchor: str = "") -> bool:
+        if anchor.startswith("#^seg-"):
+            return False
+        return self._resolver.resolve(written.strip()).page_id == self.page_id
 
 
 def _linking_pages(kb: KnowledgeService, graph: GraphIndex, page_id: str) -> list[str]:
@@ -176,7 +174,7 @@ def rename_page(kb: KnowledgeService, graph: GraphIndex, page_id: str, title: st
 
     def relink(match: re.Match[str]) -> str | None:
         written, anchor, label = match.group(1), match.group(2) or "", match.group(3)
-        if not target.matches(written):
+        if not target.matches(written, anchor):
             return None
         where = new_link if "/" in written.strip() else clean
         if label is None:
@@ -249,7 +247,7 @@ def plan_page_delete(kb: KnowledgeService, graph: GraphIndex, page_id: str) -> P
     def unlink_user(text: str) -> tuple[str, int]:
         # The user's words keep their text: the link becomes its label (or the page name).
         return _rewrite_text(text, lambda m: (m.group(3) or m.group(1).strip().rsplit("/", 1)[-1])
-                             if target.matches(m.group(1)) else None)
+                             if target.matches(m.group(1), m.group(2) or "") else None)
 
     for other in _linking_pages(kb, graph, page_id):
         read = _read(library, kb, other)
@@ -260,10 +258,11 @@ def plan_page_delete(kb: KnowledgeService, graph: GraphIndex, page_id: str) -> P
 
         def unlink_agent(block: Block) -> Block | None:
             nonlocal counted
-            written = {m.group(1).strip() for m in _LINK.finditer(block.body) if target.matches(m.group(1))}
+            hits = [m for m in _LINK.finditer(block.body) if target.matches(m.group(1), m.group(2) or "")]
+            written = {m.group(1).strip() for m in hits}
             if not written:
                 return block
-            counted += sum(1 for m in _LINK.finditer(block.body) if target.matches(m.group(1)))
+            counted += len(hits)
             strip = _strip_list if block.id in LIST_BLOCKS else _strip_inline
             body = strip(block.body, written)
             if not body.strip():
