@@ -24,6 +24,9 @@ html[data-kb-ui] {
   --kb-danger-soft: #f5e3de;
   --kb-warn: #8a5a00;
   --kb-warn-soft: #ede6d5;
+  /* 0.3.1 P: added blocks of an agent's change (never the only cue: «Added» is written). */
+  --kb-ok: #2f6b3a;
+  --kb-ok-soft: #e1eadc;
   --kb-folder-1: #2f62b0;
   --kb-folder-2: #7046b8;
   --kb-folder-3: #5a7420;
@@ -110,6 +113,8 @@ html[data-kb-ui][data-text-size='l'] {
     --kb-danger-soft: #473a3b;
     --kb-warn: #f0c060;
     --kb-warn-soft: #494438;
+    --kb-ok: #9fd3a6;
+    --kb-ok-soft: #36443a;
     --kb-folder-1: #8fb4f2;
     --kb-folder-2: #bfa4f4;
     --kb-folder-3: #b8d07a;
@@ -139,6 +144,8 @@ html[data-kb-ui][data-theme='dark'] {
   --kb-danger-soft: #473a3b;
   --kb-warn: #f0c060;
   --kb-warn-soft: #494438;
+  --kb-ok: #9fd3a6;
+  --kb-ok-soft: #36443a;
   --kb-folder-1: #8fb4f2;
   --kb-folder-2: #bfa4f4;
   --kb-folder-3: #b8d07a;
