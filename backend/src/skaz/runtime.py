@@ -24,6 +24,7 @@ from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
 from .knowledge.permissions.broker import PermissionBroker
+from .knowledge.permissions.questions import QuestionBroker
 from .knowledge.permissions.store import ControlStore
 from .knowledge.permissions.waits import RunWaits
 from .knowledge.permissions.wiki_tools import WikiEditor
@@ -108,9 +109,11 @@ class Runtime:
                                         language=lambda: self.kb_ingest.settings().language,
                                         text_layer=lambda: self.kb_ingest.text_layer)
         self.kb_tools.add(self.kb_wiki_edits.tools())
+        #: Agents' questions (Hermes ``clarify``, ``skaz_ask_user``) wait for the user here (0.3.1 P).
+        self.kb_questions = QuestionBroker(self.kb_permissions.store, self.kb_waits)
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer,
-                                    permissions=self.kb_permissions)
+                                    permissions=self.kb_permissions, questions=self.kb_questions)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)

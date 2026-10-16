@@ -68,7 +68,21 @@ class ToolPart:
     label: str
 
 
-Part = TextPart | CitePart | PagePart | ConnectionPart | ToolPart
+@dataclass(frozen=True)
+class PermissionPart:
+    """An agent's wiki change waiting for (or decided by) the user; the card reads the request by id."""
+
+    permission_id: str
+
+
+@dataclass(frozen=True)
+class QuestionPart:
+    """An agent's question to the user; the block reads the question by id."""
+
+    question_id: str
+
+
+Part = TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -83,6 +97,10 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "connection", "inference": part.inference, "page_id": part.page_id,
                 "sides": [{"folder_id": side.folder_id, "text": side.text, "material_id": side.material_id,
                            "seg": side.seg, "quote": side.quote} for side in part.sides]}
+    if isinstance(part, PermissionPart):
+        return {"type": "permission", "id": part.permission_id}
+    if isinstance(part, QuestionPart):
+        return {"type": "question", "id": part.question_id}
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -102,6 +120,10 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return ConnectionPart(sides, str(data.get("inference", "")), _optional(data.get("page_id")))
     if kind == "tool":
         return ToolPart(str(data.get("name", "")), str(data.get("label", "")))
+    if kind == "permission":
+        return PermissionPart(str(data["id"]))
+    if kind == "question":
+        return QuestionPart(str(data["id"]))
     return None
 
 
