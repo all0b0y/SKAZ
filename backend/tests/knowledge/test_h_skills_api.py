@@ -63,7 +63,7 @@ async def test_humanizer_is_on_by_default_with_a_status_per_agent(api: httpx.Asy
             {"engine": "codex", "state": "not_loaded", "reason": "Codex is not installed."},
             {"engine": "claude_code", "state": "loaded", "reason": None},
             {"engine": "hermes", "state": "not_loaded",
-             "reason": "This Hermes Agent version isn't supported. Update it."},
+             "reason": "Too old."},
         ],
     }]}
 
@@ -118,6 +118,12 @@ def test_each_agent_state_reads_as_a_plain_skill_status() -> None:
         (view("unavailable", "first_check"), ("not_loaded", "Hermes Agent needs its one-time check first.")),
         (view("unavailable", "check"), ("not_loaded", "SKAZ couldn't check Hermes Agent.")),
     ]
+    # "outdated" also covers a launcher SKAZ can't trust or can't start: say the agent's own reason.
+    why = "SKAZ couldn't start Hermes Agent. Reinstall it."
+    broken = EngineStatus("hermes", installed=True, incompatible=True, reason=why)
+    tampered = AgentView("hermes", "Hermes Agent", broken,
+                         "outdated", "update", (), None, "2026-10-17T00:00:00+00:00")
+    cases.append((tampered, ("not_loaded", why)))
     for given, expected in cases:
         status = engine_status(True, given)
         assert (status.state, status.reason) == expected, given.state
