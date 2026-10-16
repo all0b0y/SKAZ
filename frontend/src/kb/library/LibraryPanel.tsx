@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import type { KbFolder, KbMaterialSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useLibrary, useServices, useUi } from '../state/context';
 import { KIND_ICON, folderTone } from './materialMeta';
 import { NameField } from './NameField';
+import { SelectionCheckbox, hasDragFiles, hasDragItems, readDragItems, useItemsDrag, type ListSelection } from '../ui/selection/index';
+import { useMaterialBatch, useMaterialSelection, type DragRowProps } from '../materials/materialBatch';
 
 const RECENT = 5;
 
@@ -79,23 +81,50 @@ export function LibraryPanel() {
   );
 }
 
-function MaterialRow({ material, tone, meta }: { material: KbMaterialSummary; tone?: string; meta?: string }) {
+function MaterialRow({ material, tone, meta, sel, drag }: {
+  material: KbMaterialSummary; tone?: string; meta?: string; sel: ListSelection; drag: DragRowProps;
+}) {
   const openDoc = useUi((s) => s.openDoc);
   const current = useUi((s) => s.docMaterialId === material.id);
+  const reason = sel.reasonOf(material.id);
   return (
-    <li>
-      <button
-        type="button"
-        className={`kb-row${current ? ' is-current' : ''}`}
-        aria-current={current ? 'true' : undefined}
-        onClick={() => openDoc(material.id)}
-      >
-        <Icon name={KIND_ICON[material.kind]} size={16} className="kb-row__icon" />
-        <span className="kb-row__text">{material.title}</span>
-        {tone && <span className="kb-fdot" style={{ background: tone }} aria-hidden="true" />}
-        {meta && <span className="kb-row__meta">{meta}</span>}
-      </button>
+    <li {...sel.rowProps(material.id)} {...drag}>
+      <div role="gridcell">
+        <button
+          type="button"
+          className={`kb-row${current ? ' is-current' : ''}${reason ? ' kb-row--dim' : ''}`}
+          aria-current={current ? 'true' : undefined}
+          onClick={() => openDoc(material.id)}
+        >
+          <SelectionCheckbox checked={sel.selected.has(material.id)} reason={reason} />
+          <Icon name={KIND_ICON[material.kind]} size={16} className="kb-row__icon" />
+          <span className="kb-row__text">{material.title}</span>
+          {tone && <span className="kb-fdot" style={{ background: tone }} aria-hidden="true" />}
+          {meta && <span className="kb-row__meta">{meta}</span>}
+        </button>
+      </div>
     </li>
+  );
+}
+
+/** The side panel's materials list: select several (compact bar), drag rows out (0.3.1 F3/F4). */
+function MaterialList({ items, label, labelledBy, resetKey, toneOf, metaOf }: {
+  items: KbMaterialSummary[];
+  label?: string;
+  labelledBy?: string;
+  resetKey: unknown;
+  toneOf: (m: KbMaterialSummary) => string | undefined;
+  metaOf?: (m: KbMaterialSummary) => string | undefined;
+}) {
+  const openDoc = useUi((s) => s.openDoc);
+  const { sel, overlays, dragProps } = useMaterialSelection({ rows: items, resetKey, variant: 'compact', onOpen: openDoc, exportMd: null });
+  return (
+    <div className="kb-sellist" {...sel.listProps}>
+      <ul className="kb-list" {...sel.gridProps} aria-label={label} aria-labelledby={labelledBy}>
+        {items.map((m) => <MaterialRow key={m.id} material={m} tone={toneOf(m)} meta={metaOf?.(m)} sel={sel} drag={dragProps(m)} />)}
+      </ul>
+      {overlays}
+    </div>
   );
 }
 
@@ -137,17 +166,15 @@ function Overview() {
       {materials.length === 0 ? (
         <p className="kb-side__note">{contentLoad === 'loading' ? 'Loading…' : 'No materials yet.'}</p>
       ) : (
-        <ul className="kb-list" aria-labelledby="kb-recent">
-          {materials.slice(0, RECENT).map((m) => (
-            <MaterialRow key={m.id} material={m} tone={toneOf(m.folder_id)} meta={systemName(m.folder_id)} />
-          ))}
-        </ul>
+        <MaterialList items={materials.slice(0, RECENT)} labelledBy="kb-recent" resetKey="recent"
+          toneOf={(m) => toneOf(m.folder_id)} metaOf={(m) => systemName(m.folder_id)} />
       )}
 
       <div className="kb-subhead kb-subhead--row">
         <h3 className="kb-subhead__text" id="kb-folders">Folders</h3>
         <IconButton icon="folderPlus" label="New folder" size="sm" onClick={() => setCreating(true)} disabled={creating} />
       </div>
+      <DropNote />
       <ul className="kb-list" aria-labelledby="kb-folders">
         {folders.map((folder) => (
           <FolderRow key={folder.id} folder={folder} tone={toneOf(folder.id)} materialsHere={materials.some((m) => m.folder_id === folder.id) || folder.material_count > 0} />
@@ -175,6 +202,7 @@ function FolderRow({ folder, tone, materialsHere }: { folder: KbFolder; tone?: s
   const [renaming, setRenaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const moreRef = useRef<HTMLButtonElement | null>(null);
+  const drop = useFolderDrop(folder);
 
   if (renaming) {
     return (
@@ -197,7 +225,8 @@ function FolderRow({ folder, tone, materialsHere }: { folder: KbFolder; tone?: s
   return (
     <li className="kb-folder">
       <div className="kb-folder__line">
-        <button type="button" className="kb-row kb-row--folder" onClick={() => void store.getState().openFolder(folder.id)}>
+        <button type="button" className={`kb-row kb-row--folder${drop.className}`} onClick={() => void store.getState().openFolder(folder.id)}
+          title={drop.reason ?? undefined} {...drop.handlers}>
           <Icon name={folder.system ? 'inbox' : 'folder'} size={16} className="kb-row__icon" />
           <span className="kb-row__text">{folder.name}</span>
           {tone && <span className="kb-fdot" style={{ background: tone }} aria-hidden="true" />}
@@ -271,10 +300,70 @@ function FolderView({ folderId }: { folderId: string }) {
         <EmptyState icon="folder" title="No materials in this folder" compact />
       )}
       {items.length > 0 && (
-        <ul className="kb-list" aria-labelledby="kb-folder-title">
-          {items.map((m) => <MaterialRow key={m.id} material={m} tone={tone} />)}
-        </ul>
+        <MaterialList items={items} labelledBy="kb-folder-title" resetKey={folderId} toneOf={() => tone} />
       )}
     </div>
   );
+}
+
+/** Why the dragged items can't go into a folder (shown on the dimmed folders), or null. */
+function dropBlock(drag: ReturnType<typeof useItemsDrag>): string | null {
+  if (!drag) return null;
+  if (drag.items.some((i) => i.type !== 'material')) return 'Only materials go into folders';
+  return drag.blocked;
+}
+
+/** Under "Folders" while a drag that can't land here is in progress: the reason, in words. */
+function DropNote() {
+  const why = dropBlock(useItemsDrag());
+  if (!why) return null;
+  return <p className="kb-dropnote" role="status">{why}</p>;
+}
+
+/**
+ * A folder row as a drop target (0.3.1 F3): materials dragged from a list move here (outline, toast
+ * with Undo; the same folder → "Already in «X»"); files from Finder open "Add material" with them
+ * and this folder. Drags that can't land here dim the row and say why.
+ */
+function useFolderDrop(folder: KbFolder) {
+  const { library, ui, bridge } = useServices();
+  const batch = useMaterialBatch();
+  const drag = useItemsDrag();
+  const [over, setOver] = useState(false);
+  const blocked = dropBlock(drag);
+  const accepts = (e: DragEvent<HTMLElement>) => (hasDragItems(e.dataTransfer) ? !dropBlock(drag) : hasDragFiles(e.dataTransfer));
+  const handlers = {
+    onDragOver: (e: DragEvent<HTMLElement>) => {
+      if (!accepts(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = hasDragItems(e.dataTransfer) ? 'move' : 'copy';
+      if (!over) setOver(true);
+    },
+    onDragLeave: () => setOver(false),
+    onDrop: (e: DragEvent<HTMLElement>) => {
+      setOver(false);
+      if (hasDragItems(e.dataTransfer)) {
+        e.preventDefault();
+        if (dropBlock(drag)) return;
+        const items = readDragItems(e.dataTransfer);
+        if (!items || items.some((i) => i.type !== 'material')) return;
+        const s = library.getState();
+        const known = new Map([...s.materials, ...s.folderMaterials].map((m) => [m.id, m]));
+        const list = items.map((i) => known.get(i.id)).filter((m): m is KbMaterialSummary => Boolean(m));
+        void batch.move(list, folder.id);
+        return;
+      }
+      if (!hasDragFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files ?? []);
+      const read = bridge.droppedMediaFile
+        ? files.map((f) => ({ choice: bridge.droppedMediaFile!(f), size: f.size }))
+          .filter((x): x is { choice: NonNullable<typeof x.choice>; size: number } => x.choice !== null)
+          .map((x) => ({ path: x.choice.path, name: x.choice.name, size: x.size }))
+        : [];
+      ui.getState().setAddMaterialOpen(true, { folderId: folder.id, files: read, unreadable: files.length - read.length });
+    },
+  };
+  const className = over ? ' is-drop' : blocked ? ' is-nodrop' : '';
+  return { handlers, className, reason: blocked };
 }

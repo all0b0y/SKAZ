@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KbApiError, KbClient, buildPath } from '../api/client';
 import { baseWorld, createFakeBridge } from '../test/fakeBridge';
@@ -42,7 +42,8 @@ describe('Library side panel on real /kb answers', () => {
   it('lists recent materials (newest first), folders with counts and "All materials · N"', async () => {
     renderKb({ prefs: { section: 'materials' } });
     const side = await screen.findByRole('region', { name: 'Materials' });
-    const recent = await within(side).findByRole('list', { name: 'Recent' });
+    // A grid since 0.3.1 F4: recent materials can be selected (aria-multiselectable).
+    const recent = await within(side).findByRole('grid', { name: 'Recent' });
     expect(within(recent).getAllByRole('button').map((b) => b.textContent)).toEqual([
       'Pasted text: problemsInbox', 'Lecture 8 — entropy', 'Textbook: Information theory, ch. 2',
     ]);
@@ -113,7 +114,7 @@ describe('Library side panel on real /kb answers', () => {
     const side = await screen.findByRole('region', { name: 'Materials' });
     const folders = await within(side).findByRole('list', { name: 'Folders' });
     await user.click(within(folders).getByRole('button', { name: /^Physics/ }));
-    const list = await within(side).findByRole('list', { name: 'Physics' });
+    const list = await within(side).findByRole('grid', { name: 'Physics' }); // grid since 0.3.1 F4 (selectable rows)
     expect(within(list).getAllByRole('button')).toHaveLength(2);
     expect(fake.calls.some((c) => c.path === '/kb/materials' && c.query?.folder_id === 'phys')).toBe(true);
     await user.click(within(side).getByRole('button', { name: 'All folders' }));
@@ -158,7 +159,7 @@ describe('A deleted material leaves every list (user bug 1016-1)', () => {
     const side = await screen.findByRole('region', { name: 'Materials' });
     const folders = await within(side).findByRole('list', { name: 'Folders' });
     await user.click(within(folders).getByRole('button', { name: /^Inbox/ }));
-    const list = await within(side).findByRole('list', { name: 'Inbox' });
+    const list = await within(side).findByRole('grid', { name: 'Inbox' }); // grid since 0.3.1 F4 (selectable rows)
     return { side, list };
   };
 
@@ -217,5 +218,95 @@ describe('A deleted material leaves every list (user bug 1016-1)', () => {
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument());
     await waitFor(() => expect(within(side).queryByRole('button', { name: 'Pasted text: problems' })).not.toBeInTheDocument());
     expect(services.library.getState().materials.map((m) => m.id)).not.toContain('m3');
+  });
+});
+
+/** A DataTransfer for jsdom drags: data by type, `types`, and dropped files. */
+function dataTransfer(files: File[] = []) {
+  const data = new Map<string, string>();
+  return {
+    setData: (k: string, v: string) => { data.set(k, v); },
+    getData: (k: string) => data.get(k) ?? '',
+    get types() { return [...data.keys(), ...(files.length ? ['Files'] : [])]; },
+    files,
+    effectAllowed: 'all',
+    dropEffect: 'none',
+  };
+}
+
+describe('Selecting and dragging materials in the side panel (0.3.1 F3/F4)', () => {
+  async function side(world = baseWorld(), bridge = {}) {
+    const user = userEvent.setup();
+    const r = renderKb({ prefs: { section: 'materials' }, world, bridge });
+    const panel = await screen.findByRole('region', { name: 'Materials' });
+    const recent = await within(panel).findByRole('grid', { name: 'Recent' });
+    const rowOf = (name: string) => within(recent).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    const folderRow = (name: string) => within(within(panel).getByRole('list', { name: 'Folders' })).getByRole('button', { name: new RegExp(`^${name}`) });
+    return { ...r, user, panel, recent, rowOf, folderRow };
+  }
+
+  it('⌘-click selects; the compact bar moves them, a material already there is not moved again', async () => {
+    const { user, rowOf, fake, panel } = await side();
+    await user.keyboard('{Meta>}');
+    await user.click(within(rowOf('Pasted text')).getByRole('button'));
+    await user.click(within(rowOf('Lecture 8')).getByRole('button'));
+    await user.keyboard('{/Meta}');
+    const bar = within(panel).getByRole('toolbar', { name: '2 selected' });
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(
+      ['Move to…', 'Ask in chat', 'More actions', 'Delete', 'Clear selection'],
+    );
+    await user.click(within(bar).getByRole('button', { name: 'Move to…' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Physics/ }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 1 material to «Physics»');
+    expect(fake.calls.filter((c) => c.method === 'PATCH').map((c) => c.path)).toEqual(['/kb/materials/m3']);
+  });
+
+  it('dragging a row onto a folder moves it, outlines the folder, Undo brings it back; the same folder says so', async () => {
+    const { rowOf, folderRow, fake, user } = await side();
+    const dt = dataTransfer();
+    fireEvent.dragStart(rowOf('Pasted text'), { dataTransfer: dt });
+    expect(JSON.parse(dt.getData('application/x-skaz-items'))).toEqual([{ type: 'material', id: 'm3' }]);
+    fireEvent.dragOver(folderRow('Physics'), { dataTransfer: dt });
+    expect(folderRow('Physics')).toHaveClass('is-drop');
+    fireEvent.drop(folderRow('Physics'), { dataTransfer: dt });
+    fireEvent.dragEnd(rowOf('Pasted text'), { dataTransfer: dt });
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 1 material to «Physics»');
+    expect(fake.world.materials.find((m) => m.id === 'm3')!.folder_id).toBe('phys');
+    await waitFor(() => expect(folderRow('Physics')).toHaveTextContent('3'));
+    await user.click(within(screen.getByTestId('toast')).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(fake.world.materials.find((m) => m.id === 'm3')!.folder_id).toBe('inbox'));
+
+    const again = dataTransfer();
+    fireEvent.dragStart(rowOf('Lecture 8'), { dataTransfer: again });
+    fireEvent.drop(folderRow('Physics'), { dataTransfer: again });
+    fireEvent.dragEnd(rowOf('Lecture 8'), { dataTransfer: again });
+    expect(await screen.findByText('Already in «Physics»')).toBeInTheDocument();
+  });
+
+  it('a material being recorded can’t be selected or dropped: the folder dims and the reason shows', async () => {
+    const world = baseWorld();
+    world.materials.find((m) => m.id === 'm3')!.status = 'recording';
+    const { rowOf, folderRow, fake, panel } = await side(world);
+    expect(rowOf('Pasted text').querySelector('[data-sel-box]')).toHaveAttribute('title', 'Being recorded — can’t be selected yet');
+    const dt = dataTransfer();
+    fireEvent.dragStart(rowOf('Pasted text'), { dataTransfer: dt });
+    await waitFor(() => expect(folderRow('Physics')).toHaveClass('is-nodrop'));
+    expect(within(panel).getByRole('status')).toHaveTextContent('Being recorded — can’t be moved yet');
+    fireEvent.drop(folderRow('Physics'), { dataTransfer: dt });
+    fireEvent.dragEnd(rowOf('Pasted text'), { dataTransfer: dt });
+    expect(fake.calls.some((c) => c.method === 'PATCH')).toBe(false);
+    await waitFor(() => expect(folderRow('Physics')).not.toHaveClass('is-nodrop'));
+  });
+
+  it('files from Finder dropped on a folder open “Add material” with them and that folder', async () => {
+    const droppedMediaFile = vi.fn((f: File) => ({ path: `/Users/me/Downloads/${f.name}`, name: f.name }));
+    const { folderRow } = await side(baseWorld(), { droppedMediaFile });
+    const dt = dataTransfer([new File(['x'], 'seminar.pdf', { type: 'application/pdf' })]);
+    fireEvent.dragOver(folderRow('Physics'), { dataTransfer: dt });
+    expect(folderRow('Physics')).toHaveClass('is-drop');
+    fireEvent.drop(folderRow('Physics'), { dataTransfer: dt });
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    expect(dialog).toHaveTextContent('seminar.pdf');
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: /Folder/ })).toHaveValue('phys'));
   });
 });

@@ -23,6 +23,13 @@ export function materialReason(m: Pick<KbMaterialSummary, 'status' | 'wiki_state
   return null;
 }
 
+/** Why a dragged material can't go into a folder, or null. */
+export function dragBlockReason(m: Pick<KbMaterialSummary, 'status' | 'wiki_state'>): string | null {
+  if (m.status === 'recording') return 'Being recorded — can’t be moved yet';
+  if (m.wiki_state === 'processing') return 'Being added to the wiki — can’t be moved yet';
+  return null;
+}
+
 /** Ready and not in the wiki yet (or the last try failed): "Add to wiki · N" counts these. */
 export const canAddToWiki = (m: KbMaterialSummary) => m.status === 'ready' && (m.wiki_state === 'not_in_wiki' || m.wiki_state === 'failed');
 
@@ -273,7 +280,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen, exportMd
       // The selection when the row is in it, else this row alone (mockup lib-v1 «Drag»).
       const ids = sel.selected.has(m.id) ? sel.ordered : [m.id];
       const list = pick(ids);
-      const blocked = list.map(materialReason).find(Boolean) ?? null;
+      const blocked = list.map(dragBlockReason).find(Boolean) ?? null;
       startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'material', id: x.id })), title: m.title, blocked }, e.currentTarget);
     },
     onDragEnd: () => endItemsDrag(),

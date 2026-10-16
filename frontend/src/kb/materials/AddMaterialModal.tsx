@@ -17,7 +17,7 @@ interface WikiAuto { files: boolean; text: boolean }
 
 /** "+ Material" (v11): drop files, paste a link or any text, choose the folder, add. */
 export function AddMaterialModal() {
-  const { client, bridge, library } = useServices();
+  const { client, bridge, library, ui } = useServices();
   const open = useUi((s) => s.addMaterialOpen);
   const setOpen = useUi((s) => s.setAddMaterialOpen);
   const folders = useLibrary((s) => s.folders);
@@ -52,7 +52,15 @@ export function AddMaterialModal() {
     if (!open) return;
     setItems([]); setPaste(''); setErrors({}); setNoneAdded(false); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
     setCreating(false); setNewName(''); setFolderError(null);
-    client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
+    // Files dropped on a folder row (0.3.1 F3) come with that folder; otherwise the last used one.
+    const preset = ui.getState().addMaterialPreset;
+    if (preset) {
+      setFolderId(preset.folderId);
+      if (preset.files.length) setItems(preset.files.map((f) => fileItem(f.path, f.name, f.size)));
+      if (preset.unreadable) setDropError('Some files couldn’t be read from the drop. Choose them on the computer instead.');
+    } else {
+      client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
+    }
     client.call('GET /kb/settings/wiki').then((w) => {
       setAuto({ files: w.auto_add_files_links, text: w.auto_add_text });
       setWikiEngine(w.wiki_engine);
