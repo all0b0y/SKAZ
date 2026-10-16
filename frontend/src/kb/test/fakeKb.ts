@@ -835,6 +835,8 @@ const ROUTES: FakeRoutes = {
     p.configured = body.key.length > 0;
     p.valid = null;
     p.checked_at = null;
+    // As the backend: the decision layer reads the same OpenRouter key.
+    if (p.id === 'openrouter') w.decisions.openrouter_key = p.configured;
     return structuredClone(p);
   }],
   'POST /kb/settings/keys/{provider}/check': [200, (w, { path }) => {

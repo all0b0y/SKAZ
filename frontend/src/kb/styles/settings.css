@@ -74,13 +74,16 @@
 .kb-srow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  /* A control too wide to sit beside its label (five options) moves below it, right-aligned,
+     instead of lying over the label (0.3.1 fix). */
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--kb-line);
   min-width: 0;
 }
 .kb-sgroup .kb-srow:last-child { border-bottom: 0; }
-.kb-srow__text { flex: 1; min-width: 0; }
+.kb-srow__text { flex: 1 1 200px; min-width: 0; }
 .kb-srow__label { overflow-wrap: anywhere; }
 .kb-srow__hint { font-size: var(--t-xs); line-height: 1.35; margin-top: 1px; color: var(--kb-muted); }
 .kb-srow__control {
@@ -88,10 +91,11 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   flex-wrap: wrap;
-  max-width: 62%;
+  max-width: 100%;
   min-width: 0;
+  margin-left: auto;
 }
 .kb-srow__control .kb-tags { justify-content: flex-end; }
 .kb-snote { display: flex; gap: 8px; align-items: flex-start; color: var(--kb-muted); font-size: var(--t-sm); flex: none; }

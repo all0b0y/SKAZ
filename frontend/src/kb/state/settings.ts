@@ -53,7 +53,7 @@ export const HEALTH_TO_SECTION: Record<HealthSectionId, SettingsSection> = {
 };
 
 export function createSettingsStore(client: KbClient): SettingsStore {
-  return createStore<SettingsData & SettingsActions>()((set) => {
+  return createStore<SettingsData & SettingsActions>()((set, get) => {
     const read = async <K extends keyof SettingsData>(key: K, fn: () => Promise<NonNullable<SettingsData[K]['value']>>) => {
       try {
         const value = await fn();
@@ -72,6 +72,18 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       }
     };
     const loadKeys = () => read('keys', () => client.call('GET /kb/settings/keys'));
+    // A key changes what other sections can do (decisions through OpenRouter, Soniox speech, the
+    // problem plates, privacy): re-read the ones already on screen, so the status follows at once.
+    const followKeys = async () => {
+      const s = get();
+      const loaded = (r: { value: unknown; error: string | null }) => r.value !== null || r.error !== null;
+      await Promise.all([
+        loaded(s.decisions) ? read('decisions', () => client.call('GET /kb/decisions')) : undefined,
+        loaded(s.speech) ? read('speech', () => client.call('GET /kb/settings/speech')) : undefined,
+        loaded(s.privacy) ? read('privacy', () => client.call('GET /kb/settings/privacy')) : undefined,
+        read('health', () => client.call('GET /kb/settings/health')),
+      ]);
+    };
     return {
       health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(),
 
@@ -81,13 +93,17 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       loadKeys,
       saveKey: async (provider, key) => {
         const res = await write('keys', async () => { await client.call('PUT /kb/settings/keys/{provider}', { path: { provider }, body: { key } }); });
-        if (res.ok) await loadKeys();
+        if (res.ok) await Promise.all([loadKeys(), followKeys()]);
         return res;
       },
-      checkKey: (provider) => write('keys', async () => {
-        const row = await client.call('POST /kb/settings/keys/{provider}/check', { path: { provider } });
-        set((s) => ({ keys: { value: s.keys.value ? { providers: s.keys.value.providers.map((p) => (p.id === row.id ? row : p)) } : null, error: null } }));
-      }),
+      checkKey: async (provider) => {
+        const res = await write('keys', async () => {
+          const row = await client.call('POST /kb/settings/keys/{provider}/check', { path: { provider } });
+          set((s) => ({ keys: { value: s.keys.value ? { providers: s.keys.value.providers.map((p) => (p.id === row.id ? row : p)) } : null, error: null } }));
+        });
+        if (res.ok) await followKeys();
+        return res;
+      },
       loadSpeech: () => read('speech', () => client.call('GET /kb/settings/speech')),
       updateSpeech: (patch) => write('speech', () => client.call('PUT /kb/settings/speech', { body: patch })),
       deleteLocalModel: async () => {

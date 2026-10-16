@@ -353,6 +353,24 @@ test('settings: every section at every width and theme', async () => {
         await dialog.getByRole('navigation').getByRole('button', { name: new RegExp(`^${section}`) }).click();
         const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance') && v.width !== 1024;
         await check(`settings-${section.replace(/\W+/g, '-').toLowerCase()}-${v.width}-${theme}`, shot);
+        // A wide control (five options) never lies over its row's label: it moves below instead.
+        const overlaps = await dialog.locator('.kb-srow').evaluateAll((rows) => rows.flatMap((r) => {
+          const text = r.querySelector('.kb-srow__text')?.getBoundingClientRect();
+          // The control's own box can be narrower than what it holds: measure what is drawn.
+          const parts = Array.from(r.querySelector('.kb-srow__control')?.children ?? []).map((c) => c.getBoundingClientRect()).filter((b) => b.width);
+          if (!text || !parts.length) return [];
+          const top = Math.min(...parts.map((b) => b.top));
+          const bottom = Math.max(...parts.map((b) => b.bottom));
+          const left = Math.min(...parts.map((b) => b.left));
+          const label = r.querySelector('.kb-srow__label')?.getBoundingClientRect();
+          const textRight = Math.max(label?.right ?? text.left, ...Array.from(r.querySelectorAll('.kb-srow__text *')).map((e) => {
+            const range = document.createRange(); range.selectNodeContents(e);
+            return Math.max(text.left, ...Array.from(range.getClientRects()).map((x) => x.right));
+          }));
+          const sideBySide = top < text.bottom - 1 && bottom > text.top + 1;
+          return sideBySide && left < textRight - 1 ? [r.getAttribute('data-row') ?? '?'] : [];
+        }));
+        expect(overlaps, `settings ${section} ${v.width} ${theme}: control over the label`).toEqual([]);
       }
       await dialog.getByRole('searchbox', { name: 'Find a setting' }).fill('model');
       await check(`settings-search-${v.width}-${theme}`, v.width === 1440);
