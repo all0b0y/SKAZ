@@ -368,7 +368,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
               <IconButton ref={moreRef} icon="more" label="Page actions" aria-haspopup="menu" aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((v) => !v)} />
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Page actions" items={[
-                { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph() },
+                { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
                 { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
               ]} />
             </>

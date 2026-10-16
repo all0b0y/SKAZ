@@ -82,7 +82,7 @@ export function WikiSide() {
           );
         })}
         <li>
-          <button type="button" className={`kb-row${graphOpen ? ' is-current' : ''}`} onClick={openGraph} aria-current={graphOpen ? 'true' : undefined}>
+          <button type="button" className={`kb-row${graphOpen ? ' is-current' : ''}`} onClick={() => openGraph()} aria-current={graphOpen ? 'true' : undefined}>
             <Icon name="graph" size={16} className="kb-row__icon" />
             <span className="kb-row__text">Graph of connections</span>
           </button>
@@ -109,7 +109,7 @@ export function GraphSide() {
   const graphOpen = useUi((s) => s.right?.kind === 'graph');
   return (
     <div className="kb-side__scroll">
-      <button type="button" className={`kb-row kb-row--action${graphOpen ? ' is-current' : ''}`} onClick={openGraph}>
+      <button type="button" className={`kb-row kb-row--action${graphOpen ? ' is-current' : ''}`} onClick={() => openGraph()}>
         <Icon name="graph" size={16} className="kb-row__icon" />
         <span className="kb-row__text">{graphOpen ? 'Graph is open' : 'Open the graph'}</span>
       </button>

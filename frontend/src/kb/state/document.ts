@@ -23,7 +23,7 @@ export interface DocTarget {
 
 export type RightView =
   | { kind: 'doc'; target: DocTarget; nonce: number }
-  | { kind: 'graph' }
+  | { kind: 'graph'; focus?: string }
   | { kind: 'live'; materialId: string };
 
 /** What the centre column shows: the open chat, or a full-width list (decisions v16, 25). */
@@ -38,13 +38,21 @@ export interface NavState {
   docMaterialId: string | null;
   /** Wiki pages opened in this window, newest first (side panel "Recently opened"). */
   recentPages: string[];
+  /**
+   * What the right panel showed before, newest last (QA C20): "Open at quote" on a page, a link,
+   * a graph node — Back (⌘[) returns to the page you were reading. ✕ forgets it.
+   */
+  docHistory: RightView[];
 }
 
 export interface NavActions {
   openDocument: (target: DocTarget) => void;
   /** U1 entry point: open one material. */
   openDoc: (materialId: string) => void;
-  openGraph: () => void;
+  /** `focus`: the page to select in the graph ("Show the graph" from a page). */
+  openGraph: (focus?: string) => void;
+  /** Back to what the right panel showed before (no-op without history). */
+  goBack: () => void;
   openLive: (materialId: string) => void;
   /** Close the right panel, whatever it shows. */
   closeDoc: () => void;
@@ -54,6 +62,21 @@ export interface NavActions {
 
 let nonce = 0;
 const RECENT_PAGES = 8;
+const HISTORY = 30;
+
+/** Same place in the right panel (a re-open of the same document is not a step back). */
+function samePlace(a: RightView, b: RightView): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'doc' && b.kind === 'doc') return a.target.type === b.target.type && a.target.id === b.target.id;
+  if (a.kind === 'live' && b.kind === 'live') return a.materialId === b.materialId;
+  return true;
+}
+
+/** The history after leaving `from` for `to`: the live view is not a place to come back to. */
+function pushed(history: RightView[], from: RightView | null, to: RightView): RightView[] {
+  if (!from || from.kind === 'live' || samePlace(from, to)) return history;
+  return [...history, from].slice(-HISTORY);
+}
 
 function materialOf(right: RightView | null): string | null {
   return right?.kind === 'doc' && right.target.type === 'material' ? right.target.id : null;
@@ -72,11 +95,12 @@ type SetNav = (partial: Partial<NavState> | ((s: NavState) => Partial<NavState>)
 
 /** The navigation part of the UI store (spread into `createUiStore`). */
 export function createNavSlice(set: SetNav): NavState & NavActions {
-  const show = (right: RightView | null) => (s: NavState): Partial<NavState> => ({
+  const show = (right: RightView | null, history?: RightView[]) => (s: NavState): Partial<NavState> => ({
     right,
     docMaterialId: materialOf(right),
     // A different kind of panel starts in the side position; the same kind keeps ⤢.
     docExpanded: right !== null && s.right?.kind === right.kind ? s.docExpanded : false,
+    docHistory: history ?? (right ? pushed(s.docHistory, s.right, right) : []),
   });
   return {
     right: null,
@@ -84,14 +108,21 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     center: 'chat',
     docMaterialId: null,
     recentPages: [],
+    docHistory: [],
     openDocument: (target) => set((s) => ({
       ...show({ kind: 'doc', target: normalizeTarget(target), nonce: ++nonce })(s),
       ...(target.type === 'page' ? { recentPages: [target.id, ...s.recentPages.filter((id) => id !== target.id)].slice(0, RECENT_PAGES) } : {}),
     })),
     openDoc: (materialId) => set(show({ kind: 'doc', target: { type: 'material', id: materialId }, nonce: ++nonce })),
-    openGraph: () => set(show({ kind: 'graph' })),
+    openGraph: (focus) => set(show(focus ? { kind: 'graph', focus } : { kind: 'graph' })),
+    goBack: () => set((s) => {
+      const back = s.docHistory.at(-1);
+      if (!back) return {};
+      const right: RightView = back.kind === 'doc' ? { ...back, nonce: ++nonce } : back;
+      return show(right, s.docHistory.slice(0, -1))(s);
+    }),
     openLive: (materialId) => set(show({ kind: 'live', materialId })),
-    closeDoc: () => set({ right: null, docMaterialId: null, docExpanded: false }),
+    closeDoc: () => set({ right: null, docMaterialId: null, docExpanded: false, docHistory: [] }),
     toggleDocExpanded: () => set((s) => ({ docExpanded: s.right ? !s.docExpanded : false })),
     showCenter: (view) => set({ center: view }),
   };

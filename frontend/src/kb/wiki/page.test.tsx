@@ -67,6 +67,15 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     // A citation is checked against the original words: the original is shown, not the translation.
     expect(within(doc).getByRole('radio', { name: 'Original' })).toHaveAttribute('aria-checked', 'true');
     expect(mark.closest('[data-seg]')).toHaveAttribute('data-seg', '1');
+    // Back to the page that was being read (QA C20): the button, and ⌘[.
+    await user.click(within(doc).getByRole('button', { name: 'Back' }));
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'Entropy' })).toBeInTheDocument();
+    expect(within(doc).queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    await user.click((await within(doc).findAllByRole('button', { name: 'Source 1: Lecture 8 — entropy' }))[0]!);
+    await user.click(within(await screen.findByRole('dialog', { name: 'Lecture 8 — entropy' })).getByRole('button', { name: 'Open at quote, 08:12' }));
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeInTheDocument();
+    await user.keyboard('{Meta>}[[{/Meta}');
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'Entropy' })).toBeInTheDocument();
   });
 
   it('✎ makes an agent block yours ("Edited by you"); re-check asks the agent', async () => {

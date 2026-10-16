@@ -42,4 +42,17 @@ describe('Graph of connections (v4/v5)', () => {
     await user.selectOptions(within(panel).getByRole('combobox', { name: 'Folder' }), '');
     expect(await within(panel).findByText('No connections yet')).toBeInTheDocument();
   });
+
+  it('"Show the graph" from a page selects that page; the count names every kind of node drawn (QA C22, C6)', async () => {
+    const world = docWorld();
+    world.graph.nodes.push({ id: 'p-note8', kind: 'note', title: 'Notes: Lecture 8 — entropy', folder_ids: ['phys'], degree: 0, hub: false });
+    const { services } = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    services.ui.getState().openGraph('g-second');
+    const panel = await screen.findByRole('complementary', { name: 'Graph of connections' });
+    expect(await within(panel).findByText('Second law', { selector: 'b' })).toBeInTheDocument();
+    expect(within(panel).getByText('22 concepts · 1 other page · 4 folders')).toBeInTheDocument();
+    services.ui.getState().openGraph('g-temp');
+    expect(await within(panel).findByText('Temperature', { selector: 'b' })).toBeInTheDocument();
+  });
 });

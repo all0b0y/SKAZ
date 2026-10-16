@@ -62,6 +62,10 @@ export function GraphPanel() {
   const { client } = useServices();
   const folders = useLibrary((s) => s.folders);
   const openDocument = useUi((s) => s.openDocument);
+  /** "Show the graph" from a page selects that page (QA C22). */
+  const focus = useUi((s) => (s.right?.kind === 'graph' ? s.right.focus ?? null : null));
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
   const reduce = useReducedMotion() ?? false;
   const [folderId, setFolderId] = useState('');
   const { state, reload } = useLoad<KbGraph>(`graph:${folderId}`, () => client.call('GET /kb/graph', { query: folderId ? { folder_id: folderId } : {} }));
@@ -127,10 +131,14 @@ export function GraphPanel() {
     fittedRef.current = false;
     userViewRef.current = false;
     if (reduce) { const { w, h } = sizeRef.current; if (w && h) { viewRef.current = fit(sim, w, h); fittedRef.current = true; } }
-    setSelected((s) => (s && sim.byId.has(s) ? s : (sim.nodes.find((n) => n.node.hub)?.id ?? sim.nodes[0]?.id ?? null)));
+    const focused = focusRef.current;
+    setSelected((s) => (s && sim.byId.has(s) ? s
+      : focused && sim.byId.has(focused) ? focused
+        : (sim.nodes.find((n) => n.node.hub)?.id ?? sim.nodes[0]?.id ?? null)));
     request();
   }, [graph, reduce, request]);
 
+  useEffect(() => { if (focus && simRef.current?.byId.has(focus)) setSelected(focus); }, [focus]);
   useEffect(() => { request(); }, [selected, request]);
 
   // Theme changes repaint (colours are read from CSS on every frame).
@@ -236,12 +244,14 @@ export function GraphPanel() {
 
   const usedFolders = new Set(graph?.nodes.flatMap((n) => n.folder_ids) ?? []);
   const concepts = graph?.nodes.filter((n) => n.kind === 'concept').length ?? 0;
+  // Notes, folder overviews and analyses are drawn too: the count says so (QA C6).
+  const others = (graph?.nodes.length ?? 0) - concepts;
 
   return (
     <>
       <header className="kb-head kb-head--doc kb-head--graph">
         <h2 className="kb-graph__title">Graph of connections</h2>
-        {graph && <span className="kb-muted kb-graph__count">{plural(concepts, 'concept')} · {plural(usedFolders.size, 'folder')}</span>}
+        {graph && <span className="kb-muted kb-graph__count">{[plural(concepts, 'concept'), others > 0 ? plural(others, 'other page') : '', plural(usedFolders.size, 'folder')].filter(Boolean).join(' · ')}</span>}
         <span className="kb-head__spacer" />
         <label className="kb-select kb-select--sm">
           <span className="kb-visually-hidden">Folder</span>
