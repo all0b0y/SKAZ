@@ -338,6 +338,10 @@ def page_text(page: PageObject) -> PageText:
     return PageText("\n".join(out), found.unreadable, found.decoded, [_shape(group) for group in groups])
 
 
+#: A title candidate is at most this many lines of the page's biggest text.
+MAX_TITLE_LINES = 3
+
+
 def largest_text(page: PageObject) -> str | None:
     """The page's biggest text (a title candidate): lines within 5 % of the largest size."""
     try:
@@ -349,4 +353,7 @@ def largest_text(page: PageObject) -> str | None:
     biggest = max(line.size for line in lines)
     if biggest <= 0:
         return None
-    return " ".join(line.text for line in lines if line.size >= biggest * 0.95)
+    title = [line.text for line in lines if line.size >= biggest * 0.95]
+    # More than a few lines at the top size is body text, not a title (QA E19: a page of
+    # same-size text became a 150-character "title"); the caller falls back to the file name.
+    return " ".join(title) if len(title) <= MAX_TITLE_LINES else None

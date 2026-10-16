@@ -46,6 +46,7 @@ CLOSING = "SKAZ is closing."
 #: ``close()`` waits this long for a library write in progress before closing the database.
 CLOSE_WAIT_S = 1.5
 SANDBOX_REASON = "Development libraries must stay inside their profile Documents folder."
+DATA_DIR_REASON = "SKAZ keeps its own data here. Choose another folder for the library."
 #: A scan that had to leave out unreadable entries (iCloud still syncing them) runs again this often.
 UNREADABLE_RETRY_S = 60.0
 UNREADABLE_KIND = "library_unreadable"
@@ -221,6 +222,8 @@ class KnowledgeService:
         root = resolve_library_root(base)
         if not self._inside_sandbox(root):
             raise LibraryConflict(SANDBOX_REASON)
+        if self._overlaps_data_dir(root):
+            raise LibraryConflict(DATA_DIR_REASON)
         with self._state_lock:
             library = Library.create(root) if read_marker(root) is None else Library.open(root, None)
             previous = self._stored
@@ -236,6 +239,11 @@ class KnowledgeService:
                 self._note_unreadable(())
             self._open_and_scan(root, library.library_id)
         return self.view()
+
+    def _overlaps_data_dir(self, root: Path) -> bool:
+        """The library can't live in SKAZ's own data folder, nor hold it (QA E5)."""
+        data, candidate = self.data_dir.resolve(), root.resolve()
+        return candidate == data or data in candidate.parents or candidate in data.parents
 
     def _inside_sandbox(self, root: Path) -> bool:
         if self.documents_sandbox is None:

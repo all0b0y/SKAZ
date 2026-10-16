@@ -29,7 +29,7 @@ from ..errors import (
     NotFound,
     ProtectedItem,
 )
-from ..ids import new_id, utc_now
+from ..ids import new_id, utc_now, utc_now_ms
 from ..markdown.page import PageDocument, render_page
 from ..markdown.source import (
     Fragment,
@@ -338,7 +338,7 @@ class Library:
             manifest = MaterialManifest(
                 id=new_id("mat"), kind=kind, status=status, title=clean, folder=folder.id, origin=origin,
                 languages=list(languages), fragments=[FragmentMeta.of(item) for item in numbered],
-                created_at=utc_now(),
+                created_at=utc_now_ms(),
             )
             source = render_source(manifest.id, kind, numbered).encode()
             manifest = _with_extra(manifest, {SOURCE_SIZE_KEY: len(source)})

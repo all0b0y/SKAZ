@@ -25,7 +25,9 @@ def file_kind(path: PurePath) -> CarrierKind:
     if suffix in AUDIO_EXTENSIONS:
         return "audio"
     supported = ", ".join(sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS))
-    raise UnsupportedMedia(f"SKAZ can't import .{suffix or '?'} files. Supported: {supported}.")
+    if not suffix:
+        raise UnsupportedMedia(f"SKAZ can't import files without an extension. Supported: {supported}.")
+    raise UnsupportedMedia(f"SKAZ can't import .{suffix} files. Supported: {supported}.")
 
 
 @dataclass(frozen=True)
