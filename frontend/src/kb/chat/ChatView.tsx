@@ -115,7 +115,15 @@ export function ChatView({ hidden }: { hidden: boolean }) {
             {open.error}
           </Banner>
         )}
-        {chat && (
+        {chat && chat.messages.length === 0 && (
+          // An empty chat (one a recording opened, QA D9) says what it is for instead of a blank page.
+          <EmptyState icon="chats" title={recording ? 'Ask about the lecture' : 'No messages yet'}>
+            {recording
+              ? 'Questions here are answered from what has been recognised so far. Type @ to point at a page or a material.'
+              : 'Ask about your materials. Type @ to point at a page, a material or a chat.'}
+          </EmptyState>
+        )}
+        {chat && chat.messages.length > 0 && (
           <div className="kb-chat__messages">
             {chat.messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} message={m} />
               : m.role === 'system' ? <SystemMessage key={m.id} message={m} />

@@ -210,9 +210,25 @@ describe('Message field', () => {
     await ready();
     await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
     await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
-    await user.type(await screen.findByLabelText('Link to an article or a video'), 'javascript:alert(1)');
+    const field = await screen.findByLabelText('Link to an article or a video');
+    // Our own message, never the browser's validation bubble in the system language (QA D14).
+    expect(field.closest('form')).toHaveAttribute('novalidate');
+    await user.type(field, 'not a link at all');
     await user.click(screen.getByRole('button', { name: 'Add' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('http:// or https://');
+    await user.clear(field);
+    await user.type(field, 'javascript:alert(1)');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('http:// or https://');
+  });
+
+  it('the agent picker names the agent once when it has no model of its own (QA D13)', async () => {
+    const w = chatWorld();
+    w.agents.default = 'codex';
+    Object.assign(w.agents.agents.find((a) => a.id === 'codex')!, { models: [], current_model: null });
+    renderKb({ world: w });
+    await ready();
+    await waitFor(() => expect(screen.getByTestId('agent-picker')).toHaveAccessibleName('Agent and model: Codex'));
   });
 
   it('dictation: voice → text in the field through bridge.dictate; nothing is sent by itself', async () => {

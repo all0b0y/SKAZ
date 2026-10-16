@@ -217,6 +217,17 @@ describe('Chats in the side panel', () => {
     expect(within(panel).getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
+  it('an empty chat a recording opened says what it is for (QA D9)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const c2 = world.chats.find((c) => c.id === 'c2')!;
+    Object.assign(c2, { messages: [], state: 'idle' });
+    renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /What did I miss in lecture 8/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    expect(await within(centre).findByText('Ask about the lecture')).toBeInTheDocument();
+  });
+
   it('Rename: leaving the field saves the change; an unchanged or empty name just closes it (QA D7)', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
@@ -244,6 +255,8 @@ describe('Chats in the side panel', () => {
     await user.click(await within(side()).findByRole('button', { name: 'All chats · 7' }));
     const all = screen.getByRole('region', { name: 'All chats' });
     expect(await within(all).findByRole('button', { name: /^Transformer paper review/ })).toBeInTheDocument();
+    // The Folder label and its select are one unit, so a narrow toolbar wraps them together (QA D16).
+    expect(within(within(all).getByTestId('allchats-folder')).getByRole('combobox', { name: 'Folder' })).toBeInTheDocument();
     await user.click(within(all).getByRole('radio', { name: 'Pinned' }));
     await waitFor(() => expect(within(all).queryByRole('button', { name: /^Transformer paper review/ })).not.toBeInTheDocument());
     expect(within(all).getByRole('button', { name: /^Exam preparation for ML/ })).toBeInTheDocument();

@@ -147,13 +147,16 @@ export function AllChats() {
         <Segmented<Filter> label="Show" size="sm" value={filter} onChange={setFilter}
           options={[{ value: 'all', label: 'All' }, { value: 'pinned', label: 'Pinned' }, { value: 'recording', label: 'During recording' }]} />
         <span className="kb-head__spacer" />
-        <label htmlFor={folderId} className="kb-allchats__folder-label">Folder</label>
-        <span className="kb-select">
-          <select id={folderId} value={folder} onChange={(e) => setFolder(e.target.value)}>
-            <option value="">All</option>
-            {folders.filter((f) => !f.system).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
-          <Icon name="chevronDown" size={12} className="kb-select__chev" />
+        {/* Label and select wrap together, never apart (QA D16). */}
+        <span className="kb-allchats__folder" data-testid="allchats-folder">
+          <label htmlFor={folderId} className="kb-allchats__folder-label">Folder</label>
+          <span className="kb-select">
+            <select id={folderId} value={folder} onChange={(e) => setFolder(e.target.value)}>
+              <option value="">All</option>
+              {folders.filter((f) => !f.system).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+            <Icon name="chevronDown" size={12} className="kb-select__chev" />
+          </span>
         </span>
       </div>
       {notice && <p className="kb-notice" role="status">{notice}</p>}

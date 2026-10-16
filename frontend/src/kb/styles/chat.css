@@ -60,7 +60,12 @@
 /* Answer Markdown (streamed as it comes — no animation, decision 36). */
 .kb-md > * + * { margin-top: 8px; }
 .kb-md p { margin: 0; }
-.kb-md h3, .kb-md h4, .kb-md h5 { font-size: var(--t-md); font-weight: 700; margin: 12px 0 0; }
+.kb-md > * + p { margin-top: 8px; } /* `p { margin: 0 }` above must not undo the gap between blocks */
+.kb-md h3, .kb-md h4, .kb-md h5 { font-size: var(--t-md); font-weight: 700; margin: 14px 0 0; }
+/* Answer headings keep their order visible (QA D15): # > ## > ###…, all smaller than the chat title. */
+.kb-md h3 { font-size: var(--t-lg); }
+.kb-md h5 { font-size: var(--t-sm); }
+.kb-md ul + p, .kb-md ol + p, .kb-md pre + p, .kb-md blockquote + p { margin-top: 10px; }
 .kb-md ul, .kb-md ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 .kb-md ul { list-style: disc; }
 .kb-md ol { list-style: decimal; }
@@ -383,6 +388,7 @@
   min-width: 160px;
 }
 .kb-searchfield input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--kb-text); font: inherit; outline: none; }
+.kb-allchats__folder { display: inline-flex; align-items: center; gap: 6px; flex: none; margin-left: auto; }
 .kb-allchats__folder-label { color: var(--kb-muted); font-size: var(--t-sm); }
 .kb-allchats__body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 22px 20px; }
 .kb-allchats__group { margin-top: 6px; }
