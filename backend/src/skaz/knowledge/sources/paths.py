@@ -18,14 +18,18 @@ from pathlib import Path
 CHOOSE_FILE = "Choose a file to add."
 NOT_ABSOLUTE = "The file path must be absolute."
 HIDDEN = "Files inside hidden folders can't be added."
+HIDDEN_FILE = "Hidden files (their name starts with a dot) can't be added."
 MISSING = "This file doesn't exist any more or can't be opened."
 APP_DATA = "Files from SKAZ's own data folder can't be added."
 NOT_REGULAR = "Choose a regular file."
 NOT_READABLE = "SKAZ isn't allowed to read this file."
 
 
-def _hidden(path: Path) -> bool:
-    return any(part.startswith(".") for part in path.parts[1:])
+def _hidden(path: Path) -> str | None:
+    """Why ``path`` is hidden: a hidden folder on the way, or a hidden file itself (QA B18)."""
+    if any(part.startswith(".") for part in path.parts[1:-1]):
+        return HIDDEN
+    return HIDDEN_FILE if path.name.startswith(".") else None
 
 
 def given_path(raw: str | Path, rejected: Callable[[str], Exception]) -> Path:
@@ -36,8 +40,9 @@ def given_path(raw: str | Path, rejected: Callable[[str], Exception]) -> Path:
     path = Path(text)
     if not path.is_absolute():
         raise rejected(NOT_ABSOLUTE)
-    if _hidden(path):
-        raise rejected(HIDDEN)
+    hidden = _hidden(path)
+    if hidden:
+        raise rejected(hidden)
     return path
 
 
@@ -49,8 +54,9 @@ def resolved_file(path: Path, data_dir: Path,
         info = resolved.stat()
     except (OSError, RuntimeError) as error:
         raise rejected(MISSING) from error
-    if _hidden(resolved):
-        raise rejected(HIDDEN)
+    hidden = _hidden(resolved)
+    if hidden:
+        raise rejected(hidden)
     data = data_dir.resolve()
     if resolved == data or data in resolved.parents:
         raise rejected(APP_DATA)

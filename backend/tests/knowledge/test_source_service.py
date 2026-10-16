@@ -233,6 +233,7 @@ def test_text_and_markdown_files(sources: SourceService, tmp_path: Path) -> None
         (lambda tmp: str(tmp / "song.mp3"), r"can't read \.mp3 files"),
         (lambda tmp: str(tmp / "doc.rtf"), r"can't read \.rtf files\. It adds PDF, Markdown"),
         (lambda tmp: str(tmp / ".secret" / "notes.txt"), "hidden folders"),
+        (lambda tmp: str(tmp / ".hidden-start.txt"), r"Hidden files \(their name starts with a dot\)"),
         (lambda tmp: str(tmp / "folder.pdf"), "regular file"),
     ],
 )
@@ -397,3 +398,23 @@ def test_intake_record_is_written(sources: SourceService) -> None:
     result = sources.add_text("Hello world.\n\nSecond.", INBOX_ID)
     intake = json.loads((material_dir(sources.kb, result.material_id) / ".skaz" / "intake.json").read_text())
     assert intake["extractor"] == "text" and intake["failure"] is None and intake["hidden"] == []
+
+
+def test_random_bytes_in_a_txt_are_not_text(sources: SourceService, tmp_path: Path) -> None:
+    """QA B17: 4 KB of random bytes is refused, not saved as mojibake; UTF-16 and cp1251 still read."""
+    garbage = tmp_path / "binary-garbage.txt"
+    garbage.write_bytes(bytes(range(256)) * 16)
+    with pytest.raises(SourceRejected, match="This isn't a text file"):
+        sources.add_file(garbage, INBOX_ID)
+    assert sources.kb.materials() == []
+    wide = tmp_path / "wide.txt"
+    wide.write_bytes("Строка в UTF-16.".encode("utf-16"))
+    added = sources.add_file(wide, INBOX_ID)
+    assert sources.kb.material(added.material_id).fragments[0].text == "Строка в UTF-16."
+
+
+def test_a_colon_in_a_derived_title_reads_as_a_dash(sources: SourceService, tmp_path: Path) -> None:
+    """QA B20: "a:b.txt" is named "a - b", not "a -b"."""
+    path = tmp_path / "a:b.txt"
+    path.write_text("Some text.", encoding="utf-8")
+    assert sources.add_file(path, INBOX_ID).title == "a - b"

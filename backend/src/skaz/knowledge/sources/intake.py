@@ -120,7 +120,28 @@ def decode_text_file(data: bytes) -> str:
     return data.decode("latin-1")
 
 
+NOT_TEXT = "This isn't a text file. SKAZ reads .txt and .md files that hold text."
+_CONTROL = frozenset(range(0x20)) - {0x09, 0x0A, 0x0C, 0x0D, 0x1B}
+
+
+def looks_binary(data: bytes) -> bool:
+    """Random or binary bytes (QA B17): a NUL, or more than 5 % control bytes, in the first 8 KB.
+
+    UTF-16 text (with its BOM) holds NULs by design and is text.
+    """
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return False
+    head = data[:8192]
+    if not head:
+        return False
+    if b"\x00" in head:
+        return True
+    return sum(byte in _CONTROL for byte in head) > len(head) * 0.05
+
+
 def prepare_text_file(data: bytes, file_name: str, *, origin: Origin) -> Prepared:
+    if looks_binary(data):
+        raise SourceRejected(NOT_TEXT)
     stem = Path(file_name).stem
     markdown = Path(file_name).suffix.lower() in (".md", ".markdown")
     prepared = prepare_text(

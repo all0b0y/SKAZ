@@ -30,7 +30,7 @@ _TITLE_REPLACEMENTS = {
     "/": "-",
     "\\": "-",
     "|": "-",
-    ":": " -",
+    ":": " - ",  # "Lecture 3: Waves" → "Lecture 3 - Waves", "a:b" → "a - b" (QA B20)
     "*": "",
     "?": "",
     '"': "'",
