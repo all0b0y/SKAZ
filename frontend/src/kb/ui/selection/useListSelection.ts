@@ -205,6 +205,9 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     const meta = event.metaKey || event.ctrlKey;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     const inBar = Boolean(target.closest('[data-sel-bar]'));
+    const rowEl = target.closest<HTMLElement>('[data-sel-id]');
+    // Only rows (and the bar, for Esc/⌘/) are the list: filters and other controls nearby keep their keys.
+    if (!rowEl && !inBar && target !== listRef.current) return;
     const o = opts.current;
     const run = (handler: ((ids: string[]) => void) | undefined) => {
       if (!handler) return false;
@@ -225,7 +228,6 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     }
     if (meta && key === '/') { event.preventDefault(); setShortcutsOpen((v) => !v); return; }
     if (inBar) return;
-    const rowEl = target.closest<HTMLElement>('[data-sel-id]');
     const current = rowEl?.getAttribute('data-sel-id') ?? focusRef.current;
     if (!meta && (key === 'ArrowDown' || key === 'ArrowUp')) {
       const list = o.ids;

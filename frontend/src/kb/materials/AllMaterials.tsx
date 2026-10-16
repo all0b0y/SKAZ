@@ -6,6 +6,8 @@ import { KIND_ICON, KIND_LABEL } from '../library/materialMeta';
 import { useFolderTone } from '../document/parts';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
+import { SelectAllBox, SelectionCheckbox } from '../ui/selection/index';
+import { useMaterialSelection } from './materialBatch';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -93,6 +95,13 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
       : sort === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
     return out;
   }, [all, type, folderId, sort]);
+  const tableRows = layout === 'table' ? rows : [];
+  const { sel, overlays, dragProps } = useMaterialSelection({
+    rows: tableRows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
+    onOpen: (id) => openDocument({ type: 'material', id }), exportMd: null,
+  });
+  const selectable = tableRows.filter((m) => !sel.reasonOf(m.id)).length;
+  const allState = sel.selected.size === 0 ? 'none' : sel.selected.size >= selectable ? 'all' : 'some';
   const folderName = (m: KbMaterialSummary) => m.folder_name || folders.find((f) => f.id === m.folder_id)?.name || '';
 
   return (
@@ -104,7 +113,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
       </header>
-      <div className="kb-allmat__body">
+      <div className="kb-allmat__body" {...sel.listProps}>
         <div className="kb-amf">
           <Segmented label="Type" size="sm" value={type} options={TYPE_OPTIONS} onChange={setType} />
           <span className="kb-head__spacer" />
@@ -141,18 +150,22 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           </EmptyState>
         )}
         {rows.length > 0 && layout === 'table' && (
-          <table className="kb-amt">
+          <table className="kb-amt" {...sel.gridProps} aria-label="Materials">
             <colgroup>
               <col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
               <col className="kb-amt__c-added" /><col className="kb-amt__c-wiki" />
             </colgroup>
             <thead>
-              <tr><th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
+              <tr><th><SelectAllBox state={allState} onChange={(all) => (all ? sel.selectAll() : sel.clear())} /></th><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
             </thead>
             <tbody>
               {rows.map((m) => (
-                <tr key={m.id} className={openedId === m.id ? 'is-current' : undefined} onClick={() => openDocument({ type: 'material', id: m.id })}>
-                  <td><Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} /></td>
+                <tr key={m.id} className={openedId === m.id ? 'is-current' : undefined} {...sel.rowProps(m.id)} {...dragProps(m)}
+                  onClick={() => openDocument({ type: 'material', id: m.id })}>
+                  <td className="kb-amt__type">
+                    <SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} />
+                    <Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} />
+                  </td>
                   <td className="kb-amt__name">
                     <button type="button" className="kb-amt__open" onClick={(e) => { e.stopPropagation(); openDocument({ type: 'material', id: m.id }); }}>
                       {m.title}
@@ -166,6 +179,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             </tbody>
           </table>
         )}
+        {overlays}
         {rows.length > 0 && layout === 'cards' && (
           <ul className="kb-amg" aria-label="Materials">
             {rows.map((m) => (

@@ -19,7 +19,8 @@ describe('All materials (v11, decision 25)', () => {
     await ready();
     await user.click(screen.getByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    const table = await within(center).findByRole('table');
+    // A grid since 0.3.1 F2: rows are selectable (aria-multiselectable / aria-selected).
+    const table = await within(center).findByRole('grid');
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Name', 'Folder', 'Added', 'Wiki']);
     const row = within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')!;
     expect(row).toHaveTextContent('Physics');
@@ -36,7 +37,7 @@ describe('All materials (v11, decision 25)', () => {
     await ready();
     await user.click(screen.getByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    await within(center).findByRole('table');
+    await within(center).findByRole('grid');
     await user.click(within(center).getByRole('radio', { name: 'Documents' }));
     expect(within(center).getAllByRole('row')).toHaveLength(2);
     await user.click(within(center).getByRole('radio', { name: 'All' }));
@@ -295,5 +296,91 @@ describe('+ Material (v11, decisions 15–16)', () => {
     await user.click(screen.getByRole('button', { name: 'Add material' }));
     expect(await screen.findByRole('dialog', { name: 'Add material' })).toBeInTheDocument();
     act(() => undefined);
+  });
+});
+
+describe('Selecting several materials in the table (0.3.1 F2/F4/F5)', () => {
+  async function table() {
+    const user = userEvent.setup();
+    const r = await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const grid = await within(center).findByRole('grid');
+    const rowOf = (name: string) => within(grid).getByRole('button', { name }).closest('tr')!;
+    return { ...r, user, center, grid, rowOf };
+  }
+
+  it('⌘-click selects without opening; the bar moves them with Undo back to their old folders', async () => {
+    const { user, center, rowOf, fake, services } = await table();
+    expect(within(center).getByRole('grid')).toHaveAttribute('aria-multiselectable', 'true');
+    await user.keyboard('{Meta>}');
+    await user.click(within(rowOf('Pasted text: problems')).getByRole('button', { name: 'Pasted text: problems' }));
+    await user.click(within(rowOf('Cross-entropy explained')).getByRole('button', { name: 'Cross-entropy explained' }));
+    await user.keyboard('{/Meta}');
+    expect(rowOf('Pasted text: problems')).toHaveAttribute('aria-selected', 'true');
+    expect(rowOf('Cross-entropy explained')).toHaveAttribute('aria-selected', 'true');
+    expect(services.ui.getState().right).toBeNull();
+    const bar = screen.getByRole('toolbar', { name: '2 selected' });
+    expect(within(bar).getByRole('button', { name: /Add to wiki · 1/ })).toBeInTheDocument();
+    await user.click(within(bar).getByRole('button', { name: /Move to…/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Physics/ }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 2 materials to «Physics»');
+    expect(fake.world.materials.find((m) => m.id === 'm-txt')!.folder_id).toBe('phys');
+    expect(fake.world.materials.find((m) => m.id === 'm-ce')!.folder_id).toBe('phys');
+    await waitFor(() => expect(screen.queryByRole('toolbar', { name: /selected/ })).not.toBeInTheDocument());
+    await user.click(within(screen.getByTestId('toast')).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(fake.world.materials.find((m) => m.id === 'm-ce')!.folder_id).toBe('ml'));
+    expect(fake.world.materials.find((m) => m.id === 'm-txt')!.folder_id).not.toBe('phys');
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 2 materials back');
+  });
+
+  it('a material being added to the wiki can’t be selected and says why', async () => {
+    const { user, rowOf } = await table();
+    const row = rowOf('Lecture 5 — ML');
+    expect(row.querySelector('[data-sel-box]')).toHaveAttribute('title', 'Being added to the wiki — wait until it’s done');
+    await user.keyboard('{Meta>}');
+    await user.click(within(row).getByRole('button', { name: 'Lecture 5 — ML' }));
+    await user.keyboard('{/Meta}');
+    expect(row).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('⌘⌫ asks once with the consequences, then deletes one by one and reports', async () => {
+    const { user, rowOf, fake } = await table();
+    await user.click(rowOf('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    within(rowOf('Cross-entropy explained')).getByRole('button', { name: 'Cross-entropy explained' }).focus();
+    await user.keyboard('{Meta>}{Backspace}{/Meta}');
+    const dialog = await screen.findByRole('dialog', { name: 'Delete 2 materials?' });
+    expect(dialog).toHaveTextContent('Nothing is removed before you press Delete.');
+    // In the table's order (newest first).
+    expect(dialog).toHaveTextContent('Cross-entropy explained and Pasted text: problems and their files');
+    expect(fake.world.materials.some((m) => m.id === 'm-txt')).toBe(true);
+    await user.click(await within(dialog).findByRole('button', { name: 'Delete 2' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Deleted 2 materials');
+    expect(fake.world.materials.some((m) => m.id === 'm-txt' || m.id === 'm-ce')).toBe(false);
+    expect(fake.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/kb/materials/m-ce', '/kb/materials/m-txt']);
+  });
+
+  it('“Ask in chat” puts the selection into the message field as @-mentions', async () => {
+    const { user, rowOf, services } = await table();
+    await user.click(rowOf('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: /Ask in chat/ }));
+    expect(services.ui.getState().center).toBe('chat');
+    const input = await screen.findByTestId('message-input');
+    await waitFor(() => expect([...input.querySelectorAll('.kb-token--mention')].map((t) => t.textContent)).toEqual(
+      ['Cross-entropy explained', 'Pasted text: problems'].map((t) => expect.stringContaining(t)),
+    ));
+  });
+
+  it('right-click opens the same actions for the row (and the selection it joins)', async () => {
+    const { user, rowOf } = await table();
+    fireEvent.contextMenu(within(rowOf('Pasted text: problems')).getByRole('button', { name: 'Pasted text: problems' }), { clientX: 200, clientY: 200 });
+    const menu = await screen.findByRole('menu', { name: 'Material actions' });
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Move to…⌘⇧M', 'Ask in chat⌘↩', 'Add to wiki · 1', expect.stringMatching(/^Export \.md/), 'Delete 1 material⌘⌫',
+    ]);
+    expect(rowOf('Pasted text: problems')).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{Escape}');
   });
 });

@@ -4,3 +4,5 @@ export {
   ITEMS_MIME, currentDrag, endItemsDrag, hasDragFiles, hasDragItems, readDragItems, startItemsDrag, useItemsDrag,
   type DragInfo, type DragItem, type DragItemType,
 } from './dnd';
+export { BatchDeleteDialog, countOf, namesList, resultText, runOneByOne, type BatchResult } from './batch';
+export { ContextMenu } from './ContextMenu';

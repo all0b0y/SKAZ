@@ -10,7 +10,10 @@
 .kb-select--grow select { width: 100%; text-overflow: ellipsis; }
 
 .kb-amt { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--t-base); }
-.kb-amt__c-type { width: 30px; }
+.kb-amt__c-type { width: 54px; }
+.kb-amt__type { white-space: nowrap; }
+.kb-amt__type .kb-selbox { margin-right: 6px; vertical-align: -3px; }
+.kb-amt th .kb-selbox--all { vertical-align: -3px; }
 .kb-amt__c-name { width: 42%; }
 .kb-amt__c-folder { width: 24%; }
 .kb-amt__c-added { width: 96px; }
