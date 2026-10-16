@@ -52,7 +52,8 @@ async def _pending(runtime: Any) -> Any:
 
 def _page_text(runtime: Any, page_id: str) -> str:
     record = runtime.kb.page_repo.get(page_id)
-    return (runtime.kb.require().root / record.rel_path).read_text(encoding="utf-8")
+    path: Path = runtime.kb.require().root / record.rel_path
+    return path.read_text(encoding="utf-8")
 
 
 def _result(outcome: Any) -> dict[str, Any]:
@@ -245,7 +246,6 @@ def test_tool_schemas_have_no_refs(kb_app: Any) -> None:
     registry = kb_app.state.runtime.kb_tools
     for spec in registry.specs({"skaz_wiki_create_page", "skaz_wiki_edit_page"}):
         assert "$ref" not in json.dumps(spec.input_schema) and "$defs" not in json.dumps(spec.input_schema)
-    assert Path  # keep import for type hints
 
 
 async def test_over_mcp_a_waiting_call_streams_keepalives_until_the_user_decides(
