@@ -26,7 +26,7 @@ class CodexTools:
     def __init__(
         self, thread_id: str, turn_id: str, handlers: Mapping[str, ToolHandler], *,
         timeout: float = 15, max_calls: int = 128, max_output_bytes: int = 65536,
-        tool_timeouts: Mapping[str, float] | None = None,
+        tool_timeouts: Mapping[str, float | None] | None = None,
     ) -> None:
         if (
             not thread_id or not turn_id or not math.isfinite(timeout) or timeout <= 0
@@ -39,7 +39,8 @@ class CodexTools:
         self._handlers = dict(handlers)
         self._timeout = timeout
         self._tool_timeouts = dict(tool_timeouts or {})
-        if any(n not in handlers or not math.isfinite(t) or t <= 0
+        # ``None``: no timeout for that tool (it waits for the user until the turn is stopped).
+        if any(n not in handlers or (t is not None and (not math.isfinite(t) or t <= 0))
                for n, t in self._tool_timeouts.items()):
             raise ValueError("Invalid tool timeout")
         self._max_calls = max_calls

@@ -72,6 +72,10 @@ def start_turn() -> None:
         send({"id": "tool-1", "method": "item/tool/call", "params": {
             "threadId": THREAD, "turnId": TURN, "callId": "call-1", "namespace": None,
             "tool": name, "arguments": arguments}})
+    elif mode == "wait_tool":  # a SKAZ tool that waits for the user (0.3.1 P: the deadline stands still)
+        send({"id": "tool-1", "method": "item/tool/call", "params": {
+            "threadId": THREAD, "turnId": TURN, "callId": "call-1", "namespace": None,
+            "tool": "skaz_test_wait", "arguments": {}}})
     elif mode == "ingest":
         send({"id": "tool-x", "method": "item/tool/call", "params": {
             "threadId": THREAD, "turnId": TURN, "callId": "call-x", "namespace": None,

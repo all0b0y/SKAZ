@@ -44,6 +44,9 @@ from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..ingest.settings import read_settings
 from ..logsafe import error_note
 from ..markdown.text import name_key
+from ..permissions.broker import RESTARTED, PermissionBroker
+from ..permissions.broker import STOPPED as STOPPED_WAIT
+from ..permissions.store import RunRef
 from ..service import KnowledgeService
 from .analysis import AnalysisWriter, Section
 from .context import ContextBuilder, history, instructions
@@ -131,7 +134,8 @@ class _Run:
 class ChatService:
     def __init__(self, kb: KnowledgeService, *, agents: Callable[[], EngineRegistry], tools: ToolRegistry,
                  text_layer: Callable[[], TextLayer] | None = None, checkpoint_s: float = CHECKPOINT_S,
-                 stop_timeout_s: float = STOP_TIMEOUT_S, close_stop_s: float = CLOSE_STOP_S) -> None:
+                 stop_timeout_s: float = STOP_TIMEOUT_S, close_stop_s: float = CLOSE_STOP_S,
+                 permissions: PermissionBroker | None = None) -> None:
         self.kb = kb
         self.repo = ChatRepository(kb.db)
         self._agents = agents
@@ -144,6 +148,10 @@ class ChatService:
         self._saving: dict[str, asyncio.Lock] = {}
         #: Answers that were streaming when SKAZ stopped are "interrupted" (resumable) from now on.
         self.recovered = self.repo.interrupt_streaming()
+        #: Agents' wiki changes wait here for the user (phase P); nothing waits across a restart.
+        self.permissions = permissions
+        if permissions is not None:
+            permissions.recover()
         self._feeds: dict[str, ChatFeed] = {}
         self._list = ListFeed()
         self._runs: dict[str, _Run] = {}
@@ -558,6 +566,7 @@ class ChatService:
         await disk_call(self.repo.save_message, run.message)
 
     async def _finish(self, run: _Run, terminal: Completed | Failed | None) -> None:
+        await self._cancel_waits(run.run_id)
         state, failure = _outcome(terminal)
         if state == "cancelled" and run.closing:
             state, failure = "interrupted", Failure("other", RESTART_REASON)
@@ -608,8 +617,25 @@ class ChatService:
             await self._stop_run(run)
         return await self._message(chat_id, message_id)
 
+    async def _cancel_waits(self, run_id: str, *, closing: bool = False) -> None:
+        """What the run still waits for (permissions, questions) ends as cancelled; the agent learns it."""
+        reason = RESTARTED if closing else STOPPED_WAIT
+        if self.permissions is not None:
+            try:
+                await self.permissions.cancel_run(run_id, reason)
+            except Exception as error:
+                log.error("Cancelling the requests of chat answer %s failed: %s", run_id, error_note(error))
+
+    def run_ref(self, run_id: str) -> RunRef | None:
+        """The chat answer an agent run belongs to (tools learn their chat this way)."""
+        for run in self._runs.values():
+            if run.run_id == run_id:
+                return RunRef(run.run_id, run.chat_id, run.message.id, run.engine.id)
+        return None
+
     async def _stop_run(self, run: _Run) -> None:
         task = run.task
+        await self._cancel_waits(run.run_id)
         with contextlib.suppress(Exception):
             await run.engine.interrupt(run.run_id)
         if task is None:
@@ -632,6 +658,7 @@ class ChatService:
         await asyncio.gather(*(self._close_run(run) for run in runs), return_exceptions=True)
 
     async def _close_run(self, run: _Run) -> None:
+        await self._cancel_waits(run.run_id, closing=True)
         with contextlib.suppress(Exception):
             await asyncio.wait_for(run.engine.interrupt(run.run_id), self._close_stop_s)
         task = run.task

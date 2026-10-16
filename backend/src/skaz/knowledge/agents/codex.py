@@ -36,6 +36,7 @@ from ...gateways.codex_connection import parse_codex_version
 from ...gateways.codex_rpc import CodexRpc, CodexRpcError
 from ...gateways.codex_session import DISABLED_FEATURES, dynamic_tool, thread_start_params
 from ...gateways.codex_tools import CodexTools
+from ..permissions.waits import RunWaits
 from .engine import (
     AgentEvent,
     AgentTurn,
@@ -53,10 +54,13 @@ from .engine import (
     Usage,
 )
 from .prompting import untrusted_block
-from .tools import ToolRegistry
+from .tools import ToolContext, ToolRegistry
 
 MAX_PARALLEL_RUNS = 6
+#: The whole answer's deadline; time spent waiting for the user (permissions, questions) is not counted.
 RUN_TIMEOUT_S = 900.0
+#: How often a run that may wait for the user re-checks its deadline.
+WAIT_POLL_S = 1.0
 #: Per-frame cap of the run's transport (the legacy default is 1 MiB; ingest chunks can be larger).
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 HISTORY_BUDGET_CHARS = 60_000
@@ -135,18 +139,19 @@ class _RunTools(CodexTools):
     def __init__(self, run: _Run, registry: ToolRegistry, names: Sequence[str], thread_id: str,
                  turn_id: str) -> None:
         async def call(name: str, arguments: dict[str, Any]) -> str:
-            outcome = await registry.call(name, arguments)
+            outcome = await registry.call(name, arguments, ToolContext(run.run_id, "codex"))
             run.tool_error = outcome.is_error
             return f"Error: {outcome.text}" if outcome.is_error else outcome.text
 
         def handler(name: str) -> Any:
             return lambda arguments: call(name, arguments)
 
-        timeouts = {}
+        timeouts: dict[str, float | None] = {}
         for name in names:
             tool = registry.get(name)
             if tool is not None:
-                timeouts[name] = tool.timeout_s + 5
+                # Interactive tools wait for the user: no SKAZ-side limit (decision P3).
+                timeouts[name] = None if tool.timeout_s is None else tool.timeout_s + 5
         super().__init__(thread_id, turn_id, {name: handler(name) for name in names}, tool_timeouts=timeouts)
         self._run = run
 
@@ -168,7 +173,7 @@ class _RunTools(CodexTools):
 class CodexEngine:
     def __init__(self, connection: CodexProcesses, registry: ToolRegistry | None, *,
                  max_parallel: int = MAX_PARALLEL_RUNS, run_timeout_s: float = RUN_TIMEOUT_S,
-                 status_max_age_s: float = STATUS_MAX_AGE_S) -> None:
+                 status_max_age_s: float = STATUS_MAX_AGE_S, waits: RunWaits | None = None) -> None:
         if max_parallel < 1 or run_timeout_s <= 0:
             raise ValueError("Invalid Codex engine limits")
         self._connection = connection
@@ -180,6 +185,8 @@ class CodexEngine:
         self._status_at = 0.0
         self._status_lock = asyncio.Lock()
         self._runs: dict[str, _Run] = {}
+        #: Runs waiting for the user (a permission or a question): their deadline stands still (P3).
+        self.waits = waits
 
     @property
     def id(self) -> EngineId:
@@ -307,6 +314,8 @@ class CodexEngine:
 
     async def _release(self, run: _Run) -> None:
         self._runs.pop(run.run_id, None)
+        if self.waits is not None:
+            self.waits.forget(run.run_id)
         await run.shutdown()
 
     async def _drive(self, turn: AgentTurn, run: _Run) -> AsyncGenerator[AgentEvent, None]:
@@ -317,11 +326,17 @@ class CodexEngine:
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._run_timeout_s
+        waits = self.waits
         while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                yield Failed(run_id, "other", TOO_LONG)
-                return
+            if waits is not None and waits.waiting(run_id):
+                remaining = WAIT_POLL_S  # waiting for the user: the deadline stands still
+            else:
+                remaining = deadline + (waits.paused_s(run_id) if waits is not None else 0.0) - loop.time()
+                if remaining <= 0:
+                    yield Failed(run_id, "other", TOO_LONG)
+                    return
+                if waits is not None:
+                    remaining = min(remaining, WAIT_POLL_S)  # notice a wait that starts meanwhile
             try:
                 item = await asyncio.wait_for(run.queue.get(), remaining)
             except TimeoutError:
