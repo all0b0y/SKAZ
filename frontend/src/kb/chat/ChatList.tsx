@@ -8,11 +8,21 @@ import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
 import { useChatSelection } from './chatBatch';
 import { SelectionCheckbox } from '../ui/listSelection';
+import { isWaitingForUser } from '../api/permissions';
 
 const SIDE_LIMIT = 8;
 
-/** Static marks, no blinking (decision v15): answering = a still ring, new answer = a dot. */
+/** A permission or a question waits in this chat (0.3.1 P4): said in words, with a dot. */
+export function WaitingMark() {
+  return <span className="kb-chatwait" data-testid="chat-waiting">Waiting for you</span>;
+}
+
+/**
+ * Static marks, no blinking (decision v15): answering = a still ring, new answer = a dot.
+ * «Waiting for you» says more than «answering» and takes its place (P4).
+ */
 function ChatMark({ chat }: { chat: KbChatSummary }) {
+  if (isWaitingForUser(chat)) return <WaitingMark />;
   if (chat.state === 'answering') {
     return <Tooltip text="Agent is answering" describes><span className="kb-chatmark kb-chatmark--answering" role="img" aria-label="answering"><Icon name="answering" size={13} /></span></Tooltip>;
   }
@@ -187,6 +197,7 @@ export function AllChats() {
                     <span className="kb-allchats__preview">{c.last_preview}</span>
                   </button>
                   <span className="kb-allchats__tags">
+                    {isWaitingForUser(c) && <WaitingMark />}
                     {c.recording_material_id && <span className="kb-tag kb-tag--static"><Icon name="mic" size={12} />recording</span>}
                     {c.folder_ids.slice(0, 2).map((id) => folderName(id) && (
                       <span key={id} className="kb-tag kb-tag--static"><i className={`kb-fdot kb-fdot--${tone(id)}`} aria-hidden="true" />{folderName(id)}</span>

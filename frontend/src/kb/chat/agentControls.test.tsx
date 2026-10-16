@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { KbChatEvent } from '../../api/kb/types.gen';
 import { serveFake, type FakeWorld } from '../test/fakeKb';
-import { agentControlsWorld } from '../test/fixtures';
+import { agentControlsWorld, chatWorld } from '../test/fixtures';
 import { renderKb } from '../test/renderKb';
 import { openTarget } from '../state/document';
 import { applyEvents } from '../state/chats';
@@ -194,4 +194,57 @@ describe('Review beside the chat (book icon)', () => {
     expect(await within(panel).findByRole('group', { name: 'Allowed in this chat: Edited Entropy' })).toBeInTheDocument();
     expect(within(centre()).getByRole('group', { name: 'Allowed in this chat: Edited Entropy' })).toBeInTheDocument();
   });
+});
+
+describe('«Waiting for you»: chat list and the Chats rail icon (nothing pops up)', () => {
+  it('marks the waiting chats in the side list and in All chats, in words; a dot on Chats', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: agentControlsWorld() });
+    const row = (name: RegExp) => within(side()).findByRole('button', { name });
+    expect(await row(/Entropy — edit/)).toHaveTextContent('Waiting for you');
+    expect(await row(/Review lecture 8/)).toHaveTextContent('Waiting for you');
+    expect(await row(/Wiki tidy-up/)).not.toHaveTextContent('Waiting for you');
+    // «Waiting for you» says more than «answering»: the still ring gives way to it.
+    expect(within(await row(/Entropy — edit/)).queryByRole('img', { name: 'answering' })).not.toBeInTheDocument();
+    const chatsIcon = screen.getByRole('button', { name: 'Chats, waiting for you' });
+    expect(within(chatsIcon).getByTestId('chats-waiting-dot')).toBeInTheDocument();
+
+    await user.click(within(side()).getByRole('button', { name: /All chats/ }));
+    const all = screen.getByRole('region', { name: 'All chats' });
+    const allRow = (await within(all).findByRole('button', { name: /^Entropy — edit/ })).closest('li')!;
+    expect(allRow).toHaveTextContent('Waiting for you');
+  });
+
+  it('answering in the open chat clears its mark; the dot stays only for other waiting chats', async () => {
+    const { user } = await openChat(/Remove Spike/);
+    const card = await within(centre()).findByRole('region', { name: 'Codex wants to delete Spike' });
+    await user.click(within(card).getByRole('button', { name: 'Delete page' }));
+    await within(centre()).findByRole('group', { name: 'Allowed: Deleted Spike' });
+    expect(within(side()).getByRole('button', { name: /Remove Spike/ })).not.toHaveTextContent('Waiting for you');
+    expect(screen.getByRole('button', { name: 'Chats, waiting for you' })).toBeInTheDocument();
+  });
+
+  it('the open chat alone waiting: no dot (you are looking at it)', async () => {
+    const world = agentControlsWorld();
+    world.chats = world.chats.filter((c) => !['c9', 'c11'].includes(c.id));
+    const user = userEvent.setup();
+    renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Entropy — edit/ }));
+    await within(centre()).findByRole('region', { name: 'Codex wants to edit Entropy' });
+    expect(screen.getByRole('button', { name: 'Chats' })).toBeInTheDocument();
+    expect(screen.queryByTestId('chats-waiting-dot')).not.toBeInTheDocument();
+  });
+
+  it('comes live with the chat list events', async () => {
+    const { fake } = renderKb({ world: chatWorld() });
+    const row = await within(side()).findByRole('button', { name: /Compare regularisation/ });
+    expect(row).not.toHaveTextContent('Waiting for you');
+    const c3 = fake.world.chats.find((c) => c.id === 'c3')!;
+    const { messages: _m, cursor: _c, ...summary } = c3;
+    void _m; void _c;
+    fake.world.listCursor += 1;
+    fake.world.listChanges.push({ seq: fake.world.listCursor, chat: { ...summary, waiting_for_user: true } as KbChatSummaryP });
+    await waitFor(() => expect(within(side()).getByRole('button', { name: /Compare regularisation/ })).toHaveTextContent('Waiting for you'), { timeout: 6000 });
+    expect(screen.getByRole('button', { name: 'Chats, waiting for you' })).toBeInTheDocument();
+  }, 10_000);
 });
