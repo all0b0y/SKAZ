@@ -62,8 +62,8 @@ const api: BridgeApi = {
   showInFinder(target: RevealTarget): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.showInFinder, target) as Promise<boolean>;
   },
-  openInObsidian(target) {
-    return ipcRenderer.invoke(CHANNELS.openInObsidian, target) as ReturnType<NonNullable<BridgeApi['openInObsidian']>>;
+  openInObsidian(target, options) {
+    return ipcRenderer.invoke(CHANNELS.openInObsidian, target, { restart: options?.restart === true }) as ReturnType<NonNullable<BridgeApi['openInObsidian']>>;
   },
   updateState(): Promise<UpdateState> {
     return ipcRenderer.invoke(CHANNELS.updateGet) as Promise<UpdateState>;

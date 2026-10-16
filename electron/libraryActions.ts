@@ -92,8 +92,17 @@ export async function resolveTarget(target: unknown, deps: LibraryActionDeps, ex
 }
 
 // ---- Open in Obsidian ---------------------------------------------------------------------------
+//
+// `obsidian://open?path=` only opens a path inside a vault Obsidian already knows; for any other
+// folder it shows "Vault not found". Obsidian keeps its vault list in
+// ~/Library/Application Support/obsidian/obsidian.json, reads it once at launch and writes it back
+// while running. So the library becomes a vault by adding it to that list — only while Obsidian is
+// closed (an edit made while it runs would be overwritten). When Obsidian is open and doesn't know
+// the library, the user is asked first; with their yes SKAZ quits Obsidian, adds the vault and opens it.
 
-export type ObsidianResult = { ok: true } | { ok: false; reason: 'not_installed' | 'unavailable' };
+export type ObsidianResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_installed' | 'unavailable' | 'obsidian_running' | 'obsidian_config' };
 
 /** The fixed Obsidian URL for an absolute path (the library root as a vault, or one page). */
 export function obsidianUrl(absolutePath: string): string {
@@ -104,6 +113,15 @@ export interface ObsidianDeps {
   /** /Applications/Obsidian.app, ~/Applications/Obsidian.app, or a handler of obsidian:// in Launch Services. */
   installed: () => boolean;
   openExternal: (url: string) => Promise<void>;
+  /** Obsidian's own obsidian.json (vault list); read → null when there is none yet. */
+  vaultList: { read: () => string | null; write: (text: string) => void };
+  /** Obsidian's main process is running. */
+  running: () => boolean;
+  /** Ask Obsidian to quit and wait until it has; false when it is still running. */
+  quit: () => Promise<boolean>;
+  now: () => number;
+  /** A new vault id: 16 lowercase hex characters, as Obsidian makes them. */
+  newVaultId: () => string;
 }
 
 /** Obsidian is installed where macOS keeps apps, or registered for obsidian:// links. */
@@ -116,15 +134,70 @@ export function obsidianInstalled(home: string, exists: (p: string) => boolean, 
   }
 }
 
-/** Open the library or a page in Obsidian; the URL is built here from a checked path, never taken from the renderer. */
+type VaultConfig = { vaults?: Record<string, { path?: unknown }> } & Record<string, unknown>;
+
+/** Obsidian's config, or null when the file is there but isn't the JSON object it should be. */
+function readVaults(deps: ObsidianDeps): VaultConfig | null {
+  let text: string | null;
+  try { text = deps.vaultList.read(); } catch { return null; }
+  if (text === null || text.trim() === '') return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const vaults = (parsed as VaultConfig).vaults;
+    if (vaults !== undefined && (!vaults || typeof vaults !== 'object' || Array.isArray(vaults))) return null;
+    return parsed as VaultConfig;
+  } catch {
+    return null;
+  }
+}
+
+/** Some known vault holds `folder` (is it, or a folder around it) — Obsidian's own rule for open?path=. */
+export function vaultHolds(config: VaultConfig, folder: string): boolean {
+  return Object.values(config.vaults ?? {}).some(
+    (vault) => typeof vault?.path === 'string' && path.isAbsolute(vault.path) && isInside(path.resolve(vault.path), folder),
+  );
+}
+
+/** Add the library as a vault to Obsidian's list (Obsidian must not be running). */
+function addVault(deps: ObsidianDeps, root: string): boolean {
+  const config = readVaults(deps);
+  if (!config) return false;
+  if (vaultHolds(config, root)) return true;
+  const vaults = { ...(config.vaults ?? {}) };
+  let id = deps.newVaultId();
+  while (Object.hasOwn(vaults, id)) id = deps.newVaultId();
+  vaults[id] = { path: root, ts: deps.now() } as { path: string };
+  try {
+    deps.vaultList.write(JSON.stringify({ ...config, vaults }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Open the library or a page in Obsidian; the URL is built here from a checked path, never taken
+ * from the renderer. `restart` is the user's yes to "quit Obsidian so SKAZ can add the library".
+ */
 export async function openInObsidian(
-  target: unknown, deps: LibraryActionDeps & ObsidianDeps, exports: ExportFolders,
+  target: unknown, deps: LibraryActionDeps & ObsidianDeps, exports: ExportFolders, options: { restart?: unknown } = {},
 ): Promise<ObsidianResult> {
   const kind = (target as { kind?: unknown } | null)?.kind;
   if (kind !== 'library' && kind !== 'page') return { ok: false, reason: 'unavailable' };
   if (!deps.installed()) return { ok: false, reason: 'not_installed' };
   const resolved = await resolveTarget(target, deps, exports);
-  if (!resolved) return { ok: false, reason: 'unavailable' };
+  const root = resolved ? await libraryRoot(deps) : null;
+  if (!resolved || !root) return { ok: false, reason: 'unavailable' };
+  const config = readVaults(deps);
+  if (!config) return { ok: false, reason: 'obsidian_config' };
+  if (!vaultHolds(config, root)) {
+    if (deps.running()) {
+      if (options.restart !== true) return { ok: false, reason: 'obsidian_running' };
+      if (!(await deps.quit())) return { ok: false, reason: 'obsidian_running' };
+    }
+    if (!addVault(deps, root)) return { ok: false, reason: 'obsidian_config' };
+  }
   try {
     await deps.openExternal(obsidianUrl(resolved.path));
     return { ok: true };

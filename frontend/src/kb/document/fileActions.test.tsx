@@ -35,6 +35,25 @@ describe('Open in Obsidian (B20)', () => {
     expect(within(alert).getByRole('link', { name: /Download Obsidian/ })).toHaveAttribute('href', 'https://obsidian.md/download');
   });
 
+  it('Obsidian open and not knowing the library: asks, and only the user’s yes restarts it (live 16.10)', async () => {
+    const openInObsidian = vi.fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'obsidian_running' })
+      .mockResolvedValueOnce({ ok: true });
+    renderKb({ world: docWorld(), bridge: { openInObsidian } });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Storage/ }));
+    const row = within(dialog).getByRole('group', { name: 'Open in Obsidian' });
+    const user = userEvent.setup();
+    await user.click(within(row).getByRole('button', { name: 'Open in Obsidian' }));
+    expect(await within(row).findByText(/Obsidian is open and doesn’t know the library yet/)).toBeInTheDocument();
+    expect(openInObsidian).toHaveBeenCalledTimes(1);
+    await user.click(within(row).getByRole('button', { name: 'Restart Obsidian and open' }));
+    await waitFor(() => expect(openInObsidian).toHaveBeenLastCalledWith({ kind: 'library' }, { restart: true }));
+    await waitFor(() => expect(within(row).queryByRole('button', { name: 'Restart Obsidian and open' })).not.toBeInTheDocument());
+  });
+
   it('page ⋯ → Open in Obsidian opens that page (main resolves its file)', async () => {
     const openInObsidian = vi.fn(async () => ({ ok: true as const }));
     const { doc } = await openPage('p-entropy', { openInObsidian });

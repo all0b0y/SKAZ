@@ -111,6 +111,7 @@
 
 /* Settings → Sound (B20): default microphone with a live level, computer sound. */
 .kb-sound { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.kb-obsidian-ask { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .kb-sound .kb-select { max-width: 260px; }
 .kb-meter { position: relative; display: inline-block; width: 96px; height: 6px; border-radius: 3px; background: var(--kb-line); overflow: hidden; flex: none; }
 .kb-meter i { display: block; height: 100%; border-radius: 3px; background: var(--kb-accent); transition: width 90ms linear; }

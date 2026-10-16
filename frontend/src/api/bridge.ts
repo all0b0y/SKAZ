@@ -111,6 +111,8 @@ export interface UpdateState {
   disabledReason: string | null;
 }
 
+export type ObsidianFailure = 'not_installed' | 'unavailable' | 'obsidian_running' | 'obsidian_config';
+
 export interface BridgeApi {
   /**
    * Dictation into the message field: one PCM16 mono WAV clip (≤ 120 s, ≤ 8 MB) is posted by main to
@@ -143,8 +145,14 @@ export interface BridgeApi {
   chooseExportFolder?(): Promise<string | null>;
   /** Reveal a library target in Finder (the library, a wiki page's file, a folder chosen for an export). */
   showInFinder?(target: RevealTarget): Promise<boolean>;
-  /** Open the library (as a vault) or one page in Obsidian; `not_installed` when Obsidian isn't on this Mac. */
-  openInObsidian?(target: { kind: 'library' } | { kind: 'page'; id: string }): Promise<{ ok: true } | { ok: false; reason: 'not_installed' | 'unavailable' }>;
+  /**
+   * Open the library (as a vault) or one page in Obsidian; `not_installed` when Obsidian isn't on this
+   * Mac; `obsidian_running` when Obsidian is open and doesn't know the library yet — `restart: true`
+   * (the user's yes) lets SKAZ quit it, add the library as a vault and open it.
+   */
+  openInObsidian?(
+    target: { kind: 'library' } | { kind: 'page'; id: string }, options?: { restart?: boolean },
+  ): Promise<{ ok: true } | { ok: false; reason: ObsidianFailure }>;
   /** Updates (B20): the current state, "Check now", download + verify, install (SKAZ closes), changes. */
   updateState?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;

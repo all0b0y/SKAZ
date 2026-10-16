@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { CHANNELS } from './channels';
 import { NativeLiveClient } from './nativeLive';
@@ -8,7 +8,8 @@ import type { BackendManager } from './backend';
 import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
-import { ExportFolders, obsidianInstalled, openInObsidian, resolveTarget, type LibraryActionDeps } from './libraryActions';
+import { ExportFolders, openInObsidian, resolveTarget, type LibraryActionDeps } from './libraryActions';
+import { obsidianDeps } from './obsidianHost';
 import { mediaAccessOf, privacySettingsUrl } from './systemAudio';
 import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
 import { MATERIAL_EXTENSIONS, SPEECH_EXTENSIONS } from '../frontend/src/api/bridge';
@@ -212,13 +213,10 @@ export function registerIpc(
     return true;
   });
 
-  ipcMain.handle(CHANNELS.openInObsidian, async (event, target: unknown) => {
+  ipcMain.handle(CHANNELS.openInObsidian, async (event, target: unknown, options: unknown) => {
     if (!senderTrusted(event)) return { ok: false, reason: 'unavailable' };
-    return openInObsidian(target, {
-      ...actionDeps,
-      installed: () => obsidianInstalled(app.getPath('home'), existsSync, () => app.getApplicationNameForProtocol('obsidian://')),
-      openExternal: (url) => shell.openExternal(url),
-    }, exportFolders);
+    const restart = (options as { restart?: unknown } | null)?.restart === true;
+    return openInObsidian(target, { ...actionDeps, ...obsidianDeps() }, exportFolders, { restart });
   });
 
   // Fixed destinations only: the renderer names a pane, main picks the System Settings URL.
