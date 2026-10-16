@@ -81,7 +81,8 @@ describe('+ Material (v11, decisions 15–16)', () => {
     await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
     expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
     expect(within(dialog).getByText(/youtube\.com · Video · 1 h 04 min/)).toBeInTheDocument();
-    // Last-used folder by default (decision 16), wiki on for links (decision 15).
+    // Last-used folder by default (decision 16), wiki on for links with a ready agent (decision 15, QA B4).
+    expect(within(dialog).queryByTestId('add-wiki-no-agent')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue('phys');
     expect(within(dialog).getByRole('switch', { name: 'Add to wiki after processing' })).toBeChecked();
     await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Spoken language' }), 'en');
@@ -151,6 +152,22 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(await within(dialog).findByText('This file type can’t be read.')).toBeInTheDocument();
     expect(within(dialog).queryByText('lecture9.m4a')).not.toBeInTheDocument();
     expect(within(dialog).getByText('notes.pdf')).toBeInTheDocument();
+  });
+
+  it('without a ready wiki agent "Add to wiki" starts off and says where to connect one (QA B4)', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    world.agents.agents.find((a) => a.id === 'claude_code')!.state = 'not_installed';
+    const r = renderKb({ world, prefs: { section: 'materials' } });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
+    expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
+    expect(within(dialog).getByRole('switch', { name: 'Add to wiki after processing' })).not.toBeChecked();
+    expect(within(dialog).getByTestId('add-wiki-no-agent')).toHaveTextContent('Connect an agent in Settings → Accounts & keys to add materials to the wiki.');
+    await user.click(within(dialog).getByRole('button', { name: 'Open Accounts & keys' }));
+    expect(r.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
   });
 
   it('a dropped file SKAZ can’t read says so on its row and holds Add until it is removed (QA B2, B15)', async () => {

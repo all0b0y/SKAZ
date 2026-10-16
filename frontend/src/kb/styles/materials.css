@@ -127,3 +127,4 @@
 .kb-arow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .kb-arow__label { width: 110px; color: var(--kb-muted); flex: none; }
 .kb-arow__note { font-size: var(--t-xs); color: var(--kb-warn); padding-left: 118px; }
+.kb-arow__hint { font-size: var(--t-xs); padding-left: 118px; margin: 0; }

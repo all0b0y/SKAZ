@@ -3,7 +3,9 @@ import { errorText } from '../api/client';
 import { Banner, Button, Icon, IconButton, Modal, Segmented, Switch } from '../ui';
 import { NameField } from '../library/NameField';
 import { languageName } from '../material/MaterialView';
-import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
+import { useAgents, useLibrary, usePrefs, useServices, useUi } from '../state/context';
+import { agentOf } from '../state/agents';
+import type { EngineId } from '../api/names';
 import {
   fileItem, isSpeech, itemMeta, itemTitle, pasteItem, submitItem, wikiDefault, type AddItem, type LinkItem,
 } from './addItems';
@@ -24,6 +26,9 @@ export function AddMaterialModal() {
   const [folderId, setFolderId] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [auto, setAuto] = useState<WikiAuto>({ files: true, text: false });
+  const [wikiEngine, setWikiEngine] = useState<EngineId | null>(null);
+  const agents = useAgents((s) => s.agents);
+  const openSettings = useUi((s) => s.openSettings);
   const [toWiki, setToWiki] = useState<boolean | null>(null);
   const [language, setLanguage] = useState('');
   const [translate, setTranslate] = useState(false);
@@ -39,14 +44,21 @@ export function AddMaterialModal() {
     if (!open) return;
     setItems([]); setPaste(''); setErrors({}); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
     client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
-    client.call('GET /kb/settings/wiki').then((w) => setAuto({ files: w.auto_add_files_links, text: w.auto_add_text }), () => undefined);
+    client.call('GET /kb/settings/wiki').then((w) => {
+      setAuto({ files: w.auto_add_files_links, text: w.auto_add_text });
+      setWikiEngine(w.wiki_engine);
+    }, () => undefined);
     bridge.request<{ translation_target_language?: string }>({ method: 'GET', path: '/settings' })
       .then((r) => setTarget(r.ok ? r.data.translation_target_language ?? null : null), () => setTarget(null));
   }, [open]); // only on opening: the folder list and services are read at that moment
 
   // Decision 15: Settings → Wiki give the default; the switch is the user's either way and travels
   // with each add request (the backend adds the material once it is ready, or keeps it out).
-  const wikiOn = toWiki ?? wikiDefault(items, auto);
+  // QA B4 / B19: without a ready wiki agent the default is off, with the reason next to the switch.
+  const engine = wikiEngine ?? agents?.default ?? null;
+  const agentReady = engine !== null && agentOf(agents, engine)?.state === 'ready';
+  const noAgent = agents !== null && !agentReady;
+  const wikiOn = toWiki ?? (agentReady && wikiDefault(items, auto));
   const speech = items.some(isSpeech);
 
   const classify = (item: LinkItem) => {
@@ -185,6 +197,12 @@ export function AddMaterialModal() {
               <Switch label="Add to wiki after processing" checked={wikiOn} onChange={setToWiki} />
               <span>Add to wiki after processing</span>
             </div>
+            {noAgent && (
+              <p className="kb-arow__hint kb-muted" data-testid="add-wiki-no-agent">
+                Connect an agent in Settings → Accounts &amp; keys to add materials to the wiki.{' '}
+                <button type="button" className="kb-linkbtn" onClick={() => { setOpen(false); openSettings('conn'); }}>Open Accounts &amp; keys</button>
+              </p>
+            )}
             {speech && (
               <div className="kb-arow">
                 <span className="kb-arow__label">Audio and video</span>
