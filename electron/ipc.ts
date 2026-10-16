@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
-import { mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { CHANNELS } from './channels';
 import { NativeLiveClient } from './nativeLive';
 import type { NativeAudioMeta, NativeFailure } from '../frontend/src/api/nativeLive';
@@ -8,6 +8,7 @@ import type { BackendManager } from './backend';
 import { REQUEST_TIMEOUT_MS, validateBridgeRequest } from './ipcPolicy';
 import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
+import { ExportFolders, resolveTarget, type LibraryActionDeps } from './libraryActions';
 import { mediaAccessOf, privacySettingsUrl } from './systemAudio';
 import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
 import { MATERIAL_EXTENSIONS, SPEECH_EXTENSIONS } from '../frontend/src/api/bridge';
@@ -158,6 +159,57 @@ export function registerIpc(
   ipcMain.handle(CHANNELS.chooseMaterialFiles, (event) => {
     if (!senderTrusted(event)) return [];
     return kb.chooseMaterialFiles();
+  });
+
+  // Library file actions (B20): the renderer names a target, main finds and checks the path.
+  const exportFolders = new ExportFolders({
+    read: () => { try { return readFileSync(join(app.getPath('userData'), 'export-folders.json'), 'utf8'); } catch { return null; } },
+    write: (text) => writeFileSync(join(app.getPath('userData'), 'export-folders.json'), text, { encoding: 'utf8', mode: 0o600 }),
+  });
+  const actionDeps: LibraryActionDeps = {
+    getJson: async (route) => {
+      const handle = manager.getHandle();
+      if (!handle) return null;
+      try {
+        const res = await fetch(`http://127.0.0.1:${handle.port}${route}`, {
+          headers: { Authorization: `Bearer ${handle.token}` }, signal: AbortSignal.timeout(10_000),
+        });
+        return res.ok ? await res.json() as unknown : null;
+      } catch {
+        return null;
+      }
+    },
+    realPath: (p) => { try { return realpathSync(p); } catch { return null; } },
+    isDirectory: (p) => { try { return statSync(p).isDirectory(); } catch { return false; } },
+    isFile: (p) => { try { return statSync(p).isFile(); } catch { return false; } },
+  };
+  let choosingExport = false;
+  ipcMain.handle(CHANNELS.chooseExportFolder, async (event): Promise<string | null> => {
+    if (!senderTrusted(event) || choosingExport) return null;
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner) return null;
+    choosingExport = true;
+    try {
+      const result = await dialog.showOpenDialog(owner, {
+        title: 'Choose a folder for the export', buttonLabel: 'Export here', defaultPath: app.getPath('documents'),
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      const chosen = result.canceled ? null : result.filePaths[0] ?? null;
+      if (chosen) exportFolders.remember(chosen);
+      return chosen;
+    } catch {
+      return null;
+    } finally {
+      choosingExport = false;
+    }
+  });
+  ipcMain.handle(CHANNELS.showInFinder, async (event, target: unknown) => {
+    if (!senderTrusted(event)) return false;
+    const resolved = await resolveTarget(target, actionDeps, exportFolders);
+    if (!resolved) return false;
+    if (resolved.directory) return (await shell.openPath(resolved.path)) === '';
+    shell.showItemInFolder(resolved.path);
+    return true;
   });
 
   // Fixed destinations only: the renderer names a pane, main picks the System Settings URL.

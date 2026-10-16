@@ -16,16 +16,17 @@ from ..ids import new_id, utc_now
 from ..store.database import KnowledgeDatabase
 
 JOB_KIND = "ingest"
-JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections"]
+JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export"]
 #: Every kind run by ingest (W1) and the wiki (W2); ``refresh`` re-ingests after a correction changed.
 JOB_KINDS: tuple[JobKind, ...] = (
-    "ingest", "refresh", "recheck", "connections", "folder_overview", "corrections",
+    "ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export",
 )
 #: Kinds about one material (``target_id`` is the material id).
 MATERIAL_JOB_KINDS: tuple[JobKind, ...] = ("ingest", "refresh", "corrections")
 JobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
 JobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
-                  "checking_discrepancies", "finding_connections", "rechecking", "writing_overview"]
+                  "checking_discrepancies", "finding_connections", "rechecking", "writing_overview",
+                  "exporting"]
 FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted")
 INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the wiki. Retry to start again."
 WIKI_INTERRUPTED_REASON = "SKAZ was closed while this wiki job was running. Start it again when needed."
@@ -90,7 +91,8 @@ class JobRecord:
                     "writing_notes": "Writing notes", "saving": "Saving pages", "done": "Done",
                     "checking_discrepancies": "Checking for disagreements",
                     "finding_connections": "Finding connections", "rechecking": "Rechecking",
-                    "writing_overview": "Writing the folder overview"}.get(self.step or "reading", "Reading")
+                    "writing_overview": "Writing the folder overview",
+                    "exporting": "Exporting"}.get(self.step or "reading", "Reading")
         return {"done": "Done", "failed": "Failed", "cancelled": "Cancelled",
                 "interrupted": "Interrupted"}[self.state]
 

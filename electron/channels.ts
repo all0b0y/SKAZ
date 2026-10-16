@@ -23,4 +23,7 @@ export const CHANNELS = {
   dictate: 'kb:dictate',
   saveTextFile: 'app:save-text-file',
   chooseMaterialFiles: 'app:choose-material-files',
+  // Library file actions (B20).
+  chooseExportFolder: 'app:choose-export-folder',
+  showInFinder: 'app:show-in-finder',
 } as const;

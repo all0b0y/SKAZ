@@ -85,6 +85,8 @@ export interface FakeWorld {
   /** Every request served, for assertions. */
   log: Array<{ method: string; path: string; body?: unknown }>;
   seq: number;
+  /** Export targets that already hold files: path → number of entries (absent = empty). */
+  exportFolders?: Record<string, number>;
   /** Settings → Models → Recognition check (absent = same as the wiki pages). */
   recognition?: KbRecognitionSettings;
   /** Fixed clock of the fixtures (ISO), or null to follow the real clock (scenes with "Today"). */
@@ -827,6 +829,23 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/export/target': [200, (w, { query }) => {
+    const path = String(query.path ?? '');
+    const root = w.library.root ?? '';
+    if (root && (path === root || path.startsWith(`${root}/`))) {
+      return { path, reason: 'Choose a folder outside the SKAZ library: the export is a separate copy.', non_empty: false, entries: 0 };
+    }
+    const entries = w.exportFolders?.[path] ?? 0;
+    return { path, reason: null, non_empty: entries > 0, entries };
+  }],
+  'POST /kb/export': [202, (w, { body }) => {
+    if ((w.exportFolders?.[body.path] ?? 0) > 0 && !body.overwrite) fail(409, 'The folder isn\'t empty. Confirm to replace files with the same names.');
+    const job = newJob(w, 'export', null, 'running', 'Exporting');
+    job.step = 'exporting';
+    job.progress.parts_total = 10;
+    job.progress.parts_done = 3;
+    return job;
+  }],
   'GET /kb/settings/recognition': [200, (w) => structuredClone(w.recognition ?? { engine: 'same_as_wiki', model: null, effort: null })],
   'PUT /kb/settings/recognition': [200, (w, { body }) => {
     const own = body.engine !== 'same_as_wiki' && body.engine !== 'off';

@@ -144,3 +144,18 @@ class KbRecognitionSettingsUpdate(_Request):
     engine: KbRecognitionEngine
     model: str | None = Field(default=None, max_length=100)
     effort: str | None = Field(default=None, max_length=100)
+
+
+class KbExportTarget(BaseModel):
+    path: str
+    #: Why this folder can't be used; ``null`` when it can (after a confirmation if ``non_empty``).
+    reason: str | None
+    non_empty: bool
+    #: Items already in the folder.
+    entries: int
+
+
+class KbExportRequest(_Request):
+    path: str = Field(min_length=1, max_length=4096)
+    #: The user confirmed exporting into a non-empty folder (same names are replaced, others stay).
+    overwrite: bool = False

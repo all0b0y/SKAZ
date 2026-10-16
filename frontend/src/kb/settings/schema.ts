@@ -80,7 +80,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   // Storage
   { id: 'lib-folder', section: 'storage', group: 'Library', label: 'Folder', hint: 'Materials and wiki are plain .md files', keywords: 'library path location documents' },
   { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The wiki folder works as an Obsidian vault', keywords: 'vault' },
-  { id: 'export', section: 'storage', group: 'Library', label: 'Export', hint: 'The whole wiki as .md', keywords: 'markdown backup' },
+  { id: 'export', section: 'storage', group: 'Library', label: 'Export', hint: 'The whole wiki and materials as plain .md, sources as footnotes', keywords: 'markdown backup copy folder footnotes' },
   // Privacy
   { id: 'p-soniox', section: 'privacy', group: 'Where data goes', label: 'Soniox', keywords: 'privacy data cloud' },
   { id: 'p-agent', section: 'privacy', group: 'Where data goes', label: 'Your agent', hint: 'Codex, Claude Code or Hermes Agent', keywords: 'privacy data cloud' },

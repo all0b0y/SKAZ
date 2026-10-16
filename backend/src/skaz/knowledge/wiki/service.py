@@ -15,6 +15,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from ...native_io import disk_call
@@ -40,6 +41,7 @@ from .delete import DeletePlan, MaterialBusy, StillRecording, append_log, execut
 from .discrepancy import KIND as DISCREPANCY_KIND
 from .discrepancy import Discrepancies
 from .edit import add_note, delete_note, update_block
+from .export import ExportRefused, ExportTarget, check_target, export_library
 from .gone import KIND as GONE_KIND
 from .gone import GoneMaterials
 from .graph import Graph, GraphIndex
@@ -58,6 +60,8 @@ NEEDS_AGENT = "Finding connections needs a connected agent."
 SET_UP_AGENT = "Set one up in Settings → Accounts & keys."
 NO_CONCEPTS = "The wiki has no concept pages yet. Add materials to the wiki first."
 NEEDS_CHECK_AGENT = "Checking recognition needs a connected agent."
+EXPORT_DONE = "export_done"
+EXPORT_FAILED = "export_failed"
 #: How long the pre-flight agent check of a user-started job may take.
 AGENT_CHECK_S = 30.0
 #: Background "Find connections": only after this long without wiki work, and only when the wiki changed.
@@ -378,6 +382,53 @@ class WikiService:
                     await job.log("The wiki pages of this material are being refreshed.")
 
         return await self.jobs.start("corrections", material_id, "checking_recognition", work)
+
+    # -- export ---------------------------------------------------------------
+
+    def export_target(self, path: str) -> ExportTarget:
+        return check_target(self.kb, path)
+
+    async def export(self, path: str, *, overwrite: bool) -> JobRecord:
+        """Export the wiki and the materials' .md into ``path`` (B20): an ``export`` job with progress.
+
+        Refused before a job exists for a folder inside the library, an unusable path, or a
+        non-empty folder the user didn't confirm. The result is a notification with the folder.
+        """
+        target = await disk_call(check_target, self.kb, path)
+        if target.reason is not None:
+            raise ExportRefused(target.reason)
+        if target.non_empty and not overwrite:
+            raise ExportRefused("The folder isn't empty. Confirm to replace files with the same names.")
+        if self.jobs.running("export"):
+            raise WikiBusy("An export is already running.")
+
+        async def work(job: JobContext) -> None:
+            def progress(done: int, total: int) -> None:
+                self.ingest.jobs.update_counters(job.job_id, {"parts_done": done, "parts_total": total})
+
+            name = Path(target.path).name or target.path
+            try:
+                result = await disk_call(
+                    export_library, self.kb, target.path, overwrite=overwrite, progress=progress
+                )
+            except (KnowledgeError, OSError) as error:
+                reason = error.message if isinstance(error, KnowledgeError) else (
+                    f"SKAZ couldn't write there: {error.strerror or error}."
+                )
+                await disk_call(self.kb.notify, EXPORT_FAILED, "The export didn't finish",
+                                body=f"Into “{name}”: {reason}", payload={"path": target.path})
+                raise
+            await job.log(
+                f"Exported {result.pages} wiki page(s) and {result.materials} material(s) with "
+                f"{result.footnotes} source footnote(s)."
+            )
+            await disk_call(
+                self.kb.notify, EXPORT_DONE, "Export finished",
+                body=f"{result.pages} wiki page(s) and {result.materials} material(s) are in “{name}”.",
+                payload={"path": result.path, "pages": result.pages, "materials": result.materials},
+            )
+
+        return await self.jobs.start("export", None, "exporting", work)
 
     # -- corrections ----------------------------------------------------------
 

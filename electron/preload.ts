@@ -11,6 +11,7 @@ import type {
   JsonResponse,
   MaterialFileChoice,
   MediaAccess,
+  RevealTarget,
   TextFileSave,
 } from '../frontend/src/api/bridge';
 
@@ -53,6 +54,12 @@ const api: BridgeApi = {
   } : {}),
   restartBackend(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.restartBackend) as Promise<boolean>;
+  },
+  chooseExportFolder(): Promise<string | null> {
+    return ipcRenderer.invoke(CHANNELS.chooseExportFolder) as Promise<string | null>;
+  },
+  showInFinder(target: RevealTarget): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.showInFinder, target) as Promise<boolean>;
   },
   chooseStorageRoot(): Promise<string | null> {
     return ipcRenderer.invoke(CHANNELS.chooseStorageRoot) as Promise<string | null>;

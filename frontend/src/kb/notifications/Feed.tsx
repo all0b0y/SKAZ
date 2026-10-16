@@ -33,7 +33,7 @@ export function useOpenNotification() {
  * a click (decision 18), never by itself.
  */
 export function NotificationsFeed() {
-  const { notifications } = useServices();
+  const { notifications, bridge } = useServices();
   const items = useNotifications((s) => s.items);
   const load = useNotifications((s) => s.load);
   const error = useNotifications((s) => s.error);
@@ -117,6 +117,15 @@ export function NotificationsFeed() {
                             <button type="button" className="kb-note__act" disabled={busy === n.id} onClick={() => void quick(n, qa.id)}>{qa.label}</button>
                           )}
                           <button type="button" className="kb-note__act is-quiet" onClick={() => open(n)}>{k.open}</button>
+                        </span>
+                      )}
+                      {/* B20: a finished export opens its folder (main checks it was chosen for an export). */}
+                      {n.kind === 'export_done' && bridge.showInFinder && typeof n.payload.path === 'string' && (
+                        <span className="kb-note__actions">
+                          <button type="button" className="kb-note__act is-quiet" onClick={async () => {
+                            const ok = await bridge.showInFinder!({ kind: 'export', path: String(n.payload.path) }).catch(() => false);
+                            if (!ok) setRowError({ id: n.id, text: 'Finder couldn’t open that folder. It may have been moved or deleted.' });
+                          }}>Show in Finder</button>
                         </span>
                       )}
                       {!decide && n.subject && !n.resolved_at && (

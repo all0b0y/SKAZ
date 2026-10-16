@@ -88,6 +88,9 @@ export interface MediaAccess {
   screen: MediaAccessStatus;
 }
 
+/** What "Show in Finder" / "Open in Obsidian" may open: named targets only, main resolves the path. */
+export type RevealTarget = { kind: 'library' } | { kind: 'page'; id: string } | { kind: 'export'; path: string };
+
 export interface BridgeApi {
   /**
    * Dictation into the message field: one PCM16 mono WAV clip (≤ 120 s, ≤ 8 MB) is posted by main to
@@ -116,6 +119,10 @@ export interface BridgeApi {
   mediaAccess?(): Promise<MediaAccess>;
   /** Start the local service again after a failed start; false when there is nothing to retry. */
   restartBackend?(): Promise<boolean>;
+  /** Native folder chooser for an export (B20); the chosen folder becomes one "Show in Finder" may open. */
+  chooseExportFolder?(): Promise<string | null>;
+  /** Reveal a library target in Finder (the library, a wiki page's file, a folder chosen for an export). */
+  showInFinder?(target: RevealTarget): Promise<boolean>;
   /** Native folder chooser; returns a candidate only, never writes preferences. */
   chooseStorageRoot?(): Promise<string | null>;
   /** Current backend lifecycle phase. */

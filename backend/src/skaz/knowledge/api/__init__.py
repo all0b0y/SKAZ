@@ -8,6 +8,7 @@ from . import (
     chats,
     decisions,
     dictation,
+    export,
     folders,
     ingest,
     library,
@@ -40,4 +41,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     mentions.router,
     settings.router,
     dictation.router,
+    export.router,
 )

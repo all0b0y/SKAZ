@@ -124,6 +124,10 @@ const ROUTES: readonly Route[] = [
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
   // B20: "Check recognition again" of a recording (a backend job on the chosen agent).
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/recognition-check$/ },
+  // B20: export into a folder from the native chooser (the backend refuses one inside the library,
+  // and a non-empty one without the user's confirmation; development runs keep to their Documents).
+  { method: 'GET', pattern: /^\/kb\/export\/target$/ },
+  { method: 'POST', pattern: /^\/kb\/export$/ },
 ];
 
 /**

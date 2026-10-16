@@ -323,6 +323,18 @@ export interface KbExcludedFragment {
   detected_at: string;
 }
 
+export interface KbExportRequest {
+  path: string;
+  overwrite?: boolean;
+}
+
+export interface KbExportTarget {
+  path: string;
+  reason: string | null;
+  non_empty: boolean;
+  entries: number;
+}
+
 export interface KbFailure {
   kind: "limit" | "auth" | "incompatible" | "network" | "cancelled" | "other";
   message: string;
@@ -448,10 +460,10 @@ export interface KbInstallTask {
 
 export interface KbJob {
   id: string;
-  kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections";
+  kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections" | "export";
   material_id: string | null;
   state: "running" | "done" | "failed" | "cancelled" | "interrupted";
-  step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | null;
+  step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | "exporting" | null;
   label: string;
   error: string | null;
   error_code: string | null;
@@ -1228,6 +1240,20 @@ export interface KbEndpoints {
     query: { language?: string | null };
     body: never;
     response: KbDictation;
+    status: 200;
+  };
+  "POST /kb/export": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbExportRequest;
+    response: KbJob;
+    status: 202;
+  };
+  "GET /kb/export/target": {
+    path: Record<string, never>;
+    query: { path: string };
+    body: never;
+    response: KbExportTarget;
     status: 200;
   };
   "GET /kb/folders": {

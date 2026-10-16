@@ -14,6 +14,7 @@ import { EngineBadge } from '../ui/EngineBadge';
 import { ActivityLogRow } from './ActivityLog';
 import { MicRow, SystemAudioRow } from './SoundRows';
 import { RecognitionCheckRow } from './RecognitionCheckRow';
+import { ExportRow } from './ExportRow';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -69,6 +70,8 @@ function RowControl({ row }: { row: RowDef }) {
           <Button size="sm" variant="fill" onClick={() => setLibrarySetupOpen(true)}>Choose…</Button>
         </>
       );
+    case 'export':
+      return <ExportRow />;
     case 'p-soniox':
       return <PrivacyRow rowId={row.id} fallback="sound of recordings, when Soniox is chosen" />;
     case 'p-agent':

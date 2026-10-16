@@ -18,6 +18,9 @@ const KINDS: Record<string, { icon: IconName; tone: Tone; open: string }> = {
   material_ready: { icon: 'ready', tone: 'a', open: 'Open' },
   // A material folder removed outside SKAZ (backend wiki/gone.py): Clean up the wiki / Keep.
   material_gone: { icon: 'warning', tone: 'y', open: 'Review' },
+  // B20: the export finished ("Show in Finder") or stopped with its reason.
+  export_done: { icon: 'check', tone: 'a', open: 'Open' },
+  export_failed: { icon: 'error', tone: 'r', open: 'Details' },
 };
 
 /** Icon, tone and "open" word of a kind. An unknown kind is shown as ordinary "New" (API-B2 §1.1). */
