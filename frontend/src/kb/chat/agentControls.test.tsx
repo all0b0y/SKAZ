@@ -8,6 +8,7 @@ import { renderKb } from '../test/renderKb';
 import { openTarget } from '../state/document';
 import { applyEvents } from '../state/chats';
 import type { AnyMessagePart, KbChatEventP, KbChatSummaryP, KbPermissionPart } from '../api/permissions';
+import { permissionPart } from '../test/fixtures';
 
 const post = (w: FakeWorld, path: string, body?: unknown) => serveFake(w, { method: 'POST', path, body });
 const partIn = (w: FakeWorld, chatId: string, id: string) =>
@@ -151,7 +152,7 @@ describe('Permission card in the chat', () => {
     const { user, fake } = await openChat(/Remove Spike/);
     const card = await within(centre()).findByRole('region', { name: 'Codex wants to delete Spike' });
     expect(within(card).queryByRole('button', { name: 'Allow in this chat' })).not.toBeInTheDocument();
-    expect(within(card).getByText('Links to this page are removed; the words stay. Sources stay.')).toBeInTheDocument();
+    expect(within(card).getByText('No other page links here. Sources stay.')).toBeInTheDocument();
     const del = within(card).getByRole('button', { name: 'Delete page' });
     expect(del.className).toMatch(/kb-btn--danger/);
     await user.click(del);
@@ -324,5 +325,29 @@ describe('Agent question in the chat', () => {
     expect(screen.getByTestId('message-input')).toHaveAttribute('aria-placeholder', 'You can keep typing — the request waits');
     await user.click(within(side()).getByRole('button', { name: /Review lecture 8/ }));
     expect(await within(centre()).findByRole('group', { name: ASKED })).toHaveTextContent('Cancelled');
+  });
+});
+
+describe('Permission card uses what the backend tells beyond the first contract (merge of P)', () => {
+  it('shows the page path, the new title, real link counts, and no Undo when the change can no longer be undone', async () => {
+    const user = userEvent.setup();
+    const w = agentControlsWorld();
+    const parts = (id: string) => w.chats.find((c) => c.id === id)!.messages[1]!.parts as AnyMessagePart[];
+    parts('c8')[1] = permissionPart('perm-ren', { kind: 'rename', title: 'Spike', page_id: 'p-spike', path: 'Wiki/Concepts/Spike.md', new_title: 'Action potential', linking_pages: 3 }) as never;
+    Object.assign(parts('c11')[0]!, { linking_pages: 2, links_unlinked: 5 });
+    parts('c10')[0] = permissionPart('perm-auto', { status: 'allowed', auto: true, undoable: false, title: 'Cross-entropy', page_id: 'p-xent' }) as never;
+    parts('c10')[1] = permissionPart('perm-auto2', { status: 'allowed', auto: true, undoable: true, title: 'Boltzmann', page_id: 'p-boltz' }) as never;
+    renderKb({ world: w });
+    await user.click(await within(side()).findByRole('button', { name: /Entropy — edit/ }));
+    const card = await within(centre()).findByRole('region', { name: /Codex wants to rename/ });
+    expect(within(card).getByText('Wiki/Concepts/Spike.md')).toBeInTheDocument();
+    expect(within(card).getByText(/Action potential/)).toBeInTheDocument();
+    expect(within(card).getByText('Links on 3 pages follow the new name.')).toBeInTheDocument();
+    await user.click(within(side()).getByRole('button', { name: /Remove Spike/ }));
+    const del = await within(centre()).findByRole('region', { name: /Codex wants to delete/ });
+    expect(within(del).getByText('5 links on 2 pages are removed; the words stay. Sources stay.')).toBeInTheDocument();
+    await user.click(within(side()).getByRole('button', { name: /Wiki tidy-up/ }));
+    await within(centre()).findByText(/Boltzmann/);
+    expect(within(centre()).getAllByRole('button', { name: /Undo/ })).toHaveLength(1);
   });
 });

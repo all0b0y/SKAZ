@@ -493,6 +493,7 @@
 .kb-perm__head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; font-size: var(--t-base); min-width: 0; }
 .kb-perm__head b { font-weight: 600; white-space: nowrap; }
 .kb-perm__path { color: var(--kb-muted); font-size: var(--t-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-perm__to { font-size: var(--t-sm); white-space: nowrap; flex: none; }
 .kb-perm__spacer { flex: 1; }
 .kb-perm__sum { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0 12px 8px; }
 .kb-perm__pill { font-size: var(--t-xs); border: 1px solid var(--kb-line); border-radius: var(--kb-r-pill); padding: 1px 8px; white-space: nowrap; color: var(--kb-text); }

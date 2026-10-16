@@ -16,11 +16,19 @@ const OP: Record<KbPermissionChange['op'], { tag: string; cls: string }> = {
   replace: { tag: 'Changed', cls: 'chg' },
   remove: { tag: 'Removed', cls: 'del' },
 };
-/** What the user should know beyond the blocks (the contract has no counts of links). */
-const NOTE: Partial<Record<KbPermissionKind, string>> = {
-  delete: 'Links to this page are removed; the words stay. Sources stay.',
-  rename: 'Links to this page follow the new name.',
-};
+const pagesOf = (n: number) => `${n} ${n === 1 ? 'page' : 'pages'}`;
+/** What the user should know beyond the blocks: what happens to links (counts when the backend gives them). */
+function kindNote(part: KbPermissionPart): string | null {
+  const pages = part.linking_pages ?? 0;
+  const links = part.links_unlinked ?? 0;
+  if (part.kind === 'delete') {
+    return links > 0
+      ? `${links} ${links === 1 ? 'link' : 'links'} on ${pagesOf(pages)} ${links === 1 ? 'is' : 'are'} removed; the words stay. Sources stay.`
+      : pages > 0 ? `Links on ${pagesOf(pages)} are removed; the words stay. Sources stay.` : 'No other page links here. Sources stay.';
+  }
+  if (part.kind === 'rename') return pages > 0 ? `Links on ${pagesOf(pages)} follow the new name.` : 'No other page links here.';
+  return null;
+}
 /** Changes shown before «Show all N changes». */
 const FIRST = 2;
 
@@ -70,7 +78,7 @@ export function ChangeList({ part, limit }: { part: KbPermissionPart; limit?: nu
 }
 
 export function KindNote({ part }: { part: KbPermissionPart }) {
-  const note = NOTE[part.kind];
+  const note = kindNote(part);
   return note ? <p className="kb-perm__note">{note}</p> : null;
 }
 
@@ -168,7 +176,7 @@ export function PermissionOutcome({ chatId, part, onOpen }: { chatId: string; pa
     detail = 'back as it was';
   }
   const canOpen = part.status === 'allowed' && !part.auto && part.kind !== 'delete' && !!part.page_id && !!onOpen;
-  const canUndo = part.status === 'allowed' && part.auto;
+  const canUndo = part.status === 'allowed' && part.auto && part.undoable !== false;
 
   const undo = async () => {
     setBusy(true);
@@ -213,7 +221,8 @@ export function PermissionCard({ chatId, part, onOpen, onReview }: {
       <header className="kb-perm__head">
         <Icon name="permission" size={16} />
         <b>{agentName(part.engine)} wants to {VERB[part.kind]}</b>
-        <span className="kb-perm__path" title={part.title}>{part.title}</span>
+        <span className="kb-perm__path" title={part.path ?? part.title}>{part.path ?? part.title}</span>
+        {part.kind === 'rename' && part.new_title && <span className="kb-perm__to">→ {part.new_title}</span>}
         <span className="kb-perm__spacer" />
         {onReview && <IconButton icon="wiki" size="sm" label="Review beside the chat" onClick={onReview} />}
       </header>

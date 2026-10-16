@@ -486,8 +486,8 @@ type PEntry<R extends keyof KbPermissionEndpoints> = readonly [PSpec<R>['status'
 }) => PSpec<R>['response']];
 
 /**
- * Phase-P routes, typed by the local contract (`api/permissions.ts`) until types.gen.ts has them;
- * then they move into ROUTES (and so into FAKE_ROUTES, the IPC-policy check).
+ * Phase-P routes, kept apart from ROUTES only for readability;
+ * FAKE_ROUTES (the IPC-policy check) includes them.
  */
 const PERMISSION_ROUTES: { [R in keyof KbPermissionEndpoints]: PEntry<R> } = {
   'POST /kb/permissions/{permission_id}/decide': [200, (w, { path, body }) => {
@@ -1198,7 +1198,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = Object.keys(ROUTES) as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections)(\/|$)/;
