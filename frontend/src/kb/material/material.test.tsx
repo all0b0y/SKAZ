@@ -181,6 +181,27 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(doc.querySelector('.kb-art')).toBeNull();
   });
 
+  it('a Markdown file’s table and numbered list are drawn as such (QA B3)', async () => {
+    const world = docWorld();
+    const article = world.materials.find((m) => m.id === 'm-ce')!;
+    article.fragments = [
+      fragment('m-ce', 1, '1. first law', { role: 'list_item' }),
+      fragment('m-ce', 2, '2. second law', { role: 'list_item' }),
+      fragment('m-ce', 3, '| Quantity | Unit |\n|---|:-:|\n| Heat | J |\n| a \\| b | K |', { role: 'table' }),
+    ];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-ce' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const table = await within(doc).findByRole('table');
+    expect(within(table).getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Quantity', 'Unit']);
+    expect(within(table).getAllByRole('row').slice(1).map((row) => [...row.querySelectorAll('td')].map((c) => c.textContent)))
+      .toEqual([['Heat', 'J'], ['a | b', 'K']]);
+    expect(doc.querySelector('[data-seg="3"]')).toHaveAttribute('data-quote-seg', '3');
+    // The number is the item's own marker: no second bullet in front of it.
+    for (const li of within(doc).getAllByRole('listitem')) expect(li).toHaveClass('kb-mtext__li--glyph');
+  });
+
   it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {
     const world = docWorld();
     const tb = world.materials.find((m) => m.id === 'm-tb')!;

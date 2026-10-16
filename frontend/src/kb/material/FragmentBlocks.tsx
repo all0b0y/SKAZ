@@ -2,8 +2,32 @@ import type { ReactNode } from 'react';
 import type { KbFragment } from '../../api/kb/types.gen';
 import './fragmentRoles.css';
 
-/** A list item whose text already starts with a bullet glyph (PDFs) shows that glyph instead of the list's own. */
-const BULLET_GLYPH = /^[•●▪◦‣■□►➢✓✔○◆◇]/;
+/** A list item whose text already starts with a bullet glyph (PDFs) or its number (`1.` in Markdown)
+ * shows that instead of the list's own bullet. */
+const BULLET_GLYPH = /^(?:[•●▪◦‣■□►➢✓✔○◆◇]|\d{1,9}[.)]\s)/;
+
+/** Cells of one pipe-table row (`| a | b |`); escaped pipes stay in the cell. */
+export function tableCells(row: string): string[] {
+  const inner = row.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+  return inner.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/\\\|/g, '|'));
+}
+
+const SEPARATOR_ROW = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/;
+
+/** A Markdown table (QA B3): header, then rows; the text stays the fragment's own (quotes match it). */
+function TableBlock({ text, attrs }: { text: string; attrs: FragmentAttrs }) {
+  const { className, ...rest } = attrs;
+  const rows = text.split('\n').filter((row) => !SEPARATOR_ROW.test(row.trim()));
+  const [head, ...body] = rows.map(tableCells);
+  return (
+    <div {...rest} className={`${className} kb-mtext__table`}>
+      <table>
+        {head && <thead><tr>{head.map((cell, i) => <th key={i} scope="col">{cell}</th>)}</tr></thead>}
+        <tbody>{body.map((cells, r) => <tr key={r}>{cells.map((cell, i) => <td key={i}>{cell}</td>)}</tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
 
 /** Attributes of the element holding one fragment: class, seg, quote source, target key. */
 export type FragmentAttrs = { className: string } & Record<string, string | number | undefined>;
@@ -31,6 +55,8 @@ function Block({ fragment, attrs, children }: { fragment: KbFragment; attrs: Fra
       return <blockquote {...rest} className={`${className} kb-mtext__quote`}>{children}</blockquote>;
     case 'code':
       return <pre {...rest} className={`${className} kb-mtext__code`}><code>{children}</code></pre>;
+    case 'table':
+      return <TableBlock text={fragment.text} attrs={attrs} />;
     default:
       return <p {...rest} className={className}>{children}</p>;
   }

@@ -345,7 +345,7 @@ export interface KbFragment {
   speaker: string | null;
   page: number | null;
   index: number | null;
-  role: "paragraph" | "heading" | "list_item" | "quote" | "code";
+  role: "paragraph" | "heading" | "list_item" | "quote" | "code" | "table";
   level: number | null;
   original_text: string | null;
   corrections: string[];

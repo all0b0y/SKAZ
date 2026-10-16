@@ -21,8 +21,9 @@ from .text import format_timestamp
 MaterialKind = Literal["recording", "audio", "video", "video_link", "pdf", "book", "web", "text"]
 MaterialStatus = Literal["recording", "processing", "ready", "failed"]
 #: How a fragment is shown (user bug 1016-5): set by the extractors, never changes the text.
-FragmentRole = Literal["paragraph", "heading", "list_item", "quote", "code"]
-FRAGMENT_ROLES: tuple[FragmentRole, ...] = ("paragraph", "heading", "list_item", "quote", "code")
+FragmentRole = Literal["paragraph", "heading", "list_item", "quote", "code", "table"]
+#: ``table``: a Markdown pipe table kept as its rows (QA B3); the viewer draws the cells.
+FRAGMENT_ROLES: tuple[FragmentRole, ...] = ("paragraph", "heading", "list_item", "quote", "code", "table")
 MATERIAL_KINDS: tuple[MaterialKind, ...] = (
     "recording", "audio", "video", "video_link", "pdf", "book", "web", "text",
 )

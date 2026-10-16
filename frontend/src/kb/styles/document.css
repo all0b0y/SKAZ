@@ -222,6 +222,8 @@
 
 .kb-mtext { display: flex; flex-direction: column; gap: 10px; }
 .kb-mtext__p { line-height: 1.6; overflow-wrap: anywhere; border-radius: 3px; }
+/* A text file keeps its single line breaks (QA B37); PDF pages and articles have none inside a paragraph. */
+.kb-mtext > .kb-mtext__p { white-space: pre-line; }
 
 /* An excluded fragment (decision 41) keeps its place in the text: quiet, labelled, at the text's
    own left edge; the rule sits in the gutter so nothing shifts. */

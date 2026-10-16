@@ -18,12 +18,14 @@ from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.markdown.source import (
     FragmentInput,
     FragmentMeta,
+    Origin,
     number_fragments,
     read_source,
     render_source,
 )
 from skaz.knowledge.sources.fetch import SafeFetcher
 from skaz.knowledge.sources.html import extract_article
+from skaz.knowledge.sources.intake import prepare_text_file
 from skaz.knowledge.sources.pdf import extract_pdf
 from skaz.knowledge.store.schema import apply_schemas, core
 from tests.knowledge.pdf_fixtures import line, make_pdf
@@ -155,3 +157,73 @@ async def test_the_material_api_returns_the_roles(kb_app: Any, kb_client: httpx.
     assert [[f["text"], f["role"], f["level"]] for f in detail["fragments"]] == [
         list(item) for item in EXPECTED
     ]
+
+
+LECTURE_MD = """# Thermodynamics lecture
+
+Energy is conserved
+in an isolated system, see [the notes](https://example.org/n).
+
+## Terms
+
+- heat
+- **work**
+- internal energy
+  that a body holds
+
+1. first law
+2. second law
+
+> The energy of the universe is constant.
+> The entropy of the universe tends to a maximum.
+
+```python
+def q(m, c, dt):
+    return m * c * dt
+
+print(q(1, 2, 3))
+```
+
+| Quantity | Unit |
+|---|:-:|
+| Heat | J |
+| Temperature | K |
+
+---
+
+The end.
+"""
+
+
+def test_a_markdown_file_gets_the_same_roles(tmp_path: Path) -> None:
+    """QA B3: a ``.md`` material shows headings, list items, quotes, code and tables, not raw Markdown."""
+    origin = Origin(type="file", file_name="lecture.md")
+    prepared = prepare_text_file(LECTURE_MD.encode(), "lecture.md", origin=origin)
+    got = [(item.text, item.role, item.level) for item in prepared.fragments]
+    assert got == [
+        ("Thermodynamics lecture", "heading", 1),
+        ("Energy is conserved in an isolated system, see the notes.", "paragraph", None),
+        ("Terms", "heading", 2),
+        ("heat", "list_item", None),
+        ("work", "list_item", None),
+        ("internal energy that a body holds", "list_item", None),
+        ("1. first law", "list_item", None),
+        ("2. second law", "list_item", None),
+        ("The energy of the universe is constant. The entropy of the universe tends to a maximum.",
+         "quote", None),
+        ("def q(m, c, dt):\n    return m * c * dt", "code", None),
+        ("print(q(1, 2, 3))", "code", None),
+        ("| Quantity | Unit |\n|---|:-:|\n| Heat | J |\n| Temperature | K |", "table", None),
+        ("The end.", "paragraph", None),
+    ]
+    assert prepared.title == "Thermodynamics lecture"
+    assert [item.index for item in prepared.fragments] == list(range(13))
+    rendered = render_source("mat-1", "text", number_fragments([], prepared.fragments))
+    metas = [FragmentMeta.of(item) for item in number_fragments([], prepared.fragments)]
+    assert [item.role for item in read_source(rendered, metas)] == [item.role for item in prepared.fragments]
+
+
+def test_a_text_file_stays_paragraphs() -> None:
+    prepared = prepare_text_file(b"# not a heading\n\n- not a list", "a.txt", origin=Origin(type="file"))
+    assert [(item.text, item.role) for item in prepared.fragments] == [
+        ("# not a heading", "paragraph"), ("- not a list", "paragraph")]

@@ -21,6 +21,7 @@ from .fragments import (
 )
 from .guard import Finding, clean_invisible, detect_instruction
 from .html import extract_article
+from .markdown_blocks import block_of_offset, markdown_blocks
 from .pdf import extract_pdf
 
 TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown"})
@@ -80,10 +81,15 @@ def prepare_text(
     markdown: bool = False,
 ) -> Prepared:
     cleaned = clean_invisible(text)
-    paragraphs = text_paragraphs(cleaned.text)
-    findings = [
-        item.at(index=paragraph_of_offset(cleaned.text, item.offset or 0)) for item in cleaned.findings
-    ]
+    if markdown:  # headings, lists, quotes, code and tables keep their roles (QA B3)
+        blocks = markdown_blocks(cleaned.text)
+        paragraphs = [block.paragraph for block in blocks]
+        findings = [item.at(index=block_of_offset(blocks, item.offset or 0)) for item in cleaned.findings]
+    else:
+        paragraphs = text_paragraphs(cleaned.text)
+        findings = [
+            item.at(index=paragraph_of_offset(cleaned.text, item.offset or 0)) for item in cleaned.findings
+        ]
     derived = title
     if derived is None and markdown:
         heading = next((line for line in cleaned.text.splitlines() if line.startswith("# ")), None)

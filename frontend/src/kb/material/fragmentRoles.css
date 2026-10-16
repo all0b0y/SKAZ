@@ -1,4 +1,4 @@
-/* Fragment roles in the material view (user bug 1016-5): headings, lists, quotes, code. Left-aligned. */
+/* Fragment roles in the material view (user bug 1016-5, QA B3): headings, lists, quotes, code, tables. Left-aligned. */
 
 .kb-mtext__h {
   font-weight: 650;
@@ -41,3 +41,15 @@
   overflow-wrap: anywhere;
 }
 .kb-mtext__code code { font: inherit; }
+
+.kb-mtext__table { overflow-x: auto; border-radius: 3px; }
+.kb-mtext__table table { border-collapse: collapse; font-size: 0.95em; line-height: 1.45; }
+.kb-mtext__table th,
+.kb-mtext__table td {
+  padding: 4px 10px;
+  border: 1px solid var(--kb-line);
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.kb-mtext__table th { font-weight: 600; background: var(--kb-bg); }
