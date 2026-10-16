@@ -3,6 +3,7 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
+import { block } from '../test/fakeKb';
 
 async function openPage(id: string) {
   const r = renderKb({ world: docWorld() });
@@ -82,6 +83,57 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     expect(fake.calls.some((c) => c.method === 'PUT' && c.path === '/kb/wiki/pages/p-entropy/blocks/b5')).toBe(true);
     await user.click(within(block).getByRole('button', { name: /Ask the agent to re-check/ }));
     await waitFor(() => expect(fake.calls.some((c) => c.path === '/kb/wiki/pages/p-entropy/blocks/b5/recheck')).toBe(true));
+  });
+
+  it('a re-check that fails says why next to the block, with the way to Settings (QA C3)', async () => {
+    const user = userEvent.setup();
+    const { doc, fake, services } = await openPage('p-entropy');
+    const block = (await within(doc).findByText(/The logarithm makes the entropy/)).closest('[data-block-id]') as HTMLElement;
+    // The agent isn't installed: the job the backend starts fails at once with that reason.
+    const post = fake.requestMock.getMockImplementation()!;
+    fake.requestMock.mockImplementation(async (req) => {
+      const answer = await post(req);
+      if (req.path.endsWith('/recheck') && answer.ok) {
+        const job = fake.world.jobs.find((j) => j.id === (answer.data as { id: string }).id)!;
+        Object.assign(job, { state: 'failed', step: null, error: 'The agent couldn’t start: Codex is not installed.', error_code: 'AGENT_UNAVAILABLE' });
+      }
+      return answer;
+    });
+    await user.click(within(block).getByRole('button', { name: /Ask the agent to re-check/ }));
+    const alert = await within(block).findByRole('alert', {}, { timeout: 4000 });
+    expect(alert).toHaveTextContent('Couldn’t re-check against sources. The agent couldn’t start: Codex is not installed.');
+    await user.click(within(alert).getByRole('button', { name: 'Open Accounts & keys' }));
+    expect(services.ui.getState().settingsOpen).toBe(true);
+    expect(services.ui.getState().settingsSection).toBe('conn');
+  });
+
+  it('wikilinks in block text open the page or the material; editing shows readable text (QA C1, C2, C4)', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    const entropy = world.pages.find((p) => p.id === 'p-entropy')!;
+    entropy.blocks.push(block('b8', 'connection', 'In folders',
+      'Physics: [[Materials/Physics/Lecture 7 — the second law/Lecture 7 — the second law|Lecture 7 — the second law]]; see [[Wiki/Concepts/Second law|Second law]].'));
+    entropy.blocks.at(-1)!.links = [
+      { target: 'Materials/Physics/Lecture 7 — the second law/Lecture 7 — the second law', page: null, material_id: 'm-lec7' },
+      { target: 'Wiki/Concepts/Second law', page: { id: 'g-second', kind: 'concept', title: 'Second law' }, material_id: null },
+    ];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'page', id: 'p-entropy' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const row = (await within(doc).findByText(/Physics:/)).closest('[data-block-id]') as HTMLElement;
+    expect(row).toHaveTextContent('Physics: Lecture 7 — the second law; see Second law.');
+    expect(row).not.toHaveTextContent('[[');
+    // The editor shows what the reader sees, not the raw links (the backend puts them back).
+    await user.click(within(row).getByRole('button', { name: 'Edit block' }));
+    expect(within(row).getByRole('textbox', { name: 'Block text' })).toHaveValue('Physics: Lecture 7 — the second law; see Second law.');
+    await user.click(within(row).getByRole('button', { name: 'Cancel' }));
+    await user.click(within(row).getByRole('button', { name: 'Second law' }));
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'Second law' })).toBeInTheDocument();
+    act(() => r.services.ui.getState().openDocument({ type: 'page', id: 'p-entropy' }));
+    const again = (await within(doc).findByText(/Physics:/)).closest('[data-block-id]') as HTMLElement;
+    await user.click(within(again).getByRole('button', { name: 'Lecture 7 — the second law' }));
+    expect(await within(doc).findByRole('heading', { level: 2, name: 'Lecture 7 — the second law' })).toBeInTheDocument();
   });
 
   it('“My note” adds your own note; your note can be deleted', async () => {

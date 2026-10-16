@@ -13,7 +13,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -40,6 +40,7 @@ from .discrepancy import Discrepancies
 from .edit import add_note, delete_note, update_block
 from .graph import Graph, GraphIndex
 from .jobs import JobContext, WikiBusy, WikiJobs
+from .links import LinkResolver, LinkView
 from .move import move_material
 from .overview import FolderOverviews
 from .pages_io import page_path, reindex, rewrite
@@ -67,6 +68,8 @@ class PageDetail:
     mentioned_in: list[PageRefView]
     folder_names: list[str]
     updated_at: str | None
+    #: Non-citation wikilinks per block id, resolved to a page or a material (QA C1/C2).
+    links: dict[str, list[LinkView]] = field(default_factory=dict)
 
 
 def _log_failure(task: asyncio.Task[None]) -> None:
@@ -393,7 +396,8 @@ class WikiService:
             updated_at = (
                 datetime.fromtimestamp(stamp, UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
             )
-        return PageDetail(view, refs(related), refs(mentioned), names, updated_at)
+        links = LinkResolver(self.kb.db).for_blocks((entry.id, entry.text) for entry in view.entries)
+        return PageDetail(view, refs(related), refs(mentioned), names, updated_at, links)
 
     def _edited(self, page_id: str) -> PageDetail:
         self.graph.refresh()

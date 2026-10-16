@@ -27,6 +27,9 @@ _PARAGRAPH_SPLIT = re.compile(r"(\n[ \t]*\n)")
 _HEADING_LINE = re.compile(r"^#{1,6}[ \t]", re.MULTILINE)
 _TRAILING_ID = re.compile(r"\s\^[A-Za-z0-9-]+\s*$")
 _UNMARKED = re.compile(r"u-([1-9]\d*)")
+#: A wikilink: target (with an optional ``#anchor``) and an optional ``|label``.
+_LINK = re.compile(r"\[\[([^\]|\n]+?)(?:\|([^\]\n]+))?\]\]")
+_CITATION_TARGET = re.compile(r"#\^seg-\d+$")
 
 
 class InvalidText(KnowledgeError):
@@ -47,6 +50,68 @@ def clean_user_text(text: str) -> str:
     if _TRAILING_ID.search(value):
         raise InvalidText("The text can't end with a block id.")
     return value
+
+
+def _link_label(target: str, label: str | None) -> str:
+    return label if label is not None else target.split("#", 1)[0].rsplit("/", 1)[-1]
+
+
+def readable_text(body: str) -> str:
+    """What the editor shows (as the page does): links read as their labels, citation links left out.
+
+    The citations themselves live in the block marker and are shown as footnotes next to the block.
+    """
+    def show(match: re.Match[str]) -> str:
+        target, label = match.group(1).strip(), match.group(2)
+        return "" if _CITATION_TARGET.search(target) else _link_label(target, label)
+
+    return re.sub(r"[ \t]{2,}", " ", _LINK.sub(show, body)).strip()
+
+
+def relink(previous: str, text: str) -> str:
+    """The user's edited readable text with the block's links put back (QA C4).
+
+    The editor shows a block without wikilinks; saving that text must not silently drop the
+    page links (graph edges) or the readable citation links of the ``.md``. Every page/material
+    link whose label is still in the text becomes the link again (first free whole-word match,
+    in the old order); the citation links are appended at the end, as the agent wrote them.
+    Links the user typed themselves are kept as they are.
+    """
+    if " ".join(text.split()) == " ".join(readable_text(previous).split()):
+        return previous  # nothing changed but the links being hidden: the block as it was
+    taken: list[tuple[int, int]] = [match.span() for match in _LINK.finditer(text)]
+    out = text
+    citations: list[str] = []
+    cursor = 0
+    for match in _LINK.finditer(previous):
+        raw, target, label = match.group(0), match.group(1).strip(), match.group(2)
+        if _CITATION_TARGET.search(target):
+            citations.append(raw)
+            continue
+        if raw in out:
+            continue
+        shown = _link_label(target, label).strip()
+        if not shown:
+            continue
+        pattern = re.compile(rf"(?<!\w){re.escape(shown)}(?!\w)")
+        found = None
+        for start in (cursor, 0):
+            for candidate in pattern.finditer(out, start):
+                if not any(a < candidate.end() and candidate.start() < b for a, b in taken):
+                    found = candidate
+                    break
+            if found is not None:
+                break
+        if found is None:
+            continue  # the user removed the words: the link goes with them
+        a, b = found.span()
+        out = out[:a] + raw + out[b:]
+        shift = len(raw) - (b - a)
+        taken = [(x + shift if x >= b else x, y + shift if y >= b else y) for x, y in taken]
+        taken.append((a, a + len(raw)))
+        cursor = a + len(raw)
+    missing = [raw for raw in dict.fromkeys(citations) if raw not in out]
+    return f"{out} {' '.join(missing)}" if missing else out
 
 
 def new_note_id() -> str:
@@ -85,11 +150,15 @@ def _unmarked_ordinal(block_id: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _replace_unmarked(document: PageDocument, ordinal: int, text: str | None) -> PageDocument:
+def _replace_unmarked(
+    document: PageDocument, ordinal: int, text: str | None, *, keep_links: bool = False
+) -> PageDocument:
     found = _locate_unmarked(document, ordinal)
     if found is None:
         raise NotFound("This part of the page is no longer there. Reopen the page.")
     index, pieces, position = found
+    if text is not None and keep_links:
+        text = relink(pieces[position].strip("\n"), text)
     pieces[position] = _with_piece(pieces[position], text) if text is not None else ""
     parts = list(document.parts)
     parts[index] = RawText("".join(pieces))
@@ -119,14 +188,17 @@ def update_block(kb: KnowledgeService, page_id: str, block_id: str, text: str) -
     def build(document: PageDocument) -> PageDocument:
         ordinal = _unmarked_ordinal(block_id)
         if ordinal is not None:
-            return _replace_unmarked(document, ordinal, clean)
+            return _replace_unmarked(document, ordinal, clean, keep_links=True)
         index = _block_index(document, block_id)
         if index is None:
             raise NotFound("Block not found.")
         block = document.parts[index]
         assert isinstance(block, Block)
+        body = relink(block.body, clean)
+        if body == block.body:
+            return document  # saved unchanged: the block stays the agent's, byte for byte
         owner = "user_edited" if block.owner == "agent" else block.owner
-        updated = replace(block, body=clean, raw=None).remarked(owner=owner)
+        updated = replace(block, body=body, raw=None).remarked(owner=owner)
         parts = list(document.parts)
         parts[index] = updated
         return replace(document, parts=spaced(parts))

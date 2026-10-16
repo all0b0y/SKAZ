@@ -24,7 +24,14 @@ interface Ctx {
   footnotes: Map<number, Footnote>;
   activeSessionId: string | null;
   onCite: (citation: Citation) => void;
+  inAppLink?: InAppLink;
 }
+
+/**
+ * Renders a Markdown link whose URL is an in-app address (a wiki block's `skaz-page:` link);
+ * returns null for any other URL, which then follows the http(s)-only rule.
+ */
+export type InAppLink = (href: string, label: ReactNode, key: string) => ReactNode | null;
 
 function footnoteTitle(footnote: Footnote, activeSessionId: string | null): string {
   const first = footnote.citations[0]!;
@@ -117,6 +124,8 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
     }
     case 'Link': {
       const url = node.getChild('URL');
+      const own = url && ctx.inAppLink ? ctx.inAppLink(ctx.src.slice(url.from, url.to), inner(), key) : null;
+      if (own) return own;
       return <ExternalLink key={key} href={url ? safeUrl(ctx.src.slice(url.from, url.to)) : null} label={inner()} />;
     }
     case 'URL': case 'Autolink': {
@@ -136,14 +145,15 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
   }
 }
 
-export function AnswerMarkdown({ content, citations, activeSessionId, onCite }: {
+export function AnswerMarkdown({ content, citations, activeSessionId, onCite, inAppLink }: {
   content: string;
   citations?: Citation[];
   activeSessionId: string | null;
   onCite: (citation: Citation) => void;
+  inAppLink?: InAppLink;
 }) {
   const { text: body, footnotes, legacy } = answerFootnotes(content, citations);
-  const ctx: Ctx = { src: body, footnotes: new Map(footnotes.map((f) => [f.n, f])), activeSessionId, onCite };
+  const ctx: Ctx = { src: body, footnotes: new Map(footnotes.map((f) => [f.n, f])), activeSessionId, onCite, inAppLink };
   return <>
     <div className="md">{render(parser.parse(body).topNode, ctx)}</div>
     {legacy.length > 0 && (

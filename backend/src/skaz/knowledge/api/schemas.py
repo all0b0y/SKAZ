@@ -168,6 +168,23 @@ class KbCitation(BaseModel):
     quote: str | None = None
 
 
+class KbPageRef(BaseModel):
+    id: str
+    kind: PageKind
+    title: str
+
+
+class KbBlockLink(BaseModel):
+    """A wikilink in the block text that is not a citation (QA C1/C2)."""
+
+    #: The target as written in ``[[target|label]]`` (no ``#anchor``, no label).
+    target: str
+    #: The wiki page it opens; ``null`` when it isn't a page (or no such page exists).
+    page: KbPageRef | None = None
+    #: The material it opens (``[[Materials/<Folder>/<Title>/…]]``); ``null`` otherwise.
+    material_id: str | None = None
+
+
 class KbBlock(BaseModel):
     #: ``c-<id>`` for SKAZ blocks, ``u-<n>`` for unmarked user text.
     id: str
@@ -180,12 +197,8 @@ class KbBlock(BaseModel):
     text: str
     hash: str
     citations: list[KbCitation]
-
-
-class KbPageRef(BaseModel):
-    id: str
-    kind: PageKind
-    title: str
+    #: Page/material links in ``text`` and what they open; links to nothing are listed with nulls.
+    links: list[KbBlockLink] = []
 
 
 class KbPage(KbPageSummary):
