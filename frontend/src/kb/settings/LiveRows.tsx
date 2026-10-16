@@ -144,15 +144,51 @@ export function KeyRow({ provider }: { provider: KeyProviderId }) {
 
 const mb = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`);
 
-export function LocalWhisperRow() {
+/**
+ * The local Whisper model's state. With `offerDownload` (first launch, where there is no health
+ * plate — QA A2) it also offers the download right there, with the model's real size, and follows
+ * the progress; in Settings the plate of Recording & speech offers it instead.
+ */
+export function LocalWhisperRow({ offerDownload = false }: { offerDownload?: boolean } = {}) {
   const speech = useSettings((s) => s.speech);
   const { settings } = useServices();
+  const [busy, setBusy] = useState(false);
+  const [result, show] = useResult();
+  const state = speech.value?.local_model.state;
+  // Follow a running download (one read at a time, only while it runs and only where it was offered).
+  useEffect(() => {
+    if (!offerDownload || state !== 'downloading') return undefined;
+    let live = true;
+    let timer: number | undefined;
+    const tick = async () => {
+      await settings.getState().loadSpeech();
+      if (live) timer = window.setTimeout(() => void tick(), 1500);
+    };
+    timer = window.setTimeout(() => void tick(), 1500);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [offerDownload, state, settings]);
   if (!speech.value) return speech.error ? <Failed error={speech.error} retry={() => void settings.getState().loadSpeech()} /> : <Reading />;
   const m = speech.value.local_model;
   if (m.state === 'ready') return <span className="kb-status kb-status--ok"><Icon name="check" size={13} />Downloaded</span>;
   if (m.state === 'downloading') return <Progress value={m.progress} label="Downloading the speech model" />;
-  // Downloading is offered by the health plate of Recording & speech (S3 action), not a second button here.
-  return <span className={`kb-status kb-status--${m.state === 'failed' ? 'err' : 'warn'}`}><Icon name={m.state === 'failed' ? 'error' : 'warning'} size={13} />{m.state === 'failed' ? m.reason ?? 'Download failed' : 'Not downloaded'}</span>;
+  const status = <span className={`kb-status kb-status--${m.state === 'failed' ? 'err' : 'warn'}`}><Icon name={m.state === 'failed' ? 'error' : 'warning'} size={13} />{m.state === 'failed' ? m.reason ?? 'Download failed' : 'Not downloaded'}</span>;
+  if (!offerDownload) return status;
+  const action = m.state === 'failed' ? 'retry' : 'download';
+  return (
+    <>
+      {status}
+      <Button size="sm" variant="fill" icon={m.state === 'failed' ? 'retry' : undefined} busy={busy} onClick={async () => {
+        setBusy(true);
+        const r = await settings.getState().healthAction('speech-local-model', action);
+        if (r.ok) await settings.getState().loadSpeech();
+        setBusy(false);
+        show(r);
+      }}>
+        {m.state === 'failed' ? 'Try again' : `Download${m.size_bytes ? ` · about ${decimalSize(m.size_bytes)}` : ''}`}
+      </Button>
+      {result}
+    </>
+  );
 }
 
 /** Sizes as Finder shows them (1 MB = 1,000,000 bytes), so the number matches what the user sees there. */

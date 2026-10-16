@@ -68,6 +68,39 @@ describe('First launch', () => {
     expect(storedPrefs()).not.toHaveProperty('translateTo');
   });
 
+  it('Soniox: the consent to send audio is asked on the speech step (QA A12)', async () => {
+    const user = userEvent.setup();
+    const world = unconfiguredWorld();
+    world.speech.cloud_consent = false;
+    const { fake } = renderKb({ world, prefs: { onboardingDone: false } });
+    const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Skip' }));
+    expect(currentStep(dialog)).toBe('speech');
+    const consent = await within(dialog).findByRole('switch', { name: 'Send audio to Soniox' });
+    expect(consent).not.toBeChecked();
+    await user.click(consent);
+    const ask = await screen.findByRole('dialog', { name: 'Send audio to Soniox?' });
+    await user.click(within(ask).getByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(fake.world.speech.cloud_consent).toBe(true));
+    expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/speech', body: { cloud_consent: true } }));
+    await waitFor(() => expect(within(dialog).getByRole('switch', { name: 'Send audio to Soniox' })).toBeChecked());
+  });
+
+  it('on this computer: the model download is offered right on the speech step, with its size (QA A2)', async () => {
+    const user = userEvent.setup();
+    const world = unconfiguredWorld();
+    world.speech.provider = 'local_whisper';
+    const { fake } = renderKb({ world, prefs: { onboardingDone: false } });
+    const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
+    await user.click(within(dialog).getByRole('button', { name: 'Next' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Skip' }));
+    expect(within(dialog).getByText('Not downloaded')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Download · about 1.6 GB' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/settings/health/speech-local-model/download' })));
+    expect(await within(dialog).findByRole('progressbar', { name: 'Downloading the speech model' })).toBeInTheDocument();
+  });
+
   it('choosing another folder sends that path; a refusal stays on the step in the backend’s words', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: unconfiguredWorld(), prefs: { onboardingDone: false } });
@@ -107,6 +140,16 @@ describe('First launch', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     await within(dialog).findByRole('heading', { name: 'Ready to start' });
     expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/kb/library')).toBe(false);
+  });
+
+  it('summary: Soniox with a working key but without the consent is not ready (QA A12)', () => {
+    const keys = { providers: [{ id: 'soniox' as const, configured: true, checked_at: null, valid: true }] };
+    const speech = (cloud_consent: boolean) => ({
+      provider: 'soniox' as const, languages: ['en'], translate_by_default: false, translation_language: 'ru', cloud_consent,
+      local_model: { model: 'm', state: 'missing' as const, progress: null, reason: null, size_bytes: null },
+    });
+    expect(summaryLines(null, null, { settings: speech(false), keys })[0]).toEqual({ label: 'Speech recognition', tone: 'warn', text: 'Soniox — sending audio isn’t allowed yet' });
+    expect(summaryLines(null, null, { settings: speech(true), keys })[0]).toEqual({ label: 'Speech recognition', tone: 'ok', text: 'Soniox' });
   });
 
   it('summary lines follow only real states', () => {

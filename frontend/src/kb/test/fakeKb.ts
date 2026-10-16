@@ -772,6 +772,10 @@ const ROUTES: FakeRoutes = {
       else if (path.action_id === 'use_local') w.speech.provider = 'local_whisper';
       syncSpeechConsent(w);
     }
+    // The local Whisper model starts downloading (the backend's runtime.local_models.start).
+    if (path.problem_id === 'speech-local-model' && (path.action_id === 'download' || path.action_id === 'retry')) {
+      w.speech.local_model = { ...w.speech.local_model, state: 'downloading', progress: 0, reason: null };
+    }
     for (const s of w.health.sections) {
       s.problems = s.problems.filter((p) => p.id !== path.problem_id);
       if (!s.problems.length) s.state = 'ok';

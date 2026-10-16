@@ -5,7 +5,7 @@ import { EXIT, SPRING_LARGE } from '../ui/motion';
 import { useAgents, useLibrary, useServices, useSettings } from '../state/context';
 import type { KbAgents, KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 import { AgentCards } from '../settings/AgentCard';
-import { AsrRow, KeyRow, LocalWhisperRow, SpeechLanguagesRow, TranslationRow } from '../settings/LiveRows';
+import { AsrRow, KeyRow, LocalWhisperRow, SonioxConsentRow, SpeechLanguagesRow, TranslationRow } from '../settings/LiveRows';
 import { LibraryPlace, useLibraryChoice } from './LibraryStep';
 import { StepArt, type SummaryTone } from './StepArt';
 
@@ -51,9 +51,12 @@ export function summaryLines(
   const rec: StatusLine = !sp
     ? { label: 'Speech recognition', tone: 'warn', text: 'Not checked' }
     : sp.provider === 'soniox'
-      ? soniox?.configured && soniox.valid !== false
-        ? { label: 'Speech recognition', tone: 'ok', text: 'Soniox' }
-        : { label: 'Speech recognition', tone: 'warn', text: 'Soniox — no working key yet' }
+      ? !(soniox?.configured && soniox.valid !== false)
+        ? { label: 'Speech recognition', tone: 'warn', text: 'Soniox — no working key yet' }
+        // Without the consent nothing is sent, so recordings can't start: not "ready" (QA A12).
+        : !sp.cloud_consent
+          ? { label: 'Speech recognition', tone: 'warn', text: 'Soniox — sending audio isn’t allowed yet' }
+          : { label: 'Speech recognition', tone: 'ok', text: 'Soniox' }
       : sp.local_model.state === 'ready'
         ? { label: 'Speech recognition', tone: 'ok', text: 'On this computer' }
         : { label: 'Speech recognition', tone: 'warn', text: 'On this computer — the model isn’t downloaded yet' };
@@ -151,13 +154,20 @@ export function Onboarding({ open, onFinish }: { open: boolean; onFinish: () => 
                 {speechSettings?.provider === 'local_whisper' ? (
                   <div className="kb-srow">
                     <div className="kb-srow__text"><div className="kb-srow__label">Speech model</div></div>
-                    <div className="kb-srow__control"><LocalWhisperRow /></div>
+                    <div className="kb-srow__control"><LocalWhisperRow offerDownload /></div>
                   </div>
                 ) : (
-                  <div className="kb-srow">
-                    <div className="kb-srow__text"><div className="kb-srow__label">Soniox key</div></div>
-                    <div className="kb-srow__control"><KeyRow provider="soniox" /></div>
-                  </div>
+                  <>
+                    <div className="kb-srow">
+                      <div className="kb-srow__text"><div className="kb-srow__label">Soniox key</div></div>
+                      <div className="kb-srow__control"><KeyRow provider="soniox" /></div>
+                    </div>
+                    {/* The consent is asked here, with what goes where (QA A12); choosing Soniox never gives it. */}
+                    <div className="kb-srow">
+                      <div className="kb-srow__text"><div className="kb-srow__label">Send audio to Soniox</div></div>
+                      <div className="kb-srow__control"><SonioxConsentRow label="Send audio to Soniox" /></div>
+                    </div>
+                  </>
                 )}
               </>
             )}
