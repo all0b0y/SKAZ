@@ -79,8 +79,7 @@ main() {
   [ -n "${SKAZ_NO_OPEN:-}" ] || open "$dest/SKAZ.app"
 
   bold "SKAZ ${version} is installed: ${dest}/SKAZ.app"
-  echo "Next, choose a speech provider in Settings → Transcription: Local Whisper keeps audio on this Mac;"
-  echo "Soniox and OpenAI need an API key and cloud consent in Settings → API keys."
+  echo "On first launch SKAZ asks for an agent and a speech service; you can change both later in Settings."
 }
 
 main "$@"
