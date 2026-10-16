@@ -143,6 +143,9 @@ export interface AnswerActions {
   onResume: () => void;
   onSave: () => void;
   busy: string | null;
+  /** Why Regenerate/Resume didn't start, shown by the buttons; `fix` is the way to fix the agent. */
+  error?: string | null;
+  fix?: ReactNode;
 }
 
 /** One assistant answer: parts, the interruption card, and the actions under it. */
@@ -171,6 +174,9 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
           </div>
           <Button size="sm" variant="fill" icon="retry" busy={actions.busy === 'resume'} onClick={actions.onResume}>Resume</Button>
         </div>
+      )}
+      {actions.error && (
+        <p className="kb-inline-error kb-inline-error--flat kb-msg__error" role="alert">{actions.error}{actions.fix && <> {actions.fix}</>}</p>
       )}
       {message.state === 'cancelled' && <p className="kb-msg__note">Stopped. The question is kept — you can regenerate the answer.</p>}
       {(message.state === 'done' || message.state === 'cancelled') && (

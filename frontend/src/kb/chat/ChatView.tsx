@@ -2,19 +2,21 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KbMessage } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Spinner } from '../ui';
 import { Composer } from '../composer/Composer';
-import { useChats, useServices } from '../state/context';
+import { useAgents, useChats, useServices } from '../state/context';
+import { agentOf } from '../state/agents';
+import { AgentFix } from './AgentFix';
 import { useOpenDocument } from '../state/document';
 import { ChatMenu, RenameForm } from './ChatMenu';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 
-function useNotice(): [string | null, (text: string) => void] {
+function useNotice(): [string | null, (text: string | null) => void] {
   const [notice, setNotice] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  return [notice, (text: string) => {
+  return [notice, (text: string | null) => {
     setNotice(text);
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setNotice(null), 5000);
+    if (text !== null) timer.current = window.setTimeout(() => setNotice(null), 5000);
   }];
 }
 
@@ -31,6 +33,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const [renaming, setRenaming] = useState(false);
   const [busy, setBusy] = useState<{ id: string; what: string } | null>(null);
   const [notice, setNotice] = useNotice();
+  /** Regenerate/Resume failed: the reason stays under that answer, by the button (QA D6). */
+  const [actionError, setActionError] = useState<{ id: string; text: string } | null>(null);
+  const agents = useAgents((s) => s.agents);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
 
@@ -47,7 +52,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     if (currentId && summary?.unread) void chats.getState().markRead(currentId);
   }, [chats, currentId, summary?.unread]);
 
-  useEffect(() => { setRenaming(false); stick.current = true; }, [currentId]);
+  // A notice or an error belongs to the chat it was about (QA D10).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setRenaming(false); stick.current = true; setNotice(null); setActionError(null); }, [currentId]);
 
   // Keep the newest text in view while the user is at the bottom.
   useLayoutEffect(() => {
@@ -58,11 +65,13 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const act = async (message: KbMessage, what: 'regenerate' | 'resume' | 'save') => {
     if (!currentId) return;
     setBusy({ id: message.id, what });
+    setActionError(null);
     const s = chats.getState();
     const res = what === 'regenerate' ? await s.regenerate(currentId, message.id)
       : what === 'resume' ? await s.resume(currentId, message.id) : await s.saveMessage(currentId, message.id);
     setBusy(null);
-    if (!res.ok) setNotice(res.error);
+    if (!res.ok && what !== 'save') setActionError({ id: message.id, text: res.error });
+    else if (!res.ok) setNotice(res.error);
     else if (what === 'save' && res.value) {
       setNotice(`Saved to the wiki as “${res.value.title}”.`);
       openDoc({ type: 'page', id: res.value.id });
@@ -70,6 +79,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   };
 
   const recording = !!(chat?.recording_material_id ?? summary?.recording_material_id);
+  const engine = chat?.engine ?? summary?.engine;
+  const chatAgent = engine ? agentOf(agents, engine) : undefined;
+  const fix = chatAgent && chatAgent.state !== 'ready' ? <AgentFix agent={chatAgent} /> : null;
 
   return (
     <section className="kb-center" data-pane="center" aria-label="Chat" hidden={hidden}>
@@ -110,6 +122,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                 : (
                   <AssistantMessage key={m.id} chatId={chat.id} message={m} actions={{
                     busy: busy?.id === m.id ? busy.what : null,
+                    error: actionError?.id === m.id ? actionError.text : null,
+                    fix,
                     onRegenerate: () => void act(m, 'regenerate'),
                     onResume: () => void act(m, 'resume'),
                     onSave: () => void act(m, 'save'),

@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld } from '../test/fixtures';
@@ -158,6 +158,48 @@ describe('Chats in the side panel', () => {
     await user.clear(field);
     await user.type(field, 'L1 vs L2{Enter}');
     expect(await within(centre).findByRole('heading', { name: 'L1 vs L2' })).toBeInTheDocument();
+  });
+
+  it('Regenerate with no agent: the reason stays under that answer with the way to fix it, and goes with the chat (QA D6/D10)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const claude = world.agents.agents.find((a) => a.id === 'claude_code')!;
+    Object.assign(claude, { state: 'not_installed', installed: false, reason: 'Claude Code isn’t installed.', action: 'install' });
+    world.failures['POST /kb/chats/c1/messages/c1-a1/regenerate'] = { status: 409, detail: 'Claude Code is not installed.' };
+    const { services } = renderKb({ world });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    const answer = await within(centre).findByRole('article', { name: 'Answer' });
+    await user.click(within(answer).getByRole('button', { name: 'Regenerate' }));
+    const error = await within(answer).findByRole('alert');
+    expect(error).toHaveTextContent('Claude Code is not installed.');
+    await new Promise((r) => { window.setTimeout(r, 50); });
+    expect(within(answer).getByRole('alert')).toBeInTheDocument(); // not a notice that hides itself
+    await user.click(within(error).getByRole('button', { name: 'Install in Settings…' }));
+    expect(services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
+    act(() => { services.ui.getState().closeSettings(); services.chats.getState().open('c2'); });
+    await waitFor(() => expect(within(centre).queryByText('Claude Code is not installed.')).not.toBeInTheDocument());
+  });
+
+  it('Rename: leaving the field saves the change; an unchanged or empty name just closes it (QA D7)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Compare regularisation/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    await user.click(await within(centre).findByRole('button', { name: /More for/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const field = within(centre).getByRole('textbox', { name: 'Chat name' });
+    await user.clear(field);
+    await user.type(field, 'Blurred name');
+    await user.click(within(centre).getByRole('log', { name: 'Conversation' }));
+    expect(await within(centre).findByRole('heading', { name: 'Blurred name' })).toBeInTheDocument();
+    expect(fake.calls.filter((c) => c.method === 'PATCH' && /\/kb\/chats\/[^/]+$/.test(c.path))).toHaveLength(1);
+    await user.click(within(centre).getByRole('button', { name: /More for/ }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    await user.clear(within(centre).getByRole('textbox', { name: 'Chat name' }));
+    await user.click(within(centre).getByRole('log', { name: 'Conversation' }));
+    expect(within(centre).queryByRole('textbox', { name: 'Chat name' })).not.toBeInTheDocument();
+    expect(within(centre).getByRole('heading', { name: 'Blurred name' })).toBeInTheDocument();
   });
 
   it('"All chats" takes the whole centre: search, filters, folder; a row opens the chat', async () => {
