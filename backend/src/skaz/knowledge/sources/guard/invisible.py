@@ -18,6 +18,8 @@ split downstream sees them.
 
 from __future__ import annotations
 
+import functools
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -63,6 +65,27 @@ def _klass(char: str) -> str:
     return "keep"
 
 
+@functools.cache
+def _candidates() -> re.Pattern[str]:
+    """Every character ``_klass`` does not keep, plus every astral one (decided per character).
+
+    Built once from ``_klass`` itself over the BMP (~70 ms), so it can't drift from it. Text
+    between two candidates is copied as is: a pasted book is not classified letter by letter
+    in Python (QA E14 — ~0.5 s per 2 MB of paste went here).
+    """
+    ranges: list[tuple[int, int]] = []
+    for code in range(0x10000):
+        if _klass(chr(code)) == "keep":
+            continue
+        if ranges and ranges[-1][1] == code - 1:
+            ranges[-1] = (ranges[-1][0], code)
+        else:
+            ranges.append((code, code))
+    parts = [re.escape(chr(low)) if low == high else f"{re.escape(chr(low))}-{re.escape(chr(high))}"
+             for low, high in ranges]
+    return re.compile("[" + "".join(parts) + "\U00010000-\U0010FFFF]")
+
+
 @dataclass(frozen=True)
 class Cleaned:
     text: str
@@ -94,7 +117,17 @@ def clean_invisible(text: str, *, index: int | None = None, page: int | None = N
     aggregated: dict[str, tuple[int, int, int]] = {}  # class -> (count, first offset, first source pos)
     removed = 0
     position, length = 0, len(source)
+    candidates = _candidates()
     while position < length:
+        candidate = candidates.search(source, position)
+        if candidate is None:
+            out.append(source[position:])
+            out_len += length - position
+            break
+        if candidate.start() > position:
+            out.append(source[position:candidate.start()])
+            out_len += candidate.start() - position
+            position = candidate.start()
         klass = _klass(source[position])
         if klass == "keep":
             out.append(source[position])
