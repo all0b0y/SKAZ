@@ -181,6 +181,61 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(doc.querySelector('.kb-art')).toBeNull();
   });
 
+  it('a Markdown file’s table and numbered list are drawn as such (QA B3)', async () => {
+    const world = docWorld();
+    const article = world.materials.find((m) => m.id === 'm-ce')!;
+    article.fragments = [
+      fragment('m-ce', 1, '1. first law', { role: 'list_item' }),
+      fragment('m-ce', 2, '2. second law', { role: 'list_item' }),
+      fragment('m-ce', 3, '| Quantity | Unit |\n|---|:-:|\n| Heat | J |\n| a \\| b | K |', { role: 'table' }),
+    ];
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-ce' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const table = await within(doc).findByRole('table');
+    expect(within(table).getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Quantity', 'Unit']);
+    expect(within(table).getAllByRole('row').slice(1).map((row) => [...row.querySelectorAll('td')].map((c) => c.textContent)))
+      .toEqual([['Heat', 'J'], ['a | b', 'K']]);
+    expect(doc.querySelector('[data-seg="3"]')).toHaveAttribute('data-quote-seg', '3');
+    // The number is the item's own marker: no second bullet in front of it.
+    for (const li of within(doc).getAllByRole('listitem')) expect(li).toHaveClass('kb-mtext__li--glyph');
+  });
+
+  it('a scanned PDF says it has no text layer and offers Delete, never "appears as soon as it is ready" (QA B5)', async () => {
+    const world = docWorld();
+    const tb = world.materials.find((m) => m.id === 'm-tb')!;
+    Object.assign(tb, { status: 'failed', fragments: [], fragment_count: 0,
+      failure_reason: 'This PDF has no text layer (scanned pages). OCR isn’t supported yet.', can_retry: false });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-tb' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'Couldn’t read' });
+    expect(note).toHaveTextContent('This PDF has no text layer (scanned pages).');
+    expect(within(note).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(within(doc).queryByText(/appears here as soon as it is ready/)).not.toBeInTheDocument();
+    await userEvent.setup().click(within(note).getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('dialog', { name: /Delete/ })).toBeInTheDocument();
+  });
+
+  it('an interrupted import says why and Retry starts it again (QA E10)', async () => {
+    const world = docWorld();
+    const speech = world.materials.find((m) => m.kind === 'recording' || m.kind === 'audio' || m.kind === 'video')!;
+    Object.assign(speech, { kind: 'audio', status: 'failed', fragments: [], fragment_count: 0,
+      failure_reason: 'The import was interrupted when SKAZ closed. Retry to continue.', can_retry: true });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: speech.id }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const note = await within(doc).findByRole('note', { name: 'Recognition failed' });
+    expect(note).toHaveTextContent('The import was interrupted when SKAZ closed. Retry to continue.');
+    await userEvent.setup().click(within(note).getByRole('button', { name: 'Retry' }));
+    expect(r.fake.calls.some((c) => c.method === 'POST' && c.path === `/kb/imports/${speech.id}/retry`)).toBe(true);
+    await waitFor(() => expect(within(doc).queryByRole('note', { name: 'Recognition failed' })).not.toBeInTheDocument());
+    expect(within(doc).getByText('Recognising…')).toBeInTheDocument();
+  });
+
   it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {
     const world = docWorld();
     const tb = world.materials.find((m) => m.id === 'm-tb')!;
@@ -218,8 +273,12 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     const add = within(doc).getByRole('button', { name: 'Add to wiki' });
     expect(add).toBeDisabled();
     expect(add).toHaveAccessibleDescription('No speech was recognised, so there is nothing to add.');
+    // QA B42: nothing to ask about either.
+    expect(within(doc).getByRole('button', { name: 'Ask about material' })).toBeDisabled();
     await user.click(within(note).getByRole('button', { name: 'Delete' }));
-    expect(await screen.findByRole('dialog', { name: /Delete/ })).toBeInTheDocument();
+    const del = await screen.findByRole('dialog', { name: /Delete/ });
+    // QA B28: a natural sentence for none, not "0 statements … leave the wiki".
+    expect(await within(del).findByText('No statements in the wiki come from this material alone.')).toBeInTheDocument();
     expect(r.fake.calls.some((c) => c.path === '/kb/materials/m-empty/ingest')).toBe(false);
   });
 
@@ -274,6 +333,7 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     await user.click(await screen.findByRole('menuitem', { name: 'Rename' }));
     const rename = await screen.findByRole('dialog', { name: 'Rename material' });
     const field = within(rename).getByRole('textbox');
+    expect(field).toHaveAttribute('maxlength', '200'); // QA B21: the field stops, no raw "at most 255 characters"
     await user.clear(field);
     await user.type(field, 'Lecture 8 — Boltzmann');
     await user.click(within(rename).getByRole('button', { name: 'Rename' }));

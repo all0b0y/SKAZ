@@ -21,6 +21,7 @@ from .fragments import (
 )
 from .guard import Finding, clean_invisible, detect_instruction
 from .html import extract_article
+from .markdown_blocks import block_of_offset, markdown_blocks
 from .pdf import extract_pdf
 
 TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown"})
@@ -80,10 +81,15 @@ def prepare_text(
     markdown: bool = False,
 ) -> Prepared:
     cleaned = clean_invisible(text)
-    paragraphs = text_paragraphs(cleaned.text)
-    findings = [
-        item.at(index=paragraph_of_offset(cleaned.text, item.offset or 0)) for item in cleaned.findings
-    ]
+    if markdown:  # headings, lists, quotes, code and tables keep their roles (QA B3)
+        blocks = markdown_blocks(cleaned.text)
+        paragraphs = [block.paragraph for block in blocks]
+        findings = [item.at(index=block_of_offset(blocks, item.offset or 0)) for item in cleaned.findings]
+    else:
+        paragraphs = text_paragraphs(cleaned.text)
+        findings = [
+            item.at(index=paragraph_of_offset(cleaned.text, item.offset or 0)) for item in cleaned.findings
+        ]
     derived = title
     if derived is None and markdown:
         heading = next((line for line in cleaned.text.splitlines() if line.startswith("# ")), None)
@@ -114,7 +120,28 @@ def decode_text_file(data: bytes) -> str:
     return data.decode("latin-1")
 
 
+NOT_TEXT = "This isn't a text file. SKAZ reads .txt and .md files that hold text."
+_CONTROL = frozenset(range(0x20)) - {0x09, 0x0A, 0x0C, 0x0D, 0x1B}
+
+
+def looks_binary(data: bytes) -> bool:
+    """Random or binary bytes (QA B17): a NUL, or more than 5 % control bytes, in the first 8 KB.
+
+    UTF-16 text (with its BOM) holds NULs by design and is text.
+    """
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return False
+    head = data[:8192]
+    if not head:
+        return False
+    if b"\x00" in head:
+        return True
+    return sum(byte in _CONTROL for byte in head) > len(head) * 0.05
+
+
 def prepare_text_file(data: bytes, file_name: str, *, origin: Origin) -> Prepared:
+    if looks_binary(data):
+        raise SourceRejected(NOT_TEXT)
     stem = Path(file_name).stem
     markdown = Path(file_name).suffix.lower() in (".md", ".markdown")
     prepared = prepare_text(

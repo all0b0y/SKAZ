@@ -72,7 +72,7 @@ from .layout import (
     LibraryMarker,
     read_marker,
 )
-from .names import validate_name
+from .names import icloud_skips, numbered_name, validate_name
 
 INBOX_ID = "fld-inbox"
 INBOX_NAME = "Inbox"
@@ -230,6 +230,20 @@ class Library:
                 raise NameTaken()
 
     @staticmethod
+    def _free_name(directory: Path, name: str) -> str:
+        """``name`` or the first free ``name (2)``, ``name (3)``… in ``directory`` (QA B1).
+
+        For names SKAZ derives itself (a file's or page's title, a move without a
+        rename); a name the user typed is refused instead (decision B19).
+        """
+        taken = {name_key(entry) for entry in os.listdir(directory)}
+        for number in range(1, 10_000):
+            candidate = numbered_name(name, number)
+            if name_key(candidate) not in taken and not icloud_skips(candidate):
+                return candidate
+        raise NameTaken()
+
+    @staticmethod
     def _publish(staging: Path, target: Path) -> None:
         try:
             rename_exclusive(staging, target)
@@ -296,14 +310,14 @@ class Library:
         return FolderEntry(marker.id, name, system, marker.created_at, target)
 
     def create_folder(self, name: str) -> FolderEntry:
-        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES)
+        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES, directory=True)
         with self._lock:
             return self._make_folder(clean, new_id("fld"), system=False)
 
     def rename_folder(self, folder_id: str, name: str) -> FolderEntry:
         if folder_id == INBOX_ID:
             raise ProtectedItem("Inbox can't be renamed.")
-        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES)
+        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES, directory=True)
         with self._lock:
             entry = self.folder(folder_id)
             if clean == entry.name:
@@ -336,11 +350,15 @@ class Library:
     def create_material(
         self, folder_id: str, title: str, kind: MaterialKind, fragments: Sequence[FragmentInput], *,
         status: MaterialStatus = "ready", origin: Origin | None = None, languages: Sequence[str] = (),
+        unique: bool = False,
     ) -> MaterialFiles:
-        clean = validate_name(title)
+        """``unique``: the title is SKAZ's own guess, so a taken one becomes ``title (2)`` (QA B1)."""
+        clean = validate_name(title, directory=not unique)
         numbered = number_fragments([], fragments)
         with self._lock:
             folder = self.folder(folder_id)
+            if unique:
+                clean = self._free_name(folder.path, clean)
             manifest = MaterialManifest(
                 id=new_id("mat"), kind=kind, status=status, title=clean, folder=folder.id, origin=origin,
                 languages=list(languages), fragments=[FragmentMeta.of(item) for item in numbered],
@@ -491,10 +509,12 @@ class Library:
                       hint: str | None = None) -> MaterialFiles:
         """Rename and/or move a material (W2): directory, source file and manifest, or nothing at all.
 
-        A name taken in the target folder is refused (FILESYSTEM-LIBRARY-SPEC
-        14–15, 34). The directory moves with one exclusive rename; when the
-        source file rename or the manifest write fails, the directory and file
-        are put back, so no half-renamed material is left.
+        A name the user typed that is taken in the target folder is refused
+        (FILESYSTEM-LIBRARY-SPEC 14–15, 34); a move that keeps the current name
+        takes ``name (2)``… when the target folder already has it (QA B1/B19).
+        The directory moves with one exclusive rename; when the source file
+        rename or the manifest write fails, the directory and file are put back,
+        so no half-renamed material is left.
         """
         with self._lock:
             current_folder, directory, raw = self._locate(material_id, hint)
@@ -502,13 +522,16 @@ class Library:
                 manifest = MaterialManifest.model_validate(raw)
             except ValidationError as error:
                 raise ValueError("Unreadable material manifest.") from error
-            clean = validate_name(title) if title is not None else directory.name
+            clean = validate_name(title, directory=True) if title is not None else directory.name
             folder = self.folder(folder_id or current_folder)
             target = folder.path / clean
             if target == directory and clean == manifest.title:
                 return self.load_material(directory, folder.id)
             same_entry = folder.path == directory.parent and name_key(clean) == name_key(directory.name)
-            if not same_entry:
+            if not same_entry and title is None:
+                clean = self._free_name(folder.path, clean)
+                target = folder.path / clean
+            elif not same_entry:
                 self._assert_free(folder.path, clean)
             source = self.source_file(directory, manifest)
             if same_entry:

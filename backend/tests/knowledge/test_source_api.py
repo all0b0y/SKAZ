@@ -56,8 +56,12 @@ async def test_add_text_exclude_and_restore(kb_client: httpx.AsyncClient) -> Non
     assert material["status"] == "ready" and material["kind"] == "text" and material["fragment_count"] == 3
     assert material["title"] == "Thermodynamics studies how energy moves between systems"
 
-    clash = await kb_client.post("/kb/materials/text", json=body)
+    plain = {"text": CLEAN_EN[0], "folder_id": INBOX_ID}  # same title, no instruction to notify about
+    again = await kb_client.post("/kb/materials/text", json=plain)  # QA B1: numbered, not refused
+    assert again.status_code == 201 and again.json()["material"]["title"] == f"{material['title']} (2)"
+    clash = await kb_client.post("/kb/materials/text", json={**plain, "title": material["title"]})
     assert clash.status_code == 409
+    await kb_client.delete(f"/kb/materials/{again.json()['material']['id']}")
 
     guard = (await kb_client.get(f"/kb/materials/{material['id']}/excluded")).json()
     assert guard["material_id"] == material["id"] and guard["failure_reason"] is None
@@ -95,6 +99,11 @@ async def test_add_file_and_failed_scan(kb_client: httpx.AsyncClient, tmp_path: 
     ).json()
     assert failed["material"]["status"] == "failed"
     assert failed["failure_reason"] == "This PDF has no text layer (scanned pages). OCR isn't supported yet."
+    # QA B5: reopening the material says why, not "the text appears here as soon as it is ready".
+    reopened = (await kb_client.get(f"/kb/materials/{failed['material']['id']}")).json()
+    assert reopened["failure_reason"] == failed["failure_reason"] and reopened["can_retry"] is False
+    good = (await kb_client.get(f"/kb/materials/{added['material']['id']}")).json()
+    assert good["failure_reason"] is None and good["can_retry"] is False
 
     bad = await kb_client.post("/kb/materials/file", json={"path": "relative.pdf", "folder_id": INBOX_ID})
     assert bad.status_code == 422 and "absolute" in bad.json()["detail"]

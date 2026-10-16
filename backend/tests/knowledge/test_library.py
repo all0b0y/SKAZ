@@ -139,6 +139,26 @@ def test_folder_collision_is_refused_without_partial_writes(library: Library, se
     }
 
 
+@pytest.mark.parametrize("name", ["tmp", "TMP", "Archive.nosync", "x.NoSync", "draft.tmp"])
+def test_names_icloud_never_syncs_are_refused_for_folders(library: Library, name: str) -> None:
+    """QA B13/E12, decision B19: iCloud Drive skips these, and moving in/out of them deadlocks."""
+    reason = "iCloud Drive doesn't sync folders with this name. Choose another name."
+    with pytest.raises(NameRejected) as created:
+        library.create_folder(name)
+    assert created.value.message == reason
+    folder = library.create_folder("Курс")
+    with pytest.raises(NameRejected):
+        library.rename_folder(folder.id, name)
+    material = library.create_material(INBOX_ID, "Лекция", "text", [FragmentInput(text="a", index=0)])
+    with pytest.raises(NameRejected):  # a material is a folder on disk too
+        library.move_material(material.manifest.id, title=name)
+    with pytest.raises(NameRejected):
+        library.create_material(INBOX_ID, name, "text", [FragmentInput(text="b", index=0)])
+    derived = library.create_material(INBOX_ID, name, "text", [FragmentInput(text="c", index=0)], unique=True)
+    assert derived.title == f"{name} (2)"
+    assert library.create_folder("tmp files").name == "tmp files"  # only the exact forms
+
+
 def test_unknown_entries_also_block_a_name(library: Library) -> None:
     (library.root / "Materials" / "notes.txt").write_text("mine")
     with pytest.raises(NameTaken):
@@ -207,6 +227,33 @@ def test_material_title_collision_leaves_nothing_behind(library: Library) -> Non
     with pytest.raises(NameTaken):
         library.create_material(INBOX_ID, "статья", "web", [FragmentInput(text="b", index=0)])
     assert tree(library.root) == before
+
+
+def test_a_derived_material_title_takes_the_next_free_number(library: Library) -> None:
+    """QA B1: ``unique`` names a copy like Finder — "notes (2)", "notes (3)" — case-insensitively."""
+    library.create_material(INBOX_ID, "Notes", "text", [FragmentInput(text="a", index=0)])
+    (library.root / "Materials" / "Inbox" / "notes (2)").write_text("someone else's file")
+    third = library.create_material(INBOX_ID, "notes", "text", [FragmentInput(text="b", index=0)],
+                                    unique=True)
+    assert third.title == "notes (3)" and third.source_path.name == "notes (3).md"
+    long = "Ж" * 100  # 200 bytes NFC/NFD: the base is cut so the number fits
+    library.create_material(INBOX_ID, long, "text", [FragmentInput(text="c", index=0)])
+    numbered = library.create_material(INBOX_ID, long, "text", [FragmentInput(text="d", index=0)],
+                                       unique=True)
+    assert numbered.title.endswith(" (2)") and len(numbered.title.encode()) <= 200
+
+
+def test_moving_into_a_folder_that_has_the_name_numbers_it(library: Library) -> None:
+    """QA B19: a move keeps the user's intent; the name SKAZ keeps is numbered, a typed one is refused."""
+    other = library.create_folder("B5")
+    library.create_material(other.id, "notes", "text", [FragmentInput(text="there", index=0)])
+    mine = library.create_material(INBOX_ID, "Notes", "text", [FragmentInput(text="here", index=0)])
+    moved = library.move_material(mine.manifest.id, folder_id=other.id)
+    assert moved.title == "Notes (2)" and moved.folder_id == other.id
+    assert moved.source_path == library.root / "Materials" / "B5" / "Notes (2)" / "Notes (2).md"
+    back = library.create_material(INBOX_ID, "Typed", "text", [FragmentInput(text="x", index=0)])
+    with pytest.raises(NameTaken):
+        library.move_material(back.manifest.id, title="notes", folder_id=other.id)
 
 
 def test_nfd_named_material_reads_back(library: Library) -> None:

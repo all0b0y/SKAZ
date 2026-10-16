@@ -99,6 +99,17 @@ describe('Message field', () => {
     expect(screen.queryByRole('list', { name: 'Attachments' })).not.toBeInTheDocument();
   });
 
+  it('"+" → File: the Materials lists show the new material at once (QA B7)', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: chatWorld() });
+    await ready();
+    const before = services.library.getState().materials.length;
+    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
+    await user.click(screen.getByRole('menuitem', { name: 'File…' }));
+    await waitFor(() => expect(services.library.getState().materials.some((m) => m.title === 'paper')).toBe(true));
+    expect(services.library.getState().materials).toHaveLength(before + 1);
+  });
+
   it('"+" → File with Settings adding files automatically: unticking "In wiki" keeps it out of the wiki', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });

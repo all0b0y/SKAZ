@@ -6,6 +6,9 @@ import { PageChip, useFolderTone } from '../document/parts';
 import { plural } from '../document/text';
 import { useLibrary, useServices, useUi } from '../state/context';
 
+/** A name is at most 200 bytes on disk (``library/names.py``); the field stops at 200 characters (QA B21). */
+const MAX_TITLE_CHARS = 200;
+
 export type MaterialDialog = 'rename' | 'move' | 'delete' | null;
 
 function Footer({ children }: { children: ReactNode }) {
@@ -39,7 +42,8 @@ export function RenameDialog({ material, open, onClose, onDone }: {
   return (
     <Modal open={open} onClose={onClose} title="Rename material" className="kb-modal--narrow" testId="rename-material" pane="rename-material">
       <form className="kb-modal__body" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-        <TextField label="Name" value={title} onChange={(e) => setTitle(e.target.value)} error={error} autoFocus />
+        <TextField label="Name" value={title} onChange={(e) => setTitle(e.target.value)} error={error} autoFocus
+          maxLength={MAX_TITLE_CHARS} hint={title.length > MAX_TITLE_CHARS - 20 ? `${title.length} of ${MAX_TITLE_CHARS} characters` : undefined} />
         <p className="kb-modal__hint">Wiki links to this material follow the new name.</p>
         <Footer>
           <Button variant="quiet" onClick={onClose}>Cancel</Button>
@@ -102,9 +106,11 @@ function PreviewSummary({ preview }: { preview: KbDeletePreview }) {
   return (
     <div className="kb-delprev">
       <ul className="kb-delprev__list">
-        <li><b>{plural(preview.claims_removed, 'statement')}</b> from this material leave the wiki.</li>
-        {preview.claims_kept > 0 && <li>{plural(preview.claims_kept, 'statement')} stay: other sources support them.</li>}
-        {preview.connections_removed > 0 && <li>{plural(preview.connections_removed, 'connection')} between pages go away.</li>}
+        {/* Natural sentences for 0 and 1 too (QA B28). */}
+        <li>{preview.claims_removed === 0 ? 'No statements in the wiki come from this material alone.'
+          : <><b>{plural(preview.claims_removed, 'statement')}</b> from this material {preview.claims_removed === 1 ? 'leaves' : 'leave'} the wiki.</>}</li>
+        {preview.claims_kept > 0 && <li>{plural(preview.claims_kept, 'statement')} {preview.claims_kept === 1 ? 'stays: another source supports it.' : 'stay: other sources support them.'}</li>}
+        {preview.connections_removed > 0 && <li>{plural(preview.connections_removed, 'connection')} between pages {preview.connections_removed === 1 ? 'goes' : 'go'} away.</li>}
         <li>{preview.user_notes_kept === 1 ? 'Your note on these pages stays untouched.' : preview.user_notes_kept > 1 ? `Your ${preview.user_notes_kept} notes on these pages stay untouched.` : 'Your notes are never touched.'}</li>
       </ul>
       {preview.pages_removed.length > 0 && (

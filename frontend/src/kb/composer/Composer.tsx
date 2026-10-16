@@ -127,6 +127,12 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   };
 
   const inboxId = folders.find((f) => f.system)?.id ?? null;
+  // QA B7: a material made from an attachment is in Inbox at once — the Materials panel shows it.
+  const saveMaterial = (source: 'file' | 'link' | 'text', value: string, folderId: string) =>
+    addMaterial(client, source, value, folderId).then((added) => {
+      void services.library.getState().loadContent();
+      return added;
+    });
 
   const addAttachments = (items: Array<{ source: Attachment['source']; name: string; value: string; materialId?: string }>) => {
     for (const item of items) {
@@ -143,7 +149,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         continue;
       }
       const source = item.source as 'file' | 'link' | 'text';
-      addMaterial(client, source, item.value, inboxId).then(
+      saveMaterial(source, item.value, inboxId).then(
         (added) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready } : a))),
         (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
       );
@@ -202,7 +208,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       lastPaste.current = null;
       const keys = new Set(unsaved.map((a) => a.key));
       setAttachments((now) => now.map((a) => (keys.has(a.key) ? { ...a, state: 'adding', error: null } : a)));
-      const saved = await Promise.all(unsaved.map((a) => addMaterial(client, 'text', a.text!, inboxId).then(
+      const saved = await Promise.all(unsaved.map((a) => saveMaterial('text', a.text!, inboxId).then(
         (added) => ({ key: a.key, id: added.id as string | null, ready: added.ready, error: null as string | null }),
         (e: unknown) => ({ key: a.key, id: null, ready: false, error: errorText(e) }),
       )));

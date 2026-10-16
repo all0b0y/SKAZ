@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import type { MaterialFileChoice } from '../../api/bridge';
+import { SPEECH_EXTENSIONS, type MaterialFileChoice } from '../../api/bridge';
 import type { KbRef } from '../../api/kb/types.gen';
 import type { MaterialKind } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
@@ -28,7 +28,7 @@ export interface Attachment {
   text?: string;
 }
 
-const SPEECH_EXT = new Set(['aac', 'aiff', 'amr', 'asf', 'flac', 'm4a', 'mp3', 'mp4', 'ogg', 'wav', 'webm', 'mkv', 'mov', 'avi', 'm4v']);
+const SPEECH_EXT = new Set<string>(SPEECH_EXTENSIONS);
 
 export function isSpeechFile(name: string): boolean {
   return SPEECH_EXT.has(/\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? '');

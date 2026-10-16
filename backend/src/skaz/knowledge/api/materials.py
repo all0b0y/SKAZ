@@ -16,10 +16,13 @@ from ..sources.material_info import (
     MaterialWiki,
     Translation,
     excluded_count,
+    intake_failure,
+    read_intake,
     read_translation,
     unreadable_pages,
     wiki_states,
 )
+from ..speech.carriers import CarrierRepository
 from ..store.records import MaterialRecord
 from ..wiki.delete import DeletePlan, PageRefView
 from ..wiki.service import WikiService
@@ -82,7 +85,8 @@ def _translation_view(translation: Translation | None) -> KbTranslation | None:
 
 def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, folder_name: str,
                 wiki: MaterialWiki, translation: Translation | None, excluded: int,
-                unreadable: Sequence[int] = ()) -> KbMaterial:
+                unreadable: Sequence[int] = (), failure: str | None = None,
+                can_retry: bool = False) -> KbMaterial:
     """The material with the applied recognition corrections (W2) and its wiki/translation state (S3)."""
     origin = None
     if detail.origin is not None:
@@ -113,6 +117,8 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
         "correction_counts": KbCorrectionCounts(applied=applied, doubtful=doubtful),
         "translation": _translation_view(translation), "wiki": _wiki_view(wiki), "excluded_count": excluded,
         "unreadable_pages": list(unreadable),
+        "failure_reason": failure if detail.status == "failed" else None,
+        "can_retry": can_retry and detail.status == "failed",
     })
 
 
@@ -123,6 +129,10 @@ def material_view(kb: KnowledgeService, material_id: str,
     folder = kb.folder_repo.get(detail.folder_id)
     wiki = wiki_states(kb.db, [material_id]).get(material_id, NOT_IN_WIKI)
     translation, excluded, unreadable = None, 0, list[int]()
+    failure, can_retry = None, False
+    carrier = CarrierRepository(kb.db).get(material_id)
+    if carrier is not None:  # speech: the last attempt's problem (QA E10)
+        failure, can_retry = carrier.attempt_error, carrier.can_retry
     try:
         library = kb.require()
     except LibraryUnavailable:
@@ -131,9 +141,13 @@ def material_view(kb: KnowledgeService, material_id: str,
         directory = library.root / record.rel_dir
         translation = read_translation(directory)
         excluded = excluded_count(directory)
-        unreadable = unreadable_pages(directory)
+        intake = read_intake(directory)
+        unreadable = unreadable_pages(directory, intake)
+        if carrier is None:  # a document: why no text could be read (QA B5)
+            failure = intake_failure(intake)
     return detail_view(detail, corrections, folder_name=folder.name if folder else "", wiki=wiki,
-                       translation=translation, excluded=excluded, unreadable=unreadable)
+                       translation=translation, excluded=excluded, unreadable=unreadable,
+                       failure=failure, can_retry=can_retry)
 
 
 def _material(kb: KbDep, wiki: WikiService, material_id: str) -> KbMaterial:
@@ -201,8 +215,16 @@ async def delete_preview(material_id: str, wiki: WikiDep) -> KbDeletePreview:
 
 
 @router.delete("/{material_id}")
-async def delete_material(material_id: str, wiki: WikiDep) -> KbDeletePreview:
-    """What actually happened. 409 while the material is recorded or being added to the wiki."""
+async def delete_material(material_id: str, wiki: WikiDep, request: Request) -> KbDeletePreview:
+    """What actually happened. 409 while the material is recorded or being added to the wiki.
+
+    A speech material lets go of its technical session first: a running import stops and its
+    temporary media is removed, and no restart tries to settle it again (QA E13, B41).
+    """
+    await kb_call(wiki.check_deletable, material_id)
+    speech = getattr(request.app.state.runtime, "kb_speech", None)
+    if speech is not None:
+        await speech.release_deleted(material_id)
     return preview_view(await kb_call(wiki.delete_material, material_id))
 
 

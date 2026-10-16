@@ -10,7 +10,7 @@ import { isTrustedFrame } from './ipcSender';
 import { kbBridgeHandlers } from './kbBridge';
 import { privacySettingsUrl } from './systemAudio';
 import type { AudioFileChoice, BridgeRequest, HttpMethod, JsonResponse } from '../frontend/src/api/bridge';
-import { AUDIO_EXTENSIONS, MATERIAL_EXTENSIONS } from '../frontend/src/api/bridge';
+import { MATERIAL_EXTENSIONS, SPEECH_EXTENSIONS } from '../frontend/src/api/bridge';
 
 // Registers the request-scoped IPC handlers. Every call is proxied to the
 // loopback backend with the per-run bearer token attached here in main, so the
@@ -110,7 +110,7 @@ export function registerIpc(
         defaultPath: app.getPath('downloads'),
         // One file per import: each import is one priced confirmation.
         properties: ['openFile'],
-        filters: [{ name: 'Audio and video', extensions: [...AUDIO_EXTENSIONS, 'mkv', 'mov', 'avi', 'm4v'] }],
+        filters: [{ name: 'Audio and video', extensions: [...SPEECH_EXTENSIONS] }],
       });
       const chosen = result.canceled ? null : result.filePaths[0] ?? null;
       if (!chosen) return null;

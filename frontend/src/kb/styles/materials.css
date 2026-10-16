@@ -46,6 +46,17 @@
   .kb-amt__added, .kb-amt__c-added { display: none; }
   .kb-amt__c-name { width: 50%; }
 }
+/* Beside an open material on a small window (QA B12): the controls shrink or wrap instead of being
+   cut, the folder column goes (the filter still names it), the wiki state keeps only its icon. */
+.kb-amf > .kb-select { flex: 0 1 auto; min-width: 0; }
+.kb-amf > .kb-select select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+@container allmat (max-width: 440px) {
+  .kb-amf .kb-seg { flex: 0 1 auto; flex-wrap: wrap; min-width: 0; }
+  .kb-amt__folder-col, .kb-amt__c-folder { display: none; }
+  .kb-amt__c-name { width: auto; }
+  .kb-amt__c-wiki { width: 40px; }
+  .kb-amt .kb-wk__text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 
 .kb-wk { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: var(--t-sm); }
 .kb-wk__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -113,6 +124,9 @@
   padding: 3px 0;
   color: var(--kb-text);
   max-height: 120px;
+  /* A long paste shows as a few lines, not one (QA B38). */
+  field-sizing: content;
+  overflow-y: auto;
 }
 .kb-paste__input:focus-visible { outline: none; }
 .kb-paste:focus-within { border-color: var(--kb-accent); }
@@ -126,4 +140,8 @@
 .kb-aopt { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--kb-line); padding-top: 10px; }
 .kb-arow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .kb-arow__label { width: 110px; color: var(--kb-muted); flex: none; }
+/* A long folder name never pushes the select onto its own line or the modal sideways (QA B11). */
+.kb-arow > .kb-select { flex: 0 1 auto; min-width: 0; max-width: calc(100% - 118px); }
+.kb-arow > .kb-select select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 .kb-arow__note { font-size: var(--t-xs); color: var(--kb-warn); padding-left: 118px; }
+.kb-arow__hint { font-size: var(--t-xs); padding-left: 118px; margin: 0; }

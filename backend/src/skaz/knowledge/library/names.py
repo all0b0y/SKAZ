@@ -24,7 +24,25 @@ def _reject(reason: str) -> NameRejected:
     return NameRejected(f"{reason} Choose another name.")
 
 
-def validate_name(raw: str, *, reserved: Iterable[str] = ()) -> str:
+def icloud_skips(name: str) -> bool:
+    """Folder names iCloud Drive never syncs (QA B13/E12, decision B19); moving in or out deadlocks."""
+    key = name.casefold()
+    return key == "tmp" or key.endswith((".tmp", ".nosync"))
+
+
+def numbered_name(name: str, number: int) -> str:
+    """``name (n)`` as Finder numbers a copy (QA B1, decision B19); the base is cut so it stays valid."""
+    if number < 2:
+        return name
+    suffix = f" ({number})"
+    base = name
+    while base and len(unicodedata.normalize("NFD", base + suffix).encode("utf-8")) > MAX_NAME_BYTES:
+        base = base[:-1]
+    return base.rstrip() + suffix
+
+
+def validate_name(raw: str, *, reserved: Iterable[str] = (), directory: bool = False) -> str:
+    """``directory``: the name becomes a folder on disk (a folder or a material), so iCloud rules apply."""
     name = unicodedata.normalize("NFC", raw).strip()
     if not name:
         raise _reject("The name is empty.")
@@ -39,4 +57,6 @@ def validate_name(raw: str, *, reserved: Iterable[str] = ()) -> str:
         raise _reject("The name is too long.")
     if name_key(name) in {name_key(item) for item in reserved}:
         raise _reject("This name is reserved by SKAZ.")
+    if directory and icloud_skips(name):
+        raise _reject("iCloud Drive doesn't sync folders with this name.")
     return name

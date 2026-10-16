@@ -54,7 +54,7 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
   };
   const v = view[state];
   return (
-    <span className={`kb-wk kb-wk--${v.tone}`}>
+    <span className={`kb-wk kb-wk--${v.tone}`} title={v.text}>
       <span className="kb-stx" aria-hidden="true">
         {v.icon ? <Icon name={v.icon} size={11} /> : v.tone === 'run' ? <span className="kb-spinner kb-spinner--xs" /> : null}
       </span>
@@ -147,7 +147,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
               <col className="kb-amt__c-added" /><col className="kb-amt__c-wiki" />
             </colgroup>
             <thead>
-              <tr><th aria-label="Type" /><th>Name</th><th>Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
+              <tr><th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
             </thead>
             <tbody>
               {rows.map((m) => (
@@ -158,7 +158,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
                       {m.title}
                     </button>
                   </td>
-                  <td><span className="kb-amt__folder"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" /><span className="kb-amt__cell">{folderName(m)}</span></span></td>
+                  <td className="kb-amt__folder-col"><span className="kb-amt__folder"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" /><span className="kb-amt__cell">{folderName(m)}</span></span></td>
                   <td className="kb-amt__added kb-muted"><span className="kb-amt__cell">{addedLabel(m.created_at)}</span></td>
                   <td><WikiCell material={m} /></td>
                 </tr>

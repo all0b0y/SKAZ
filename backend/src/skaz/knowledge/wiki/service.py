@@ -368,6 +368,10 @@ class WikiService:
     def delete_preview(self, material_id: str) -> DeletePlan:
         return plan_delete(self.kb, self.graph, material_id)
 
+    def check_deletable(self, material_id: str) -> None:
+        """Refuse before anything else lets go of the material (its speech session, QA E13)."""
+        self._check_deletable(material_id)
+
     def _check_deletable(self, material_id: str) -> None:
         record = self.kb.material_repo.get(material_id)
         if record is None:

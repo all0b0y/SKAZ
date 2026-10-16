@@ -22,7 +22,8 @@ from skaz.gateways.soniox_async import AsyncToken
 from skaz.import_service import LOCAL_BUSY, MAX_LOCAL_RECOGNITIONS
 from skaz.knowledge.ingest.service import NO_SPEECH_FILE
 from skaz.knowledge.library.library import INBOX_ID
-from skaz.knowledge.speech.service import CANCELLED_IMPORT, INTERRUPTED_IMPORT
+from skaz.knowledge.speech.carriers import CANCELLED_IMPORT
+from skaz.knowledge.speech.service import INTERRUPTED_IMPORT
 from skaz.secrets import MemorySecretStore
 from tests.conftest import TOKEN, FakeHttp
 from tests.sessions_support import adelete, get_session, session_count
@@ -192,7 +193,7 @@ async def test_import_without_cloud_consent_is_refused_and_leaves_no_session_beh
     refused = await api.post("/kb/imports", json={"path": media(tmp_path, "Lecture.m4a")})
 
     assert refused.status_code == 409, refused.text
-    assert "consent" in refused.json()["detail"].lower()
+    assert "Send audio to Soniox" in refused.json()["detail"]  # QA B6: the real place
     assert session_count(speech_app) == sessions_before
     active = await api.get("/kb/imports/active")
     assert active.status_code == 200 and active.json() == []
@@ -214,10 +215,23 @@ async def test_requests_are_checked_before_anything_starts(
         response = await api.post("/kb/imports", json=body)
         assert response.status_code == status, (body, response.text)
     await api.post("/kb/imports", json={"path": media(tmp_path, "Same.m4a")})
-    taken = await api.post("/kb/imports", json={"path": media(tmp_path, "same.m4a")})
-    assert taken.status_code == 409 and "already exists" in taken.json()["detail"]
+    taken = await api.post("/kb/imports", json={"path": media(tmp_path, "other.m4a"), "title": "same"})
+    assert taken.status_code == 409 and "already exists" in taken.json()["detail"]  # typed: refused
     assert session_count(speech_app) == sessions_before + 1
     assert len(soniox.jobs) <= 1
+
+
+async def test_a_derived_import_title_that_is_taken_is_numbered(
+    api: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    """QA B1 / decision B19: the file's own name gets " (2)" instead of a dead-end refusal."""
+    first = await api.post("/kb/imports", json={"path": media(tmp_path, "Lecture.m4a")})
+    (tmp_path / "again").mkdir()
+    path = tmp_path / "again" / "lecture.m4a"
+    path.write_bytes(b"\x02\x03" * 2048)
+    second = await api.post("/kb/imports", json={"path": str(path)})
+    assert first.status_code == 201 and second.status_code == 201, second.text
+    assert [first.json()["title"], second.json()["title"]] == ["Lecture", "lecture (2)"]
 
 
 async def test_audio_and_video_paths_get_the_same_checks_as_documents(
@@ -289,11 +303,16 @@ async def test_a_failed_import_keeps_its_reason_and_retry_continues_the_same_mat
     created = (await api.post("/kb/imports", json={"path": media(tmp_path, "Broken.m4a")})).json()
     failed = await until(api, created["material_id"], status="failed")
     assert failed["import_state"] == "failed" and "fixture error" in failed["error"]
+    # QA E10: the material itself says why and that it can be retried.
+    material = (await api.get(f"/kb/materials/{created['material_id']}")).json()
+    assert "fixture error" in material["failure_reason"] and material["can_retry"] is True
     soniox.failing = False
     retried = await api.post(f"/kb/imports/{created['material_id']}/retry")
     assert retried.status_code == 200, retried.text
     done = await until(api, created["material_id"], status="ready")
     assert done["material_id"] == created["material_id"] and done["error"] is None
+    material = (await api.get(f"/kb/materials/{created['material_id']}")).json()
+    assert material["failure_reason"] is None and material["can_retry"] is False
     assert await fragments(api, created["material_id"]) == [("Hello there", "1"), ("Hi", "2")]
     assert (await api.post(f"/kb/imports/{created['material_id']}/retry")).status_code == 409
 
@@ -365,6 +384,8 @@ async def test_closing_the_app_stops_every_import_and_retry_resumes_each(
         for material_id in ids:
             interrupted = await until(client, material_id, status="failed")
             assert interrupted["import_state"] == "interrupted" and interrupted["error"] == INTERRUPTED_IMPORT
+            material = (await client.get(f"/kb/materials/{material_id}")).json()
+            assert material["failure_reason"] == INTERRUPTED_IMPORT and material["can_retry"] is True
         assert (await client.post(f"/kb/imports/{ids[0]}/retry")).status_code == 200
         await until(client, ids[0], status="ready")
         # The other one is still waiting for its own decision.
@@ -482,3 +503,53 @@ async def test_an_import_without_speech_is_ready_without_text_and_never_goes_to_
     refused = await api.post(f"/kb/materials/{material_id}/ingest")
     assert refused.status_code == 409
     assert refused.json()["detail"] == NO_SPEECH_FILE
+
+
+async def test_deleting_an_import_material_stops_it_and_removes_its_temporary_media(
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
+) -> None:
+    """QA E13 / B41: the material goes with its session, its carrier and ``import-temp/<session>``."""
+    soniox.hold_all = True
+    runtime = speech_app.state.runtime
+    created = (await api.post("/kb/imports", json={"path": media(tmp_path, "Clip.mp4")})).json()
+    await until(api, created["material_id"], import_stage="processing")
+    temp = runtime.imports.temp.root / created["session_id"]
+    assert temp.is_dir() and any(temp.iterdir())  # the prepared audio of a video
+    deleted = await api.delete(f"/kb/materials/{created['material_id']}")
+    assert deleted.status_code == 200, deleted.text
+    assert not temp.exists()
+    assert get_session(speech_app, created["session_id"]) is None
+    assert runtime.kb_speech.carriers.get(created["material_id"]) is None
+    assert (await api.get(f"/kb/materials/{created['material_id']}")).status_code == 404
+    soniox.hold.clear()
+
+
+async def test_startup_sweeps_temporary_media_no_import_can_use(
+    api: httpx.AsyncClient, soniox: AsyncSoniox, tmp_path: Path, speech_app: Any,
+) -> None:
+    """QA E13: media of a gone, finished or cancelled import goes; a failed one keeps it for Retry."""
+    imports = speech_app.state.runtime.imports
+    soniox.failing = True
+    failed = (await api.post("/kb/imports", json={"path": media(tmp_path, "Failed.mp4")})).json()
+    await until(api, failed["material_id"], status="failed")
+    soniox.failing = False
+    done = (await api.post("/kb/imports", json={"path": media(tmp_path, "Done.m4a")})).json()
+    await until(api, done["material_id"], status="ready")
+    for session_id in (failed["session_id"], done["session_id"], "c" * 32):
+        (imports.temp.root / session_id).mkdir(parents=True, exist_ok=True)
+        (imports.temp.root / session_id / "audio.m4a").write_bytes(b"x")
+    (imports.temp.root / "not-an-import").mkdir()
+    assert imports.sweep_temp() == 2
+    left = sorted(path.name for path in imports.temp.root.iterdir())
+    assert left == sorted([failed["session_id"], "not-an-import"])
+
+
+async def test_a_carrier_of_a_deleted_material_is_skipped_quietly_at_start(
+    api: httpx.AsyncClient, speech_app: Any, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """QA B41: no "Speech material … not updated: NotFound" on every start for a material that is gone."""
+    speech = speech_app.state.runtime.kb_speech
+    speech.carriers.add("mat-gone", "d" * 32, "audio")
+    with caplog.at_level("WARNING", logger="skaz.knowledge.speech.service"):
+        await speech._reconcile_all()
+    assert "not updated" not in caplog.text

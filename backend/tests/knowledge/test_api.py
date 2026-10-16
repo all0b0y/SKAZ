@@ -129,3 +129,18 @@ def test_startup_reopens_the_connected_library_and_never_creates_one(tmp_path: P
                     headers=headers) as client:
         assert client.get("/kb/library").json()["state"] == "ready"
         assert [f["name"] for f in client.get("/kb/folders").json()] == ["Inbox", "Курс 2"]
+
+
+async def test_move_into_a_folder_with_the_same_name_numbers_it(kb_client: httpx.AsyncClient) -> None:
+    """QA B1/B19: Move never dead-ends on a name the user didn't type; the index follows the new name."""
+    await kb_client.post("/kb/library", json={})
+    folder = (await kb_client.post("/kb/folders", json={"name": "B5"})).json()
+    body = {"text": "Notes about bees.", "folder_id": folder["id"]}
+    assert (await kb_client.post("/kb/materials/text", json=body)).status_code == 201
+    inbox = (await kb_client.get("/kb/folders")).json()[0]["id"]
+    mine = (await kb_client.post("/kb/materials/text", json={**body, "folder_id": inbox})).json()["material"]
+    moved = await kb_client.patch(f"/kb/materials/{mine['id']}", json={"folder_id": folder["id"]})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["title"] == f"{mine['title']} (2)" and moved.json()["folder_id"] == folder["id"]
+    typed = await kb_client.patch(f"/kb/materials/{mine['id']}", json={"title": mine["title"]})
+    assert typed.status_code == 409 and typed.json() == {"detail": COLLISION}

@@ -228,7 +228,9 @@ export function classifyFake(url: string): KbLinkInfo {
   try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* invalid */ }
   const video = /(^|\.)(youtube\.com|youtu\.be|vk\.com|vkvideo\.ru|rutube\.ru|vimeo\.com)$/.test(host);
   const info: KbLinkInfo = {
-    kind: video ? 'video' : /\.pdf$/i.test(url) ? 'pdf' : 'site', url, domain: host, label: host,
+    // Labels as the backend makes them (`sources/links.py`): "YouTube · 1:04:00", "habr.com · article".
+    kind: video ? 'video' : /\.pdf$/i.test(url) ? 'pdf' : 'site', url, domain: host,
+    label: video ? 'YouTube · 1:04:00' : /\.pdf$/i.test(url) ? `${host} · PDF` : `${host} · article`,
     platform: video ? 'youtube' : null, video_id: null, title: video ? 'Seminar on entropy' : null,
     duration_ms: video ? 64 * 60_000 : null, supported: true, note: null, embedded_video: null,
   };
@@ -534,6 +536,12 @@ const ROUTES: FakeRoutes = {
   'POST /kb/imports': [201, (w, { body }) => {
     const name = body.title ?? (body.url ? classifyFake(body.url).title ?? 'Video' : (body.path ?? '').split('/').pop()!.replace(/\.[^.]+$/, ''));
     const m = newMaterial(w, name, body.url ? 'video_link' : 'audio', body.folder_id ?? w.lastFolderId, 'processing', []);
+    return { ...speechView(m, `s-${m.id}`, null), import_state: 'running', import_stage: 'transcribing' };
+  }],
+  'POST /kb/imports/{material_id}/retry': [200, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    if (!m.can_retry) fail(409, 'Only a failed or interrupted import can be retried.');
+    Object.assign(m, { status: 'processing', failure_reason: null, can_retry: false });
     return { ...speechView(m, `s-${m.id}`, null), import_state: 'running', import_stage: 'transcribing' };
   }],
 

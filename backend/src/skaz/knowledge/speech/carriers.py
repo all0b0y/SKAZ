@@ -11,6 +11,8 @@ from ..store.database import KnowledgeDatabase
 CarrierKind = Literal["recording", "audio", "video", "video_link"]
 CARRIER_KINDS: tuple[CarrierKind, ...] = get_args(CarrierKind)
 IMPORT_KINDS: tuple[CarrierKind, ...] = ("audio", "video", "video_link")
+#: An import whose session was deleted: there is nothing left to retry.
+CANCELLED_IMPORT = "The import was cancelled."
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,11 @@ class Carrier:
     @property
     def is_import(self) -> bool:
         return self.kind in IMPORT_KINDS
+
+    @property
+    def can_retry(self) -> bool:
+        """A failed or interrupted import can start again (``POST /kb/imports/{id}/retry``, QA E10)."""
+        return self.is_import and self.attempt_error is not None and self.attempt_error != CANCELLED_IMPORT
 
 
 def _carrier(row: sqlite3.Row) -> Carrier:

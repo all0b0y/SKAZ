@@ -47,7 +47,7 @@ from ...native_io import disk_call
 from ..errors import KnowledgeError, NameTaken, NotFound
 from ..library.layout import STAGING_PATH
 from ..library.library import INBOX_ID
-from ..library.names import validate_name
+from ..library.names import numbered_name, validate_name
 from ..logsafe import error_note
 from ..markdown.source import MaterialStatus, Origin
 from ..markdown.text import name_key
@@ -55,7 +55,7 @@ from ..service import KnowledgeService
 from ..sources.fragments import sanitize_title
 from ..sources.paths import given_path, resolved_file
 from ..sources.service import SourceService
-from .carriers import IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
+from .carriers import CANCELLED_IMPORT, IMPORT_KINDS, Carrier, CarrierKind, CarrierRepository
 from .legacy import (
     IMPORT_CONFLICT,
     IMPORT_INVALID,
@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 LAST_FOLDER_KEY = "last_folder_id"
 INTERRUPTED_RECORDING = "SKAZ closed before this recording was stopped."
 INTERRUPTED_IMPORT = "The import was interrupted when SKAZ closed. Retry to continue."
-CANCELLED_IMPORT = "The import was cancelled."
 STILL_STREAMING = "The recorder is still streaming. Stop or pause it in the recorder first."
 #: App shutdown waits this long for in-flight projections (``close``); Electron's grace is 4 s.
 CLOSE_WAIT_S = 1.0
@@ -127,6 +126,9 @@ class ImportInput:
     #: The user's "to wiki" choice (decision 15); ``None``: Settings → Wiki decide. Kept before the
     #: import can finish, so the wiki sees it at completion however fast the import is (X5).
     to_wiki: bool | None = None
+    #: ``title`` is SKAZ's own guess (from the file or the video's details), not typed by the user:
+    #: a taken one becomes ``title (2)`` instead of being refused (QA B1, decision B19).
+    derived_title: bool = False
 
 
 def derived_title(raw: object, fallback: str) -> str:
@@ -370,6 +372,11 @@ class SpeechService:
     async def _reconcile_all(self) -> None:
         await disk_call(self._restore_carriers)
         for carrier in await disk_call(self.carriers.list_all):
+            if await disk_call(self.kb.material_repo.get, carrier.material_id) is None:
+                # Deleted before carriers were let go of, or in another library: nothing to settle
+                # here, and no warning on every start (QA B41). ``_restore_carriers`` relinks it
+                # if the material comes back.
+                continue
             if carrier.is_import:
                 await self._guarded(carrier.material_id, functools.partial(self._reconcile_import, carrier))
                 continue
@@ -430,10 +437,19 @@ class SpeechService:
         if any(name_key(item.title) == key for item in self.kb.materials(folder_id=folder_id)):
             raise NameTaken()
 
+    def _free_title(self, folder_id: str, title: str) -> str:
+        """``title`` or the first ``title (2)``… no material of the folder has (QA B1)."""
+        taken = {name_key(item.title) for item in self.kb.materials(folder_id=folder_id)}
+        for number in range(1, 10_000):
+            candidate = numbered_name(title, number)
+            if name_key(candidate) not in taken:
+                return candidate
+        raise NameTaken()
+
     def _new_material(self, folder_id: str, title: str, kind: CarrierKind, status: MaterialStatus,
-                      origin: Origin, languages: list[str]) -> str:
+                      origin: Origin, languages: list[str], *, unique: bool = False) -> str:
         return self.kb.create_material(folder_id, title, kind, [], status=status, origin=origin,
-                                       languages=languages).manifest.id
+                                       languages=languages, unique=unique).manifest.id
 
     def _link(self, material_id: str, session_id: str, kind: CarrierKind, folder_id: str) -> Carrier:
         carrier = self.carriers.add(material_id, session_id, kind)
@@ -542,6 +558,7 @@ class SpeechService:
             url: str | None = link.url
             origin = Origin(type="url", url=link.url)
             title = request.title
+            derived = request.derived_title or not title
             metadata = request.metadata
             if metadata is None and not title:
                 try:
@@ -562,9 +579,13 @@ class SpeechService:
             path, _info = await disk_call(resolved_file, picked, self.kb.data_dir, SpeechInvalid)
             url = None
             origin = Origin(type="file", file_name=picked.name)
+            derived = request.derived_title or not request.title
             title = request.title or derived_title(picked.stem, "Video" if kind == "video" else "Audio")
         clean = validate_name(title[:200])
-        await disk_call(self._assert_free, folder, clean)
+        if derived:
+            clean = await disk_call(self._free_title, folder, clean)
+        else:
+            await disk_call(self._assert_free, folder, clean)
         session_id = await disk_call(self.legacy.create_import_session, clean)
         try:
             await self.legacy.start_import(ImportRequest(
@@ -582,7 +603,7 @@ class SpeechService:
             material_id = await disk_call(
                 self._new_material, folder, clean, kind, "processing",
                 origin.model_copy(update={"session_id": session_id}),
-                [request.language] if request.language else [])
+                [request.language] if request.language else [], unique=derived)
         except BaseException:
             await self.legacy.cancel_import(session_id)
             raise
@@ -612,12 +633,14 @@ class SpeechService:
             metadata = await self.legacy.video_metadata(link.url)
         except IMPORT_INVALID as error:
             raise SpeechInvalid(str(error)) from error
+        typed = bool((title or "").strip())
         chosen = (title or "").strip() or derived_title(metadata.get("title"), "Video")
         if avoid_title is not None and name_key(chosen) == name_key(avoid_title):
             chosen = f"{chosen[:190]} (video)"
         return await self.start_import(ImportInput(url=link.url, folder_id=folder_id, title=chosen,
                                                    translate=translate, language=language,
-                                                   metadata=metadata, to_wiki=to_wiki))
+                                                   metadata=metadata, to_wiki=to_wiki,
+                                                   derived_title=not typed))
 
     async def _import(self, material_id: str) -> Carrier:
         carrier = await disk_call(self.carriers.get, material_id)
@@ -664,6 +687,27 @@ class SpeechService:
         async with self._lock(material_id):
             await disk_call(self._remove_material, material_id, record.rel_dir)
 
+    async def release_deleted(self, material_id: str) -> None:
+        """The material is about to be deleted (W2): let go of what feeds it (QA E13, B41).
+
+        Its technical session goes the legacy way — a running import is cancelled and its
+        temporary media removed — and the carrier is forgotten, so no restart tries to settle
+        a material that no longer exists. A material without a carrier is not speech: nothing.
+        """
+        carrier = await disk_call(self.carriers.get, material_id)
+        if carrier is None:
+            return
+        if await disk_call(self.legacy.session_status, carrier.session_id) is not None:
+            await self.legacy.delete_session(carrier.session_id)
+        await disk_call(self._forget_carrier, material_id)
+
+    def _forget_carrier(self, material_id: str) -> None:
+        self.carriers.remove(material_id)
+        with self._map_lock:
+            if self._by_session is not None:
+                self._by_session = {key: value for key, value in self._by_session.items()
+                                    if value != material_id}
+
     def _remove_material(self, material_id: str, rel_dir: str) -> None:
         library = self.kb.require()
         directory = library.locate_material(material_id, hint=rel_dir)
@@ -674,11 +718,7 @@ class SpeechService:
         shutil.rmtree(doomed, ignore_errors=True)
         with self.kb.db.write() as connection:
             connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
-        self.carriers.remove(material_id)
-        with self._map_lock:
-            if self._by_session is not None:
-                self._by_session = {key: value for key, value in self._by_session.items()
-                                    if value != material_id}
+        self._forget_carrier(material_id)
 
     async def retry_import(self, material_id: str) -> SpeechView:
         carrier = await self._import(material_id)

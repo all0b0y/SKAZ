@@ -345,7 +345,7 @@ export interface KbFragment {
   speaker: string | null;
   page: number | null;
   index: number | null;
-  role: "paragraph" | "heading" | "list_item" | "quote" | "code";
+  role: "paragraph" | "heading" | "list_item" | "quote" | "code" | "table";
   level: number | null;
   original_text: string | null;
   corrections: string[];
@@ -581,6 +581,8 @@ export interface KbMaterial {
   wiki: KbMaterialWiki;
   excluded_count: number;
   unreadable_pages?: number[];
+  failure_reason?: string | null;
+  can_retry?: boolean;
 }
 
 export interface KbMaterialAdded {
