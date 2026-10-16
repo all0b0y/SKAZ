@@ -78,6 +78,43 @@ describe('Message field', () => {
     expect(picker).toHaveAccessibleName(/Claude Code/);
   });
 
+  it('each chat keeps its own unsent draft; a hand-off that opens New chat lands in its field (QA D2/D3)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    const { services } = renderKb({ world: w });
+    const input = await ready();
+    const [a, b] = [w.chats[0]!.id, w.chats[1]!.id];
+    act(() => services.chats.getState().open(a));
+    await user.click(input);
+    await user.keyboard('draft in A');
+    act(() => services.chats.getState().open(b));
+    expect(input).toHaveTextContent(/^$/);
+    act(() => services.chats.getState().open(a));
+    expect(input).toHaveTextContent('draft in A');
+    // "Ask the agent about this": New chat opens and the text is handed over in the same tick.
+    act(() => {
+      services.chats.getState().open(null);
+      services.composer.getState().push([{ kind: 'text', text: 'handed over' }], { focus: true });
+    });
+    await waitFor(() => expect(input).toHaveTextContent('handed over'));
+    expect(input).not.toHaveTextContent('draft in A');
+  });
+
+  it('no agent: the reason is next to the field with the way to fix it (QA D6)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    w.agents.default = 'hermes';
+    const { services, fake } = renderKb({ world: w });
+    const input = await ready();
+    await user.click(input);
+    await user.keyboard('Why?{Enter}');
+    const error = await screen.findByText(/Hermes Agent can’t answer now: Hermes Agent isn’t installed\./);
+    expect(input).toHaveTextContent('Why?');
+    expect(fake.calls.some((c) => c.method === 'POST' && /\/messages$/.test(c.path))).toBe(false);
+    await user.click(within(error).getByRole('button', { name: 'Install in Settings…' }));
+    expect(services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
+  });
+
   it('"+" → File: saved to Materials (Inbox) at once and held; "In wiki" on from Settings, sent at send; the message carries its id', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });

@@ -37,8 +37,8 @@ export interface ChatsActions {
   load: (id: string) => Promise<void>;
   /** Follow one chat's events (streamed text, states, title). Returns stop. */
   follow: (id: string) => () => void;
-  /** Create the chat if needed, then send. Resolves with the chat id. */
-  send: (input: KbMessageInput, context: KbOpenContext) => Promise<ActionResult<string>>;
+  /** Create the chat if needed (or always, with `newChat`), then send. Resolves with the chat id. */
+  send: (input: KbMessageInput, context: KbOpenContext, options?: { newChat?: boolean }) => Promise<ActionResult<string>>;
   stop: (chatId: string, messageId: string) => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
   resume: (chatId: string, messageId: string) => Promise<ActionResult>;
@@ -215,8 +215,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
         return { cursor: res.cursor, changed: fresh.length > 0 };
       }, 0),
 
-      send: async (input, context) => {
-        let id = get().currentId;
+      send: async (input, context, options = {}) => {
+        let id = options.newChat ? null : get().currentId;
         if (!id) {
           const draft = get().draftAgent;
           try {
@@ -225,7 +225,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
             });
             putChat(chat);
             id = chat.id;
-            set({ currentId: id, draftAgent: null });
+            // A chat asked from ⌘K leaves New chat's own agent choice alone.
+            set({ currentId: id, draftAgent: options.newChat ? get().draftAgent : null });
           } catch (error) {
             return { ok: false, error: errorText(error) };
           }
