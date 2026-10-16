@@ -96,6 +96,25 @@ function ModalLayer({
     target.focus({ preventScroll: true });
   }, [initialFocusRef, initialFocus]);
 
+  // Escape with the focus lost to <body> (a pressed button unmounted, a window behind closed):
+  // the topmost dialog still closes, as if the focus were in it (QA A32, A29). Inside a dialog
+  // its own handler below decides.
+  useEffect(() => {
+    if (!present) return undefined;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && active.closest('.kb-modal-layer')) return;
+      const layers = Array.from(document.querySelectorAll('.kb-modal-layer:not([data-closing])'));
+      if (layers[layers.length - 1] !== layerRef.current) return;
+      event.preventDefault();
+      if (dismissOnEscape) onCloseRef.current();
+      else dialogRef.current?.focus({ preventScroll: true });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [present, dismissOnEscape]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.stopPropagation();

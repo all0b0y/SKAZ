@@ -100,6 +100,33 @@ describe('Modal', () => {
     await user.keyboard('{Escape}');
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('Escape still closes the topmost dialog when the focus fell to <body> (QA A32, A29)', async () => {
+    const user = userEvent.setup();
+    const lower = vi.fn();
+    const upper = vi.fn();
+    render(
+      <>
+        <Modal open onClose={lower} title="Lower" testId="lower"><button type="button">L</button></Modal>
+        <Modal open onClose={upper} title="Upper" testId="upper"><button type="button">U</button></Modal>
+      </>,
+    );
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    await user.keyboard('{Escape}');
+    expect(upper).toHaveBeenCalledTimes(1);
+    expect(lower).not.toHaveBeenCalled();
+  });
+
+  it('a dialog that can’t be dismissed takes the focus back instead of closing', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<Modal open onClose={onClose} title="Pinned" dismissOnEscape={false} testId="m"><button type="button">B</button></Modal>);
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard('{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('m')).toContainElement(document.activeElement as HTMLElement);
+  });
 });
 
 describe('Banner', () => {

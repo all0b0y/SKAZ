@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
 import { unconfiguredWorld, baseWorld, without } from '../test/fakeBridge';
@@ -99,6 +99,18 @@ describe('First launch', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Download · about 1.6 GB' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/settings/health/speech-local-model/download' })));
     expect(await within(dialog).findByRole('progressbar', { name: 'Downloading the speech model' })).toBeInTheDocument();
+  });
+
+  it('⌘K and ⌘, do nothing while first launch is open (QA A32)', async () => {
+    renderKb({ world: unconfiguredWorld(), prefs: { onboardingDone: false } });
+    const dialog = await screen.findByRole('dialog', { name: 'Welcome to SKAZ' });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(window, { key: ',', metaKey: true });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('dialog', { name: 'Search' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Welcome to SKAZ' })).toBe(dialog);
   });
 
   it('choosing another folder sends that path; a refusal stays on the step in the backend’s words', async () => {

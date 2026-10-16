@@ -104,11 +104,14 @@ function useQuitAnswer() {
 }
 
 function useSettingsShortcut() {
+  const { prefs } = useServices();
   const openSettings = useUi((s) => s.openSettings);
   const setSearchOpen = useUi((s) => s.setSearchOpen);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      // First launch can't be dismissed: nothing opens over or instead of it (QA A32).
+      if (!prefs.getState().onboardingDone) return;
       if (event.key === ',') {
         event.preventDefault();
         openSettings();
@@ -120,7 +123,7 @@ function useSettingsShortcut() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openSettings, setSearchOpen]);
+  }, [openSettings, setSearchOpen, prefs]);
 }
 
 /**
