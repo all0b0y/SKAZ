@@ -3,7 +3,8 @@
 ::
 
     <root>/.skaz/library.json                 marker: library id + format version
-    <root>/.skaz/tmp/                         staging for atomic creation (same volume)
+    <root>/.skaz/staging/                     staging for atomic creation (same volume; iCloud
+                                              never syncs a folder named ``tmp``)
     <root>/Materials/<Folder>/.skaz/folder.json
     <root>/Materials/<Folder>/<Title>/<Title>.md
     <root>/Materials/<Folder>/<Title>/.skaz/material.json

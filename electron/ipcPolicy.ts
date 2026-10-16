@@ -165,8 +165,9 @@ function hasControlChar(path: string): boolean {
 function validatePath(path: unknown): string | null {
   if (typeof path !== 'string' || path.length === 0) return 'invalid path';
   if (!path.startsWith('/')) return 'path must start with "/" (absolute URLs are rejected)';
-  // Reject traversal in raw and percent-encoded forms, plus backslashes.
-  if (path.includes('..') || /%2e/i.test(path) || path.includes('\\')) {
+  // Reject traversal in raw and percent-encoded forms, plus backslashes. An encoded slash would be
+  // decoded by the backend into another route (`/kb/materials/%2F` answered with the list — QA E3).
+  if (path.includes('..') || /%2e|%2f|%5c/i.test(path) || path.includes('\\')) {
     return 'path contains traversal or unsafe characters';
   }
   if (hasControlChar(path)) return 'path contains control characters';

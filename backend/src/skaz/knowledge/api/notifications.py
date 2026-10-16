@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from ..errors import KnowledgeError
 from ..notifications.actions import NotificationActions
 from ..notifications.feed import MAX_WAIT_S, NotificationFeed
+from ..store.database import MAX_DB_INT
 from ..store.records import NotificationRecord
 from .deps import KbDep, kb_call
 from .schemas import KbNotification, KbNotificationAction, KbSubjectRef
@@ -62,7 +63,7 @@ def notification_view(record: NotificationRecord, actions: NotificationActions) 
 async def list_notifications(
     feed: FeedDep,
     include_dismissed: bool = False,
-    after: Annotated[int | None, Query(ge=0)] = None,
+    after: Annotated[int | None, Query(ge=0, le=MAX_DB_INT)] = None,
     wait: Annotated[float, Query(ge=0, le=MAX_WAIT_S)] = 0,
 ) -> KbNotificationFeed:
     """Newest first. With ``after``: only what was created or changed since that cursor (dismissed ones

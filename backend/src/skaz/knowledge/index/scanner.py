@@ -6,8 +6,13 @@ Rules (FILESYSTEM-LIBRARY-SPEC 2, 7, 9, 12, 16, 20, 22, 26–28):
   materials with ``.skaz/material.json``, pages with ``skaz_id``/``kind``
   frontmatter. Anything else is neither shown nor touched.
 * A damaged marker makes that one object unconnectable; it is skipped.
-* Any ``OSError`` while walking aborts the scan (``LibraryUnavailable``):
-  an incomplete walk must never shrink the index.
+* An ``OSError`` on the library itself (root, ``Materials/``, ``Wiki/``)
+  aborts the scan (``LibraryUnavailable``): an incomplete walk must never
+  shrink the index.
+* One entry that can't be read (a folder, a material, a page — e.g. an iCloud
+  placeholder still downloading, ``EDEADLK``) is left out and listed in
+  ``ScanResult.unreadable``; the index keeps what it had under that path, and
+  the rest of the library stays usable (QA E9).
 * Names on disk win (Finder renames/moves are accepted); ids come from markers.
 * The same id in several places: the previously indexed path wins; without
   one, a single candidate is used and several candidates are all skipped.
@@ -25,6 +30,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from ..errors import LibraryUnavailable, NotFound
+from ..library.fsio import entry_kind
 from ..library.layout import WIKI_SUBDIRS
 from ..library.library import FolderEntry, Library, MaterialFiles
 from ..markdown.page import Block, PageFormatError, PageMeta, UserParagraph, parse_page, render_page
@@ -70,6 +76,8 @@ class ScanResult:
     materials: list[ScannedMaterial] = field(default_factory=list)
     pages: list[ScannedPage] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    #: Library-relative paths that could not be read; the index keeps its rows under them.
+    unreadable: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -167,24 +175,36 @@ def _scan(library: Library, known: KnownPaths, result: ScanResult, stop: StopChe
         raise LibraryUnavailable(f"The library layout is incomplete: {library.root}")
 
     folders_by_id: dict[str, list[FolderEntry]] = defaultdict(list)
-    for entry in library.folders():
+    entries, unreadable = library.read_folders()
+    result.unreadable.extend(library.relative(path) for path in unreadable)
+    for entry in entries:
         folders_by_id[entry.id].append(entry)
     result.folders = _pick(folders_by_id, known.folders, lambda e: library.relative(e.path), result.skipped)
     result.folder_paths = {entry.id: library.relative(entry.path) for entry in result.folders}
 
     materials_by_id: dict[str, list[ScannedMaterial]] = defaultdict(list)
     for folder in result.folders:
-        for name in sorted(os.listdir(folder.path)):
+        try:
+            names = sorted(os.listdir(folder.path))
+        except OSError:
+            result.unreadable.append(library.relative(folder.path))
+            continue
+        for name in names:
             _check(stop)
             directory = folder.path / name
-            if name.startswith(".") or not directory.is_dir():
-                continue
-            if not (directory / ".skaz" / "material.json").is_file():
+            if name.startswith("."):
                 continue
             try:
+                if entry_kind(directory) != "dir":
+                    continue
+                if entry_kind(directory / ".skaz" / "material.json") != "file":
+                    continue
                 files = library.load_material(directory, folder.id)
             except (ValueError, NotFound, UnicodeDecodeError):
                 result.skipped.append(library.relative(directory))
+                continue
+            except OSError:
+                result.unreadable.append(library.relative(directory))
                 continue
             materials_by_id[files.manifest.id].append(ScannedMaterial(
                 files, library.relative(directory), library.relative(files.source_path),
@@ -194,16 +214,26 @@ def _scan(library: Library, known: KnownPaths, result: ScanResult, stop: StopChe
     pages_by_id: dict[str, list[ScannedPage]] = defaultdict(list)
     for subdir in WIKI_SUBDIRS.values():
         directory = library.wiki_dir / subdir
-        if not directory.is_dir():
+        try:
+            if entry_kind(directory) != "dir":
+                continue
+            names = sorted(os.listdir(directory))
+        except OSError:
+            result.unreadable.append(library.relative(directory))
             continue
-        for name in sorted(os.listdir(directory)):
+        for name in names:
             _check(stop)
             path = directory / name
-            if name.startswith(".") or not name.endswith(".md") or not path.is_file():
+            if name.startswith(".") or not name.endswith(".md"):
                 continue
             try:
+                if entry_kind(path) != "file":
+                    continue
                 page = read_page(library, path)
             except (PageFormatError, UnicodeDecodeError):
                 continue  # not a SKAZ page: neither shown nor touched
+            except OSError:
+                result.unreadable.append(library.relative(path))
+                continue
             pages_by_id[page.meta.skaz_id].append(page)
     result.pages = _pick(pages_by_id, known.pages, lambda p: p.rel_path, result.skipped)

@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request
 
 from ...native_io import disk_call
 from ..errors import KnowledgeError
+from ..library.fsio import os_error_reason
 from ..service import KnowledgeService
 
 P = ParamSpec("P")
@@ -28,6 +29,4 @@ async def kb_call(function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
     except OSError as error:
-        raise HTTPException(
-            status_code=503, detail=f"SKAZ couldn't use the library folder: {error.strerror or error}.",
-        ) from error
+        raise HTTPException(status_code=503, detail=os_error_reason(error)) from error

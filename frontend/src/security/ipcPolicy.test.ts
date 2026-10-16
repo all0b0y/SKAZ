@@ -63,6 +63,14 @@ describe('Electron IPC policy', () => {
     }
   });
 
+  it('rejects an encoded slash or backslash in an id (QA E3: "%2F" reached the list route)', () => {
+    for (const path of ['/kb/materials/%2F', '/kb/chats/%2f', '/kb/wiki/pages/a%2Fb', '/kb/jobs/%5C',
+      '/kb/materials/%2f/fragments']) {
+      expect(validateBridgeRequest({ method: 'GET', path })).toMatch(/path/);
+    }
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/materials/mat-1' })).toBeNull();
+  });
+
   it('bounds ordinary JSON and rejects non-serializable bodies', () => {
     expect(validateBridgeRequest({ method: 'PUT', path: '/settings',
       body: { model: 'x'.repeat(70_000) } })).toMatch(/body/);

@@ -18,6 +18,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+#: The harness/operator switch: ``SKAZ_ALLOW_MODEL_DOWNLOAD=0`` (isolated smokes, QA runs) refuses
+#: every model download — Whisper checkpoints and the decision model alike (QA E18).
+MODEL_DOWNLOAD_ENV = "SKAZ_ALLOW_MODEL_DOWNLOAD"
+MODEL_DOWNLOADS_OFF = "Model downloads are turned off for this run (SKAZ_ALLOW_MODEL_DOWNLOAD=0)."
+
+
+def model_downloads_refused() -> bool:
+    """True when this run must not download any model (read on every call: tests flip it)."""
+    return os.environ.get(MODEL_DOWNLOAD_ENV, "").strip() == "0"
+
 GIGACHAT_PROVIDER = "local-gigachat-mlx"
 GIGACHAT_MODEL_ID = "ai-babai/gigachat-audio-mlx"
 GIGACHAT_REVISION = "db430193908ea810d4873404b43a148d5cbe9753"

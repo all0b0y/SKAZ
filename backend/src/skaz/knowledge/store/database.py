@@ -13,6 +13,8 @@ from pathlib import Path
 from .schema import MODULES, SchemaModule, applied_versions, apply_schemas
 
 KNOWLEDGE_DB_NAME = "knowledge.sqlite3"
+#: SQLite INTEGER is 64-bit signed: API cursors and numbers bound to queries stay at or under it.
+MAX_DB_INT = 2**63 - 1
 
 
 class KnowledgeDatabase:

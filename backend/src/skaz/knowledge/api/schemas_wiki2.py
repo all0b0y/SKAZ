@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..store.database import MAX_DB_INT
 from .schemas import KbNotification, KbPageRef
 from .schemas_ingest import KbJob
 
@@ -37,7 +38,7 @@ class KbResolve(_Request):
 
 
 class KbNotificationsRead(_Request):
-    up_to_seq: int = Field(ge=0)
+    up_to_seq: int = Field(ge=0, le=MAX_DB_INT)
 
 
 class KbCorrection(BaseModel):

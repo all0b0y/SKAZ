@@ -11,9 +11,10 @@ import ctypes
 import errno
 import json
 import os
+import stat
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 #: Finder writes these into any folder it opens; they never make a folder "non-empty".
@@ -116,3 +117,51 @@ def dump_json_rows(value: dict[str, Any]) -> bytes:
 
 def visible_entries(path: Path) -> list[str]:
     return [name for name in os.listdir(path) if name not in IGNORABLE_ENTRIES]
+
+
+#: Errors that mean "nothing is there" rather than "something is there but can't be read".
+_ABSENT = frozenset({errno.ENOENT, errno.ENOTDIR})
+
+
+def entry_kind(path: Path) -> Literal["dir", "file", "other"] | None:
+    """What is at ``path``: ``None`` if nothing; any other ``OSError`` propagates.
+
+    ``Path.is_dir()``/``is_file()`` answer ``False`` for *every* error on Python 3.14, which
+    would make an unreadable iCloud placeholder (``EDEADLK``) look absent and shrink the index.
+    """
+    try:
+        mode = os.stat(path).st_mode
+    except OSError as error:
+        if error.errno in _ABSENT:
+            return None
+        raise
+    if stat.S_ISDIR(mode):
+        return "dir"
+    return "file" if stat.S_ISREG(mode) else "other"
+
+
+def os_error_reason(error: OSError, root: Path | None = None) -> str:
+    """Plain-English reason for a failed library file operation; names the entry when known.
+
+    ``EDEADLK`` ("Resource deadlock avoided") is what iCloud Drive answers for an item that is
+    still being downloaded or synced.
+    """
+    where = error.filename
+    name = None
+    if where:
+        path = Path(os.fsdecode(where))
+        if ".skaz" in path.parts:  # name the folder the user knows, not SKAZ's service files in it
+            path = Path(*path.parts[:path.parts.index(".skaz")])
+        if root is not None:
+            try:
+                name = path.relative_to(root).as_posix()
+            except ValueError:
+                name = path.name
+        else:
+            name = path.name
+        name = name if name not in ("", ".") else None
+    if error.errno == errno.EDEADLK:
+        subject = f"“{name}”" if name else "a library folder"
+        return f"iCloud is still syncing {subject}. Try again in a moment."
+    reason = error.strerror or str(error)
+    return f"SKAZ couldn't use the library folder{f' ({name})' if name else ''}: {reason}."

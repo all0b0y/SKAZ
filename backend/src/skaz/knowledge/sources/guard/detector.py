@@ -469,7 +469,9 @@ def detect_instruction(text: str) -> Detection | None:
     base = normalise(text)
     if not base:
         return None
-    variants = (base, base.translate(_TO_LATIN), base.translate(_TO_CYRILLIC))
+    # A look-alike fold that changed nothing (one-script text) would only find the same matches
+    # again: scanned once (QA E14 — a 10 MB paste ran every rule three times per fragment).
+    variants = tuple(dict.fromkeys((base, base.translate(_TO_LATIN), base.translate(_TO_CYRILLIC))))
     starts = _sentence_starts(base)
     by_sentence: dict[int, dict[str, tuple[Rule, int, int]]] = {}
     for rule in RULES:

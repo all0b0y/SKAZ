@@ -40,6 +40,8 @@ export interface BackendStatus {
   detail?: string;
   /** Extra guidance for a failed start; development builds only. */
   hint?: string;
+  /** The backend had been running and then stopped (crashed, killed): not a failed start. */
+  stopped?: boolean;
 }
 
 /** Live capture snapshot the renderer pushes to main so a close/quit can be

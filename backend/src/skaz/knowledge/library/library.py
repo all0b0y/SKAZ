@@ -29,7 +29,7 @@ from ..errors import (
     NotFound,
     ProtectedItem,
 )
-from ..ids import new_id, utc_now
+from ..ids import new_id, utc_now, utc_now_ms
 from ..markdown.page import PageDocument, render_page
 from ..markdown.source import (
     Fragment,
@@ -49,6 +49,7 @@ from .fsio import (
     create_exclusive,
     dump_json,
     dump_json_rows,
+    entry_kind,
     fsync_dir,
     read_json,
     rename_exclusive,
@@ -233,22 +234,36 @@ class Library:
     # -- folders ------------------------------------------------------------
 
     def folders(self) -> list[FolderEntry]:
-        """Folders with a valid marker; anything else under Materials is not ours and is skipped.
+        """Folders with a valid marker; anything else under Materials is not ours and is skipped."""
+        return self.read_folders()[0]
 
-        ``OSError`` (other than a folder vanishing mid-listing) propagates: an
+    def read_folders(self) -> tuple[list[FolderEntry], list[Path]]:
+        """Folders with a valid marker, and the entries of ``Materials/`` that could not be read.
+
+        An entry that can't be read (an iCloud placeholder still downloading answers
+        ``EDEADLK``, a folder without permission ``EACCES``) is left out and returned in the
+        second list, so one such folder never makes the whole library unusable; the scan keeps
+        what it indexed there before. ``OSError`` on ``Materials/`` itself propagates: an
         unreadable library is not an empty one.
         """
         found: list[FolderEntry] = []
+        unreadable: list[Path] = []
         for name in sorted(os.listdir(self.materials_dir)):
             path = self.materials_dir / name
-            if name.startswith(".") or not path.is_dir():
+            if name.startswith("."):
                 continue
             try:
+                if entry_kind(path) != "dir":
+                    continue
                 marker = FolderMarker.model_validate(read_json(path / FOLDER_MARKER))
             except (FileNotFoundError, NotADirectoryError, ValueError, UnicodeDecodeError):
                 continue
+            except OSError:
+                unreadable.append(path)
+                continue
             found.append(FolderEntry(marker.id, name, marker.system, marker.created_at, path))
-        return sorted(found, key=lambda entry: (entry.id != INBOX_ID, name_key(entry.name)))
+        found.sort(key=lambda entry: (entry.id != INBOX_ID, name_key(entry.name)))
+        return found, unreadable
 
     def folder(self, folder_id: str) -> FolderEntry:
         matches = [entry for entry in self.folders() if entry.id == folder_id]
@@ -323,7 +338,7 @@ class Library:
             manifest = MaterialManifest(
                 id=new_id("mat"), kind=kind, status=status, title=clean, folder=folder.id, origin=origin,
                 languages=list(languages), fragments=[FragmentMeta.of(item) for item in numbered],
-                created_at=utc_now(),
+                created_at=utc_now_ms(),
             )
             source = render_source(manifest.id, kind, numbered).encode()
             manifest = _with_extra(manifest, {SOURCE_SIZE_KEY: len(source)})
@@ -337,10 +352,19 @@ class Library:
             return MaterialFiles(manifest, clean, folder.id, target, target / f"{clean}.md", numbered)
 
     def material_directories(self) -> Iterator[tuple[FolderEntry, Path]]:
+        """Material directories of the readable folders; an entry that can't be read is skipped."""
         for folder in self.folders():
-            for name in sorted(os.listdir(folder.path)):
+            try:
+                names = sorted(os.listdir(folder.path))
+            except OSError:
+                continue
+            for name in names:
                 path = folder.path / name
-                if not name.startswith(".") and (path / MATERIAL_MANIFEST).is_file():
+                try:
+                    is_material = not name.startswith(".") and entry_kind(path / MATERIAL_MANIFEST) == "file"
+                except OSError:
+                    continue
+                if is_material:
                     yield folder, path
 
     def _find_material(self, material_id: str, hint: str | None) -> tuple[str, Path]:

@@ -34,8 +34,11 @@ def replace_index(db: KnowledgeDatabase, result: ScanResult, *, stop: StopCheck 
     ``stop()`` returning ``True`` between objects (SKAZ is closing) rolls the whole rebuild back.
     """
     with db.write() as connection:
-        for table in _REBUILT:
-            connection.execute(f"DELETE FROM {table}")
+        if result.unreadable:
+            _clear_except_unreadable(connection, result)
+        else:
+            for table in _REBUILT:
+                connection.execute(f"DELETE FROM {table}")
         for folder in result.folders:
             _put_folder(connection, folder.id, folder.name, result.folder_paths[folder.id], folder.system,
                         folder.created_at)
@@ -47,6 +50,40 @@ def replace_index(db: KnowledgeDatabase, result: ScanResult, *, stop: StopCheck 
             if stop is not None and stop():
                 raise ScanStopped
             _put_page(connection, page)
+
+
+def clear_index(db: KnowledgeDatabase) -> None:
+    """Empty every table rebuilt from library files, the areas' derived ones included.
+
+    For a switch to another library: the previous library's rows must not be served as if they
+    were the new one's while the new one can't be read (QA E15).
+    """
+    with db.write() as connection:
+        for table in (*_REBUILT, "edges", "corrections"):
+            connection.execute(f"DELETE FROM {table}")
+
+
+def _under(path: str, prefixes: Sequence[str]) -> bool:
+    return any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
+
+
+def _clear_except_unreadable(connection: sqlite3.Connection, result: ScanResult) -> None:
+    """Drop the index rows the scan will rebuild, keeping those under paths it could not read.
+
+    A folder the scan found again is updated in place (upsert), never deleted: deleting it would
+    cascade to a kept material inside it. Children go by cascade, FTS rows by their triggers.
+    """
+    prefixes = result.unreadable
+    kept_folders = {row[0] for row in connection.execute("SELECT id, rel_path FROM folders")
+                    if _under(row[1], prefixes)}
+    kept_folders.update(folder.id for folder in result.folders)
+    kept_materials = {row[0] for row in connection.execute("SELECT id, rel_dir FROM materials")
+                      if _under(row[1], prefixes)}
+    kept_pages = {row[0] for row in connection.execute("SELECT id, rel_path FROM pages")
+                  if _under(row[1], prefixes)}
+    for table, kept in (("pages", kept_pages), ("materials", kept_materials), ("folders", kept_folders)):
+        rows = [row[0] for row in connection.execute(f"SELECT id FROM {table}") if row[0] not in kept]
+        connection.executemany(f"DELETE FROM {table} WHERE id = ?", [(row,) for row in rows])
 
 
 def put_folder(db: KnowledgeDatabase, folder_id: str, name: str, rel_path: str, system: bool,

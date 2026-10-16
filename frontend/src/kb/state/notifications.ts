@@ -67,16 +67,24 @@ export function createNotificationsStore(client: KbClient): NotificationsStore {
         }
       },
 
-      start: () => longPoll(async (cursor, wait) => {
-        try {
-          const feed = await client.notifications(cursor || undefined, cursor ? wait : undefined);
-          apply(cursor, feed);
-          return { cursor: feed.cursor, changed: feed.cursor !== 0 && feed.cursor !== cursor };
-        } catch (error) {
-          set({ load: get().load === 'ready' ? 'ready' : 'error', error: errorText(error) });
-          throw error;
-        }
-      }, get().cursor),
+      start: () => {
+        // The first read takes the whole feed at once; every later one is a held long poll —
+        // also at cursor 0 (an empty feed), which used to short-poll every 3 s (QA E4).
+        let primed = get().cursor !== 0;
+        return longPoll(async (cursor, wait) => {
+          try {
+            const first = !primed;
+            const feed = first ? await client.notifications() : await client.notifications(cursor, wait);
+            primed = true;
+            apply(cursor, feed);
+            // The first full read answers at once by design: go straight on to the held poll.
+            return { cursor: feed.cursor, changed: first || (feed.cursor !== 0 && feed.cursor !== cursor) };
+          } catch (error) {
+            set({ load: get().load === 'ready' ? 'ready' : 'error', error: errorText(error) });
+            throw error;
+          }
+        }, get().cursor);
+      },
 
       dismiss: async (id) => {
         const before = get().items;
