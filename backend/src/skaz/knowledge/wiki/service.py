@@ -579,6 +579,22 @@ class WikiService:
         links = LinkResolver(self.kb.db).for_blocks((entry.id, entry.text) for entry in view.entries)
         return PageDetail(view, refs(related), refs(mentioned), names, updated_at, links)
 
+    def wiki_file(self, name: str) -> tuple[str, list[LinkView]]:
+        """``Wiki/index.md`` or ``Wiki/log.md`` as text with its links resolved (read-only view, B20).
+
+        Not written yet (an empty wiki) is an empty text, not an error.
+        """
+        if name not in ("index", "log"):
+            raise NotFound("Only the wiki index and log can be read here.")
+        library = self.kb.require()
+        try:
+            text = (library.wiki_dir / f"{name}.md").read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return "", []
+        except UnicodeDecodeError as error:
+            raise KnowledgeError(f"Wiki/{name}.md isn't readable text.") from error
+        return text, LinkResolver(self.kb.db).links(text)
+
     def page_file(self, page_id: str) -> str:
         """Absolute path of a page's file (404 when the page or its file is gone)."""
         _library, path = page_path(self.kb, page_id)

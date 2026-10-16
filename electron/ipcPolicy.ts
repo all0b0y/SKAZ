@@ -127,6 +127,8 @@ const ROUTES: readonly Route[] = [
   // B20: export into a folder from the native chooser (the backend refuses one inside the library,
   // and a non-empty one without the user's confirmation; development runs keep to their Documents).
   { method: 'GET', pattern: /^\/kb\/export\/target$/ },
+  // B20: Wiki/index.md and Wiki/log.md, read-only in the right panel.
+  { method: 'GET', pattern: /^\/kb\/wiki\/files\/(?:index|log)$/ },
   { method: 'POST', pattern: /^\/kb\/export$/ },
 ];
 

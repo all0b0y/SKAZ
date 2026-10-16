@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..store.database import MAX_DB_INT
-from .schemas import KbNotification, KbPageRef
+from .schemas import KbBlockLink, KbNotification, KbPageRef
 from .schemas_ingest import KbJob
 
 KbCorrectionState = Literal["applied", "doubtful", "reverted", "kept"]
@@ -164,3 +164,13 @@ class KbExportRequest(_Request):
 class KbPageFile(BaseModel):
     #: Absolute path of the page's ``.md`` file (main process only).
     path: str
+
+
+class KbWikiFile(BaseModel):
+    """``Wiki/index.md`` / ``Wiki/log.md`` for the read-only view (B20)."""
+
+    name: Literal["index", "log"]
+    #: The file's Markdown; empty while the wiki has none yet.
+    text: str
+    #: Its wikilinks resolved to pages and materials (as for page blocks).
+    links: list[KbBlockLink]

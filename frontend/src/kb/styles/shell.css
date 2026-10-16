@@ -350,3 +350,14 @@ p.kb-row--static { margin-top: 4px; }
 
 /* Backend gate: the startup screen lives with the mark, frontend/src/brand/LoadingTree.css. */
 .kb-side__note { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px 12px 8px; font-size: 12px; }
+
+/* Wiki panel search (B20). */
+.kb-wsearch { padding: 4px 8px 8px; }
+.kb-wsearch__field { margin: 0 0 4px; }
+.kb-wsearch__list { margin: 0; }
+.kb-wsearch__hit { cursor: pointer; align-items: flex-start; height: auto; min-height: 30px; padding: 5px 8px; white-space: normal; }
+.kb-wsearch__hit .kb-row__icon { margin-top: 1px; }
+.kb-wsearch__hit.is-active { background: color-mix(in srgb, var(--kb-accent-soft) 70%, transparent); }
+.kb-wsearch__hit .kb-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kb-wsearch__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-wsearch__snippet { color: var(--kb-muted); font-size: var(--t-xs); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }

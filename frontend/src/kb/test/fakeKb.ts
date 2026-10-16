@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink,
 } from '../../api/kb/types.gen';
 
 // ---- The world -------------------------------------------------------------------------------
@@ -85,6 +85,8 @@ export interface FakeWorld {
   /** Every request served, for assertions. */
   log: Array<{ method: string; path: string; body?: unknown }>;
   seq: number;
+  /** Wiki/index.md and Wiki/log.md (absent = just their headings). */
+  wikiFiles?: Partial<Record<'index' | 'log', { text: string; links: KbBlockLink[] }>>;
   /** Export targets that already hold files: path → number of entries (absent = empty). */
   exportFolders?: Record<string, number>;
   /** Settings → Models → Recognition check (absent = same as the wiki pages). */
@@ -829,6 +831,10 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/wiki/files/{name}': [200, (w, { path }) => {
+    const file = w.wikiFiles?.[path.name] ?? { text: path.name === 'index' ? '# Index\n' : '# Log\n', links: [] };
+    return { name: path.name, text: file.text, links: file.links };
+  }],
   'GET /kb/export/target': [200, (w, { query }) => {
     const path = String(query.path ?? '');
     const root = w.library.root ?? '';

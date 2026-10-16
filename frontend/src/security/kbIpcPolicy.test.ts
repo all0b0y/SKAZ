@@ -154,7 +154,7 @@ function sourceFiles(dir: string): string[] {
 const uiRoutes = new Set(sourceFiles(`${repoRoot}/frontend/src/kb`).flatMap((file) => routesIn(readFileSync(file, 'utf8'))));
 
 /** A concrete request path for a route template: a sample value per path parameter. */
-const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox' };
+const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox', name: 'index' };
 function instance(route: string): { method: string; path: string } {
   const space = route.indexOf(' ');
   return { method: route.slice(0, space), path: route.slice(space + 1).replace(/\{([^}]+)\}/g, (_, name: string) => SAMPLE[name] ?? 'x1') };

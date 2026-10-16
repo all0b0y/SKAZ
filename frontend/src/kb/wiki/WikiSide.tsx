@@ -1,10 +1,111 @@
-import { useState } from 'react';
-import type { KbPageSummary } from '../../api/kb/types.gen';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { KbPageSummary, KbSnippetPart } from '../../api/kb/types.gen';
 import type { PageKind } from '../api/names';
 import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
 import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
 import { useServices, useUi } from '../state/context';
+import type { WikiFileName } from '../state/document';
+import { errorText } from '../api/client';
+import { Snippet } from '../ui/Highlight';
+
+interface Hit {
+  key: string;
+  pageId: string;
+  blockId: string | null;
+  kind: PageKind;
+  title: string;
+  snippet: KbSnippetPart[] | null;
+}
+
+/**
+ * The wiki panel's search (B20): pages by title or alias first, then pages by text (the index's
+ * FTS matches, one row per page with the first matching passage). ↑/↓ move, Enter opens, Esc
+ * clears; the field keeps focus while the list is browsed.
+ */
+function WikiSearch() {
+  const { client } = useServices();
+  const openDocument = useUi((s) => s.openDocument);
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<Hit[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const listId = useId();
+  const q = query.trim();
+
+  useEffect(() => {
+    if (!q) { setHits(null); setError(null); return undefined; }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      client.call('GET /kb/search', { query: { q, limit: 20 } }).then((r) => {
+        if (!live) return;
+        const out: Hit[] = [];
+        const seen = new Set<string>();
+        for (const p of r.pages) {
+          if (seen.has(p.id)) continue;
+          seen.add(p.id);
+          out.push({ key: `p-${p.id}`, pageId: p.id, blockId: null, kind: p.kind, title: p.title,
+            snippet: p.matched_alias ? [{ text: p.matched_alias, match: true }] : null });
+        }
+        for (const b of r.blocks) {
+          if (seen.has(b.page_id)) continue;
+          seen.add(b.page_id);
+          out.push({ key: `b-${b.page_id}`, pageId: b.page_id, blockId: b.block_id, kind: b.page_kind, title: b.page_title, snippet: b.snippet });
+        }
+        setHits(out);
+        setActive(0);
+        setError(null);
+      }, (e: unknown) => { if (live) { setHits([]); setError(errorText(e)); } });
+    }, 180);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [client, q]);
+
+  const open = (hit: Hit) => openDocument({ type: 'page', id: hit.pageId, block_id: hit.blockId });
+  const list = hits ?? [];
+  return (
+    <div className="kb-wsearch">
+      <div className="kb-settings__search kb-wsearch__field">
+        <Icon name="search" size={14} />
+        <input ref={inputRef} type="search" placeholder="Search the wiki" aria-label="Search the wiki" value={query}
+          role="combobox" aria-expanded={hits !== null} aria-controls={listId} aria-autocomplete="list"
+          aria-activedescendant={hits && list[active] ? `${listId}-${active}` : undefined}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown' && list.length) { e.preventDefault(); setActive((i) => (i + 1) % list.length); }
+            else if (e.key === 'ArrowUp' && list.length) { e.preventDefault(); setActive((i) => (i - 1 + list.length) % list.length); }
+            else if (e.key === 'Enter' && list[active]) { e.preventDefault(); open(list[active]!); }
+            else if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); setQuery(''); }
+          }} />
+      </div>
+      {hits !== null && (
+        <>
+          <ul className="kb-list kb-wsearch__list" id={listId} role="listbox" aria-label="Wiki pages found">
+            {list.map((hit, i) => (
+              <li key={hit.key} id={`${listId}-${i}`} role="option" aria-selected={i === active}
+                className={`kb-row kb-wsearch__hit${i === active ? ' is-active' : ''}`}
+                onMouseEnter={() => setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => open(hit)}>
+                <Icon name={PAGE_KIND_ICON[hit.kind]} size={16} className="kb-row__icon" />
+                <span className="kb-row__text">
+                  <span className="kb-wsearch__title">{hit.title}</span>
+                  {hit.snippet && <span className="kb-wsearch__snippet"><Snippet parts={hit.snippet} /></span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className={error ? 'kb-inline-error kb-inline-error--flat' : 'kb-side__note'} role="status">
+            {error ?? (list.length === 0 ? `No pages match “${q}”.` : list.length === 1 ? '1 page' : `${list.length} pages`)}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+const FILES: ReadonlyArray<{ name: WikiFileName; label: string }> = [
+  { name: 'index', label: 'Index' },
+  { name: 'log', label: 'Log' },
+];
 
 const SECTIONS: ReadonlyArray<{ kind: PageKind; label: string }> = [
   { kind: 'concept', label: 'Concepts' },
@@ -41,6 +142,8 @@ export function WikiSide() {
   const openGraph = useUi((s) => s.openGraph);
   const graphOpen = useUi((s) => s.right?.kind === 'graph');
   const recent = useUi((s) => s.recentPages);
+  const openWikiFile = useUi((s) => s.openWikiFile);
+  const fileOpen = useUi((s) => (s.right?.kind === 'wikifile' ? s.right.name : null));
   const [kind, setKind] = useState<PageKind | null>(null);
   const { state, reload } = useLoad('wiki-pages', () => client.call('GET /kb/wiki/pages'));
   const pages = state.value ?? [];
@@ -77,6 +180,7 @@ export function WikiSide() {
   const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
   return (
     <div className="kb-side__scroll">
+      <WikiSearch />
       <h3 className="kb-subhead" id="kb-wiki-sections">Sections</h3>
       <ul className="kb-list" aria-labelledby="kb-wiki-sections">
         {SECTIONS.map((s) => {
@@ -97,6 +201,15 @@ export function WikiSide() {
             <span className="kb-row__text">Graph of connections</span>
           </button>
         </li>
+        {FILES.map((f) => (
+          <li key={f.name}>
+            <button type="button" className={`kb-row${fileOpen === f.name ? ' is-current' : ''}`} aria-current={fileOpen === f.name ? 'true' : undefined}
+              onClick={() => openWikiFile(f.name)}>
+              <Icon name="text" size={16} className="kb-row__icon" />
+              <span className="kb-row__text">{f.label}</span>
+            </button>
+          </li>
+        ))}
       </ul>
       {recentPages.length > 0 && (
         <>

@@ -986,6 +986,13 @@ export interface KbTranslationFragment {
   text: string;
 }
 
+/** ``Wiki/index.md`` / ``Wiki/log.md`` for the read-only view (B20). */
+export interface KbWikiFile {
+  name: "index" | "log";
+  text: string;
+  links: KbBlockLink[];
+}
+
 export interface KbWikiSettings {
   wiki_language: string;
   wiki_language_chosen: boolean;
@@ -1672,6 +1679,13 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/wiki/files/{name}": {
+    path: { name: "index" | "log" };
+    query: Record<string, never>;
+    body: never;
+    response: KbWikiFile;
+    status: 200;
   };
   "GET /kb/wiki/pages": {
     path: Record<string, never>;

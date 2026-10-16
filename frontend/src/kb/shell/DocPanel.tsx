@@ -3,11 +3,13 @@ import { PageView } from '../wiki/PageView';
 import { MaterialView } from '../material/MaterialView';
 import { GraphPanel } from '../graph/GraphPanel';
 import { LivePanel } from '../recording/LivePanel';
+import { WikiFileView } from '../wiki/WikiFileView';
 
 const LABEL: Record<RightView['kind'], string> = {
   doc: 'Document',
   graph: 'Graph of connections',
   live: 'Live recording',
+  wikifile: 'Document',
 };
 
 /**
@@ -30,6 +32,7 @@ export function DocPanel({ view, expanded, width }: { view: RightView; expanded:
       {view.kind === 'doc' && view.target.type === 'material' && <MaterialView key={view.target.id} target={view.target} nonce={view.nonce} />}
       {view.kind === 'graph' && <GraphPanel />}
       {view.kind === 'live' && <LivePanel materialId={view.materialId} />}
+      {view.kind === 'wikifile' && <WikiFileView key={view.name} name={view.name} />}
     </aside>
   );
 }

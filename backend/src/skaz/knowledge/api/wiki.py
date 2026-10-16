@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -10,6 +10,7 @@ from ..corrections.settings import RecognitionSettings
 from ..errors import KnowledgeError
 from ..markdown.page import PageKind
 from ..store.records import PageRecord
+from ..wiki.links import LinkView
 from ..wiki.service import PageDetail, WikiService
 from .deps import KbDep, kb_call
 from .ingest import job_view
@@ -27,6 +28,7 @@ from .schemas_wiki2 import (
     KbRecognitionSettings,
     KbRecognitionSettingsUpdate,
     KbRescanResult,
+    KbWikiFile,
 )
 
 router = APIRouter(prefix="/kb/wiki", tags=["kb"])
@@ -53,6 +55,15 @@ def summary_view(record: PageRecord) -> KbPageSummary:
             "sources": list(record.sources),
             "language": record.language,
         }
+    )
+
+
+def _link_view(link: LinkView) -> KbBlockLink:
+    return KbBlockLink(
+        target=link.target,
+        page=KbPageRef(id=link.page_id, kind=cast(PageKind, link.page_kind), title=link.page_title or "")
+        if link.page_id else None,
+        material_id=link.material_id,
     )
 
 
@@ -92,16 +103,7 @@ def page_view(detail: PageDetail) -> KbPage:
                             )
                             for c in entry.citations
                         ],
-                        "links": [
-                            KbBlockLink(
-                                target=link.target,
-                                page=KbPageRef(id=link.page_id, kind=cast(PageKind, link.page_kind),
-                                               title=link.page_title or "")
-                                if link.page_id else None,
-                                material_id=link.material_id,
-                            )
-                            for link in detail.links.get(entry.id, [])
-                        ],
+                        "links": [_link_view(link) for link in detail.links.get(entry.id, [])],
                     }
                 )
                 for entry in view.entries
@@ -126,6 +128,13 @@ async def list_pages(
 async def read_page(page_id: str, wiki: WikiDep) -> KbPage:
     """Re-reads the page file first: an external edit is detected when the page is opened."""
     return page_view(await kb_call(wiki.page, page_id))
+
+
+@router.get("/files/{name}")
+async def read_wiki_file(name: Literal["index", "log"], wiki: WikiDep) -> KbWikiFile:
+    """``Wiki/index.md`` or ``Wiki/log.md``, read-only, with its links resolved (B20)."""
+    text, links = await kb_call(wiki.wiki_file, name)
+    return KbWikiFile(name=name, text=text, links=[_link_view(link) for link in links])
 
 
 @router.get("/pages/{page_id}/file")
