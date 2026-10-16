@@ -38,12 +38,18 @@ export function fileItem(path: string, name: string, size: number | null): FileI
   return { id: nextId(), type: 'file', path, name, size, kind, video: VIDEO_EXT.has(ext) };
 }
 
-/** One pasted line: a web address becomes a link, anything else is text (no length limit). */
+export const NOT_A_LINK = 'Not a valid link. SKAZ opens web addresses that start with http:// or https:// and have no spaces.';
+
+/** One pasted line: a web address becomes a link, anything else is text (no length limit). A single
+ * line that looks like an address but isn't a usable one is said to be so, not saved as text (QA B24). */
 export function pasteItem(raw: string): LinkItem | TextItem | null {
   const text = raw.trim();
   if (!text) return null;
   if (/^https?:\/\/\S+$/i.test(text)) {
     return { id: nextId(), type: 'link', url: text, info: null, classifying: true, error: null, mode: 'text' };
+  }
+  if (!text.includes('\n') && /^[a-z][a-z0-9+.-]*:\/\/\S/i.test(text)) {
+    return { id: nextId(), type: 'link', url: text, info: null, classifying: false, error: NOT_A_LINK, mode: 'text' };
   }
   return { id: nextId(), type: 'text', text };
 }
@@ -79,10 +85,12 @@ export function itemMeta(item: AddItem): string {
     if (item.error) return item.error;
     const info = item.info;
     if (!info) return 'Link';
+    // The backend's label already says where and what ("YouTube · 0:19", "habr.com · article"):
+    // one label per row, the exact length (QA B22).
+    if (info.label) return info.label;
     const label = info.kind === 'video' ? 'Video' : info.kind === 'pdf' ? 'PDF' : info.kind === 'site' ? 'Article'
       : info.kind === 'audio_file' ? 'Audio file' : 'Video file';
-    const duration = info.duration_ms ? ` · ${formatDuration(info.duration_ms)}` : '';
-    return `${info.label || info.domain} · ${label}${duration}`;
+    return `${info.domain} · ${label}`;
   }
   return `Text · ${item.text.length.toLocaleString('en-GB')} characters`;
 }

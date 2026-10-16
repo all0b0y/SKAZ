@@ -273,8 +273,12 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     const add = within(doc).getByRole('button', { name: 'Add to wiki' });
     expect(add).toBeDisabled();
     expect(add).toHaveAccessibleDescription('No speech was recognised, so there is nothing to add.');
+    // QA B42: nothing to ask about either.
+    expect(within(doc).getByRole('button', { name: 'Ask about material' })).toBeDisabled();
     await user.click(within(note).getByRole('button', { name: 'Delete' }));
-    expect(await screen.findByRole('dialog', { name: /Delete/ })).toBeInTheDocument();
+    const del = await screen.findByRole('dialog', { name: /Delete/ });
+    // QA B28: a natural sentence for none, not "0 statements … leave the wiki".
+    expect(await within(del).findByText('No statements in the wiki come from this material alone.')).toBeInTheDocument();
     expect(r.fake.calls.some((c) => c.path === '/kb/materials/m-empty/ingest')).toBe(false);
   });
 
@@ -329,6 +333,7 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     await user.click(await screen.findByRole('menuitem', { name: 'Rename' }));
     const rename = await screen.findByRole('dialog', { name: 'Rename material' });
     const field = within(rename).getByRole('textbox');
+    expect(field).toHaveAttribute('maxlength', '200'); // QA B21: the field stops, no raw "at most 255 characters"
     await user.clear(field);
     await user.type(field, 'Lecture 8 — Boltzmann');
     await user.click(within(rename).getByRole('button', { name: 'Rename' }));

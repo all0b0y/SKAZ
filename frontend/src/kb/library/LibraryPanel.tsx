@@ -201,7 +201,7 @@ function FolderRow({ folder, tone, materialsHere }: { folder: KbFolder; tone?: s
           <Icon name={folder.system ? 'inbox' : 'folder'} size={16} className="kb-row__icon" />
           <span className="kb-row__text">{folder.name}</span>
           {tone && <span className="kb-fdot" style={{ background: tone }} aria-hidden="true" />}
-          <span className="kb-row__count" aria-label={`${folder.material_count} materials`}>{folder.material_count}</span>
+          <span className="kb-row__count" aria-label={`${folder.material_count} ${folder.material_count === 1 ? 'material' : 'materials'}`}>{folder.material_count}</span>
         </button>
         {!folder.system && (
           <>

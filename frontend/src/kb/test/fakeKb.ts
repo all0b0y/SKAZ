@@ -228,7 +228,9 @@ export function classifyFake(url: string): KbLinkInfo {
   try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* invalid */ }
   const video = /(^|\.)(youtube\.com|youtu\.be|vk\.com|vkvideo\.ru|rutube\.ru|vimeo\.com)$/.test(host);
   const info: KbLinkInfo = {
-    kind: video ? 'video' : /\.pdf$/i.test(url) ? 'pdf' : 'site', url, domain: host, label: host,
+    // Labels as the backend makes them (`sources/links.py`): "YouTube · 1:04:00", "habr.com · article".
+    kind: video ? 'video' : /\.pdf$/i.test(url) ? 'pdf' : 'site', url, domain: host,
+    label: video ? 'YouTube · 1:04:00' : /\.pdf$/i.test(url) ? `${host} · PDF` : `${host} · article`,
     platform: video ? 'youtube' : null, video_id: null, title: video ? 'Seminar on entropy' : null,
     duration_ms: video ? 64 * 60_000 : null, supported: true, note: null, embedded_video: null,
   };

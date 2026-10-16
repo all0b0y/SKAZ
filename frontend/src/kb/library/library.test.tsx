@@ -48,6 +48,7 @@ describe('Library side panel on real /kb answers', () => {
     ]);
     const folders = within(side).getByRole('list', { name: 'Folders' });
     expect(within(folders).getByRole('button', { name: /^Inbox/ })).toHaveTextContent('1');
+    expect(within(folders).getByLabelText('1 material')).toBeInTheDocument(); // QA B35: not "1 materials"
     expect(within(folders).getByRole('button', { name: /^Physics/ })).toHaveTextContent('2');
     expect(within(side).getByTestId('all-materials')).toHaveTextContent('All materials · 3');
   });

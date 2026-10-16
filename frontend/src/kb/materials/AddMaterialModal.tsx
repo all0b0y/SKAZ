@@ -37,6 +37,7 @@ export function AddMaterialModal() {
   const [translate, setTranslate] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [noneAdded, setNoneAdded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -45,7 +46,7 @@ export function AddMaterialModal() {
   // Defaults each time it opens: last used folder (decision 16), wiki auto-add (decision 15).
   useEffect(() => {
     if (!open) return;
-    setItems([]); setPaste(''); setErrors({}); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
+    setItems([]); setPaste(''); setErrors({}); setNoneAdded(false); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
     client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
     client.call('GET /kb/settings/wiki').then((w) => {
       setAuto({ files: w.auto_add_files_links, text: w.auto_add_text });
@@ -82,7 +83,7 @@ export function AddMaterialModal() {
     if (!item) return;
     setItems((list) => [...list, item]);
     setPaste('');
-    if (item.type === 'link') classify(item);
+    if (item.type === 'link' && item.classifying) classify(item);
   };
   const addFiles = (list: Array<{ path: string; name: string; size: number | null }>) => {
     setItems((cur) => [...cur, ...list.filter((f) => !cur.some((i) => i.type === 'file' && i.path === f.path)).map((f) => fileItem(f.path, f.name, f.size))]);
@@ -112,14 +113,19 @@ export function AddMaterialModal() {
     addFiles(picked);
   };
 
+  // A link that failed its check stays on the list with its reason; Add neither counts nor sends it (QA B23).
+  const broken = (i: AddItem) => i.type === 'link' && i.error !== null;
+  const sendable = items.filter((i) => !broken(i));
   const submit = async () => {
-    if (!items.length || !folderId) return;
+    if (!sendable.length || !folderId) return;
     setBusy(true);
     const failed: Record<string, string> = {};
-    const left: AddItem[] = [];
-    for (const item of items) {
+    const left: AddItem[] = items.filter(broken);
+    let added = 0;
+    for (const item of sendable) {
       try {
         await submitItem(client, item, { folderId, language: language || null, translate, toWiki: wikiOn });
+        added += 1;
       } catch (e) {
         failed[item.id] = errorText(e);
         left.push(item);
@@ -128,16 +134,18 @@ export function AddMaterialModal() {
     setBusy(false);
     void library.getState().loadContent();
     setErrors(failed);
+    setNoneAdded(added === 0);
     setItems(left);
     if (left.length === 0) setOpen(false);
   };
 
-  const ready = items.length > 0 && items.every((i) => (i.type !== 'link' || !i.classifying) && (i.type !== 'file' || i.kind !== 'unsupported'))
+  const ready = sendable.length > 0 && items.every((i) => (i.type !== 'link' || !i.classifying) && (i.type !== 'file' || i.kind !== 'unsupported'))
     && !blocked && folderId !== '';
   const spokenOptions = [...new Set([...languages, ...SPOKEN])];
 
   return (
-    <Modal open={open} onClose={() => setOpen(false)} title="Add material" className="kb-addmat" testId="add-material-dialog" pane="add-material">
+    <Modal open={open} onClose={() => setOpen(false)} title="Add material" className="kb-addmat" testId="add-material-dialog" pane="add-material"
+      initialFocusRef={pasteRef}>
       <div className="kb-modal__body kb-addmat__body">
         <div
           className={`kb-drop${dragging ? ' is-over' : ''}`}
@@ -166,8 +174,11 @@ export function AddMaterialModal() {
                 <Icon name={item.type === 'text' ? 'text' : item.type === 'link' ? (item.info?.kind === 'video' ? 'video' : 'web') : item.kind === 'speech' ? (item.video ? 'video' : 'audio') : 'pdf'} size={15} />
                 <span className="kb-aqi__main">
                   <span className="kb-aqi__title">{itemTitle(item)}</span>
-                  <span className={`kb-aqi__meta${(item.type === 'link' && item.error) || (item.type === 'file' && item.kind === 'unsupported') ? ' is-error' : ''}`}>{itemMeta(item)}</span>
-                  {errors[item.id] && <span className="kb-aqi__meta is-error" role="alert">{errors[item.id]}</span>}
+                  {errors[item.id] ? (
+                    <span className="kb-aqi__meta is-error" role="alert">{errors[item.id]}</span>
+                  ) : (
+                    <span className={`kb-aqi__meta${(item.type === 'link' && item.error) || (item.type === 'file' && item.kind === 'unsupported') ? ' is-error' : ''}`}>{itemMeta(item)}</span>
+                  )}
                   {blocked && isSpeech(item) && !errors[item.id] && (
                     <span className="kb-aqi__meta is-error" data-testid="speech-block">{blocked.reason}</span>
                   )}
@@ -235,16 +246,17 @@ export function AddMaterialModal() {
             )}
           </div>
         )}
-        {Object.keys(errors).length > 0 && (
-          <Banner tone="error" title="Some materials weren’t added.">The others were. Fix or remove these and try again.</Banner>
+        {Object.keys(errors).length > 0 && (noneAdded
+          ? <Banner tone="error" title="None of these were added.">Fix or remove them and try again.</Banner>
+          : <Banner tone="error" title="Some materials weren’t added.">The others were. Fix or remove these and try again.</Banner>
         )}
       </div>
       <div className="kb-modal__foot">
-        <span className="kb-muted">{items.length ? `${items.length} ${items.length === 1 ? 'material' : 'materials'}` : ''}</span>
+        <span className="kb-muted">{sendable.length ? `${sendable.length} ${sendable.length === 1 ? 'material' : 'materials'}` : ''}</span>
         <span className="kb-head__spacer" />
         <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
         <Button variant="fill" busy={busy} disabled={!ready} onClick={() => void submit()}>
-          {items.length > 1 ? `Add ${items.length}` : 'Add'}
+          {sendable.length > 1 ? `Add ${sendable.length}` : 'Add'}
         </Button>
       </div>
     </Modal>

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import { addedLabel } from './AllMaterials';
-import { fileItem, pasteItem, speechBlock, wikiDefault } from './addItems';
+import { fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
 async function ready() {
@@ -81,7 +81,7 @@ describe('+ Material (v11, decisions 15–16)', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Add material' });
     await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://www.youtube.com/watch?v=abc{Enter}');
     expect(await within(dialog).findByText('Seminar on entropy')).toBeInTheDocument();
-    expect(within(dialog).getByText(/youtube\.com · Video · 1 h 04 min/)).toBeInTheDocument();
+    expect(within(dialog).getByText('YouTube · 1:04:00')).toBeInTheDocument();
     // Last-used folder by default (decision 16), wiki on for links with a ready agent (decision 15, QA B4).
     expect(within(dialog).queryByTestId('add-wiki-no-agent')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue('phys');
@@ -218,6 +218,33 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByRole('button', { name: 'Add 2' })).toBeDisabled();
     await user.click(within(dialog).getByRole('button', { name: 'Remove doc.rtf' }));
     expect(within(dialog).getByRole('button', { name: 'Add' })).toBeEnabled();
+  });
+
+  it('Low: link labels once, bad addresses said so, failing links not counted, "None" when nothing was added, focus in the field (QA B14, B22–B24, B33)', async () => {
+    expect(pasteItem('https://exa mple.com')).toMatchObject({ type: 'link', error: NOT_A_LINK });
+    expect(pasteItem('https://example.com is where I read it\nand more')).toMatchObject({ type: 'text' });
+    expect(pasteItem('ftp://example.com/x.pdf')).toMatchObject({ type: 'link', classifying: false, error: NOT_A_LINK });
+    const yt = { ...pasteItem('https://youtu.be/x') as LinkItem, classifying: false };
+    expect(itemMeta({ ...yt, info: { kind: 'video', url: 'u', domain: 'youtube.com', label: 'YouTube · 0:19', platform: 'youtube', video_id: 'x', title: 'T', duration_ms: 19_000, supported: true, note: null, embedded_video: null } }))
+      .toBe('YouTube · 0:19');
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const box = within(dialog).getByRole('textbox', { name: 'Link or any text' });
+    await waitFor(() => expect(box).toHaveFocus());
+    await user.type(box, 'ftp://example.com/x.pdf{Enter}');
+    expect(within(dialog).getByText(NOT_A_LINK)).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: 'Seminar notes.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => (req.path === '/kb/materials/text'
+      ? { ok: false, status: 503, detail: 'The library is busy.' } : original(req))) as typeof original;
+    // The broken link is neither counted nor sent.
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    expect(await within(dialog).findByText('None of these were added.')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('The library is busy.')).toHaveLength(1);
+    expect(fake.calls.some((c) => c.path === '/kb/materials/link' || c.path === '/kb/links/classify')).toBe(false);
   });
 
   it('the side panel "Add material" opens the same window', async () => {

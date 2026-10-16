@@ -124,6 +124,9 @@
   padding: 3px 0;
   color: var(--kb-text);
   max-height: 120px;
+  /* A long paste shows as a few lines, not one (QA B38). */
+  field-sizing: content;
+  overflow-y: auto;
 }
 .kb-paste__input:focus-visible { outline: none; }
 .kb-paste:focus-within { border-color: var(--kb-accent); }

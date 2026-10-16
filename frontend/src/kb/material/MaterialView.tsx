@@ -200,7 +200,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             </>
           )}
         >
-          <IconButton icon="chats" label="Ask about material" disabled={!material}
+          <IconButton icon="chats" label="Ask about material" disabled={!material || isWithoutSpeech(material)}
             onClick={() => material && askAbout({ type: 'material', id: material.id, title: material.title })} />
           <IconButton icon="folder" label="Move to folder" disabled={!material} onClick={() => setDialog('move')} />
         </PanelFrameButtons>
