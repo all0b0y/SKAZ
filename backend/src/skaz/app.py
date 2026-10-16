@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -91,6 +92,11 @@ def create_app(
         token = current_activity.set(runtime.activity_log)
         try:
             return await call_next(request)
+        except Exception as error:
+            # QA E1: an exception that left this middleware made uvicorn close the kept-alive
+            # socket after its 500, so the bridge's next request failed with "fetch failed".
+            # Answer here instead: JSON 500 (string ``detail``), an id to match the log line.
+            return _internal_error(request, error)
         finally:
             current_activity.reset(token)
 
@@ -113,6 +119,18 @@ def create_app(
     # MCP for agent runs: its own per-run bearer token, never the app token (Host/Origin checked above).
     app.include_router(kb_mcp_router)
     return app
+
+
+def _internal_error(request: Request, error: Exception) -> JSONResponse:
+    error_id = f"err-{secrets.token_hex(4)}"
+    # Route template, not the URL (ids only, no user text); the error's type and frames, no message.
+    route = getattr(request.scope.get("route"), "path", None) or "unknown route"
+    logger.error("unhandled error %s in %s %s: %s", error_id, request.method, route, error_note(error))
+    return JSONResponse(status_code=500, content={
+        "detail": f"Something went wrong inside SKAZ (error {error_id}). Try again; if it keeps "
+                  "happening, send the logs from Settings.",
+        "error_id": error_id,
+    })
 
 
 def _describe_validation(error: RequestValidationError) -> str:
