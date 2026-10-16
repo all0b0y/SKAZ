@@ -8,7 +8,7 @@ import { useLibrary, useServices } from '../state/context';
 import {
   BatchDeleteDialog, ContextMenu, SelectionBar, ShortcutsPopover, countOf, endItemsDrag, namesList, resultText, runOneByOne,
   startItemsDrag, useListSelection, type ListSelection, type SelectionAction,
-} from '../ui/selection/index';
+} from '../ui/listSelection';
 import type { MenuItem } from '../ui/Popover';
 import { useExportItems } from '../document/exportItems';
 
@@ -295,7 +295,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
       startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'material', id: x.id, title: x.title })), title: m.title, blocked }, e.currentTarget);
     },
     // Dropped somewhere that took it (a folder, the message field): the action is done, the selection goes.
-    onDragEnd: (e) => { endItemsDrag(); if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') sel.clear(); },
+    onDragEnd: (e) => { const took = endItemsDrag(); if (took || (e.dataTransfer && e.dataTransfer.dropEffect !== 'none')) sel.clear(); },
   });
 
   const overlays = (

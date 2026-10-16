@@ -4,7 +4,7 @@ import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../
 import { useLibrary, useServices, useUi } from '../state/context';
 import { KIND_ICON, folderTone } from './materialMeta';
 import { NameField } from './NameField';
-import { SelectionCheckbox, hasDragFiles, hasDragItems, readDragItems, useItemsDrag, type ListSelection } from '../ui/selection/index';
+import { SelectionCheckbox, hasDragFiles, hasDragItems, markItemsDropped, readDragItems, useItemsDrag, type ListSelection } from '../ui/listSelection';
 import { useMaterialBatch, useMaterialSelection, type DragRowProps } from '../materials/materialBatch';
 
 const RECENT = 5;
@@ -350,6 +350,7 @@ function useFolderDrop(folder: KbFolder) {
         const s = library.getState();
         const known = new Map([...s.materials, ...s.folderMaterials].map((m) => [m.id, m]));
         const list = items.map((i) => known.get(i.id)).filter((m): m is KbMaterialSummary => Boolean(m));
+        markItemsDropped();
         void batch.move(list, folder.id);
         return;
       }

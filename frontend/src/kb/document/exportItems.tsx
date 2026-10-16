@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { errorText } from '../api/client';
 import { Button, Modal } from '../ui';
 import { useServices } from '../state/context';
-import { countOf, resultText } from '../ui/selection/index';
+import { countOf, resultText } from '../ui/listSelection';
 
 export interface ExportRef { type: 'chat' | 'page' | 'material'; id: string }
 

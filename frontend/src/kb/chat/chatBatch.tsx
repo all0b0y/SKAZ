@@ -5,7 +5,7 @@ import { useExportItems } from '../document/exportItems';
 import {
   BatchDeleteDialog, SelectionBar, ShortcutsPopover, countOf, namesList, resultText, useListSelection,
   type BatchResult, type ListSelection, type SelectionAction,
-} from '../ui/selection/index';
+} from '../ui/listSelection';
 
 /** One chat action as a batch step: ActionResult → throw, so `runOneByOne`-style results keep the reason. */
 async function each(ids: readonly string[], fn: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>): Promise<BatchResult> {

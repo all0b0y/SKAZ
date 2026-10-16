@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MotionProvider } from '../motion';
 import { SelectionBar, SelectionCheckbox, ShortcutsPopover, useListSelection, type ListSelectionOptions } from './index';
-import { ITEMS_MIME, readDragItems, startItemsDrag, endItemsDrag, currentDrag } from './dnd';
+import { ITEMS_MIME, readDragItems, startItemsDrag, endItemsDrag, currentDrag, markItemsDropped } from './dnd';
 import { Toast } from '../Toast';
 
 const ROWS = [
@@ -235,5 +235,17 @@ describe('Toast', () => {
     act(() => { vi.advanceTimersByTime(8000); });
     expect(onClose).toHaveBeenCalled();
     vi.useRealTimers();
+  });
+});
+
+describe('drag end knows whether a target took the drop', () => {
+  const dt = () => ({ setData: vi.fn(), types: [ITEMS_MIME] } as unknown as DataTransfer);
+  it('true after a target in the window marked the drop, false when the drag was abandoned', () => {
+    startItemsDrag(dt(), { items: [{ type: 'material', id: 'm1' }], title: 'A', blocked: null });
+    markItemsDropped();
+    expect(endItemsDrag()).toBe(true);
+    expect(currentDrag()).toBeNull();
+    startItemsDrag(dt(), { items: [{ type: 'material', id: 'm1' }], title: 'A', blocked: null });
+    expect(endItemsDrag()).toBe(false);
   });
 });

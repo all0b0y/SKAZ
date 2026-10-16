@@ -8,7 +8,7 @@ import { useLibrary, useServices, useUi } from '../state/context';
 import type { WikiFileName } from '../state/document';
 import { errorText } from '../api/client';
 import { Snippet } from '../ui/Highlight';
-import { SelectionCheckbox, type ListSelection } from '../ui/selection/index';
+import { SelectionCheckbox, type ListSelection } from '../ui/listSelection';
 import { usePageSelection } from './pageBatch';
 import type { DragRowProps } from '../materials/materialBatch';
 

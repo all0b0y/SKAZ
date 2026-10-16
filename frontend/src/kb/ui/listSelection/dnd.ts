@@ -20,6 +20,8 @@ export interface DragInfo {
 }
 
 let current: DragInfo | null = null;
+/** A target in this window took the drop (Chromium's `dropEffect` on drag end isn't reliable in Electron). */
+let dropped = false;
 const listeners = new Set<() => void>();
 const emit = () => { for (const l of listeners) l(); };
 
@@ -46,13 +48,19 @@ export function startItemsDrag(dt: DataTransfer, info: DragInfo, ghostFrom?: HTM
     window.setTimeout(() => ghost.remove(), 0);
   }
   current = info;
+  dropped = false;
   emit();
 }
 
-export function endItemsDrag(): void {
-  if (!current) return;
-  current = null;
-  emit();
+/** Called by a drop target that acted on the items. */
+export function markItemsDropped(): void { dropped = true; }
+
+/** The drag is over; true when a target in this window took the drop. */
+export function endItemsDrag(): boolean {
+  const took = dropped;
+  dropped = false;
+  if (current) { current = null; emit(); }
+  return took;
 }
 
 export function hasDragItems(dt: DataTransfer | null): boolean {

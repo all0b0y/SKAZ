@@ -7,7 +7,7 @@ import { useExportItems } from '../document/exportItems';
 import {
   BatchDeleteDialog, SelectionBar, ShortcutsPopover, countOf, endItemsDrag, namesList, resultText, runOneByOne,
   startItemsDrag, useListSelection, type ListSelection, type SelectionAction,
-} from '../ui/selection/index';
+} from '../ui/listSelection';
 import type { DragRowProps } from '../materials/materialBatch';
 
 /** Pages as @-mentions in the current chat's field (as "Ask about page"). */
@@ -86,7 +86,7 @@ export function usePageSelection({ pages, resetKey, onOpen }: {
       startItemsDrag(e.dataTransfer, { items: list.map((x) => ({ type: 'page', id: x.id, title: x.title })), title: p.title, blocked: null }, e.currentTarget);
     },
     // Dropped somewhere that took it (a folder, the message field): the action is done, the selection goes.
-    onDragEnd: (e) => { endItemsDrag(); if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') sel.clear(); },
+    onDragEnd: (e) => { const took = endItemsDrag(); if (took || (e.dataTransfer && e.dataTransfer.dropEffect !== 'none')) sel.clear(); },
   });
 
   const overlays = (

@@ -6,7 +6,7 @@ import { KIND_ICON, KIND_LABEL } from '../library/materialMeta';
 import { useFolderTone } from '../document/parts';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
-import { SelectAllBox, SelectionCheckbox } from '../ui/selection/index';
+import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
 import { useMaterialSelection } from './materialBatch';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';

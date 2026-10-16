@@ -1,7 +1,7 @@
 import { useState, type DragEvent } from 'react';
 import { Icon } from '../ui';
 import { useServices } from '../state/context';
-import { currentDrag, hasDragItems, readDragItems, useItemsDrag } from '../ui/selection/index';
+import { currentDrag, hasDragItems, markItemsDropped, readDragItems, useItemsDrag } from '../ui/listSelection';
 
 /**
  * The message field as a drop target (0.3.1 F3, mockup lib-v2 «Drag into chat»): wiki pages and
@@ -29,6 +29,7 @@ export function useMentionDrop() {
       setOver(false);
       const items = readDragItems(e.dataTransfer);
       if (!items || items.some((i) => i.type === 'chat')) return;
+      markItemsDropped();
       const titles = new Map((currentDrag()?.items ?? []).map((i) => [`${i.type}:${i.id}`, i.title]));
       const materials = new Map(library.getState().materials.map((m) => [m.id, m.title]));
       composer.getState().push(items.map((i) => ({

@@ -7,7 +7,7 @@ import { useChats, useLibrary, useServices, useUi } from '../state/context';
 import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
 import { useChatSelection } from './chatBatch';
-import { SelectionCheckbox } from '../ui/selection/index';
+import { SelectionCheckbox } from '../ui/listSelection';
 
 const SIDE_LIMIT = 8;
 
