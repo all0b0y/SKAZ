@@ -221,6 +221,53 @@ test('all materials: table and cards over the centre; + Material with a classifi
   }
 });
 
+test('1024 × 700: all materials beside a material, + Material with audio, video and a long folder name (QA B11, B12)', async () => {
+  const longName = 'Lecture notes of the autumn term — thermodynamics, statistical physics and entropy';
+  for (const theme of THEMES) {
+    await setView(1024, 700, theme);
+    const tag = `1024-${theme}`;
+    await rail('Materials').click();
+    await page.getByTestId('all-materials').click();
+    const center = page.getByRole('region', { name: 'All materials' });
+    await center.getByRole('button', { name: 'Lecture 8 — entropy' }).click();
+    await expect(doc().getByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeVisible();
+    await check(`all-materials-doc-${tag}`);
+    const pane = (await center.boundingBox())!;
+    for (const control of [center.getByRole('radiogroup', { name: 'Type' }), center.getByRole('combobox', { name: 'Folder' }),
+      center.getByRole('combobox', { name: 'Sort' }), center.getByRole('radio', { name: 'Text' })]) {
+      const box = (await control.boundingBox())!;
+      expect(box.x + box.width, 'a control is cut at the right').toBeLessThanOrEqual(pane.x + pane.width - 8);
+    }
+    const name = (await center.locator('td.kb-amt__name').first().boundingBox())!;
+    expect(name.width, 'the name column stays readable').toBeGreaterThanOrEqual(150);
+    await page.getByRole('button', { name: 'Close document' }).click();
+    await center.getByRole('button', { name: 'Close all materials' }).click();
+
+    await page.getByTestId('add-material').click();
+    const dialog = page.getByRole('dialog', { name: 'Add material' });
+    await dialog.getByRole('button', { name: 'choose on the computer' }).click();
+    await expect(dialog.getByText('speech.wav')).toBeVisible();
+    const folder = dialog.getByRole('combobox', { name: 'Folder' });
+    if (theme === 'light') {
+      await folder.selectOption('__new');
+      await dialog.getByRole('textbox', { name: 'New folder name' }).fill(longName);
+      await page.keyboard.press('Enter');
+    } else {
+      await folder.selectOption({ label: longName });
+    }
+    await expect(folder).toHaveValue(/.+/);
+    await expect(folder.locator('option:checked')).toHaveText(longName);
+    const label = (await dialog.getByText('Folder', { exact: true }).boundingBox())!;
+    const select = (await folder.boundingBox())!;
+    expect(Math.abs(label.y - select.y), 'Folder label and select share one row').toBeLessThan(10);
+    const body = dialog.locator('.kb-addmat__body');
+    expect(await body.evaluate((el) => el.scrollWidth - el.clientWidth), 'the modal never scrolls sideways').toBeLessThanOrEqual(0);
+    await check(`add-media-${tag}`);
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+  }
+});
+
 test('graph: wide panel, drawn on canvas (pixels), node card, legend', async () => {
   for (const theme of THEMES) {
     for (const v of WIDTHS) {

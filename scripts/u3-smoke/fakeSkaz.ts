@@ -22,6 +22,12 @@ const skaz = {
   onPrepareQuit: () => () => undefined,
   reportCaptureState: () => undefined,
   chooseStorageRoot: async () => null,
+  // "+ Material" → choose on the computer: a document with audio and video (QA B11 layout).
+  chooseMaterialFiles: async () => [
+    { path: '/Users/me/Downloads/good.pdf', name: 'good.pdf', size: 3_000 },
+    { path: '/Users/me/Downloads/speech.wav', name: 'speech.wav', size: 223_000 },
+    { path: '/Users/me/Downloads/clip.mp4', name: 'clip.mp4', size: 67_000 },
+  ],
   systemAudioSupported: false,
   openNative: native.openNative,
   sendNativeAudio: native.sendNativeAudio,
