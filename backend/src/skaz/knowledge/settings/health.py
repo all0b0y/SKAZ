@@ -140,9 +140,11 @@ class SettingsHealth:
                      "signed_out": f"{name}: sign-in needed"}.get(state, f"{name} isn't ready")
             if action == "first_check":
                 title = f"{name} needs a one-time check"
+            # The title already says "isn't installed": the text says what SKAZ looked for (QA A20).
+            reason = (f"SKAZ didn't find {name} on this Mac." if state == "not_installed"
+                      else view.status.reason or f"{name} can't be used right now.")
             problems.append(Problem(
-                f"agent-{engine}", "accounts", "error", title,
-                view.status.reason or f"{name} can't be used right now.",
+                f"agent-{engine}", "accounts", "error", title, reason,
                 "Recording, importing and reading your materials and wiki keep working.",
                 f"Chats and adding to the wiki use {name}, the main agent: they stop until it's ready.",
                 actions=actions,

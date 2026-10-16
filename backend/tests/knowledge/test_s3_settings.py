@@ -289,6 +289,8 @@ async def test_library_agent_and_decision_problems(app: Any, api: httpx.AsyncCli
 
     agent = problem(sections, "accounts", "agent-codex")
     assert agent is not None and agent["title"] == "Codex isn't installed"
+    # Not the title again in other words (QA A20).
+    assert agent["reason"] == "SKAZ didn't find Codex on this Mac."
     assert [action["id"] for action in agent["actions"]] == ["install"]
     installing = await api.post("/kb/settings/health/agent-codex/install")
     assert installing.status_code == 200

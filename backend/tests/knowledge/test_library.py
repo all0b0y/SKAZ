@@ -77,9 +77,11 @@ def test_new_library_layout(library: Library) -> None:
 def test_existing_foreign_content_is_never_turned_into_a_library(tmp_path: Path) -> None:
     root = tmp_path / "SKAZ"
     (root / "Ungrouped").mkdir(parents=True)
-    with pytest.raises(LibraryConflict):
+    with pytest.raises(LibraryConflict) as refused:
         Library.create(root)
     assert tree(root) == {"Ungrouped"}
+    # The refusal names the busy SKAZ folder: the folder the user chose may be fine (QA A9).
+    assert refused.value.message == "The “SKAZ” folder here already has other files. Choose another folder."
 
 
 def test_staging_is_a_place_icloud_syncs(library: Library) -> None:
