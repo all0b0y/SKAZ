@@ -93,7 +93,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'ui-language', section: 'look', group: '', label: 'Interface language', hint: 'Answer and wiki language are set separately', keywords: 'english' },
   // About
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },
-  { id: 'updates', section: 'about', group: '', label: 'Updates', keywords: 'update check' },
+  { id: 'updates', section: 'about', group: '', label: 'Updates', hint: 'From GitHub releases, checked at start and once a day', keywords: 'update check new version install download release' },
   { id: 'github', section: 'about', group: '', label: 'GitHub', keywords: 'source code repository' },
 ];
 

@@ -27,4 +27,10 @@ export const CHANNELS = {
   chooseExportFolder: 'app:choose-export-folder',
   showInFinder: 'app:show-in-finder',
   openInObsidian: 'app:open-in-obsidian',
+  // Updates (B20).
+  updateGet: 'app:update-get',
+  updateCheck: 'app:update-check',
+  updatePrepare: 'app:update-prepare',
+  updateInstall: 'app:update-install',
+  updateState: 'app:update-state',
 } as const;

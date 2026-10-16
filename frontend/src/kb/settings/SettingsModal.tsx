@@ -16,6 +16,7 @@ import { MicRow, SystemAudioRow } from './SoundRows';
 import { RecognitionCheckRow } from './RecognitionCheckRow';
 import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
+import { UpdatesRow } from './UpdatesRow';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -99,6 +100,8 @@ function RowControl({ row }: { row: RowDef }) {
       return <span className="kb-muted">English</span>;
     case 'version':
       return <VersionRow fallback={appVersion} />;
+    case 'updates':
+      return <UpdatesRow />;
     case 'github':
       return (
         <a className="kb-link" href="https://github.com/all0b0y/SKAZ" target="_blank" rel="noreferrer noopener">

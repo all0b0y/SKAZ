@@ -12,6 +12,7 @@ import type {
   MaterialFileChoice,
   MediaAccess,
   RevealTarget,
+  UpdateState,
   TextFileSave,
 } from '../frontend/src/api/bridge';
 
@@ -63,6 +64,23 @@ const api: BridgeApi = {
   },
   openInObsidian(target) {
     return ipcRenderer.invoke(CHANNELS.openInObsidian, target) as ReturnType<NonNullable<BridgeApi['openInObsidian']>>;
+  },
+  updateState(): Promise<UpdateState> {
+    return ipcRenderer.invoke(CHANNELS.updateGet) as Promise<UpdateState>;
+  },
+  checkForUpdates(): Promise<UpdateState> {
+    return ipcRenderer.invoke(CHANNELS.updateCheck) as Promise<UpdateState>;
+  },
+  prepareUpdate(): Promise<UpdateState> {
+    return ipcRenderer.invoke(CHANNELS.updatePrepare) as Promise<UpdateState>;
+  },
+  installUpdate(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.updateInstall) as Promise<boolean>;
+  },
+  onUpdateState(listener: (state: UpdateState) => void): () => void {
+    const handler = (_event: unknown, state: UpdateState): void => listener(state);
+    ipcRenderer.on(CHANNELS.updateState, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.updateState, handler);
   },
   chooseStorageRoot(): Promise<string | null> {
     return ipcRenderer.invoke(CHANNELS.chooseStorageRoot) as Promise<string | null>;
