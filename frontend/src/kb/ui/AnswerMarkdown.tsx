@@ -73,6 +73,13 @@ function children(node: SyntaxNode, ctx: Ctx, inline: boolean): ReactNode[] {
   return out;
 }
 
+/** An ordered list keeps the number it starts at ("3. three" stays 3). */
+function listStart(node: SyntaxNode, src: string): number | undefined {
+  const mark = node.firstChild?.getChild('ListMark');
+  const n = mark ? Number.parseInt(src.slice(mark.from, mark.to), 10) : NaN;
+  return Number.isFinite(n) && n !== 1 ? n : undefined;
+}
+
 function safeUrl(raw: string): string | null {
   try {
     const url = new URL(raw);
@@ -102,7 +109,7 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
     case 'Strikethrough': return <del key={key}>{inner()}</del>;
     case 'InlineCode': return <code key={key}>{text(slice.replace(/^`+|`+$/g, ''), ctx, key)}</code>;
     case 'BulletList': return <ul key={key}>{inner()}</ul>;
-    case 'OrderedList': return <ol key={key}>{inner()}</ol>;
+    case 'OrderedList': return <ol key={key} start={listStart(node, ctx.src)}>{inner()}</ol>;
     case 'ListItem': return <li key={key}>{inner()}</li>;
     case 'Task': return <Fragment key={key}>
       <input type="checkbox" disabled checked={/^\[[xX]\]/.test(slice)} aria-label="Task" /> {inner()}

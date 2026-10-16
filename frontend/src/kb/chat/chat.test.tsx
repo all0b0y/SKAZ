@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld } from '../test/fixtures';
 import { InlineMarkdown } from './Markdown';
+import { AnswerMarkdown } from '../ui/AnswerMarkdown';
 import { plainText, toBlocks } from './Message';
 import { openTarget } from '../state/document';
 
@@ -189,6 +190,15 @@ describe('Answer text', () => {
     expect(screen.queryByRole('link', { name: 'bad' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'ok' })).toHaveAttribute('href', 'https://example.org/');
     expect(screen.getByRole('button', { name: 'chip 0' }).closest('p')).toHaveTextContent('chip 0 done');
+  });
+
+  it('an ordered list keeps its first number (a list saved as separate blocks no longer restarts at 1)', () => {
+    const { container } = render(<InlineMarkdown pieces={['2. two\n3. three']} slot={() => null} />);
+    expect(container.querySelector('ol')).toHaveAttribute('start', '2');
+    const { container: wiki } = render(<AnswerMarkdown content={'3. three'} citations={[]} activeSessionId={null} onCite={() => undefined} />);
+    expect(wiki.querySelector('ol')).toHaveAttribute('start', '3');
+    const { container: first } = render(<InlineMarkdown pieces={['1. one']} slot={() => null} />);
+    expect(first.querySelector('ol')).not.toHaveAttribute('start');
   });
 
   it('parts: text/cite/page flow as one run; a connection is its own block; tools are not text', () => {
