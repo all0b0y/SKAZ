@@ -362,7 +362,7 @@ async def test_import_requires_cloud_consent(
     secrets.set("soniox", "test-soniox-key")
     refused = await refused_import(client, audio_file(tmp_path))
     assert isinstance(refused, ProviderNotConfigured)
-    assert "consent" in str(refused).lower()
+    assert "Send audio to Soniox" in str(refused) and "Recording & speech" in str(refused)  # QA B6
     assert provider.upload_calls == 0
 
 

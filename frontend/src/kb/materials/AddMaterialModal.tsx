@@ -7,8 +7,9 @@ import { useAgents, useLibrary, usePrefs, useServices, useUi } from '../state/co
 import { agentOf } from '../state/agents';
 import type { EngineId } from '../api/names';
 import {
-  fileItem, isSpeech, itemMeta, itemTitle, pasteItem, submitItem, wikiDefault, type AddItem, type LinkItem,
+  fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem, type LinkItem,
 } from './addItems';
+import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
 const SPOKEN = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
 
@@ -27,6 +28,8 @@ export function AddMaterialModal() {
   const [creating, setCreating] = useState(false);
   const [auto, setAuto] = useState<WikiAuto>({ files: true, text: false });
   const [wikiEngine, setWikiEngine] = useState<EngineId | null>(null);
+  const [speechSettings, setSpeechSettings] = useState<KbSpeechSettings | null>(null);
+  const [keys, setKeys] = useState<KbKeys | null>(null);
   const agents = useAgents((s) => s.agents);
   const openSettings = useUi((s) => s.openSettings);
   const [toWiki, setToWiki] = useState<boolean | null>(null);
@@ -48,6 +51,10 @@ export function AddMaterialModal() {
       setAuto({ files: w.auto_add_files_links, text: w.auto_add_text });
       setWikiEngine(w.wiki_engine);
     }, () => undefined);
+    // QA B6: what audio and video need is checked now, not after Add (one failure at a time).
+    setSpeechSettings(null); setKeys(null);
+    client.call('GET /kb/settings/speech').then(setSpeechSettings, () => undefined);
+    client.call('GET /kb/settings/keys').then(setKeys, () => undefined);
     bridge.request<{ translation_target_language?: string }>({ method: 'GET', path: '/settings' })
       .then((r) => setTarget(r.ok ? r.data.translation_target_language ?? null : null), () => setTarget(null));
   }, [open]); // only on opening: the folder list and services are read at that moment
@@ -60,6 +67,9 @@ export function AddMaterialModal() {
   const noAgent = agents !== null && !agentReady;
   const wikiOn = toWiki ?? (agentReady && wikiDefault(items, auto));
   const speech = items.some(isSpeech);
+  const blocked = speech ? speechBlock(speechSettings, keys) : null;
+  const openPlace = () => { if (!blocked) return; setOpen(false); openSettings(blocked.section); };
+  const firstSpeech = items.find(isSpeech)?.id;
 
   const classify = (item: LinkItem) => {
     client.call('POST /kb/links/classify', { body: { url: item.url, probe: true } }).then(
@@ -123,7 +133,7 @@ export function AddMaterialModal() {
   };
 
   const ready = items.length > 0 && items.every((i) => (i.type !== 'link' || !i.classifying) && (i.type !== 'file' || i.kind !== 'unsupported'))
-    && folderId !== '';
+    && !blocked && folderId !== '';
   const spokenOptions = [...new Set([...languages, ...SPOKEN])];
 
   return (
@@ -158,7 +168,13 @@ export function AddMaterialModal() {
                   <span className="kb-aqi__title">{itemTitle(item)}</span>
                   <span className={`kb-aqi__meta${(item.type === 'link' && item.error) || (item.type === 'file' && item.kind === 'unsupported') ? ' is-error' : ''}`}>{itemMeta(item)}</span>
                   {errors[item.id] && <span className="kb-aqi__meta is-error" role="alert">{errors[item.id]}</span>}
+                  {blocked && isSpeech(item) && !errors[item.id] && (
+                    <span className="kb-aqi__meta is-error" data-testid="speech-block">{blocked.reason}</span>
+                  )}
                 </span>
+                {blocked && item.id === firstSpeech && (
+                  <Button size="sm" variant="outline" icon="settings" onClick={openPlace}>{blocked.action}</Button>
+                )}
                 {item.type === 'link' && item.info?.embedded_video && (
                   <Segmented label="Take from the article" size="sm" value={item.mode}
                     options={[{ value: 'text', label: 'Text' }, { value: 'video', label: 'Video' }, { value: 'both', label: 'Both' }]}

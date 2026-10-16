@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import { addedLabel } from './AllMaterials';
-import { fileItem, pasteItem, wikiDefault } from './addItems';
+import { fileItem, pasteItem, speechBlock, wikiDefault } from './addItems';
+import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
 async function ready() {
   const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
@@ -168,6 +169,41 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByTestId('add-wiki-no-agent')).toHaveTextContent('Connect an agent in Settings → Accounts & keys to add materials to the wiki.');
     await user.click(within(dialog).getByRole('button', { name: 'Open Accounts & keys' }));
     expect(r.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'conn' });
+  });
+
+  it('audio and video say what they need before Add, per row, with the real Settings place (QA B6)', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    world.speech = { ...world.speech, provider: 'soniox', cloud_consent: false };
+    const r = renderKb({ world, prefs: { section: 'materials' } });
+    r.services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const files = [new File(['x'], 'talk.wav'), new File(['y'], 'clip.mov'), new File(['z'], 'notes.pdf')];
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files, getData: () => '' } });
+    const rows = await within(dialog).findAllByTestId('speech-block');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('Importing sends the audio to Soniox. Turn on “Send audio to Soniox” in Settings → Recording & speech.');
+    expect(within(dialog).getByRole('button', { name: 'Add 3' })).toBeDisabled();
+    expect(within(dialog).queryByText(/Download it below/)).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Open Recording & speech' }));
+    expect(r.services.ui.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'rec' });
+    expect(r.fake.calls.some((c) => c.path === '/kb/imports')).toBe(false);
+  });
+
+  it('names the setting each provider needs: key, consent, the model on this computer', () => {
+    const speech = (over: Partial<KbSpeechSettings>): KbSpeechSettings => ({
+      provider: 'soniox', languages: [], translate_by_default: false, translation_language: 'en', cloud_consent: true,
+      local_model: { model: 'small', state: 'ready', progress: null, reason: null, size_bytes: null }, ...over,
+    });
+    const keys = (soniox: boolean): KbKeys => ({ providers: [{ id: 'soniox', configured: soniox, checked_at: null, valid: null }] });
+    expect(speechBlock(speech({}), keys(true))).toBeNull();
+    expect(speechBlock(speech({}), keys(false))).toMatchObject({ section: 'conn', action: 'Open Accounts & keys', reason: 'Soniox has no API key. Add one in Settings → Accounts & keys.' });
+    expect(speechBlock(speech({ cloud_consent: false }), keys(true))?.section).toBe('rec');
+    const local = speech({ provider: 'local_whisper', cloud_consent: false, local_model: { model: 'small', state: 'missing', progress: null, reason: null, size_bytes: 1 } });
+    expect(speechBlock(local, keys(false))).toMatchObject({ section: 'rec', reason: expect.stringMatching(/isn’t downloaded yet\. Download it in Settings → Recording & speech/) });
+    expect(speechBlock(null, null)).toBeNull();
   });
 
   it('a dropped file SKAZ can’t read says so on its row and holds Add until it is removed (QA B2, B15)', async () => {

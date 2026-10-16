@@ -57,6 +57,8 @@ MAX_LOCAL_RECOGNITIONS = 4
 LOCAL_BUSY = (f"{MAX_LOCAL_RECOGNITIONS} on-device transcriptions are already running on this computer. "
               "Wait for one to finish, or use a cloud provider.")
 DUPLICATE_VIDEO = "This video already has a session. Open it or confirm Transcribe again."
+#: Where the user fixes it, by the names the Settings window shows (QA B6).
+SONIOX_NO_KEY = "Soniox has no API key stored. Add one in Settings → Accounts & keys."
 #: Transport failures tolerated in a row before the import is called failed.
 MAX_TRANSPORT_FAILURES = 30
 
@@ -164,10 +166,11 @@ class ImportService:
         if settings.transcription_provider == "soniox":
             if not settings.cloud_consent:
                 raise ProviderNotConfigured(
-                    "Importing a file sends its audio to Soniox; enable cloud consent in settings."
+                    "Importing a file sends its audio to Soniox. Turn on “Send audio to Soniox” in "
+                    "Settings → Recording & speech."
                 )
             if not await disk_call(self._runtime.api_key, "soniox"):
-                raise ProviderNotConfigured("Soniox has no API key stored; add one in settings.")
+                raise ProviderNotConfigured(SONIOX_NO_KEY)
         else:
             # The provider is fixed now and recorded on the import; a later settings
             # change never silently moves this file to another provider.
@@ -453,7 +456,7 @@ class ImportService:
     async def _gateway(self) -> SonioxAsyncGateway:
         key = await disk_call(self._runtime.api_key, "soniox")
         if not key:
-            raise ProviderNotConfigured("Soniox has no API key stored; add one in settings.")
+            raise ProviderNotConfigured(SONIOX_NO_KEY)
         return SonioxAsyncGateway(api_key=key, http=self._runtime.http)
 
     async def close(self) -> None:

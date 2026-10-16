@@ -2,7 +2,8 @@
 // route per item (API-B2 §4; package-1 routes for files, text and speech imports).
 
 import { DOCUMENT_EXTENSIONS, SPEECH_EXTENSIONS, VIDEO_EXTENSIONS } from '../../api/bridge';
-import type { KbLinkInfo, KbMaterialSummary } from '../../api/kb/types.gen';
+import type { KbKeys, KbLinkInfo, KbMaterialSummary, KbSpeechSettings } from '../../api/kb/types.gen';
+import type { SettingsSection } from '../state/ui';
 import type { KbClient } from '../api/client';
 
 const SPEECH_EXT = new Set<string>(SPEECH_EXTENSIONS);
@@ -97,6 +98,39 @@ export function formatDuration(ms: number): string {
   const min = Math.round(ms / 60_000);
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+}
+
+/** Why audio and video can't be imported right now, and the Settings place that fixes it (QA B6). */
+export interface SpeechBlock {
+  reason: string;
+  section: SettingsSection;
+  action: string;
+}
+
+const REC = { section: 'rec', action: 'Open Recording & speech' } as const;
+const KEYS = { section: 'conn', action: 'Open Accounts & keys' } as const;
+
+/**
+ * The import's own checks (`import_service._admit`, `asr_providers.check_import`), asked before Add:
+ * Soniox needs the consent and its key, the on-device model must be downloaded. `null`: ready, or
+ * not known (the import itself still refuses with its reason).
+ */
+export function speechBlock(speech: KbSpeechSettings | null, keys: KbKeys | null): SpeechBlock | null {
+  if (!speech) return null;
+  const key = (id: 'soniox' | 'openai') => keys?.providers.find((p) => p.id === id)?.configured;
+  if (speech.provider === 'local_whisper') {
+    if (speech.local_model.state === 'ready') return null;
+    const doing = speech.local_model.state === 'downloading' ? 'is still downloading' : 'isn’t downloaded yet';
+    return { reason: `The speech model on this computer ${doing}. Download it in Settings → Recording & speech → Speech model on this computer.`, ...REC };
+  }
+  const name = speech.provider === 'openai' ? 'OpenAI' : 'Soniox';
+  if (!speech.cloud_consent) {
+    return { reason: `Importing sends the audio to ${name}. Turn on “Send audio to Soniox” in Settings → Recording & speech.`, ...REC };
+  }
+  if (key(speech.provider === 'openai' ? 'openai' : 'soniox') === false) {
+    return { reason: `${name} has no API key. Add one in Settings → Accounts & keys.`, ...KEYS };
+  }
+  return null;
 }
 
 export interface AddOptions {
