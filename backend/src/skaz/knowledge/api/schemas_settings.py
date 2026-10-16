@@ -1,4 +1,4 @@
-"""Pydantic models of ``/kb/settings/{health,keys,speech,privacy,about}`` (area S3).
+"""Pydantic models of ``/kb/settings/{health,keys,speech,privacy,about,skills}`` (area S3, 0.3.1 H).
 
 Same rules as ``schemas.py``: ``Kb`` prefix, no defaults on response models.
 A stored key never appears in any response.
@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from .schemas_agents import KbEngineId
 
 KbSettingsSectionId = Literal["accounts", "models", "speech", "wiki", "storage", "privacy", "appearance",
                               "about"]
@@ -142,3 +144,36 @@ class KbAbout(BaseModel):
     version: str
     build: str
     licenses: list[KbLicense]
+
+
+# -- skills (0.3.1 H3) ------------------------------------------------------------------
+
+KbSkillState = Literal["loaded", "not_loaded", "off"]
+
+
+class KbSkillEngine(BaseModel):
+    engine: KbEngineId
+    #: ``loaded``: every turn of this agent carries the skill; ``not_loaded``: see ``reason``;
+    #: ``off``: the skill is switched off.
+    state: KbSkillState
+    reason: str | None
+
+
+class KbSkill(BaseModel):
+    id: str
+    name: str
+    version: str
+    license: str
+    source_url: str
+    enabled: bool
+    engines: list[KbSkillEngine]
+
+
+class KbSkills(BaseModel):
+    """Only the skills of SKAZ's own folder; personal skills of the agents are never listed or used."""
+
+    skills: list[KbSkill]
+
+
+class KbSkillUpdate(_Request):
+    enabled: bool = Field(strict=True)

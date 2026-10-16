@@ -242,3 +242,18 @@ describe('Electron IPC policy — agents ask permission and questions (0.3.1 P)'
     }
   });
 });
+
+describe('Electron IPC policy — SKAZ skills (0.3.1 H)', () => {
+  it('lets Settings → Skills read the list and switch a skill — one id segment, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/settings/skills' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/settings/skills/humanizer', body: { enabled: false } })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/settings/skills'], ['PUT', '/kb/settings/skills'], ['DELETE', '/kb/settings/skills/humanizer'],
+      ['GET', '/kb/settings/skills/humanizer'], ['POST', '/kb/settings/skills/humanizer'],
+      ['PUT', '/kb/settings/skills/humanizer/file'], ['PUT', '/kb/settings/skills/../keys/soniox'],
+      ['PUT', '/kb/settings/skills/%2e%2e'], ['PUT', '/kb/settings/skills/Humanizer'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});

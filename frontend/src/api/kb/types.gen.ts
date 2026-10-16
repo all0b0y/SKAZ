@@ -1029,6 +1029,31 @@ export interface KbSettingsSection {
   problems: KbProblem[];
 }
 
+export interface KbSkill {
+  id: string;
+  name: string;
+  version: string;
+  license: string;
+  source_url: string;
+  enabled: boolean;
+  engines: KbSkillEngine[];
+}
+
+export interface KbSkillEngine {
+  engine: "codex" | "claude_code" | "hermes";
+  state: "loaded" | "not_loaded" | "off";
+  reason: string | null;
+}
+
+export interface KbSkillUpdate {
+  enabled: boolean;
+}
+
+/** Only the skills of SKAZ's own folder; personal skills of the agents are never listed or used. */
+export interface KbSkills {
+  skills: KbSkill[];
+}
+
 export interface KbSnippetPart {
   text: string;
   match: boolean;
@@ -1785,6 +1810,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbRecognitionSettingsUpdate;
     response: KbRecognitionSettings;
+    status: 200;
+  };
+  "GET /kb/settings/skills": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbSkills;
+    status: 200;
+  };
+  "PUT /kb/settings/skills/{skill_id}": {
+    path: { skill_id: string };
+    query: Record<string, never>;
+    body: KbSkillUpdate;
+    response: KbSkills;
     status: 200;
   };
   "GET /kb/settings/speech": {
