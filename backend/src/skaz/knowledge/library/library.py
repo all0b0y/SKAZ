@@ -69,7 +69,7 @@ from .layout import (
     LibraryMarker,
     read_marker,
 )
-from .names import numbered_name, validate_name
+from .names import icloud_skips, numbered_name, validate_name
 
 INBOX_ID = "fld-inbox"
 INBOX_NAME = "Inbox"
@@ -232,7 +232,7 @@ class Library:
         taken = {name_key(entry) for entry in os.listdir(directory)}
         for number in range(1, 10_000):
             candidate = numbered_name(name, number)
-            if name_key(candidate) not in taken:
+            if name_key(candidate) not in taken and not icloud_skips(candidate):
                 return candidate
         raise NameTaken()
 
@@ -289,14 +289,14 @@ class Library:
         return FolderEntry(marker.id, name, system, marker.created_at, target)
 
     def create_folder(self, name: str) -> FolderEntry:
-        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES)
+        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES, directory=True)
         with self._lock:
             return self._make_folder(clean, new_id("fld"), system=False)
 
     def rename_folder(self, folder_id: str, name: str) -> FolderEntry:
         if folder_id == INBOX_ID:
             raise ProtectedItem("Inbox can't be renamed.")
-        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES)
+        clean = validate_name(name, reserved=_RESERVED_FOLDER_NAMES, directory=True)
         with self._lock:
             entry = self.folder(folder_id)
             if clean == entry.name:
@@ -332,7 +332,7 @@ class Library:
         unique: bool = False,
     ) -> MaterialFiles:
         """``unique``: the title is SKAZ's own guess, so a taken one becomes ``title (2)`` (QA B1)."""
-        clean = validate_name(title)
+        clean = validate_name(title, directory=not unique)
         numbered = number_fragments([], fragments)
         with self._lock:
             folder = self.folder(folder_id)
@@ -492,7 +492,7 @@ class Library:
                 manifest = MaterialManifest.model_validate(raw)
             except ValidationError as error:
                 raise ValueError("Unreadable material manifest.") from error
-            clean = validate_name(title) if title is not None else directory.name
+            clean = validate_name(title, directory=True) if title is not None else directory.name
             folder = self.folder(folder_id or current_folder)
             target = folder.path / clean
             if target == directory and clean == manifest.title:

@@ -137,6 +137,26 @@ def test_folder_collision_is_refused_without_partial_writes(library: Library, se
     }
 
 
+@pytest.mark.parametrize("name", ["tmp", "TMP", "Archive.nosync", "x.NoSync", "draft.tmp"])
+def test_names_icloud_never_syncs_are_refused_for_folders(library: Library, name: str) -> None:
+    """QA B13/E12, decision B19: iCloud Drive skips these, and moving in/out of them deadlocks."""
+    reason = "iCloud Drive doesn't sync folders with this name. Choose another name."
+    with pytest.raises(NameRejected) as created:
+        library.create_folder(name)
+    assert created.value.message == reason
+    folder = library.create_folder("Курс")
+    with pytest.raises(NameRejected):
+        library.rename_folder(folder.id, name)
+    material = library.create_material(INBOX_ID, "Лекция", "text", [FragmentInput(text="a", index=0)])
+    with pytest.raises(NameRejected):  # a material is a folder on disk too
+        library.move_material(material.manifest.id, title=name)
+    with pytest.raises(NameRejected):
+        library.create_material(INBOX_ID, name, "text", [FragmentInput(text="b", index=0)])
+    derived = library.create_material(INBOX_ID, name, "text", [FragmentInput(text="c", index=0)], unique=True)
+    assert derived.title == f"{name} (2)"
+    assert library.create_folder("tmp files").name == "tmp files"  # only the exact forms
+
+
 def test_unknown_entries_also_block_a_name(library: Library) -> None:
     (library.root / "Materials" / "notes.txt").write_text("mine")
     with pytest.raises(NameTaken):
