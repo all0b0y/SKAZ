@@ -16,6 +16,7 @@ import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './M
 import { StatusChips } from './StatusChips';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
 import { useLiveMaterial } from '../recording/useLiveMaterial';
+import { useRecognitionRecheck } from './RecognitionRecheck';
 
 const MATERIAL_GONE = 'This material is no longer in the library — it was deleted.';
 
@@ -143,6 +144,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hasTranslation = Boolean(material?.translation && material.translation.fragments.length > 0);
+  const recheck = useRecognitionRecheck(material, data?.jobs ?? [], reload);
 
   // Decision 24: translation by default when the recording was made with one.
   useEffect(() => { setView('original'); setNote(null); }, [target.id]);
@@ -191,6 +193,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Material actions" items={[
                 { id: 'move', label: 'Move to folder', icon: 'folder', onSelect: () => setDialog('move') },
                 { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => setDialog('rename') },
+                ...(recheck.item ? [recheck.item] : []),
                 {
                   id: 'delete', label: 'Delete…', icon: 'trash', danger: true,
                   disabled: material?.status === 'recording', note: material?.status === 'recording' ? 'Recording' : undefined,
@@ -229,6 +232,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               </div>
             )}
             {addError && <p className="kb-inline-error" role="alert">{addError}</p>}
+            {recheck.message}
             {note && <p className="kb-mat__note" role="status">{note}</p>}
             <UnreadableText pages={material.unreadable_pages ?? []} />
             {material.status === 'failed' && (

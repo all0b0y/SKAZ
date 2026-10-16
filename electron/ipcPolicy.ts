@@ -78,8 +78,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/excluded\/\d+\/restore$/ },
   { method: 'GET', pattern: /^\/kb\/search$/ },
   { method: 'GET', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
-  { method: 'GET', pattern: /^\/kb\/settings\/(?:health|keys|speech|privacy|about|wiki)$/ },
-  { method: 'PUT', pattern: /^\/kb\/settings\/(?:speech|wiki)$/ },
+  { method: 'GET', pattern: /^\/kb\/settings\/(?:health|keys|speech|privacy|about|wiki|recognition)$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/(?:speech|wiki|recognition)$/ },
   { method: 'POST', pattern: /^\/kb\/settings\/health\/[^/]+\/[^/]+$/ },
   { method: 'PUT', pattern: /^\/kb\/settings\/keys\/(?:openrouter|soniox|openai)$/ },
   { method: 'POST', pattern: /^\/kb\/settings\/keys\/(?:openrouter|soniox|openai)\/check$/ },
@@ -122,6 +122,8 @@ const ROUTES: readonly Route[] = [
   // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
   { method: 'POST', pattern: /^\/kb\/agents\/codex\/logout$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
+  // B20: "Check recognition again" of a recording (a backend job on the chosen agent).
+  { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/recognition-check$/ },
 ];
 
 /**

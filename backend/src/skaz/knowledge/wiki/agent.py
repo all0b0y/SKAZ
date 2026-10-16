@@ -31,9 +31,13 @@ class WikiJobFailed(Exception):
 
 
 class AgentCaller:
-    def __init__(self, engine: AgentEngine, prefix: str) -> None:
+    def __init__(self, engine: AgentEngine, prefix: str, *, model: str | None = None,
+                 effort: str | None = None) -> None:
         self.engine = engine
         self.prefix = prefix
+        #: The model and effort chosen for this work (Recognition check), ``None`` = the agent's default.
+        self.model = model
+        self.effort = effort
         self._runs = 0
 
     async def ask(self, instructions: str, messages: Sequence[TurnMessage], schema: dict[str, Any]) -> str:
@@ -44,6 +48,8 @@ class AgentCaller:
             messages=tuple(messages),
             instructions=instructions,
             tools=None,
+            model=self.model,
+            effort=self.effort,
             response_schema=schema,
         )
         try:

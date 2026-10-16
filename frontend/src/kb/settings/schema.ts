@@ -61,7 +61,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'chat-model', section: 'models', group: 'Agent', label: 'Chat', hint: 'Can also be changed in the message field', keywords: 'model effort' },
   { id: 'wiki-model', section: 'models', group: 'Agent', label: 'Wiki pages and notes', keywords: 'model effort summary' },
   { id: 'decisions', section: 'models', group: 'Helpers', label: 'Wiki decisions', hint: 'Where to file a material, whether to merge or link pages', keywords: 'openrouter jev local system one' },
-  { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model corrections' },
+  { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model effort corrections agent off' },
   // Recording & speech
   { id: 'mic', section: 'rec', group: 'Sound', label: 'Microphone', hint: 'Default for new recordings', keywords: 'input device level permission' },
   { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound permission' },

@@ -13,6 +13,7 @@ import {
 import { EngineBadge } from '../ui/EngineBadge';
 import { ActivityLogRow } from './ActivityLog';
 import { MicRow, SystemAudioRow } from './SoundRows';
+import { RecognitionCheckRow } from './RecognitionCheckRow';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -39,6 +40,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'chat-model': return <ChatModelRow />;
     case 'wiki-model': return <WikiModelRow label={row.label} />;
     case 'decisions': return <DecisionsRow label={row.label} />;
+    case 'recognition-check': return <RecognitionCheckRow label={row.label} />;
     case 'mic': return <MicRow />;
     case 'system-audio': return <SystemAudioRow label={row.label} />;
     case 'asr-service': return <AsrRow label={row.label} />;

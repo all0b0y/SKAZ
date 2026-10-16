@@ -124,3 +124,23 @@ class KbGraphEdge(BaseModel):
 class KbGraph(BaseModel):
     nodes: list[KbGraphNode]
     edges: list[KbGraphEdge]
+
+
+KbRecognitionEngine = Literal["same_as_wiki", "off", "codex", "claude_code", "hermes"]
+
+
+class KbRecognitionSettings(BaseModel):
+    """Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it."""
+
+    engine: KbRecognitionEngine
+    #: Only with a chosen agent; ``null`` = that agent's default.
+    model: str | None
+    effort: str | None
+
+
+class KbRecognitionSettingsUpdate(_Request):
+    """The whole choice; a model and effort go only with a chosen agent."""
+
+    engine: KbRecognitionEngine
+    model: str | None = Field(default=None, max_length=100)
+    effort: str | None = Field(default=None, max_length=100)

@@ -19,12 +19,14 @@ from uuid import uuid4
 
 from ...native_io import disk_call
 from ..agents.engine import AgentEngine
-from ..corrections.check import RecognitionChecker
+from ..corrections.check import NotSpeech, RecognitionChecker, RecognitionOff
 from ..corrections.model import apply_to_text
 from ..corrections.service import CorrectionChange, CorrectionService
+from ..corrections.settings import RecognitionSettings, read_recognition, update_recognition
 from ..corrections.store import CorrectionsLayer, CorrectionStore
 from ..errors import KnowledgeError, NotFound
 from ..ingest.jobs import JobRecord
+from ..ingest.runner import SPEECH_KINDS
 from ..ingest.service import IngestService
 from ..ingest.writer import WikiWriter
 from ..logsafe import error_note
@@ -55,6 +57,7 @@ NO_ENGINE = "No agent is ready to write the wiki. Connect one in Settings → Mo
 NEEDS_AGENT = "Finding connections needs a connected agent."
 SET_UP_AGENT = "Set one up in Settings → Accounts & keys."
 NO_CONCEPTS = "The wiki has no concept pages yet. Add materials to the wiki first."
+NEEDS_CHECK_AGENT = "Checking recognition needs a connected agent."
 #: How long the pre-flight agent check of a user-started job may take.
 AGENT_CHECK_S = 30.0
 #: Background "Find connections": only after this long without wiki work, and only when the wiki changed.
@@ -121,6 +124,8 @@ class WikiService:
             decisions=lambda: ingest.decisions,
             detector=lambda: ingest.detector,
             auto=lambda: ingest.settings().auto_corrections,
+            choice=self.recognition_settings,
+            engine_for=self._recognition_engine,
         )
         self.idle_after_s = IDLE_AFTER_S
         self.clock = time.monotonic
@@ -188,6 +193,21 @@ class WikiService:
             raise WikiJobFailed(NO_ENGINE)
         return engine
 
+    def _recognition_engine(self, choice: RecognitionSettings) -> AgentEngine | None:
+        """The agent of the recognition check: its own choice, or the wiki's (never a substitute)."""
+        resolve = self.ingest.engines
+        if resolve is None or choice.off:
+            return None
+        return resolve(choice.own_agent or self.ingest.settings().engine)
+
+    def recognition_settings(self) -> RecognitionSettings:
+        return read_recognition(self.kb.settings)
+
+    def update_recognition(
+        self, *, engine: str, model: str | None, effort: str | None
+    ) -> RecognitionSettings:
+        return update_recognition(self.kb.settings, engine=engine, model=model, effort=effort)
+
     def _caller(self, prefix: str) -> AgentCaller:
         return AgentCaller(self._engine(), f"{prefix}-{uuid4().hex[:8]}")
 
@@ -236,16 +256,17 @@ class WikiService:
 
     # -- jobs -----------------------------------------------------------------
 
-    async def _require_ready_agent(self, needs: str) -> None:
-        """Refuse before any job exists when the wiki agent can't run (QA A13).
+    async def _require_ready_agent(self, needs: str, engine: AgentEngine | None = None) -> None:
+        """Refuse before any job exists when the wiki agent (or ``engine``) can't run (QA A13).
 
         Without this a job was created and finished at once with nothing done, while the
         user was told it had started.
         """
-        try:
-            engine = self._engine()
-        except WikiJobFailed as failure:
-            raise AgentNotReady(f"{needs} {SET_UP_AGENT}") from failure
+        if engine is None:
+            try:
+                engine = self._engine()
+            except WikiJobFailed as failure:
+                raise AgentNotReady(f"{needs} {SET_UP_AGENT}") from failure
         try:
             async with asyncio.timeout(AGENT_CHECK_S):
                 status = await engine.status()
@@ -314,6 +335,49 @@ class WikiService:
             await self.rechecks.run(page_id, block_id, self._caller("recheck"), job.log)
 
         return await self.jobs.start("recheck", page_id, "rechecking", work)
+
+    async def check_recognition_again(self, material_id: str) -> JobRecord:
+        """"Check recognition again" of a recording (B20): a ``corrections`` job on the chosen agent.
+
+        Refused before a job exists when it can't do anything: not speech, still being made, the
+        check is off, no ready agent, or the material is being added to the wiki right now.
+        """
+        record = await disk_call(self.kb.material_repo.get, material_id)
+        if record is None:
+            raise NotFound("Material not found.")
+        if record.kind not in SPEECH_KINDS:
+            raise NotSpeech()
+        if record.status != "ready":
+            raise MaterialBusy("The recording isn't finished yet. Check it when its text is ready.")
+        if record.fragment_count == 0:
+            raise MaterialBusy("No speech was recognised in this recording, so there is nothing to check.")
+        choice = await disk_call(self.recognition_settings)
+        if choice.off:
+            raise RecognitionOff()
+        engine = self._recognition_engine(choice)
+        if engine is None:
+            raise AgentNotReady(f"{NEEDS_CHECK_AGENT} {SET_UP_AGENT}")
+        await self._require_ready_agent(NEEDS_CHECK_AGENT, engine)
+        if self.jobs.running("corrections", material_id):
+            raise WikiBusy("The recognition of this recording is already being checked.")
+        material_jobs = await disk_call(self.ingest.list_jobs, material_id=material_id)
+        if any(job.state == "running" for job in material_jobs):
+            raise MaterialBusy("This material is being added to the wiki. Check it again when that finishes.")
+        self._touch()
+
+        async def work(job: JobContext) -> None:
+            entries = await self.recognition.recheck(material_id, job.log)
+            segs = {entry.seg for entry in entries if entry.state == "applied"}
+            if segs:  # the wiki was built from the old text: take broken quotes down and refresh
+                removed, refresh = await self._text_changed(material_id, segs)
+                if removed:
+                    await job.log(
+                        f"{removed} statement(s) no longer matched the corrected text and were taken down."
+                    )
+                if refresh is not None:
+                    await job.log("The wiki pages of this material are being refreshed.")
+
+        return await self.jobs.start("corrections", material_id, "checking_recognition", work)
 
     # -- corrections ----------------------------------------------------------
 

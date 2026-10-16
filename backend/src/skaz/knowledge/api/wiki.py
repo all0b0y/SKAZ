@@ -6,6 +6,7 @@ from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..corrections.settings import RecognitionSettings
 from ..errors import KnowledgeError
 from ..markdown.page import PageKind
 from ..store.records import PageRecord
@@ -22,6 +23,8 @@ from .schemas_wiki2 import (
     KbGraphEdge,
     KbGraphNode,
     KbNodeKind,
+    KbRecognitionSettings,
+    KbRecognitionSettingsUpdate,
     KbRescanResult,
 )
 
@@ -160,6 +163,33 @@ async def find_connections(wiki: WikiDep) -> KbJob:
     """ "Find connections" across the whole wiki (and disagreements between sources). 409 while one runs."""
     try:
         return job_view(await wiki.find_connections_now())
+    except KnowledgeError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+
+def recognition_view(settings: RecognitionSettings) -> KbRecognitionSettings:
+    return KbRecognitionSettings(engine=settings.engine, model=settings.model, effort=settings.effort)
+
+
+@graph_router.get("/kb/settings/recognition")
+async def read_recognition_settings(wiki: WikiDep) -> KbRecognitionSettings:
+    return recognition_view(await kb_call(wiki.recognition_settings))
+
+
+@graph_router.put("/kb/settings/recognition")
+async def update_recognition_settings(
+    body: KbRecognitionSettingsUpdate, wiki: WikiDep
+) -> KbRecognitionSettings:
+    return recognition_view(
+        await kb_call(wiki.update_recognition, engine=body.engine, model=body.model, effort=body.effort)
+    )
+
+
+@graph_router.post("/kb/materials/{material_id}/recognition-check", status_code=202)
+async def check_recognition_again(material_id: str, wiki: WikiDep) -> KbJob:
+    """"Check recognition again" of a recording: a ``corrections`` job; 409 when it can't run now."""
+    try:
+        return job_view(await wiki.check_recognition_again(material_id))
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
 

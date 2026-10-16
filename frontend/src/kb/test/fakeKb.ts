@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings,
+  KbWikiSettings, KbRecognitionSettings,
 } from '../../api/kb/types.gen';
 
 // ---- The world -------------------------------------------------------------------------------
@@ -85,6 +85,8 @@ export interface FakeWorld {
   /** Every request served, for assertions. */
   log: Array<{ method: string; path: string; body?: unknown }>;
   seq: number;
+  /** Settings → Models → Recognition check (absent = same as the wiki pages). */
+  recognition?: KbRecognitionSettings;
   /** Fixed clock of the fixtures (ISO), or null to follow the real clock (scenes with "Today"). */
   now: string | null;
   /** What a new streamed answer cites (defaults: the first concept page, the last fragment of the first material). */
@@ -825,6 +827,21 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/settings/recognition': [200, (w) => structuredClone(w.recognition ?? { engine: 'same_as_wiki', model: null, effort: null })],
+  'PUT /kb/settings/recognition': [200, (w, { body }) => {
+    const own = body.engine !== 'same_as_wiki' && body.engine !== 'off';
+    if (!own && (body.model || body.effort)) fail(422, 'Choose an agent first: a model and effort go with a chosen agent.');
+    w.recognition = { engine: body.engine, model: own ? body.model ?? null : null, effort: own ? body.effort ?? null : null };
+    return structuredClone(w.recognition);
+  }],
+  'POST /kb/materials/{material_id}/recognition-check': [202, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    if (!['recording', 'audio', 'video', 'video_link'].includes(m.kind)) fail(409, 'Only recordings, audio and video are checked for recognition errors.');
+    if (w.recognition?.engine === 'off') fail(409, 'The recognition check is off. Turn it on in Settings → Models.');
+    const job = newJob(w, 'corrections', m.id, 'running', 'Checking recognition');
+    job.step = 'checking_recognition';
+    return job;
+  }],
   'GET /kb/settings/wiki': [200, (w) => structuredClone(w.wiki)],
   'PUT /kb/settings/wiki': [200, (w, { body }) => {
     for (const [k, v] of Object.entries(body)) if (v !== undefined && k !== 'wiki_engine') (w.wiki as unknown as Record<string, unknown>)[k] = v;

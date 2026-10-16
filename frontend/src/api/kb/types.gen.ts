@@ -808,6 +808,20 @@ export interface KbQuote {
   text: string;
 }
 
+/** Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it. */
+export interface KbRecognitionSettings {
+  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes";
+  model: string | null;
+  effort: string | null;
+}
+
+/** The whole choice; a model and effort go only with a chosen agent. */
+export interface KbRecognitionSettingsUpdate {
+  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes";
+  model?: string | null;
+  effort?: string | null;
+}
+
 export interface KbRecordingCreate {
   folder_id?: string | null;
   title?: string | null;
@@ -1426,6 +1440,13 @@ export interface KbEndpoints {
     response: KbJob;
     status: 202;
   };
+  "POST /kb/materials/{material_id}/recognition-check": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
+  };
   "GET /kb/mentions": {
     path: Record<string, never>;
     query: { q?: string; limit?: number };
@@ -1564,6 +1585,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbPrivacy;
+    status: 200;
+  };
+  "GET /kb/settings/recognition": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbRecognitionSettings;
+    status: 200;
+  };
+  "PUT /kb/settings/recognition": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbRecognitionSettingsUpdate;
+    response: KbRecognitionSettings;
     status: 200;
   };
   "GET /kb/settings/speech": {
