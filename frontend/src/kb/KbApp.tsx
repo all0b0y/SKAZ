@@ -13,6 +13,7 @@ import { CommandK } from './search/CommandK';
 import { DecisionModal } from './notifications/DecisionModal';
 import { SelectionToolbar } from './ui/Selection';
 import { AddMaterialModal } from './materials/AddMaterialModal';
+import { Toast } from './ui/Toast';
 
 /** Mirror theme and text size onto <html>, where the tokens read them. */
 function ThemeSync() {
@@ -188,8 +189,16 @@ function Workspace() {
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
       <AddMaterialModal />
+      <ToastHost />
     </>
   );
+}
+
+/** The window's toast (0.3.1 F2–F4: moved / deleted / Undo). */
+function ToastHost() {
+  const toast = useUi((s) => s.toast);
+  const closeToast = useUi((s) => s.closeToast);
+  return <Toast toast={toast} onClose={closeToast} />;
 }
 
 function QuitAnswer() {
