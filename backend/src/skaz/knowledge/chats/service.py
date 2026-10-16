@@ -34,6 +34,7 @@ from ..agents.engine import (
     Failed,
     TextDelta,
     ToolCall,
+    ToolSpec,
     TurnMessage,
 )
 from ..agents.registry import ENGINE_NAMES, EngineRegistry, EngineUnavailable
@@ -44,6 +45,7 @@ from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..ingest.settings import read_settings
 from ..logsafe import error_note
 from ..markdown.text import name_key
+from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
@@ -543,6 +545,13 @@ class ChatService:
 
     # -- one answer -------------------------------------------------------------------
 
+    def _tools_for(self, chat: Chat) -> tuple[ToolSpec, ...]:
+        """The turn's SKAZ tools: ``skaz_ask_user`` only where the agent's own question tool can't work."""
+        specs = self.tools.specs()
+        if chat.engine in NATIVE_QUESTIONS:
+            return tuple(spec for spec in specs if spec.name != ASK_TOOL)
+        return specs
+
     async def _drive(self, run: _Run, chat: Chat, question: Message, prior: list[Message]) -> None:
         reader = MaterialReader(self.kb, self._text_layer())
         resolver = Resolver(self.kb, reader)
@@ -555,8 +564,8 @@ class ChatService:
             request = await disk_call(builder.request, chat, question.input, self._other_chat)
             language = await disk_call(self._wiki_language)
             turn = AgentTurn(run_id=run.run_id, messages=(*history(prior), TurnMessage("user", request)),
-                             instructions=instructions(language), tools=self.tools.specs(), model=chat.model,
-                             effort=chat.effort)
+                             instructions=instructions(language), tools=self._tools_for(chat),
+                             model=chat.model, effort=chat.effort)
             stream = run.engine.run(turn)
             async for event in stream:
                 if isinstance(event, TextDelta):

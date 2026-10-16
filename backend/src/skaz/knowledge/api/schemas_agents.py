@@ -65,6 +65,9 @@ class KbAgent(BaseModel):
     checked_at: str
     #: Agents SKAZ starts only after a one-time check (Hermes); ``null`` for the others.
     first_run: KbAgentFirstRun | None
+    #: How the agent asks the user a question: its own tool, or SKAZ's (the card says
+    #: "Questions: through SKAZ" — known before a chat, not during it; Q-A1).
+    questions: Literal["native", "skaz"] = "skaz"
 
 
 class KbAgents(BaseModel):

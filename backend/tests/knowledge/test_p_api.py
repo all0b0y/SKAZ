@@ -192,3 +192,29 @@ async def test_question_answered_by_option_own_message_and_later_option(env: Env
     await finished(env.runtime.kb_chats)
     texts = [m["input"]["text"] for m in (await env.chat_view(chat["id"]))["messages"] if m["role"] == "user"]
     assert texts[-1] == LATE.format(answer="Cards")
+
+
+async def test_skaz_ask_user_is_the_question_tool_and_the_agent_card_says_so(env: Env) -> None:
+    """Q-A1: no installed agent's native question tool works with SKAZ yet (``permissions/ask_tool.py``),
+    so each gets ``skaz_ask_user`` and its card says "Questions: through SKAZ" ahead of time."""
+    ask = Invoke("skaz_ask_user", {"question": "Which lecture?", "recommended_index": 1, "options": [
+        {"label": "Lecture 1", "description": "Thermodynamics"},
+        {"label": "Lecture 3", "description": "Entropy"}]})
+    env.engine.script = lambda _turn: [ask, TextDelta("", "Ок.")]
+    chat = await env.chat()
+    await env.send(chat["id"], "Объясни")
+    part = await env.part_of(chat["id"], "question")
+    assert [option["label"] for option in part["options"]] == ["Lecture 3", "Lecture 1"]
+    offered = env.engine.turns[0].tools
+    assert offered is not None and "skaz_ask_user" in {spec.name for spec in offered}
+    answered = await env.client.post(f"/kb/questions/{part['id']}/answer", json={"text": "Обе"})
+    assert answered.status_code == 200
+    await finished(env.runtime.kb_chats)
+    assert env.engine.outcomes == ['{"status":"answered","answer":"Обе"}']
+    bad = await env.runtime.kb_tools.call("skaz_ask_user", {"question": "Q?", "recommended_index": 2,
+                                                            "options": [{"label": "A"}]}, None)
+    assert bad.is_error
+
+    agents = (await env.client.get("/kb/agents")).json()["agents"]
+    assert {agent["id"]: agent["questions"] for agent in agents} == {
+        "codex": "skaz", "claude_code": "skaz", "hermes": "skaz"}

@@ -48,6 +48,7 @@ export interface KbAgent {
   install_task: string | null;
   checked_at: string;
   first_run: KbAgentFirstRun | null;
+  questions?: "native" | "skaz";
 }
 
 export interface KbAgentDefault {

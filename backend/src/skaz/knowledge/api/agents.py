@@ -16,6 +16,7 @@ from ..errors import KnowledgeError
 from ..install.recipes import Recipe
 from ..install.system import dotted
 from ..install.tasks import InstallTask
+from ..permissions.ask_tool import NATIVE_QUESTIONS
 from .schemas_agents import (
     KbAgent,
     KbAgentDefault,
@@ -69,6 +70,7 @@ def agent_view(hub: AgentsHub, view: AgentView) -> KbAgent:
                 for m in view.models],
         current_model=view.current_model, install=_install_info(hub.installs.recipes[view.engine]),
         install_task=running.id if running else None, checked_at=view.checked_at,
+        questions="native" if view.engine in NATIVE_QUESTIONS else "skaz",
     )
 
 

@@ -23,6 +23,7 @@ from .knowledge.chats import ChatService
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
+from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
 from .knowledge.permissions.questions import QuestionBroker
 from .knowledge.permissions.store import ControlStore
@@ -115,6 +116,8 @@ class Runtime:
                                     text_layer=lambda: self.kb_ingest.text_layer,
                                     permissions=self.kb_permissions, questions=self.kb_questions)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
+        #: SKAZ's own question tool for agents whose native one can't work with SKAZ (Q-A1).
+        self.kb_tools.add((ask_tool(self.kb_questions, self.kb_chats.run_ref),))
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
         #: File imports. Resumption is started by the app lifespan, not here: a
