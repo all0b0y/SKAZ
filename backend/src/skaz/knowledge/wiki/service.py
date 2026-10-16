@@ -37,7 +37,15 @@ from ..service import KnowledgeService, MaterialDetail, PageView
 from .agent import AgentCaller, WikiJobFailed
 from .connections import Connections
 from .context import NO_DETECTOR, WikiContext
-from .delete import DeletePlan, MaterialBusy, StillRecording, append_log, execute_delete, plan_delete
+from .delete import (
+    DeletePlan,
+    MaterialBusy,
+    StillRecording,
+    append_log,
+    append_page_log,
+    execute_delete,
+    plan_delete,
+)
 from .discrepancy import KIND as DISCREPANCY_KIND
 from .discrepancy import Discrepancies
 from .edit import add_note, delete_note, update_block
@@ -49,6 +57,7 @@ from .jobs import JobContext, WikiBusy, WikiJobs
 from .links import LinkResolver, LinkView
 from .move import move_material
 from .overview import FolderOverviews
+from .page_ops import PageDeletePlan, execute_page_delete, plan_page_delete, rename_page
 from .pages_io import page_path, reindex, rewrite
 from .recheck import Recheck
 from .retract import retract_unquoted
@@ -594,6 +603,38 @@ class WikiService:
         except UnicodeDecodeError as error:
             raise KnowledgeError(f"Wiki/{name}.md isn't readable text.") from error
         return text, LinkResolver(self.kb.db).links(text)
+
+    def rename_page(self, page_id: str, title: str) -> PageDetail:
+        """Rename a page; every link to it follows (B20). 409 for a taken name, 422 for a bad one."""
+        with self.ctx.write_lock:
+            before = self.kb.page_repo.get(page_id)
+            renamed = rename_page(self.kb, self.graph, page_id, title)
+            if before is not None and renamed.stem != Path(before.rel_path).stem:
+                append_page_log(self.kb.require(), self.ingest.settings().language,
+                                f"{Path(before.rel_path).stem} → {renamed.stem}", renamed=True)
+        self.graph.refresh(force=True)
+        self._refresh_index()
+        self._touch()
+        return self.page(page_id)
+
+    def page_delete_preview(self, page_id: str) -> PageDeletePlan:
+        return plan_page_delete(self.kb, self.graph, page_id)
+
+    def delete_page(self, page_id: str) -> PageDeletePlan:
+        """Delete a page: links to it are unlinked, its sources stay (B20)."""
+        with self.ctx.write_lock:
+            plan = plan_page_delete(self.kb, self.graph, page_id)
+            execute_page_delete(self.kb, plan)
+            append_page_log(self.kb.require(), self.ingest.settings().language, plan.page.title)
+            for item in self.kb.notifications():
+                subject = item.subject or {}
+                about = subject.get("id") == page_id or item.payload.get("page_id") == page_id
+                if about and not item.dismissed_at:
+                    self.kb.dismiss_notification(item.id)
+        self.graph.refresh(force=True)
+        self._refresh_index()
+        self._touch()
+        return plan
 
     def page_file(self, page_id: str) -> str:
         """Absolute path of a page's file (404 when the page or its file is gone)."""

@@ -751,6 +751,15 @@ export interface KbPage {
   is_analysis_source_forbidden: boolean;
 }
 
+/** What deleting a page does (B20); the same shape answers the deletion itself. */
+export interface KbPageDeletePreview {
+  page: KbPageRef;
+  linking_pages: KbPageLinking[];
+  links_unlinked: number;
+  user_notes: number;
+  sources: KbSourceKept[];
+}
+
 export interface KbPageFile {
   path: string;
 }
@@ -760,6 +769,12 @@ export interface KbPageHit {
   title: string;
   kind: "concept" | "note" | "folder" | "analysis";
   matched_alias: string | null;
+}
+
+export interface KbPageLinking {
+  page: KbPageRef;
+  links: number;
+  in_your_notes: number;
 }
 
 export interface KbPagePart {
@@ -772,6 +787,10 @@ export interface KbPagePart {
 export interface KbPageRef {
   id: string;
   kind: "concept" | "note" | "folder" | "analysis";
+  title: string;
+}
+
+export interface KbPageRename {
   title: string;
 }
 
@@ -916,6 +935,11 @@ export interface KbSettingsSection {
 export interface KbSnippetPart {
   text: string;
   match: boolean;
+}
+
+export interface KbSourceKept {
+  id: string;
+  title: string;
 }
 
 export interface KbSpeechDefaults {
@@ -1701,6 +1725,20 @@ export interface KbEndpoints {
     response: KbPage;
     status: 200;
   };
+  "PATCH /kb/wiki/pages/{page_id}": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: KbPageRename;
+    response: KbPage;
+    status: 200;
+  };
+  "DELETE /kb/wiki/pages/{page_id}": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageDeletePreview;
+    status: 200;
+  };
   "POST /kb/wiki/pages/{page_id}/blocks": {
     path: { page_id: string };
     query: Record<string, never>;
@@ -1728,6 +1766,13 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/wiki/pages/{page_id}/delete-preview": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageDeletePreview;
+    status: 200;
   };
   "GET /kb/wiki/pages/{page_id}/file": {
     path: { page_id: string };

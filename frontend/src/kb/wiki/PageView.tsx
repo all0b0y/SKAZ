@@ -16,6 +16,7 @@ import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 import { useOpenInObsidian } from '../document/fileActions';
+import { DeletePageDialog, RenamePageDialog, type PageDialog } from './PageDialogs';
 
 const NO_CITES: never[] = [];
 const PAGE_GONE = 'Page was removed from the wiki.';
@@ -297,8 +298,10 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
 }
 
 /** Wiki page in the right panel (v7–v8, decisions 20–22). */
+const FINDER_FAILED = 'Finder couldn’t show this page. It may have been moved or deleted.';
+
 export function PageView({ target, nonce }: { target: DocTarget; nonce: number }) {
-  const { client, chats } = useServices();
+  const { client, chats, bridge } = useServices();
   const askAbout = useAskAbout();
   const expanded = useUi((s) => s.docExpanded);
   const openGraph = useUi((s) => s.openGraph);
@@ -311,6 +314,8 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const [failures, setFailures] = useState<Record<string, RecheckFailure>>({});
   const closeDoc = useUi((s) => s.closeDoc);
   const obsidian = useOpenInObsidian();
+  const [dialog, setDialog] = useState<PageDialog>(null);
+  const [finderError, setFinderError] = useState<string | null>(null);
   const { state, reload, set } = useLoad(target.id, async () => await client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } })
     .catch((e: unknown) => {
       // Gone from the wiki: retrying can't help (QA D5); chats on screen mark their chips to it.
@@ -384,6 +389,15 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
                 { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
                 { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
                 ...(obsidian.open && page ? [{ id: 'obsidian', label: 'Open in Obsidian', icon: 'external' as const, onSelect: () => void obsidian.open!({ kind: 'page', id: page.id }) }] : []),
+                ...(bridge.showInFinder && page ? [{ id: 'finder', label: 'Show in Finder', icon: 'folder' as const, onSelect: () => {
+                  setFinderError(null);
+                  void bridge.showInFinder!({ kind: 'page', id: page.id }).then(
+                    (ok) => { if (!ok) setFinderError(FINDER_FAILED); }, () => setFinderError(FINDER_FAILED));
+                } }] : []),
+                ...(page ? [
+                  { id: 'rename', label: 'Rename', icon: 'pencil' as const, onSelect: () => setDialog('rename') },
+                  { id: 'delete', label: 'Delete page…', icon: 'trash' as const, danger: true, onSelect: () => setDialog('delete') },
+                ] : []),
               ]} />
             </>
           )}
@@ -403,6 +417,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
               : <Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {obsidian.message && <p className="kb-page__notice">{obsidian.message}</p>}
+        {finderError && <p className="kb-page__notice" role="alert">{finderError}</p>}
         {page && (
           <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={page.kind}>
             <h2 className="kb-doc__title">{page.title}</h2>
@@ -416,6 +431,8 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
             <PageBody page={page} actions={actions} noteOpen={noteOpen} setNoteOpen={setNoteOpen} addNote={addNote} />
           </article>
         )}
+        {page && <RenamePageDialog page={page} open={dialog === 'rename'} onClose={() => setDialog(null)} onDone={set} />}
+        {page && <DeletePageDialog page={page} open={dialog === 'delete'} onClose={() => setDialog(null)} />}
       </div>
     </>
   );

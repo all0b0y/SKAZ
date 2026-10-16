@@ -105,6 +105,10 @@ const ROUTES: readonly Route[] = [
   { method: 'PUT', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/wiki\/pages\/[^/]+\/blocks\/[^/]+\/recheck$/ },
+  // B20: rename and delete a page (with its preview); its file path stays main-only.
+  { method: 'PATCH', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
+  { method: 'DELETE', pattern: /^\/kb\/wiki\/pages\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/wiki\/pages\/[^/]+\/delete-preview$/ },
   { method: 'PATCH', pattern: /^\/kb\/materials\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/kb\/materials\/[^/]+$/ },
   { method: 'GET', pattern: /^\/kb\/materials\/[^/]+\/delete-preview$/ },

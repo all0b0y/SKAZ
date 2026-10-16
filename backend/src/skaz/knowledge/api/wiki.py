@@ -11,6 +11,7 @@ from ..errors import KnowledgeError
 from ..markdown.page import PageKind
 from ..store.records import PageRecord
 from ..wiki.links import LinkView
+from ..wiki.page_ops import PageDeletePlan
 from ..wiki.service import PageDetail, WikiService
 from .deps import KbDep, kb_call
 from .ingest import job_view
@@ -24,10 +25,14 @@ from .schemas_wiki2 import (
     KbGraphEdge,
     KbGraphNode,
     KbNodeKind,
+    KbPageDeletePreview,
     KbPageFile,
+    KbPageLinking,
+    KbPageRename,
     KbRecognitionSettings,
     KbRecognitionSettingsUpdate,
     KbRescanResult,
+    KbSourceKept,
     KbWikiFile,
 )
 
@@ -145,6 +150,41 @@ async def page_file(page_id: str, wiki: WikiDep) -> KbPageFile:
     library root before it hands it to Finder or Obsidian.
     """
     return KbPageFile(path=await kb_call(wiki.page_file, page_id))
+
+
+@router.patch("/pages/{page_id}")
+async def rename_page(page_id: str, body: KbPageRename, wiki: WikiDep) -> KbPage:
+    """Rename a page; every [[link]] to it is rewritten (B20). 409 for a taken name."""
+    return page_view(await kb_call(wiki.rename_page, page_id, body.title))
+
+
+def _delete_view(plan: PageDeletePlan) -> KbPageDeletePreview:
+    return KbPageDeletePreview(
+        page=KbPageRef(id=plan.page.id, kind=cast(PageKind, plan.page.kind), title=plan.page.title),
+        linking_pages=[
+            KbPageLinking(
+                page=KbPageRef(id=item.ref.id, kind=cast(PageKind, item.ref.kind), title=item.ref.title),
+                links=item.links,
+                in_your_notes=item.in_user_text,
+            )
+            for item in plan.linking
+        ],
+        links_unlinked=plan.links_unlinked,
+        user_notes=plan.user_notes,
+        sources=[KbSourceKept(id=material_id, title=title) for material_id, title in plan.sources],
+    )
+
+
+@router.get("/pages/{page_id}/delete-preview")
+async def page_delete_preview(page_id: str, wiki: WikiDep) -> KbPageDeletePreview:
+    """What deleting the page would do; changes nothing."""
+    return _delete_view(await kb_call(wiki.page_delete_preview, page_id))
+
+
+@router.delete("/pages/{page_id}")
+async def delete_page(page_id: str, wiki: WikiDep) -> KbPageDeletePreview:
+    """Delete the page: links to it are unlinked, its sources stay."""
+    return _delete_view(await kb_call(wiki.delete_page, page_id))
 
 
 @router.put("/pages/{page_id}/blocks/{block_id}")

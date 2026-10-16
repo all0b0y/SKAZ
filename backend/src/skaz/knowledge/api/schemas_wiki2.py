@@ -174,3 +174,33 @@ class KbWikiFile(BaseModel):
     text: str
     #: Its wikilinks resolved to pages and materials (as for page blocks).
     links: list[KbBlockLink]
+
+
+class KbPageRename(_Request):
+    #: The new name; the same rules as material names (no slashes, not hidden, not too long).
+    title: str = Field(min_length=1, max_length=200)
+
+
+class KbPageLinking(BaseModel):
+    page: KbPageRef
+    #: Links to the deleted page that get unlinked on this page.
+    links: int
+    #: How many of them are in the user's own words (they keep their text, lose the link).
+    in_your_notes: int
+
+
+class KbSourceKept(BaseModel):
+    id: str
+    title: str
+
+
+class KbPageDeletePreview(BaseModel):
+    """What deleting a page does (B20); the same shape answers the deletion itself."""
+
+    page: KbPageRef
+    linking_pages: list[KbPageLinking]
+    links_unlinked: int
+    #: The user's own notes / edited statements on the page: they go with it.
+    user_notes: int
+    #: Materials the page cites: they stay in the library.
+    sources: list[KbSourceKept]

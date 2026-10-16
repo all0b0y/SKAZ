@@ -565,6 +565,33 @@ const ROUTES: FakeRoutes = {
   'GET /kb/wiki/pages': [200, (w, { query }) => w.pages.filter((p) => (!query.kind || p.kind === query.kind)
     && (!query.folder_id || p.folders.includes(query.folder_id))).map(pageSummary)],
   'GET /kb/wiki/pages/{page_id}': [200, (w, { path }) => findPage(w, path.page_id)],
+  // B20: rename (links follow), delete with a preview (links unlinked, sources kept).
+  'PATCH /kb/wiki/pages/{page_id}': [200, (w, { path, body }) => {
+    const page = findPage(w, path.page_id);
+    const title = body.title.trim();
+    if (!title || title.includes('/')) fail(422, 'A name can’t contain “/”.');
+    if (w.pages.some((p) => p.id !== page.id && p.kind === page.kind && p.title.toLowerCase() === title.toLowerCase())) {
+      fail(409, 'A page with this name already exists here. Choose another name.');
+    }
+    page.title = title;
+    for (const other of w.pages) {
+      for (const ref of [...other.related, ...other.mentioned_in]) if (ref.id === page.id) ref.title = title;
+      for (const b of other.blocks) for (const l of b.links ?? []) if (l.page?.id === page.id) l.page.title = title;
+    }
+    return page;
+  }],
+  'GET /kb/wiki/pages/{page_id}/delete-preview': [200, (w, { path }) => pageDeletePreview(w, findPage(w, path.page_id))],
+  'DELETE /kb/wiki/pages/{page_id}': [200, (w, { path }) => {
+    const page = findPage(w, path.page_id);
+    const preview = pageDeletePreview(w, page);
+    w.pages = w.pages.filter((p) => p.id !== page.id);
+    for (const other of w.pages) {
+      other.related = other.related.filter((r) => r.id !== page.id);
+      other.mentioned_in = other.mentioned_in.filter((r) => r.id !== page.id);
+      for (const b of other.blocks) if (b.links) b.links = b.links.filter((l) => l.page?.id !== page.id);
+    }
+    return preview;
+  }],
   'POST /kb/wiki/pages/{page_id}/blocks': [201, (w, { path, body }) => {
     const page = findPage(w, path.page_id);
     page.blocks.push(block(`u${++w.seq}`, 'user_note', body.section ?? 'My notes', body.text));
@@ -939,6 +966,22 @@ const ROUTES: FakeRoutes = {
 
 function findCorrection(w: FakeWorld, id: string): KbCorrection {
   return w.corrections.find((c) => c.id === id) ?? fail(404, 'Correction not found.');
+}
+
+function pageDeletePreview(w: FakeWorld, page: KbPage) {
+  const linking = w.pages.filter((p) => p.id !== page.id).flatMap((p) => {
+    const links = p.blocks.flatMap((b) => (b.links ?? []).filter((l) => l.page?.id === page.id).map(() => b.owner));
+    const related = links.length ? 0 : [...p.related, ...p.mentioned_in].some((r) => r.id === page.id) ? 1 : 0;
+    const total = links.length + related;
+    return total ? [{ page: pageRef(p), links: total, in_your_notes: links.filter((o) => o !== 'agent').length }] : [];
+  });
+  return {
+    page: pageRef(page),
+    linking_pages: linking,
+    links_unlinked: linking.reduce((n, l) => n + l.links, 0),
+    user_notes: page.blocks.filter((b) => b.owner !== 'agent').length,
+    sources: page.sources.map((id) => ({ id, title: w.materials.find((m) => m.id === id)?.title ?? id })),
+  };
 }
 
 function findPage(w: FakeWorld, id: string): KbPage {

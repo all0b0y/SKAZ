@@ -4,7 +4,7 @@ import type { PageKind } from '../api/names';
 import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
 import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
-import { useServices, useUi } from '../state/context';
+import { useLibrary, useServices, useUi } from '../state/context';
 import type { WikiFileName } from '../state/document';
 import { errorText } from '../api/client';
 import { Snippet } from '../ui/Highlight';
@@ -146,6 +146,10 @@ export function WikiSide() {
   const fileOpen = useUi((s) => (s.right?.kind === 'wikifile' ? s.right.name : null));
   const [kind, setKind] = useState<PageKind | null>(null);
   const { state, reload } = useLoad('wiki-pages', () => client.call('GET /kb/wiki/pages'));
+  // A page renamed or deleted (or anything else that reloads the library) shows here too.
+  const revision = useLibrary((s) => s.revision);
+  const seen = useRef(revision);
+  useEffect(() => { if (seen.current !== revision) { seen.current = revision; reload(); } }, [revision, reload]);
   const pages = state.value ?? [];
   const byId = new Map(pages.map((p) => [p.id, p]));
 

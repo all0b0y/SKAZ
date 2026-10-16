@@ -25,7 +25,7 @@ describe('Electron IPC policy — knowledge library (/kb) routes of the new inte
       ['DELETE', '/kb/library'], ['PUT', '/kb/library'],
       ['DELETE', '/kb/folders'], ['GET', '/kb/folders/fld_1/files'],
       ['POST', '/kb/materials'], ['PUT', '/kb/materials/mat_1'], ['GET', '/kb/materials/mat_1/file'],
-      ['GET', '/kb/notifications/n1'], ['DELETE', '/kb/wiki/pages/p1'], ['GET', '/kb'],
+      ['GET', '/kb/notifications/n1'], ['PUT', '/kb/wiki/pages/p1'], ['POST', '/kb/wiki/pages/p1/delete-preview'], ['GET', '/kb'],
     ];
     for (const [method, path] of refused) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
