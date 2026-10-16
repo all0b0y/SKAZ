@@ -26,4 +26,5 @@ export const CHANNELS = {
   // Library file actions (B20).
   chooseExportFolder: 'app:choose-export-folder',
   showInFinder: 'app:show-in-finder',
+  openInObsidian: 'app:open-in-obsidian',
 } as const;

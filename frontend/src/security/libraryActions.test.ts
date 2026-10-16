@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { ExportFolders, isInside, resolveTarget, type LibraryActionDeps } from '../../../electron/libraryActions';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  ExportFolders, isInside, obsidianInstalled, obsidianUrl, openInObsidian, resolveTarget, type LibraryActionDeps,
+} from '../../../electron/libraryActions';
 
 const ROOT = '/Users/me/Documents/SKAZ';
 
@@ -65,5 +67,40 @@ describe('Library file actions — named targets only (B20)', () => {
     expect(isInside(ROOT, `${ROOT}/Wiki`)).toBe(true);
     expect(isInside(ROOT, '/Users/me/Documents/SKAZ-other')).toBe(false);
     expect(isInside(ROOT, ROOT)).toBe(true);
+  });
+});
+
+describe('Open in Obsidian — fixed URL from a checked path (B20)', () => {
+  it('builds obsidian://open?path= from the library root or a page file, nothing else', async () => {
+    expect(obsidianUrl('/Users/me/Documents/SKAZ/Wiki/Concepts/Entropy (энтропия).md'))
+      .toBe('obsidian://open?path=%2FUsers%2Fme%2FDocuments%2FSKAZ%2FWiki%2FConcepts%2FEntropy%20(%D1%8D%D0%BD%D1%82%D1%80%D0%BE%D0%BF%D0%B8%D1%8F).md');
+    const openExternal = vi.fn(async () => undefined);
+    const exports = new ExportFolders(memory());
+    const d = { ...deps(), installed: () => true, openExternal };
+    expect(await openInObsidian({ kind: 'library' }, d, exports)).toEqual({ ok: true });
+    expect(openExternal).toHaveBeenLastCalledWith(obsidianUrl(ROOT));
+    expect(await openInObsidian({ kind: 'page', id: 'pg-1' }, d, exports)).toEqual({ ok: true });
+    expect(openExternal).toHaveBeenLastCalledWith(obsidianUrl(`${ROOT}/Wiki/Concepts/Entropy.md`));
+    exports.remember('/Users/me/Export');
+    for (const target of [{ kind: 'export', path: '/Users/me/Export' }, { kind: 'url', url: 'obsidian://x' }, 'obsidian://open?vault=x']) {
+      expect(await openInObsidian(target, d, exports), JSON.stringify(target)).toEqual({ ok: false, reason: 'unavailable' });
+    }
+    expect(openExternal).toHaveBeenCalledTimes(2);
+  });
+
+  it('says honestly when Obsidian is not installed, and never opens anything then', async () => {
+    const openExternal = vi.fn(async () => undefined);
+    const result = await openInObsidian({ kind: 'library' }, { ...deps(), installed: () => false, openExternal }, new ExportFolders(memory()));
+    expect(result).toEqual({ ok: false, reason: 'not_installed' });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('detects Obsidian in /Applications, ~/Applications or as the obsidian:// handler', () => {
+    const none = () => false;
+    expect(obsidianInstalled('/Users/me', (p) => p === '/Applications/Obsidian.app', () => '')).toBe(true);
+    expect(obsidianInstalled('/Users/me', (p) => p === '/Users/me/Applications/Obsidian.app', () => '')).toBe(true);
+    expect(obsidianInstalled('/Users/me', none, () => 'Obsidian')).toBe(true);
+    expect(obsidianInstalled('/Users/me', none, () => '')).toBe(false);
+    expect(obsidianInstalled('/Users/me', none, () => { throw new Error('no'); })).toBe(false);
   });
 });

@@ -15,6 +15,7 @@ import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavi
 import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
+import { useOpenInObsidian } from '../document/fileActions';
 
 const NO_CITES: never[] = [];
 const PAGE_GONE = 'Page was removed from the wiki.';
@@ -309,6 +310,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const [jobs, setJobs] = useState<Record<string, string>>({});
   const [failures, setFailures] = useState<Record<string, RecheckFailure>>({});
   const closeDoc = useUi((s) => s.closeDoc);
+  const obsidian = useOpenInObsidian();
   const { state, reload, set } = useLoad(target.id, async () => await client.call('GET /kb/wiki/pages/{page_id}', { path: { page_id: target.id } })
     .catch((e: unknown) => {
       // Gone from the wiki: retrying can't help (QA D5); chats on screen mark their chips to it.
@@ -381,6 +383,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Page actions" items={[
                 { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
                 { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
+                ...(obsidian.open && page ? [{ id: 'obsidian', label: 'Open in Obsidian', icon: 'external' as const, onSelect: () => void obsidian.open!({ kind: 'page', id: page.id }) }] : []),
               ]} />
             </>
           )}
@@ -399,6 +402,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
               ? <Button size="sm" icon="close" onClick={closeDoc}>Close</Button>
               : <Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
+        {obsidian.message && <p className="kb-page__notice">{obsidian.message}</p>}
         {page && (
           <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={page.kind}>
             <h2 className="kb-doc__title">{page.title}</h2>

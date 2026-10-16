@@ -90,3 +90,45 @@ export async function resolveTarget(target: unknown, deps: LibraryActionDeps, ex
   }
   return null;
 }
+
+// ---- Open in Obsidian ---------------------------------------------------------------------------
+
+export type ObsidianResult = { ok: true } | { ok: false; reason: 'not_installed' | 'unavailable' };
+
+/** The fixed Obsidian URL for an absolute path (the library root as a vault, or one page). */
+export function obsidianUrl(absolutePath: string): string {
+  return `obsidian://open?path=${encodeURIComponent(absolutePath)}`;
+}
+
+export interface ObsidianDeps {
+  /** /Applications/Obsidian.app, ~/Applications/Obsidian.app, or a handler of obsidian:// in Launch Services. */
+  installed: () => boolean;
+  openExternal: (url: string) => Promise<void>;
+}
+
+/** Obsidian is installed where macOS keeps apps, or registered for obsidian:// links. */
+export function obsidianInstalled(home: string, exists: (p: string) => boolean, protocolHandler: () => string): boolean {
+  if (exists('/Applications/Obsidian.app') || exists(path.join(home, 'Applications', 'Obsidian.app'))) return true;
+  try {
+    return protocolHandler().trim() !== '';
+  } catch {
+    return false;
+  }
+}
+
+/** Open the library or a page in Obsidian; the URL is built here from a checked path, never taken from the renderer. */
+export async function openInObsidian(
+  target: unknown, deps: LibraryActionDeps & ObsidianDeps, exports: ExportFolders,
+): Promise<ObsidianResult> {
+  const kind = (target as { kind?: unknown } | null)?.kind;
+  if (kind !== 'library' && kind !== 'page') return { ok: false, reason: 'unavailable' };
+  if (!deps.installed()) return { ok: false, reason: 'not_installed' };
+  const resolved = await resolveTarget(target, deps, exports);
+  if (!resolved) return { ok: false, reason: 'unavailable' };
+  try {
+    await deps.openExternal(obsidianUrl(resolved.path));
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'unavailable' };
+  }
+}

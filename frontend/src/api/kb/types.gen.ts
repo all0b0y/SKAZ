@@ -751,6 +751,10 @@ export interface KbPage {
   is_analysis_source_forbidden: boolean;
 }
 
+export interface KbPageFile {
+  path: string;
+}
+
 export interface KbPageHit {
   id: string;
   title: string;
@@ -1710,6 +1714,13 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/wiki/pages/{page_id}/file": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPageFile;
+    status: 200;
   };
 }
 

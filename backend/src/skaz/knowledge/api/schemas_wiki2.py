@@ -159,3 +159,8 @@ class KbExportRequest(_Request):
     path: str = Field(min_length=1, max_length=4096)
     #: The user confirmed exporting into a non-empty folder (same names are replaced, others stay).
     overwrite: bool = False
+
+
+class KbPageFile(BaseModel):
+    #: Absolute path of the page's ``.md`` file (main process only).
+    path: str

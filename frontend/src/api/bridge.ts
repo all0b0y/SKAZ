@@ -123,6 +123,8 @@ export interface BridgeApi {
   chooseExportFolder?(): Promise<string | null>;
   /** Reveal a library target in Finder (the library, a wiki page's file, a folder chosen for an export). */
   showInFinder?(target: RevealTarget): Promise<boolean>;
+  /** Open the library (as a vault) or one page in Obsidian; `not_installed` when Obsidian isn't on this Mac. */
+  openInObsidian?(target: { kind: 'library' } | { kind: 'page'; id: string }): Promise<{ ok: true } | { ok: false; reason: 'not_installed' | 'unavailable' }>;
   /** Native folder chooser; returns a candidate only, never writes preferences. */
   chooseStorageRoot?(): Promise<string | null>;
   /** Current backend lifecycle phase. */

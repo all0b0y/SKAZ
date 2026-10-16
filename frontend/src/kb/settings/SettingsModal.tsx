@@ -15,6 +15,7 @@ import { ActivityLogRow } from './ActivityLog';
 import { MicRow, SystemAudioRow } from './SoundRows';
 import { RecognitionCheckRow } from './RecognitionCheckRow';
 import { ExportRow } from './ExportRow';
+import { ObsidianRow } from '../document/fileActions';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -72,6 +73,8 @@ function RowControl({ row }: { row: RowDef }) {
       );
     case 'export':
       return <ExportRow />;
+    case 'obsidian':
+      return <ObsidianRow />;
     case 'p-soniox':
       return <PrivacyRow rowId={row.id} fallback="sound of recordings, when Soniox is chosen" />;
     case 'p-agent':

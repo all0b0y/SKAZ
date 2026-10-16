@@ -579,6 +579,11 @@ class WikiService:
         links = LinkResolver(self.kb.db).for_blocks((entry.id, entry.text) for entry in view.entries)
         return PageDetail(view, refs(related), refs(mentioned), names, updated_at, links)
 
+    def page_file(self, page_id: str) -> str:
+        """Absolute path of a page's file (404 when the page or its file is gone)."""
+        _library, path = page_path(self.kb, page_id)
+        return str(path)
+
     def _edited(self, page_id: str) -> PageDetail:
         self.graph.refresh()
         self._touch()

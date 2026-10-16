@@ -23,6 +23,7 @@ from .schemas_wiki2 import (
     KbGraphEdge,
     KbGraphNode,
     KbNodeKind,
+    KbPageFile,
     KbRecognitionSettings,
     KbRecognitionSettingsUpdate,
     KbRescanResult,
@@ -125,6 +126,16 @@ async def list_pages(
 async def read_page(page_id: str, wiki: WikiDep) -> KbPage:
     """Re-reads the page file first: an external edit is detected when the page is opened."""
     return page_view(await kb_call(wiki.page, page_id))
+
+
+@router.get("/pages/{page_id}/file")
+async def page_file(page_id: str, wiki: WikiDep) -> KbPageFile:
+    """The page's file on disk, for the main process only (Show in Finder, Open in Obsidian, B20).
+
+    The renderer never calls it (the IPC policy refuses it): main checks the path lies inside the
+    library root before it hands it to Finder or Obsidian.
+    """
+    return KbPageFile(path=await kb_call(wiki.page_file, page_id))
 
 
 @router.put("/pages/{page_id}/blocks/{block_id}")
