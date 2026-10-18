@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from ..agents.engine import TurnMessage
 from ..agents.prompting import untrusted_block
+from ..errors import KnowledgeError
 from ..ingest.checks import MIN_QUOTE_CHARS
 from ..markdown.text import format_timestamp
 from ..service import KnowledgeService
@@ -31,6 +33,12 @@ CONTEXT_CHARS = 48_000
 #: general ``CONTEXT_CHARS``) stays far below the agents' context windows.
 ATTACHMENT_CHARS = 60_000
 HISTORY_QUOTE_CHARS = 300
+
+class StudyReader(Protocol):
+    def open_context(self, block_id: str) -> str | None: ...
+
+    def agent_summary(self, page_id: str) -> str: ...
+
 
 #: Another chat's title and messages by id (``None`` when it does not exist).
 ChatLookup = Callable[[str], tuple[str, Sequence[Message]] | None]
@@ -58,6 +66,17 @@ citations whose quote is copied verbatim from the fragment (at least {min_quote}
 block with a quote that doesn't match is refused, so read the fragment first. Write plain text: \
 no wikilinks, no instructions to an AI. Never change the wiki on your own initiative: suggest it \
 in words and let the user decide.
+
+Flashcards and tests: when the user asks for cards or a test from materials or wiki pages, read \
+the sources first, then make them with skaz_study_make_deck or skaz_study_make_test in one call (as \
+many as the user asked, else as many as the material supports). Every answer rests on a citation \
+whose quote is copied verbatim from the fragment; your examples and mnemonics go in explanation; \
+the wrong options of a test are yours. After the call, say in one or two sentences what you made and \
+what was dropped — don't repeat the cards in text. The user grades and answers in the block on their \
+own; never treat their next message as an answer to a card. For reviewing saved decks (mentioned \
+with @, with their review state), use skaz_study_show with the mode that fits the request (due, new, \
+hard, quick10, all); if it is unclear where to start, ask once. "This card" or "this question" means \
+the one the context says is open.
 
 Questions to the user: when you can't go on without the user's choice, ask with skaz_ask_user \
 (up to 4 options, the one you recommend marked); ask rarely, one question at a time. The user may \
@@ -147,9 +166,12 @@ def _clip(text: str, limit: int) -> str:
 class ContextBuilder:
     """Builds the text of the current question with everything the agent should know about it."""
 
-    def __init__(self, kb: KnowledgeService, reader: MaterialReader) -> None:
+    def __init__(self, kb: KnowledgeService, reader: MaterialReader,
+                 study: StudyReader | None = None) -> None:
         self.kb = kb
         self.reader = reader
+        #: Decks/tests (0.3.1 S): the open block and a deck's cards with their FSRS state.
+        self.study = study
 
     def request(self, chat: Chat, given: MessageInput, chats: ChatLookup) -> str:
         budget = _Budget()
@@ -170,6 +192,12 @@ class ContextBuilder:
             material = self._material(given.context.material_id)
             if material is not None:
                 add("The user has this material open next to the chat:", "open material", material)
+        if given.context.study_id and self.study is not None:
+            opened = self.study.open_context(given.context.study_id)
+            if opened is not None:
+                add("The user has this study block open; “this card” / “this question” means the "
+                    "current one:",
+                    "open study block", opened)
         for ref in given.mentions:
             mention = self._mention(ref, chat.id, chats)
             if mention is not None:
@@ -239,6 +267,12 @@ class ContextBuilder:
         record = self.kb.page_repo.get(page_id)
         if record is None:
             return None
+        if record.kind in ("deck", "test") and self.study is not None:
+            # A deck with each card's FSRS group and due date (S12): "start with what I forget" works.
+            try:
+                return _clip(self.study.agent_summary(page_id), ITEM_CHARS)
+            except (KnowledgeError, OSError, ValueError):
+                return None
         note = " — a saved chat answer, not evidence" if record.kind == "analysis" else ""
         lines = [f"Wiki page “{record.title}” (id {record.id}, kind {record.kind}{note})"]
         for block in self.kb.page_repo.blocks(record.id):

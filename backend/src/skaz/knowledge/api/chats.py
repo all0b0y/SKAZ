@@ -27,6 +27,7 @@ from ..chats.model import (
     QuestionPart,
     Quote,
     Ref,
+    StudyPart,
     TextPart,
 )
 from ..chats.service import ChatConflict, ChatService, ChatView
@@ -35,6 +36,7 @@ from ..permissions.broker import PermissionConflict
 from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
 from ..service import KnowledgeService
 from ..store.database import MAX_DB_INT
+from ..study.service import StudyService
 from .deps import kb_call
 from .schemas import KbCitation, KbPageRef
 from .schemas_chats import (
@@ -67,6 +69,7 @@ from .schemas_chats import (
     KbTextPart,
     KbToolPart,
 )
+from .study import study_part
 
 MAX_WAIT_S = 25.0
 MAX_LIST = 500
@@ -119,6 +122,8 @@ class Presenter:
     def __init__(self, kb: KnowledgeService) -> None:
         self.kb = kb
         self.controls = ControlStore(kb.db)
+        #: Reads study blocks for their parts (no writes: saving goes through the app's service).
+        self.study = StudyService(kb, None, language=lambda: "en")
         self._folders: dict[str, str] = {}
 
     def citation(self, material_id: str, seg: int, quote: str | None) -> KbCitation:
@@ -150,6 +155,10 @@ class Presenter:
         if isinstance(part, QuestionPart):
             found = self.controls.question(part.question_id)
             return KbMessagePart(question_part(found) if found is not None
+                                 else KbTextPart(type="text", text=""))
+        if isinstance(part, StudyPart):
+            block = self.study.store.block(part.study_id)
+            return KbMessagePart(study_part(self.study, block, self.citation) if block is not None
                                  else KbTextPart(type="text", text=""))
         if isinstance(part, TextPart):
             return KbMessagePart(KbTextPart(type="text", text=part.text))
@@ -260,7 +269,8 @@ def to_input(body: KbSend) -> MessageInput:
         quotes=tuple(Quote(quote.source, quote.id, quote.text, quote.block_id, quote.seg, quote.message_id)
                      for quote in body.quotes),
         attachments=tuple(body.attachments),
-        context=OpenContext(body.context.open_page_id, body.context.open_material_id),
+        context=OpenContext(body.context.open_page_id, body.context.open_material_id,
+                            body.context.open_study_id),
     )
 
 

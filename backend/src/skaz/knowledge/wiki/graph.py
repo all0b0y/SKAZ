@@ -137,7 +137,9 @@ class GraphIndex:
         edges = self.edges()
         with self.db.read() as connection:
             pages = connection.execute(
-                "SELECT id, kind, title FROM pages ORDER BY title COLLATE NOCASE"
+                # Decks and tests are study material, not knowledge pages: not in the graph (0.3.1 S).
+                "SELECT id, kind, title FROM pages WHERE kind NOT IN ('deck', 'test') "
+                "ORDER BY title COLLATE NOCASE"
             ).fetchall()
             folders: dict[str, list[str]] = defaultdict(list)
             for row in connection.execute("SELECT page_id, folder_id FROM page_folders ORDER BY rowid"):

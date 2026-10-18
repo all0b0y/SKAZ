@@ -45,7 +45,7 @@ TEXT_MAX_OUTPUT_BYTES = 48_000
 _SUMMARY_CHARS = 160
 _TRUNCATED = " …[truncated]"
 SearchKind = Literal["recording", "audio", "video", "video_link", "pdf", "book", "web", "text",
-                     "concept", "note", "folder", "analysis"]
+                     "concept", "note", "folder", "analysis", "deck", "test"]
 assert set(get_args(SearchKind)) == set(MATERIAL_KINDS) | set(PAGE_KINDS)
 
 

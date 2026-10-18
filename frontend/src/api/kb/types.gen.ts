@@ -129,7 +129,7 @@ export interface KbBlockCreate {
 export interface KbBlockHit {
   page_id: string;
   page_title: string;
-  page_kind: "concept" | "note" | "folder" | "analysis";
+  page_kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
   block_id: string;
   kind: "from_source" | "connection" | "explanation" | "user_note";
   owner: "agent" | "user" | "user_edited";
@@ -174,7 +174,7 @@ export interface KbChatCreate {
   recording_material_id?: string | null;
 }
 
-/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part; ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question). */
+/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part; ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question, study). */
 export interface KbChatEvent {
   seq: number;
   type: "message" | "delta" | "part" | "state" | "title" | "part_update";
@@ -312,6 +312,25 @@ export interface KbDecisions {
   cloud_model: string;
   local: KbLocalDecisions;
   stats: KbDecisionStats;
+}
+
+export interface KbDeckStudy {
+  mode?: "due" | "new" | "hard" | "quick10" | "all";
+  card_ids?: string[] | null;
+  chat_id?: string | null;
+}
+
+export interface KbDeckStudyResult {
+  chat_id: string;
+  study: KbStudyPart;
+}
+
+export interface KbDeckView {
+  page_id: string;
+  title: string;
+  cards: KbStudyCard[];
+  groups: KbStudyGroups;
+  due: number;
 }
 
 export interface KbDeletePreview {
@@ -797,7 +816,7 @@ export interface KbMessageInput {
   attachments: string[];
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -848,6 +867,7 @@ export interface KbNotificationsRead {
 export interface KbOpenContext {
   open_page_id?: string | null;
   open_material_id?: string | null;
+  open_study_id?: string | null;
 }
 
 export interface KbOrigin {
@@ -858,7 +878,7 @@ export interface KbOrigin {
 
 export interface KbPage {
   id: string;
-  kind: "concept" | "note" | "folder" | "analysis";
+  kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
   title: string;
   original: string | null;
   aliases: string[];
@@ -889,7 +909,7 @@ export interface KbPageFile {
 export interface KbPageHit {
   id: string;
   title: string;
-  kind: "concept" | "note" | "folder" | "analysis";
+  kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
   matched_alias: string | null;
 }
 
@@ -908,7 +928,7 @@ export interface KbPagePart {
 
 export interface KbPageRef {
   id: string;
-  kind: "concept" | "note" | "folder" | "analysis";
+  kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
   title: string;
 }
 
@@ -918,7 +938,7 @@ export interface KbPageRename {
 
 export interface KbPageSummary {
   id: string;
-  kind: "concept" | "note" | "folder" | "analysis";
+  kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
   title: string;
   original: string | null;
   aliases: string[];
@@ -1191,6 +1211,148 @@ export interface KbSpeechSettingsUpdate {
   translate_by_default?: boolean | null;
   translation_language?: string | null;
   cloud_consent?: boolean | null;
+}
+
+export interface KbStudyAnswerIn {
+  item_id: string;
+  choices?: string[] | null;
+  text?: string | null;
+}
+
+export interface KbStudyCard {
+  id: string;
+  page_id: string | null;
+  question: string;
+  answer: string;
+  citations: KbCitation[];
+  explanation: string | null;
+  group: "new" | "learning" | "known" | "hard";
+  state: "new" | "learning" | "review" | "relearning";
+  suspended: boolean;
+  marked_hard: boolean;
+  intervals: KbStudyIntervals;
+  graded: "again" | "hard" | "good" | "easy" | null;
+  due: string | null;
+}
+
+export interface KbStudyGradeIn {
+  item_id: string;
+  grade: "again" | "hard" | "good" | "easy";
+}
+
+export interface KbStudyGroups {
+  new: number;
+  learning: number;
+  known: number;
+  hard: number;
+}
+
+/** What each grade schedules ("10m", "3d"); ``null`` where a practice mode leaves the schedule alone. */
+export interface KbStudyIntervals {
+  again: string | null;
+  hard: string | null;
+  good: string | null;
+  easy: string | null;
+}
+
+export interface KbStudyMarkIn {
+  item_ids: string[];
+  mark: "hard" | "known" | "hide" | "unhide" | "unhard";
+}
+
+export interface KbStudyMove {
+  place?: "chat" | "panel" | "window" | null;
+  position?: number | null;
+  side?: "question" | "answer" | null;
+}
+
+export interface KbStudyOption {
+  id: string;
+  text: string;
+  origin: "source" | "agent";
+}
+
+/** A deck or test block in a chat (S5, W2): lives in one place — the chat, beside it, or its window. */
+export interface KbStudyPart {
+  type: "study";
+  id: string;
+  kind: "deck" | "test";
+  title: string;
+  engine: string | null;
+  origin: "agent" | "show";
+  mode: "due" | "new" | "hard" | "quick10" | "all";
+  place: "chat" | "panel" | "window";
+  position: number;
+  side: "question" | "answer";
+  total: number;
+  cards: KbStudyCard[];
+  questions: KbStudyQuestion[];
+  groups: KbStudyGroups;
+  held_back: number;
+  save: KbStudySave;
+  result: KbStudyResult | null;
+  chat_id: string;
+  message_id: string;
+}
+
+export interface KbStudyQuestion {
+  id: string;
+  type: "choice" | "multi" | "short" | "open";
+  question: string;
+  options: KbStudyOption[];
+  answers: string[];
+  citations: KbCitation[];
+  explanation: string | null;
+  response: KbStudyResponse | null;
+}
+
+/** The user's answer to one question in the current attempt. */
+export interface KbStudyResponse {
+  choices: string[];
+  text: string | null;
+  checked: boolean;
+  score: number | null;
+  verdict: string | null;
+  missing: string | null;
+  comment: string | null;
+  checking: boolean;
+  error: string | null;
+}
+
+export interface KbStudyResult {
+  correct: number;
+  total: number;
+  mistakes: number;
+  partly: number;
+  rows: KbStudyResultRow[];
+}
+
+export interface KbStudyResultRow {
+  id: string;
+  score: number | null;
+}
+
+export interface KbStudyRetake {
+  mistakes_only?: boolean;
+}
+
+/** The block's last row (S6): "<Agent> wants to create <path> · Deny · Save to wiki" and what happened. */
+export interface KbStudySave {
+  status: "none" | "pending" | "saved" | "denied";
+  path: string;
+  page_id: string | null;
+}
+
+export interface KbStudySaveIn {
+  decision: "allow" | "deny";
+}
+
+export interface KbStudySettings {
+  new_per_day: number;
+}
+
+export interface KbStudySettingsPatch {
+  new_per_day: number;
 }
 
 /** What a click on a notification opens. */
@@ -2015,6 +2177,104 @@ export interface KbEndpoints {
     response: KbWikiSettings;
     status: 200;
   };
+  "GET /kb/study/decks/{page_id}": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbDeckView;
+    status: 200;
+  };
+  "POST /kb/study/decks/{page_id}/marks": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: KbStudyMarkIn;
+    response: KbDeckView;
+    status: 200;
+  };
+  "POST /kb/study/decks/{page_id}/study": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: KbDeckStudy;
+    response: KbDeckStudyResult;
+    status: 200;
+  };
+  "GET /kb/study/settings": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbStudySettings;
+    status: 200;
+  };
+  "PATCH /kb/study/settings": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbStudySettingsPatch;
+    response: KbStudySettings;
+    status: 200;
+  };
+  "GET /kb/study/{block_id}": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "PATCH /kb/study/{block_id}": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyMove;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/answer": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyAnswerIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/check-open": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyAnswerIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/finish": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/grade": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyGradeIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/mark": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyMarkIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/retake": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyRetake;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/save": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudySaveIn;
+    response: KbStudyPart;
+    status: 200;
+  };
   "POST /kb/wiki/connections/find": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -2031,7 +2291,7 @@ export interface KbEndpoints {
   };
   "GET /kb/wiki/pages": {
     path: Record<string, never>;
-    query: { kind?: "concept" | "note" | "folder" | "analysis" | null; folder_id?: string | null };
+    query: { kind?: "concept" | "note" | "folder" | "analysis" | "deck" | "test" | null; folder_id?: string | null };
     body: never;
     response: KbPageSummary[];
     status: 200;

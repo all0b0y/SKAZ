@@ -36,6 +36,9 @@ from .knowledge.sources.links import ytdlp_probe
 from .knowledge.sources.service import SourceService
 from .knowledge.speech import create_speech_service
 from .knowledge.speech.dictation import Dictation
+from .knowledge.study.judge import make_judge
+from .knowledge.study.service import StudyService
+from .knowledge.study.tools import StudyTools
 from .knowledge.wiki.service import WikiService
 from .knowledge.wiring import McpGrants, wire_fixes_offer, wire_speech, wire_wiki
 from .knowledge.wiring import wire as wire_knowledge
@@ -112,10 +115,18 @@ class Runtime:
         self.kb_tools.add(self.kb_wiki_edits.tools())
         #: Agents' questions (Hermes ``clarify``, ``skaz_ask_user``) wait for the user here (0.3.1 P).
         self.kb_questions = QuestionBroker(self.kb_permissions.store, self.kb_waits)
+        #: Flashcards and tests (0.3.1 S): blocks in chats, FSRS, "Save to wiki", deck pages.
+        self.kb_study = StudyService(self.kb, self.kb_wiki,
+                                     language=lambda: self.kb_ingest.settings().language,
+                                     text_layer=lambda: self.kb_ingest.text_layer)
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer,
-                                    permissions=self.kb_permissions, questions=self.kb_questions)
+                                    permissions=self.kb_permissions, questions=self.kb_questions,
+                                    study=self.kb_study)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
+        self.kb_study_tools = StudyTools(self.kb_study, self.kb_chats.run_ref)
+        self.kb_tools.add(self.kb_study_tools.tools())
+        self.kb_study.judge = make_judge(self.kb, lambda: self.kb_agents.registry)
         #: SKAZ's own question tool for agents whose native one can't work with SKAZ (Q-A1).
         self.kb_tools.add((ask_tool(self.kb_questions, self.kb_chats.run_ref),))
         self.settings_store = SettingsStore(self.db)

@@ -53,6 +53,9 @@ from ..permissions.questions import QuestionBroker
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..service import KnowledgeService
 from ..skills.settings import enabled_skills
+from ..study.scheduling import Mode
+from ..study.service import StudyService
+from ..study.store import StudyBlock
 from .analysis import AnalysisWriter, Section
 from .context import ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
@@ -69,6 +72,7 @@ from .model import (
     Part,
     PermissionPart,
     QuestionPart,
+    StudyPart,
     TextPart,
 )
 from .parsing import CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
@@ -145,7 +149,8 @@ class ChatService:
                  text_layer: Callable[[], TextLayer] | None = None, checkpoint_s: float = CHECKPOINT_S,
                  stop_timeout_s: float = STOP_TIMEOUT_S, close_stop_s: float = CLOSE_STOP_S,
                  permissions: PermissionBroker | None = None,
-                 questions: QuestionBroker | None = None) -> None:
+                 questions: QuestionBroker | None = None,
+                 study: StudyService | None = None) -> None:
         self.kb = kb
         self.repo = ChatRepository(kb.db)
         self._agents = agents
@@ -168,6 +173,10 @@ class ChatService:
         if questions is not None:
             questions.listeners.append(self._on_question)
             questions.late_answer = self._late_answer
+        #: Decks and tests in chats (0.3.1 S): a block's change is a part update of its message.
+        self.study = study
+        if study is not None:
+            study.listeners.append(self._on_study)
         self._feeds: dict[str, ChatFeed] = {}
         self._list = ListFeed()
         self._runs: dict[str, _Run] = {}
@@ -216,6 +225,32 @@ class ChatService:
 
     def _on_question(self, record: QuestionRecord) -> None:
         self._on_part(record.chat_id, record.message_id, QuestionPart(record.id))
+
+    def _on_study(self, block: StudyBlock) -> None:
+        self._on_part(block.chat_id, block.message_id, StudyPart(block.id, block.kind, block.title))
+
+    async def study_from_deck(self, study: StudyService, page_id: str, mode: Mode,
+                              card_ids: Sequence[str] | None,
+                              chat_id: str | None) -> tuple[str, StudyBlock]:
+        """"Study" on a deck page (S12): the cards as a block of the chat (a new one if none is open),
+        in a message of their own, so the route chat ⇄ beside ⇄ window and the agent's context hold."""
+        record = await disk_call(self.kb.page_repo.get, page_id)
+        if record is None or record.kind not in ("deck", "test"):
+            raise NotFound("This page is not a deck.")
+        if chat_id is not None:
+            chat = await self._chat(chat_id)
+        else:
+            chat = (await self.create(title=f"Study · {record.title}")).chat
+        message_id = new_id("msg")
+        ref = RunRef(run_id="", chat_id=chat.id, message_id=message_id, engine=chat.engine)
+        block = await disk_call(study.show_saved, ref, [page_id], mode, card_ids, notify=False)
+        now = utc_now()
+        message = Message(id=message_id, chat_id=chat.id, seq=0, role="system", state="done", created_at=now,
+                          parts=(StudyPart(block.id, block.kind, block.title),), engine=chat.engine)
+        (added,) = await disk_call(self.repo.add_messages, [message], {"updated_at": now})
+        self._feed(chat.id).emit("message", added.id, message=added)
+        self._list.touch(chat.id)
+        return chat.id, block
 
     async def _late_answer(self, chat_id: str, text: str) -> None:
         """An option picked after the agent stopped waiting: a new question in the chat (Q-A2)."""
@@ -557,7 +592,7 @@ class ChatService:
     async def _drive(self, run: _Run, chat: Chat, question: Message, prior: list[Message]) -> None:
         reader = MaterialReader(self.kb, self._text_layer())
         resolver = Resolver(self.kb, reader)
-        builder = ContextBuilder(self.kb, reader)
+        builder = ContextBuilder(self.kb, reader, self.study)
         parser = StreamParser()
         stream: AsyncIterator[AgentEvent] | None = None
         terminal: Completed | Failed | None = None

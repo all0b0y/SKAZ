@@ -82,7 +82,17 @@ class QuestionPart:
     question_id: str
 
 
-Part = TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart
+@dataclass(frozen=True)
+class StudyPart:
+    """A deck or a test the agent made or showed (0.3.1 S5); the block reads the study block by id."""
+
+    study_id: str
+    #: Kind and title when the block was made (the history and previews read these).
+    kind: str = "deck"
+    title: str = ""
+
+
+Part = TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -101,6 +111,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "permission", "id": part.permission_id}
     if isinstance(part, QuestionPart):
         return {"type": "question", "id": part.question_id}
+    if isinstance(part, StudyPart):
+        return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -124,6 +136,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return PermissionPart(str(data["id"]))
     if kind == "question":
         return QuestionPart(str(data["id"]))
+    if kind == "study":
+        return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
     return None
 
 
@@ -161,6 +175,8 @@ class OpenContext:
 
     page_id: str | None = None
     material_id: str | None = None
+    #: The deck or test block open now (0.3.1 W2 "Agent sees").
+    study_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,7 +196,8 @@ class MessageInput:
                         "block_id": quote.block_id, "seg": quote.seg, "message_id": quote.message_id}
                        for quote in self.quotes],
             "attachments": list(self.attachments),
-            "context": {"page_id": self.context.page_id, "material_id": self.context.material_id},
+            "context": {"page_id": self.context.page_id, "material_id": self.context.material_id,
+                        "study_id": self.context.study_id},
         }
 
     @classmethod
@@ -196,7 +213,8 @@ class MessageInput:
                                _optional(item.get("message_id")))
                          for item in data.get("quotes", [])),
             attachments=tuple(str(item) for item in data.get("attachments", [])),
-            context=OpenContext(_optional(context.get("page_id")), _optional(context.get("material_id"))),
+            context=OpenContext(_optional(context.get("page_id")), _optional(context.get("material_id")),
+                                _optional(context.get("study_id"))),
         )
 
 

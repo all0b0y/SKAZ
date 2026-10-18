@@ -22,6 +22,7 @@ from skaz.knowledge.agents.tools import TOOL_NAMES
 from skaz.knowledge.chats.service import ChatService
 from skaz.knowledge.markdown.page import Heading, parse_page, render_page
 from skaz.knowledge.permissions.wiki_tools import WIKI_TOOL_NAMES
+from skaz.knowledge.study.tools import STUDY_TOOL_NAMES
 from tests.knowledge.chat_support import (
     Agents,
     Library,
@@ -380,7 +381,8 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     turn = env.agents.engines["codex"].turns[-1]
     # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool.
     assert turn.tools is not None
-    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, "skaz_ask_user")
+    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *STUDY_TOOL_NAMES,
+                                                             "skaz_ask_user")
     assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
     assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions

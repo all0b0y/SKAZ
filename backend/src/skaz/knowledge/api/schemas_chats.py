@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
+from .schemas_study import KbStudyPart
 
 KbChatState = Literal["idle", "answering"]
 KbChatFilter = Literal["all", "pinned", "recording"]
@@ -168,7 +169,7 @@ class KbQuestionPart(BaseModel):
 
 
 class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
-                                        | KbPermissionPart | KbQuestionPart,
+                                        | KbPermissionPart | KbQuestionPart | KbStudyPart,
                                         Field(discriminator="type")]]):
     pass
 
@@ -258,6 +259,8 @@ class KbChatPatch(_Request):
 class KbOpenContext(_Request):
     open_page_id: str | None = Field(default=None, max_length=200)
     open_material_id: str | None = Field(default=None, max_length=200)
+    #: The deck or test block open now ("Agent sees", W2): the agent is told its card or question.
+    open_study_id: str | None = Field(default=None, max_length=200)
 
 
 class KbSend(_Request):
@@ -276,7 +279,8 @@ class KbSendResult(BaseModel):
 
 class KbChatEvent(BaseModel):
     """``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part;
-    ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question)."""
+    ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question,
+    study)."""
 
     seq: int
     type: KbChatEventType

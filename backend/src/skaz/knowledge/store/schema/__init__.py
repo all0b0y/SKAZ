@@ -13,7 +13,7 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
-from . import chats, core, decisions, ingest, service, speech, wiki2
+from . import chats, core, decisions, ingest, service, speech, study, wiki2
 
 
 class SchemaModule(Protocol):
@@ -30,7 +30,7 @@ class SchemaError(RuntimeError):
 
 
 #: Registry order is application order. Append new area modules at the end.
-MODULES: tuple[SchemaModule, ...] = (core, service, ingest, decisions, speech, wiki2, chats)
+MODULES: tuple[SchemaModule, ...] = (core, service, ingest, decisions, speech, wiki2, chats, study)
 
 _VERSIONS_SQL = """
 CREATE TABLE IF NOT EXISTS schema_versions (

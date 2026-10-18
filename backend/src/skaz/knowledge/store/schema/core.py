@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 NAME = "core"
-VERSION = 4
+VERSION = 5
 
 _TOKENIZE = "tokenize='unicode61 remove_diacritics 2'"
 
@@ -79,7 +79,7 @@ CREATE INDEX IF NOT EXISTS corrections_by_fragment ON corrections(material_id, s
 
 CREATE TABLE IF NOT EXISTS pages (
     id          TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL CHECK (kind IN ('concept', 'note', 'folder', 'analysis')),
+    kind        TEXT NOT NULL CHECK (kind IN ('concept', 'note', 'folder', 'analysis', 'deck', 'test')),
     title       TEXT NOT NULL,
     rel_path    TEXT NOT NULL UNIQUE,
     original    TEXT,
@@ -178,5 +178,33 @@ DROP TABLE blocks_fts_v2;
     4: """
 ALTER TABLE fragments ADD COLUMN role TEXT NOT NULL DEFAULT 'paragraph';
 ALTER TABLE fragments ADD COLUMN level INTEGER;
+""",
+    # Deck and test pages (0.3.1 S): ``pages.kind`` takes deck and test. SQLite can't change a CHECK in
+    # place, so the table is rebuilt (sqlite.org/lang_altertable.html, "other kinds of table schema
+    # changes"): foreign keys off so the child rows stay, the rows copied, the new table renamed in.
+    # The FTS delete triggers are made again first: the rename re-reads every trigger, and one that a
+    # v3 rename pointed at the dropped ``blocks_fts_v2`` would stop it.
+    5: """
+PRAGMA foreign_keys=OFF;
+BEGIN;
+DROP TRIGGER IF EXISTS fragments_fts_forget;
+DROP TRIGGER IF EXISTS blocks_fts_forget;
+""" + TRIGGERS + """
+CREATE TABLE pages_v5 (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL CHECK (kind IN ('concept', 'note', 'folder', 'analysis', 'deck', 'test')),
+    title       TEXT NOT NULL,
+    rel_path    TEXT NOT NULL UNIQUE,
+    original    TEXT,
+    language    TEXT NOT NULL,
+    file_sha256 TEXT NOT NULL,
+    indexed_at  TEXT NOT NULL
+);
+INSERT INTO pages_v5(id, kind, title, rel_path, original, language, file_sha256, indexed_at)
+    SELECT id, kind, title, rel_path, original, language, file_sha256, indexed_at FROM pages;
+DROP TABLE pages;
+ALTER TABLE pages_v5 RENAME TO pages;
+COMMIT;
+PRAGMA foreign_keys=ON;
 """,
 }

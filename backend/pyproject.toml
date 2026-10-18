@@ -12,6 +12,7 @@ dependencies = [
     "websockets>=15.0,<18",
     "pypdf>=6.20.1",
     "readability-lxml>=0.9",
+    "fsrs==6.3.2",
 ]
 
 [project.optional-dependencies]

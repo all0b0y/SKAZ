@@ -21,6 +21,7 @@ from . import (
     settings,
     sources,
     speech,
+    study,
     wiki,
 )
 
@@ -46,4 +47,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     dictation.router,
     export.router,
     permissions.router,
+    study.router,
 )
