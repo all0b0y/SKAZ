@@ -243,7 +243,8 @@ function offerMoveToApplications(): boolean {
   if (!shouldOfferMoveToApplications({
     platform: process.platform,
     isPackaged: app.isPackaged,
-    isInApplicationsFolder: app.isInApplicationsFolder(),
+    // A macOS-only API: elsewhere it does not exist (and nothing is offered there).
+    isInApplicationsFolder: process.platform === 'darwin' && app.isInApplicationsFolder(),
     declinedForever: readDeclinedForever(userData),
     customUserData: app.commandLine.hasSwitch('user-data-dir'),
   })) return false;

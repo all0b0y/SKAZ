@@ -12,6 +12,27 @@ export interface IsolatedSmokeOptions {
   env?: Record<string, string>;
 }
 
+/**
+ * The X display of a Linux run (e.g. under xvfb-run); empty on macOS. Smokes pass a minimal
+ * environment, and without it Electron can't open a window on Linux at all.
+ */
+export function displayEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of ['DISPLAY', 'XAUTHORITY'] as const) {
+    const value = process.env[key];
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Chromium refuses to run as root without its sandbox switched off (a Linux container); a normal
+ * user and macOS never get this switch.
+ */
+export function rootArgs(): string[] {
+  return process.platform === 'linux' && process.getuid?.() === 0 ? ['--no-sandbox'] : [];
+}
+
 /** Prove isolation before returning a window that a smoke may interact with. */
 export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmokeOptions = {}): Promise<{
   app: ElectronApplication;
@@ -30,7 +51,7 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
   };
   try {
     app = await electron.launch({
-      args: [path.join(root, 'scripts/optin-smoke/main.cjs')],
+      args: [...rootArgs(), path.join(root, 'scripts/optin-smoke/main.cjs')],
       cwd: root,
       env: {
         PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', NODE_ENV: 'production',
@@ -38,6 +59,7 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
         PYTHON_KEYRING_BACKEND: 'keyring.backends.null.Keyring',
         SKAZ_ALLOW_MODEL_DOWNLOAD: '0',
         SKAZ_UPDATE_CHECK: '0',
+        ...displayEnv(),
         ...options.env,
       },
     });
