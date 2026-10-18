@@ -31,6 +31,43 @@ export interface BackendHandle {
 
 type StatusListener = (status: BackendStatus) => void;
 
+/** What the backend may see of this process's environment (L3); everything else stays here. */
+const SYSTEM_ENV = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LANGUAGE', 'TZ',
+  '__CF_USER_TEXT_ENCODING'];
+/** A proxy and its certificates: downloads and providers must keep working behind one. */
+const NETWORK_ENV = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy',
+  'all_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE'];
+/** Settings the backend reads on purpose (model caches, media tools, builds). */
+const BACKEND_ENV = ['HF_HOME', 'HF_HUB_CACHE', 'SKAZ_MODEL_CACHE', 'SKAZ_ALLOW_MODEL_DOWNLOAD', 'SKAZ_MEDIA_TOOLS_DIR',
+  'SKAZ_BUILD'];
+/** Development only: uv's own settings, a virtualenv, and SKAZ_* switches of smoke and dev runs. */
+const DEV_PREFIXES = ['UV_', 'XDG_', 'SKAZ_'];
+const DEV_ENV = ['VIRTUAL_ENV'];
+/** The opt-in environment key fallback of development/CI (backend/src/skaz/secrets.py). */
+const ENV_KEY_NAMES = ['OPENROUTER_API_KEY', 'OPEN_ROUTER_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'SONIOX_API_KEY'];
+
+/**
+ * The backend's environment (L3): an allow-list, not all of `process.env`. A launch from Terminal
+ * used to hand the backend — and the ffmpeg/yt-dlp it runs on untrusted links — every variable of
+ * the user's shell, API keys included. The installed app passes only system, network and the
+ * backend's own settings; a development run also passes uv/SKAZ_* switches and, when
+ * SKAZ_ALLOW_ENV_KEYS is on, the provider keys of the documented fallback.
+ */
+export function backendEnvironment(source: NodeJS.ProcessEnv, packaged: boolean): Record<string, string> {
+  const out: Record<string, string> = {};
+  const allowed = new Set([...SYSTEM_ENV, ...NETWORK_ENV, ...BACKEND_ENV, ...(packaged ? [] : DEV_ENV)]);
+  const envKeys = !packaged && /^(1|true|yes|on)$/i.test(source.SKAZ_ALLOW_ENV_KEYS?.trim() ?? '');
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    if (allowed.has(name) || name.startsWith('LC_')
+      || (!packaged && DEV_PREFIXES.some((prefix) => name.startsWith(prefix)))
+      || (envKeys && ENV_KEY_NAMES.includes(name))) {
+      out[name] = value;
+    }
+  }
+  return out;
+}
+
 function findFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -167,7 +204,7 @@ export class BackendManager {
     const child = spawn(command, args, {
       cwd,
       env: {
-        ...process.env,
+        ...backendEnvironment(process.env, app.isPackaged),
         SKAZ_TOKEN: token,
         SKAZ_DATA_DIR: this.dataDir,
         // Settings → About shows the app's version, not the backend package's (QA A21).
