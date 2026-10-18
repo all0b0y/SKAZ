@@ -60,6 +60,9 @@ export function UpdatesRow() {
             <i style={{ width: `${pct ?? 5}%` }} />
           </span>
           <span className="kb-muted">{pct === null ? '…' : `${pct}%`}</span>
+          {bridge.cancelUpdate && (
+            <Button size="sm" variant="quiet" onClick={async () => { const s = await bridge.cancelUpdate?.().catch(() => null); if (s) setState(s); }}>Cancel</Button>
+          )}
         </span>
       )}
       {state.phase === 'verifying' && <span className="kb-muted" role="status">Checking the download…</span>}

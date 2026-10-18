@@ -31,6 +31,7 @@ export const CHANNELS = {
   updateGet: 'app:update-get',
   updateCheck: 'app:update-check',
   updatePrepare: 'app:update-prepare',
+  updateCancel: 'app:update-cancel',
   updateInstall: 'app:update-install',
   updateState: 'app:update-state',
 } as const;

@@ -74,6 +74,9 @@ const api: BridgeApi = {
   prepareUpdate(): Promise<UpdateState> {
     return ipcRenderer.invoke(CHANNELS.updatePrepare) as Promise<UpdateState>;
   },
+  cancelUpdate(): Promise<UpdateState> {
+    return ipcRenderer.invoke(CHANNELS.updateCancel) as Promise<UpdateState>;
+  },
   installUpdate(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.updateInstall) as Promise<boolean>;
   },

@@ -158,6 +158,8 @@ export interface BridgeApi {
   updateState?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;
   prepareUpdate?(): Promise<UpdateState>;
+  /** Stop a running download (M2); back to "available". */
+  cancelUpdate?(): Promise<UpdateState>;
   installUpdate?(): Promise<boolean>;
   onUpdateState?(listener: (state: UpdateState) => void): () => void;
   /** Native folder chooser; returns a candidate only, never writes preferences. */
