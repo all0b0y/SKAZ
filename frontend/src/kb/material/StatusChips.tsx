@@ -1,4 +1,6 @@
 import type { KbJob, KbMaterial, KbMaterialWiki } from '../../api/kb/types.gen';
+import { useState } from 'react';
+import { errorText } from '../api/client';
 import { Button, Icon, type IconName } from '../ui';
 import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';
@@ -46,6 +48,30 @@ function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
   return <span className={`kb-pst kb-pst--${tone}${wrap ? ' kb-pst--wrap' : ''}`} role="status">{body}</span>;
 }
 
+const IMPORTED: ReadonlyArray<KbMaterial['kind']> = ['audio', 'video', 'video_link'];
+
+/** H5: an import that recognises speech can be stopped from here (it used to spin with no way out). */
+function StopImport({ materialId }: { materialId: string }) {
+  const { client } = useServices();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const stop = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await client.call('POST /kb/imports/{material_id}/cancel', { path: { material_id: materialId } });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <Button size="sm" variant="quiet" icon="close" busy={busy} onClick={() => void stop()}>Stop</Button>
+    {error && <span className="kb-muted kb-pipe__why" role="alert">{error}</span>}
+  </>;
+}
+
 /** Processing strip (v10, decision 24): what is done, what runs now, links into the wiki. */
 export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   material: KbMaterial;
@@ -68,6 +94,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
     <div className="kb-pipe" aria-label="Processing">
       {material.status === 'recording' && <Pill tone="run" spin>Recording</Pill>}
       {material.status === 'processing' && <Pill tone="run" spin>{speech ? 'Recognising…' : 'Reading…'}</Pill>}
+      {material.status === 'processing' && IMPORTED.includes(material.kind) && <StopImport materialId={material.id} />}
       {material.status === 'failed' && <Pill tone="error" icon="warning">{speech ? 'Recognition failed' : 'Couldn’t read'}</Pill>}
       {material.status === 'ready' && (silent ? <Pill tone="warn" icon="warning">No speech recognised</Pill>
         : <Pill tone="done" icon="check">{first}</Pill>)}

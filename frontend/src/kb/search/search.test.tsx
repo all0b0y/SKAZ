@@ -31,6 +31,16 @@ describe('⌘K', () => {
     expect(await within(dialog).findByText('Nothing found for “zzqqxx”.')).toBeInTheDocument();
   });
 
+  it('a failing text index says search is unavailable, never "Nothing found" (L1)', async () => {
+    const world = chatWorld();
+    world.searchDegraded = true;
+    renderKb({ world });
+    const dialog = await openK();
+    fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'zzqqxx' } });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('isn’t available right now');
+    expect(within(dialog).queryByText(/Nothing found/)).not.toBeInTheDocument();
+  });
+
   it('⌘K and the rail button open it; sections with counts, three per section in All, matches marked', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });

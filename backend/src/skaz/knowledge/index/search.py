@@ -6,13 +6,17 @@ parts (``text``, ``match``) so a client never has to render HTML.
 """
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
 
+from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
+
+logger = logging.getLogger(__name__)
 
 _TOKEN = re.compile(r"\w+")
 _OPEN, _CLOSE = "\x02", "\x03"
@@ -61,6 +65,8 @@ class SearchResults:
     fragments: tuple[FragmentHit, ...] = ()
     blocks: tuple[BlockHit, ...] = ()
     pages: tuple[PageHit, ...] = ()
+    #: The full-text index failed (locked or damaged): the results are not "nothing found".
+    degraded: bool = False
 
 
 def fts_query(query: str) -> str | None:
@@ -102,8 +108,10 @@ def search(db: KnowledgeDatabase, query: str, *, limit: int = 20) -> SearchResul
                 "WHERE blocks_fts MATCH ? ORDER BY rank LIMIT ?",
                 (expression, limit),
             ).fetchall()
-        except sqlite3.OperationalError:
-            return SearchResults(query=query)
+        except sqlite3.OperationalError as error:
+            # L1: a broken or busy index used to look exactly like "no matches", with no trace.
+            logger.warning("Full-text search failed: %s", error_note(error))
+            return SearchResults(query=query, degraded=True)
         pages = _pages(connection, query, limit)
     return SearchResults(
         query=query,

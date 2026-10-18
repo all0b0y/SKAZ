@@ -110,8 +110,10 @@ class StreamSettings:
     #: Received-but-undecoded audio beyond this means the decoder cannot keep up.
     max_backlog_s: float = 12.0
     event_queue_size: int = 8
-    #: The native stream allows 10 s for the final decode at Stop.
+    #: How long ``finish()`` waits for the final decode at Stop (the native stream bounds Stop itself).
     finish_timeout_s: float = 120.0
+    #: Seconds the worker may wait on a full event queue (a slow consumer) before the stream says so.
+    consumer_stall_s: float = 6.0
 
     def __post_init__(self) -> None:
         if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int)
@@ -371,6 +373,8 @@ class WhisperStreamSession:
         self._events_claimed = False
         self._events_ended = False
         self._finished = False
+        #: Seconds the worker spent waiting for the event consumer since the last decode step.
+        self._stalled_s = 0.0
         self._worker = asyncio.create_task(self._run(), name="whisper-stream")
 
     # ── LiveAsrSession ────────────────────────────────────────────────────────
@@ -387,8 +391,9 @@ class WhisperStreamSession:
         self._received += len(converted) // 2
         limit = (self._settings.max_window_s + self._settings.max_backlog_s + 5) * BYTES_PER_SECOND
         if len(self._buffer) > limit:
-            await self._fail(self._too_slow(), retryable=False)
-            raise LiveAsrError(self._too_slow(), retryable=False)
+            message, retryable = self._too_slow(), self._consumer_slow()
+            await self._fail(message, retryable=retryable)
+            raise LiveAsrError(message, retryable=retryable)
         self._wake.set()
 
     async def events(self) -> AsyncIterator[SonioxEvent]:
@@ -404,17 +409,32 @@ class WhisperStreamSession:
     async def finish(self) -> bool:
         self._finishing = True
         self._wake.set()
-        with contextlib.suppress(TimeoutError, asyncio.CancelledError, Exception):
+        try:
             async with asyncio.timeout(self._settings.finish_timeout_s):
                 await asyncio.shield(self._worker)
+        except TimeoutError:
+            # Counters only, never transcript text (M3: a Stop that lost words left no trace).
+            logger.warning("%s: the final decode at Stop took longer than %.0f s (undecoded %.1f s).",
+                           self._settings.label, self._settings.finish_timeout_s,
+                           (self._received - self._decoded_end) / SAMPLE_RATE)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("%s: the final decode at Stop failed: %s", self._settings.label,
+                           type(error).__name__)
         return self._finished
 
     async def aclose(self) -> None:
         self._closed = True
         if not self._worker.done():
             self._worker.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
+            try:
                 await self._worker
+            except asyncio.CancelledError:
+                pass
+            except Exception as error:
+                logger.warning("%s: the stream ended with %s while closing.", self._settings.label,
+                               type(error).__name__)
         self._end_events()
 
     # ── worker ────────────────────────────────────────────────────────────────
@@ -430,10 +450,11 @@ class WhisperStreamSession:
                     return
                 if pending_s < self._settings.min_step_s:
                     continue
+                self._stalled_s = 0.0
                 await self._step(finishing=False)
                 backlog_s = (self._received - self._decoded_end) / SAMPLE_RATE
                 if backlog_s > self._settings.max_backlog_s:
-                    raise LiveAsrError(self._too_slow(), retryable=False)
+                    raise LiveAsrError(self._too_slow(), retryable=self._consumer_slow())
                 if (self._received - self._decoded_end) / SAMPLE_RATE >= self._settings.min_step_s:
                     self._wake.set()
         except asyncio.CancelledError:
@@ -441,13 +462,30 @@ class WhisperStreamSession:
         except LiveAsrError as error:
             self.failure_message = str(error)
             self.failure_retryable = error.retryable
-        except Exception:
-            self.failure_message = f"{self._settings.label} failed while transcribing."
+        except (TimeoutError, ConnectionError) as error:
+            logger.warning("%s stopped while transcribing: %s", self._settings.label, type(error).__name__)
+            kind = type(error).__name__
+            self.failure_message = f"{self._settings.label} stopped while transcribing ({kind})."
             self.failure_retryable = True
+        except Exception as error:
+            # An internal error (a broken model file, no memory, a bug) fails the same way on a retry.
+            logger.error("%s failed while transcribing: %s", self._settings.label, type(error).__name__,
+                         exc_info=True)
+            kind = type(error).__name__
+            self.failure_message = (f"{self._settings.label} failed while transcribing ({kind}). "
+                                    "Open the logs, or choose another model or provider.")
+            self.failure_retryable = False
         finally:
             self._end_events()
 
+    def _consumer_slow(self) -> bool:
+        """The backlog grew because the recognised text wasn't taken away fast enough, not the model."""
+        return self._stalled_s >= self._settings.consumer_stall_s
+
     def _too_slow(self) -> str:
+        if self._consumer_slow():
+            return (f"SKAZ couldn't save the recognised text fast enough ({self._stalled_s:.0f} s behind), "
+                    f"so {self._settings.label} stopped. The computer or its disk was busy; try again.")
         return (f"{self._settings.label} cannot keep up with live audio on this computer. "
                 "Choose a smaller model, or another provider.")
 
@@ -468,6 +506,7 @@ class WhisperStreamSession:
         # One slot is reserved for the end-of-stream marker.
         while self._events.qsize() >= self._settings.event_queue_size:
             await asyncio.sleep(0.01)
+            self._stalled_s += 0.01
         self._events.put_nowait(event)
 
     async def _step(self, *, finishing: bool) -> None:

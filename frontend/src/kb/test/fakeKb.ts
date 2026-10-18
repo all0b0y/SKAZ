@@ -29,6 +29,8 @@ export interface FakeExcluded {
 }
 
 export interface FakeWorld {
+  /** The backend's full-text index fails (L1): search answers `degraded`. */
+  searchDegraded?: boolean;
   library: KbLibrary;
   folders: KbFolder[];
   materials: KbMaterial[];
@@ -420,7 +422,7 @@ function search(world: FakeWorld, q: string): KbSearchResults {
   const blocks = world.pages.flatMap((p) => p.blocks.filter((b) => has(b.text)).slice(0, 1).map((b) => ({
     page_id: p.id, page_title: p.title, page_kind: p.kind, block_id: b.id, kind: b.kind, owner: b.owner, snippet: snippet(b.text, q),
   }))).slice(0, 5);
-  return { query: q, pages, blocks, fragments, materials, counts: { wiki: pages.length + blocks.length, materials: materials.length + fragments.length, chats: 0 } };
+  return { query: q, pages, blocks, fragments, materials, counts: { wiki: pages.length + blocks.length, materials: materials.length + fragments.length, chats: 0 }, degraded: world.searchDegraded === true };
 }
 
 // ---- Notifications --------------------------------------------------------------------------
@@ -543,6 +545,11 @@ const ROUTES: FakeRoutes = {
     const name = body.title ?? (body.url ? classifyFake(body.url).title ?? 'Video' : (body.path ?? '').split('/').pop()!.replace(/\.[^.]+$/, ''));
     const m = newMaterial(w, name, body.url ? 'video_link' : 'audio', body.folder_id ?? w.lastFolderId, 'processing', []);
     return { ...speechView(m, `s-${m.id}`, null), import_state: 'running', import_stage: 'transcribing' };
+  }],
+  'POST /kb/imports/{material_id}/cancel': [200, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    Object.assign(m, { status: 'failed', failure_reason: 'The import was cancelled.', can_retry: true });
+    return { ...speechView(m, `s-${m.id}`, null), import_state: 'cancelled', import_stage: null };
   }],
   'POST /kb/imports/{material_id}/retry': [200, (w, { path }) => {
     const m = findMaterial(w, path.material_id);

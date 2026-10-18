@@ -11,14 +11,18 @@ are totals per ⌘K section, not the length of the returned lists:
 """
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
 
 from ..index.search import SnippetPart, fts_query
+from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
+
+logger = logging.getLogger(__name__)
 
 _TOKEN = re.compile(r"\w+")
 MAX_TOKENS = 12
@@ -91,7 +95,8 @@ def search_materials(db: KnowledgeDatabase, query: str, *, limit: int) -> tuple[
 def _distinct(connection: sqlite3.Connection, sql: str, parameters: tuple[object, ...]) -> set[str]:
     try:
         return {row[0] for row in connection.execute(sql, parameters)}
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as error:
+        logger.warning("Search count failed: %s", error_note(error))
         return set()
 
 

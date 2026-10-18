@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import array
 import asyncio
+import contextlib
 import math
 from collections.abc import Sequence
 from typing import Any
@@ -268,6 +269,42 @@ async def test_a_decoder_that_cannot_keep_up_fails_with_a_clear_non_retryable_re
     await receiver
     assert session.failure_message is not None and "cannot keep up" in session.failure_message
     assert session.failure_retryable is False
+
+
+async def test_a_consumer_that_falls_behind_is_not_blamed_on_the_computer() -> None:
+    """M3: nobody takes the events away; the decoder is fast. The reason names saving, retryable."""
+    vad = ScriptedVad()
+    session = make(ScriptedDecoder(vad), vad, max_backlog_s=2.0, event_queue_size=1, consumer_stall_s=0.05)
+    second = tone(1, [(" x", 0.0, 1.0)])
+    with pytest.raises(LiveAsrError) as error:
+        for _ in range(400):
+            await session.send_audio(second)
+            await asyncio.sleep(0.01)
+    assert "couldn't save the recognised text" in str(error.value) and error.value.retryable is True
+    await session.aclose()
+
+
+async def test_an_internal_decoder_error_is_logged_and_not_offered_as_a_retry(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    vad = ScriptedVad()
+
+    class Broken(ScriptedDecoder):
+        async def decode(self, pcm: bytes, **kwargs: Any) -> Decoded:
+            raise IndexError("model file")
+
+    session = make(Broken(vad), vad)
+    receiver = asyncio.create_task(_drain(session))
+    with contextlib.suppress(LiveAsrError):
+        for _ in range(20):
+            await session.send_audio(tone(1, [(" x", 0.0, 1.0)]))
+            await asyncio.sleep(0.02)
+    await session.finish()
+    await session.aclose()
+    await receiver
+    assert session.failure_message is not None and "IndexError" in session.failure_message
+    assert session.failure_retryable is False
+    assert "IndexError" in caplog.text
 
 
 async def _drain(session: WhisperStreamSession) -> None:

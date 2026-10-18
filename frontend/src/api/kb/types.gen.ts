@@ -907,6 +907,7 @@ export interface KbSearchResults {
   pages: KbPageHit[];
   materials: KbMaterialHit[];
   counts: KbSearchCounts;
+  degraded: boolean;
 }
 
 export interface KbSend {

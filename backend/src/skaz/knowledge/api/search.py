@@ -63,6 +63,7 @@ def run_search(kb: KnowledgeService, q: str, limit: int) -> KbSearchResults:
             for hit in materials
         ],
         "counts": KbSearchCounts(wiki=totals.wiki, materials=totals.materials, chats=totals.chats),
+        "degraded": results.degraded,
     })
 
 

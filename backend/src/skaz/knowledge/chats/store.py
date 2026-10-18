@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
@@ -9,9 +10,12 @@ from typing import Any, cast
 
 from ..agents.engine import EngineId
 from ..index.search import fts_query
+from ..logsafe import error_note
 from ..store.database import KnowledgeDatabase
 from .model import Chat, Failure, Message, MessageInput, MessageState, Role, part_to_json, parts_from_json
 from .text import plain_text
+
+log = logging.getLogger(__name__)
 
 _CHAT_COLUMNS = frozenset({
     "title", "title_auto", "pinned", "engine", "model", "effort", "folder_ids", "unread", "last_preview",
@@ -113,7 +117,8 @@ class ChatRepository:
             try:
                 rows = connection.execute("SELECT DISTINCT chat_id FROM chat_fts WHERE chat_fts MATCH ?",
                                           (expression,)).fetchall()
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as error:
+                log.warning("Chat search failed: %s", error_note(error))
                 return set()
         return {row[0] for row in rows}
 

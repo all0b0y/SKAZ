@@ -236,6 +236,19 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     expect(within(doc).getByText('Recognising…')).toBeInTheDocument();
   });
 
+  it('a running import can be stopped from the material (H5): it never spins with no way out', async () => {
+    const world = docWorld();
+    const speech = world.materials.find((m) => m.kind === 'recording' || m.kind === 'audio' || m.kind === 'video')!;
+    Object.assign(speech, { kind: 'audio', status: 'processing', fragments: [], fragment_count: 0 });
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: speech.id }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(doc).findByText('Recognising…')).toBeInTheDocument();
+    await userEvent.setup().click(within(doc).getByRole('button', { name: 'Stop' }));
+    expect(r.fake.calls.some((c) => c.method === 'POST' && c.path === `/kb/imports/${speech.id}/cancel`)).toBe(true);
+  });
+
   it('pages whose PDF text couldn’t be read are named, and that text is not in the material', async () => {
     const world = docWorld();
     const tb = world.materials.find((m) => m.id === 'm-tb')!;

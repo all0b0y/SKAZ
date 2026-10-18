@@ -110,6 +110,8 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['POST', '/kb/imports'], ['POST', '/kb/chats'],
       // QA E10: Retry on a failed or interrupted import's material.
       ['POST', '/kb/imports/mat_1/retry'],
+      // H5: a running import can be stopped from its material; H2: failed wiki jobs retried at once.
+      ['POST', '/kb/imports/mat_1/cancel'], ['POST', '/kb/jobs/retry-failed'],
       // The live text after the material; the sample clock and recording settings of the existing pipeline.
       ['GET', '/kb/recordings/mat_1/live'], ['GET', '/sessions/s1/live'], ['GET', '/settings'], ['PUT', '/settings'],
     ];
@@ -126,7 +128,8 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['GET', '/kb/recordings/mat_1/state'], ['GET', '/kb/recordings/a/b'],
       ['PUT', '/kb/wiki/pages/p1'], ['POST', '/kb/wiki/pages/p1/blocks/c-1/edit'],
       ['GET', '/kb/wiki/pages/a/b'], ['POST', '/kb/graph'], ['DELETE', '/kb/jobs/j1'],
-      ['POST', '/kb/imports/a/b/retry'], ['GET', '/kb/imports/mat_1/retry'], ['POST', '/kb/imports/mat_1/cancel'],
+      ['POST', '/kb/imports/a/b/retry'], ['GET', '/kb/imports/mat_1/retry'], ['POST', '/kb/imports/a/b/cancel'],
+      ['POST', '/kb/jobs/j1/retry-failed'],
     ];
     for (const [method, path] of refused) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();

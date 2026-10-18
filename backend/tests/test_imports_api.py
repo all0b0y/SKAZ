@@ -289,6 +289,19 @@ async def test_a_provider_error_fails_the_import_and_keeps_its_reason(
     assert not session_gone(ready, session_id)
 
 
+async def test_an_unexpected_error_fails_the_import_instead_of_leaving_it_running(
+    ready: httpx.AsyncClient, tmp_path: Path, provider: Provider, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H5: an untyped exception used to end the task and leave the import "running" until a restart."""
+    async def broken(_self: Any, _record: Any) -> None:
+        raise KeyError("model cache entry")
+
+    monkeypatch.setattr("skaz.import_service.ImportService._execute", broken)
+    session_id = await start_import(ready, audio_file(tmp_path))
+    record = await settle(ready, session_id, expect="failed")
+    assert "KeyError" in record["error"] and "Retry" in record["error"]
+
+
 async def test_a_failed_import_is_never_retried_automatically(
     ready: httpx.AsyncClient, tmp_path: Path, provider: Provider,
 ) -> None:

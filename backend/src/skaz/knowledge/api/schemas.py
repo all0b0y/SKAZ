@@ -280,6 +280,8 @@ class KbSearchResults(BaseModel):
     #: Materials whose title matches (newest first).
     materials: list[KbMaterialHit]
     counts: KbSearchCounts
+    #: The full-text index failed: say "search isn't available", not "nothing found".
+    degraded: bool
 
 
 class KbNotificationAction(BaseModel):
