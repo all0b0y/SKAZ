@@ -99,7 +99,9 @@ class WikiJobs:
             logger.error("wiki job %s failed: %s", job_id, error_note(failure))
         finally:
             try:
-                self.jobs.finish(job_id, state, error=error, error_code=code if state == "failed" else None)
+                # L2: off the event loop; disk_call still finishes the write when the job is cancelled.
+                await disk_call(lambda: self.jobs.finish(job_id, state, error=error,
+                                                         error_code=code if state == "failed" else None))
             finally:
                 self._tasks.pop(job_id, None)
 

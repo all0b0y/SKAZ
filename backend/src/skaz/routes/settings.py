@@ -21,7 +21,8 @@ router = APIRouter()
 
 @router.get("/settings")
 async def read_settings(runtime: RuntimeDep) -> Settings:
-    return runtime.settings_view()
+    # L2: several database reads; off the event loop so a background commit never stalls it.
+    return await disk_call(runtime.settings_view)
 
 
 @router.put("/settings")
@@ -33,7 +34,7 @@ async def update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Setti
 
 
 async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Settings:
-    current = runtime.settings_store.load()
+    current = await disk_call(runtime.settings_store.load)
     merged = apply_update(current, payload)
     # Keys are provider-scoped: a credential is written for a provider regardless of
     # which task (if any) currently uses it, so a key can be saved ahead of assignment.
@@ -91,4 +92,4 @@ async def _update_settings(payload: SettingsUpdate, runtime: RuntimeDep) -> Sett
     # Cancellation after the durable write must still complete cloud shutdown
     # before releasing the lock to a new native open or settings update.
     await drain_on_cancel(save_and_revoke())
-    return runtime.settings_view(merged)
+    return await disk_call(runtime.settings_view, merged)

@@ -327,26 +327,27 @@ class IngestService:
             logger.error("ingest job %s failed: %s", job_id, error_note(failure))
         finally:
             try:
+                # L2: off the event loop; disk_call still finishes the write when the job is cancelled.
                 if state == "queued":
-                    self.jobs.requeue(job_id)
+                    await disk_call(self.jobs.requeue, job_id)
                 else:
-                    self.jobs.finish(job_id, state, error=error or None,
-                                     error_code=code if state == "failed" else None)
-                self._notify_blocked(job_id, active)
+                    await disk_call(lambda: self.jobs.finish(job_id, state, error=error or None,
+                                                             error_code=code if state == "failed" else None))
+                await disk_call(self._notify_blocked, job_id, active)
             finally:
                 self._active.pop(job_id, None)
             if state == "done":
-                self._tell_finished(job_id, active.material_id)
+                self._tell_finished(await disk_call(self.jobs.get, job_id), active.material_id)
 
-    def _tell_finished(self, job_id: str, material_id: str) -> None:
-        record = self.jobs.get(job_id)
+    def _tell_finished(self, record: JobRecord | None, material_id: str) -> None:
+        """On the event loop: listeners start their own follow-up tasks (W2 overview, connections)."""
         for listener in list(self.finished_listeners):
             if record is None:
                 break
             try:
                 listener(material_id, record)
             except Exception as failure:  # a listener's failure never changes the finished job
-                logger.error("ingest listener failed for job %s: %s", job_id, error_note(failure))
+                logger.error("ingest listener failed for job %s: %s", record.id, error_note(failure))
 
     def _notify_blocked(self, job_id: str, active: _Active) -> None:
         run = active.run

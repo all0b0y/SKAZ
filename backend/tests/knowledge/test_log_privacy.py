@@ -148,7 +148,7 @@ async def test_unexpected_ingest_and_wiki_job_errors_log_ids_and_types_not_title
         raise ValueError(f"“{SECRET}” could not be announced")
 
     ingest.finished_listeners.append(listener)
-    ingest._tell_finished(job.id, material_id)
+    ingest._tell_finished(ingest.jobs.get(job.id), material_id)
     assert "ValueError" in caplog.text
 
     wiki_jobs = WikiJobs(JobRepository(ready.db))
