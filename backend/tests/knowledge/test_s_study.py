@@ -642,6 +642,9 @@ def test_a_clock_moves_cards_into_due() -> None:
 # -- the page index learns deck and test pages (core schema v5) ---------------------------------------
 
 
+DECK_ROW = "INSERT INTO pages VALUES ('pg-2', 'deck', 'D', 'Wiki/Decks/D.md', NULL, 'ru', '', 'n')"
+
+
 def test_an_index_before_decks_keeps_its_rows_and_takes_deck_pages(tmp_path: Path) -> None:
     connection = sqlite3.connect(tmp_path / "knowledge.sqlite3")
     connection.execute("PRAGMA foreign_keys=ON")
@@ -669,7 +672,7 @@ def test_an_index_before_decks_keeps_its_rows_and_takes_deck_pages(tmp_path: Pat
     # Every row stays (child rows included) and the table takes decks and tests now.
     for table, count in (("pages", 1), ("page_folders", 1), ("aliases", 1), ("blocks", 1), ("blocks_fts", 1)):
         assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (count,), table
-    connection.execute("INSERT INTO pages VALUES ('pg-2', 'deck', 'D', 'Wiki/Decks/D.md', NULL, 'ru', '', 'n')")
+    connection.execute(DECK_ROW)
     connection.execute("INSERT INTO page_folders(page_id, folder_id) VALUES ('pg-2', 'fld-1')")
     connection.execute("DELETE FROM pages WHERE id = 'pg-1'")
     for table in ("aliases", "blocks", "blocks_fts"):  # the cascade and the FTS trigger still hold
