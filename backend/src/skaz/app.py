@@ -25,6 +25,7 @@ from .runtime import Runtime
 from .schemas import Provider  # noqa: F401  (kept for OpenAPI clarity)
 from .secrets import SecretStore
 from .security import local_access_error, require_token
+from .version import app_version
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def create_app(
             await runtime.http.aclose()
             runtime.close()
 
-    app = FastAPI(title="SKAZ backend", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="SKAZ backend", version=app_version(), lifespan=lifespan)
     app.state.runtime = runtime
 
     @app.middleware("http")

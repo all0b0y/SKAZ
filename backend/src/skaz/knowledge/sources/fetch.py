@@ -20,6 +20,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from ...version import app_version
 from ..errors import KnowledgeError
 
 MAX_REDIRECTS = 5
@@ -27,7 +28,8 @@ MAX_PAGE_BYTES = 10 * 1024 * 1024
 TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 TOTAL_SECONDS = 60.0
 USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) SKAZ/0.2"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+    f"SKAZ/{app_version()}"
 )
 
 Resolver = Callable[[str], Awaitable[list[str]]]
