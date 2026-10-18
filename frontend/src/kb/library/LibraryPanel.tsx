@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import type { KbFolder, KbMaterialSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
 import { useLibrary, useServices, useUi } from '../state/context';
 import { KIND_ICON, folderTone } from './materialMeta';
 import { NameField } from './NameField';
+import { dragsMaterials, MATERIALS_MIME, moveMaterials, outcomeText, readDraggedMaterials } from '../materials/bulk';
 
 const RECENT = 5;
 
@@ -89,6 +90,12 @@ function MaterialRow({ material, tone, meta }: { material: KbMaterialSummary; to
         className={`kb-row${current ? ' is-current' : ''}`}
         aria-current={current ? 'true' : undefined}
         onClick={() => openDoc(material.id)}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(MATERIALS_MIME, JSON.stringify([material.id]));
+          e.dataTransfer.setData('text/plain', material.title);
+          e.dataTransfer.effectAllowed = 'move';
+        }}
       >
         <Icon name={KIND_ICON[material.kind]} size={16} className="kb-row__icon" />
         <span className="kb-row__text">{material.title}</span>
@@ -170,10 +177,28 @@ function Overview() {
 }
 
 function FolderRow({ folder, tone, materialsHere }: { folder: KbFolder; tone?: string; materialsHere: boolean }) {
-  const { library: store } = useServices();
+  const { library: store, client } = useServices();
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
+  /** FEAT-2: material rows dropped on a folder move there (one or the whole selection). */
+  const over = (e: DragEvent) => {
+    if (!dragsMaterials(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDropping(true);
+  };
+  const drop = async (e: DragEvent) => {
+    setDropping(false);
+    const ids = readDraggedMaterials(e.dataTransfer);
+    if (!ids.length) return;
+    e.preventDefault();
+    setError(null);
+    const outcome = await moveMaterials(client, ids, folder.id);
+    if (outcome.failed.length) setError(outcomeText(outcome, 'moved'));
+    await store.getState().loadContent();
+  };
   const moreRef = useRef<HTMLButtonElement | null>(null);
 
   if (renaming) {
@@ -195,7 +220,8 @@ function FolderRow({ folder, tone, materialsHere }: { folder: KbFolder; tone?: s
   };
 
   return (
-    <li className="kb-folder">
+    <li className={`kb-folder${dropping ? ' is-drop' : ''}`} onDragOver={over} onDragLeave={() => setDropping(false)}
+      onDrop={(e) => void drop(e)}>
       <div className="kb-folder__line">
         <button type="button" className="kb-row kb-row--folder" onClick={() => void store.getState().openFolder(folder.id)}>
           <Icon name={folder.system ? 'inbox' : 'folder'} size={16} className="kb-row__icon" />

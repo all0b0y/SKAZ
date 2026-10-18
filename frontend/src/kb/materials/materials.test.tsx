@@ -21,7 +21,7 @@ describe('All materials (v11, decision 25)', () => {
     await user.click(screen.getByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
     const table = await within(center).findByRole('table');
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Name', 'Folder', 'Added', 'Wiki']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', '', 'Name', 'Folder', 'Added', 'Wiki']);
     const row = within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')!;
     expect(row).toHaveTextContent('Physics');
     expect(row).toHaveTextContent('In wiki');
@@ -70,6 +70,63 @@ describe('All materials (v11, decision 25)', () => {
     await user.click(within(center).getByRole('button', { name: 'Retry failed (1)' }));
     await waitFor(() => expect(row()).toHaveTextContent('Queued'));
     expect(within(center).queryByRole('button', { name: /Retry failed/ })).not.toBeInTheDocument();
+  });
+
+  it('selects rows and acts on all of them: move, add to wiki, delete (FEAT-2)', async () => {
+    const user = userEvent.setup();
+    const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
+    await user.click(await screen.findByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    await within(center).findByRole('table');
+    expect(within(center).queryByRole('toolbar', { name: 'Selected materials' })).not.toBeInTheDocument();
+    await user.click(within(center).getByRole('checkbox', { name: 'Select Lecture 8 — entropy' }));
+    await user.click(within(center).getByRole('checkbox', { name: 'Select Pasted text: problems' }));
+    const bar = within(center).getByRole('toolbar', { name: 'Selected materials' });
+    expect(bar).toHaveTextContent('2 materials selected');
+
+    await user.click(within(bar).getByRole('button', { name: 'Add to wiki' }));
+    await waitFor(() => expect(r.fake.calls.filter((c) => c.method === 'POST' && /\/ingest$/.test(c.path))).toHaveLength(2));
+
+    await user.click(within(bar).getByRole('button', { name: 'Move to…' }));
+    const move = await screen.findByRole('dialog', { name: 'Move 2 materials to folder' });
+    await user.click(within(move).getAllByRole('radio')[0]!);
+    await user.click(within(move).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'PATCH' && c.path.startsWith('/kb/materials/'))).toBe(true));
+
+    await user.click(within(center).getByRole('checkbox', { name: 'Select Pasted text: problems' }));
+    await user.click(within(center).getByRole('button', { name: 'Delete' }));
+    const confirm = await screen.findByRole('dialog', { name: /Delete \d+ materials?\?/ });
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'DELETE' && c.path.startsWith('/kb/materials/'))).toBe(true));
+  });
+
+  it('select all picks every shown row, and Ask puts them in the message as mentions', async () => {
+    const user = userEvent.setup();
+    const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
+    await user.click(await screen.findByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const table = await within(center).findByRole('table');
+    await user.click(within(center).getByRole('checkbox', { name: 'Select all materials' }));
+    const rows = within(table).getAllByRole('row').length - 1;
+    expect(within(center).getByRole('toolbar', { name: 'Selected materials' })).toHaveTextContent(`${rows} materials selected`);
+    const pushed: unknown[] = [];
+    const off = r.services.composer.subscribe((s) => pushed.push(s));
+    await user.click(within(center).getByRole('button', { name: 'Ask' }));
+    off();
+    expect(pushed.length).toBeGreaterThan(0);
+    expect(within(center).queryByRole('toolbar', { name: 'Selected materials' })).not.toBeInTheDocument();
+  });
+
+  it('dropping material rows on a folder moves them there (FEAT-2)', async () => {
+    const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
+    await screen.findByTestId('all-materials');
+    const folder = (await screen.findAllByRole('listitem')).find((li) => li.classList.contains('kb-folder'))!;
+    const store: Record<string, string> = { 'application/x-skaz-materials': JSON.stringify(['m-txt']) };
+    const dataTransfer = { types: Object.keys(store), getData: (t: string) => store[t] ?? '', setData: () => undefined, dropEffect: 'none' };
+    fireEvent.dragOver(folder, { dataTransfer });
+    expect(folder).toHaveClass('is-drop');
+    fireEvent.drop(folder, { dataTransfer });
+    await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'PATCH' && c.path === '/kb/materials/m-txt')).toBe(true));
   });
 
   it('says "today", "yesterday", else a short date', () => {
