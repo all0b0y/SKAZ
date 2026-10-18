@@ -18,6 +18,7 @@ import { RecognitionCheckRow } from './RecognitionCheckRow';
 import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
 import { UpdatesRow } from './UpdatesRow';
+import { HermesProviders } from './HermesProviders';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -132,6 +133,7 @@ function Row({ row }: { row: RowDef }) {
         {row.hint && <div className="kb-srow__hint">{row.hint}</div>}
       </div>
       <div className="kb-srow__control"><RowControl row={row} /></div>
+      {row.id === 'agent-hermes' && <HermesProviders />}
     </div>
   );
 }

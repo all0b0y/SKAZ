@@ -444,6 +444,61 @@ export interface KbGraphNode {
   hub: boolean;
 }
 
+export interface KbHermesCatalogItem {
+  id: string;
+  name: string;
+  group: "subscription" | "api_key" | "cloud";
+  keywords: string;
+}
+
+/** One credential Hermes keeps for a provider; never the key or token itself. */
+export interface KbHermesCredential {
+  index: number;
+  id: string;
+  label: string;
+  auth_type: string;
+  priority: number;
+  state: "ready" | "limited" | "signed_out" | "error";
+  until: string | null;
+  detail: string | null;
+  current: boolean;
+}
+
+export interface KbHermesCredentialMove {
+  priority: number;
+}
+
+export interface KbHermesProvider {
+  id: string;
+  name: string;
+  credentials: KbHermesCredential[];
+  free_tier: string | null;
+  order: number | null;
+}
+
+export interface KbHermesProviderAdd {
+  provider: string;
+  group: "subscription" | "api_key" | "cloud";
+}
+
+export interface KbHermesProviders {
+  state: "ready" | "not_installed" | "unavailable";
+  reason: string | null;
+  providers: KbHermesProvider[];
+  catalog: KbHermesCatalogItem[];
+  catalog_checked: string;
+  terminal: KbHermesTerminal | null;
+  read_at: string;
+}
+
+/** The Terminal window SKAZ opened for Hermes: still running, done, or stopped with an error. */
+export interface KbHermesTerminal {
+  provider: string | null;
+  title: string;
+  state: "running" | "done" | "failed";
+  started_at: string;
+}
+
 export interface KbHiddenFinding {
   kind: "unicode_tags" | "bidi_control" | "zero_width_run" | "variation_selector_run" | "interlinear_annotation" | "hidden_html" | "html_comment" | "hidden_pdf_text" | "unreadable_pdf_text";
   detail: string;
@@ -1181,6 +1236,55 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbAgentDefault;
     response: KbAgents;
+    status: 200;
+  };
+  "GET /kb/agents/hermes/providers": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "POST /kb/agents/hermes/providers/add": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbHermesProviderAdd;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "POST /kb/agents/hermes/providers/order": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "POST /kb/agents/hermes/providers/other": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "DELETE /kb/agents/hermes/providers/{provider}/credentials/{credential_id}": {
+    path: { provider: string; credential_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "POST /kb/agents/hermes/providers/{provider}/credentials/{credential_id}/priority": {
+    path: { provider: string; credential_id: string };
+    query: Record<string, never>;
+    body: KbHermesCredentialMove;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "POST /kb/agents/hermes/providers/{provider}/credentials/{credential_id}/sign-in": {
+    path: { provider: string; credential_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbHermesProviders;
     status: 200;
   };
   "GET /kb/agents/install/{task_id}": {

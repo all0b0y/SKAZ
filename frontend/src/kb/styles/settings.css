@@ -124,3 +124,62 @@
 .kb-meter { position: relative; display: inline-block; width: 96px; height: 6px; border-radius: 3px; background: var(--kb-line); overflow: hidden; flex: none; }
 .kb-meter i { display: block; height: 100%; border-radius: 3px; background: var(--kb-accent); transition: width 90ms linear; }
 @media (prefers-reduced-motion: reduce) { .kb-meter i { transition: none; } }
+
+/* Provider marks (0.3.1 K, decision Q4): colour marks as images, single-colour marks in the text colour. */
+.kb-provider {
+  --kb-provider-size: 16px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--kb-provider-size);
+  height: var(--kb-provider-size);
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.kb-provider img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.kb-provider--mono {
+  background-color: currentColor;
+  mask-size: contain; mask-repeat: no-repeat; mask-position: center;
+  -webkit-mask-size: contain; -webkit-mask-repeat: no-repeat; -webkit-mask-position: center;
+}
+.kb-provider--letter {
+  font-size: calc(var(--kb-provider-size) * 0.62);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--kb-muted-strong);
+  background: color-mix(in srgb, var(--kb-text) 9%, transparent);
+}
+
+/* Settings → Accounts & keys → Hermes providers (0.3.1 K1/K3). */
+.kb-hproviders { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 4px 0 2px; }
+.kb-hproviders__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.kb-hproviders__title { font-weight: 600; }
+.kb-hproviders__sub { font-size: var(--t-xs); }
+.kb-hproviders__terminal {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 10px; border: 1px dashed var(--kb-line); border-radius: var(--kb-r-md); font-size: var(--t-sm);
+}
+.kb-hproviders__empty, .kb-hproviders__note { margin: 0; font-size: var(--t-sm); }
+.kb-hproviders__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.kb-hprovider { border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); background: var(--kb-pane); padding: 6px 10px; }
+.kb-hprovider__head { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 26px; }
+.kb-hprovider__num {
+  width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 5px;
+  border: 1px solid var(--kb-line); font-size: var(--t-xs); color: var(--kb-muted); font-variant-numeric: tabular-nums;
+}
+.kb-hprovider__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.kb-hcreds { list-style: none; margin: 2px 0 0; padding: 0 0 0 26px; display: flex; flex-direction: column; }
+.kb-hcred { display: flex; align-items: center; gap: 8px; min-height: 30px; flex-wrap: wrap; border-top: 1px solid var(--kb-line); font-size: var(--t-sm); }
+.kb-hcreds .kb-hcred:first-child { border-top: 0; }
+.kb-hcred__label { min-width: 0; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-hcred__type { font-size: var(--t-xs); white-space: nowrap; }
+
+/* "Add a provider to Hermes" (K3). */
+.kb-addprovider { width: min(520px, calc(100vw - 32px)); }
+.kb-addprovider__intro { margin: 0 0 10px; font-size: var(--t-sm); }
+.kb-addprovider__search { margin-bottom: 8px; }
+.kb-addprovider__list { max-height: min(420px, 60vh); overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.kb-addprovider__list ul { list-style: none; margin: 0; padding: 0; }
+.kb-addprovider__item { width: 100%; gap: 10px; }
+.kb-addprovider__foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--kb-line); margin-top: 10px; }
+.kb-addprovider__checked { font-size: var(--t-xs); }

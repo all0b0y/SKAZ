@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 KbEngineId = Literal["codex", "claude_code", "hermes"]
 #: ``preparing``: Hermes' first check is running (wire name kept; it no longer downloads anything).
@@ -120,3 +120,75 @@ class KbAgentLoginResult(BaseModel):
     method: Literal["terminal", "browser"]
     url: str | None
     message: str
+
+
+# -- Hermes providers (0.3.1 K1/K3) -----------------------------------------------------------
+
+KbHermesProviderGroup = Literal["subscription", "api_key", "cloud"]
+KbHermesCredentialState = Literal["ready", "limited", "signed_out", "error"]
+
+
+class KbHermesCredential(BaseModel):
+    """One credential Hermes keeps for a provider; never the key or token itself."""
+
+    #: 1-based place in Hermes' list for the provider (its try order).
+    index: int
+    id: str
+    label: str
+    #: ``oauth`` (a sign-in) or ``api_key``.
+    auth_type: str
+    priority: int
+    state: KbHermesCredentialState
+    #: ``limited``: when Hermes tries it again (ISO-8601 UTC), if it said.
+    until: str | None
+    #: Hermes' own status words ("rate-limited (429)").
+    detail: str | None
+    #: Hermes' next pick for this provider.
+    current: bool
+
+
+class KbHermesProvider(BaseModel):
+    id: str
+    name: str
+    credentials: list[KbHermesCredential]
+    #: Hermes' free tier ("Free tier · <model>"), not a credential the user added.
+    free_tier: str | None
+    #: 0 = Hermes' main provider, 1.. = its fallback chain; ``null`` = not in Hermes' order.
+    order: int | None
+
+
+class KbHermesCatalogItem(BaseModel):
+    id: str
+    name: str
+    group: KbHermesProviderGroup
+    keywords: str
+
+
+class KbHermesTerminal(BaseModel):
+    """The Terminal window SKAZ opened for Hermes: still running, done, or stopped with an error."""
+
+    provider: str | None
+    title: str
+    state: Literal["running", "done", "failed"]
+    started_at: str
+
+
+class KbHermesProviders(BaseModel):
+    state: Literal["ready", "not_installed", "unavailable"]
+    reason: str | None
+    providers: list[KbHermesProvider]
+    catalog: list[KbHermesCatalogItem]
+    #: When the catalog was last checked against Hermes' own provider list.
+    catalog_checked: str
+    terminal: KbHermesTerminal | None
+    read_at: str
+
+
+class KbHermesProviderAdd(_Request):
+    provider: str = Field(min_length=1, max_length=64)
+    group: KbHermesProviderGroup
+
+
+class KbHermesCredentialMove(_Request):
+    #: 0 = tried first.
+    priority: int = Field(ge=0, le=100)

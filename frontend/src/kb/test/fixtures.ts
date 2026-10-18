@@ -63,6 +63,29 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
         }),
       ],
     },
+    hermesProviders: {
+      state: 'ready', reason: null, catalog_checked: '2026-10-18 · Hermes v0.22.2', terminal: null, read_at: ago(0),
+      providers: [
+        { id: 'openai-codex', name: 'ChatGPT or Codex subscription', order: 0, free_tier: null, credentials: [
+          { index: 1, id: 'c0dex1', label: 'me@example.com', auth_type: 'oauth', priority: 0, state: 'limited', until: '2026-10-15T09:30:00Z', detail: 'rate-limited (429) (1h 5m left)', current: false },
+          { index: 2, id: 'c0dex2', label: 'second account', auth_type: 'oauth', priority: 1, state: 'ready', until: null, detail: null, current: true },
+        ] },
+        { id: 'anthropic', name: 'Anthropic', order: 1, free_tier: null, credentials: [
+          { index: 1, id: 'a1b2c3', label: 'work key', auth_type: 'api_key', priority: 0, state: 'signed_out', until: null, detail: 'auth failed (401) (re-auth may be required)', current: true },
+        ] },
+        { id: 'nous', name: 'Nous Portal', order: null, free_tier: 'Free tier · Hermes-4-70B', credentials: [] },
+      ],
+      catalog: [
+        { id: 'openai-codex', name: 'ChatGPT or Codex subscription', group: 'subscription', keywords: 'openai chatgpt' },
+        { id: 'anthropic', name: 'Claude subscription', group: 'subscription', keywords: 'claude' },
+        { id: 'nous', name: 'Nous Portal', group: 'subscription', keywords: 'nous' },
+        { id: 'openrouter', name: 'OpenRouter', group: 'api_key', keywords: 'or' },
+        { id: 'anthropic', name: 'Anthropic API', group: 'api_key', keywords: 'claude console' },
+        { id: 'deepseek', name: 'DeepSeek', group: 'api_key', keywords: '' },
+        { id: 'gmi', name: 'GMI Cloud', group: 'api_key', keywords: '' },
+        { id: 'bedrock', name: 'AWS Bedrock', group: 'cloud', keywords: 'aws amazon' },
+      ],
+    },
     installTasks: {},
     keys: { providers: [
       { id: 'openrouter', configured: true, checked_at: ago(60 * 24), valid: true },

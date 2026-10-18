@@ -16,6 +16,7 @@ from ..install.terminal import TerminalLauncher
 from .claude_code import ClaudeCodeEngine
 from .engine import AgentEngine, EngineId, EngineStatus
 from .hermes import HermesEngine
+from .hermes_accounts import HermesAccounts
 from .mcp_access import McpAccessProvider
 from .registry import AgentAction, AgentState, AgentView, CodexStatusEngine, EngineRegistry, SettingsStore
 
@@ -24,6 +25,8 @@ from .registry import AgentAction, AgentState, AgentView, CodexStatusEngine, Eng
 class AgentsHub:
     registry: EngineRegistry
     installs: InstallManager
+    #: Hermes' providers in SKAZ's folder (K1/K3); ``None`` when Hermes is a test double.
+    hermes_accounts: HermesAccounts | None = None
 
     def state(self, view: AgentView) -> tuple[AgentState, AgentAction | None]:
         """The view's state, or ``preparing`` while the agent's first check runs (B10)."""
@@ -107,4 +110,6 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
 
     installs = InstallManager(agents_dir / "install", verify=verify, resolve=resolve, executor=executor,
                               after_steps=after_steps, watch_step=watch_step)
-    return AgentsHub(registry, installs)
+    hermes = registry.engine("hermes")
+    accounts = HermesAccounts(hermes) if isinstance(hermes, HermesEngine) else None
+    return AgentsHub(registry, installs, accounts)

@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders,
 } from '../../api/kb/types.gen';
 import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
@@ -61,6 +61,8 @@ export interface FakeWorld {
   readUpTo: number;
   // Settings, agents (S3, A2, D1)
   agents: KbAgents;
+  /** Hermes' providers in SKAZ's folder (0.3.1 K1/K3). */
+  hermesProviders: KbHermesProviders;
   installTasks: Record<string, KbInstallTask>;
   keys: KbKeys;
   speech: KbSpeechSettings;
@@ -1105,6 +1107,40 @@ const ROUTES: FakeRoutes = {
     Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
     return { engine: a.id, method: 'terminal', url: null, message: `${a.name} sign-in opened in Terminal. Come back when it says you’re signed in.` };
   }],
+  // -- Hermes providers (0.3.1 K1/K3): Terminal opens are recorded as a running window --
+  'GET /kb/agents/hermes/providers': [200, (w) => structuredClone(w.hermesProviders)],
+  'POST /kb/agents/hermes/providers/add': [200, (w, { body }) => {
+    const item = w.hermesProviders.catalog.find((c) => c.id === body.provider && c.group === body.group)
+      ?? fail(404, 'SKAZ doesn’t know this provider. Use “Other provider…” to add it in Hermes.');
+    w.hermesProviders.terminal = { provider: item.id, title: `SKAZ opened Hermes to add ${item.name}.`, state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/other': [200, (w) => {
+    w.hermesProviders.terminal = { provider: null, title: 'SKAZ opened Hermes’ credential manager.', state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/order': [200, (w) => {
+    w.hermesProviders.terminal = { provider: null, title: 'SKAZ opened Hermes’ fallback providers.', state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/{provider}/credentials/{credential_id}/sign-in': [200, (w, { path }) => {
+    hermesCredential(w, path.provider, path.credential_id);
+    w.hermesProviders.terminal = { provider: path.provider, title: 'SKAZ opened Hermes to sign in again.', state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/{provider}/credentials/{credential_id}/priority': [200, (w, { path, body }) => {
+    const { pool, credential } = hermesCredential(w, path.provider, path.credential_id);
+    const rest = pool.credentials.filter((c) => c.id !== credential.id);
+    rest.splice(Math.min(body.priority, rest.length), 0, credential);
+    pool.credentials = rest.map((c, i) => ({ ...c, index: i + 1, priority: i }));
+    return structuredClone(w.hermesProviders);
+  }],
+  'DELETE /kb/agents/hermes/providers/{provider}/credentials/{credential_id}': [200, (w, { path }) => {
+    const { pool, credential } = hermesCredential(w, path.provider, path.credential_id);
+    pool.credentials = pool.credentials.filter((c) => c.id !== credential.id).map((c, i) => ({ ...c, index: i + 1, priority: i }));
+    if (pool.credentials.length === 0 && !pool.free_tier) w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
+    return structuredClone(w.hermesProviders);
+  }],
   'POST /kb/agents/codex/logout': [200, (w) => {
     const a = findAgent(w, 'codex');
     Object.assign(a, { state: 'signed_out', signed_in: false, reason: 'Sign in with ChatGPT to use Codex.', action: 'login', models: [], current_model: null });
@@ -1164,6 +1200,13 @@ function findMessage(c: KbChat, id: string): KbMessage {
 
 function findNotification(w: FakeWorld, id: string): KbNotification {
   return w.notifications.find((n) => n.id === id) ?? fail(404, 'Notification not found.');
+}
+
+function hermesCredential(w: FakeWorld, provider: string, id: string) {
+  const pool = w.hermesProviders.providers.find((p) => p.id === provider);
+  const credential = pool?.credentials.find((c) => c.id === id);
+  if (!pool || !credential) return fail(404, 'This credential is no longer in Hermes. The list was read again.');
+  return { pool, credential };
 }
 
 function findAgent(w: FakeWorld, id: string) {

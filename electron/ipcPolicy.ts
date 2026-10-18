@@ -144,6 +144,12 @@ const ROUTES: readonly Route[] = [
   // 0.3.1 P: the user's answers to agents — Allow / Allow in this chat / Deny, Undo, a question's answer.
   { method: 'POST', pattern: /^\/kb\/permissions\/[^/]+\/(?:decide|undo)$/ },
   { method: 'POST', pattern: /^\/kb\/questions\/[^/]+\/answer$/ },
+  // 0.3.1 K1/K3: Hermes' providers in SKAZ's folder. Adding and signing in again open Hermes' own
+  // command in Terminal (no key passes through SKAZ); remove / priority carry no secret.
+  { method: 'GET', pattern: /^\/kb\/agents\/hermes\/providers$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/(?:add|other|order)$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/credentials\/[A-Za-z0-9_-]{1,64}\/(?:sign-in|priority)$/ },
+  { method: 'DELETE', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/credentials\/[A-Za-z0-9_-]{1,64}$/ },
 ];
 
 /**

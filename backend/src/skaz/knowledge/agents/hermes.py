@@ -102,6 +102,7 @@ from typing import Any
 
 from ...native_io import disk_call
 from ..install.system import (
+    Captured,
     Located,
     LocateFn,
     Version,
@@ -648,6 +649,39 @@ class HermesEngine:
         env = self.environment(located)
         shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR", "HERMES_RUNTIME_DIR")}
         await self._launcher.open("hermes-setup", SETUP_TITLE, [str(located.binary), "model"], shown)
+
+    # -- short Hermes commands for SKAZ's folder (providers, K1/K3) ------------------
+
+    async def cli(self, *args: str, timeout: float | None = None) -> Captured:
+        """A short Hermes command (``auth list``, ``config get …``) in SKAZ's folder, under the launcher
+        watch. Never one that asks for a secret: those run in Terminal (:meth:`open_terminal`)."""
+        located = self._locate("hermes")
+        if located is None:
+            raise FileNotFoundError(NOT_INSTALLED)
+        self.prepare()
+        watch = self.watch(located)
+        try:
+            return await run_capture([str(located.binary), *args], env=self.environment(located),
+                                     cwd=self.home, timeout=timeout or self._status_timeout)
+        finally:
+            watch.check()
+
+    async def open_terminal(self, name: str, title: str, commands: Sequence[Sequence[str]]) -> None:
+        """Hermes commands for SKAZ's folder in Terminal (the user answers Hermes there; SKAZ sees
+        nothing)."""
+        located = self._locate("hermes")
+        if located is None:
+            raise FileNotFoundError(NOT_INSTALLED)
+        self.prepare()
+        self.watch(located)  # never on a launcher that already points into SKAZ's folder
+        env = self.environment(located)
+        shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR", "HERMES_RUNTIME_DIR")}
+        steps = [[str(located.binary), *argv] for argv in commands]
+        await self._launcher.open_steps(name, title, steps, shown)
+
+    def terminal_finished(self, name: str) -> int | None:
+        """Exit code of a Terminal window SKAZ opened (``None`` while it runs)."""
+        return self._launcher.finished(name)
 
     # -- SKAZ conversations in Hermes' session store ----------------------------
 

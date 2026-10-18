@@ -121,6 +121,18 @@ if args == ["model"]:
 if args[:1] == ["sessions"]:  # documented session management: `hermes sessions delete <id> --yes`, `prune`
     record("sessions", args=args[1:], home=os.environ.get("HERMES_HOME"))
     sys.exit(SCENARIO.get("sessions_exit", 0))
+if args[:1] in (["auth"], ["config"], ["fallback"]):
+    # Short commands answered from the scenario by their argv ("auth list", "config get model.provider
+    # --json"); output shapes are built from Hermes' own print statements (auth_commands.py, config.py).
+    record("cli", args=args, home=os.environ.get("HERMES_HOME"), cwd=os.getcwd(),
+           stdin_tty=sys.stdin.isatty() if sys.stdin else None)
+    answer = SCENARIO.get("cli", {}).get(" ".join(args))
+    if answer is None:
+        sys.stderr.write("Config key not set: " + " ".join(args) + "\n")
+        sys.exit(1)
+    sys.stdout.write(answer.get("stdout", ""))
+    sys.stderr.write(answer.get("stderr", ""))
+    sys.exit(answer.get("exit", 0))
 assert args == ["acp"], args
 if SCENARIO.get("stubborn"):
     stubborn()

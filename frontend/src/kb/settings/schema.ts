@@ -52,7 +52,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   // Accounts & keys
   { id: 'agent-codex', section: 'conn', group: 'Agent', label: 'Codex', hint: 'ChatGPT subscription · chat answers and wiki pages', keywords: 'openai chatgpt login sign in' },
   { id: 'agent-claude', section: 'conn', group: 'Agent', label: 'Claude Code', hint: 'Claude subscription or Anthropic key', keywords: 'anthropic login sign in' },
-  { id: 'agent-hermes', section: 'conn', group: 'Agent', label: 'Hermes Agent', hint: 'Models and keys come from Hermes settings', keywords: 'nous' },
+  { id: 'agent-hermes', section: 'conn', group: 'Agent', label: 'Hermes Agent', hint: 'Subscriptions and API keys, added through Hermes in Terminal', keywords: 'nous provider providers subscription api key sign in openrouter anthropic gemini deepseek fallback order' },
   { id: 'key-openrouter', section: 'conn', group: 'API keys', label: 'OpenRouter', hint: 'Other models with an API key', keywords: 'key token jev' },
   { id: 'key-soniox', section: 'conn', group: 'API keys', label: 'Soniox', hint: 'Live recording and translation', keywords: 'key speech asr' },
   { id: 'local-whisper', section: 'conn', group: 'On this computer', label: 'Whisper on this computer', hint: 'Works without internet', keywords: 'local offline speech asr download' },
