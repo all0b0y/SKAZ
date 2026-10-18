@@ -33,7 +33,8 @@ export interface AudioFileChoice {
   name: string;
 }
 
-export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped';
+/** `quitting`: the app is closing and the service is being stopped on purpose — not a failure. */
+export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped' | 'quitting';
 
 export interface BackendStatus {
   phase: BackendPhase;

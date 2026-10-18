@@ -205,7 +205,7 @@ export class BackendManager {
       // A process that restart() already replaced must not report over its successor.
       if (this.child !== child) return;
       this.child = null;
-      if (this.status.phase !== 'stopped') {
+      if (this.status.phase !== 'stopped' && this.status.phase !== 'quitting') {
         this.setStatus({
           phase: 'error',
           detail: `backend exited (code ${code ?? 'null'}, signal ${signalName ?? 'none'})`,
@@ -255,13 +255,17 @@ export class BackendManager {
       this.restarting = false;
     }
     // The app may have started quitting while the stale process was exiting.
-    if (this.getStatus().phase === 'stopped') return false;
+    if (this.getStatus().phase === 'stopped' || this.getStatus().phase === 'quitting') return false;
     void this.start().catch(() => undefined);
     return true;
   }
 
+  /**
+   * Stop on purpose (the app is quitting). The window hears `quitting` — a short wait, never the
+   * "service stopped" error — and the phase stays there: the window closes once this resolves.
+   */
   async stop(): Promise<void> {
-    this.setStatus({ phase: 'stopped' });
+    this.setStatus({ phase: 'quitting' });
     const child = this.child;
     this.child = null;
     this.handle = null;

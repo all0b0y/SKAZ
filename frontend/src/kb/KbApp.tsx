@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BackendStatus } from '../api/bridge';
 import { LoadingTree } from '../brand/LoadingTree';
-import { Banner, Button } from './ui';
+import { Banner, Button, Spinner } from './ui';
 import { MotionProvider } from './ui/motion';
 import { KbServicesProvider, useLibrary, usePrefs, useServices, useUi, type KbServices } from './state/context';
 import { Shell } from './shell/Shell';
@@ -77,6 +77,15 @@ function BackendGate({ children }: { children: ReactNode }) {
       if (!restarted) void bridge.getBackendStatus?.().then(setStatus);
     });
   };
+  // SKAZ is closing: the service stops on purpose. A plain spinner until the window closes —
+  // no tree, no error, and nothing that makes the user wait longer than the service needs.
+  if (phase === 'quitting') {
+    return (
+      <div className="kb-quitting" data-testid="quitting">
+        <Spinner label="Closing SKAZ…" />
+      </div>
+    );
+  }
   return (
     <>
       {phase === 'ready' ? children : null}

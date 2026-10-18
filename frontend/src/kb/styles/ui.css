@@ -277,6 +277,17 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   .kb-spinner { animation-duration: 2.4s; }
 }
 
+/* SKAZ is closing (BackendGate, phase `quitting`): one spinner in the middle of the window. */
+.kb-quitting {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--kb-bg);
+}
+.kb-quitting .kb-spinner { width: 28px; height: 28px; border-width: 3px; }
+
 /* ---- Empty state ---- */
 .kb-empty {
   margin: auto;

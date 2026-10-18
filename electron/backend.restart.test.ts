@@ -68,4 +68,20 @@ describe('BackendManager.restart', () => {
     expect(manager.getStatus()).toMatchObject({ phase: 'error', stopped: true });
     expect(manager.getStatus().hint).toBeUndefined();
   });
+
+  it('stopping on quit reports quitting, never an error, even when the process exits on SIGTERM', async () => {
+    const { BackendManager } = await import('./backend');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ status: 'ok' }) })));
+    const seen: string[] = [];
+    const manager = new BackendManager({ repoRoot: '/repo', dataDir: '/tmp/skaz-restart-test', onStatus: (s) => seen.push(s.phase) });
+    void manager.start();
+    await vi.waitFor(() => expect(manager.getStatus().phase).toBe('ready'), { timeout: 3_000 });
+    const child = children.at(-1)!;
+    child.kill.mockImplementation(() => { queueMicrotask(() => child.emit('exit', null, 'SIGTERM')); return true; });
+    await manager.stop();
+    expect(manager.getStatus().phase).toBe('quitting');
+    expect(seen).not.toContain('error');
+    expect(seen).not.toContain('stopped');
+    expect(await manager.restart()).toBe(false);
+  });
 });
