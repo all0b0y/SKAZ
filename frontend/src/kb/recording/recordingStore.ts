@@ -114,6 +114,15 @@ interface Deps {
 const LIVE_STATES: ReadonlyArray<RecPhase> = ['recording', 'pausing', 'paused', 'resuming'];
 const SETTLE_TRIES = 60;
 const STREAM_POLL_MS = 1500;
+/** Background retries of audio that couldn't be saved when a recording stopped (~2 minutes). */
+const SAVE_RETRIES = 24;
+const SAVE_RETRY_MS = 5000;
+
+/** "the last 3 s", "the last 2 min 5 s" — how much recording time a message says was lost. */
+function spoken(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min${seconds % 60 ? ` ${seconds % 60} s` : ''}`;
+}
 
 interface LegacySettings {
   transcription_provider?: string;
@@ -130,6 +139,11 @@ export function isLive(phase: RecPhase): boolean {
 export function createRecordingStore(deps: Deps): RecordingStore {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let engine: CaptureEngine | null = null;
+  /**
+   * A stopped capture whose audio isn't all saved yet. It stays referenced so the quit guard keeps
+   * counting its unsaved audio, and SKAZ keeps retrying it in the background.
+   */
+  let unsaved: CaptureEngine | null = null;
   let ticker: ReturnType<typeof setInterval> | null = null;
   let poller: ReturnType<typeof setTimeout> | null = null;
   /** Bumped whenever polling starts or stops: an answer of an older loop never schedules another. */
@@ -139,7 +153,9 @@ export function createRecordingStore(deps: Deps): RecordingStore {
   const store = createStore<RecordingData & RecordingActions>()((set, get) => {
     const report = () => {
       const phase = get().phase;
-      const pending = engine?.pending() ?? { pending: 0, failed: 0 };
+      const live = engine?.pending() ?? { pending: 0, failed: 0 };
+      const kept = unsaved?.pending() ?? { pending: 0, failed: 0 };
+      const pending = { pending: live.pending + kept.pending, failed: live.failed + kept.failed };
       deps.bridge.reportCaptureState?.({
         recorderState: phase === 'recording' ? 'recording' : phase === 'paused' ? 'paused'
           : phase === 'idle' ? 'idle' : 'processing',
@@ -199,6 +215,40 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       void fail(message);
     };
 
+    /**
+     * Keep retrying a stopped capture's unsaved audio in the background. The quit guard counts it
+     * all along (report), so SKAZ never quits over it silently; once saved, the material settles.
+     */
+    const keepSaving = (current: CaptureEngine, materialId: string | null) => {
+      unsaved = current;
+      report();
+      void (async () => {
+        for (let i = 0; i < SAVE_RETRIES && unsaved === current; i += 1) {
+          await sleep(SAVE_RETRY_MS);
+          if (unsaved !== current) return;
+          if (await (current.retry?.() ?? Promise.resolve(false)).catch(() => false)) {
+            unsaved = null;
+            break;
+          }
+        }
+        // Saved, or out of retries: the material settles with what the backend has. Audio still
+        // unsaved stays counted for the quit guard until SKAZ quits.
+        if (materialId) await settle(materialId, 'stop');
+        report();
+        deps.onMaterialsChanged?.();
+      })();
+    };
+
+    /** What a stop that couldn't save everything says: what is lost for good, what is still kept. */
+    const unsavedText = (current: CaptureEngine | null, saved: boolean): string | null => {
+      const lost = current?.lostMs?.() ?? 0;
+      if (lost > 0) {
+        return `The last ${spoken(lost)} of audio couldn’t be saved and are lost.`
+          + (saved ? '' : ' SKAZ keeps the rest of the unsaved audio and keeps trying to save it.');
+      }
+      return saved ? null : 'Some audio isn’t saved yet. SKAZ keeps it, keeps trying to save it, and will not quit silently.';
+    };
+
     /** Recognition/capture stopped on its own: keep what is saved, settle, never continue alone. */
     const fail = async (message: string) => {
       const materialId = get().materialId;
@@ -206,10 +256,18 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       attempt += 1;
       tick(false);
       set({ phase: 'finishing', bars: SILENT_BARS });
-      await engine?.stop().catch(() => false);
+      const current = engine;
+      const saved = await (current?.stop() ?? Promise.resolve(true)).catch(() => false);
       engine = null;
-      if (materialId) await settle(materialId, 'stop');
-      set({ phase: 'idle', failure: materialId ? { materialId, atMs, message } : null, elapsedMs: atMs });
+      // Unsaved audio must stay visible to the quit guard: report it before anything settles. The
+      // stream stays open for the retries; keepSaving settles the material afterwards.
+      if (!saved && current) keepSaving(current, materialId);
+      else if (materialId) await settle(materialId, 'stop');
+      const loss = unsavedText(current, saved);
+      set({
+        phase: 'idle', elapsedMs: atMs,
+        failure: materialId ? { materialId, atMs, message: loss ? `${message} ${loss}` : message } : null,
+      });
       report();
     };
 
@@ -383,15 +441,27 @@ export function createRecordingStore(deps: Deps): RecordingStore {
         set({ phase: 'finishing', bars: SILENT_BARS });
         report();
         const current = engine;
-        const saved = await (current?.stop() ?? Promise.resolve(true)).catch(() => false);
+        let saved = await (current?.stop() ?? Promise.resolve(true)).catch(() => false);
+        // One immediate retry: a delivery that failed once often goes through after reconnecting.
+        if (!saved && current?.retry) saved = await current.retry().catch(() => false);
         if (!saved) {
-          // Unsaved audio: keep the quit guard (main warns before closing) and say so.
-          set({ startError: 'Some audio isn’t saved yet. SKAZ keeps it and will not quit silently.', startErrorWhen: 'stop-unsaved' });
+          // Unsaved audio: keep it for the quit guard (main warns before closing), keep retrying
+          // in the background, and say so.
+          engine = null;
+          if (current) keepSaving(current, materialId);
+          set({ phase: 'idle', startError: unsavedText(current, false), startErrorWhen: 'stop-unsaved' });
           report();
           return false;
         }
         engine = null;
         await settle(materialId, 'stop');
+        const lost = unsavedText(current, true);
+        if (lost) {
+          set({ phase: 'idle', bars: SILENT_BARS, startError: lost, startErrorWhen: 'stop-unsaved' });
+          report();
+          deps.onMaterialsChanged?.();
+          return false;
+        }
         // The capture graph never confirmed its last flush: what arrived is saved, the final
         // moment may be missing. The quit guard hears it, so SKAZ never quits over it silently.
         const complete = !(current?.incomplete?.() ?? false);
@@ -454,6 +524,15 @@ export function createRecordingStore(deps: Deps): RecordingStore {
       clearStartError: () => set({ startError: null, startErrorWhen: null, startPermission: null }),
 
       prepareQuit: async () => {
+        if (unsaved) {
+          const current = unsaved;
+          if (await (current.retry?.() ?? Promise.resolve(false)).catch(() => false)) {
+            unsaved = null;
+            report();
+          } else {
+            return false;
+          }
+        }
         if (get().phase === 'idle') return true;
         if (get().phase === 'starting' || get().phase === 'finishing') {
           for (let i = 0; i < SETTLE_TRIES && !['idle', 'recording', 'paused'].includes(get().phase); i += 1) await sleep(250);

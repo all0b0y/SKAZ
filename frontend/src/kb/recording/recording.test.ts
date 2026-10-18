@@ -14,14 +14,18 @@ function fakeEngine() {
   let elapsed = 0;
   let saved = true;
   let incomplete = false;
+  let lost = 0;
+  let retrySaves = false;
   const engine: CaptureEngine = {
     start: vi.fn(async (start, cb) => { started = start; callbacks = cb; calls.push('start'); }),
     pause: vi.fn(async () => { calls.push('pause'); }),
     resume: vi.fn(async () => { calls.push('resume'); }),
     stop: vi.fn(async () => { calls.push('stop'); return saved; }),
     elapsedMs: () => elapsed,
-    pending: () => ({ pending: saved ? 0 : 3, failed: 0 }),
+    pending: () => ({ pending: saved ? 0 : 3, failed: saved ? 0 : 1 }),
     incomplete: () => incomplete,
+    retry: vi.fn(async () => { calls.push('retry'); if (retrySaves) saved = true; return saved; }),
+    lostMs: () => lost,
   };
   return {
     engine, calls,
@@ -30,6 +34,8 @@ function fakeEngine() {
     fail: (message: string) => callbacks!.onFailure(message),
     setElapsed: (ms: number) => { elapsed = ms; },
     unsaved: () => { saved = false; },
+    retrySaves: () => { retrySaves = true; },
+    lose: (ms: number) => { lost = ms; },
     flushUnconfirmed: () => { incomplete = true; },
   };
 }
@@ -243,13 +249,44 @@ describe('Recording store over /kb/recordings and the existing capture pipeline'
   });
 
   it('quit barrier: stops a running recording and answers whether its audio is saved', async () => {
-    const { store, eng } = setup();
+    const { store, eng, fake } = setup();
     await expect(store.getState().prepareQuit()).resolves.toBe(true);
     await store.getState().start();
     eng.unsaved();
     await expect(store.getState().prepareQuit()).resolves.toBe(false);
-    expect(store.getState().phase).toBe('finishing');
     expect(store.getState().startErrorWhen).toBe('stop-unsaved');
+    // The unsaved audio stays counted for the quit guard in main.
+    expect(fake.bridge.reportCaptureState).toHaveBeenLastCalledWith(expect.objectContaining({ pending: 3, failed: 1 }));
+    await expect(store.getState().prepareQuit()).resolves.toBe(false);
+  });
+
+  it('a capture that fails with unsaved audio keeps the quit guard instead of reporting 0 pending', async () => {
+    const { store, eng, fake } = setup();
+    await store.getState().start();
+    eng.unsaved();
+    eng.fail('Audio couldn’t be saved, so the recording stopped.');
+    await vi.waitFor(() => expect(store.getState().phase).toBe('idle'));
+    expect(store.getState().failure?.message).toMatch(/keeps trying to save it/);
+    expect(fake.bridge.reportCaptureState).toHaveBeenLastCalledWith(expect.objectContaining({ pending: 3, failed: 1 }));
+    await expect(store.getState().prepareQuit()).resolves.toBe(false);
+  });
+
+  it('a retry that saves the audio releases the quit guard', async () => {
+    const { store, eng, fake } = setup();
+    await store.getState().start();
+    eng.unsaved();
+    eng.retrySaves();
+    await expect(store.getState().stop()).resolves.toBe(true);
+    expect(eng.calls).toContain('retry');
+    expect(fake.bridge.reportCaptureState).toHaveBeenLastCalledWith(expect.objectContaining({ pending: 0, failed: 0 }));
+  });
+
+  it('says how much audio was lost for good', async () => {
+    const { store, eng } = setup();
+    await store.getState().start();
+    eng.lose(3200);
+    await expect(store.getState().stop()).resolves.toBe(false);
+    expect(store.getState().startError).toMatch(/last 3 s of audio couldn’t be saved/);
   });
 
   it('each refusal says what didn’t happen: start, resume, continue', async () => {

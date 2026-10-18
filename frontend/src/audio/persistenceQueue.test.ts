@@ -104,13 +104,31 @@ describe('PersistenceQueue durable FIFO', () => {
     expect(queue.enqueue(chunk(1))).toBe(false);
     expect(queue.enqueue(chunk(2))).toBe(false); // protected stop-tail slot
     expect(queue.retainedRawCount()).toBe(3); // bounded live slot + overflow + stop tail
-    expect(queue.getState()).toMatchObject({ overflow: true, droppedCount: 0 });
+    expect(queue.getState()).toMatchObject({ overflow: true, droppedCount: 0, droppedMs: 0 });
     expect(onBlocked).toHaveBeenCalledTimes(1);
     release();
     queue.retryFailed();
     await expect(queue.drain()).resolves.toBe(true);
     expect(queue.retainedRawCount()).toBe(0);
   });
+});
+
+it('counts chunks past the protected slots, and every later one, instead of dropping them silently', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const queue = new PersistenceQueue({
+    maxPending: 1,
+    store: async (item) => { await gate; return ack(item.sequence); },
+  });
+  queue.enqueue(chunk(0));
+  queue.enqueue(chunk(1));
+  queue.enqueue(chunk(2));
+  expect(queue.enqueue(chunk(3))).toBe(false);
+  release();
+  await expect(queue.drain()).resolves.toBe(true);
+  // A gap in sequences can never be stored: later chunks are refused and counted too.
+  expect(queue.enqueue(chunk(4))).toBe(false);
+  expect(queue.getState()).toMatchObject({ droppedCount: 2, droppedMs: 20, completed: 3 });
 });
 
 it('drains accepted transient PCM without requiring an audio file', async () => {

@@ -39,6 +39,10 @@ export interface CaptureEngine {
   elapsedMs(): number;
   /** Unsent audio, for the quit guard in main. */
   pending(): { pending: number; failed: number };
+  /** Retry audio that couldn't be saved (reconnecting first); true = everything is saved now. */
+  retry?(): Promise<boolean>;
+  /** Recording time refused for good (the queue overflowed past its protected slots). */
+  lostMs?(): number;
 }
 
 export type CaptureFactory = () => CaptureEngine;
@@ -96,10 +100,16 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
         }
       });
       queue = new PersistenceQueue({
-        store: (chunk) => nativeWriter.store(chunk),
-        maxPending: 64,
-        maxAttempts: 1,
-        onBlocked: () => callbacks.onFailure('Audio delivery was interrupted; the audio received so far is kept.'),
+        // A failed delivery disconnects the writer; reconnecting re-checks the saved clock, so a
+        // retry never writes audio out of order (NativeAudioWriter.open).
+        store: async (chunk) => {
+          if (nativeWriter.needsReconnect) await nativeWriter.open();
+          return nativeWriter.store(chunk);
+        },
+        // About a minute of 0.1 s windows (~6 MB): a backend that stalls for a few seconds while
+        // a delivery is retried doesn't overflow the queue and stop the recording.
+        maxPending: 600,
+        onBlocked: () => callbacks.onFailure('Audio couldn’t be saved, so the recording stopped. SKAZ keeps the unsaved part and keeps trying to save it.'),
       });
       const activeQueue = queue;
       const meter = new SignalMeter();
@@ -156,6 +166,20 @@ export function nativeCapture(bridge: NativeBridge): CaptureEngine {
     pending() {
       const state = queue?.getState();
       return { pending: state?.pending ?? 0, failed: state?.failed.length ?? 0 };
+    },
+    async retry() {
+      if (!queue) return true;
+      queue.retryFailed();
+      const saved = await queue.drain();
+      if (saved) {
+        try { await writer?.finish('stop'); } catch { /* settled by POST /kb/recordings/{id}/stop */ }
+        unlisten?.();
+        unlisten = null;
+      }
+      return saved;
+    },
+    lostMs() {
+      return queue?.getState().droppedMs ?? 0;
     },
   };
 }

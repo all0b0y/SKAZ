@@ -35,6 +35,9 @@ export class NativeAudioWriter {
 
   disconnect(): void { this.connected = false; this.failed = true; }
 
+  /** The transport failed mid-recording: retained audio can be retried after open() reconnects. */
+  get needsReconnect(): boolean { return this.failed && !this.stopped && this.rate !== null; }
+
   open(rate = this.rate): Promise<void> {
     if (this.opening) return this.opening;
     if (this.connected) return Promise.resolve();
