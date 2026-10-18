@@ -65,3 +65,49 @@ describe('Wiki panel: search, Index and Log (B20)', () => {
     expect(within(doc).getByText(/Notes created: Lecture 8/)).toBeInTheDocument();
   });
 });
+
+describe('Selecting several wiki pages (0.3.1 F4)', () => {
+  async function concepts() {
+    const user = userEvent.setup();
+    const r = await wikiPanel();
+    await user.click(screen.getByRole('button', { name: /^Concepts/ }));
+    const grid = await screen.findByRole('grid', { name: 'Concepts' });
+    const rowOf = (name: string) => within(grid).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    const tick = async (...names: string[]) => { for (const n of names) await user.click(rowOf(n).querySelector('[data-sel-box]')!); };
+    return { ...r, user, grid, rowOf, tick };
+  }
+
+  it('Index and Log can’t be selected and say why', async () => {
+    await wikiPanel();
+    expect(screen.getByRole('button', { name: 'Index' })).toHaveAttribute('title', 'SKAZ keeps Index and Log — they can’t be selected');
+    expect(screen.getByRole('button', { name: 'Log' })).not.toHaveAttribute('aria-selected');
+  });
+
+  it('“Ask in chat” attaches the selected pages as @; the bar has Export, ⋯ and Delete', async () => {
+    const { user, tick, services } = await concepts();
+    const titles = within(screen.getByRole('grid', { name: 'Concepts' })).getAllByRole('row').slice(0, 2)
+      .map((r) => r.textContent ?? '');
+    await tick(titles[0]!, titles[1]!);
+    const bar = screen.getByRole('toolbar', { name: '2 selected' });
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Ask in chat', 'Export .md', 'More actions', 'Delete', 'Clear selection']);
+    await user.click(within(bar).getByRole('button', { name: 'Ask in chat' }));
+    expect(services.ui.getState().center).toBe('chat');
+    const input = await screen.findByTestId('message-input');
+    await waitFor(() => expect([...input.querySelectorAll('.kb-token--mention')].map((t) => t.textContent)).toEqual(
+      titles.map((t) => expect.stringContaining(t)),
+    ));
+  });
+
+  it('Delete builds one window from the page previews, then deletes one by one', async () => {
+    const { user, grid, tick, fake } = await concepts();
+    const titles = within(grid).getAllByRole('row').slice(0, 2).map((r) => r.textContent ?? '');
+    await tick(titles[0]!, titles[1]!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete 2 pages?' });
+    expect(fake.calls.filter((c) => c.method === 'GET' && c.path.endsWith('/delete-preview'))).toHaveLength(2);
+    expect(dialog).toHaveTextContent('Materials stay');
+    await user.click(await within(dialog).findByRole('button', { name: 'Delete 2' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Deleted 2 pages');
+    expect(fake.calls.filter((c) => c.method === 'DELETE')).toHaveLength(2);
+  });
+});

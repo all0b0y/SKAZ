@@ -49,6 +49,14 @@ if (!requested) {
     refuse('userData/sessionData isolation could not be established');
   }
   if (isolated) {
+    // Test-only injection, after profile isolation is proven. Keep the production allow-list strict:
+    // the backend sees only this checkout and the one explicitly requested offline Soniox fixture.
+    const childProcess = require('node:child_process');
+    const { smokeBackendOptions } = require('./backend-env.cjs');
+    const spawn = childProcess.spawn;
+    const root = path.resolve(__dirname, '..', '..');
+    childProcess.spawn = (command, args, options) => spawn(command, args,
+      smokeBackendOptions(root, command, options, process.env.PYTHONPATH));
     // Loaded only after both paths are proven: importing this constructs the
     // backend manager with path.join(app.getPath('userData'), 'data').
     require(path.join(__dirname, '..', '..', 'dist', 'main', 'main.js'));

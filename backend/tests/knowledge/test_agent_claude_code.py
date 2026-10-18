@@ -207,6 +207,9 @@ async def test_run_streams_text_tool_calls_results_and_usage(tmp_path: Path) -> 
                 "type": "http",
                 "url": "http://127.0.0.1:8765/kb/mcp",
                 "headers": {"Authorization": "Bearer run-token-run-1"},
+                # 0.3.1 P: Claude Code's per-call and idle limits for SKAZ's server raised to their
+                # clamp (2147483647 ms, ``dr``/``$s`` of the 2.1.281 binary): a wiki tool waits for the user.
+                "timeout": 2147483647,
             }
         }
     }

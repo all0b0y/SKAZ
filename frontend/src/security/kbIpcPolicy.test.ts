@@ -216,3 +216,47 @@ describe('Electron IPC policy — restored capabilities (F2)', () => {
     }
   });
 });
+
+describe('Electron IPC policy — exporting chosen items (0.3.1 F5)', () => {
+  it('lets the chosen items be exported next to the whole-library export — nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/export/items', body: { path: '/Users/me/Documents/Out', items: [{ type: 'page', id: 'p1' }] } })).toBeNull();
+    for (const [method, path] of [
+      ['GET', '/kb/export/items'], ['PUT', '/kb/export/items'], ['DELETE', '/kb/export/items'],
+      ['POST', '/kb/export/items/x'], ['POST', '/kb/export/items/../target'], ['POST', '/kb/export/item'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — agents ask permission and questions (0.3.1 P)', () => {
+  it('lets the user decide, undo and answer — one id segment, POST only', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/permissions/perm-1/decide', body: { decision: 'deny', reason: 'Not this page' } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/permissions/perm-1/undo' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/questions/q-1/answer', body: { option_index: 0 } })).toBeNull();
+    for (const [method, path] of [
+      ['GET', '/kb/permissions/perm-1/decide'], ['PUT', '/kb/permissions/perm-1/decide'], ['POST', '/kb/permissions/perm-1'],
+      ['GET', '/kb/permissions'], ['POST', '/kb/permissions/perm-1/apply'], ['POST', '/kb/permissions/a/b/decide'],
+      ['POST', '/kb/permissions/../chats/c1/decide'], ['DELETE', '/kb/permissions/perm-1/undo'],
+      ['GET', '/kb/questions/q-1/answer'], ['POST', '/kb/questions/q-1'], ['POST', '/kb/questions/q-1/answer/x'],
+      ['POST', '/kb/questions'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — SKAZ skills (0.3.1 H)', () => {
+  it('lets Settings → Skills read the list and switch a skill — one id segment, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/settings/skills' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/settings/skills/humanizer', body: { enabled: false } })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/settings/skills'], ['PUT', '/kb/settings/skills'], ['DELETE', '/kb/settings/skills/humanizer'],
+      ['GET', '/kb/settings/skills/humanizer'], ['POST', '/kb/settings/skills/humanizer'],
+      ['PUT', '/kb/settings/skills/humanizer/file'], ['PUT', '/kb/settings/skills/../keys/soniox'],
+      ['PUT', '/kb/settings/skills/%2e%2e'], ['PUT', '/kb/settings/skills/Humanizer'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});

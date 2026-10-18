@@ -48,6 +48,7 @@ export interface KbAgent {
   install_task: string | null;
   checked_at: string;
   first_run: KbAgentFirstRun | null;
+  questions?: "native" | "skaz";
 }
 
 export interface KbAgentDefault {
@@ -142,6 +143,7 @@ export interface KbChat {
   folder_ids: string[];
   state: "idle" | "answering";
   unread: boolean;
+  waiting_for_user?: boolean;
   messages: KbMessage[];
   cursor: number;
 }
@@ -154,10 +156,10 @@ export interface KbChatCreate {
   recording_material_id?: string | null;
 }
 
-/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part. */
+/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part; ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question). */
 export interface KbChatEvent {
   seq: number;
-  type: "message" | "delta" | "part" | "state" | "title";
+  type: "message" | "delta" | "part" | "state" | "title" | "part_update";
   message_id: string | null;
   text?: string | null;
   part?: KbMessagePart | null;
@@ -202,6 +204,7 @@ export interface KbChatSummary {
   folder_ids: string[];
   state: "idle" | "answering";
   unread: boolean;
+  waiting_for_user?: boolean;
 }
 
 export interface KbCitation {
@@ -323,9 +326,32 @@ export interface KbExcludedFragment {
   detected_at: string;
 }
 
+export interface KbExportItem {
+  type: "chat" | "page" | "material";
+  id: string;
+}
+
+/** Chosen chats, wiki pages and materials as ``.md`` into a folder (0.3.1 F5). */
+export interface KbExportItemsRequest {
+  path: string;
+  items: KbExportItem[];
+  overwrite?: boolean;
+}
+
+export interface KbExportItemsResult {
+  written: KbExportWritten[];
+  skipped: KbExportSkipped[];
+}
+
 export interface KbExportRequest {
   path: string;
   overwrite?: boolean;
+}
+
+export interface KbExportSkipped {
+  type: "chat" | "page" | "material";
+  id: string;
+  reason: string;
 }
 
 export interface KbExportTarget {
@@ -333,6 +359,12 @@ export interface KbExportTarget {
   reason: string | null;
   non_empty: boolean;
   entries: number;
+}
+
+export interface KbExportWritten {
+  type: "chat" | "page" | "material";
+  id: string;
+  file: string;
 }
 
 export interface KbFailure {
@@ -687,7 +719,7 @@ export interface KbMessageInput {
   attachments: string[];
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart;
 
 export interface KbNotification {
   id: string;
@@ -805,6 +837,47 @@ export interface KbPageSummary {
   language: string;
 }
 
+export interface KbPermissionChange {
+  op: "add" | "replace" | "remove";
+  block_id: string | null;
+  label: string;
+  before: string | null;
+  after: string | null;
+  block_kind: string | null;
+}
+
+export interface KbPermissionDecide {
+  decision: "allow" | "allow_chat" | "deny";
+  reason?: string | null;
+}
+
+/** An agent's wiki change: waits for Allow / Allow in this chat / Deny, then shows what happened. */
+export interface KbPermissionPart {
+  type: "permission";
+  id: string;
+  kind: "create" | "edit" | "rename" | "delete";
+  engine: "codex" | "claude_code" | "hermes";
+  page_id: string | null;
+  title: string;
+  status: "pending" | "allowed" | "denied" | "cancelled" | "undone";
+  auto: boolean;
+  reason: string | null;
+  summary: KbPermissionSummary;
+  changes: KbPermissionChange[];
+  path?: string | null;
+  new_title?: string | null;
+  linking_pages?: number;
+  links_unlinked?: number;
+  undoable?: boolean;
+}
+
+export interface KbPermissionSummary {
+  added: number;
+  changed: number;
+  removed: number;
+  user_notes_untouched: boolean;
+}
+
 export interface KbPrivacy {
   flows: KbPrivacyFlow[];
 }
@@ -831,6 +904,30 @@ export interface KbProblemAction {
   id: string;
   label: string;
   primary: boolean;
+}
+
+/** Exactly one: the index of an option, or the user's own answer. */
+export interface KbQuestionAnswer {
+  option_index?: number | null;
+  text?: string | null;
+}
+
+export interface KbQuestionOption {
+  label: string;
+  description: string;
+  recommended: boolean;
+}
+
+/** An agent's question; answer now or later — or just write a message (it closes the question). */
+export interface KbQuestionPart {
+  type: "question";
+  id: string;
+  engine: "codex" | "claude_code" | "hermes";
+  question: string;
+  options: KbQuestionOption[];
+  allow_other: boolean;
+  status: "pending" | "answered" | "superseded" | "cancelled";
+  answer: string | null;
 }
 
 /** A quote token in the question. ``source: "chat"`` is an earlier AI answer: context, not evidence. */
@@ -931,6 +1028,31 @@ export interface KbSettingsSection {
   id: "accounts" | "models" | "speech" | "wiki" | "storage" | "privacy" | "appearance" | "about";
   state: "ok" | "progress" | "warning" | "error";
   problems: KbProblem[];
+}
+
+export interface KbSkill {
+  id: string;
+  name: string;
+  version: string;
+  license: string;
+  source_url: string;
+  enabled: boolean;
+  engines: KbSkillEngine[];
+}
+
+export interface KbSkillEngine {
+  engine: "codex" | "claude_code" | "hermes";
+  state: "loaded" | "not_loaded" | "off";
+  reason: string | null;
+}
+
+export interface KbSkillUpdate {
+  enabled: boolean;
+}
+
+/** Only the skills of SKAZ's own folder; personal skills of the agents are never listed or used. */
+export interface KbSkills {
+  skills: KbSkill[];
 }
 
 export interface KbSnippetPart {
@@ -1285,6 +1407,13 @@ export interface KbEndpoints {
     response: KbJob;
     status: 202;
   };
+  "POST /kb/export/items": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbExportItemsRequest;
+    response: KbExportItemsResult;
+    status: 200;
+  };
   "GET /kb/export/target": {
     path: Record<string, never>;
     query: { path: string };
@@ -1551,6 +1680,27 @@ export interface KbEndpoints {
     response: KbNotification;
     status: 200;
   };
+  "POST /kb/permissions/{permission_id}/decide": {
+    path: { permission_id: string };
+    query: Record<string, never>;
+    body: KbPermissionDecide;
+    response: KbPermissionPart;
+    status: 200;
+  };
+  "POST /kb/permissions/{permission_id}/undo": {
+    path: { permission_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbPermissionPart;
+    status: 200;
+  };
+  "POST /kb/questions/{question_id}/answer": {
+    path: { question_id: string };
+    query: Record<string, never>;
+    body: KbQuestionAnswer;
+    response: KbQuestionPart;
+    status: 200;
+  };
   "POST /kb/recordings": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -1668,6 +1818,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbRecognitionSettingsUpdate;
     response: KbRecognitionSettings;
+    status: 200;
+  };
+  "GET /kb/settings/skills": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbSkills;
+    status: 200;
+  };
+  "PUT /kb/settings/skills/{skill_id}": {
+    path: { skill_id: string };
+    query: Record<string, never>;
+    body: KbSkillUpdate;
+    response: KbSkills;
     status: 200;
   };
   "GET /kb/settings/speech": {

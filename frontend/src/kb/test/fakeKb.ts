@@ -13,9 +13,13 @@ import type {
   KbAbout, KbAgents, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
-  KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSpeechMaterial, KbSpeechSettings,
+  KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
   KbWikiSettings, KbRecognitionSettings, KbBlockLink,
 } from '../../api/kb/types.gen';
+import {
+  isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
+  type KbPermissionPart, type KbQuestionPart,
+} from '../api/permissions';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -98,6 +102,12 @@ export interface FakeWorld {
   /** What a new streamed answer cites (defaults: the first concept page, the last fragment of the first material). */
   answerPage?: KbPageRef;
   answerCite?: KbCitation;
+  /** 0.3.1 P: kinds allowed without a question per chat («Allow in this chat»). */
+  permissionGrants?: Record<string, string[]>;
+  /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
+  undoRefusals?: Record<string, string>;
+  /** 0.3.1 H: SKAZ skills switched off (absent = every skill on, as the backend's default). */
+  skillsOff?: string[];
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -155,7 +165,9 @@ function pageSummary(p: KbPage): KbPageSummary {
 function chatSummary(c: KbChat): KbChatSummary {
   const { messages: _m, cursor: _c, ...rest } = c;
   void _m; void _c;
-  return rest;
+  // 0.3.1 P: a permission or a question waits for the user somewhere in the chat.
+  const summary: KbChatSummaryP = { ...rest, waiting_for_user: c.messages.some((m) => partsOf(m).some(isWaitingPart)) };
+  return summary;
 }
 
 /** The world's time now: the fixed clock, or the real one. */
@@ -288,6 +300,10 @@ function applyToMessage(m: KbMessage, e: Omit<KbChatEvent, 'seq'>): void {
     else m.parts.push({ type: 'text', text: e.text });
   } else if (e.type === 'part' && e.part) {
     m.parts.push(e.part);
+  } else if ((e as KbChatEventP).type === 'part_update' && e.part) {
+    const part = e.part as AnyMessagePart;
+    const i = partsOf(m).findIndex((p) => 'id' in p && 'id' in part && p.id === part.id);
+    if (i >= 0) m.parts[i] = e.part;
   } else if ((e.type === 'state' || e.type === 'message') && e.message) {
     Object.assign(m, e.message);
   }
@@ -388,6 +404,24 @@ export function syncSpeechConsent(w: FakeWorld): void {
   for (const flow of w.privacy.flows) if (/soniox/i.test(flow.where)) flow.enabled = w.speech.provider === 'soniox' && w.speech.cloud_consent;
 }
 
+/** The backend's `/kb/settings/skills` (0.3.1 H): the pinned Humanizer, its state per agent from the agents. */
+export function fakeSkills(w: FakeWorld): KbSkills {
+  const enabled = !(w.skillsOff ?? []).includes('humanizer');
+  const engines = w.agents.agents.map((a): KbSkillEngine => {
+    if (!enabled) return { engine: a.id, state: 'off', reason: null };
+    if (a.state === 'ready' || a.state === 'signed_out') return { engine: a.id, state: 'loaded', reason: null };
+    if (a.state === 'not_installed') return { engine: a.id, state: 'not_loaded', reason: `${a.name} is not installed.` };
+    if (a.state === 'outdated') return { engine: a.id, state: 'not_loaded', reason: `This ${a.name} version isn't supported. Update it.` };
+    return { engine: a.id, state: 'not_loaded', reason: `SKAZ couldn't check ${a.name}.` };
+  });
+  return {
+    skills: [{
+      id: 'humanizer', name: 'Humanizer', version: '3.1.0', license: 'MIT',
+      source_url: 'https://github.com/blader/humanizer', enabled, engines,
+    }],
+  };
+}
+
 export function finishAnswer(world: FakeWorld, chatId: string): void {
   delete world.pendingAnswers[chatId];
   finishers.get(world)?.[chatId]?.();
@@ -431,6 +465,101 @@ function bump(world: FakeWorld, n: KbNotification): void {
   world.notificationSeq += 1;
   n.seq = world.notificationSeq;
 }
+
+// ---- Agent permissions and questions (0.3.1 phase P) --------------------------------------------
+
+type FakeWaiting<T> = { chat: KbChat; message: KbMessage; part: T };
+
+function findPart<T extends KbPermissionPart | KbQuestionPart>(w: FakeWorld, type: T['type'], id: string): FakeWaiting<T> {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = partsOf(message).find((p) => p.type === type && p.id === id);
+      if (part) return { chat, message, part: part as T };
+    }
+  }
+  return fail(404, type === 'permission' ? 'Permission request not found.' : 'Question not found.');
+}
+
+/** A part changed: `part_update` with the whole part; an answer that waited for nothing else goes on (here: ends). */
+function updated(w: FakeWorld, { chat, message, part }: FakeWaiting<AnyMessagePart>): void {
+  const event: Omit<KbChatEventP, 'seq'> = { type: 'part_update', message_id: message.id, part: structuredClone(part) };
+  pushEvent(w, chat.id, event as Omit<KbChatEvent, 'seq'>);
+  if (message.state === 'streaming' && !partsOf(message).some(isWaitingPart)) {
+    emit(w, chat, [{ type: 'state', message_id: message.id, message: { ...structuredClone(message), state: 'done' } }]);
+    chat.state = 'idle';
+  }
+  touchList(w, chat);
+}
+
+/** The user wrote instead of picking: a waiting question closes as «superseded» (Q-A2). */
+function supersedeQuestions(w: FakeWorld, c: KbChat): void {
+  for (const message of c.messages) {
+    for (const part of partsOf(message)) {
+      if (part.type !== 'question' || part.status !== 'pending') continue;
+      part.status = 'superseded';
+      updated(w, { chat: c, message, part });
+    }
+  }
+}
+
+type PSpec<R extends keyof KbPermissionEndpoints> = KbPermissionEndpoints[R];
+type PEntry<R extends keyof KbPermissionEndpoints> = readonly [PSpec<R>['status'], (world: FakeWorld, call: {
+  path: PSpec<R>['path']; query: Partial<PSpec<R>['query']>; body: PSpec<R>['body'];
+}) => PSpec<R>['response']];
+
+/**
+ * Phase-P routes, kept apart from ROUTES only for readability;
+ * FAKE_ROUTES (the IPC-policy check) includes them.
+ */
+const PERMISSION_ROUTES: { [R in keyof KbPermissionEndpoints]: PEntry<R> } = {
+  'POST /kb/permissions/{permission_id}/decide': [200, (w, { path, body }) => {
+    const found = findPart<KbPermissionPart>(w, 'permission', path.permission_id);
+    const { part, chat } = found;
+    if (!['allow', 'allow_chat', 'deny'].includes(body.decision)) fail(422, 'Unknown decision.');
+    if ((body.reason ?? '').length > 500) fail(422, 'The reason is longer than 500 characters.');
+    if (body.decision === 'allow_chat' && part.kind === 'delete') fail(422, 'Deleting a page always asks.');
+    if (part.status !== 'pending') fail(409, 'This request was already answered.');
+    part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    part.reason = body.decision === 'deny' ? (body.reason?.trim() || null) : null;
+    if (body.decision === 'allow_chat') {
+      const grants = (w.permissionGrants ??= {});
+      grants[chat.id] = [...new Set([...(grants[chat.id] ?? []), part.kind])];
+    }
+    updated(w, found);
+    return structuredClone(part);
+  }],
+  'POST /kb/permissions/{permission_id}/undo': [200, (w, { path }) => {
+    const found = findPart<KbPermissionPart>(w, 'permission', path.permission_id);
+    if (found.part.status !== 'allowed') fail(409, 'Only an applied change can be undone.');
+    const refusal = w.undoRefusals?.[found.part.id];
+    if (refusal) fail(409, refusal);
+    found.part.status = 'undone';
+    updated(w, found);
+    return structuredClone(found.part);
+  }],
+  'POST /kb/questions/{question_id}/answer': [200, (w, { path, body }) => {
+    const found = findPart<KbQuestionPart>(w, 'question', path.question_id);
+    const { part, chat } = found;
+    const index = body.option_index ?? null;
+    const text = body.text?.trim() ?? '';
+    if (index === null && !text) fail(422, 'Pick an option or write an answer.');
+    if (index !== null && !part.options[index]) fail(422, 'There is no such option.');
+    if (part.status === 'answered' || part.status === 'cancelled') fail(409, 'This question is already closed.');
+    const late = part.status === 'superseded';
+    part.status = 'answered';
+    part.answer = index !== null ? part.options[index]!.label : text;
+    updated(w, found);
+    if (late) {
+      // A pick after the user wrote their own message goes to the agent as a new message (Q-A2).
+      const said = `Answer to the question: ${part.answer}`;
+      const user = chatMessage(`${chat.id}-u${++w.seq}`, (chat.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: said }]);
+      chat.messages.push(user);
+      pushEvent(w, chat.id, { type: 'message', message_id: user.id, message: structuredClone(user) });
+      touchList(w, chat);
+    }
+    return structuredClone(part);
+  }],
+};
 
 // ---- The typed route table ------------------------------------------------------------------
 
@@ -731,6 +860,7 @@ const ROUTES: FakeRoutes = {
   }],
   'POST /kb/chats/{chat_id}/messages': [202, (w, { path, body }) => {
     const c = findChat(w, path.chat_id);
+    supersedeQuestions(w, c);
     if (c.state === 'answering') fail(409, 'The agent is still answering in this chat.');
     const user = chatMessage(`${c.id}-u${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: body.text }], {
       input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] },
@@ -849,6 +979,8 @@ const ROUTES: FakeRoutes = {
     p.configured = body.key.length > 0;
     p.valid = null;
     p.checked_at = null;
+    // As the backend: the decision layer reads the same OpenRouter key.
+    if (p.id === 'openrouter') w.decisions.openrouter_key = p.configured;
     return structuredClone(p);
   }],
   'POST /kb/settings/keys/{provider}/check': [200, (w, { path }) => {
@@ -872,6 +1004,14 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/settings/skills': [200, (w) => fakeSkills(w)],
+  'PUT /kb/settings/skills/{skill_id}': [200, (w, { path, body }) => {
+    if (path.skill_id !== 'humanizer') fail(404, 'Unknown skill.');
+    const off = new Set(w.skillsOff ?? []);
+    if (body.enabled) off.delete(path.skill_id); else off.add(path.skill_id);
+    w.skillsOff = [...off];
+    return fakeSkills(w);
+  }],
   'GET /kb/wiki/files/{name}': [200, (w, { path }) => {
     const file = w.wikiFiles?.[path.name] ?? { text: path.name === 'index' ? '# Index\n' : '# Log\n', links: [] };
     return { name: path.name, text: file.text, links: file.links };
@@ -892,6 +1032,22 @@ const ROUTES: FakeRoutes = {
     job.progress.parts_total = 10;
     job.progress.parts_done = 3;
     return job;
+  }],
+  'POST /kb/export/items': [200, (w, { body }) => {
+    const root = w.library.root ?? '';
+    if (root && (body.path === root || body.path.startsWith(`${root}/`))) fail(409, 'Choose a folder outside the SKAZ library: the export is a separate copy.');
+    if ((w.exportFolders?.[body.path] ?? 0) > 0 && !body.overwrite) fail(409, 'The folder isn\'t empty. Confirm to replace files with the same names.');
+    const written: Array<{ type: 'chat' | 'page' | 'material'; id: string; file: string }> = [];
+    const skipped: Array<{ type: 'chat' | 'page' | 'material'; id: string; reason: string }> = [];
+    for (const item of body.items) {
+      const title = item.type === 'page' ? w.pages.find((p) => p.id === item.id)?.title
+        : item.type === 'material' ? w.materials.find((m) => m.id === item.id)?.title : w.chats.find((c) => c.id === item.id)?.title;
+      const noun = item.type === 'page' ? 'Page' : item.type === 'material' ? 'Material' : 'Chat';
+      if (!title) skipped.push({ type: item.type, id: item.id, reason: `${noun} not found.` });
+      else written.push({ type: item.type, id: item.id, file: `${item.type === 'chat' ? 'Chats' : item.type === 'page' ? 'Wiki' : 'Materials'}/${title}.md` });
+    }
+    w.exportFolders = { ...w.exportFolders, [body.path]: (w.exportFolders?.[body.path] ?? 0) + written.length };
+    return { written, skipped };
   }],
   'GET /kb/settings/recognition': [200, (w) => structuredClone(w.recognition ?? { engine: 'same_as_wiki', model: null, effort: null })],
   'PUT /kb/settings/recognition': [200, (w, { body }) => {
@@ -1073,7 +1229,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
-const COMPILED: Compiled[] = (Object.entries(ROUTES) as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1084,7 +1240,7 @@ const COMPILED: Compiled[] = (Object.entries(ROUTES) as Array<[KbRoute, Entry<Kb
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = Object.keys(ROUTES) as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections)(\/|$)/;

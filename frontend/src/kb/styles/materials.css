@@ -10,8 +10,9 @@
 .kb-select--grow select { width: 100%; text-overflow: ellipsis; }
 
 .kb-amt { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--t-base); }
-.kb-amt__c-pick { width: 30px; }
+.kb-amt__c-sel { width: 34px; }
 .kb-amt__c-type { width: 30px; }
+.kb-amt__sel .kb-selbox { display: block; }
 .kb-amt__c-name { width: 42%; }
 .kb-amt__c-folder { width: 24%; }
 .kb-amt__c-added { width: 96px; }
@@ -146,23 +147,6 @@
 .kb-arow > .kb-select select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 .kb-arow__note { font-size: var(--t-xs); color: var(--kb-warn); padding-left: 118px; }
 .kb-arow__hint { font-size: var(--t-xs); padding-left: 118px; margin: 0; }
-
-/* FEAT-2: selecting rows, and the bar that acts on all of them. */
-.kb-amt__pick { text-align: center; }
-.kb-amt__pick input { cursor: pointer; }
-.kb-amt tbody tr.is-picked { background: color-mix(in srgb, var(--kb-accent-soft) 60%, transparent); }
-.kb-amt tbody tr[draggable="true"] { cursor: default; }
-.kb-bulkbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0 18px 14px;
-  padding: 6px 8px 6px 14px;
-  border: 1px solid var(--kb-line);
-  border-radius: 10px;
-  background: var(--kb-bg);
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.12);
-}
-.kb-bulkbar__count { font-weight: 600; margin-right: 6px; }
-.kb-folder.is-drop > .kb-folder__line { outline: 2px dashed var(--kb-accent); outline-offset: -2px; border-radius: 8px; }
+/* 0.3.1 F1: a new folder name typed in place; Add makes it. */
+.kb-afolder { display: flex; align-items: flex-start; gap: 4px; flex: 1 1 220px; min-width: 0; max-width: calc(100% - 118px); }
+.kb-afolder > .kb-field { flex: 1; min-width: 0; }

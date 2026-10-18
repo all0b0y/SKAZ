@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type {
-  KbAbout, KbDecisionProviderUpdate, KbDecisions, KbKeys, KbPrivacy, KbSettingsHealth, KbSpeechSettings, KbSpeechSettingsUpdate, KbWikiSettings, KbWikiSettingsUpdate,
+  KbAbout, KbDecisionProviderUpdate, KbDecisions, KbKeys, KbPrivacy, KbSettingsHealth, KbSkills, KbSpeechSettings, KbSpeechSettingsUpdate, KbWikiSettings, KbWikiSettingsUpdate,
 } from '../../api/kb/types.gen';
 import type { HealthSectionId, KeyProviderId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
@@ -23,6 +23,7 @@ export interface SettingsData {
   decisions: Remote<KbDecisions>;
   privacy: Remote<KbPrivacy>;
   about: Remote<KbAbout>;
+  skills: Remote<KbSkills>;
 }
 
 export interface SettingsActions {
@@ -43,6 +44,10 @@ export interface SettingsActions {
   cancelDecisionModel: () => Promise<ActionResult>;
   loadPrivacy: () => Promise<void>;
   loadAbout: () => Promise<void>;
+  /** 0.3.1 H: SKAZ's own skills and, per agent, whether its answers carry them. */
+  loadSkills: () => Promise<void>;
+  /** Switch one skill; the answer is the whole list with the new status per agent (no reopening). */
+  setSkillEnabled: (skillId: string, enabled: boolean) => Promise<ActionResult>;
 }
 
 export type SettingsStore = StoreApi<SettingsData & SettingsActions>;
@@ -53,7 +58,7 @@ export const HEALTH_TO_SECTION: Record<HealthSectionId, SettingsSection> = {
 };
 
 export function createSettingsStore(client: KbClient): SettingsStore {
-  return createStore<SettingsData & SettingsActions>()((set) => {
+  return createStore<SettingsData & SettingsActions>()((set, get) => {
     const read = async <K extends keyof SettingsData>(key: K, fn: () => Promise<NonNullable<SettingsData[K]['value']>>) => {
       try {
         const value = await fn();
@@ -72,8 +77,20 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       }
     };
     const loadKeys = () => read('keys', () => client.call('GET /kb/settings/keys'));
+    // A key changes what other sections can do (decisions through OpenRouter, Soniox speech, the
+    // problem plates, privacy): re-read the ones already on screen, so the status follows at once.
+    const followKeys = async () => {
+      const s = get();
+      const loaded = (r: { value: unknown; error: string | null }) => r.value !== null || r.error !== null;
+      await Promise.all([
+        loaded(s.decisions) ? read('decisions', () => client.call('GET /kb/decisions')) : undefined,
+        loaded(s.speech) ? read('speech', () => client.call('GET /kb/settings/speech')) : undefined,
+        loaded(s.privacy) ? read('privacy', () => client.call('GET /kb/settings/privacy')) : undefined,
+        read('health', () => client.call('GET /kb/settings/health')),
+      ]);
+    };
     return {
-      health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(),
+      health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(), skills: empty(),
 
       loadHealth: () => read('health', () => client.call('GET /kb/settings/health')),
       healthAction: (problemId, actionId) => write('health', () =>
@@ -81,13 +98,17 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       loadKeys,
       saveKey: async (provider, key) => {
         const res = await write('keys', async () => { await client.call('PUT /kb/settings/keys/{provider}', { path: { provider }, body: { key } }); });
-        if (res.ok) await loadKeys();
+        if (res.ok) await Promise.all([loadKeys(), followKeys()]);
         return res;
       },
-      checkKey: (provider) => write('keys', async () => {
-        const row = await client.call('POST /kb/settings/keys/{provider}/check', { path: { provider } });
-        set((s) => ({ keys: { value: s.keys.value ? { providers: s.keys.value.providers.map((p) => (p.id === row.id ? row : p)) } : null, error: null } }));
-      }),
+      checkKey: async (provider) => {
+        const res = await write('keys', async () => {
+          const row = await client.call('POST /kb/settings/keys/{provider}/check', { path: { provider } });
+          set((s) => ({ keys: { value: s.keys.value ? { providers: s.keys.value.providers.map((p) => (p.id === row.id ? row : p)) } : null, error: null } }));
+        });
+        if (res.ok) await followKeys();
+        return res;
+      },
       loadSpeech: () => read('speech', () => client.call('GET /kb/settings/speech')),
       updateSpeech: (patch) => write('speech', () => client.call('PUT /kb/settings/speech', { body: patch })),
       deleteLocalModel: async () => {
@@ -107,6 +128,9 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       cancelDecisionModel: () => write('decisions', () => client.call('POST /kb/decisions/local/cancel')),
       loadPrivacy: () => read('privacy', () => client.call('GET /kb/settings/privacy')),
       loadAbout: () => read('about', () => client.call('GET /kb/settings/about')),
+      loadSkills: () => read('skills', () => client.call('GET /kb/settings/skills')),
+      setSkillEnabled: (skillId, enabled) => write('skills', () =>
+        client.call('PUT /kb/settings/skills/{skill_id}', { path: { skill_id: skillId }, body: { enabled } })),
     };
   });
 }

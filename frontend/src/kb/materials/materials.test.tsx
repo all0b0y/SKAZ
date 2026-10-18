@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
@@ -20,7 +20,8 @@ describe('All materials (v11, decision 25)', () => {
     await ready();
     await user.click(screen.getByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    const table = await within(center).findByRole('table');
+    // A grid since 0.3.1 F2: rows are selectable (aria-multiselectable / aria-selected).
+    const table = await within(center).findByRole('grid');
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', '', 'Name', 'Folder', 'Added', 'Wiki']);
     const row = within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')!;
     expect(row).toHaveTextContent('Physics');
@@ -37,7 +38,7 @@ describe('All materials (v11, decision 25)', () => {
     await ready();
     await user.click(screen.getByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    await within(center).findByRole('table');
+    await within(center).findByRole('grid');
     await user.click(within(center).getByRole('radio', { name: 'Documents' }));
     expect(within(center).getAllByRole('row')).toHaveLength(2);
     await user.click(within(center).getByRole('radio', { name: 'All' }));
@@ -63,7 +64,7 @@ describe('All materials (v11, decision 25)', () => {
     renderKb({ world, prefs: { section: 'materials' } });
     await user.click(await screen.findByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    const table = await within(center).findByRole('table');
+    const table = await within(center).findByRole('grid');
     const row = () => within(table).getByRole('button', { name: 'Pasted text: problems' }).closest('tr')!;
     expect(row()).toHaveTextContent('Error');
     // The unreadable link can't be fixed by the wiki: it isn't counted.
@@ -72,61 +73,83 @@ describe('All materials (v11, decision 25)', () => {
     expect(within(center).queryByRole('button', { name: /Retry failed/ })).not.toBeInTheDocument();
   });
 
-  it('selects rows and acts on all of them: move, add to wiki, delete (FEAT-2)', async () => {
+  it('selects rows and queues the eligible ones, then moves and deletes through the shared actions (FEAT-2)', async () => {
     const user = userEvent.setup();
     const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
     await user.click(await screen.findByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    await within(center).findByRole('table');
-    expect(within(center).queryByRole('toolbar', { name: 'Selected materials' })).not.toBeInTheDocument();
-    await user.click(within(center).getByRole('checkbox', { name: 'Select Lecture 8 — entropy' }));
-    await user.click(within(center).getByRole('checkbox', { name: 'Select Pasted text: problems' }));
-    const bar = within(center).getByRole('toolbar', { name: 'Selected materials' });
-    expect(bar).toHaveTextContent('2 materials selected');
-
-    await user.click(within(bar).getByRole('button', { name: 'Add to wiki' }));
-    await waitFor(() => expect(r.fake.calls.filter((c) => c.method === 'POST' && /\/ingest$/.test(c.path))).toHaveLength(2));
-
-    await user.click(within(bar).getByRole('button', { name: 'Move to…' }));
-    const move = await screen.findByRole('dialog', { name: 'Move 2 materials to folder' });
-    await user.click(within(move).getAllByRole('radio')[0]!);
-    await user.click(within(move).getByRole('button', { name: 'Move' }));
-    await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'PATCH' && c.path.startsWith('/kb/materials/'))).toBe(true));
-
-    await user.click(within(center).getByRole('checkbox', { name: 'Select Pasted text: problems' }));
-    await user.click(within(center).getByRole('button', { name: 'Delete' }));
-    const confirm = await screen.findByRole('dialog', { name: /Delete \d+ materials?\?/ });
-    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
-    await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'DELETE' && c.path.startsWith('/kb/materials/'))).toBe(true));
+    const grid = await within(center).findByRole('grid');
+    const row = (name: string) => within(grid).getByRole('button', { name }).closest('tr')!;
+    await user.click(row('Lecture 8 — entropy').querySelector('[data-sel-box]')!);
+    await user.click(row('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: /Move to…/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Machine learning/ }));
+    await waitFor(() => expect(r.fake.calls.filter((c) => c.method === 'PATCH' && c.path.startsWith('/kb/materials/'))).toHaveLength(2));
+    await waitFor(() => expect(row('Pasted text: problems')).toHaveAttribute('aria-selected', 'false'));
+    await user.click(row('Lecture 8 — entropy').querySelector('[data-sel-box]')!);
+    await user.click(row('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: /Add to wiki · 1/ }));
+    await waitFor(() => expect(r.fake.calls.filter((c) => c.method === 'POST' && /\/ingest$/.test(c.path))).toHaveLength(1));
+    await waitFor(() => expect(row('Lecture 8 — entropy')).toHaveAttribute('aria-selected', 'false'));
+    // The queued text is now processing; delete the other, selectable material.
+    await user.click(row('Lecture 8 — entropy').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '1 selected' })).getByRole('button', { name: /Delete/ }));
+    const confirm = await screen.findByRole('dialog', { name: 'Delete 1 material?' });
+    await user.click(await within(confirm).findByRole('button', { name: 'Delete 1' }));
+    await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'DELETE' && c.path === '/kb/materials/m-lec8')).toBe(true));
   });
 
-  it('select all picks every shown row, and Ask puts them in the message as mentions', async () => {
+  it('select all picks every eligible shown row, and Ask puts them in the message as mentions', async () => {
     const user = userEvent.setup();
     const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
     await user.click(await screen.findByTestId('all-materials'));
     const center = await screen.findByRole('region', { name: 'All materials' });
-    const table = await within(center).findByRole('table');
-    await user.click(within(center).getByRole('checkbox', { name: 'Select all materials' }));
-    const rows = within(table).getAllByRole('row').length - 1;
-    expect(within(center).getByRole('toolbar', { name: 'Selected materials' })).toHaveTextContent(`${rows} materials selected`);
+    const grid = await within(center).findByRole('grid');
+    await user.click(within(center).getByRole('checkbox', { name: 'Select all' }));
+    const eligible = within(grid).getAllByRole('row').slice(1).filter((row) => !row.querySelector('.is-off-limits'));
+    expect(within(center).getByRole('toolbar', { name: `${eligible.length} selected` })).toBeInTheDocument();
+    expect(eligible.every((row) => row.getAttribute('aria-selected') === 'true')).toBe(true);
     const pushed: unknown[] = [];
     const off = r.services.composer.subscribe((s) => pushed.push(s));
-    await user.click(within(center).getByRole('button', { name: 'Ask' }));
+    await user.click(within(center).getByRole('button', { name: /Ask in chat/ }));
     off();
     expect(pushed.length).toBeGreaterThan(0);
-    expect(within(center).queryByRole('toolbar', { name: 'Selected materials' })).not.toBeInTheDocument();
+    await waitFor(() => expect(center.querySelector('[data-selecting]')).not.toBeInTheDocument());
   });
 
   it('dropping material rows on a folder moves them there (FEAT-2)', async () => {
     const r = renderKb({ world: docWorld(), prefs: { section: 'materials' } });
-    await screen.findByTestId('all-materials');
-    const folder = (await screen.findAllByRole('listitem')).find((li) => li.classList.contains('kb-folder'))!;
-    const store: Record<string, string> = { 'application/x-skaz-materials': JSON.stringify(['m-txt']) };
+    const folder = await screen.findByRole('button', { name: /^Physics/ });
+    const store: Record<string, string> = { 'application/x-skaz-items': JSON.stringify([{ type: 'material', id: 'm-txt', title: 'Pasted text: problems' }]) };
     const dataTransfer = { types: Object.keys(store), getData: (t: string) => store[t] ?? '', setData: () => undefined, dropEffect: 'none' };
     fireEvent.dragOver(folder, { dataTransfer });
     expect(folder).toHaveClass('is-drop');
     fireEvent.drop(folder, { dataTransfer });
     await waitFor(() => expect(r.fake.calls.some((c) => c.method === 'PATCH' && c.path === '/kb/materials/m-txt')).toBe(true));
+  });
+
+  it.each(['move', 'delete'] as const)('keeps only failed materials selected after a partial %s (merged FEAT-2)', async (action) => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    fake.world.failures[`${action === 'move' ? 'PATCH' : 'DELETE'} /kb/materials/m-txt`] = { status: 409, detail: 'This material is busy.' };
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const grid = await within(center).findByRole('grid');
+    const row = (name: string) => within(grid).getByRole('button', { name }).closest('tr')!;
+    await user.click(row('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(row('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    const bar = screen.getByRole('toolbar', { name: '2 selected' });
+    if (action === 'move') {
+      await user.click(within(bar).getByRole('button', { name: /Move to…/ }));
+      await user.click(await screen.findByRole('menuitem', { name: /Physics/ }));
+    } else {
+      await user.click(within(bar).getByRole('button', { name: /Delete/ }));
+      const confirm = await screen.findByRole('dialog', { name: 'Delete 2 materials?' });
+      await user.click(await within(confirm).findByRole('button', { name: 'Delete 2' }));
+    }
+    expect(await screen.findByTestId('toast')).toHaveTextContent('skipped 1');
+    await waitFor(() => expect(row('Pasted text: problems')).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
   });
 
   it('says "today", "yesterday", else a short date', () => {
@@ -190,6 +213,51 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toEqual({ text: 'Seminar notes: the log makes entropy additive.', folder_id: 'math', to_wiki: true });
     // The backend adds it once it is ready (AutoIngest honours the flag): no separate request.
     expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
+  });
+
+  it('a typed new folder name is created by Add itself and the materials land in it (0.3.1 F1)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Link or any text' }), { target: { value: 'Seminar notes on attention.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
+    await user.type(within(dialog).getByRole('textbox', { name: 'New folder name' }), 'Психология 2026');
+    // No Enter: the button says what one press does.
+    await user.click(within(dialog).getByRole('button', { name: 'Create «Психология 2026» and add 1' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    const created = fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/folders');
+    expect(created?.body).toEqual({ name: 'Психология 2026' });
+    const folder = fake.world.folders.find((f) => f.name === 'Психология 2026');
+    expect(folder).toBeDefined();
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder!.id });
+  });
+
+  it('Enter in the new folder name makes the folder and selects it; a taken name offers the existing folder (0.3.1 F1)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Link or any text' }), { target: { value: 'Seminar notes on entropy.' } });
+    await user.click(within(dialog).getByRole('button', { name: 'Add to list' }));
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
+    const name = within(dialog).getByRole('textbox', { name: 'New folder name' });
+    const existing = fake.world.folders.find((f) => !f.system)!;
+    await user.type(name, existing.name.toLocaleUpperCase());
+    expect(within(dialog).getByText('A folder with this name exists.')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: `Add to «${existing.name}»` }));
+    expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue(existing.id);
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: 'Folder' }), '__new');
+    await user.type(within(dialog).getByRole('textbox', { name: 'New folder name' }), 'Seminars{Enter}');
+    const folder = await waitFor(() => fake.world.folders.find((f) => f.name === 'Seminars')!);
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Folder' })).toHaveValue(folder.id));
+    expect(fake.calls.some((c) => c.path === '/kb/materials/text')).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(fake.calls.find((c) => c.path === '/kb/materials/text')?.body).toMatchObject({ folder_id: folder.id });
+    expect(fake.calls.filter((c) => c.method === 'POST' && c.path === '/kb/folders')).toHaveLength(1);
   });
 
   it('with Settings adding files and links automatically, switching "Add to wiki" off is honoured (decision 15)', async () => {
@@ -329,5 +397,111 @@ describe('+ Material (v11, decisions 15–16)', () => {
     await user.click(screen.getByRole('button', { name: 'Add material' }));
     expect(await screen.findByRole('dialog', { name: 'Add material' })).toBeInTheDocument();
     act(() => undefined);
+  });
+});
+
+describe('Selecting several materials in the table (0.3.1 F2/F4/F5)', () => {
+  async function table() {
+    const user = userEvent.setup();
+    const r = await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const grid = await within(center).findByRole('grid');
+    const rowOf = (name: string) => within(grid).getByRole('button', { name }).closest('tr')!;
+    return { ...r, user, center, grid, rowOf };
+  }
+
+  it('⌘-click selects without opening; the bar moves them with Undo back to their old folders', async () => {
+    const { user, center, rowOf, fake, services } = await table();
+    expect(within(center).getByRole('grid')).toHaveAttribute('aria-multiselectable', 'true');
+    await user.keyboard('{Meta>}');
+    await user.click(within(rowOf('Pasted text: problems')).getByRole('button', { name: 'Pasted text: problems' }));
+    await user.click(within(rowOf('Cross-entropy explained')).getByRole('button', { name: 'Cross-entropy explained' }));
+    await user.keyboard('{/Meta}');
+    expect(rowOf('Pasted text: problems')).toHaveAttribute('aria-selected', 'true');
+    expect(rowOf('Cross-entropy explained')).toHaveAttribute('aria-selected', 'true');
+    expect(services.ui.getState().right).toBeNull();
+    const bar = screen.getByRole('toolbar', { name: '2 selected' });
+    expect(within(bar).getByRole('button', { name: /Add to wiki · 1/ })).toBeInTheDocument();
+    await user.click(within(bar).getByRole('button', { name: /Move to…/ }));
+    await user.click(await screen.findByRole('menuitem', { name: /Physics/ }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 2 materials to «Physics»');
+    expect(fake.world.materials.find((m) => m.id === 'm-txt')!.folder_id).toBe('phys');
+    expect(fake.world.materials.find((m) => m.id === 'm-ce')!.folder_id).toBe('phys');
+    await waitFor(() => expect(screen.queryByRole('toolbar', { name: /selected/ })).not.toBeInTheDocument());
+    await user.click(within(screen.getByTestId('toast')).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(fake.world.materials.find((m) => m.id === 'm-ce')!.folder_id).toBe('ml'));
+    expect(fake.world.materials.find((m) => m.id === 'm-txt')!.folder_id).not.toBe('phys');
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 2 materials back');
+  });
+
+  it('a material being added to the wiki can’t be selected and says why', async () => {
+    const { user, rowOf } = await table();
+    const row = rowOf('Lecture 5 — ML');
+    expect(row.querySelector('[data-sel-box]')).toHaveAttribute('title', 'Being added to the wiki — wait until it’s done');
+    await user.keyboard('{Meta>}');
+    await user.click(within(row).getByRole('button', { name: 'Lecture 5 — ML' }));
+    await user.keyboard('{/Meta}');
+    expect(row).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('⌘⌫ asks once with the consequences, then deletes one by one and reports', async () => {
+    const { user, rowOf, fake } = await table();
+    await user.click(rowOf('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    within(rowOf('Cross-entropy explained')).getByRole('button', { name: 'Cross-entropy explained' }).focus();
+    await user.keyboard('{Meta>}{Backspace}{/Meta}');
+    const dialog = await screen.findByRole('dialog', { name: 'Delete 2 materials?' });
+    expect(dialog).toHaveTextContent('Nothing is removed before you press Delete.');
+    // In the table's order (newest first).
+    expect(dialog).toHaveTextContent('Cross-entropy explained and Pasted text: problems and their files');
+    expect(fake.world.materials.some((m) => m.id === 'm-txt')).toBe(true);
+    await user.click(await within(dialog).findByRole('button', { name: 'Delete 2' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Deleted 2 materials');
+    expect(fake.world.materials.some((m) => m.id === 'm-txt' || m.id === 'm-ce')).toBe(false);
+    expect(fake.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/kb/materials/m-ce', '/kb/materials/m-txt']);
+  });
+
+  it('“Ask in chat” puts the selection into the message field as @-mentions', async () => {
+    const { user, rowOf, services } = await table();
+    await user.click(rowOf('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: /Ask in chat/ }));
+    expect(services.ui.getState().center).toBe('chat');
+    const input = await screen.findByTestId('message-input');
+    await waitFor(() => expect([...input.querySelectorAll('.kb-token--mention')].map((t) => t.textContent)).toEqual(
+      ['Cross-entropy explained', 'Pasted text: problems'].map((t) => expect.stringContaining(t)),
+    ));
+  });
+
+  it('right-click opens the same actions for the row (and the selection it joins)', async () => {
+    const { user, rowOf } = await table();
+    fireEvent.contextMenu(within(rowOf('Pasted text: problems')).getByRole('button', { name: 'Pasted text: problems' }), { clientX: 200, clientY: 200 });
+    const menu = await screen.findByRole('menu', { name: 'Material actions' });
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Move to…⌘⇧M', 'Ask in chat⌘↩', 'Add to wiki · 1', expect.stringMatching(/^Export \.md/), 'Delete 1 material⌘⌫',
+    ]);
+    expect(rowOf('Pasted text: problems')).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{Escape}');
+  });
+
+  it('⋯ Export .md writes the chosen materials into a folder from the chooser (POST /kb/export/items)', async () => {
+    const user = userEvent.setup();
+    const chooseExportFolder = vi.fn(async () => '/Users/me/Documents/Out');
+    const { fake } = renderKb({ world: docWorld(), prefs: { section: 'materials' }, bridge: { chooseExportFolder } });
+    await waitFor(() => expect(screen.getByTestId('add-material')).not.toHaveAttribute('aria-disabled'));
+    await user.click(screen.getByTestId('all-materials'));
+    const grid = await within(await screen.findByRole('region', { name: 'All materials' })).findByRole('grid');
+    const rowOf = (name: string) => within(grid).getByRole('button', { name }).closest('tr')!;
+    await user.click(rowOf('Pasted text: problems').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Cross-entropy explained').querySelector('[data-sel-box]')!);
+    await user.click(within(screen.getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'More actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Export \.md/ }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Exported 2 files to «Out»');
+    expect(chooseExportFolder).toHaveBeenCalledTimes(1);
+    expect(fake.calls.find((c) => c.method === 'POST' && c.path === '/kb/export/items')?.body).toEqual({
+      path: '/Users/me/Documents/Out', overwrite: false,
+      items: [{ type: 'material', id: 'm-ce' }, { type: 'material', id: 'm-txt' }],
+    });
   });
 });

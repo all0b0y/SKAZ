@@ -6,11 +6,23 @@ import { clockOrDate, dayBucket, groupBy } from '../ui/time';
 import { useChats, useLibrary, useServices, useUi } from '../state/context';
 import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
+import { useChatSelection } from './chatBatch';
+import { SelectionCheckbox } from '../ui/listSelection';
+import { isWaitingForUser } from '../api/permissions';
 
 const SIDE_LIMIT = 8;
 
-/** Static marks, no blinking (decision v15): answering = a still ring, new answer = a dot. */
+/** A permission or a question waits in this chat (0.3.1 P4): said in words, with a dot. */
+export function WaitingMark() {
+  return <span className="kb-chatwait" data-testid="chat-waiting">Waiting for you</span>;
+}
+
+/**
+ * Static marks, no blinking (decision v15): answering = a still ring, new answer = a dot.
+ * «Waiting for you» says more than «answering» and takes its place (P4).
+ */
 function ChatMark({ chat }: { chat: KbChatSummary }) {
+  if (isWaitingForUser(chat)) return <WaitingMark />;
   if (chat.state === 'answering') {
     return <Tooltip text="Agent is answering" describes><span className="kb-chatmark kb-chatmark--answering" role="img" aria-label="answering"><Icon name="answering" size={13} /></span></Tooltip>;
   }
@@ -40,23 +52,27 @@ export function ChatList() {
   const pinned = list.filter((c) => c.pinned);
   const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
   const groups = groupBy(rest, (c) => dayBucket(c.updated_at));
+  const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
 
   const row = (c: KbChatSummary) => {
     const current = center === 'chat' && c.id === currentId;
     return (
-      <li key={c.id}>
-        <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
-          aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
-          {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
-          <span className="kb-row__text">{c.title}</span>
-          <ChatMark chat={c} />
-        </button>
+      <li key={c.id} {...sel.rowProps(c.id)}>
+        <div role="gridcell">
+          <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
+            aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
+            <SelectionCheckbox checked={sel.selected.has(c.id)} />
+            {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
+            <span className="kb-row__text">{c.title}</span>
+            <ChatMark chat={c} />
+          </button>
+        </div>
       </li>
     );
   };
 
   return (
-    <div className="kb-side__scroll">
+    <div className="kb-side__scroll" {...sel.listProps}>
       <button type="button" className={`kb-row kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
         onClick={() => openChat(null)}>
         <Icon name="newChat" size={16} className="kb-row__icon" />
@@ -77,13 +93,13 @@ export function ChatList() {
       {pinned.length > 0 && (
         <section aria-label="Pinned">
           <h3 className="kb-subhead"><span className="kb-subhead__text">Pinned</span></h3>
-          <ul className="kb-list">{pinned.map(row)}</ul>
+          <ul className="kb-list" {...sel.gridProps} aria-label="Pinned">{pinned.map(row)}</ul>
         </section>
       )}
       {groups.map((g) => (
         <section key={g.label} aria-label={g.label}>
           <h3 className="kb-subhead"><span className="kb-subhead__text">{g.label}</span></h3>
-          <ul className="kb-list">{g.items.map(row)}</ul>
+          <ul className="kb-list" {...sel.gridProps} aria-label={g.label}>{g.items.map(row)}</ul>
         </section>
       ))}
       {list.length > 0 && (
@@ -92,6 +108,7 @@ export function ChatList() {
           <span className="kb-row__text">All chats · {list.length}</span>
         </button>
       )}
+      {overlays}
     </div>
   );
 }
@@ -128,6 +145,10 @@ export function AllChats() {
   }, [client, q, filter, folder, listVersion]);
 
   const groups = groupBy(rows ?? [], (c) => dayBucket(c.updated_at));
+  // 0.3.1 F4: the same selection as the side panel, with labelled actions (there is room here).
+  const { sel, overlays } = useChatSelection({
+    chats: groups.flatMap((g) => g.items), onOpen: (id) => openChat(id), variant: 'full', resetKey: `${q}\n${filter}\n${folder}`,
+  });
   const folderName = (id: string) => folders.find((f) => f.id === id)?.name;
 
   return (
@@ -160,33 +181,36 @@ export function AllChats() {
         </span>
       </div>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
-      <div className="kb-allchats__body">
+      <div className="kb-allchats__body" {...sel.listProps}>
         {error && <Banner tone="error" title="Chats couldn’t be loaded.">{error}</Banner>}
         {rows === null && !error && <div className="kb-chat__wait"><Spinner label="Loading chats" /></div>}
         {rows?.length === 0 && <EmptyState icon="chats" title={q ? `No chats match “${q.trim()}”` : 'No chats here'} compact />}
         {groups.map((g) => (
           <section key={g.label} aria-label={g.label} className="kb-allchats__group">
             <h2 className="kb-subhead"><span className="kb-subhead__text">{g.label}</span></h2>
-            <ul className="kb-allchats__list">
+            <ul className="kb-allchats__list" {...sel.gridProps} aria-label={g.label}>
               {g.items.map((c) => (
-                <li key={c.id} className="kb-allchats__row">
+                <li key={c.id} className="kb-allchats__row" {...sel.rowProps(c.id)}>
+                  <SelectionCheckbox checked={sel.selected.has(c.id)} />
                   <button type="button" className="kb-allchats__main" onClick={() => openChat(c.id)}>
                     <span className="kb-allchats__title">{c.pinned && <Icon name="pin" size={13} />}{c.title}</span>
                     <span className="kb-allchats__preview">{c.last_preview}</span>
                   </button>
                   <span className="kb-allchats__tags">
+                    {isWaitingForUser(c) && <WaitingMark />}
                     {c.recording_material_id && <span className="kb-tag kb-tag--static"><Icon name="mic" size={12} />recording</span>}
                     {c.folder_ids.slice(0, 2).map((id) => folderName(id) && (
                       <span key={id} className="kb-tag kb-tag--static"><i className={`kb-fdot kb-fdot--${tone(id)}`} aria-hidden="true" />{folderName(id)}</span>
                     ))}
                   </span>
                   <span className="kb-allchats__time">{clockOrDate(c.updated_at)}</span>
-                  <ChatMenu chat={c} size="sm" onNotice={setNotice} />
+                  <span data-sel-ignore><ChatMenu chat={c} size="sm" onNotice={setNotice} /></span>
                 </li>
               ))}
             </ul>
           </section>
         ))}
+        {overlays}
       </div>
     </section>
   );

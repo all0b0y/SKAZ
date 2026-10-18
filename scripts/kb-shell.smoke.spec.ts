@@ -348,11 +348,29 @@ test('settings: every section at every width and theme', async () => {
       await page.keyboard.press('Meta+Comma');
       const dialog = page.getByRole('dialog', { name: 'Settings' });
       await expect(dialog).toBeVisible();
-      for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Storage', 'Privacy', 'Appearance', 'About']) {
+      for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Skills', 'Storage', 'Privacy', 'Appearance', 'About']) {
         // A section with a problem on this Mac is named "<section> Needs attention" (the dot).
         await dialog.getByRole('navigation').getByRole('button', { name: new RegExp(`^${section}`) }).click();
-        const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance') && v.width !== 1024;
+        const shot = (section === 'Storage' || section === 'Models' || section === 'Appearance' || section === 'Skills') && v.width !== 1024;
         await check(`settings-${section.replace(/\W+/g, '-').toLowerCase()}-${v.width}-${theme}`, shot);
+        // A wide control (five options) never lies over its row's label: it moves below instead.
+        const overlaps = await dialog.locator('.kb-srow').evaluateAll((rows) => rows.flatMap((r) => {
+          const text = r.querySelector('.kb-srow__text')?.getBoundingClientRect();
+          // The control's own box can be narrower than what it holds: measure what is drawn.
+          const parts = Array.from(r.querySelector('.kb-srow__control')?.children ?? []).map((c) => c.getBoundingClientRect()).filter((b) => b.width);
+          if (!text || !parts.length) return [];
+          const top = Math.min(...parts.map((b) => b.top));
+          const bottom = Math.max(...parts.map((b) => b.bottom));
+          const left = Math.min(...parts.map((b) => b.left));
+          const label = r.querySelector('.kb-srow__label')?.getBoundingClientRect();
+          const textRight = Math.max(label?.right ?? text.left, ...Array.from(r.querySelectorAll('.kb-srow__text *')).map((e) => {
+            const range = document.createRange(); range.selectNodeContents(e);
+            return Math.max(text.left, ...Array.from(range.getClientRects()).map((x) => x.right));
+          }));
+          const sideBySide = top < text.bottom - 1 && bottom > text.top + 1;
+          return sideBySide && left < textRight - 1 ? [r.getAttribute('data-row') ?? '?'] : [];
+        }));
+        expect(overlaps, `settings ${section} ${v.width} ${theme}: control over the label`).toEqual([]);
       }
       await dialog.getByRole('searchbox', { name: 'Find a setting' }).fill('model');
       await check(`settings-search-${v.width}-${theme}`, v.width === 1440);
@@ -407,7 +425,7 @@ test('package 2 on the real backend: chats, notifications, ⌘K, all materials, 
 
   // Every live read of the package-2 screens answers on this backend (no 404 behind a screen).
   for (const route of ['/kb/chats', '/kb/chats/events', '/kb/notifications', '/kb/agents', '/kb/settings/health', '/kb/settings/keys',
-    '/kb/settings/speech', '/kb/settings/wiki', '/kb/settings/privacy', '/kb/settings/about', '/kb/decisions', '/kb/graph', '/kb/wiki/pages', '/kb/jobs']) {
+    '/kb/settings/speech', '/kb/settings/wiki', '/kb/settings/privacy', '/kb/settings/about', '/kb/settings/skills', '/kb/decisions', '/kb/graph', '/kb/wiki/pages', '/kb/jobs']) {
     const res = await bridgeRequest('GET', route);
     expect(res, `GET ${route}`).toMatchObject({ ok: true });
   }

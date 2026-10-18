@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { KbMaterialSummary } from '../../api/kb/types.gen';
 import type { KbWikiState } from '../api/names';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
@@ -7,8 +7,8 @@ import { useFolderTone } from '../document/parts';
 import { errorText } from '../api/client';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
-import { MATERIALS_MIME } from './bulk';
-import { SelectionBar } from './SelectionBar';
+import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
+import { useMaterialSelection } from './materialBatch';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -114,25 +114,14 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
       : sort === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
     return out;
   }, [all, type, folderId, sort]);
-  const folderName = (m: KbMaterialSummary) => m.folder_name || folders.find((f) => f.id === m.folder_id)?.name || '';
-
-  // FEAT-2: rows are selected with their checkbox; the bar below acts on all of them at once.
-  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
-  const selected = useMemo(() => rows.filter((m) => picked.has(m.id)), [rows, picked]);
-  const allPicked = rows.length > 0 && selected.length === rows.length;
-  const toggle = (id: string) => setPicked((s) => {
-    const next = new Set(s);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
+  const tableRows = layout === 'table' ? rows : [];
+  const { sel, overlays, dragProps } = useMaterialSelection({
+    rows: tableRows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
+    onOpen: (id) => openDocument({ type: 'material', id }),
   });
-  const toggleAll = () => setPicked(allPicked ? new Set() : new Set(rows.map((m) => m.id)));
-  /** Dragging a selected row carries the whole selection; any other row carries itself. */
-  const dragStart = (m: KbMaterialSummary) => (e: DragEvent) => {
-    const ids = picked.has(m.id) ? selected.map((s) => s.id) : [m.id];
-    e.dataTransfer.setData(MATERIALS_MIME, JSON.stringify(ids));
-    e.dataTransfer.setData('text/plain', ids.length === 1 ? m.title : `${ids.length} materials`);
-    e.dataTransfer.effectAllowed = 'move';
-  };
+  const selectable = tableRows.filter((m) => !sel.reasonOf(m.id)).length;
+  const allState = sel.selected.size === 0 ? 'none' : sel.selected.size >= selectable ? 'all' : 'some';
+  const folderName = (m: KbMaterialSummary) => m.folder_name || folders.find((f) => f.id === m.folder_id)?.name || '';
 
   return (
     <section className="kb-center kb-allmat" data-pane="materials" aria-label="All materials" hidden={hidden}>
@@ -149,7 +138,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
       </header>
-      <div className="kb-allmat__body">
+      <div className="kb-allmat__body" {...sel.listProps}>
         <div className="kb-amf">
           <Segmented label="Type" size="sm" value={type} options={TYPE_OPTIONS} onChange={setType} />
           <span className="kb-head__spacer" />
@@ -186,26 +175,23 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           </EmptyState>
         )}
         {rows.length > 0 && layout === 'table' && (
-          <table className="kb-amt">
+          <table className="kb-amt" {...sel.gridProps} aria-label="Materials">
             <colgroup>
-              <col className="kb-amt__c-pick" /><col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
+              <col className="kb-amt__c-sel" /><col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
               <col className="kb-amt__c-added" /><col className="kb-amt__c-wiki" />
             </colgroup>
             <thead>
-              <tr>
-                <th className="kb-amt__pick"><input type="checkbox" aria-label="Select all materials" checked={allPicked}
-                  ref={(el) => { if (el) el.indeterminate = selected.length > 0 && !allPicked; }} onChange={toggleAll} /></th>
-                <th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th>
-              </tr>
+              <tr><th className="kb-amt__sel"><SelectAllBox state={allState} onChange={(all) => (all ? sel.selectAll() : sel.clear())} /></th><th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
             </thead>
             <tbody>
               {rows.map((m) => (
-                <tr key={m.id} className={`${openedId === m.id ? 'is-current' : ''}${picked.has(m.id) ? ' is-picked' : ''}`.trim() || undefined}
-                  draggable onDragStart={dragStart(m)} onClick={() => openDocument({ type: 'material', id: m.id })}>
-                  <td className="kb-amt__pick" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" aria-label={`Select ${m.title}`} checked={picked.has(m.id)} onChange={() => toggle(m.id)} />
+                <tr key={m.id} className={openedId === m.id ? 'is-current' : undefined} {...sel.rowProps(m.id)} {...dragProps(m)}
+                  onClick={() => openDocument({ type: 'material', id: m.id })}>
+                  {/* Own column, as in mockup lib-v1: the box never shares a cell with the type icon. */}
+                  <td className="kb-amt__sel"><SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} /></td>
+                  <td className="kb-amt__type">
+                    <Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} />
                   </td>
-                  <td><Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} /></td>
                   <td className="kb-amt__name">
                     <button type="button" className="kb-amt__open" onClick={(e) => { e.stopPropagation(); openDocument({ type: 'material', id: m.id }); }}>
                       {m.title}
@@ -219,6 +205,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             </tbody>
           </table>
         )}
+        {overlays}
         {rows.length > 0 && layout === 'cards' && (
           <ul className="kb-amg" aria-label="Materials">
             {rows.map((m) => (
@@ -234,7 +221,6 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           </ul>
         )}
       </div>
-      <SelectionBar selected={selected} onClear={() => setPicked(new Set())} onKeep={(ids) => setPicked(new Set(ids))} />
     </section>
   );
 }

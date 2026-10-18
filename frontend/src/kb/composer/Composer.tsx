@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useMentionDrop } from './MentionDrop';
 import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { agentOf } from '../state/agents';
 import { isAnswering, type AgentChoice } from '../state/chats';
+import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
@@ -66,6 +68,9 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const open = useChats((s) => (chatId ? s.chats[chatId]?.chat ?? null : null));
   const answering = isAnswering(open);
   const streaming = [...(open?.messages ?? [])].reverse().find((m) => m.role === 'assistant' && m.state === 'streaming') ?? null;
+  // An agent question waits (Q-A2): the field stays free — a message of your own answers it instead.
+  const questionWaits = !!streaming && partsOf(streaming).some((p) => p.type === 'question' && p.status === 'pending');
+  const blocked = answering && !questionWaits;
   const choice = useAgentChoice(chatId);
   const agents = useAgents((s) => s.agents);
   const folders = useLibrary((s) => s.folders);
@@ -202,7 +207,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   // Quick questions while recording: the recording goes along as an attached material, so the agent
   // reads its transcribed fragments only — never the words still being recognised.
-  const quickReason = !agentReady ? unavailable : answering ? 'The agent is still answering' : null;
+  const quickReason = !agentReady ? unavailable : blocked ? 'The agent is still answering' : null;
   const askQuick = async (text: string) => {
     if (!recId || sending || quickReason) return;
     setSending(true);
@@ -243,7 +248,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     const deleted = [...markGone(root, gone), ...attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
     if (deleted.length) { setError(`“${deleted[0]}” was deleted. Remove it from the message to send.`); return; }
     if (!agentReady) { setError(unavailable); return; }
-    if (answering) return;
+    if (blocked) return;
     setSending(true);
     setError(null);
     let list = attachments;
@@ -388,6 +393,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     setHover({ text: el.dataset.full, left: r.left, top: r.top });
   };
 
+  const mentionDrop = useMentionDrop();
   const placeholderShown = empty && dictation.phase === 'idle';
   // A query of several words stays a mention only while something matches; otherwise it is just text.
   const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
@@ -398,7 +404,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       {recPhase === 'recording' && recId && (
         <QuickQuestions disabledReason={quickReason} onAsk={(q) => void askQuick(q)} onPrefill={prefillQuick} />
       )}
-      <div className="kb-composer" data-testid="composer">
+      <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
+        {mentionDrop.overlay}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
             onPick={pickMention} onHover={setActive} />
@@ -466,7 +473,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               <button type="button" className="kb-iconbtn kb-iconbtn--md" aria-label="Dictate" aria-disabled="true"><Icon name="mic" size={16} /></button>
             </Tooltip>
           )}
-          {answering && streaming && chatId ? (
+          {answering && streaming && chatId && !(questionWaits && canSend) ? (
             <Tooltip text="Stop the answer" placement="top">
               <button type="button" className="kb-send is-stop" aria-label="Stop the answer"
                 onClick={async () => { const r = await chats.getState().stop(chatId, streaming.id); if (!r.ok) setError(r.error); }}>
@@ -474,8 +481,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               </button>
             </Tooltip>
           ) : (
-            <Tooltip text={answering ? 'The agent is still answering' : 'Send (Enter)'} placement="top">
-              <button type="button" className="kb-send" aria-label="Send" aria-disabled={!canSend || sending || answering || undefined}
+            <Tooltip text={blocked ? 'The agent is still answering' : 'Send (Enter)'} placement="top">
+              <button type="button" className="kb-send" aria-label="Send" aria-disabled={!canSend || sending || blocked || undefined}
                 onClick={() => void submit()} data-busy={sending || undefined}>
                 <Icon name="send" size={14} />
               </button>

@@ -23,12 +23,16 @@ from ..chats.model import (
     OpenContext,
     PagePart,
     Part,
+    PermissionPart,
+    QuestionPart,
     Quote,
     Ref,
     TextPart,
 )
 from ..chats.service import ChatConflict, ChatService, ChatView
 from ..errors import KnowledgeError
+from ..permissions.broker import PermissionConflict
+from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
 from ..service import KnowledgeService
 from ..store.database import MAX_DB_INT
 from .deps import kb_call
@@ -51,6 +55,11 @@ from .schemas_chats import (
     KbMessageInput,
     KbMessagePart,
     KbPagePart,
+    KbPermissionChange,
+    KbPermissionPart,
+    KbPermissionSummary,
+    KbQuestionOption,
+    KbQuestionPart,
     KbQuote,
     KbRef,
     KbSend,
@@ -67,6 +76,8 @@ def error_response(error: KnowledgeError) -> JSONResponse:
     content: dict[str, Any] = {"detail": error.message}
     if isinstance(error, ChatConflict):
         content.update(code=error.code, **error.extra)
+    elif isinstance(error, PermissionConflict):
+        content.update(code=error.code)
     elif isinstance(error, EngineUnavailable):
         content.update(code="AGENT_UNAVAILABLE", engine=error.engine, action=error.action)
     return JSONResponse(status_code=error.status_code, content=content)
@@ -107,6 +118,7 @@ class Presenter:
 
     def __init__(self, kb: KnowledgeService) -> None:
         self.kb = kb
+        self.controls = ControlStore(kb.db)
         self._folders: dict[str, str] = {}
 
     def citation(self, material_id: str, seg: int, quote: str | None) -> KbCitation:
@@ -131,6 +143,14 @@ class Presenter:
         return self._folders[folder_id]
 
     def part(self, part: Part) -> KbMessagePart:
+        if isinstance(part, PermissionPart):
+            record = self.controls.permission(part.permission_id)
+            return KbMessagePart(permission_part(record) if record is not None
+                                 else KbTextPart(type="text", text=""))
+        if isinstance(part, QuestionPart):
+            found = self.controls.question(part.question_id)
+            return KbMessagePart(question_part(found) if found is not None
+                                 else KbTextPart(type="text", text=""))
         if isinstance(part, TextPart):
             return KbMessagePart(KbTextPart(type="text", text=part.text))
         if isinstance(part, CitePart):
@@ -184,7 +204,36 @@ def summary(view: ChatView) -> KbChatSummary:
         effort=chat.effort,
         created_at=chat.created_at, updated_at=chat.updated_at, last_preview=chat.last_preview,
         recording_material_id=chat.recording_material_id, folder_ids=list(chat.folder_ids), state=view.state,
-        unread=chat.unread,
+        unread=chat.unread, waiting_for_user=view.waiting,
+    )
+
+
+def permission_part(record: PermissionRecord) -> KbPermissionPart:
+    preview = record.preview
+    found = preview.get("summary")
+    raw: dict[str, Any] = found if isinstance(found, dict) else {}
+    summary = KbPermissionSummary(added=int(raw.get("added", 0)), changed=int(raw.get("changed", 0)),
+                                  removed=int(raw.get("removed", 0)),
+                                  user_notes_untouched=bool(raw.get("user_notes_untouched", True)))
+    changes = [KbPermissionChange.model_validate(item) for item in preview.get("changes") or []
+               if isinstance(item, dict)]
+    return KbPermissionPart(
+        type="permission", id=record.id, kind=record.kind, engine=record.engine, page_id=record.page_id,
+        title=record.title, status=record.status, auto=record.auto, reason=record.reason, summary=summary,
+        changes=changes, path=preview.get("path") if isinstance(preview.get("path"), str) else None,
+        new_title=preview.get("new_title") if isinstance(preview.get("new_title"), str) else None,
+        linking_pages=int(preview.get("linking_pages") or 0),
+        links_unlinked=int(preview.get("links_unlinked") or 0),
+        undoable=record.status == "allowed" and record.applied and bool(record.undo),
+    )
+
+
+def question_part(record: QuestionRecord) -> KbQuestionPart:
+    return KbQuestionPart(
+        type="question", id=record.id, engine=record.engine, question=record.question,
+        options=[KbQuestionOption(label=option.label, description=option.description,
+                                  recommended=option.recommended) for option in record.options],
+        allow_other=True, status=record.status, answer=record.answer,
     )
 
 

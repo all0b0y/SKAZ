@@ -88,6 +88,27 @@ describe('Live settings (package 2)', () => {
     expect(dialog).toHaveTextContent('never switches to another on its own');
   });
 
+  it('a key saved in Accounts & keys counts at once in Models — no reopening Settings (0.3.1 fix)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    world.keys.providers = world.keys.providers.map((p) => (p.id === 'openrouter' ? { ...p, configured: false, valid: null, checked_at: null } : p));
+    world.decisions = { ...world.decisions, provider: 'off', cloud_consent: false, openrouter_key: false };
+    renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: 'Models' }));
+    await user.click(await within(row(dialog, 'Wiki decisions')).findByRole('radio', { name: 'OpenRouter · Jev' }));
+    expect(within(row(dialog, 'Wiki decisions')).getByRole('alert')).toHaveTextContent('Add an OpenRouter key');
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const keyRow = await within(dialog).findByRole('group', { name: 'OpenRouter' });
+    await user.click(within(keyRow).getByRole('button', { name: 'Add key…' }));
+    await user.type(within(keyRow).getByLabelText('OpenRouter key'), 'sk-or-test');
+    await user.click(within(keyRow).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(within(keyRow).getByText('Key saved')).toBeInTheDocument());
+    await user.click(within(dialog).getByRole('button', { name: 'Models' }));
+    await user.click(await within(row(dialog, 'Wiki decisions')).findByRole('radio', { name: 'OpenRouter · Jev' }));
+    expect(await screen.findByRole('dialog', { name: 'Send decision questions to OpenRouter?' })).toBeInTheDocument();
+  });
+
   it('Recording & speech and Wiki read and write the backend; background connections ask first; "Find now" starts a job', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });

@@ -21,6 +21,7 @@ from ..decisions.protocol import DecisionLayer
 from ..errors import NotFound
 from ..markdown.source import Fragment
 from ..service import KnowledgeService
+from ..skills import SkazSkill
 from . import prompts
 from .checks import CheckedBlock, CheckStats, check_statement, clean_text, clean_title, flags_instructions
 from .drafts import ConceptDraft, DraftSection
@@ -80,7 +81,8 @@ class IngestRun:
     def __init__(self, *, kb: KnowledgeService, jobs: JobRepository, job_id: str, material_id: str,
                  engine: AgentEngine, detector: InstructionDetector, decisions: DecisionLayer | None,
                  text_layer: TextLayer, writer: WikiWriter, hook: ConceptUpdateHook | None, language: str,
-                 limits: Limits, recognition: RecognitionCheck | None = None) -> None:
+                 limits: Limits, recognition: RecognitionCheck | None = None,
+                 skills: Sequence[SkazSkill] = ()) -> None:
         self.kb = kb
         self.jobs = jobs
         self.job_id = job_id
@@ -94,6 +96,8 @@ class IngestRun:
         self.language = language
         self.limits = limits
         self.recognition = recognition
+        #: SKAZ skills that were on when the job started (Humanizer, H2): in the writing prompts only.
+        self.skills = tuple(skills)
         self.report = RunReport()
         self.current_run: str | None = None
         self.writing = False
@@ -225,7 +229,7 @@ class IngestRun:
     async def _notes(self, source: IngestSource, parts: Sequence[Sequence[Fragment]]) -> list[DraftSection]:
         fragments = source.by_seg()
         operation = _Operation("notes")
-        instructions = prompts.instructions_for(prompts.NOTES_INSTRUCTIONS, self.language)
+        instructions = prompts.instructions_for(prompts.NOTES_INSTRUCTIONS, self.language, skills=self.skills)
         sections: list[DraftSection] = []
         for index, part in enumerate(parts, start=1):
             prompt = prompts.notes_prompt(source.title, part, index, len(parts),
@@ -253,7 +257,8 @@ class IngestRun:
                         parts: Sequence[Sequence[Fragment]]) -> list[ConceptDraft]:
         fragments = source.by_seg()
         operation = _Operation("concepts")
-        instructions = prompts.instructions_for(prompts.CONCEPTS_INSTRUCTIONS, self.language)
+        instructions = prompts.instructions_for(prompts.CONCEPTS_INSTRUCTIONS, self.language,
+                                                skills=self.skills)
         drafts: list[ConceptDraft] = []
         for index, part in enumerate(parts, start=1):
             prompt = prompts.concepts_prompt(source.title, part, index, len(parts),

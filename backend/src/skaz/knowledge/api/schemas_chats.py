@@ -18,7 +18,10 @@ KbChatFilter = Literal["all", "pinned", "recording"]
 KbMessageRole = Literal["user", "assistant", "system"]
 KbMessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
 KbFailureKind = Literal["limit", "auth", "incompatible", "network", "cancelled", "other"]
-KbChatEventType = Literal["message", "delta", "part", "state", "title"]
+KbChatEventType = Literal["message", "delta", "part", "state", "title", "part_update"]
+KbPermissionKind = Literal["create", "edit", "rename", "delete"]
+KbPermissionStatus = Literal["pending", "allowed", "denied", "cancelled", "undone"]
+KbQuestionStatus = Literal["pending", "answered", "superseded", "cancelled"]
 
 MAX_TEXT = 100_000
 MAX_ITEMS = 50
@@ -94,7 +97,78 @@ class KbToolPart(BaseModel):
     label: str
 
 
-class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart,
+class KbPermissionSummary(BaseModel):
+    added: int
+    changed: int
+    removed: int
+    #: Always true for an agent's change: the user's own notes are never changed or removed.
+    user_notes_untouched: bool
+
+
+class KbPermissionChange(BaseModel):
+    op: Literal["add", "replace", "remove"]
+    block_id: str | None
+    #: "Added" / "Changed" / "Removed".
+    label: str
+    #: Readable block text (citation links left out); ``null`` for an added / removed side.
+    before: str | None
+    after: str | None
+    #: from_source / connection / explanation / user_note (the wiki label of the block).
+    block_kind: str | None
+
+
+class KbPermissionPart(BaseModel):
+    """An agent's wiki change: waits for Allow / Allow in this chat / Deny, then shows what happened."""
+
+    type: Literal["permission"]
+    id: str
+    kind: KbPermissionKind
+    engine: KbEngineId
+    #: ``null`` for a page that is still to be created.
+    page_id: str | None
+    title: str
+    status: KbPermissionStatus
+    #: Allowed by an earlier "Allow in this chat" (the feed shows a row with Undo).
+    auto: bool
+    #: Deny: the user's reason for the agent; cancelled: why.
+    reason: str | None
+    summary: KbPermissionSummary
+    changes: list[KbPermissionChange]
+    #: Library-relative path of the page (``Wiki/Concepts/<Title>.md``).
+    path: str | None = None
+    #: Rename: the title it would get.
+    new_title: str | None = None
+    #: Rename / delete: how many other pages link to it (their links follow / are unlinked).
+    linking_pages: int = 0
+    #: Delete: how many links to it get unlinked.
+    links_unlinked: int = 0
+    #: The change was applied and can still be undone (``POST /kb/permissions/{id}/undo``).
+    undoable: bool = False
+
+
+class KbQuestionOption(BaseModel):
+    label: str
+    description: str
+    recommended: bool
+
+
+class KbQuestionPart(BaseModel):
+    """An agent's question; answer now or later — or just write a message (it closes the question)."""
+
+    type: Literal["question"]
+    id: str
+    engine: KbEngineId
+    question: str
+    #: Up to 4, the recommended one first.
+    options: list[KbQuestionOption]
+    allow_other: bool
+    status: KbQuestionStatus
+    #: The chosen option's label or the user's own answer; ``null`` while pending or superseded.
+    answer: str | None
+
+
+class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
+                                        | KbPermissionPart | KbQuestionPart,
                                         Field(discriminator="type")]]):
     pass
 
@@ -152,6 +226,9 @@ class KbChatSummary(BaseModel):
     state: KbChatState
     #: A new answer the user has not opened yet.
     unread: bool
+    #: An agent's permission request or question in this chat waits for the user ("Waiting for you").
+    #: Always sent; the default only keeps 0.3.0 clients and fixtures that don't know it valid.
+    waiting_for_user: bool = False
 
 
 class KbChat(KbChatSummary):
@@ -198,7 +275,8 @@ class KbSendResult(BaseModel):
 
 
 class KbChatEvent(BaseModel):
-    """``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part."""
+    """``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part;
+    ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question)."""
 
     seq: int
     type: KbChatEventType
@@ -230,3 +308,16 @@ class KbMentions(BaseModel):
     pages: list[KbPageRef]
     materials: list[KbRef]
     chats: list[KbRef]
+
+
+class KbPermissionDecide(_Request):
+    decision: Literal["allow", "allow_chat", "deny"]
+    #: Deny: an optional reason for the agent.
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class KbQuestionAnswer(_Request):
+    """Exactly one: the index of an option, or the user's own answer."""
+
+    option_index: int | None = Field(default=None, ge=0, le=3)
+    text: str | None = Field(default=None, min_length=1, max_length=10_000)

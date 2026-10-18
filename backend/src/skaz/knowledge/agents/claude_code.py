@@ -59,6 +59,7 @@ from ..install.system import (
     run_capture,
 )
 from ..install.terminal import TerminalLauncher
+from ..permissions.refusals import CLAUDE_MCP_TIMEOUT_MS
 from ..processes import CHILDREN
 from .engine import (
     AgentEvent,
@@ -365,8 +366,11 @@ class ClaudeCodeEngine:
     @staticmethod
     def _write_mcp_config(run_dir: Path, url: str, token: str) -> Path:
         """The token goes to a 0600 file in the run folder, never onto the command line."""
+        # ``timeout``: a SKAZ wiki tool waits for the user (P3) — Claude Code's per-call and idle
+        # limits for this one server, raised to its clamp (``permissions/refusals.py``).
         config = {"mcpServers": {MCP_SERVER_NAME: {"type": "http", "url": url,
-                                                    "headers": {"Authorization": f"Bearer {token}"}}}}
+                                                    "headers": {"Authorization": f"Bearer {token}"},
+                                                    "timeout": CLAUDE_MCP_TIMEOUT_MS}}}
         path = run_dir / "mcp.json"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:

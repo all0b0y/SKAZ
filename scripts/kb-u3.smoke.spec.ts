@@ -194,7 +194,7 @@ test('all materials: table and cards over the centre; + Material with a classifi
       await rail('Materials').click();
       await page.getByTestId('all-materials').click();
       const center = page.getByRole('region', { name: 'All materials' });
-      await expect(center.getByRole('table')).toBeVisible();
+      await expect(center.getByRole('grid')).toBeVisible();
       await check(`all-materials-${tag}`);
       await center.getByRole('button', { name: 'Lecture 8 — entropy' }).click();
       await expect(doc().getByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeVisible();

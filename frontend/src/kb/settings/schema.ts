@@ -16,6 +16,7 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'models', label: 'Models', icon: 'models' },
       { id: 'rec', label: 'Recording & speech', icon: 'mic' },
       { id: 'wiki', label: 'Wiki', icon: 'wiki' },
+      { id: 'skills', label: 'Skills', icon: 'skills' },
     ],
   },
   {
@@ -77,6 +78,11 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'auto-fix', section: 'wiki', group: 'Upkeep', label: 'Fix recognition automatically', hint: 'Doubtful places are only highlighted', keywords: 'corrections' },
   { id: 'bg-links', section: 'wiki', group: 'Upkeep', label: 'Find connections in the background', hint: 'When the app is idle, with your permission', keywords: 'links graph' },
   { id: 'links-now', section: 'wiki', group: 'Upkeep', label: 'Find connections now', keywords: 'links graph run' },
+  // Skills (0.3.1 H3): SKAZ's own skills folder only
+  { id: 'humanizer', section: 'skills', group: 'Writing', label: 'Humanizer', hint: 'Writes like a person: no filler, no AI tells. Used in chat answers, wiki pages, cards and tests. Quotes from sources are never changed. v3.1.0 · MIT · github.com/blader/humanizer', keywords: 'skills writing ai style tells filler human natural' },
+  { id: 'skill-codex', section: 'skills', group: 'Applies to', label: 'Codex', keywords: 'humanizer skills loaded status' },
+  { id: 'skill-claude', section: 'skills', group: 'Applies to', label: 'Claude Code', keywords: 'humanizer skills loaded status' },
+  { id: 'skill-hermes', section: 'skills', group: 'Applies to', label: 'Hermes Agent', keywords: 'humanizer skills loaded status' },
   // Storage
   { id: 'lib-folder', section: 'storage', group: 'Library', label: 'Folder', hint: 'Materials and wiki are plain .md files', keywords: 'library path location documents' },
   { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The library folder opens as an Obsidian vault; SKAZ adds it to Obsidian’s vaults the first time.', keywords: 'vault obsidian markdown' },

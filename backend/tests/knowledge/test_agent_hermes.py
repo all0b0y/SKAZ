@@ -402,6 +402,11 @@ def test_policy_pins_no_builtin_toolsets_no_memory_no_skills(tmp_path: Path) -> 
         assert toolset in policy["agent"]["disabled_toolsets"], toolset
     assert policy["agent"]["coding_context"] == "off"
     assert policy["memory"] == {"memory_enabled": False, "user_profile_enabled": False}
+    # 0.3.1 P: a wiki tool / a question waits for the user. Hermes 0.22.1 reads the MCP per-call
+    # deadline from ``timeouts.mcp.tool_call`` (``tools/mcp_tool_common.py`` ``_resolve_tool_timeout``),
+    # clamped to 365 days (``agent/deadline.py:57``); ``agent.clarify_timeout <= 0`` = no limit.
+    assert policy["timeouts"] == {"mcp": {"tool_call": 31_536_000}}
+    assert policy["agent"]["clarify_timeout"] == 0
     assert policy["skills"]["project_discovery"] is False
     assert (
         engine.home.is_dir() and not (engine.home / "config.yaml").exists()

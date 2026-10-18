@@ -84,7 +84,8 @@ class FolderOverviews:
             folder.name, [(title, statements) for _id, title, _note, statements in inputs]
         )
         answer = await caller.ask_json(
-            instructions_for(OVERVIEW_INSTRUCTIONS, language), prompt, OVERVIEW_SCHEMA, OverviewOut
+            instructions_for(OVERVIEW_INSTRUCTIONS, language, skills=self.ctx.skills()),
+            prompt, OVERVIEW_SCHEMA, OverviewOut,
         )
         if answer is None:
             await log(

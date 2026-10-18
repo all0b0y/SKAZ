@@ -28,7 +28,9 @@ export type RightView =
   | { kind: 'doc'; target: DocTarget; nonce: number }
   | { kind: 'graph'; focus?: string }
   | { kind: 'live'; materialId: string }
-  | { kind: 'wikifile'; name: WikiFileName };
+  | { kind: 'wikifile'; name: WikiFileName }
+  /** 0.3.1 P: an agent's permission request reviewed beside the chat (the part lives in the chat). */
+  | { kind: 'review'; chatId: string; partId: string };
 
 /** What the centre column shows: the open chat, or a full-width list (decisions v16, 25). */
 export type CenterView = 'chat' | 'allChats' | 'materials';
@@ -60,6 +62,8 @@ export interface NavActions {
   openLive: (materialId: string) => void;
   /** `Wiki/index.md` or `Wiki/log.md`, read-only (B20). */
   openWikiFile: (name: WikiFileName) => void;
+  /** An agent's permission request beside the chat, with the decision bar at the bottom (P4). */
+  openReview: (chatId: string, partId: string) => void;
   /** Close the right panel, whatever it shows. */
   closeDoc: () => void;
   toggleDocExpanded: () => void;
@@ -76,6 +80,7 @@ function samePlace(a: RightView, b: RightView): boolean {
   if (a.kind === 'doc' && b.kind === 'doc') return a.target.type === b.target.type && a.target.id === b.target.id;
   if (a.kind === 'live' && b.kind === 'live') return a.materialId === b.materialId;
   if (a.kind === 'wikifile' && b.kind === 'wikifile') return a.name === b.name;
+  if (a.kind === 'review' && b.kind === 'review') return a.partId === b.partId;
   return true;
 }
 
@@ -130,6 +135,7 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     }),
     openLive: (materialId) => set(show({ kind: 'live', materialId })),
     openWikiFile: (name) => set(show({ kind: 'wikifile', name })),
+    openReview: (chatId, partId) => set(show({ kind: 'review', chatId, partId })),
     closeDoc: () => set({ right: null, docMaterialId: null, docExpanded: false, docHistory: [] }),
     toggleDocExpanded: () => set((s) => ({ docExpanded: s.right ? !s.docExpanded : false })),
     showCenter: (view) => set({ center: view }),
