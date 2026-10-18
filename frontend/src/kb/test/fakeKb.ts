@@ -558,6 +558,13 @@ const ROUTES: FakeRoutes = {
   'POST /kb/corrections/{correction_id}/reapply': [200, (w, { path }) => applyCorrection(w, findCorrection(w, path.correction_id), 'reapply')],
 
   // -- jobs --
+  // Like ingest/service.py retry_failed: every readable material whose wiki job failed is queued again.
+  'POST /kb/jobs/retry-failed': [200, (w) => w.materials.filter((m) => m.wiki.state === 'failed' && m.status !== 'failed').map((m) => {
+    const job = newJob(w, 'ingest', m.id, 'queued', 'Queued');
+    m.wiki = materialWiki('queued', { job_id: job.id });
+    m.wiki_state = 'queued';
+    return job;
+  })],
   'GET /kb/jobs': [200, (w, { query }) => w.jobs.filter((j) => !query.material_id || j.material_id === query.material_id)],
   'GET /kb/jobs/{job_id}': [200, (w, { path }) => w.jobs.find((j) => j.id === path.job_id) ?? fail(404, 'Job not found.')],
 

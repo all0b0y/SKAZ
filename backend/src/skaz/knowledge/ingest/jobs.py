@@ -1,8 +1,10 @@
 """Ingest jobs: rows of the foundation ``jobs`` table plus ``ingest_jobs`` details.
 
-No queue: every job runs on its own. A job that was running when the backend
-stopped is marked ``interrupted`` at the next start and is never resumed
-silently; the user retries it (a new job).
+Adding materials to the wiki goes through a queue: a job is created ``queued`` and
+``IngestService`` starts queued jobs in order while the wiki engine has a free slot.
+The queue lives in the database, so it survives a restart: an ingest job that was
+queued or running when SKAZ closed is queued again at the next start and continues
+by itself. Other wiki jobs left ``running`` become ``interrupted``.
 """
 from __future__ import annotations
 
@@ -23,13 +25,15 @@ JOB_KINDS: tuple[JobKind, ...] = (
 )
 #: Kinds about one material (``target_id`` is the material id).
 MATERIAL_JOB_KINDS: tuple[JobKind, ...] = ("ingest", "refresh", "corrections")
-JobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
+JobState = Literal["queued", "running", "done", "failed", "cancelled", "interrupted"]
 JobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
                   "checking_discrepancies", "finding_connections", "rechecking", "writing_overview",
                   "exporting"]
 FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted")
 INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the wiki. Retry to start again."
 WIKI_INTERRUPTED_REASON = "SKAZ was closed while this wiki job was running. Start it again when needed."
+#: Kinds that wait in the ingest queue and continue after a restart.
+QUEUED_KINDS: tuple[JobKind, ...] = ("ingest", "refresh")
 #: Bounded journal: the status view never grows without limit.
 MAX_JOURNAL = 200
 #: ``JobRecord.error_code``: the agent can't work until the user fixes it (sign in, update, connect
@@ -83,7 +87,9 @@ class JobRecord:
 
     @property
     def label(self) -> str:
-        """The material status line: Reading / Writing notes / Concepts N / Done."""
+        """The material status line: Queued / Reading / Writing notes / Concepts N / Done."""
+        if self.state == "queued":
+            return "Queued"
         if self.state == "running":
             if self.step == "concepts":
                 return f"Concepts {self.counters.get('concepts_found', 0)}"
@@ -122,15 +128,15 @@ class JobRepository:
         self.db = db
 
     def create(self, material_id: str | None, *, kind: JobKind = "ingest",
-               step: JobStep = "reading") -> JobRecord:
-        """A running job; ``material_id`` is the target (a page for ``recheck``, a folder for overviews)."""
+               step: JobStep = "reading", state: Literal["running", "queued"] = "running") -> JobRecord:
+        """A new job; ``material_id`` is the target (a page for ``recheck``, a folder for overviews)."""
         job_id = new_id("job")
         now = utc_now()
         with self.db.write() as connection:
             connection.execute(
                 "INSERT INTO jobs(id, kind, target_id, state, step, error, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'running', ?, NULL, ?, ?)",
-                (job_id, kind, material_id, step, now, now),
+                "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+                (job_id, kind, material_id, state, step, now, now),
             )
             connection.execute("INSERT INTO ingest_jobs(job_id) VALUES (?)", (job_id,))
         record = self.get(job_id)
@@ -155,6 +161,50 @@ class JobRepository:
     def running_for(self, material_id: str) -> JobRecord | None:
         return next((job for job in self.list_all(material_id=material_id) if job.state == "running"), None)
 
+    def pending_for(self, material_id: str) -> JobRecord | None:
+        """The material's queued or running ingest job, if any (wiki checks of it don't count)."""
+        return next((job for job in self.list_all(material_id=material_id)
+                     if job.kind in QUEUED_KINDS and job.state in ("queued", "running")), None)
+
+    def claim_next(self) -> JobRecord | None:
+        """Start the oldest queued ingest job: ``queued`` → ``running`` in one write; ``None`` if none."""
+        kinds = ", ".join(f"'{kind}'" for kind in QUEUED_KINDS)
+        with self.db.write() as connection:
+            row = connection.execute(
+                f"SELECT id FROM jobs WHERE kind IN ({kinds}) AND state = 'queued' "
+                "ORDER BY created_at, rowid LIMIT 1").fetchone()
+            if row is None:
+                return None
+            connection.execute("UPDATE jobs SET state = 'running', step = 'reading', updated_at = ? "
+                               "WHERE id = ? AND state = 'queued'", (utc_now(), row["id"]))
+        return self.get(row["id"])
+
+    def requeue(self, job_id: str) -> None:
+        """A running job goes back to the queue (SKAZ is closing): it continues at the next start."""
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE jobs SET state = 'queued', step = 'reading', error = NULL, updated_at = ? "
+                "WHERE id = ? AND state = 'running'", (utc_now(), job_id))
+
+    def queued_count(self) -> int:
+        kinds = ", ".join(f"'{kind}'" for kind in QUEUED_KINDS)
+        with self.db.read() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) FROM jobs WHERE kind IN ({kinds}) AND state = 'queued'").fetchone()
+        return int(row[0])
+
+    def latest_failed_materials(self) -> list[str]:
+        """Materials whose latest ingest job failed or was interrupted (not ones the user cancelled)."""
+        kinds = ", ".join(f"'{kind}'" for kind in QUEUED_KINDS)
+        with self.db.read() as connection:
+            rows = connection.execute(
+                f"SELECT target_id, state FROM jobs WHERE kind IN ({kinds}) AND target_id IS NOT NULL "
+                "ORDER BY created_at DESC, rowid DESC").fetchall()
+        latest: dict[str, str] = {}
+        for row in rows:
+            latest.setdefault(row["target_id"], row["state"])
+        return [material_id for material_id, state in latest.items() if state in ("failed", "interrupted")]
+
     def set_step(self, job_id: str, step: JobStep) -> None:
         with self.db.write() as connection:
             connection.execute("UPDATE jobs SET step = ?, updated_at = ? WHERE id = ? AND state = 'running'",
@@ -166,7 +216,7 @@ class JobRepository:
             finished = connection.execute(
                 "UPDATE jobs SET state = ?, error = ?, "
                 "step = CASE WHEN ? = 'done' THEN 'done' ELSE step END, "
-                "updated_at = ? WHERE id = ? AND state = 'running'",
+                "updated_at = ? WHERE id = ? AND state IN ('running', 'queued')",
                 (state, error, state, utc_now(), job_id),
             ).rowcount
             if finished:
@@ -193,8 +243,13 @@ class JobRepository:
                                (json.dumps(journal[-MAX_JOURNAL:], ensure_ascii=False), job_id))
 
     def interrupt_running(self) -> list[str]:
-        """Startup: jobs left ``running`` by a previous process become ``interrupted``."""
+        """Startup: ingest jobs left ``running`` go back to the queue and continue; other jobs left
+        ``running`` by a previous process become ``interrupted``. Returns the interrupted ids."""
+        queued = ", ".join(f"'{kind}'" for kind in QUEUED_KINDS)
         with self.db.write() as connection:
+            connection.execute(
+                "UPDATE jobs SET state = 'queued', step = 'reading', error = NULL, updated_at = ? "
+                f"WHERE kind IN ({queued}) AND state = 'running'", (utc_now(),))
             ids = [row[0] for row in connection.execute(
                 f"SELECT id FROM jobs WHERE kind IN {_KINDS_IN} AND state = 'running'")]
             connection.execute(

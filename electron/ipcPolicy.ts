@@ -94,6 +94,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/decisions\/local\/(?:download|cancel)$/ },
   { method: 'POST', pattern: /^\/kb\/materials\/(?:file|link|text)$/ },
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/ingest$/ },
+  // H2: queue every material whose wiki job failed or was interrupted again, in one click.
+  { method: 'POST', pattern: /^\/kb\/jobs\/retry-failed$/ },
   { method: 'POST', pattern: /^\/kb\/imports$/ },
   // QA E10: a failed or interrupted import says why on its material and starts again from there.
   { method: 'POST', pattern: /^\/kb\/imports\/[^/]+\/retry$/ },

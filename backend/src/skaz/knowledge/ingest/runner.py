@@ -56,6 +56,10 @@ class Limits:
     max_answers: int = 64
     #: Characters of statements per operation.
     max_chars: int = 200_000
+    #: Retries of one model call that failed only because the engine was busy or the network dropped.
+    transient_retries: int = 3
+    #: Seconds before each such retry (the last value repeats).
+    retry_delays_s: tuple[float, ...] = (5.0, 15.0, 30.0)
 
 
 @dataclass
@@ -112,6 +116,29 @@ class IngestRun:
     # -- model calls --------------------------------------------------------
 
     async def _ask(self, instructions: str, messages: Sequence[TurnMessage], schema: dict[str, Any]) -> str:
+        """One model call; a call that failed only because the engine was busy or the network dropped
+        is retried a few times after a pause instead of failing the whole material."""
+        for attempt in range(self.limits.transient_retries + 1):
+            terminal, text = await self._call(instructions, messages, schema)
+            if terminal is None:
+                return text
+            if terminal.kind == "cancelled" or self.cancel_requested:
+                raise IngestCancelled()
+            retryable = terminal.transient or terminal.kind == "network"
+            if retryable and attempt < self.limits.transient_retries:
+                delays = self.limits.retry_delays_s or (0.0,)
+                await self._log("The agent was busy or offline; trying the same step again shortly.")
+                await asyncio.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+            when = ""
+            if terminal.retry_at is not None:
+                when = f" It should work again after {terminal.retry_at.isoformat()}."
+            raise IngestFailed(agent_failure_text(terminal.kind, terminal.message) + when,
+                               agent_failure_code(terminal.kind))
+        raise AssertionError("unreachable")
+
+    async def _call(self, instructions: str, messages: Sequence[TurnMessage],
+                    schema: dict[str, Any]) -> tuple[Failed | None, str]:
         if self.cancel_requested:
             raise IngestCancelled()
         self._runs += 1
@@ -129,14 +156,8 @@ class IngestRun:
             self.current_run = None
         terminal = result.terminal
         if isinstance(terminal, Failed):
-            if terminal.kind == "cancelled" or self.cancel_requested:
-                raise IngestCancelled()
-            when = ""
-            if terminal.retry_at is not None:
-                when = f" It should work again after {terminal.retry_at.isoformat()}."
-            raise IngestFailed(agent_failure_text(terminal.kind, terminal.message) + when,
-                               agent_failure_code(terminal.kind))
-        return result.text
+            return terminal, ""
+        return None, result.text
 
     async def _answers(self, operation: _Operation, instructions: str, prompt: str, schema: dict[str, Any],
                        model: type[NotesOut] | type[ConceptsOut]) -> AsyncIterator[NotesOut | ConceptsOut]:

@@ -462,7 +462,7 @@ export interface KbJob {
   id: string;
   kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections" | "export";
   material_id: string | null;
-  state: "running" | "done" | "failed" | "cancelled" | "interrupted";
+  state: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
   step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | "exporting" | null;
   label: string;
   error: string | null;
@@ -593,7 +593,7 @@ export interface KbMaterial {
   languages: string[];
   created_at: string;
   fragment_count: number;
-  wiki_state: "not_in_wiki" | "processing" | "in_wiki" | "failed";
+  wiki_state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed";
   folder_name: string;
   origin: KbOrigin | null;
   fragments: KbFragment[];
@@ -642,7 +642,7 @@ export interface KbMaterialSummary {
   languages: string[];
   created_at: string;
   fragment_count: number;
-  wiki_state: "not_in_wiki" | "processing" | "in_wiki" | "failed";
+  wiki_state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed";
   folder_name: string;
 }
 
@@ -652,7 +652,7 @@ export interface KbMaterialUpdate {
 }
 
 export interface KbMaterialWiki {
-  state: "not_in_wiki" | "processing" | "in_wiki" | "failed";
+  state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed";
   note_page_id: string | null;
   concept_count: number;
   job_id: string | null;
@@ -1364,6 +1364,13 @@ export interface KbEndpoints {
   "GET /kb/jobs": {
     path: Record<string, never>;
     query: { material_id?: string | null };
+    body: never;
+    response: KbJob[];
+    status: 200;
+  };
+  "POST /kb/jobs/retry-failed": {
+    path: Record<string, never>;
+    query: Record<string, never>;
     body: never;
     response: KbJob[];
     status: 200;

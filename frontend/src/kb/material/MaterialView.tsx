@@ -92,7 +92,8 @@ export function useMaterialData(materialId: string) {
   // A material being recorded right now grows from the recording's live poll, not by re-reading it.
   const { material, followed } = useLiveMaterial(materialId, data?.material ?? null, loader.reload);
   const busy = data !== null && !followed && (data.material.status === 'processing' || data.material.status === 'recording'
-    || data.material.wiki?.state === 'processing' || data.jobs.some((j) => j.state === 'running'));
+    || data.material.wiki?.state === 'processing' || data.material.wiki?.state === 'queued'
+    || data.jobs.some((j) => j.state === 'running' || j.state === 'queued'));
   // The next read starts 2 s after the previous one answered (the interval stops while one runs).
   useInterval(busy && loader.state.load !== 'loading', 2000, loader.reload);
   const state = useMemo(

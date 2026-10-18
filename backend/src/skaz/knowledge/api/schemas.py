@@ -60,7 +60,7 @@ class KbOrigin(BaseModel):
     file_name: str | None
 
 
-KbWikiState = Literal["not_in_wiki", "processing", "in_wiki", "failed"]
+KbWikiState = Literal["not_in_wiki", "queued", "processing", "in_wiki", "failed"]
 
 
 class KbMaterialSummary(BaseModel):

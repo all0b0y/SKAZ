@@ -76,6 +76,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
       {speech && counts.doubtful > 0 && <Pill tone="warn" icon="warning">{`${counts.doubtful} doubtful`}</Pill>}
       {running && <Pill tone="run" spin>{stepLabel(running)}</Pill>}
       {!running && wiki?.state === 'processing' && <Pill tone="run" spin>Adding to the wiki</Pill>}
+      {!running && wiki?.state === 'queued' && <Pill tone="run" spin>Queued for the wiki</Pill>}
       {wiki?.state === 'in_wiki' && wiki.note_page_id && (
         <Pill tone="done" icon="pdf" label="Open the notes" onClick={() => openDocument({ type: 'page', id: wiki.note_page_id! })}>Notes</Pill>
       )}

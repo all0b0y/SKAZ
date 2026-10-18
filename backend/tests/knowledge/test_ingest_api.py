@@ -46,7 +46,7 @@ async def test_ingest_job_lifecycle_over_http(kb_app: Any, kb_client: httpx.Asyn
 
     # Before the engine registry and the detector are wired, the job fails with a plain reason.
     started = await kb_client.post(f"/kb/materials/{material_id}/ingest")
-    assert started.status_code == 202 and started.json()["state"] == "running"
+    assert started.status_code == 202 and started.json()["state"] in ("queued", "running")
     await settle(lambda: not ingest.active_jobs())
     failed = (await kb_client.get(f"/kb/jobs/{started.json()['id']}")).json()
     assert failed["state"] == "failed" and failed["can_retry"] is True and "Retry" not in failed["label"]

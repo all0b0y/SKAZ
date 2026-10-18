@@ -26,7 +26,7 @@ from .guard.visibility import ExclusionsUnreadable, read_excluded
 
 log = logging.getLogger(__name__)
 
-WikiState = Literal["not_in_wiki", "processing", "in_wiki", "failed"]
+WikiState = Literal["not_in_wiki", "queued", "processing", "in_wiki", "failed"]
 TRANSLATION_FILE = "translation.md"
 #: Jobs that (re)build a material's pages (W1 ingest; W2 refresh).
 _WIKI_JOB_KINDS = ("ingest", "refresh")
@@ -108,6 +108,8 @@ def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str,
         code = job_code if job_state in _FAILED else None
         if job_state == "running":
             state: WikiState = "processing"
+        elif job_state == "queued":
+            state = "queued"
         elif note is not None or count:
             state = "in_wiki"
         elif job_state in _FAILED:

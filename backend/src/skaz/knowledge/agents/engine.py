@@ -126,6 +126,8 @@ class Failed:
     message: str
     #: When the limit resets, if the engine says so.
     retry_at: datetime | None = None
+    #: The engine was only busy (all its parallel slots taken): the same turn can run a bit later.
+    transient: bool = False
 
 
 AgentEvent = TextDelta | ToolCall | ToolResult | Completed | Failed

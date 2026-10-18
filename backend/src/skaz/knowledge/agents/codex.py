@@ -287,7 +287,8 @@ class CodexEngine:
             return
         if len(self._runs) >= self._max_parallel:
             yield Failed(run_id, "other", f"Too many Codex answers are running at once (limit "
-                                          f"{self._max_parallel}). Wait for one to finish or stop one.")
+                                          f"{self._max_parallel}). Wait for one to finish or stop one.",
+                         transient=True)
             return
         run = _Run(run_id)
         self._runs[run_id] = run

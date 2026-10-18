@@ -59,6 +59,8 @@ def create_app(
                 app.state.kb_startup_scan = scan
                 await asyncio.wait({scan}, timeout=STARTUP_SCAN_WAIT_S)
             runtime.kb_auto_ingest.bind_loop(asyncio.get_running_loop())
+            # Materials queued for the wiki when SKAZ last closed continue by themselves.
+            runtime.kb_ingest.resume()
             # Outside edits of Wiki/ (every 2 s) and background connections when the user allowed them.
             await runtime.kb_wiki.start()
             # Imports outlive the process that started them: a paid job keeps

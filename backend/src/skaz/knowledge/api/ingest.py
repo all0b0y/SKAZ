@@ -45,11 +45,17 @@ def settings_view(settings: WikiSettings) -> KbWikiSettings:
 
 @router.post("/kb/materials/{material_id}/ingest", status_code=202)
 async def request_ingest(material_id: str, ingest: IngestDep) -> KbJob:
-    """Start adding the material to the wiki (or retry). 409 while a job for it is running."""
+    """Queue the material for the wiki (or retry). 409 while a job for it is queued or running."""
     try:
         return job_view(await ingest.request_ingest(material_id))
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+
+@router.post("/kb/jobs/retry-failed")
+async def retry_failed(ingest: IngestDep) -> list[KbJob]:
+    """Queue again every material whose latest wiki job failed or was interrupted."""
+    return [job_view(record) for record in await ingest.retry_failed()]
 
 
 @router.get("/kb/jobs")

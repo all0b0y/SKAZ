@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
+import { materialWiki } from '../test/fakeKb';
 import { addedLabel } from './AllMaterials';
 import { fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
@@ -51,6 +52,24 @@ describe('All materials (v11, decision 25)', () => {
     expect(await screen.findByRole('heading', { level: 2, name: 'Cross-entropy explained' })).toBeInTheDocument();
     await user.click(within(center).getByRole('button', { name: 'Close all materials' }));
     expect(screen.queryByRole('region', { name: 'All materials' })).not.toBeInTheDocument();
+  });
+
+  it('queues every material whose wiki job failed again with one "Retry failed" (H2)', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    const pasted = world.materials.find((m) => m.id === 'm-txt')!;
+    pasted.wiki = materialWiki('failed', { error: 'The agent stopped.' });
+    pasted.wiki_state = 'failed';
+    renderKb({ world, prefs: { section: 'materials' } });
+    await user.click(await screen.findByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const table = await within(center).findByRole('table');
+    const row = () => within(table).getByRole('button', { name: 'Pasted text: problems' }).closest('tr')!;
+    expect(row()).toHaveTextContent('Error');
+    // The unreadable link can't be fixed by the wiki: it isn't counted.
+    await user.click(within(center).getByRole('button', { name: 'Retry failed (1)' }));
+    await waitFor(() => expect(row()).toHaveTextContent('Queued'));
+    expect(within(center).queryByRole('button', { name: /Retry failed/ })).not.toBeInTheDocument();
   });
 
   it('says "today", "yesterday", else a short date', () => {

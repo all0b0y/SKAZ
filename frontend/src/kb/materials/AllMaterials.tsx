@@ -4,6 +4,7 @@ import type { KbWikiState } from '../api/names';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL } from '../library/materialMeta';
 import { useFolderTone } from '../document/parts';
+import { errorText } from '../api/client';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
 
@@ -46,6 +47,7 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
     ? 'reading' : material.status === 'failed' ? 'failed' : known ?? 'unknown';
   const view: Record<Shown, { icon: 'check' | 'close' | 'warning' | null; text: string; tone: string }> = {
     in_wiki: { icon: 'check', text: 'In wiki', tone: 'ok' },
+    queued: { icon: null, text: 'Queued', tone: 'run' },
     processing: { icon: null, text: 'Adding…', tone: 'run' },
     reading: { icon: null, text: material.status === 'recording' ? 'Recording…' : 'Processing…', tone: 'run' },
     not_in_wiki: { icon: 'close', text: 'Not in wiki', tone: 'off' },
@@ -83,8 +85,25 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   useEffect(() => { reload(); }, [revision, reload]);
   const gone = useLibrary((s) => s.gone);
   const all = useMemo(() => (state.value ?? []).filter((m) => !gone.includes(m.id)), [state.value, gone]);
-  const busy = all.some((m) => m.status === 'processing' || m.status === 'recording' || m.wiki_state === 'processing');
+  const busy = all.some((m) => m.status === 'processing' || m.status === 'recording'
+    || m.wiki_state === 'processing' || m.wiki_state === 'queued');
   useInterval(busy && !hidden, 3000, reload);
+  const failedCount = all.filter((m) => m.wiki_state === 'failed' && m.status !== 'failed').length;
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  /** H2: every material whose wiki job failed or was interrupted goes back in the queue, in one click. */
+  const retryFailed = async () => {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await client.call('POST /kb/jobs/retry-failed');
+      reload();
+    } catch (error) {
+      setRetryError(errorText(error));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const rows = useMemo(() => {
     const kinds = type === 'all' ? null : TYPE_KINDS[type];
@@ -101,6 +120,12 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         <h1 className="kb-head__title kb-allmat__title">All materials</h1>
         <span className="kb-muted kb-allmat__count">{all.length || libraryCount}</span>
         <span className="kb-head__spacer" />
+        {failedCount > 0 && (
+          <Button size="sm" icon="retry" busy={retrying} onClick={() => void retryFailed()}
+            title={retryError ?? 'Add the materials that failed to the wiki again'}>
+            Retry failed ({failedCount})
+          </Button>
+        )}
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
       </header>

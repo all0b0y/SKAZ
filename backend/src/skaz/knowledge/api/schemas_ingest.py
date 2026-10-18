@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-KbJobState = Literal["running", "done", "failed", "cancelled", "interrupted"]
+KbJobState = Literal["queued", "running", "done", "failed", "cancelled", "interrupted"]
 KbJobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
                     "checking_discrepancies", "finding_connections", "rechecking", "writing_overview",
                     "exporting"]
