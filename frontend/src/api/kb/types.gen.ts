@@ -41,7 +41,7 @@ export interface KbAgent {
   signed_in: boolean;
   incompatible: boolean;
   reason: string | null;
-  action: "install" | "update" | "login" | "check" | "first_check" | null;
+  action: "install" | "update" | "login" | "check" | "first_check" | "repair" | null;
   models: KbAgentModel[];
   current_model: string | null;
   install: KbAgentInstallInfo;
@@ -440,13 +440,13 @@ export interface KbInstallLine {
 }
 
 export interface KbInstallStart {
-  action?: "install" | "update" | "first_check";
+  action?: "install" | "update" | "first_check" | "repair";
 }
 
 export interface KbInstallTask {
   id: string;
   engine: "codex" | "claude_code" | "hermes";
-  action: "install" | "update" | "first_check";
+  action: "install" | "update" | "first_check" | "repair";
   state: "running" | "succeeded" | "failed" | "cancelled";
   lines: KbInstallLine[];
   cursor: number;

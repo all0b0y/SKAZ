@@ -146,6 +146,16 @@ MIN_HERMES_VERSION: Version = (0, 21, 5)
 _VERSION = re.compile(r"Hermes Agent v(\d+)\.(\d+)\.(\d+)")
 _INSTALL_DIR = re.compile(r"^Install directory:\s*(.+)$", re.MULTILINE)
 NOT_INSTALLED = "Hermes Agent is not installed."
+#: Commands Hermes may suggest in its own error output that SKAZ runs by itself (H3): its repairs only,
+#: never anything else a message happens to say.
+REPAIR_COMMANDS: frozenset[tuple[str, ...]] = frozenset({("pm", "repair")})
+_SUGGESTED = re.compile(r"run\s+`hermes\s+([a-z][a-z -]*?)`", re.I)
+REPAIR_TIMEOUT_S = 300.0
+REPAIR_NOTE = ("Hermes Agent needs a repair for SKAZ's own Hermes folder, and the automatic one didn't help. "
+               "Press Repair to run it again, or open the logs.")
+UNREADABLE_NOTE = ("Hermes Agent started but didn't say its version. Check it again; if that keeps "
+                   "happening, open the logs.")
+RUN_FAIL_NOTE = "SKAZ couldn't start Hermes Agent. Check it again; if that keeps happening, reinstall it."
 NO_PROVIDER = "Choose a model and provider for Hermes in its setup (opened from SKAZ)."
 SETUP_AUTH_METHOD = "hermes-setup"
 NO_TOOLS_LISTING = "No tools available."
@@ -189,6 +199,15 @@ HERMES_POLICY: dict[str, Any] = {
     "memory": {"memory_enabled": False, "user_profile_enabled": False},
     "skills": {"project_discovery": False, "external_dirs": []},
 }
+
+
+def suggested_repair(stderr: str) -> tuple[str, ...] | None:
+    """The repair command Hermes asks for in its error output, if it is one SKAZ may run by itself."""
+    for match in _SUGGESTED.finditer(stderr):
+        command = tuple(match.group(1).split())
+        if command in REPAIR_COMMANDS:
+            return command
+    return None
 
 
 def parse_hermes_version(text: str) -> Version | None:
@@ -411,7 +430,12 @@ class HermesEngine:
         self._status_timeout = status_timeout_s
         self._grace = interrupt_grace_s
         self._runs: dict[str, _ActiveRun] = {}
+        #: Readable versions only: a failed read is asked again every time (it may be repaired meanwhile).
         self._checked: dict[tuple[str, float], tuple[Version | None, Path | None]] = {}
+        #: Binaries SKAZ already repaired by itself in this process (one automatic attempt each).
+        self._repaired: set[tuple[str, float]] = set()
+        #: The repair Hermes suggested at the last unreadable version, if SKAZ may run it.
+        self._repair: tuple[str, ...] | None = None
         self.current_model: str | None = None
         self._history_tasks: set[asyncio.Task[None]] = set()
         self._swept = False
@@ -479,12 +503,16 @@ class HermesEngine:
         """Forget the remembered version (the launcher script does not change on ``hermes update``)."""
         self._checked.clear()
 
-    async def _version(self, located: Located) -> tuple[Version | None, Path | None]:
+    @staticmethod
+    def _key(located: Located) -> tuple[str, float]:
         try:
             stamp = located.binary.stat().st_mtime
         except OSError:
             stamp = 0.0
-        key = (str(located.binary), stamp)
+        return (str(located.binary), stamp)
+
+    async def _version(self, located: Located) -> tuple[Version | None, Path | None]:
+        key = self._key(located)
         if key not in self._checked:
             self.prepare()
             watch = self.watch(located)
@@ -493,8 +521,35 @@ class HermesEngine:
                                         timeout=self._status_timeout)
             finally:
                 watch.check()
-            self._checked[key] = (parse_hermes_version(out.stdout), install_dir_of(out.stdout))
+            version = parse_hermes_version(out.stdout)
+            if version is None:
+                # Never remembered: the next status asks again. The output says why, without secrets
+                # (``--version`` prints none); it is cut short for the log.
+                self._repair = suggested_repair(out.stderr)
+                logger.warning("Hermes '--version' (exit %s) wasn't understood: stdout=%r stderr=%r",
+                               out.returncode, out.stdout[:300], out.stderr[:300])
+                return None, None
+            self._repair = None
+            self._checked[key] = (version, install_dir_of(out.stdout))
         return self._checked[key]
+
+    async def _self_repair(self, located: Located) -> bool:
+        """Run the repair Hermes asked for, once per binary per process; True if it was run."""
+        key = self._key(located)
+        repair = self._repair
+        if repair is None or key in self._repaired:
+            return False
+        self._repaired.add(key)
+        logger.warning("Hermes asked for 'hermes %s'; SKAZ runs it for its own Hermes folder.",
+                       " ".join(repair))
+        watch = self.watch(located)
+        try:
+            out = await run_capture([str(located.binary), *repair], env=self.environment(located),
+                                    timeout=REPAIR_TIMEOUT_S)
+        finally:
+            watch.check()
+        logger.warning("'hermes %s' finished with exit code %s.", " ".join(repair), out.returncode)
+        return True
 
     async def install_dir(self) -> Path | None:
         located = self._locate("hermes")
@@ -508,14 +563,20 @@ class HermesEngine:
             return EngineStatus("hermes", installed=False, reason=NOT_INSTALLED)
         try:
             version, _ = await self._version(located)
+            # H3: Hermes said how it is fixed (``run `hermes pm repair```): SKAZ runs that once by
+            # itself, then reads the version again — the user sees a problem only if that didn't help.
+            if version is None and await self._self_repair(located):
+                version, _ = await self._version(located)
         except LauncherTampered as error:
             return EngineStatus("hermes", installed=True, incompatible=True, reason=str(error))
         except (OSError, TimeoutError):
-            return EngineStatus("hermes", installed=True, incompatible=True,
-                                reason="SKAZ couldn't start Hermes Agent. Reinstall it.")
+            return EngineStatus("hermes", installed=True, reason=RUN_FAIL_NOTE)
         if version is None:
-            return EngineStatus("hermes", installed=True, incompatible=True,
-                                reason="SKAZ couldn't read the Hermes Agent version. Reinstall it.")
+            # Not "outdated": an update can't fix a launcher that doesn't start (and Hermes refuses to
+            # "update" a newer build), so the action is the repair Hermes named, or a new check.
+            if self._repair is not None:
+                return EngineStatus("hermes", installed=True, repairable=True, reason=REPAIR_NOTE)
+            return EngineStatus("hermes", installed=True, reason=UNREADABLE_NOTE)
         shown = dotted(version)
         if version < MIN_HERMES_VERSION:
             return EngineStatus("hermes", installed=True, version=shown, incompatible=True,

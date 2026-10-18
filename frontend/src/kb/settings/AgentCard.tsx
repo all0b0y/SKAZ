@@ -50,11 +50,11 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     return store.getState().followInstall(agent.id, taskId);
   }, [store, agent.id, taskId, install?.task.state]);
 
-  const act = async (what: 'install' | 'update' | 'first_check' | 'login' | 'check' | 'cancel' | 'logout') => {
+  const act = async (what: 'install' | 'update' | 'first_check' | 'repair' | 'login' | 'check' | 'cancel' | 'logout') => {
     setBusy(what);
     setMessage(null);
     const s = store.getState();
-    if (what === 'install' || what === 'update' || what === 'first_check') {
+    if (what === 'install' || what === 'update' || what === 'first_check' || what === 'repair') {
       const r = await s.install(agent.id, what);
       if (!r.ok) setMessage({ text: r.error, error: true });
     } else if (what === 'cancel') {
@@ -81,7 +81,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     && !(checkedHere && agent.state === 'not_installed');
   const action = agent.action;
   const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again'
-    : action === 'first_check' ? 'Check' : null;
+    : action === 'first_check' ? 'Check' : action === 'repair' ? 'Repair' : null;
   const finished = install && install.task.state !== 'running' ? install.task : null;
 
   const status = (
@@ -122,7 +122,8 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
           <div className="kb-installlog__head">
             {running ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" /> : <Icon name={finished?.state === 'succeeded' ? 'check' : 'error'} size={13} />}
             <span role="status">
-              {running ? (install.task.action === 'update' ? 'Updating…' : install.task.action === 'first_check' ? 'Checking…' : 'Installing…')
+              {running ? (install.task.action === 'update' ? 'Updating…' : install.task.action === 'first_check' ? 'Checking…'
+                : install.task.action === 'repair' ? 'Repairing…' : 'Installing…')
                 : finished?.state === 'succeeded' ? `Done${finished.version ? ` · ${finished.version}` : ''}`
                   : finished?.state === 'cancelled' ? 'Cancelled' : `Failed${finished?.reason ? `: ${finished.reason}` : ''}`}
             </span>

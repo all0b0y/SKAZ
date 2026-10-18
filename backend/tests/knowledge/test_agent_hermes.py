@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ from skaz.knowledge.agents.hermes import (
     ensure_private_home,
     tools_listing_allowed,
 )
+from skaz.knowledge.agents.registry import classify
 from skaz.knowledge.install.terminal import TerminalLauncher
 from tests.knowledge.agent_fakes import FakeCli, RecordingMcp, RecordingOpener, hermes_probe
 
@@ -553,3 +555,38 @@ async def test_the_gateway_of_skaz_folder_is_registered_after_a_run(tmp_path: Pa
             CHILDREN.discard(engine._gateway)
         ours.close()
         user.close()
+
+
+async def test_a_repair_hermes_asks_for_is_run_once_by_itself_and_the_agent_works(tmp_path: Path) -> None:
+    """H3: ``--version`` exits 1 asking for ``hermes pm repair``: SKAZ runs exactly that, then asks again."""
+    engine, fake = engine_for(tmp_path, scenario(needs_repair=True))
+    status = await engine.status()
+    assert status.version is not None and not status.incompatible and not status.repairable
+    repairs = fake.records("repair")
+    assert len(repairs) == 1 and repairs[0]["home"] == str(engine.home)
+
+
+async def test_a_repair_that_does_not_help_asks_for_repair_not_an_update(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    engine, fake = engine_for(tmp_path, scenario(needs_repair=True, repair_works=False))
+    caplog.set_level(logging.WARNING)
+    status = await engine.status()
+    assert status.repairable and not status.incompatible and status.version is None
+    assert "Repair" in (status.reason or "") and "Reinstall" not in (status.reason or "")
+    assert classify(status) == ("unavailable", "repair")
+    assert "no dependency environment is committed" in caplog.text
+    # One automatic attempt per binary: a second status doesn't repeat it, but asks Hermes again.
+    await engine.status()
+    assert len(fake.records("repair")) == 1
+    assert sum(1 for item in fake.records("start") if item["argv"] == ["--version"]) >= 3
+
+
+async def test_an_unreadable_version_is_not_remembered_and_never_means_outdated(tmp_path: Path) -> None:
+    engine, fake = engine_for(tmp_path, scenario(version_output="something else"))
+    status = await engine.status()
+    assert not status.incompatible and not status.repairable and status.version is None
+    assert classify(status) == ("unavailable", "check")
+    before = sum(1 for item in fake.records("start") if item["argv"] == ["--version"])
+    await engine.status()
+    assert sum(1 for item in fake.records("start") if item["argv"] == ["--version"]) == before + 1

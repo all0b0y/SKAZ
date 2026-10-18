@@ -17,7 +17,7 @@ from skaz.knowledge.install.errors import failure_reason
 from skaz.knowledge.install.recipes import RECIPES
 from skaz.knowledge.install.runner import SubprocessExecutor, clean_line
 from skaz.knowledge.install.system import ElevationRefused, refuse_sudo
-from skaz.knowledge.install.tasks import InstallManager, InstallTask
+from skaz.knowledge.install.tasks import InstallBusy, InstallManager, InstallTask
 
 HANG = object()
 
@@ -232,7 +232,25 @@ async def test_installers_cannot_reach_a_real_sudo(tmp_path: Path) -> None:
     assert result.returncode == 1 and "never runs commands with administrator rights" in result.stderr
 
 
+async def test_hermes_repair_runs_its_own_repair_for_skaz_folder_then_checks(tmp_path: Path) -> None:
+    executor = FakeExecutor([([], 0), (["Hermes ACP check OK"], 0)])
+    installs, _ = manager(tmp_path, executor)
+    task = await finished(installs.start("hermes", "repair"))
+    assert task.state == "succeeded"
+    assert [step["argv"] for step in executor.started] == [
+        ["/Users/me/.local/bin/hermes", "pm", "repair"],
+        ["/Users/me/.local/bin/hermes", "acp", "--check"],
+    ]
+    assert executor.started[0]["env"]["HERMES_HOME"] == "/skaz/agents/hermes-home"
+    # Agents without a repair of their own are refused, not "repaired" by something else.
+    with pytest.raises(InstallBusy):
+        installs.start("codex", "repair")
+
+
 def test_failure_reasons_in_plain_words() -> None:
+    # H3: Hermes refusing to "update" a newer canary build is not a broken installer.
+    assert "No update is needed" in failure_reason(
+        ["Refusing to move: v0.21.5 predates the installed v0.22.1. Downgrading is unsupported."], 1)
     assert "disk space" in failure_reason(["write error: No space left on device"], 1)
     assert "needs Node.js" in failure_reason(["bash: npm: command not found"], 127)
     assert "needs Python" in failure_reason(["python3: command not found"], 127)

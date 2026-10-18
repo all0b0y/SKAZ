@@ -5,7 +5,13 @@ import re
 from collections.abc import Sequence
 from typing import Protocol
 
+DOWNGRADE_REFUSAL = ("SKAZ changed nothing: the installed version is newer than the one the update would "
+                     "install, and the installer refuses to go back. No update is needed.")
+
 _RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    # Hermes' updater refuses to replace a newer (canary) build with an older release.
+    (re.compile(r"Refusing to move|Downgrading is unsupported|predates the installed", re.I),
+     DOWNGRADE_REFUSAL),
     (re.compile(r"no space left|ENOSPC|disk (is )?full|not enough (free )?space", re.I),
      "There is not enough free disk space. Free some space and try again."),
     (re.compile(r"could not resolve host|curl: \(6\)|curl: \(7\)|failed to connect|network is unreachable|"

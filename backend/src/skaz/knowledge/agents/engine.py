@@ -37,6 +37,8 @@ class EngineStatus:
     incompatible: bool = False
     #: Plain-words reason when not ready ("Claude Code is not installed.").
     reason: str | None = None
+    #: The agent itself says how it is fixed (Hermes: ``hermes pm repair``) and SKAZ can run that.
+    repairable: bool = False
 
     @property
     def missing(self) -> bool:

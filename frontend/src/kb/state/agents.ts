@@ -34,7 +34,7 @@ export type AutoCheckReason = 'open' | 'focus';
 export interface AgentsActions {
   refresh: () => Promise<void>;
   setDefault: (engine: EngineId) => Promise<ActionResult>;
-  install: (engine: EngineId, action?: 'install' | 'update' | 'first_check') => Promise<ActionResult>;
+  install: (engine: EngineId, action?: 'install' | 'update' | 'first_check' | 'repair') => Promise<ActionResult>;
   /** Follow a running task's log; returns stop. */
   followInstall: (engine: EngineId, taskId: string) => () => void;
   cancelInstall: (engine: EngineId) => Promise<ActionResult>;

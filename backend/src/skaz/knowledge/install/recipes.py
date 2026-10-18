@@ -37,7 +37,7 @@ from typing import Literal
 
 from ..agents.engine import EngineId
 
-Action = Literal["install", "update", "first_check"]
+Action = Literal["install", "update", "first_check", "repair"]
 CHECKED_ON = "2026-10-15"
 
 
@@ -64,6 +64,8 @@ class Recipe:
     checked_on: str = CHECKED_ON
     #: SKAZ starts the agent only after a one-time check (``first_check`` action; Hermes only).
     first_check: bool = False
+    #: The agent has its own repair command (``repair`` action; Hermes only).
+    repair: bool = False
 
 
 def _shell(command: str) -> tuple[str, ...]:
@@ -93,11 +95,17 @@ SKAZ_HERMES_ENV = (("HERMES_HOME", "{hermes_home}"), ("HERMES_MANAGED_DIR", "{he
                    ("HERMES_RUNTIME_DIR", "{hermes_runtime}"))
 HERMES_FIRST_CHECK = Step("Check that Hermes Agent runs with SKAZ's own Hermes folder",
                           ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV)
+#: Hermes keeps its dependencies per data folder (``HERMES_HOME``); for SKAZ's own folder it may have
+#: none yet, and its launcher then asks for ``hermes pm repair`` — Hermes' own fix, run for that folder.
+HERMES_REPAIR = Step("Repair Hermes Agent for SKAZ's own Hermes folder", ("{binary}", "pm", "repair"),
+                     env=SKAZ_HERMES_ENV)
 
 
 def _hermes(action: Action) -> tuple[Step, ...]:
     if action == "first_check":
         return (HERMES_FIRST_CHECK,)
+    if action == "repair":
+        return (HERMES_REPAIR, Step("Check ACP support", ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV))
     first = (Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL)) if action == "install"
              else Step("Update Hermes Agent", ("{binary}", "update")))
     return (
@@ -115,5 +123,5 @@ RECIPES: dict[EngineId, Recipe] = {
     "hermes": Recipe("hermes", "Hermes Agent", "hermes",
                      "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
                      "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", _hermes,
-                     first_check=True),
+                     first_check=True, repair=True),
 }

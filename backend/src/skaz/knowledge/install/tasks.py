@@ -138,6 +138,8 @@ class InstallManager:
         recipe = self.recipes[engine]
         if action == "first_check" and not recipe.first_check:
             raise InstallBusy(f"{recipe.name} has nothing to check first.")
+        if action == "repair" and not recipe.repair:
+            raise InstallBusy(f"{recipe.name} has no repair of its own. Reinstall it instead.")
         task = InstallTask(uuid.uuid4().hex, engine, action, recipe)
         self._tasks[task.id] = task
         self._running[task.id] = asyncio.create_task(self._run(task))
@@ -240,6 +242,9 @@ class InstallManager:
         if not status.installed:
             task.finish("failed", f"The installer finished, but SKAZ can't find {name}. Open a new Terminal "
                                   "window to check it, or install manually.")
+        elif status.repairable or (task.action == "repair" and status.version is None):
+            # The repair has to make the agent answer again; otherwise it didn't help.
+            task.finish("failed", status.reason or f"The repair finished, but {name} still doesn't start.")
         elif status.incompatible:
             task.finish("failed", status.reason or f"The installed {name} can't be used by SKAZ.")
         elif task.action == "first_check":

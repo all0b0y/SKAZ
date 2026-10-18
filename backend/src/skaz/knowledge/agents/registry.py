@@ -34,7 +34,7 @@ DEFAULT_ENGINE: EngineId = "codex"
 #: environment; the composer's agent picker reads it).
 AgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
 #: ``first_check``: Hermes' one-time check with SKAZ's own folder (B10); ``check``: look at the state again.
-AgentAction = Literal["install", "update", "login", "check", "first_check"]
+AgentAction = Literal["install", "update", "login", "check", "first_check", "repair"]
 LoginMethod = Literal["terminal", "browser"]
 
 
@@ -93,6 +93,8 @@ def classify(status: EngineStatus, *, check_failed: bool = False) -> tuple[Agent
         return "unavailable", "check"
     if not status.installed:
         return "not_installed", "install"
+    if status.repairable:
+        return "unavailable", "repair"
     if status.incompatible:
         return "outdated", "update"
     if not status.signed_in:

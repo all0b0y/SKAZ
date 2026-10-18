@@ -196,6 +196,22 @@ describe('Live settings (package 2)', () => {
     expect(await within(hermes).findByRole('status')).toHaveTextContent('Checking…');
     expect(within(hermes).getByLabelText('Install log')).toHaveTextContent('Checking Hermes Agent…');
   });
+
+  it('Hermes that asks for its own repair (H3): Repair runs it, never Update or Reinstall', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const hermesAgent = world.agents.agents.find((a) => a.id === 'hermes')!;
+    Object.assign(hermesAgent, { state: 'unavailable', installed: true, version: null, action: 'repair',
+      reason: "Hermes Agent needs a repair for SKAZ's own Hermes folder, and the automatic one didn't help." });
+    const { fake } = renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const hermes = row(dialog, 'Hermes Agent');
+    expect(within(hermes).queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+    await user.click(within(hermes).getByRole('button', { name: 'Repair' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/hermes/install', body: { action: 'repair' } })));
+    expect(await within(hermes).findByRole('status')).toHaveTextContent('Repairing…');
+  });
 });
 
 describe('First launch, step "Agent" (v21)', () => {

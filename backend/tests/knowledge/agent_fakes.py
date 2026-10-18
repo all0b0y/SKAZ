@@ -102,6 +102,17 @@ if LAUNCHER:
     if open(target).read() != body:
         record("launcher_minted", store=store)
         open(target, "w").write(body)
+REPAIRED = os.path.join(os.environ.get("HERMES_HOME", "."), ".repaired")
+if args == ["pm", "repair"]:  # Hermes' own fix: commits the dependency record for this HERMES_HOME
+    record("repair", home=os.environ.get("HERMES_HOME"))
+    if SCENARIO.get("repair_works", True):
+        open(REPAIRED, "w").write("1")
+    sys.exit(0)
+if args == ["--version"] and SCENARIO.get("needs_repair") and not os.path.exists(REPAIRED):
+    # The canary launcher with no dependency record for SKAZ's HERMES_HOME (live incident 2026-10-18).
+    sys.stderr.write("hermes: no dependency environment is committed for this install; "
+                     "run `hermes pm repair`\n")
+    sys.exit(1)
 if args == ["--version"]:
     print(SCENARIO.get("version_output", "Hermes Agent v0.21.5+6627.g4bb9e57 (2026.9.24)"))
     sys.exit(0)

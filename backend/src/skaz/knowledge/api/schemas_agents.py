@@ -9,8 +9,8 @@ KbEngineId = Literal["codex", "claude_code", "hermes"]
 #: ``preparing``: Hermes' first check is running (wire name kept; it no longer downloads anything).
 KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
 #: ``first_check``: Hermes' one-time check with SKAZ's own folder; ``check``: look at the state again.
-KbAgentAction = Literal["install", "update", "login", "check", "first_check"]
-KbInstallAction = Literal["install", "update", "first_check"]
+KbAgentAction = Literal["install", "update", "login", "check", "first_check", "repair"]
+KbInstallAction = Literal["install", "update", "first_check", "repair"]
 KbInstallState = Literal["running", "succeeded", "failed", "cancelled"]
 
 
