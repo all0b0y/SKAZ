@@ -166,6 +166,13 @@ export function CommandK() {
     ui.getState().showCenter('chat');
   };
 
+  // L5: the highlighted row is always on screen while ↑/↓ move through a long list.
+  useEffect(() => {
+    if (!open || !rows) return;
+    const row = document.getElementById(`${listId}-${active}`);
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, rows, active, listId]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowDown' && rows) { event.preventDefault(); setActive((i) => (i + 1) % rows); }
     else if (event.key === 'ArrowUp' && rows) { event.preventDefault(); setActive((i) => (i - 1 + rows) % rows); }

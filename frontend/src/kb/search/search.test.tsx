@@ -41,6 +41,23 @@ describe('⌘K', () => {
     expect(within(dialog).queryByText(/Nothing found/)).not.toBeInTheDocument();
   });
 
+  it('↑/↓ keep the highlighted result on screen in a long list (L5)', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) { scrolled.push(this.id); };
+    try {
+      renderKb({ world: chatWorld() });
+      const dialog = await openK();
+      fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: 'entropy' } });
+      await waitFor(() => expect(within(dialog).getAllByRole('option').length).toBeGreaterThan(2));
+      fireEvent.keyDown(within(dialog).getByRole('combobox'), { key: 'ArrowDown' });
+      const active = within(dialog).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+      await waitFor(() => expect(scrolled).toContain(active.id));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('⌘K and the rail button open it; sections with counts, three per section in All, matches marked', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });
