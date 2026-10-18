@@ -310,7 +310,17 @@ class Database:
         columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(sessions)")}
         if "mode" not in columns:
             self._connection.execute(
-                "ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'legacy'"
+                "ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'legacy' "
+                "CHECK (mode IN ('legacy', 'contextual_local'))"
+            )
+        # L7: a database migrated before the CHECK above has the column without it. The same rule as
+        # a fresh schema's CHECK, for every database, without rebuilding the sessions table.
+        for event in ("INSERT", "UPDATE OF mode"):
+            name = "sessions_mode_" + event.split()[0].lower()
+            self._connection.execute(
+                f"CREATE TRIGGER IF NOT EXISTS {name} BEFORE {event} ON sessions "
+                "WHEN NEW.mode NOT IN ('legacy', 'contextual_local') "
+                "BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: sessions.mode'); END"
             )
 
     def _migrate_live_asr_finality(self) -> None:

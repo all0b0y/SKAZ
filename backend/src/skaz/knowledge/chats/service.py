@@ -42,6 +42,7 @@ from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..ingest.settings import read_settings
+from ..keyed_locks import KeyedLocks
 from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..service import KnowledgeService
@@ -141,7 +142,7 @@ class ChatService:
         self._stop_timeout_s = stop_timeout_s
         self._close_stop_s = close_stop_s
         #: One "Save to wiki" per answer at a time: a double click must not write two analysis pages.
-        self._saving: dict[str, asyncio.Lock] = {}
+        self._saving = KeyedLocks()
         #: Answers that were streaming when SKAZ stopped are "interrupted" (resumable) from now on.
         self.recovered = self.repo.interrupt_streaming()
         self._feeds: dict[str, ChatFeed] = {}
@@ -663,7 +664,7 @@ class ChatService:
     async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
         """The answer as an analysis page; a repeated (also a concurrent) save is 409 ``ALREADY_SAVED``
         naming the page the first one wrote."""
-        async with self._saving.setdefault(message_id, asyncio.Lock()):
+        async with self._saving.hold(message_id):
             return await self._save_message(chat_id, message_id)
 
     async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:

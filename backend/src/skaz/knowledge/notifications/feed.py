@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from ...native_io import disk_call
 from ..errors import KnowledgeError, NotFound
+from ..keyed_locks import KeyedLocks
 from .actions import ActionSpec, NotificationActions
 
 if TYPE_CHECKING:
@@ -67,7 +68,7 @@ def register_material_kinds(actions: NotificationActions, kinds: Sequence[str]) 
 class NotificationFeed:
     def __init__(self, kb: KnowledgeService) -> None:
         self.kb = kb
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks = KeyedLocks()
 
     @property
     def actions(self) -> NotificationActions:
@@ -100,8 +101,7 @@ class NotificationFeed:
         return record
 
     async def resolve(self, notification_id: str, action: str, text: str | None) -> NotificationRecord:
-        lock = self._locks.setdefault(notification_id, asyncio.Lock())
-        async with lock:
+        async with self._locks.hold(notification_id):
             record = await disk_call(self._record, notification_id)
             specs = {spec.id: spec for spec in self.actions.actions(record)}
             spec = specs.get(action)

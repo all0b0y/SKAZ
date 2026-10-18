@@ -20,7 +20,6 @@ text. The untouched recognition stays in the legacy session.
 from __future__ import annotations
 
 import contextlib
-import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -31,6 +30,7 @@ from typing import Any
 from ... import monologues as mono
 from ..index import indexer
 from ..index.scanner import ScannedMaterial
+from ..keyed_locks import KeyedThreadLocks
 from ..library.fsio import write_atomic
 from ..library.layout import SERVICE_DIR
 from ..library.library import Library
@@ -104,21 +104,16 @@ class SpeechProjector:
     def __init__(self, kb: KnowledgeService, legacy_read: LegacyReader) -> None:
         self.kb = kb
         self._legacy_read = legacy_read
-        self._locks: dict[str, threading.Lock] = {}
-        self._guard = threading.Lock()
+        self._locks = KeyedThreadLocks()
 
     @contextlib.contextmanager
     def _exclusive(self, material_id: str, *, timeout: float | None = None) -> Iterator[None]:
         """Per material. Never held while waiting for ``kb.writing()``: whoever needs both takes
         ``writing()`` first, so a live read never queues behind a scan or another area's write."""
-        with self._guard:
-            lock = self._locks.setdefault(material_id, threading.Lock())
-        if not lock.acquire(timeout=-1 if timeout is None else timeout):
-            raise LiveBusy("The live text is being updated.")
-        try:
+        with self._locks.hold(material_id, timeout=-1 if timeout is None else timeout) as taken:
+            if not taken:
+                raise LiveBusy("The live text is being updated.")
             yield
-        finally:
-            lock.release()
 
     def _hint(self, material_id: str) -> str | None:
         record = self.kb.material_repo.get(material_id)
