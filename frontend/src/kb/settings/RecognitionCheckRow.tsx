@@ -6,6 +6,7 @@ import { Icon, Segmented } from '../ui';
 import { ENGINE_NAME, ENGINE_ORDER, agentOf } from '../state/agents';
 import { useAgents, useServices } from '../state/context';
 import { useLoad } from '../document/useLoad';
+import { modelName } from '../composer/modelCatalog';
 
 type Choice = KbRecognitionSettings['engine'];
 
@@ -61,7 +62,7 @@ export function RecognitionCheckRow({ label }: { label: string }) {
           <select aria-label="Model for the recognition check" value={value.model ?? ''}
             onChange={(e) => void save({ engine: value.engine, model: e.target.value || null, effort: null })}>
             <option value="">Agent default model</option>
-            {chosen.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            {chosen.models.map((m) => <option key={m.id} value={m.id}>{modelName(m)}{chosen.id === 'hermes' ? ` · ${m.provider_label}` : ''}</option>)}
           </select>
           <Icon name="chevronDown" size={12} className="kb-select__chev" />
         </span>

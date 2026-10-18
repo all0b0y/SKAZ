@@ -30,8 +30,21 @@ function agent(id: EngineId, name: string, state: KbAgent['state'], extra: Parti
     action: state === 'not_installed' ? 'install' : state === 'signed_out' ? 'login' : null,
     models: [], current_model: null,
     install: { docs_url: `https://example.org/${id}`, manual_command: `install-${id}`, checked_on: '2026-10-14' },
-    install_task: null, checked_at: ago(1), first_run: null, ...extra,
+    install_task: null, checked_at: ago(1), first_run: null, visible: true, ...extra,
+    providers: extra.providers ?? providersOf(extra.models ?? []),
   };
+}
+
+/** The provider sections the backend derives from an agent's models (0.3.1 K2). */
+export function providersOf(models: ReadonlyArray<KbAgent['models'][number]>): KbAgent['providers'] {
+  const out: KbAgent['providers'] = [];
+  for (const m of models) {
+    let p = out.find((x) => x.id === m.provider);
+    if (!p) { p = { id: m.provider, label: m.provider_label, visible: true, shown: 0, total: 0 }; out.push(p); }
+    p.total += 1;
+    if (m.visible) p.shown += 1;
+  }
+  return out;
 }
 
 /** The parts every world has: agents, settings, an empty chat list and feed. */
@@ -43,19 +56,20 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
     notifications: [], notificationSeq: 0, readUpTo: 0,
     agents: {
       default: 'claude_code',
+      favorites: [],
       agents: [
         agent('codex', 'Codex', 'ready', {
           current_model: 'gpt-5.6-luna',
           models: [
-            { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
-            { id: 'gpt-5.6-luna-mini', label: 'gpt-5.6-luna-mini', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
+            { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'codex', provider_label: 'Codex', name: 'GPT-5.6-luna', tag: null, visible: true, default_visible: true, favorite: false },
+            { id: 'gpt-5.6-luna-mini', label: 'gpt-5.6-luna-mini', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'codex', provider_label: 'Codex', name: 'GPT-5.6-luna-mini', tag: null, visible: true, default_visible: true, favorite: false },
           ],
         }),
         agent('claude_code', 'Claude Code', 'ready', {
           current_model: 'claude-opus-5-5',
           models: [
-            { id: 'claude-opus-5-5', label: 'claude-opus-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
-            { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
+            { id: 'claude-opus-5-5', label: 'claude-opus-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'claude_code', provider_label: 'Claude Code', name: 'Opus 5.5', tag: null, visible: true, default_visible: true, favorite: false },
+            { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'claude_code', provider_label: 'Claude Code', name: 'Sonnet 5.5', tag: null, visible: true, default_visible: true, favorite: false },
           ],
         }),
         agent('hermes', 'Hermes Agent', 'not_installed', {

@@ -49,6 +49,8 @@ export interface KbAgent {
   checked_at: string;
   first_run: KbAgentFirstRun | null;
   questions?: "native" | "skaz";
+  visible: boolean;
+  providers: KbAgentProvider[];
 }
 
 export interface KbAgentDefault {
@@ -83,11 +85,27 @@ export interface KbAgentModel {
   label: string;
   efforts: string[];
   default_effort: string | null;
+  provider: string;
+  provider_label: string;
+  name: string;
+  tag: string | null;
+  visible: boolean;
+  default_visible: boolean;
+  favorite: boolean;
+}
+
+export interface KbAgentProvider {
+  id: string;
+  label: string;
+  visible: boolean;
+  shown: number;
+  total: number;
 }
 
 export interface KbAgents {
   agents: KbAgent[];
   default: "codex" | "claude_code" | "hermes";
+  favorites: KbFavoriteModel[];
 }
 
 export interface KbBlock {
@@ -371,6 +389,11 @@ export interface KbFailure {
   kind: "limit" | "auth" | "incompatible" | "network" | "cancelled" | "other";
   message: string;
   retry_at: string | null;
+}
+
+export interface KbFavoriteModel {
+  engine: "codex" | "claude_code" | "hermes";
+  model: string;
 }
 
 export interface KbFolder {
@@ -775,6 +798,18 @@ export interface KbMessageInput {
 }
 
 export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart;
+
+export interface KbModelChange {
+  kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
+  engine: "codex" | "claude_code" | "hermes";
+  provider?: string | null;
+  model?: string | null;
+  value?: boolean;
+}
+
+export interface KbModelChanges {
+  changes: KbModelChange[];
+}
 
 export interface KbNotification {
   id: string;
@@ -1299,6 +1334,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbInstallTask;
+    status: 200;
+  };
+  "PATCH /kb/agents/models": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbModelChanges;
+    response: KbAgents;
     status: 200;
   };
   "POST /kb/agents/{engine}/check": {

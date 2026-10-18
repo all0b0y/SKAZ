@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
-import { usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
+import { useAgents, usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
@@ -43,6 +43,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'local-decisions': return <LocalDecisionsRow />;
     case 'default-agent': return <DefaultAgentRow label={row.label} />;
     case 'chat-model': return <ChatModelRow />;
+    case 'picker-models': return <PickerModelsRow />;
     case 'wiki-model': return <WikiModelRow label={row.label} />;
     case 'decisions': return <DecisionsRow label={row.label} />;
     case 'recognition-check': return <RecognitionCheckRow label={row.label} />;
@@ -117,6 +118,21 @@ function RowControl({ row }: { row: RowDef }) {
     default:
       return <NotYet />;
   }
+}
+
+/** Settings → Models → "Models in the picker" (0.3.1 K4): how many are shown, and "Edit models…". */
+function PickerModelsRow() {
+  const agents = useAgents((s) => s.agents);
+  const openEditModels = useUi((s) => s.openEditModels);
+  const shown = agents?.agents.reduce((n, a) => n + a.models.filter((m) => m.visible).length, 0) ?? 0;
+  const total = agents?.agents.reduce((n, a) => n + a.models.length, 0) ?? 0;
+  const favorites = agents?.favorites.length ?? 0;
+  return (
+    <>
+      {agents && <span className="kb-muted">{shown} of {total} shown{favorites ? ` · ${favorites} favourite${favorites === 1 ? '' : 's'}` : ''}</span>}
+      <Button size="sm" icon="editModels" onClick={() => openEditModels()}>Edit models…</Button>
+    </>
+  );
 }
 
 const ENGINE_OF_ROW: Record<string, EngineId | undefined> = {

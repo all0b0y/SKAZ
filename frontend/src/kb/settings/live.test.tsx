@@ -75,7 +75,7 @@ describe('Live settings (package 2)', () => {
     expect(within(def).getByRole('alert')).toHaveTextContent('isn’t connected');
     await user.click(within(def).getByRole('radio', { name: 'Codex' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/agents/default', body: { engine: 'codex' } })));
-    expect(row(dialog, 'Chat')).toHaveTextContent('Codex: gpt-5.6-luna');
+    expect(row(dialog, 'Chat')).toHaveTextContent('Codex: GPT-5.6-luna');
 
     await user.click(within(row(dialog, 'Wiki pages and notes')).getByRole('radio', { name: 'Claude Code' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/wiki', body: { wiki_engine: 'claude_code' } })));

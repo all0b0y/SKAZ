@@ -24,6 +24,27 @@ class KbAgentModel(BaseModel):
     #: Empty when the agent has no reasoning levels (Hermes: set in Hermes itself).
     efforts: list[str]
     default_effort: str | None
+    #: The provider section it is listed under (Hermes' provider; Codex/Claude Code: the agent itself).
+    provider: str
+    provider_label: str
+    #: Human name ("Opus 5.5", "GPT-6.1 Sol") and a grey variant tag ("Fast", "1M"), 0.3.1 K4.
+    name: str
+    tag: str | None
+    #: Shown in the picker (the user's choice, else the first 50 of its provider).
+    visible: bool
+    #: What the default rule alone would do ("Show defaults").
+    default_visible: bool
+    favorite: bool
+
+
+class KbAgentProvider(BaseModel):
+    id: str
+    label: str
+    #: The whole provider section is shown in the picker.
+    visible: bool
+    #: Models shown / all models of the provider.
+    shown: int
+    total: int
 
 
 class KbAgentInstallInfo(BaseModel):
@@ -68,12 +89,39 @@ class KbAgent(BaseModel):
     #: How the agent asks the user a question: its own tool, or SKAZ's (the card says
     #: "Questions: through SKAZ" — known before a chat, not during it; Q-A1).
     questions: Literal["native", "skaz"] = "skaz"
+    #: Shown in the composer's agent picker (0.3.1 K2; the default agent always is).
+    visible: bool
+    #: Provider sections of its models, in the agent's order.
+    providers: list[KbAgentProvider]
+
+
+class KbFavoriteModel(BaseModel):
+    engine: KbEngineId
+    model: str
 
 
 class KbAgents(BaseModel):
     agents: list[KbAgent]
     #: Engine for new chats (Settings → Models).
     default: KbEngineId
+    #: Starred models, in the order they were added (top of the picker).
+    favorites: list[KbFavoriteModel]
+
+
+KbModelChangeKind = Literal["agent", "provider", "model", "favorite", "defaults", "hide_all"]
+
+
+class KbModelChange(_Request):
+    kind: KbModelChangeKind
+    engine: KbEngineId
+    provider: str | None = Field(default=None, max_length=200)
+    model: str | None = Field(default=None, max_length=300)
+    #: agent / provider / model: shown; favorite: starred. Ignored by defaults / hide_all.
+    value: bool = True
+
+
+class KbModelChanges(_Request):
+    changes: list[KbModelChange] = Field(min_length=1, max_length=500)
 
 
 class KbAgentDefault(_Request):

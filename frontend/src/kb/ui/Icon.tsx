@@ -7,7 +7,7 @@ import {
   SquarePen, Sun, Trash2, Pause, LayoutList, LayoutGrid, TriangleAlert, Type, Upload, Waypoints, X, Palette, HardDrive, Sparkles, Bell,
   ArrowUpDown, BookPlus, ChevronUp, Clock, Copy, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
-  CircleCheck, CircleX, CircleSlash, Undo2, PenLine,
+  CircleCheck, CircleX, CircleSlash, Undo2, PenLine, Star, Eye as EyeOn, EyeOff, SlidersHorizontal,
 } from 'lucide-react';
 
 /**
@@ -106,6 +106,11 @@ const ICONS = {
   undo: Undo2,
   // 0.3.1 H: Settings → Skills
   skills: PenLine,
+  // 0.3.1 K: favourites and visibility of models
+  star: Star,
+  shown: EyeOn,
+  hidden: EyeOff,
+  editModels: SlidersHorizontal,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;
 
 export type IconName = keyof typeof ICONS;

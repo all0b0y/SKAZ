@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbAgent, KbAgentLoginResult, KbAgents, KbInstallLine, KbInstallTask } from '../../api/kb/types.gen';
+import type { KbAgent, KbAgentLoginResult, KbAgents, KbInstallLine, KbInstallTask, KbModelChange } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
@@ -48,6 +48,8 @@ export interface AgentsActions {
   autoCheck: (reason: AutoCheckReason, engines?: readonly EngineId[]) => void;
   /** Codex only: sign out of SKAZ's own Codex profile (other Codex apps keep their sign-in). */
   logoutCodex: () => Promise<ActionResult<KbAgent>>;
+  /** 0.3.1 K2/K4: show / hide agents, providers and models in the picker; star models. */
+  changeModels: (changes: KbModelChange[]) => Promise<ActionResult>;
 }
 
 export type AgentsStore = StoreApi<AgentsData & AgentsActions>;
@@ -62,6 +64,28 @@ const DEFAULT_CLOCK = {
 
 export function agentOf(agents: KbAgents | null, engine: EngineId): KbAgent | undefined {
   return agents?.agents.find((a) => a.id === engine);
+}
+
+/** The picker as it will look after `changes` (the backend's answer replaces it). */
+function optimistic(agents: KbAgents, changes: KbModelChange[]): KbAgents {
+  const next = structuredClone(agents);
+  for (const c of changes) {
+    const a = next.agents.find((x) => x.id === c.engine);
+    if (!a) continue;
+    const value = c.value ?? true;
+    if (c.kind === 'agent') a.visible = value;
+    else if (c.kind === 'provider') { const p = a.providers.find((x) => x.id === c.provider); if (p) p.visible = value; }
+    else if (c.kind === 'model') { const m = a.models.find((x) => x.id === c.model); if (m) m.visible = value; }
+    else if (c.kind === 'favorite') {
+      next.favorites = next.favorites.filter((f) => !(f.engine === c.engine && f.model === c.model));
+      if (value && c.model) next.favorites.push({ engine: c.engine, model: c.model });
+      const m = a.models.find((x) => x.id === c.model); if (m) m.favorite = value;
+    } else {
+      a.models.filter((m) => !c.provider || m.provider === c.provider)
+        .forEach((m) => { m.visible = c.kind === 'defaults' ? m.default_visible : false; });
+    }
+  }
+  return next;
 }
 
 export function createAgentsStore(client: KbClient, clock: { now: () => number; hidden: () => boolean } = DEFAULT_CLOCK): AgentsStore {
@@ -161,6 +185,20 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
           set((st) => ({ awaitingSignIn: { ...st.awaitingSignIn, [engine]: clock.now() } }));
           return { ok: true, value: res };
         } catch (error) {
+          return { ok: false, error: errorText(error) };
+        }
+      },
+
+      changeModels: async (changes) => {
+        // Shown at once: a star or a check box answers the click, then the backend's answer wins.
+        const before = get().agents;
+        if (before) set({ agents: optimistic(before, changes) });
+        try {
+          const agents = await client.call('PATCH /kb/agents/models', { body: { changes } });
+          set({ agents });
+          return { ok: true, value: undefined };
+        } catch (error) {
+          if (before) set({ agents: before });
           return { ok: false, error: errorText(error) };
         }
       },

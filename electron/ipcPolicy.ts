@@ -89,6 +89,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/wiki\/connections\/find$/ },
   { method: 'GET', pattern: /^\/kb\/agents$/ },
   { method: 'PUT', pattern: /^\/kb\/agents\/default$/ },
+  // 0.3.1 K2/K4: show / hide agents, providers and models in the picker; favourites.
+  { method: 'PATCH', pattern: /^\/kb\/agents\/models$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes)\/(?:check|install|login)$/ },
   { method: 'GET', pattern: /^\/kb\/agents\/install\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/install\/[^/]+\/cancel$/ },

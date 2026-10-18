@@ -1,3 +1,4 @@
+import type { EngineId } from '../api/names';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { createNavSlice, type NavActions, type NavState } from './document';
 import type { ToastData } from '../ui/Toast';
@@ -32,6 +33,10 @@ export interface UiState extends NavState, NavActions {
   searchOpen: boolean;
   /** Notification whose decision window is open (decision 18: only by a click). */
   decisionId: string | null;
+  /** "Edit models…" (0.3.1 K4), opened on an agent / provider when given. */
+  editModels: EditModelsTarget | null;
+  openEditModels: (target?: EditModelsTarget) => void;
+  closeEditModels: () => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setSettingsSection: (section: SettingsSection) => void;
@@ -41,6 +46,11 @@ export interface UiState extends NavState, NavActions {
   closeToast: () => void;
   setSearchOpen: (open: boolean) => void;
   openDecision: (id: string | null) => void;
+}
+
+export interface EditModelsTarget {
+  engine?: EngineId;
+  provider?: string;
 }
 
 export type UiStore = StoreApi<UiState>;
@@ -56,6 +66,9 @@ export function createUiStore(): UiStore {
     toast: null,
     searchOpen: false,
     decisionId: null,
+    editModels: null,
+    openEditModels: (target) => set({ editModels: target ?? {} }),
+    closeEditModels: () => set({ editModels: null }),
     openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),
     closeSettings: () => set({ settingsOpen: false }),
     setSettingsSection: (section) => set({ settingsSection: section }),

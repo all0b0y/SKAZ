@@ -60,6 +60,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   // Models
   { id: 'default-agent', section: 'models', group: 'Agent', label: 'Default agent', hint: 'For new chats; can be changed in any chat', keywords: 'codex claude hermes engine' },
   { id: 'chat-model', section: 'models', group: 'Agent', label: 'Chat', hint: 'Can also be changed in the message field', keywords: 'model effort' },
+  { id: 'picker-models', section: 'models', group: 'Agent', label: 'Models in the picker', hint: 'Which agents, providers and models the message field lists; favourites on top', keywords: 'edit models visible hidden show hide favorites favourites star providers' },
   { id: 'wiki-model', section: 'models', group: 'Agent', label: 'Wiki pages and notes', keywords: 'model effort summary' },
   { id: 'decisions', section: 'models', group: 'Helpers', label: 'Wiki decisions', hint: 'Where to file a material, whether to merge or link pages', keywords: 'openrouter jev local system one' },
   { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model effort corrections agent off' },

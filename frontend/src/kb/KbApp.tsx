@@ -7,6 +7,7 @@ import { KbServicesProvider, useLibrary, usePrefs, useServices, useUi, type KbSe
 import { Shell } from './shell/Shell';
 import { useProblems } from './shell/problems';
 import type { SettingsSection } from './state/ui';
+import { EditModelsModal } from './composer/EditModels';
 import { SettingsModal } from './settings/SettingsModal';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
 import { CommandK } from './search/CommandK';
@@ -192,6 +193,7 @@ function Workspace() {
     <>
       <Shell />
       <SettingsModal />
+      <EditModelsModal />
       <CommandK />
       <DecisionModal />
       <SelectionToolbar />

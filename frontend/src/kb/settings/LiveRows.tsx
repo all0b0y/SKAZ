@@ -9,6 +9,7 @@ import { useAgents, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import { AgentCard } from './AgentCard';
 import { LANGUAGES, languageName } from './Languages';
+import { modelName } from '../composer/modelCatalog';
 
 /** Visible, honest "not here yet" (no dummy buttons). */
 export function NotYet({ text = 'Not connected yet' }: { text?: string }) {
@@ -317,7 +318,7 @@ export function ChatModelRow() {
   if (!data) return <Reading />;
   const a = agentOf(data, data.default);
   const model = a?.models.find((m) => m.id === a.current_model);
-  return <span className="kb-muted">{a?.name}: {model?.label ?? (a?.id === 'hermes' ? 'as set in Hermes' : 'agent default')} · change it in the message field</span>;
+  return <span className="kb-muted">{a?.name}: {model ? modelName(model) : (a?.id === 'hermes' ? 'as set in Hermes' : 'agent default')} · change it in the message field</span>;
 }
 
 export function WikiModelRow({ label }: { label: string }) {

@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent,
 } from '../../api/kb/types.gen';
 import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
@@ -1095,7 +1095,7 @@ const ROUTES: FakeRoutes = {
 
   // -- agents --
   'GET /kb/agents': [200, (w) => structuredClone(w.agents)],
-  'PUT /kb/agents/default': [200, (w, { body }) => { w.agents.default = body.engine; return structuredClone(w.agents); }],
+  'PUT /kb/agents/default': [200, (w, { body }) => { w.agents.default = body.engine; findAgent(w, body.engine).visible = true; return structuredClone(w.agents); }],
   'POST /kb/agents/{engine}/check': [200, (w, { path }) => {
     const a = findAgent(w, path.engine);
     a.checked_at = stamp(w);
@@ -1106,6 +1106,37 @@ const ROUTES: FakeRoutes = {
     if (a.id === 'codex' && body?.consent !== true) fail(409, 'Confirm the ChatGPT privacy notice first.');
     Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
     return { engine: a.id, method: 'terminal', url: null, message: `${a.name} sign-in opened in Terminal. Come back when it says you’re signed in.` };
+  }],
+  // 0.3.1 K2/K4: what the picker shows (the real backend keeps it in SKAZ's settings).
+  'PATCH /kb/agents/models': [200, (w, { body }) => {
+    for (const change of body.changes) {
+      const a = findAgent(w, change.engine);
+      const value = change.value ?? true;
+      const inProvider = (m: KbAgent['models'][number]) => !change.provider || m.provider === change.provider;
+      if (change.kind === 'agent') {
+        if (!value && w.agents.default === a.id) fail(409, 'The default agent can’t be hidden. Choose another default agent first.');
+        a.visible = value;
+      } else if (change.kind === 'provider') {
+        const p = a.providers.find((x) => x.id === change.provider);
+        if (p) p.visible = value;
+      } else if (change.kind === 'model') {
+        const m = a.models.find((x) => x.id === change.model);
+        if (m) m.visible = value;
+      } else if (change.kind === 'favorite') {
+        w.agents.favorites = w.agents.favorites.filter((f) => !(f.engine === a.id && f.model === change.model));
+        if (value && change.model) w.agents.favorites.push({ engine: a.id, model: change.model });
+        const m = a.models.find((x) => x.id === change.model);
+        if (m) m.favorite = value;
+      } else if (change.kind === 'defaults') {
+        a.models.filter(inProvider).forEach((m) => { m.visible = m.default_visible; });
+      } else {
+        a.models.filter(inProvider).forEach((m) => { m.visible = false; });
+      }
+      a.providers = a.providers.map((p) => ({
+        ...p, shown: a.models.filter((m) => m.provider === p.id && m.visible).length, total: a.models.filter((m) => m.provider === p.id).length,
+      }));
+    }
+    return structuredClone(w.agents);
   }],
   // -- Hermes providers (0.3.1 K1/K3): Terminal opens are recorded as a running window --
   'GET /kb/agents/hermes/providers': [200, (w) => structuredClone(w.hermesProviders)],
