@@ -429,3 +429,14 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   pointer-events: none;
   box-shadow: var(--kb-shadow-pop);
 }
+
+/* ---- Formulas (KaTeX, kb/ui/markdown) ---- */
+.kb-math--display {
+  display: block;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+.kb-math .katex { font-size: 1.05em; }
+.kb-math .katex-error { color: var(--kb-danger); }

@@ -37,6 +37,9 @@ export default defineConfig({
       // electron-vite leaves the renderer unminified by default; the shipped
       // bundle was 1.66 MB of readable source parsed on every window load.
       minify: true,
+      // Fonts are always files: the CSP allows `font-src 'self'`, not data: URLs (KaTeX's smallest
+      // font is under Vite's 4 KB inline limit).
+      assetsInlineLimit: (file: string) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
       rollupOptions: {
         input: resolve(__dirname, 'frontend/index.html'),
       },

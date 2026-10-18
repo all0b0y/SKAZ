@@ -17,6 +17,8 @@ const DASH = /[-–—]/;
 /** Private-use code points: never produced by the model, safe as placeholders. */
 export const MARK_OPEN = '\uE000';
 export const MARK_CLOSE = '\uE001';
+/** Where a label without a source stood: tidy() closes the gap there and nowhere else. */
+const GAP = '\uE002';
 
 export interface Footnote {
   /** 1-based number shown in the text. */
@@ -54,7 +56,7 @@ export function answerFootnotes(content: string, citations: readonly Citation[] 
     }
   });
   if (!byLabel.size) {
-    return { text: tidy(content.replace(LABEL_BLOCK, '')), footnotes: [], legacy: [...citations] };
+    return { text: tidy(content.replace(LABEL_BLOCK, GAP)), footnotes: [], legacy: [...citations] };
   }
   const footnotes: Footnote[] = [];
   const numberOf = new Map<string, number>();
@@ -76,14 +78,16 @@ export function answerFootnotes(content: string, citations: readonly Citation[] 
       }
       if (!marks.includes(n)) marks.push(n);
     }
-    return marks.map((n) => `${MARK_OPEN}${n}${MARK_CLOSE}`).join('');
+    return marks.length ? marks.map((n) => `${MARK_OPEN}${n}${MARK_CLOSE}`).join('') : GAP;
   });
   return { text: tidy(text), footnotes, legacy: [] };
 }
 
-/** A removed or moved label leaves `word .` / `word  more`: close those gaps, and
- * attach a footnote mark to the word it follows, as a superscript would be. */
+/** A removed or moved label leaves `word .` / `word  more`: close those gaps, and attach a footnote
+ * mark to the word it follows, as a superscript would be. Only where a label stood: two spaces at a
+ * line end (a Markdown line break) and spaces inside code stay as written. */
 function tidy(text: string): string {
   return text.replace(new RegExp(`[ \\t]+(?=${MARK_OPEN})`, 'g'), '')
-    .replace(/[ \t]+([.,;:!?)])/g, '$1').replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/gm, '');
+    .replace(new RegExp(`[ \\t]*${GAP}[ \\t]*(?=[.,;:!?)]|$)`, 'gm'), '')
+    .replace(new RegExp(`[ \\t]*${GAP}`, 'g'), '');
 }

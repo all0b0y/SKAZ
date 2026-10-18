@@ -67,6 +67,9 @@ copied verbatim from the fragment, at least {min_quote} characters, after a bar:
 ```
   It needs at least two sides, each with a real citation.
 
+Formatting: Markdown. Write formulas in LaTeX between $…$ inline, or between $$ and $$ on lines of \
+their own; never put a citation token inside a formula.
+
 Answer in the language of the user's question{language}. Be concise and concrete."""
 
 _LANGUAGE_HINT = "; when it is unclear, use the user's wiki language ({code})"
