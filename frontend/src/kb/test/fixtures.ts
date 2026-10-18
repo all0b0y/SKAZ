@@ -8,6 +8,7 @@
 
 import type {
   KbAgent, KbChat, KbCitation, KbFolder, KbGraph, KbGraphEdge, KbMaterial, KbMessagePart, KbNotification, KbPage, KbPageRef,
+  KbStudyCard, KbStudyPart,
 } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { block, chatMessage, fragment, materialWiki, pageRef, type FakeWorld } from './fakeKb';
@@ -584,5 +585,96 @@ export function agentControlsWorld(): FakeWorld {
     ], true),
   );
   for (const id of ['c8', 'c9', 'c10', 'c11']) w.chatEvents[id] = [];
+  return w;
+}
+
+// ---- flashcards and tests (0.3.1 phase S) ------------------------------------------------------
+
+const LECTURE8 = 'Lecture 8 — entropy';
+const INTERVALS_NEW = { again: '1m', hard: '6m', good: '10m', easy: '3d' };
+
+/** A card in the contract's shape: new, answer from the lecture with its checked quote. */
+export function studyCard(id: string, question: string, answer: string, extra: Partial<KbStudyCard> = {}): KbStudyCard {
+  return {
+    id, page_id: null, question, answer, citations: [cite('m1', LECTURE8, 1, { start_ms: 2_600_000 }, 'entropy as S = k·ln W')],
+    explanation: null, group: 'new', state: 'new', suspended: false, marked_hard: false, intervals: { ...INTERVALS_NEW },
+    graded: null, due: null, ...extra,
+  };
+}
+
+const SAVE_PENDING = (kind: 'deck' | 'test', title: string): KbStudyPart['save'] => (
+  { status: 'pending', path: `Wiki/${kind === 'deck' ? 'Decks' : 'Tests'}/${title}.md`, page_id: null });
+
+/** A deck the agent just made in a chat (Codex, three cards, Save to wiki waiting). */
+export function deckPart(id: string, chatId: string, messageId: string, extra: Partial<KbStudyPart> = {}): KbStudyPart {
+  return {
+    type: 'study', id, kind: 'deck', title: 'Lecture 8', engine: 'codex', origin: 'agent', mode: 'new', place: 'chat',
+    position: 0, side: 'question', total: 3,
+    cards: [
+      studyCard('c-1', 'How did Boltzmann write entropy?', 'S = k·ln W', { explanation: 'Like counting the ways to arrange a messy room.' }),
+      studyCard('c-2', 'Why a logarithm?', 'So that the entropies of independent systems add up.',
+        { citations: [cite('m1', LECTURE8, 2, { start_ms: 2_620_000 }, 'the entropies of two independent systems should add up')] }),
+      studyCard('c-3', 'What is entropy in information theory?', 'The average uncertainty of a random variable.',
+        { citations: [cite('m2', 'Textbook: Information theory, ch. 2', 9, { page: 31 }, 'the average uncertainty of a random variable')] }),
+    ],
+    questions: [], groups: { new: 3, learning: 0, known: 0, hard: 0 }, held_back: 0, save: SAVE_PENDING('deck', 'Lecture 8'),
+    result: null, chat_id: chatId, message_id: messageId, ...extra,
+  };
+}
+
+/** A test the agent just made: one question of each kind. */
+export function testPart(id: string, chatId: string, messageId: string, extra: Partial<KbStudyPart> = {}): KbStudyPart {
+  const lecture = [cite('m1', LECTURE8, 1, { start_ms: 2_600_000 }, 'entropy as S = k·ln W')];
+  return {
+    type: 'study', id, kind: 'test', title: 'Lecture 8 check', engine: 'codex', origin: 'agent', mode: 'all', place: 'chat',
+    position: 0, side: 'question', total: 3, cards: [],
+    questions: [
+      { id: 'q-1', type: 'choice', question: 'How did Boltzmann write entropy?', answers: ['S = k·ln W'], citations: lecture, explanation: null, response: null,
+        options: [{ id: 'w0', text: 'S = k·W²', origin: 'agent' }, { id: 'r0', text: 'S = k·ln W', origin: 'source' }, { id: 'w1', text: 'S = W / k', origin: 'agent' }] },
+      { id: 'q-2', type: 'short', question: 'What letter stands for the number of microstates?', answers: ['W'], citations: lecture, explanation: null, response: null, options: [] },
+      { id: 'q-3', type: 'open', question: 'Explain why entropy uses a logarithm.', answers: ['So that the entropies of independent systems add up.'],
+        citations: [cite('m1', LECTURE8, 2, { start_ms: 2_620_000 }, 'the entropies of two independent systems should add up')],
+        explanation: 'Think of what happens to the count of arrangements when you join two systems.', response: null, options: [] },
+    ],
+    groups: { new: 0, learning: 0, known: 0, hard: 0 }, held_back: 0, save: SAVE_PENDING('test', 'Lecture 8 check'),
+    result: null, chat_id: chatId, message_id: messageId, ...extra,
+  };
+}
+
+/**
+ * chatWorld plus phase S: a chat whose answer holds a new deck (c12), one with a test (c13), and a
+ * saved deck page "Thermodynamics" (p-deck) with cards in every group.
+ */
+export function studyWorld(): FakeWorld {
+  const w = chatWorld();
+  const chat = (id: string, title: string, minutesAgo: number, messages: KbChat['messages']): KbChat => ({
+    id, title, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+    created_at: ago(minutesAgo + 10), updated_at: ago(minutesAgo), last_preview: '', recording_material_id: null,
+    folder_ids: [], state: 'idle', unread: false, messages, cursor: 0,
+  });
+  const ask = (id: string, text: string, min: number) => chatMessage(id, 1, 'user', ago(min), [{ type: 'text', text }]);
+  const answer = (id: string, min: number, parts: AnyMessagePart[]) =>
+    chatMessage(id, 2, 'assistant', ago(min), parts.map(asPart), { engine: 'codex', model: 'gpt-5.6-luna' });
+  w.chats.push(
+    chat('c12', 'Lecture 8 — cards', 0.5, [
+      ask('c12-u1', 'Make cards from @Lecture 8', 1),
+      answer('c12-a1', 0.5, [{ type: 'text', text: 'Here are three cards from the lecture.' }, deckPart('st-deck', 'c12', 'c12-a1')]),
+    ]),
+    chat('c13', 'Lecture 8 — test', 0.8, [
+      ask('c13-u1', 'Test me on lecture 8', 1),
+      answer('c13-a1', 0.8, [{ type: 'text', text: 'A short test: wrong options are made up by me.' }, testPart('st-test', 'c13', 'c13-a1')]),
+    ]),
+  );
+  w.chatEvents.c12 = [];
+  w.chatEvents.c13 = [];
+  const phys = w.folders.find((f) => f.id === 'phys')!;
+  const deckCards = [
+    studyCard('d-1', 'How did Boltzmann write entropy?', 'S = k·ln W', { page_id: 'p-deck', group: 'hard', state: 'relearning', marked_hard: true, due: ago(-60) }),
+    studyCard('d-2', 'Why a logarithm?', 'So that entropies add up.', { page_id: 'p-deck', group: 'learning', state: 'learning', due: ago(-10) }),
+    studyCard('d-3', 'Second law?', 'Entropy of an isolated system does not decrease.', { page_id: 'p-deck', group: 'known', state: 'review', due: ago(-60 * 24 * 3) }),
+    studyCard('d-4', 'What is a microstate?', 'One arrangement of the particles.', { page_id: 'p-deck', group: 'new' }),
+  ];
+  w.pages.push(page('p-deck', 'deck', 'Thermodynamics', [phys], deckCards.map((c) => block(c.id, 'from_source', null, `${c.question}::${c.answer}`, c.citations))));
+  w.decks = { 'p-deck': { page_id: 'p-deck', title: 'Thermodynamics', cards: deckCards, groups: { new: 1, learning: 1, known: 1, hard: 1 }, due: 1 } };
   return w;
 }

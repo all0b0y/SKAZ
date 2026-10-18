@@ -79,6 +79,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'auto-fix', section: 'wiki', group: 'Upkeep', label: 'Fix recognition automatically', hint: 'Doubtful places are only highlighted', keywords: 'corrections' },
   { id: 'bg-links', section: 'wiki', group: 'Upkeep', label: 'Find connections in the background', hint: 'When the app is idle, with your permission', keywords: 'links graph' },
   { id: 'links-now', section: 'wiki', group: 'Upkeep', label: 'Find connections now', keywords: 'links graph run' },
+  { id: 'study-new', section: 'wiki', group: 'Study', label: 'New cards per day', hint: 'For each folder; the rest wait for another day', keywords: 'flashcards cards deck review fsrs limit learn' },
   // Skills (0.3.1 H3): SKAZ's own skills folder only
   { id: 'humanizer', section: 'skills', group: 'Writing', label: 'Humanizer', hint: 'Writes like a person: no filler, no AI tells. Used in chat answers, wiki pages, cards and tests. Quotes from sources are never changed. v3.1.0 · MIT · github.com/blader/humanizer', keywords: 'skills writing ai style tells filler human natural' },
   { id: 'skill-codex', section: 'skills', group: 'Applies to', label: 'Codex', keywords: 'humanizer skills loaded status' },

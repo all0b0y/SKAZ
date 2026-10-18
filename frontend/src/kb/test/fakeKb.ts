@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
 } from '../../api/kb/types.gen';
 import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
@@ -110,6 +110,12 @@ export interface FakeWorld {
   undoRefusals?: Record<string, string>;
   /** 0.3.1 H: SKAZ skills switched off (absent = every skill on, as the backend's default). */
   skillsOff?: string[];
+  /** 0.3.1 S: saved decks (the deck page), by page id. */
+  decks?: Record<string, KbDeckView>;
+  /** 0.3.1 S: new cards per day and folder (absent = 20, the backend's default). */
+  studyNewPerDay?: number;
+  /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
+  judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean };
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -560,6 +566,222 @@ const PERMISSION_ROUTES: { [R in keyof KbPermissionEndpoints]: PEntry<R> } = {
       touchList(w, chat);
     }
     return structuredClone(part);
+  }],
+};
+
+// ---- Flashcards and tests (0.3.1 phase S) -------------------------------------------------------
+
+type FakeStudy = { chat: KbChat; message: KbMessage; part: KbStudyPart };
+
+function findStudy(w: FakeWorld, id: string): FakeStudy {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = partsOf(message).find((p) => p.type === 'study' && p.id === id);
+      if (part) return { chat, message, part: part as KbStudyPart };
+    }
+  }
+  return fail(404, 'This deck or test is no longer in the chat.');
+}
+
+/** A block changed: `part_update` with the whole block, the answer back. */
+function studyChanged(w: FakeWorld, found: FakeStudy): KbStudyPart {
+  found.part.total = found.part.kind === 'deck' ? found.part.cards.length : found.part.questions.length;
+  const counts = { new: 0, learning: 0, known: 0, hard: 0 };
+  for (const c of found.part.cards) counts[c.group] += 1;
+  found.part.groups = counts;
+  const event: Omit<KbChatEventP, 'seq'> = { type: 'part_update', message_id: found.message.id, part: structuredClone(found.part) };
+  pushEvent(w, found.chat.id, event as Omit<KbChatEvent, 'seq'>);
+  touchList(w, found.chat);
+  return structuredClone(found.part);
+}
+
+const GRADE_GROUP: Record<string, KbStudyCard['group']> = { again: 'learning', hard: 'learning', good: 'learning', easy: 'known' };
+
+function studyCardsOf(w: FakeWorld, pageId: string): KbStudyCard[] {
+  return w.decks?.[pageId]?.cards ?? fail(404, 'This page is not a deck.');
+}
+
+function markCards(cards: KbStudyCard[], ids: string[], mark: string): void {
+  for (const c of cards) {
+    if (!ids.includes(c.id)) continue;
+    if (mark === 'hide') { c.suspended = true; c.group = c.marked_hard ? 'hard' : 'known'; }
+    if (mark === 'unhide') c.suspended = false;
+    if (mark === 'hard') { c.marked_hard = true; c.group = 'hard'; }
+    if (mark === 'unhard') { c.marked_hard = false; c.group = c.state === 'new' ? 'new' : 'learning'; }
+    if (mark === 'known') { c.marked_hard = false; c.group = 'known'; c.state = 'review'; }
+  }
+}
+
+function deckView(w: FakeWorld, pageId: string): KbDeckView {
+  const deck = w.decks?.[pageId] ?? fail(404, 'This page is not a deck.');
+  const counts = { new: 0, learning: 0, known: 0, hard: 0 };
+  for (const c of deck.cards) counts[c.group] += 1;
+  deck.groups = counts;
+  return structuredClone(deck);
+}
+
+const normalized = (t: string) => t.trim().toLowerCase().replace(/[.!?]+$/, '');
+
+const STUDY_ROUTES: FakeRoutes = {
+  'GET /kb/study/settings': [200, (w) => ({ new_per_day: w.studyNewPerDay ?? 20 })],
+  'PATCH /kb/study/settings': [200, (w, { body }) => {
+    if (body.new_per_day < 0 || body.new_per_day > 9999) fail(422, 'New cards per day is a number from 0 to 9999.');
+    w.studyNewPerDay = body.new_per_day;
+    return { new_per_day: body.new_per_day };
+  }],
+  'GET /kb/study/decks/{page_id}': [200, (w, { path }) => deckView(w, path.page_id)],
+  'POST /kb/study/decks/{page_id}/marks': [200, (w, { path, body }) => {
+    markCards(studyCardsOf(w, path.page_id), body.item_ids, body.mark);
+    return deckView(w, path.page_id);
+  }],
+  'POST /kb/study/decks/{page_id}/study': [200, (w, { path, body }) => {
+    const deck = deckView(w, path.page_id);
+    const mode = body.mode ?? 'due';
+    const live = deck.cards.filter((c) => !c.suspended && (!body.card_ids || body.card_ids.includes(c.id)));
+    const cards = mode === 'hard' ? live.filter((c) => c.group === 'hard') : mode === 'new' ? live.filter((c) => c.group === 'new') : live;
+    let chat: KbChat;
+    if (body.chat_id) chat = findChat(w, body.chat_id);
+    else {
+      chat = {
+        id: `c-study-${++w.seq}`, title: `Study · ${deck.title}`, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+        created_at: clock(w), updated_at: clock(w), last_preview: '', recording_material_id: null, folder_ids: [], state: 'idle', unread: false,
+        messages: [], cursor: 0,
+      };
+      w.chats.unshift(chat);
+      w.chatEvents[chat.id] = [];
+    }
+    for (const other of w.chats.flatMap((c) => c.messages.flatMap((m) => partsOf(m).filter((p) => p.type === 'study')))) {
+      if ((other as KbStudyPart).place !== 'chat') (other as KbStudyPart).place = 'chat';
+    }
+    const id = `st-${++w.seq}`;
+    const messageId = `${chat.id}-s${w.seq}`;
+    const part: KbStudyPart = {
+      type: 'study', id, kind: 'deck', title: deck.title, engine: chat.engine, origin: 'show', mode, place: 'panel', position: 0, side: 'question',
+      total: cards.length, cards: structuredClone(cards), questions: [], groups: deck.groups, held_back: 0,
+      save: { status: 'saved', path: `Wiki/Decks/${deck.title}.md`, page_id: path.page_id }, result: null, chat_id: chat.id, message_id: messageId,
+    };
+    const message = chatMessage(messageId, (chat.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [part as unknown as KbMessage['parts'][number]]);
+    chat.messages.push(message);
+    pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) });
+    touchList(w, chat);
+    return { chat_id: chat.id, study: structuredClone(part) };
+  }],
+  'GET /kb/study/{block_id}': [200, (w, { path }) => structuredClone(findStudy(w, path.block_id).part)],
+  'PATCH /kb/study/{block_id}': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (body.place && body.place !== part.place) {
+      if (body.place !== 'chat') {
+        // A-4: one block beside the chat or in a window; the one there goes back to the chat.
+        for (const chat of w.chats) {
+          for (const message of chat.messages) {
+            for (const p of partsOf(message)) {
+              if (p.type === 'study' && p.id !== part.id && (p as KbStudyPart).place !== 'chat') {
+                (p as KbStudyPart).place = 'chat';
+                studyChanged(w, { chat, message, part: p as KbStudyPart });
+              }
+            }
+          }
+        }
+      }
+      part.place = body.place;
+    }
+    const total = part.kind === 'deck' ? part.cards.length : part.questions.length;
+    if (typeof body.position === 'number') { part.position = Math.max(0, Math.min(body.position, total)); part.side = 'question'; }
+    if (body.side) part.side = body.side;
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/grade': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const i = found.part.cards.findIndex((c) => c.id === body.item_id);
+    if (i < 0) fail(404, 'This card is not in the block.');
+    const card = found.part.cards[i]!;
+    card.graded = body.grade;
+    if (!card.marked_hard) card.group = GRADE_GROUP[body.grade]!;
+    card.state = body.grade === 'easy' ? 'review' : 'learning';
+    found.part.position = i + 1;
+    found.part.side = 'question';
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/mark': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    markCards(found.part.cards, body.item_ids, body.mark);
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/answer': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const q = found.part.questions.find((x) => x.id === body.item_id) ?? fail(404, 'This question is not in the test.');
+    if (q.type === 'choice' || q.type === 'multi') {
+      const picked = body.choices ?? [];
+      if (!picked.length) fail(409, 'Choose one of the options.');
+      const right = q.options.filter((o) => o.origin === 'source').map((o) => o.id).sort();
+      const ok = JSON.stringify([...picked].sort()) === JSON.stringify(right);
+      q.response = { choices: picked, text: null, checked: true, score: ok ? 1 : 0, verdict: null, missing: null, comment: null, checking: false, error: null };
+    } else {
+      const text = (body.text ?? '').trim();
+      if (!text) fail(409, 'Write an answer first.');
+      const ok = q.type === 'short' && q.answers.some((a) => normalized(a) === normalized(text));
+      q.response = { choices: [], text, checked: q.type === 'short', score: q.type === 'short' ? (ok ? 1 : 0) : null,
+        verdict: null, missing: null, comment: null, checking: false, error: null };
+    }
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/check-open': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const q = found.part.questions.find((x) => x.id === body.item_id) ?? fail(404, 'This question is not in the test.');
+    if (q.type !== 'open') fail(409, 'Only open answers are checked by the agent.');
+    const text = (body.text ?? '').trim();
+    if (!text) fail(409, 'Write an answer first.');
+    q.response = { choices: [], text, checked: false, score: null, verdict: null, missing: null, comment: null, checking: true, error: null };
+    const answered = studyChanged(w, found);
+    const judge = w.judge ?? { verdict: 'partly' as const, missing: 'It doesn’t say the entropies add up.', comment: 'Close: the idea of joining systems is there.' };
+    if (!judge.hold) {
+      // The verdict arrives later, as an update of the block: the request never waits for it.
+      q.response = { choices: [], text, checked: true, score: { right: 1, partly: 0.5, wrong: 0 }[judge.verdict], verdict: judge.verdict,
+        missing: judge.missing || null, comment: judge.comment || null, checking: false, error: null };
+      studyChanged(w, found);
+    }
+    return answered;
+  }],
+  'POST /kb/study/{block_id}/finish': [200, (w, { path }) => {
+    const found = findStudy(w, path.block_id);
+    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null }));
+    found.part.result = {
+      correct: rows.reduce((n, r) => n + (r.score ?? 0), 0), total: rows.length,
+      mistakes: rows.filter((r) => (r.score ?? 0) < 1).length, partly: rows.filter((r) => r.score === 0.5).length, rows,
+    };
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/retake': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (body.mistakes_only) {
+      const wrong = part.questions.filter((q) => (q.response?.score ?? 0) < 1);
+      if (!wrong.length) fail(409, 'No mistakes to retake.');
+      part.questions = wrong;
+    }
+    for (const q of part.questions) q.response = null;
+    part.result = null;
+    part.position = 0;
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/save': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (part.origin !== 'agent') fail(409, 'This block shows saved pages already.');
+    if (part.save.status === 'saved') fail(409, 'Already saved to the wiki.');
+    if (body.decision === 'deny') { part.save.status = 'denied'; return studyChanged(w, found); }
+    const pageId = `p-${part.kind}-${++w.seq}`;
+    w.pages.push({
+      id: pageId, kind: part.kind, title: part.title, original: null, aliases: [], folders: [], sources: [], language: 'en', blocks: [],
+      related: [], mentioned_in: [], folder_names: [], updated_at: clock(w), is_analysis_source_forbidden: false,
+    });
+    part.save = { status: 'saved', path: part.save.path, page_id: pageId };
+    for (const c of part.cards) c.page_id = pageId;
+    if (part.kind === 'deck') {
+      (w.decks ??= {})[pageId] = { page_id: pageId, title: part.title, cards: structuredClone(part.cards), groups: part.groups, due: 0 };
+    }
+    return studyChanged(w, found);
   }],
 };
 
@@ -1303,7 +1525,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1314,10 +1536,10 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
-const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections)(\/|$)/;
+const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;
 
 const ok = <T,>(data: T, status = 200): JsonResponse<T> => ({ ok: true, status, data });
 const failed = (status: number, detail: string): JsonResponse<never> => ({ ok: false, status, detail });

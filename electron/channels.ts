@@ -34,4 +34,8 @@ export const CHANNELS = {
   updateCancel: 'app:update-cancel',
   updateInstall: 'app:update-install',
   updateState: 'app:update-state',
+  // A deck or test block in its own window (0.3.1 S).
+  studyOpen: 'study:open-window',
+  studyClose: 'study:close-window',
+  studyClosed: 'study:window-closed',
 } as const;

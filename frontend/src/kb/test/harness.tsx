@@ -7,11 +7,12 @@ import { createServices } from '../state/context';
 import { PREFS_KEY } from '../state/prefs';
 import { createBrowserFake } from './browserFake';
 import { finishAnswer, syncSpeechConsent } from './fakeKb';
-import { chatWorld } from './fixtures';
+import { chatWorld, studyWorld } from './fixtures';
 import '../styles/index.css';
 
 const params = new URLSearchParams(location.search);
-const world = chatWorld();
+// `world=study`: chats with a deck and a test, and a saved deck page (0.3.1 S, scripts/kb-s.smoke.spec.ts).
+const world = params.get('world') === 'study' ? studyWorld() : chatWorld();
 if (params.get('hold') === '1') world.hold = true;
 // Soniox chosen without the consent to send audio (review B2 #6).
 if (params.get('soniox') === 'off') {

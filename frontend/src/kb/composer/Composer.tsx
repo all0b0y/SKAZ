@@ -18,6 +18,8 @@ import { QuickQuestions } from './QuickQuestions';
 import { openTarget } from '../state/document';
 import { ingestWhenReady } from '../materials/ingestWhenReady';
 import { AgentFix } from '../chat/AgentFix';
+import { useOpenStudy } from '../study/useStudy';
+import { StudyContextChip } from '../study/StudyBlock';
 
 const NEW_CHAT = 'new';
 
@@ -203,7 +205,11 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     }
   };
 
-  const openContext = () => (doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {});
+  const study = useOpenStudy(chatId);
+  const openContext = () => ({
+    ...(doc ? (doc.type === 'page' ? { open_page_id: doc.id } : { open_material_id: doc.id }) : {}),
+    ...(study ? { open_study_id: study.id } : {}),
+  });
 
   // Quick questions while recording: the recording goes along as an attached material, so the agent
   // reads its transcribed fragments only — never the words still being recognised.
@@ -404,6 +410,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       {recPhase === 'recording' && recId && (
         <QuickQuestions disabledReason={quickReason} onAsk={(q) => void askQuick(q)} onPrefill={prefillQuick} />
       )}
+      {study && chatId && <StudyContextChip chatId={chatId} part={study} />}
       <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
         {mentionDrop.overlay}
         {popupOpen && (

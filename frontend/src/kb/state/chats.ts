@@ -67,6 +67,8 @@ export interface ChatsActions {
   undo: (chatId: string, partId: string) => Promise<ActionResult<KbPermissionPart>>;
   /** Answer an agent's question by option or own text (also a late pick after writing instead). */
   answer: (chatId: string, partId: string, body: KbQuestionAnswer) => Promise<ActionResult<KbQuestionPart>>;
+  /** A part as the backend answered it (a study block after a grade, 0.3.1 S): replaced in place. */
+  applyPart: (chatId: string, part: AnyMessagePart) => void;
 }
 
 export type ChatsStore = StoreApi<ChatsData & ChatsActions>;
@@ -427,6 +429,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
         putPart(chatId, part);
         return part;
       }),
+      applyPart: (chatId, part) => putPart(chatId, part),
       forget: (gone) => set((s) => {
         let changed = false;
         const chats: Record<string, OpenChat> = {};

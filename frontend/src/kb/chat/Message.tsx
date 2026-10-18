@@ -14,6 +14,8 @@ import { indexSources } from '../cite/sources';
 import type { AnyMessagePart, KbPermissionPart, KbQuestionPart } from '../api/permissions';
 import { PermissionCard } from './permission';
 import { QuestionBlock } from './QuestionBlock';
+import { StudyInChat } from '../study/StudyBlock';
+import type { KbStudyPart } from '../study/api';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -24,7 +26,8 @@ type Block =
   | { kind: 'inline'; pieces: Array<string | number>; slots: InlineSlot[] }
   | { kind: 'connection'; part: Extract<KbMessagePart, { type: 'connection' }> }
   | { kind: 'permission'; part: KbPermissionPart }
-  | { kind: 'question'; part: KbQuestionPart };
+  | { kind: 'question'; part: KbQuestionPart }
+  | { kind: 'study'; part: KbStudyPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -46,11 +49,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
   };
   for (const part of parts) {
     if (part.type === 'tool') continue;
-    if (part.type === 'connection' || part.type === 'permission' || part.type === 'question') {
-      // A connection, a permission request and an agent question are blocks of their own (0.3.1 P).
+    if (part.type === 'connection' || part.type === 'permission' || part.type === 'question' || part.type === 'study') {
+      // A connection, a permission request, an agent question (0.3.1 P) and a deck or test (S) are
+      // blocks of their own.
       flushSpace();
       run = null;
-      out.push(part.type === 'connection' ? { kind: 'connection', part } : part.type === 'permission' ? { kind: 'permission', part } : { kind: 'question', part });
+      out.push(part.type === 'connection' ? { kind: 'connection', part } : part.type === 'permission' ? { kind: 'permission', part }
+        : part.type === 'question' ? { kind: 'question', part } : { kind: 'study', part });
       continue;
     }
     if (!run) { run = { kind: 'inline', pieces: [], slots: [] }; out.push(run); }
@@ -116,6 +121,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
           );
         }
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
@@ -259,8 +265,16 @@ export function renderInput(input: KbMessageInput): ReactNode {
   return out;
 }
 
-/** "Switched to Claude Code" and similar records in the conversation. */
-export function SystemMessage({ message }: { message: KbMessage }) {
+/** "Switched to Claude Code" and similar records in the conversation; "Study" from a deck page (S12). */
+export function SystemMessage({ chatId, message }: { chatId: string; message: KbMessage }) {
+  const studies = message.parts.filter((p): p is KbStudyPart => p.type === 'study');
+  if (studies.length) {
+    return (
+      <article className="kb-msg kb-msg--study" aria-label="Study">
+        {studies.map((p) => <StudyInChat key={p.id} chatId={chatId} part={p} />)}
+      </article>
+    );
+  }
   const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
   return (
     <p className="kb-msg kb-msg--system" role="note">

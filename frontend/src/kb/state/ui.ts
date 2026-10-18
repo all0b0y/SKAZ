@@ -36,6 +36,13 @@ export interface UiState extends NavState, NavActions {
   /** "Edit models…" (0.3.1 K4), opened on an agent / provider when given. */
   editModels: EditModelsTarget | null;
   openEditModels: (target?: EditModelsTarget) => void;
+  /**
+   * 0.3.1 S (W2): the study block of each chat the user worked with last — what the agent is told is
+   * open when the block is in the thread. ✕ on the chip turns it off until the next touch.
+   */
+  studyFocus: Record<string, { id: string; on: boolean }>;
+  focusStudy: (chatId: string, studyId: string) => void;
+  dismissStudyContext: (chatId: string) => void;
   closeEditModels: () => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
@@ -67,6 +74,11 @@ export function createUiStore(): UiStore {
     searchOpen: false,
     decisionId: null,
     editModels: null,
+    studyFocus: {},
+    focusStudy: (chatId, studyId) => set((s) => (s.studyFocus[chatId]?.id === studyId && s.studyFocus[chatId]?.on
+      ? {} : { studyFocus: { ...s.studyFocus, [chatId]: { id: studyId, on: true } } })),
+    dismissStudyContext: (chatId) => set((s) => (s.studyFocus[chatId]
+      ? { studyFocus: { ...s.studyFocus, [chatId]: { ...s.studyFocus[chatId]!, on: false } } } : {})),
     openEditModels: (target) => set({ editModels: target ?? {} }),
     closeEditModels: () => set({ editModels: null }),
     openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),

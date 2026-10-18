@@ -8,6 +8,7 @@ import {
   ArrowUpDown, BookPlus, ChevronUp, Clock, Copy, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
   CircleCheck, CircleX, CircleSlash, Undo2, PenLine, Star, Eye as EyeOn, EyeOff, SlidersHorizontal,
+  Layers, ListChecks, RotateCcw, Flame,
 } from 'lucide-react';
 
 /**
@@ -111,6 +112,11 @@ const ICONS = {
   shown: EyeOn,
   hidden: EyeOff,
   editModels: SlidersHorizontal,
+  // 0.3.1 S: flashcards and tests
+  deck: Layers,
+  test: ListChecks,
+  flip: RotateCcw,
+  hard: Flame,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;
 
 export type IconName = keyof typeof ICONS;

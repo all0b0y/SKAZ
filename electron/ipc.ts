@@ -52,6 +52,8 @@ export function registerIpc(
   manager: BackendManager,
   expectedId: ExpectedWebContentsId,
   onNativeFailure?: (failure: NativeFailure) => void,
+  /** A deck or test block's own window (0.3.1 S): trusted for backend requests only, never more. */
+  studyWindowId: ExpectedWebContentsId = () => null,
 ): NativeLiveClient {
   const native = new NativeLiveClient(() => manager.getHandle(), onNativeFailure);
   const senderTrusted = (event: IpcMainInvokeEvent): boolean =>
@@ -248,8 +250,14 @@ export function registerIpc(
     return manager.restart();
   });
 
+  // The study window reaches the backend through the same allowlist; every other channel stays main-only.
+  const requestTrusted = (event: IpcMainInvokeEvent): boolean => senderTrusted(event) || isTrustedFrame({
+    senderId: event.sender.id,
+    expectedId: studyWindowId(),
+    isMainFrame: event.senderFrame?.parent === null,
+  });
   ipcMain.handle(CHANNELS.request, async (event, req: BridgeRequest): Promise<JsonResponse<unknown>> => {
-    if (!senderTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
+    if (!requestTrusted(event)) return { ok: false, status: 0, detail: 'untrusted sender' };
     const handle = manager.getHandle();
     if (!handle) return { ok: false, status: 0, detail: 'backend not ready' };
     if (!ALLOWED_METHODS.includes(req.method)) {

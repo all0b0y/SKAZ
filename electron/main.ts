@@ -15,7 +15,8 @@ import { QuitController } from './quitController';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
 import { registerUpdates } from './updateRuntime';
-import type { BackendStatus } from '../frontend/src/api/bridge';
+import type { BackendStatus, StudyWindowTarget } from '../frontend/src/api/bridge';
+import { sameTarget, studyHash, validateStudyTarget } from './studyWindow';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
 const RENDERER_DEV_URL = process.env.ELECTRON_RENDERER_URL;
@@ -44,6 +45,11 @@ const CSP =
 
 let mainWindow: BrowserWindow | null = null;
 let nativeClient: NativeLiveClient | null = null;
+/** A deck or test block in its own window (0.3.1 S, W2): one at a time. */
+let studyWindow: BrowserWindow | null = null;
+let studyTarget: StudyWindowTarget | null = null;
+/** Closed by SKAZ (the block went elsewhere, the app quits), not by the user: the main window isn't told. */
+let studyClosingQuietly = false;
 
 // Resolve every persistent path before the backend, singleton or Chromium session
 // is constructed. Packaged builds ignore development profile flags/env entirely.
@@ -180,6 +186,65 @@ function hardenSession(): void {
   });
 }
 
+/** The trusted window of a block: the same renderer and preload, a URL fragment naming the block. */
+function openStudyWindow(target: StudyWindowTarget): void {
+  if (studyWindow && !studyWindow.isDestroyed() && sameTarget(studyTarget, target)) {
+    if (studyWindow.isMinimized()) studyWindow.restore();
+    studyWindow.show();
+    studyWindow.focus();
+    return;
+  }
+  closeStudyWindow();
+  studyTarget = target;
+  const win = new BrowserWindow({
+    width: 380,
+    height: 700,
+    minWidth: 320,
+    minHeight: 480,
+    icon: app.isPackaged ? undefined : APP_ICON,
+    backgroundColor: '#ffffff',
+    show: false,
+    title: 'SKAZ',
+    titleBarStyle: 'hiddenInset',
+    webPreferences: {
+      preload: PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      spellcheck: false,
+    },
+  });
+  studyWindow = win;
+  win.once('ready-to-show', () => win.show());
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.on('closed', () => {
+    const closed = studyTarget;
+    if (studyWindow === win) { studyWindow = null; studyTarget = null; }
+    if (!studyClosingQuietly && closed && mainWindow && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(CHANNELS.studyClosed, closed);
+    }
+  });
+  const hash = studyHash(target);
+  if (isDev && RENDERER_DEV_URL) void win.loadURL(`${RENDERER_DEV_URL}#${hash}`);
+  else void win.loadFile(RENDERER_HTML, { hash });
+}
+
+function closeStudyWindow(): void {
+  const win = studyWindow;
+  if (!win || win.isDestroyed()) return;
+  studyClosingQuietly = true;
+  try {
+    win.destroy();
+  } finally {
+    studyClosingQuietly = false;
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -230,6 +295,7 @@ function createWindow(): void {
     rendererSave.disconnected();
     nativeClient?.abort();
     mainWindow = null;
+    closeStudyWindow();
   });
 }
 
@@ -298,6 +364,30 @@ app.whenReady().then(() => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send(CHANNELS.nativeFailure, failure);
     }
+  }, () => (studyWindow && !studyWindow.isDestroyed() ? studyWindow.webContents.id : null));
+  // A block's own window (0.3.1 S): only the main window opens one; either window may close it.
+  ipcMain.handle(CHANNELS.studyOpen, (event, payload: unknown) => {
+    if (!isTrustedFrame({
+      senderId: event.sender.id,
+      expectedId: mainWindow?.webContents.id ?? null,
+      isMainFrame: event.senderFrame?.parent === null,
+    })) return false;
+    const target = validateStudyTarget(payload);
+    if (!target) return false;
+    openStudyWindow(target);
+    return true;
+  });
+  ipcMain.handle(CHANNELS.studyClose, (event) => {
+    const isMainFrame = event.senderFrame?.parent === null;
+    const trusted = isTrustedFrame({ senderId: event.sender.id, expectedId: mainWindow?.webContents.id ?? null, isMainFrame })
+      || isTrustedFrame({
+        senderId: event.sender.id,
+        expectedId: studyWindow && !studyWindow.isDestroyed() ? studyWindow.webContents.id : null,
+        isMainFrame,
+      });
+    if (!trusted) return false;
+    closeStudyWindow();
+    return true;
   });
   ipcMain.on(CHANNELS.quitPrepared, (event, id: unknown, saved: unknown) => {
     if (!isTrustedFrame({
@@ -341,5 +431,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', (event) => {
-  if (quitController.onBeforeQuit()) event.preventDefault();
+  if (quitController.onBeforeQuit()) { event.preventDefault(); return; }
+  // Quitting keeps the block where it is: after the restart it opens in its window again.
+  studyClosingQuietly = true;
 });

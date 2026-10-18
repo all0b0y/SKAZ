@@ -152,6 +152,15 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/(?:add|other|order)$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/credentials\/[A-Za-z0-9_-]{1,64}\/(?:sign-in|priority)$/ },
   { method: 'DELETE', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/credentials\/[A-Za-z0-9_-]{1,64}$/ },
+  // 0.3.1 S: decks and tests — a block's view and place, grades, answers, Save to wiki (one id segment);
+  // the deck page (its marks, "Study"); the daily limit of new cards.
+  { method: 'GET', pattern: /^\/kb\/study\/settings$/ },
+  { method: 'PATCH', pattern: /^\/kb\/study\/settings$/ },
+  { method: 'GET', pattern: /^\/kb\/study\/decks\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/decks\/[^/]+\/(?:marks|study)$/ },
+  { method: 'GET', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
+  { method: 'PATCH', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|mark|answer|check-open|finish|retake|save)$/ },
 ];
 
 /**

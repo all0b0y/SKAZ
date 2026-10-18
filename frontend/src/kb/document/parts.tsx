@@ -10,6 +10,8 @@ export const PAGE_KIND_LABEL: Record<PageKind, string> = {
   note: 'Notes',
   analysis: 'Analysis',
   folder: 'Folder',
+  deck: 'Deck',
+  test: 'Test',
 };
 
 export const PAGE_KIND_ICON: Record<PageKind, IconName> = {
@@ -17,6 +19,8 @@ export const PAGE_KIND_ICON: Record<PageKind, IconName> = {
   note: 'pdf',
   analysis: 'models',
   folder: 'folder',
+  deck: 'deck',
+  test: 'test',
 };
 
 /**

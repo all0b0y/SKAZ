@@ -1,4 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { DeckPage, TestPage } from '../study/DeckPage';
+import { useMakeStudy } from '../study/makeFrom';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText, KbApiError } from '../api/client';
 import { AnswerMarkdown, type InAppLink } from '../ui/AnswerMarkdown';
@@ -303,6 +305,7 @@ const FINDER_FAILED = 'Finder couldn’t show this page. It may have been moved 
 export function PageView({ target, nonce }: { target: DocTarget; nonce: number }) {
   const { client, chats, bridge } = useServices();
   const askAbout = useAskAbout();
+  const make = useMakeStudy();
   const expanded = useUi((s) => s.docExpanded);
   const openGraph = useUi((s) => s.openGraph);
   const tone = useFolderTone();
@@ -387,6 +390,10 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
                 onClick={() => setMenuOpen((v) => !v)} />
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Page actions" items={[
                 { id: 'graph', label: 'Show the graph', icon: 'graph', onSelect: () => openGraph(page?.id) },
+                ...(page && page.kind !== 'deck' && page.kind !== 'test' ? [
+                  { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'page', id: page.id, title: page.title }]) },
+                  { id: 'test', label: 'Make a test from this', icon: 'test' as const, onSelect: () => make('test', [{ type: 'page', id: page.id, title: page.title }]) },
+                ] : []),
                 { id: 'reload', label: 'Read the page again', icon: 'retry', onSelect: () => reload() },
                 ...(obsidian.open && page ? [{ id: 'obsidian', label: 'Open in Obsidian', icon: 'external' as const, onSelect: () => void obsidian.open!({ kind: 'page', id: page.id }) }] : []),
                 ...(bridge.showInFinder && page ? [{ id: 'finder', label: 'Show in Finder', icon: 'folder' as const, onSelect: () => {
@@ -404,8 +411,10 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         >
           <IconButton icon="chats" label="Ask about page" disabled={!page}
             onClick={() => page && askAbout({ type: 'page', id: page.id, title: page.title })} />
-          <IconButton icon="newChat" label="My note" disabled={!page} aria-pressed={noteOpen}
-            onClick={() => setNoteOpen(true)} />
+          {page?.kind !== 'deck' && page?.kind !== 'test' && (
+            <IconButton icon="newChat" label="My note" disabled={!page} aria-pressed={noteOpen}
+              onClick={() => setNoteOpen(true)} />
+          )}
         </PanelFrameButtons>
       </header>
       <div className="kb-doc__body" ref={bodyRef}>
@@ -428,7 +437,9 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
                   page.updated_at ? `updated ${relativeTime(page.updated_at)}` : ''].filter(Boolean).join(' · ')}
               </span>
             </div>
-            <PageBody page={page} actions={actions} noteOpen={noteOpen} setNoteOpen={setNoteOpen} addNote={addNote} />
+            {page.kind === 'deck' ? <DeckPage page={page} />
+              : page.kind === 'test' ? <TestPage page={page} />
+                : <PageBody page={page} actions={actions} noteOpen={noteOpen} setNoteOpen={setNoteOpen} addNote={addNote} />}
           </article>
         )}
         {page && <RenamePageDialog page={page} open={dialog === 'rename'} onClose={() => setDialog(null)} onDone={set} />}

@@ -115,6 +115,8 @@ const SECTIONS: ReadonlyArray<{ kind: PageKind; label: string }> = [
   { kind: 'note', label: 'Notes' },
   { kind: 'analysis', label: 'Analyses' },
   { kind: 'folder', label: 'Folder overviews' },
+  { kind: 'deck', label: 'Decks' },
+  { kind: 'test', label: 'Tests' },
 ];
 
 /** How pages of each kind appear, said where the list is empty (QA C24). */
@@ -123,6 +125,8 @@ const EMPTY_HINT: Record<PageKind, string> = {
   note: 'Each material added to the wiki gets its notes here.',
   analysis: 'Save a chat answer to the wiki (“Save to wiki” under the answer) to keep it here.',
   folder: 'A folder gets its overview once its materials are in the wiki.',
+  deck: 'Ask an agent for flashcards from your materials, then “Save to wiki” in the block.',
+  test: 'Ask an agent for a test from your materials, then “Save to wiki” in the block.',
 };
 
 function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection; drag: DragRowProps }) {

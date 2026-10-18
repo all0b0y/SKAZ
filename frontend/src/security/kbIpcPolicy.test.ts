@@ -157,7 +157,7 @@ function sourceFiles(dir: string): string[] {
 const uiRoutes = new Set(sourceFiles(`${repoRoot}/frontend/src/kb`).flatMap((file) => routesIn(readFileSync(file, 'utf8'))));
 
 /** A concrete request path for a route template: a sample value per path parameter. */
-const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox', name: 'index' };
+const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox', name: 'index', block_id: 'st-1' };
 function instance(route: string): { method: string; path: string } {
   const space = route.indexOf(' ');
   return { method: route.slice(0, space), path: route.slice(space + 1).replace(/\{([^}]+)\}/g, (_, name: string) => SAMPLE[name] ?? 'x1') };
@@ -255,6 +255,28 @@ describe('Electron IPC policy — SKAZ skills (0.3.1 H)', () => {
       ['GET', '/kb/settings/skills/humanizer'], ['POST', '/kb/settings/skills/humanizer'],
       ['PUT', '/kb/settings/skills/humanizer/file'], ['PUT', '/kb/settings/skills/../keys/soniox'],
       ['PUT', '/kb/settings/skills/%2e%2e'], ['PUT', '/kb/settings/skills/Humanizer'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — flashcards and tests (0.3.1 S)', () => {
+  it('lets a block be read, moved, graded, answered and saved, and a deck page be studied — one id segment', () => {
+    for (const [method, path] of [
+      ['GET', '/kb/study/st-1a2b'], ['PATCH', '/kb/study/st-1a2b'], ['POST', '/kb/study/st-1a2b/grade'],
+      ['POST', '/kb/study/st-1a2b/mark'], ['POST', '/kb/study/st-1a2b/answer'], ['POST', '/kb/study/st-1a2b/check-open'],
+      ['POST', '/kb/study/st-1a2b/finish'], ['POST', '/kb/study/st-1a2b/retake'], ['POST', '/kb/study/st-1a2b/save'],
+      ['GET', '/kb/study/decks/pg-1'], ['POST', '/kb/study/decks/pg-1/marks'], ['POST', '/kb/study/decks/pg-1/study'],
+      ['GET', '/kb/study/settings'], ['PATCH', '/kb/study/settings'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
+    }
+    for (const [method, path] of [
+      ['DELETE', '/kb/study/st-1a2b'], ['POST', '/kb/study/st-1a2b'], ['GET', '/kb/study/st-1a2b/grade'],
+      ['POST', '/kb/study/st-1a2b/delete'], ['POST', '/kb/study/a/b/grade'], ['POST', '/kb/study/../chats/c1/grade'],
+      ['POST', '/kb/study/x/grade'], ['PATCH', '/kb/study/decks/pg-1'], ['DELETE', '/kb/study/decks/pg-1'],
+      ['POST', '/kb/study/decks/pg-1/save'], ['POST', '/kb/study'], ['GET', '/kb/study'],
     ] as const) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
     }

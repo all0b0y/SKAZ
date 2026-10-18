@@ -479,7 +479,8 @@ describe('Selecting several materials in the table (0.3.1 F2/F4/F5)', () => {
     fireEvent.contextMenu(within(rowOf('Pasted text: problems')).getByRole('button', { name: 'Pasted text: problems' }), { clientX: 200, clientY: 200 });
     const menu = await screen.findByRole('menu', { name: 'Material actions' });
     expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
-      'Move to…⌘⇧M', 'Ask in chat⌘↩', 'Add to wiki · 1', expect.stringMatching(/^Export \.md/), 'Delete 1 material⌘⌫',
+      'Move to…⌘⇧M', 'Ask in chat⌘↩', 'Add to wiki · 1', expect.stringMatching(/^Export \.md/),
+      'Make cards from these', 'Make a test from these', 'Delete 1 material⌘⌫',
     ]);
     expect(rowOf('Pasted text: problems')).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{Escape}');

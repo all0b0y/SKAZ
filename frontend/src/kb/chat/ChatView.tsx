@@ -136,7 +136,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         {chat && chat.messages.length > 0 && (
           <div className="kb-chat__messages">
             {chat.messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} message={m} />
-              : m.role === 'system' ? <SystemMessage key={m.id} message={m} />
+              : m.role === 'system' ? <SystemMessage key={m.id} chatId={chat.id} message={m} />
                 : (
                   <AssistantMessage key={m.id} chatId={chat.id} message={m} actions={{
                     busy: busy?.id === m.id ? busy.what : null,

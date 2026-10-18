@@ -1,4 +1,5 @@
 import { useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { useMakeStudy } from '../study/makeFrom';
 import type { KbDeletePreview, KbFolder, KbMaterialSummary } from '../../api/kb/types.gen';
 import { Icon, Popover } from '../ui';
 import { PageChip } from '../document/parts';
@@ -213,6 +214,8 @@ export function useAnchor(): [RefObject<HTMLElement | null>, (el: HTMLElement | 
 /** The actions of a material selection, for the bar, ⋯ and the right-click menu. */
 export function materialActions(list: ReadonlyArray<KbMaterialSummary>, run: {
   move: () => void; ask: () => void; addToWiki: () => void; exportMd: (() => void) | null; remove: () => void;
+  /** 0.3.1 S3: "Make cards / a test from these" — the request goes into the message field. */
+  cards?: () => void; test?: () => void;
 }): Record<'full' | 'compact', { bar: SelectionAction[]; more: SelectionAction[] }> & { menu: MenuItem[] } {
   const toWiki = list.filter(canAddToWiki).length;
   const move: SelectionAction = { id: 'move', label: 'Move to…', icon: 'folder', shortcut: '⌘⇧M', onSelect: run.move };
@@ -223,18 +226,23 @@ export function materialActions(list: ReadonlyArray<KbMaterialSummary>, run: {
     disabled: !run.exportMd, note: run.exportMd ? undefined : 'In the desktop app',
   };
   const del: SelectionAction = { id: 'delete', label: 'Delete', icon: 'trash', shortcut: '⌘⌫', danger: true, onSelect: run.remove };
+  const study: SelectionAction[] = [
+    ...(run.cards ? [{ id: 'cards', label: 'Make cards from these', icon: 'deck' as const, onSelect: run.cards }] : []),
+    ...(run.test ? [{ id: 'test', label: 'Make a test from these', icon: 'test' as const, onSelect: run.test }] : []),
+  ];
   const menu: MenuItem[] = [
     { id: 'move', label: 'Move to…', icon: 'folder', note: '⌘⇧M', onSelect: run.move },
     { id: 'ask', label: 'Ask in chat', icon: 'mention', note: '⌘↩', onSelect: run.ask },
     ...(toWiki ? [{ id: 'wiki', label: `Add to wiki · ${toWiki}`, icon: 'saveWiki' as const, onSelect: run.addToWiki }] : []),
     { id: 'export', label: 'Export .md', icon: 'export', note: run.exportMd ? '⌘⇧E' : 'In the desktop app', disabled: !run.exportMd, onSelect: run.exportMd ?? (() => undefined) },
+    ...study.map((a) => ({ id: a.id, label: a.label, icon: a.icon, onSelect: a.onSelect })),
     { id: 'delete', label: `Delete ${countOf(list.length, 'material')}`, icon: 'trash', danger: true, note: '⌘⌫', onSelect: run.remove },
   ];
   return {
     // Table (full bar, mockup lib-v1 A): Move to… · Ask in chat · Add to wiki · N · ⋯ Export · Delete.
-    full: { bar: [move, ask, ...(toWiki ? [wiki] : []), del], more: [exp] },
+    full: { bar: [move, ask, ...(toWiki ? [wiki] : []), del], more: [exp, ...study] },
     // Side panel (compact, lib-v2): Move to… · Ask in chat · ⋯ Add to wiki · N, Export · Delete.
-    compact: { bar: [move, ask, del], more: [wiki, exp] },
+    compact: { bar: [move, ask, del], more: [wiki, exp, ...study] },
     menu,
   };
 }
@@ -250,6 +258,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
   onOpen: (id: string) => void;
 }): { sel: ListSelection; overlays: ReactNode; dragProps: (m: KbMaterialSummary) => DragRowProps } {
   const batch = useMaterialBatch();
+  const make = useMakeStudy();
   const exp = useExportItems();
   // Export .md (F5), or null where the host can't choose a folder.
   const exportMd = exp.run ? (list: KbMaterialSummary[]) => { exp.run!(list.map((m) => ({ type: 'material' as const, id: m.id }))); } : null;
@@ -288,6 +297,8 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
     addToWiki: () => { void batch.addToWiki(pick(ids())).then(sel.clear); },
     exportMd: exportMd ? () => { exportMd(pick(ids())); } : null,
     remove: () => setDeleteIds(ids()),
+    cards: () => { make('cards', pick(ids()).map((m) => ({ type: 'material' as const, id: m.id, title: m.title }))); sel.clear(); },
+    test: () => { make('test', pick(ids()).map((m) => ({ type: 'material' as const, id: m.id, title: m.title }))); sel.clear(); },
   });
   const barActions = materialActions(selectedList, run(() => sel.ordered))[variant];
   const menuItems = menu ? materialActions(pick(menu.ids), run(() => menu.ids)).menu : [];

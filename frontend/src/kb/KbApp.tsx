@@ -15,6 +15,7 @@ import { DecisionModal } from './notifications/DecisionModal';
 import { SelectionToolbar } from './ui/Selection';
 import { AddMaterialModal } from './materials/AddMaterialModal';
 import { Toast } from './ui/Toast';
+import { useStudyPlacement } from './study/useStudy';
 
 /** Mirror theme and text size onto <html>, where the tokens read them. */
 function ThemeSync() {
@@ -188,6 +189,7 @@ function Workspace() {
   const setLibrarySetupOpen = useUi((s) => s.setLibrarySetupOpen);
   useSettingsShortcut();
   useLiveData();
+  useStudyPlacement();
   useEffect(() => { void library.getState().loadLibrary(); }, [library]);
   return (
     <>

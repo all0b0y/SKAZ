@@ -9,6 +9,7 @@ import {
   startItemsDrag, useListSelection, type ListSelection, type SelectionAction,
 } from '../ui/listSelection';
 import type { DragRowProps } from '../materials/materialBatch';
+import { useMakeStudy } from '../study/makeFrom';
 
 /** Pages as @-mentions in the current chat's field (as "Ask about page"). */
 export function useAskAboutPages() {
@@ -36,6 +37,7 @@ export function usePageSelection({ pages, resetKey, onOpen }: {
   const exp = useExportItems();
   const exportMd = exp.run ? (picked: KbPageSummary[]) => { exp.run!(picked.map((p) => ({ type: 'page' as const, id: p.id }))); } : null;
   const ask = useAskAboutPages();
+  const make = useMakeStudy();
   const obsidian = useOpenInObsidian();
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const byId = new Map(pages.map((p) => [p.id, p]));
@@ -55,11 +57,14 @@ export function usePageSelection({ pages, resetKey, onOpen }: {
     { id: 'delete', label: 'Delete', icon: 'trash', shortcut: '⌘⌫', danger: true, onSelect: () => setDeleteIds(ids()) },
   ];
   const one = sel.ordered.length === 1;
+  const refs = () => pick(ids()).map((p) => ({ type: 'page' as const, id: p.id, title: p.title }));
   const more: SelectionAction[] = [{
     id: 'obsidian', label: 'Open in Obsidian', icon: 'external', disabled: !obsidian.open || !one,
     note: !obsidian.open ? 'In the desktop app' : one ? undefined : 'One page at a time',
     onSelect: () => { const id = sel.ordered[0]; if (id && obsidian.open) void obsidian.open({ kind: 'page', id }); },
-  }];
+  },
+  { id: 'cards', label: 'Make cards from these', icon: 'deck', onSelect: () => { make('cards', refs()); sel.clear(); } },
+  { id: 'test', label: 'Make a test from these', icon: 'test', onSelect: () => { make('test', refs()); sel.clear(); } }];
 
   const doomed = pick(deleteIds ?? []);
   const preview = async () => {

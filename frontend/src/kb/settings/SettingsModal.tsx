@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { NewCardsRow } from '../study/StudySettingsRow';
 import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
 import { useAgents, usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
@@ -60,6 +61,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'auto-fix': return <WikiSwitchRow field="auto_corrections" label={row.label} />;
     case 'bg-links': return <BackgroundLinksRow label={row.label} />;
     case 'links-now': return <FindLinksNowRow />;
+    case 'study-new': return <NewCardsRow label={row.label} />;
     case 'humanizer': return <SkillSwitchRow skillId="humanizer" label={row.label} />;
     case 'skill-codex': return <SkillEngineRow skillId="humanizer" engine="codex" />;
     case 'skill-claude': return <SkillEngineRow skillId="humanizer" engine="claude_code" />;

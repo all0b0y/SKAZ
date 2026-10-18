@@ -30,7 +30,9 @@ export type RightView =
   | { kind: 'live'; materialId: string }
   | { kind: 'wikifile'; name: WikiFileName }
   /** 0.3.1 P: an agent's permission request reviewed beside the chat (the part lives in the chat). */
-  | { kind: 'review'; chatId: string; partId: string };
+  | { kind: 'review'; chatId: string; partId: string }
+  /** 0.3.1 S (W2): a deck or test block beside the chat (the block is a part of its chat's message). */
+  | { kind: 'study'; chatId: string; studyId: string };
 
 /** What the centre column shows: the open chat, or a full-width list (decisions v16, 25). */
 export type CenterView = 'chat' | 'allChats' | 'materials';
@@ -64,6 +66,8 @@ export interface NavActions {
   openWikiFile: (name: WikiFileName) => void;
   /** An agent's permission request beside the chat, with the decision bar at the bottom (P4). */
   openReview: (chatId: string, partId: string) => void;
+  /** A study block beside the chat (it left the thread: one place at a time, A-4). */
+  openStudy: (chatId: string, studyId: string) => void;
   /** Close the right panel, whatever it shows. */
   closeDoc: () => void;
   toggleDocExpanded: () => void;
@@ -81,12 +85,13 @@ function samePlace(a: RightView, b: RightView): boolean {
   if (a.kind === 'live' && b.kind === 'live') return a.materialId === b.materialId;
   if (a.kind === 'wikifile' && b.kind === 'wikifile') return a.name === b.name;
   if (a.kind === 'review' && b.kind === 'review') return a.partId === b.partId;
+  if (a.kind === 'study' && b.kind === 'study') return a.studyId === b.studyId;
   return true;
 }
 
-/** The history after leaving `from` for `to`: the live view is not a place to come back to. */
+/** The history after leaving `from` for `to`: the live view and a study block are not places to come back to. */
 function pushed(history: RightView[], from: RightView | null, to: RightView): RightView[] {
-  if (!from || from.kind === 'live' || samePlace(from, to)) return history;
+  if (!from || from.kind === 'live' || from.kind === 'study' || samePlace(from, to)) return history;
   return [...history, from].slice(-HISTORY);
 }
 
@@ -136,6 +141,7 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     openLive: (materialId) => set(show({ kind: 'live', materialId })),
     openWikiFile: (name) => set(show({ kind: 'wikifile', name })),
     openReview: (chatId, partId) => set(show({ kind: 'review', chatId, partId })),
+    openStudy: (chatId, studyId) => set(show({ kind: 'study', chatId, studyId })),
     closeDoc: () => set({ right: null, docMaterialId: null, docExpanded: false, docHistory: [] }),
     toggleDocExpanded: () => set((s) => ({ docExpanded: s.right ? !s.docExpanded : false })),
     showCenter: (view) => set({ center: view }),
