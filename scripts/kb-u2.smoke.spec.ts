@@ -182,7 +182,7 @@ for (const theme of THEMES) {
       await page.getByTestId('agent-picker').click();
       await expect(page.getByRole('menu', { name: 'Agent and model' })).toBeVisible();
       await check(`engine-${tag}`);
-      await page.getByRole('menuitemradio', { name: 'gpt-5.6-luna', exact: true }).click();
+      await page.getByRole('menuitemradio', { name: 'GPT-5.6-luna', exact: true }).click();
       await expect(page.getByText('Switched to Codex')).toBeVisible();
       await check(`engine-switched-${tag}`);
     });
