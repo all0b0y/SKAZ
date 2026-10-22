@@ -20,6 +20,7 @@
     "dist:mac": "npm run icon && npm run build:media && npm run build:backend && npm run build && electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
+    "@animateicons/react": "0.12.1",
     "@lezer/markdown": "^1.8.0",
     "katex": "^0.19.0",
     "lucide-react": "^1.57.0",

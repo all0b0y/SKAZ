@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Clipboar
 import { useMentionDrop } from './MentionDrop';
 import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
-import { Icon, IconButton } from '../ui';
+import { Icon, IconButton, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { agentOf, startingChoice } from '../state/agents';
 import { isAnswering, type AgentChoice } from '../state/chats';
@@ -52,6 +52,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const [active, setActive] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [sendPlay, replaySend] = useIconPlay();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dictation, setDictation] = useState<Dictation>({ phase: 'idle' });
   const [hover, setHover] = useState<{ text: string; left: number; top: number } | null>(null);
@@ -279,6 +280,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     const ready = list.filter((a) => a.state === 'ready' && a.materialId);
     const input: KbMessageInput = { text: value.text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!) };
     sendingFrom.current = draftKey.current;
+    // The arrow moves as the message goes (it is replaced by Stop once the answer starts, so not after the reply).
+    replaySend();
     const result = await chats.getState().send(input, openContext());
     sendingFrom.current = null;
     setSending(false);
@@ -491,7 +494,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
             <Tooltip text={blocked ? 'The agent is still answering' : 'Send (Enter)'} placement="top">
               <button type="button" className="kb-send" aria-label="Send" aria-disabled={!canSend || sending || blocked || undefined}
                 onClick={() => void submit()} data-busy={sending || undefined}>
-                <Icon name="send" size={14} />
+                <Icon name="send" size={14} play={sendPlay} />
               </button>
             </Tooltip>
           )}

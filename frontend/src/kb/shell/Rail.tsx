@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { m } from 'motion/react';
-import { Icon, type IconName } from '../ui';
+import { Icon, useIconPlay, type IconName } from '../ui';
 import { useChats, useNotifications, usePrefs, useServices, useUi } from '../state/context';
 import { isWaitingForUser } from '../api/permissions';
 import type { Section } from '../state/prefs';
@@ -17,6 +17,33 @@ const ITEMS: ReadonlyArray<{ id: Section; label: string; icon: IconName }> = [
 export const LABEL_DELAY_MS = 300;
 /** How long after a name hides the next one still comes at once. */
 export const LABEL_WARM_MS = 600;
+
+/** The bell moves at most once in this long, however fast notifications arrive. */
+export const BELL_MIN_GAP_MS = 5000;
+
+/**
+ * Feedback counter for the bell (animated-icons spec): it goes up when the unread count INCREASES —
+ * not for the count the first read brings, not when it falls (opening the list), and not within
+ * {@link BELL_MIN_GAP_MS} of the last time it moved.
+ */
+export function useBellPlay(): number {
+  const unread = useNotifications((s) => s.unread);
+  const ready = useNotifications((s) => s.load === 'ready');
+  const [play, replay] = useIconPlay();
+  const before = useRef<number | null>(null); // null until the first read has arrived
+  const movedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ready) { before.current = null; return; }
+    const was = before.current;
+    before.current = unread;
+    if (was === null || unread <= was) return;
+    const now = Date.now();
+    if (movedAt.current !== null && now - movedAt.current < BELL_MIN_GAP_MS) return;
+    movedAt.current = now;
+    replay();
+  }, [ready, unread, replay]);
+  return play;
+}
 
 /**
  * Which rail item shows its name (v43 variant B, "slide-out pill"): one at a time. Hover waits
@@ -78,6 +105,8 @@ interface RailButtonProps {
   /** Muted after the name: a keyboard shortcut, or what needs attention. */
   hint?: string;
   icon: IconName;
+  /** Feedback counter for the icon (see `Icon`'s `play`). */
+  iconPlay?: number;
   active?: boolean;
   open?: boolean;
   labels: Labels;
@@ -91,7 +120,7 @@ interface RailButtonProps {
  * A rail button. Its name is its accessible name; on hover/focus its highlight slides out to the
  * right with the name beside the icon — one shape, decorative (aria-hidden: the button says it).
  */
-function RailButton({ id, label, hint, icon, active = false, open = false, labels, ariaLabel, attrs, onClick, children }: RailButtonProps) {
+function RailButton({ id, label, hint, icon, iconPlay, active = false, open = false, labels, ariaLabel, attrs, onClick, children }: RailButtonProps) {
   return (
     <button
       type="button"
@@ -107,7 +136,7 @@ function RailButton({ id, label, hint, icon, active = false, open = false, label
       onBlur={() => labels.hide(id)}
     >
       {active && <m.span layoutId="kb-rail-active" className="kb-rail__fill" aria-hidden="true" />}
-      <Icon name={icon} size={18} className="kb-rail__icon" />
+      <Icon name={icon} size={18} className="kb-rail__icon" play={iconPlay} />
       {labels.shown === id && (
         <span className="kb-rail__label" aria-hidden="true" data-testid="rail-label" data-overlay="">
           <Icon name={icon} size={18} />
@@ -132,6 +161,7 @@ export function Rail() {
   const section = usePrefs((s) => s.section);
   const sideOpen = usePrefs((s) => s.sideOpen);
   const unread = useNotifications((s) => s.unread);
+  const bellPlay = useBellPlay();
   const openSettings = useUi((s) => s.openSettings);
   const settingsOpen = useUi((s) => s.settingsOpen);
   const searchOpen = useUi((s) => s.searchOpen);
@@ -155,7 +185,7 @@ export function Rail() {
           return (
             <li key={item.id}>
               <RailButton
-                id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : waits ? 'Waiting for you' : undefined} icon={item.icon} active={active} labels={labels}
+                id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : waits ? 'Waiting for you' : undefined} icon={item.icon} iconPlay={item.id === 'notifications' ? bellPlay : undefined} active={active} labels={labels}
                 ariaLabel={badge > 0 ? `${item.label}, ${badge} unread` : waits ? `${item.label}, waiting for you` : item.label}
                 attrs={{ 'aria-current': active ? 'page' : undefined }}
                 onClick={() => prefs.getState().set({ section: item.id, sideOpen: true })}

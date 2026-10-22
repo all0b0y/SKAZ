@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { listInputDevices, browserDiscovery } from '../../audio/devices';
-import { Button, Icon, Popover, Segmented, Spinner, Switch } from '../ui';
+import { Button, Icon, Popover, Segmented, Spinner, Switch, useIconPlayHold } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { formatTime } from '../library/materialMeta';
 import { NameField } from '../library/NameField';
@@ -180,6 +180,8 @@ export function RecordControls() {
   const right = useUi((s) => s.right);
   const [menuOpen, setMenuOpen] = useState(false);
   const [rowOpen, setRowOpen] = useState(false);
+  // Feedback motion (animated-icons spec): the mic moves when a recording starts; the spinner waits for it.
+  const mic = useIconPlayHold();
   // The control row's truth for event handlers: a hover and a click can arrive before React
   // re-renders, so handlers read these refs, never the `rowOpen` of their render.
   const rowOpenNow = useRef(false);
@@ -199,6 +201,7 @@ export function RecordControls() {
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   const folderName = folders.find((f) => f.id === options.folderId)?.name ?? folders.find((f) => f.system)?.name ?? 'Inbox';
   const start = () => { void recording.getState().start(); };
+  const startFromButton = () => { mic.replay(); start(); };
 
   const live = isLive(phase);
   const paused = phase === 'paused' || phase === 'pausing';
@@ -279,8 +282,10 @@ export function RecordControls() {
     <span className="kb-recgo" data-testid="record-capsule">
       <Tooltip text={disabledReason ?? `Record into ${folderName}`} describes>
         <button ref={recordRef} type="button" className="kb-capsule kb-capsule--go" aria-disabled={!ready || phase === 'starting' || undefined}
-          onClick={() => { if (ready && phase === 'idle') start(); }}>
-          {phase === 'starting' ? <span className="kb-spinner kb-spinner--inline kb-spinner--onfill" aria-hidden="true" /> : <Icon name="mic" size={14} />}
+          onClick={() => { if (ready && phase === 'idle') startFromButton(); }}>
+          {phase === 'starting' && !mic.held
+            ? <span className="kb-spinner kb-spinner--inline kb-spinner--onfill" aria-hidden="true" />
+            : <Icon name="mic" size={14} play={mic.play} />}
           <span className="kb-capsule__main">Record</span>
         </button>
       </Tooltip>

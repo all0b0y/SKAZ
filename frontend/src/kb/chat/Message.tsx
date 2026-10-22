@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
 import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
-import { Button, Icon, IconButton } from '../ui';
+import { Button, Icon, IconButton, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
 import { inputPieces, quoteLabel } from '../composer/editor';
@@ -192,6 +192,9 @@ export interface AnswerActions {
 /** One assistant answer: parts, the interruption card, and the actions under it. */
 export function AssistantMessage({ chatId, message, actions }: { chatId: string; message: KbMessage; actions: AnswerActions }) {
   const [copied, setCopied] = useState(false);
+  // Feedback motion (animated-icons spec): the ✓ draws itself after a copy, the arrow turns on Regenerate.
+  const [copyPlay, replayCopy] = useIconPlay();
+  const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
   const empty = message.parts.filter((p) => p.type !== 'tool').length === 0;
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
@@ -225,9 +228,14 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
       {message.state === 'cancelled' && <p className="kb-msg__note">Stopped. The question is kept — you can regenerate the answer.</p>}
       {(message.state === 'done' || message.state === 'cancelled') && (
         <div className="kb-msg__actions" role="group" aria-label="Answer actions">
-          <IconButton icon={copied ? 'check' : 'copy'} label={copied ? 'Copied' : 'Copy'} size="sm"
-            onClick={async () => setCopied(await copyToClipboard(plainText(message.parts)))} />
-          <IconButton icon="retry" label="Regenerate" size="sm" disabled={actions.busy === 'regenerate'} onClick={actions.onRegenerate} />
+          <IconButton icon={copied ? 'check' : 'copy'} iconPlay={copyPlay} label={copied ? 'Copied' : 'Copy'} size="sm"
+            onClick={async () => {
+              const ok = await copyToClipboard(plainText(message.parts));
+              setCopied(ok);
+              if (ok) replayCopy();
+            }} />
+          <IconButton icon="retry" iconPlay={regenPlay} label="Regenerate" size="sm" disabled={actions.busy === 'regenerate'}
+            onClick={() => { replayRegen(); actions.onRegenerate(); }} />
           {message.saved_page_id ? (
             <IconButton icon="check" label="Saved to wiki — open" size="sm"
               onClick={() => open({ type: 'page', id: message.saved_page_id! })} />

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
-import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
+import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { clockOrDate, dayBucket, groupBy } from '../ui/time';
 import { useChats, useLibrary, useServices, useUi } from '../state/context';
@@ -48,6 +48,7 @@ export function ChatList() {
   const { chats } = useServices();
   const openChat = useOpenChat();
   const showCenter = useUi((s) => s.showCenter);
+  const [newPlay, replayNew] = useIconPlay();
 
   const pinned = list.filter((c) => c.pinned);
   const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
@@ -74,8 +75,8 @@ export function ChatList() {
   return (
     <div className="kb-side__scroll" {...sel.listProps}>
       <button type="button" className={`kb-row kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
-        onClick={() => openChat(null)}>
-        <Icon name="newChat" size={16} className="kb-row__icon" />
+        onClick={() => { replayNew(); openChat(null); }}>
+        <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
         <span className="kb-row__text">New chat</span>
       </button>
       {load === 'loading' && list.length === 0 && <div className="kb-side__wait"><Spinner label="Loading chats" size="sm" /></div>}
@@ -120,6 +121,7 @@ export function AllChats() {
   const { client } = useServices();
   const openChat = useOpenChat();
   const showCenter = useUi((s) => s.showCenter);
+  const [newPlay, replayNew] = useIconPlay();
   const total = useChats((s) => s.list.length);
   const listVersion = useChats((s) => s.list);
   const folders = useLibrary((s) => s.folders);
@@ -156,7 +158,8 @@ export function AllChats() {
       <header className="kb-head">
         <h1 className="kb-head__title">All chats <span className="kb-head__count">{total}</span></h1>
         <span className="kb-head__spacer" />
-        <Button size="sm" variant="fill" icon="newChat" onClick={() => openChat(null)}>New chat</Button>
+        <Button size="sm" variant="fill" icon="newChat" iconPlay={newPlay}
+          onClick={() => { replayNew(); openChat(null); }}>New chat</Button>
         <IconButton icon="close" label="Back to the chat" onClick={() => showCenter('chat')} />
       </header>
       <div className="kb-allchats__tools">

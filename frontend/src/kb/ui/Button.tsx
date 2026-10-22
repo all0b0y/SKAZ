@@ -10,6 +10,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   icon?: IconName;
+  /** Feedback counter for the icon (see `Icon`'s `play`): each change plays its motion once. */
+  iconPlay?: number;
   /** Shown instead of the label's icon while a real request runs; the button stays the same size. */
   busy?: boolean;
   children?: ReactNode;
@@ -21,7 +23,7 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 
 /** Text button. `fill` = primary (graphite fill), `outline`, `quiet` (text only), `danger` (outlined red). */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'outline', size = 'md', icon, busy = false, className, children, type = 'button', ...rest },
+  { variant = 'outline', size = 'md', icon, iconPlay, busy = false, className, children, type = 'button', ...rest },
   ref,
 ) {
   return (
@@ -33,7 +35,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...rest}
     >
       {busy ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
-        : icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} /> : null}
+        : icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} play={iconPlay} /> : null}
       {children !== undefined && <span className="kb-btn__label">{children}</span>}
     </button>
   );
@@ -41,6 +43,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 
 export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   icon: IconName;
+  /** Feedback counter for the icon (see `Icon`'s `play`): each change plays its motion once. */
+  iconPlay?: number;
   /** Accessible name and tooltip text. Required: an icon alone never names a control. */
   label: string;
   size?: 'sm' | 'md' | 'lg';
@@ -52,7 +56,7 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
 }
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { icon, label, size = 'md', active = false, tooltip = true, tooltipPlacement = 'bottom', badge, className,
+  { icon, iconPlay, label, size = 'md', active = false, tooltip = true, tooltipPlacement = 'bottom', badge, className,
     type = 'button', ...rest },
   ref,
 ) {
@@ -65,7 +69,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       className={cx('kb-iconbtn', `kb-iconbtn--${size}`, active && 'is-active', className)}
       {...rest}
     >
-      <Icon name={icon} size={px} />
+      <Icon name={icon} size={px} play={iconPlay} />
       {badge}
     </button>
   );

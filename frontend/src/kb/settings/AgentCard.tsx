@@ -279,9 +279,9 @@ export function AgentCards() {
   useEffect(() => { store.getState().autoCheck('open'); }, [store]);
   if (!agents) {
     return load === 'error' ? (
-      <p className="kb-inline-error kb-inline-error--flat" role="alert">
+      <div className="kb-inline-error kb-inline-error--flat" role="alert">
         Agents couldn’t be checked: {error} <Button size="sm" variant="quiet" icon="retry" onClick={() => void store.getState().refresh()}>Try again</Button>
-      </p>
+      </div>
     ) : <p className="kb-muted" role="status">Checking agents…</p>;
   }
   return <ul className="kb-agentcards">{agents.agents.map((a) => <AgentCard key={a.id} agent={a} />)}</ul>;

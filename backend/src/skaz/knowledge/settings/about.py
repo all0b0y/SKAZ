@@ -33,6 +33,8 @@ LICENSES: tuple[License, ...] = (
     License("Inter", "OFL-1.1", "https://github.com/rsms/inter"),
     License("Unbounded", "OFL-1.1", "https://github.com/googlefonts/unbounded"),
     License("Lucide", "ISC", "https://lucide.dev/license"),
+    License("AnimateIcons", "MIT", "https://github.com/Avijit07x/animateicons"),
+    License("Hugeicons", "MIT", "https://github.com/hugeicons/hugeicons-react"),
     License("Motion", "MIT", "https://github.com/motiondivision/motion"),
     License("React", "MIT", "https://github.com/facebook/react"),
     License("Electron", "MIT", "https://github.com/electron/electron"),

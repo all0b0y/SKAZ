@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { useRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
@@ -7,32 +9,109 @@ import {
 } from './index';
 import { boundaryFor, placePopup } from './geometry';
 
+// Where each concept's glyph comes from (animated-icons spec §3).
+const HUGE_CONCEPTS = ['chats', 'materials', 'bell', 'copy', 'retry', 'close', 'web', 'quote', 'mic', 'settings', 'search', 'more', 'pencil', 'chevronDown', 'stop'];
+const ANIMATED_CONCEPTS = ['send', 'newChat', 'check'];
+
 describe('Icon', () => {
-  it('is decorative by default: hidden from assistive tech, Lucide stroke 1.25', () => {
-    const { container } = render(<Icon name="settings" />);
+  it('is decorative by default: hidden from assistive tech, not focusable, stroke 1.5 on a static glyph', () => {
+    const { container } = render(<Icon name="graph" />);
     const svg = container.querySelector('svg')!;
     expect(svg).toHaveAttribute('aria-hidden', 'true');
+    expect(svg).toHaveAttribute('focusable', 'false');
+    expect(svg).toHaveAttribute('data-icon', 'graph');
+    expect(svg).toHaveAttribute('data-set', 'lucide');
     expect(svg.getAttribute('stroke-width')).toBe(String(ICON_STROKE));
-    expect(ICON_STROKE).toBe(1.25);
+    expect(ICON_STROKE).toBe(1.5);
     expect(svg).toHaveAttribute('width', '16');
+    expect(svg).toHaveClass('kb-icon');
   });
 
-  it('is announced only when it carries meaning on its own', () => {
+  it('library icons carry the same markers on their root: aria-hidden, focusable, data-icon, data-set, class', () => {
+    for (const [name, set] of [['settings', 'huge'], ['send', 'lucide-animated']] as const) {
+      // `play` makes the animated Lucide shapes use the library (without it they stay a static svg).
+      const { container, unmount } = render(<Icon name={name} className="extra" size={18} play={0} />);
+      const root = container.querySelector('[data-icon]')!;
+      expect(root.tagName, name).toBe('DIV');
+      expect(root).toHaveAttribute('data-icon', name);
+      expect(root).toHaveAttribute('data-set', set);
+      expect(root).toHaveAttribute('aria-hidden', 'true');
+      expect(root).toHaveAttribute('focusable', 'false');
+      expect(root).toHaveClass('kb-icon', 'kb-icon--lib', 'extra');
+      expect(root.querySelector('svg')).toHaveAttribute('width', '18');
+      expect(root.querySelector('svg')).toHaveAttribute('height', '18');
+      unmount();
+    }
+  });
+
+  it('never puts a div inside a paragraph: ✓, ↑ and the pen stay a static svg where they do not play', () => {
+    for (const name of ['check', 'send', 'newChat'] as const) {
+      const { container, unmount } = render(<p><Icon name={name} /></p>);
+      expect(container.querySelector('p div'), name).toBeNull();
+      expect(container.querySelector('p > svg')).toHaveAttribute('data-set', 'lucide-animated');
+      unmount();
+    }
+  });
+
+  it('a banner text can hold Hugeicons glyphs (divs) without a div inside a paragraph', () => {
+    const { container } = render(<Banner tone="warning" title="Speech is off.">Reason <span><Icon name="close" size={12} />Stopped: live</span></Banner>);
+    expect(container.querySelector('[data-icon="close"]')).not.toBeNull();
+    expect(container.querySelector('p div')).toBeNull();
+  });
+
+  it('is announced only when it carries meaning on its own — static glyph or library icon', () => {
     render(<Icon name="warning" label="Needs attention" size={20} />);
     const img = screen.getByRole('img', { name: 'Needs attention' });
     expect(img).not.toHaveAttribute('aria-hidden');
     expect(img).toHaveAttribute('width', '20');
+    render(<Icon name="chats" label="Conversation" />);
+    const lib = screen.getByRole('img', { name: 'Conversation' });
+    expect(lib).not.toHaveAttribute('aria-hidden');
+    expect(lib).toHaveAttribute('data-icon', 'chats');
   });
 
-  it('maps every concept to a drawn glyph (no empty icons), the gear is "settings"', () => {
+  it('takes its glyph from the right source: 15 Huge shapes, 3 animated Lucide, every other concept static Lucide', () => {
+    expect(ICON_NAMES.length).toBeGreaterThan(90);
+    expect(new Set(ICON_NAMES).size).toBe(ICON_NAMES.length);
+    for (const name of ICON_NAMES) {
+      const { container, unmount } = render(<Icon name={name} />);
+      const root = container.querySelector('[data-icon]')!;
+      const want = HUGE_CONCEPTS.includes(name) ? 'huge' : ANIMATED_CONCEPTS.includes(name) ? 'lucide-animated' : 'lucide';
+      expect(root.getAttribute('data-set'), name).toBe(want);
+      unmount();
+    }
+    for (const name of [...HUGE_CONCEPTS, ...ANIMATED_CONCEPTS]) expect(ICON_NAMES).toContain(name);
+  });
+
+  it('maps every concept to a drawn glyph (no empty icons), the static gears keep their Lucide class', () => {
     for (const name of ICON_NAMES) {
       const { container, unmount } = render(<Icon name={name} />);
       const svg = container.querySelector('svg')!;
       expect(svg.children.length, name).toBeGreaterThan(0);
       unmount();
     }
-    const { container } = render(<Icon name="settings" />);
-    expect(container.querySelector('svg')!.getAttribute('class')).toContain('lucide-settings');
+    const { container } = render(<Icon name="graph" />);
+    expect(container.querySelector('svg')!.getAttribute('class')).toContain('lucide-waypoints');
+  });
+
+  it('stroke is 1.5 for every icon: the stylesheet overrides the library’s hard-coded 2', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/ui.css'), 'utf8');
+    expect(css).toMatch(new RegExp(`\\.kb-icon svg, svg\\.kb-icon \\{ stroke-width: ${ICON_STROKE}; \\}`));
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.append(style);
+    try {
+      for (const name of ['settings', 'send', 'graph'] as const) {
+        const { container, unmount } = render(<Icon name={name} />);
+        expect(getComputedStyle(container.querySelector('svg')!).strokeWidth, name).toBe(String(ICON_STROKE));
+        unmount();
+      }
+      // The library draws strokeWidth="2" itself: that is what the rule has to beat.
+      const { container } = render(<Icon name="settings" />);
+      expect(container.querySelector('svg')!.getAttribute('stroke-width')).toBe('2');
+    } finally {
+      style.remove();
+    }
   });
 });
 

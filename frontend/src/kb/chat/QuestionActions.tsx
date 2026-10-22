@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { KbMessageInput } from '../../api/kb/types.gen';
 import { copyToClipboard } from '../../lib/clipboard';
-import { Button, IconButton, type IconName } from '../ui';
+import { Button, IconButton, useIconPlay, useIconPlayHold, type IconName } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { caretToEnd, fillEditor, insertText, serialize } from '../composer/editor';
 
@@ -23,9 +23,11 @@ export interface QuestionActions {
 export const EDIT_NOTE = 'Answers after this question are removed and it is answered again.';
 
 /** An action that waits: still focusable, says why (aria-disabled + description), does nothing. */
-function WaitingButton({ icon, label, reason, onClick }: { icon: IconName; label: string; reason: string | null; onClick: () => void }) {
+function WaitingButton({ icon, iconPlay, label, reason, onClick }: {
+  icon: IconName; iconPlay?: number; label: string; reason: string | null; onClick: () => void;
+}) {
   const id = useId();
-  if (!reason) return <IconButton icon={icon} label={label} size="sm" onClick={onClick} />;
+  if (!reason) return <IconButton icon={icon} iconPlay={iconPlay} label={label} size="sm" onClick={onClick} />;
   return (
     <>
       <Tooltip text={reason}>
@@ -39,12 +41,20 @@ function WaitingButton({ icon, label, reason, onClick }: { icon: IconName; label
 
 export function QuestionActionsRow({ text, actions, onEdit }: { text: string; actions: QuestionActions; onEdit: () => void }) {
   const [copied, setCopied] = useState(false);
+  // Feedback motion (animated-icons spec): the ✓ draws itself after a copy, the arrow turns on Resend.
+  const [copyPlay, replayCopy] = useIconPlay();
+  const [resendPlay, replayResend] = useIconPlay();
   return (
     <div className="kb-msg__actions kb-msg__actions--user" role="group" aria-label="Message actions">
-      <IconButton icon={copied ? 'check' : 'copy'} label={copied ? 'Copied' : 'Copy'} size="sm"
-        onClick={async () => setCopied(await copyToClipboard(text))} />
+      <IconButton icon={copied ? 'check' : 'copy'} iconPlay={copyPlay} label={copied ? 'Copied' : 'Copy'} size="sm"
+        onClick={async () => {
+          const ok = await copyToClipboard(text);
+          setCopied(ok);
+          if (ok) replayCopy();
+        }} />
       <WaitingButton icon="pencil" label="Edit" reason={actions.waitReason} onClick={onEdit} />
-      <WaitingButton icon="retry" label="Resend" reason={actions.waitReason} onClick={actions.onResend} />
+      <WaitingButton icon="retry" iconPlay={resendPlay} label="Resend" reason={actions.waitReason}
+        onClick={() => { replayResend(); actions.onResend(); }} />
     </div>
   );
 }
@@ -63,6 +73,7 @@ export function QuestionEditor({ input, onSend, onCancel }: {
   const [empty, setEmpty] = useState(!input.text.trim());
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const arrow = useIconPlayHold(); // the arrow moves before the busy spinner takes its place
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
 
@@ -83,6 +94,7 @@ export function QuestionEditor({ input, onSend, onCancel }: {
     if (!value.text.trim()) return;
     setSending(true);
     setError(null);
+    arrow.replay();
     const failed = await onSend({ ...value, attachments: input.attachments });
     if (!live.current) return;
     setSending(false);
@@ -112,7 +124,7 @@ export function QuestionEditor({ input, onSend, onCancel }: {
       <div className="kb-msg__editfoot">
         <small>{EDIT_NOTE}</small>
         <Button size="sm" onClick={onCancel}>Cancel</Button>
-        <Button size="sm" variant="fill" icon="send" busy={sending} disabled={empty} onClick={() => void send()}>Send</Button>
+        <Button size="sm" variant="fill" icon="send" iconPlay={arrow.play} busy={sending && !arrow.held} disabled={empty} onClick={() => void send()}>Send</Button>
       </div>
     </div>
   );

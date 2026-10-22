@@ -1,5 +1,12 @@
 /* Design-system components (kb/ui). Sizes follow the summary mockup app-v39. */
 
+/* ---- Icons ---- */
+/* Stroke of every icon = ICON_STROKE in ui/Icon.tsx. The animated-icons library hard-codes stroke-width="2" on its
+   svg as an attribute; a rule beats it. */
+.kb-icon svg, svg.kb-icon { stroke-width: 1.5; }
+/* Their root is a div (the library's Tailwind classes do not exist here): a box the size of the svg, laid out like it. */
+.kb-icon--lib { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+
 /* ---- Buttons ---- */
 .kb-btn {
   display: inline-flex;

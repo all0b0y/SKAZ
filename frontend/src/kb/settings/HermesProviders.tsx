@@ -243,15 +243,15 @@ export function HermesProviders() {
         </ul>
       </div>
       {error && !value && (
-        <p className="kb-inline-error kb-inline-error--flat" role="alert">
+        <div className="kb-inline-error kb-inline-error--flat" role="alert">
           {error} <Button size="sm" variant="quiet" icon="retry" onClick={() => void read()}>Try again</Button>
-        </p>
+        </div>
       )}
       {!value && !error && <p className="kb-muted kb-hproviders__note" role="status">Reading Hermes’ providers…</p>}
       {value && value.state !== 'ready' && (
-        <p className="kb-inline-error kb-inline-error--flat" role="alert">
+        <div className="kb-inline-error kb-inline-error--flat" role="alert">
           {value.reason} <Button size="sm" variant="quiet" icon="retry" onClick={() => void read()}>Try again</Button>
-        </p>
+        </div>
       )}
       {ready && pools.length === 0 && !running && (
         <p className="kb-muted kb-hproviders__note">No providers yet. Add one: Hermes asks for the key or opens the sign-in page in Terminal.</p>
