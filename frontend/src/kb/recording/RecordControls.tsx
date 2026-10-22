@@ -8,6 +8,7 @@ import { languageName } from '../material/MaterialView';
 import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import { isLive, type LiveView, type RecErrorWhen, type RecOptions } from './recordingStore';
 import { speechServiceName } from './connection';
+import { SpeechBars } from '../fx/indicators/SpeechBars';
 
 const TARGETS = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
 const VIEW_OPTIONS: ReadonlyArray<{ value: LiveView; label: string }> = [
@@ -18,12 +19,8 @@ const VIEW_OPTIONS: ReadonlyArray<{ value: LiveView; label: string }> = [
 
 function Bars() {
   const bars = useRecording((s) => s.bars);
-  // Heights follow the real signal only; silence = three still, short bars. No CSS animation.
-  return (
-    <span className="kb-lvl" aria-hidden="true">
-      {bars.map((v, i) => <i key={i} style={{ height: `${4 + Math.round(v * 8)}px` }} />)}
-    </span>
-  );
+  // Heights follow the real signal only; silence = short, still bars. Drawn on change, no loop, no CSS animation.
+  return <SpeechBars levels={bars} />;
 }
 
 /** "Record | Folder ▾" menu: folder, microphone, computer sound, mode, language (v12, v15). */

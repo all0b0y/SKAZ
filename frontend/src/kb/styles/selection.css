@@ -191,6 +191,8 @@ tr[data-sel-id]:focus-within > td:first-child { box-shadow: inset 2px 0 0 var(--
   box-shadow: var(--kb-shadow-pop);
   font-size: 13px;
 }
+/* FX «Stippling»: the arrival shimmer lives OUTSIDE the toast, left of its edge, so it never meets the text. */
+.kb-fx-stip--toast { position: absolute; right: 100%; top: -20px; width: 40px; height: calc(100% + 40px); pointer-events: none; }
 .kb-toast__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-toast__action, .kb-toast__close {
   border: 0;

@@ -88,7 +88,7 @@ export function ChatList() {
         </div>
       )}
       {load === 'ready' && list.length === 0 && (
-        <EmptyState icon="chats" title="No chats yet" compact>Ask your first question in the field below.</EmptyState>
+        <EmptyState icon="chats" title="No chats yet" compact field>Ask your first question in the field below.</EmptyState>
       )}
       {pinned.length > 0 && (
         <section aria-label="Pinned">

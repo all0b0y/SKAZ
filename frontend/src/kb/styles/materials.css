@@ -59,10 +59,21 @@
 }
 
 .kb-wk { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: var(--t-sm); }
+/*
+ * FX «Stippling»: a running status shows the indeterminate dot strip instead of a spinner. In the
+ * Wiki cell it is laid OVER the space just under the 18-px label (absolute, 6 px), so the row keeps
+ * its height: the table cell is 36 px (label centred, strip ≈ 28–34 px), and in a card it sits in the 6-px gap
+ * under the top line. Nothing is drawn behind the label text.
+ */
+.kb-stipstrip { position: relative; display: block; height: 6px; min-width: 0; pointer-events: none; }
+.kb-wk--strip { position: relative; vertical-align: middle; } /* its empty icon slot has no baseline */
+.kb-wk--strip > .kb-stipstrip { position: absolute; left: 0; right: 0; top: 100%; }
+.kb-pipe > .kb-stipstrip { flex: 0 0 100%; max-width: 280px; }
+.kb-fx-stip--strip { position: absolute; inset: 0; width: 100%; height: 100%; }
 .kb-wk__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kb-stx { display: inline-flex; width: 18px; height: 18px; border-radius: 50%; align-items: center; justify-content: center; flex: none; }
 .kb-wk--ok .kb-stx { background: var(--kb-accent-soft); color: var(--kb-accent); }
-.kb-wk--run .kb-stx { background: var(--kb-accent-soft); }
+/* A running status has no icon (the strip under it is the indicator); the empty slot keeps the column aligned. */
 .kb-wk--off { color: var(--kb-muted); }
 .kb-wk--off .kb-stx { background: var(--kb-rail); color: var(--kb-muted); }
 .kb-wk--err { color: var(--kb-danger); }

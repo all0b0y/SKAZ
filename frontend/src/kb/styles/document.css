@@ -92,7 +92,8 @@
 .kb-block__body > .kb-md { display: inline; }
 .kb-block[data-targeted] { outline: 2px solid var(--kb-accent); outline-offset: 4px; transition: outline-color 1.6s ease 0.8s; }
 .kb-block__label { display: flex; }
-.kb-block__body { line-height: 1.6; overflow-wrap: anywhere; }
+/* isolation: the citation-chip stipple canvas (z-index -1, cite.css) paints above the pane, below the text. */
+.kb-block__body { line-height: 1.6; overflow-wrap: anywhere; isolation: isolate; }
 .kb-block__cites { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 2px; vertical-align: middle; max-width: 100%; min-width: 0; }
 /* A long material title shortens with an ellipsis; the time or page stays visible (I1, real backend). */
 .kb-block__cites .kb-chip { min-width: 0; }

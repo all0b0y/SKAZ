@@ -3,11 +3,13 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, m } from 'motion/react';
 import { Icon } from './Icon';
 import { EXIT, SPRING_SMALL } from './motion';
+import { ToastStipple } from '../fx/stipple';
 
 export interface ToastData {
   /** A new id restarts the timer even with the same text. */
   id: number;
   text: string;
+  /** 'done' = good news (check icon + the arrival shimmer); 'problem' = warning; none = a neutral note. */
   tone?: 'done' | 'problem';
   /** One action (Undo); it closes the toast. */
   action?: { label: string; run: () => void };
@@ -40,6 +42,9 @@ export function Toast({ toast, onClose }: { toast: ToastData | null; onClose: ()
           onMouseEnter={() => window.clearTimeout(timer.current)} onMouseLeave={arm}
           onFocus={() => window.clearTimeout(timer.current)} onBlur={arm}
           initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: SPRING_SMALL }} exit={{ opacity: 0, transition: EXIT }}>
+          {/* A quiet shimmer left of the toast, once per toast (a new id remounts it); only for good news
+              (tone 'done') — never a problem, nor a neutral note («Already pinned»). */}
+          {toast.tone === 'done' && <ToastStipple />}
           <Icon name={toast.tone === 'problem' ? 'warning' : 'check'} size={14} />
           <span className="kb-toast__text">{toast.text}</span>
           {toast.action && (

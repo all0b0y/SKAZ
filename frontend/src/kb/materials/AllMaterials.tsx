@@ -9,6 +9,7 @@ import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
 import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
 import { useMaterialSelection } from './materialBatch';
+import { StippleStrip } from '../fx/stipple';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -60,11 +61,12 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
   };
   const v = view[state];
   return (
-    <span className={`kb-wk kb-wk--${v.tone}`} title={v.text}>
-      <span className="kb-stx" aria-hidden="true">
-        {v.icon ? <Icon name={v.icon} size={11} /> : v.tone === 'run' ? <span className="kb-spinner kb-spinner--xs" /> : null}
-      </span>
+    <span className={`kb-wk kb-wk--${v.tone}${v.tone === 'run' ? ' kb-wk--strip' : ''}`} title={v.text}>
+      <span className="kb-stx" aria-hidden="true">{v.icon && <Icon name={v.icon} size={11} />}</span>
       <span className="kb-wk__text">{v.text}</span>
+      {/* Queued / Processing… / Recording…: no percentages exist, so an endless dot strip — instead of
+          a spinner — laid UNDER the label without growing the row (materials.css .kb-wk--strip). */}
+      {v.tone === 'run' && <StippleStrip />}
     </span>
   );
 }
@@ -171,7 +173,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           <Banner tone="error" title="Couldn’t load materials." actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {state.value && rows.length === 0 && (
-          <EmptyState icon="materials" title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
+          <EmptyState icon="materials" field={!all.length} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
             action={all.length ? undefined : <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add material</Button>}>
             {all.length ? 'Choose another type or folder.' : 'Record, drop files or paste a link — everything lands here.'}
           </EmptyState>

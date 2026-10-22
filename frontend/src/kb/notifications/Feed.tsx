@@ -50,7 +50,7 @@ export function NotificationsFeed() {
   }, [notifications, items.length]);
 
   if (library?.state !== 'ready') {
-    return <EmptyState icon="bell" title="No notifications" compact>Connect the library first.</EmptyState>;
+    return <EmptyState icon="bell" title="No notifications" compact field>Connect the library first.</EmptyState>;
   }
   if (load === 'error' && items.length === 0) {
     return (
@@ -85,7 +85,7 @@ export function NotificationsFeed() {
         ]} />
       </div>
       {shown.length === 0 && (
-        <EmptyState icon="bell" title={filter === 'decide' ? 'Nothing waits for a decision' : 'Nothing needs your attention'} compact />
+        <EmptyState icon="bell" title={filter === 'decide' ? 'Nothing waits for a decision' : 'Nothing needs your attention'} compact field />
       )}
       {groups.map((g) => (
         <section key={g.label} aria-label={g.label}>

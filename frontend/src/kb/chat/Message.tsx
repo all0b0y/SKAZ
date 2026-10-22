@@ -19,6 +19,7 @@ import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
+import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -199,7 +200,10 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
     <article className="kb-msg kb-msg--assistant" data-state={message.state} aria-label="Answer">
       <Tools parts={message.parts} />
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
-        {empty && message.state === 'streaming' && <p className="kb-msg__wait" role="status">Writing an answer…</p>}
+        {empty && message.state === 'streaming' && (
+          // FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
+          <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />Writing an answer…</p>
+        )}
         <SourcesProvider index={sources}>
           <Parts chatId={chatId} parts={message.parts} />
         </SourcesProvider>

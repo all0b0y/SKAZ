@@ -76,7 +76,8 @@
 }
 .kb-st-know:hover { color: var(--kb-text); background: var(--kb-accent-soft); }
 .kb-st-q { font-family: var(--kb-font-display); font-weight: 600; font-size: var(--t-lg); line-height: 1.35; margin: auto 0; text-align: center; }
-.kb-st-ans { font-size: var(--t-md); line-height: 1.5; margin: 10px 0 0; }
+/* isolation (here, .kb-st-res, .kb-st-op): the citation-chip stipple paints above the card, below the text. */
+.kb-st-ans { font-size: var(--t-md); line-height: 1.5; margin: 10px 0 0; isolation: isolate; }
 .kb-st-ex { margin: auto 0 0; padding-top: 8px; font-size: var(--t-sm); color: var(--kb-muted); display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
 .kb-st-ex b { font-weight: 600; color: var(--kb-text); white-space: nowrap; }
 .kb-st-face--flat .kb-st-ex { margin-top: 10px; }
@@ -192,7 +193,7 @@
 .kb-st-check { display: flex; justify-content: flex-end; margin-top: 10px; }
 .kb-st-res {
   display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: 13px; line-height: 1.45; padding: 8px 10px;
-  border-radius: var(--kb-r-md); border: 1px solid var(--kb-line); background: var(--kb-pane);
+  border-radius: var(--kb-r-md); border: 1px solid var(--kb-line); background: var(--kb-pane); isolation: isolate;
 }
 .kb-st-res.is-ok { border-color: var(--kb-ok); }
 .kb-st-res.is-bad { border-color: var(--kb-danger); }
@@ -200,7 +201,7 @@
 .kb-st-res.is-ok > .kb-icon, .kb-st-res.is-ok .kb-st-rt { color: var(--kb-ok); }
 .kb-st-res.is-bad > .kb-icon, .kb-st-res.is-bad .kb-st-rt { color: var(--kb-danger); }
 .kb-st-rt { font-weight: 600; }
-.kb-st-op { border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); background: var(--kb-pane); padding: 9px 11px; margin-top: 10px; font-size: 13px; line-height: 1.5; }
+.kb-st-op { border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); background: var(--kb-pane); padding: 9px 11px; margin-top: 10px; font-size: 13px; line-height: 1.5; isolation: isolate; }
 .kb-st-op b { font-weight: 600; }
 .kb-st-opl { display: flex; gap: 6px; align-items: center; font-size: var(--t-xs); color: var(--kb-muted); margin-bottom: 4px; white-space: nowrap; }
 .kb-st-opsrc { color: var(--kb-muted); }

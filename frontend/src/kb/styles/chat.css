@@ -31,6 +31,38 @@
 .kb-chat__wait { display: flex; justify-content: center; padding: 32px; }
 .kb-chat__scroll > .kb-banner { margin: 16px 22px; }
 
+/*
+ * FX (FX-EFFECTS-SPEC Batch A): the 1-bit dither field behind an empty chat. Decorative only — the
+ * canvas is aria-hidden, carries no text, and every word sits on the solid plate below it.
+ * The base `.kb-fx` rules live in fx/fx.css.
+ */
+.kb-chat__stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+/* The conversation is positioned so it paints above the canvas (DOM order, no z-index needed). */
+.kb-chat__stage > .kb-chat__scroll { position: relative; }
+/* While the first question rises, the thread is no scroll container: the bubble's 260 px offset
+   neither adds scroll height nor gets chased by the stick-to-bottom scroll; it emerges from the edge. */
+.kb-chat__stage[data-fx='leaving'] > .kb-chat__scroll { overflow: clip; }
+.kb-fx-field { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.kb-chat__stage[data-interactive='true'] { cursor: crosshair; }
+/* Reduced motion: the still frame just fades out with the first message (≤ 200 ms). */
+.kb-chat__stage[data-still='true'] .kb-fx-field { transition: opacity 200ms linear; }
+.kb-chat__stage[data-still='true'][data-fx='leaving'] .kb-fx-field { opacity: 0; }
+.kb-chat__plate { flex: none; padding: 6px 22px 10px; background: var(--kb-pane); transition: opacity 250ms ease; }
+.kb-chat__plate[data-leaving='true'] { opacity: 0; pointer-events: none; }
+.kb-chat__plate-title { font-family: var(--kb-font-display); font-weight: 600; font-size: var(--t-lg); letter-spacing: -0.01em; margin: 0 0 4px; }
+.kb-chat__plate-text { color: var(--kb-muted); font-size: var(--t-sm); line-height: 1.45; max-width: 520px; margin: 0; }
+/* The first question rises from the composer into the thread while the field burns out. */
+.kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-up 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.kb-chat__messages--fade > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
+@keyframes kb-fx-up { from { transform: translateY(260px); opacity: 0; } 35% { opacity: 1; } to { transform: none; opacity: 1; } }
+@keyframes kb-fx-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .kb-chat__plate { transition-duration: 200ms; }
+  .kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
+}
+/* «Connecting nodes» beside «Writing an answer…» (FX §7). */
+.kb-msg__think { width: 84px; height: 16px; flex: none; }
+
 .kb-msg { display: flex; flex-direction: column; min-width: 0; }
 .kb-msg--user { align-items: flex-end; }
 .kb-msg__bubble {
@@ -44,8 +76,9 @@
 }
 .kb-msg__attach { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-msg--assistant { align-items: stretch; }
-.kb-msg__body { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
-.kb-msg__wait { color: var(--kb-muted); }
+/* Own stacking context: a citation chip's stipple canvas (z-index:-1) paints above the pane, below the text (F1). */
+.kb-msg__body { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; isolation: isolate; }
+.kb-msg__wait { color: var(--kb-muted); display: flex; align-items: center; gap: 10px; }
 .kb-msg__note { color: var(--kb-muted); font-size: var(--t-sm); margin-top: 4px; }
 .kb-msg__actions { display: flex; gap: 2px; margin-top: 6px; color: var(--kb-muted); }
 /*

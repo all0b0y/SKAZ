@@ -5,6 +5,7 @@ import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import type { CaptureCallbacks, CaptureEngine } from './capture';
 import { SystemAudioUnavailable } from '../../audio/recorder';
+import { SPEECH_BAR_W } from '../fx/indicators/speech';
 
 function engine() {
   let cb: CaptureCallbacks | null = null;
@@ -58,13 +59,49 @@ describe('Recording: "Record | Folder ▾", capsule, live panel (decisions 26–
     const live = await screen.findByRole('complementary', { name: 'Live recording' });
     expect(within(live).getByRole('heading', { level: 2, name: 'Recording 15 Oct, 09:00' })).toBeInTheDocument();
     // Bars: still in silence, the real level when there is sound — never animated by CSS.
-    const bars = () => Array.from(capsule.querySelectorAll('.kb-lvl i')).map((i) => (i as HTMLElement).style.height);
-    expect(bars()).toEqual(['4px', '4px', '4px']);
+    const lvl = capsule.querySelector('.kb-lvl')!;
+    expect(lvl).toHaveAttribute('aria-hidden', 'true');
+    expect(lvl.querySelector('canvas.kb-fx')).toHaveAttribute('aria-hidden', 'true');
+    const bars = () => (lvl.getAttribute('data-levels') ?? '').split(',');
+    expect(bars()).toEqual(['0', '0', '0']);
     eng.level(-8);
-    expect(bars().some((h) => h !== '4px')).toBe(true);
+    expect(bars().some((h) => h !== '0')).toBe(true);
     eng.level(-70);
-    expect(bars()).toEqual(['4px', '4px', '4px']);
+    expect(bars()).toEqual(['0', '0', '0']);
     window.removeEventListener('kb:open-chat', asked as EventListener);
+  });
+
+  it('the level bars are REDRAWN from the real level: taller bars with sound, 2-px bars in silence', async () => {
+    // A recording 2D context for the speech canvas only (36×14 css px); every other canvas keeps jsdom's null.
+    const bars: number[][] = [];
+    const ctx = { setTransform: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn((...a: number[]) => { if (a[2] === SPEECH_BAR_W) bars.at(-1)?.push(a[3]!); }), fillStyle: '' };
+    const speech = (el: HTMLCanvasElement) => el.classList.contains('kb-fx-speech');
+    const realGet = HTMLCanvasElement.prototype.getContext;
+    const realRect = HTMLCanvasElement.prototype.getBoundingClientRect;
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement, ...a: unknown[]) {
+      return speech(this) ? (ctx as never) : (realGet as (...x: unknown[]) => never).apply(this, a);
+    });
+    const rect = vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLCanvasElement) {
+      return speech(this) ? ({ width: 36, height: 14, left: 0, top: 0, right: 36, bottom: 14, x: 0, y: 0, toJSON: () => ({}) }) : realRect.apply(this);
+    });
+    ctx.clearRect.mockImplementation(() => { bars.push([]); }); // one clear per drawn frame
+    try {
+      const { user, bar, record, eng } = await start();
+      await user.click(record);
+      await within(bar).findByRole('button', { name: /^Recording/ });
+      const frame = () => bars.at(-1) ?? [];
+      await waitFor(() => expect(frame()).toHaveLength(7));
+      expect(frame().every((h) => h === 2)).toBe(true); // silence: still, short bars
+      const before = bars.length;
+      eng.level(-8);
+      expect(bars.length).toBeGreaterThan(before); // a new frame was painted for the new level
+      expect(Math.max(...frame())).toBeGreaterThan(2);
+      eng.level(-70);
+      expect(frame().every((h) => h === 2)).toBe(true);
+    } finally {
+      getContext.mockRestore();
+      rect.mockRestore();
+    }
   });
 
   it('clicking the capsule shows the row: pause, stop, original / translation / both', async () => {

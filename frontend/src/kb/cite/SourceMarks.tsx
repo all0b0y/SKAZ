@@ -4,6 +4,7 @@ import { Icon, Popover } from '../ui';
 import { clock } from '../ui/time';
 import { citationRef, useOpenDocument } from '../state/document';
 import { useFold } from '../state/context';
+import { ChipStipple } from '../fx/stipple';
 import { useFragmentText } from './fragments';
 import { claimSources, indexSources, type SourceEntry, type SourceIndex } from './sources';
 
@@ -129,6 +130,8 @@ function SourceTrigger({ entry, quotes, row = false }: { entry: SourceEntry; quo
             <span className="kb-srcs__title">{entry.title}</span>
           </>
         ) : entry.n}
+        {/* Decorative dots behind the chip while it is hovered or focused (aria-hidden, no text). */}
+        <ChipStipple on={state !== 'closed'} />
       </button>
       <Popover open={state !== 'closed'} onClose={close} anchorRef={ref} label={entry.title}
         autoFocus={state === 'pinned'} className="kb-srcpop-wrap">

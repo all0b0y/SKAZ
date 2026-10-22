@@ -5,6 +5,7 @@ import { Button, Icon, type IconName } from '../ui';
 import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';
 import { isWithoutSpeech, NO_SPEECH_REASON } from './NoSpeech';
+import { StippleStrip } from '../fx/stipple';
 
 const STEP_LABEL: Record<string, string> = {
   reading: 'Reading the material',
@@ -44,7 +45,7 @@ function useElapsed(startedAt: string | null | undefined): string | null {
 /** The running step with live progress and the time it has taken so far (C1-f): a sign of life. */
 function RunningPill({ job }: { job: KbJob }) {
   const elapsed = useElapsed(job.step_started_at);
-  return <Pill tone="run" spin>{elapsed ? `${stepLabel(job)} · ${elapsed}` : stepLabel(job)}</Pill>;
+  return <Pill tone="run">{elapsed ? `${stepLabel(job)} · ${elapsed}` : stepLabel(job)}</Pill>;
 }
 
 const SPEECH: ReadonlyArray<KbMaterial['kind']> = ['recording', 'audio', 'video', 'video_link'];
@@ -54,10 +55,9 @@ const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
 /** The pill of a material whose wiki budget is used up (also explained in the wiki legend). */
 export const BUDGET_PAUSED_LABEL = 'Paused · budget reached';
 
-export function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
+export function Pill({ tone, icon, children, onClick, label, wrap }: {
   tone: 'done' | 'run' | 'todo' | 'error' | 'warn';
   icon?: IconName;
-  spin?: boolean;
   children: string;
   onClick?: () => void;
   label?: string;
@@ -66,7 +66,7 @@ export function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
 }) {
   const body = (
     <>
-      {spin ? <span className="kb-spinner kb-spinner--xs" aria-hidden="true" /> : icon ? <Icon name={icon} size={12} /> : null}
+      {icon ? <Icon name={icon} size={12} /> : null}
       <span>{children}</span>
       {onClick && <Icon name="external" size={11} />}
     </>
@@ -118,11 +118,15 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   const wiki = material.wiki as KbMaterialWiki | undefined;
   const counts = material.correction_counts;
   const silent = isWithoutSpeech(material);
+  // Any running status in this strip: one indeterminate dot strip in its own row (no percentages
+  // exist). It is the only progress indicator: the running pills carry no spinner (FX B2).
+  const inProgress = material.status === 'recording' || material.status === 'processing' || !!running
+    || wiki?.state === 'processing' || wiki?.state === 'queued';
 
   return (
     <div className="kb-pipe" aria-label="Processing">
-      {material.status === 'recording' && <Pill tone="run" spin>Recording</Pill>}
-      {material.status === 'processing' && <Pill tone="run" spin>{speech ? 'Recognising…' : 'Reading…'}</Pill>}
+      {material.status === 'recording' && <Pill tone="run">Recording</Pill>}
+      {material.status === 'processing' && <Pill tone="run">{speech ? 'Recognising…' : 'Reading…'}</Pill>}
       {material.status === 'processing' && IMPORTED.includes(material.kind) && <StopImport materialId={material.id} />}
       {material.status === 'failed' && <Pill tone="error" icon="warning">{speech ? 'Recognition failed' : 'Couldn’t read'}</Pill>}
       {material.status === 'ready' && (silent ? <Pill tone="warn" icon="warning">No speech recognised</Pill>
@@ -131,8 +135,8 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
       {speech && counts.applied > 0 && <Pill tone="done" icon="check">{plural(counts.applied, 'correction')}</Pill>}
       {speech && counts.doubtful > 0 && <Pill tone="warn" icon="warning">{`${counts.doubtful} doubtful`}</Pill>}
       {running && <RunningPill job={running} />}
-      {!running && wiki?.state === 'processing' && <Pill tone="run" spin>Adding to the wiki</Pill>}
-      {!running && wiki?.state === 'queued' && <Pill tone="run" spin>Queued for the wiki</Pill>}
+      {!running && wiki?.state === 'processing' && <Pill tone="run">Adding to the wiki</Pill>}
+      {!running && wiki?.state === 'queued' && <Pill tone="run">Queued for the wiki</Pill>}
       {wiki?.state === 'in_wiki' && wiki.note_page_id && (
         <Pill tone="done" icon="pdf" label="Open the notes" onClick={() => openDocument({ type: 'page', id: wiki.note_page_id! })}>Notes</Pill>
       )}
@@ -175,6 +179,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
           <Button size="sm" variant="quiet" icon="retry" busy={adding} onClick={onAddToWiki}>Try again</Button>
         </>
       )}
+      {inProgress && <StippleStrip />}
     </div>
   );
 }

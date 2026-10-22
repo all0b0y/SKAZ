@@ -250,7 +250,7 @@ export function WikiSide() {
         </>
       )}
       {pages.length === 0 && (
-        <EmptyState icon="wiki" title="The wiki is empty" compact>
+        <EmptyState icon="wiki" title="The wiki is empty" compact field>
           Concepts, notes and analyses appear as materials are added to the wiki.
         </EmptyState>
       )}

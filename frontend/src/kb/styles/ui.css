@@ -304,6 +304,11 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-empty__title { font-weight: 600; }
 .kb-empty__text { color: var(--kb-muted); font-size: var(--t-sm); line-height: 1.45; }
 .kb-empty__action { margin-top: 6px; }
+/* Opt-in «Dither · Connect» field above the icon (fx/dither/MiniDither). Decorative, on its own area. */
+.kb-empty__field { width: 100%; height: 70px; margin-bottom: 6px; }
+.kb-empty__field--compact { height: 40px; margin-bottom: 4px; }
+.kb-empty__field .kb-fx-mini { width: 100%; height: 100%; display: block; }
+.kb-empty__field[data-interactive='true'] .kb-fx-mini { cursor: pointer; }
 
 /* ---- Badge and dots ---- */
 .kb-badge {
