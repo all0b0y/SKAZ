@@ -31,8 +31,9 @@ html[data-kb-ui] {
   --kb-folder-2: #7046b8;
   --kb-folder-3: #5a7420;
   --kb-folder-4: #11746a;
-  /* FX effects (FX-EFFECTS-SPEC): the one colour an effect flashes during an interaction. Light = olive. */
-  --kb-fx-accent: var(--kb-folder-3);
+  /* FX effects (FX-EFFECTS-SPEC): the one colour an effect flashes during an interaction. Light = dark cocoa
+     (chosen 2026-10-22; the folder olive stays a folder colour). */
+  --kb-fx-accent: #4a2c20;
   --kb-fill: #2c2e31;
   --kb-on-fill: #f9f8f3;
   --kb-fill-border: #2c2e31;

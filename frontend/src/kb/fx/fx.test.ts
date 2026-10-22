@@ -70,7 +70,7 @@ describe('fx/colors', () => {
   it('readFxColors takes ink / accent from the tokens, with light fallbacks (no painter reads the pane)', () => {
     const el = document.createElement('div');
     document.body.appendChild(el);
-    expect(readFxColors(el)).toEqual({ ink: [44, 46, 49], accent: [90, 116, 32] });
+    expect(readFxColors(el)).toEqual({ ink: [44, 46, 49], accent: [74, 44, 32] });
     el.style.setProperty('--kb-text', '#f9f8f3');
     el.style.setProperty('--kb-fx-accent', '#bfa4f4');
     expect(readFxColors(el)).toEqual({ ink: [249, 248, 243], accent: [191, 164, 244] });

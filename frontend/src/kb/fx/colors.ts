@@ -13,7 +13,7 @@ export interface FxColors {
   pane?: Rgb;
 }
 
-const FALLBACK = { ink: [44, 46, 49], accent: [90, 116, 32] } as const satisfies FxColors;
+const FALLBACK = { ink: [44, 46, 49], accent: [74, 44, 32] } as const satisfies FxColors;
 
 /** `#rgb`, `#rrggbb` or `rgb(a)(r, g, b…)` → Rgb; null when it can't be read. */
 export function parseColor(value: string): Rgb | null {

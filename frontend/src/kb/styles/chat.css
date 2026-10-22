@@ -26,7 +26,8 @@
 }
 .kb-chat__scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 .kb-chat__messages { display: flex; flex-direction: column; gap: 14px; padding: 16px 22px 20px; width: 100%; }
-/* Answers keep a readable line length; the question sits at the right edge (v39). */
+/* Answers keep a readable line length; the question sits at the right edge (v39). The chat backdrop
+   keeps this column clear: change fx/backdrop CHAT_COLUMN with the 22 px padding or the 760 px. */
 .kb-msg--assistant > * { max-width: 760px; }
 .kb-chat__wait { display: flex; justify-content: center; padding: 32px; }
 .kb-chat__scroll > .kb-banner { margin: 16px 22px; }
@@ -47,6 +48,14 @@
 /* Reduced motion: the still frame just fades out with the first message (≤ 200 ms). */
 .kb-chat__stage[data-still='true'] .kb-fx-field { transition: opacity 200ms linear; }
 .kb-chat__stage[data-still='true'][data-fx='leaving'] .kb-fx-field { opacity: 0; }
+/*
+ * CHAT-BACKDROP-SPEC: behind a chat with messages, three faint dither patches that move only while
+ * the agent writes (fx/backdrop). It fills the stage (not the scroll content), so it stays put while
+ * the thread scrolls; the thread paints above it. It fades in when the empty field has burnt out.
+ * Its «keep text clear» column follows .kb-chat__messages / .kb-msg--assistant below (CHAT_COLUMN).
+ */
+.kb-chat__backdrop { position: absolute; inset: 0; pointer-events: none; animation: kb-fx-fade 600ms ease both; }
+.kb-fx-backdrop { width: 100%; height: 100%; }
 .kb-chat__plate { flex: none; padding: 6px 22px 10px; background: var(--kb-pane); transition: opacity 250ms ease; }
 .kb-chat__plate[data-leaving='true'] { opacity: 0; pointer-events: none; }
 .kb-chat__plate-title { font-family: var(--kb-font-display); font-weight: 600; font-size: var(--t-lg); letter-spacing: -0.01em; margin: 0 0 4px; }
@@ -58,6 +67,7 @@
 @keyframes kb-fx-fade { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .kb-chat__plate { transition-duration: 200ms; }
+  .kb-chat__backdrop { animation-duration: 200ms; }
   .kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
 }
 /* «Connecting nodes» beside «Writing an answer…» (FX §7). */

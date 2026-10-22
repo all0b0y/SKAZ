@@ -18,8 +18,9 @@ import { DiagramFixProvider, type DiagramFix } from '../ui/markdown/Diagram';
 import { diagramFixRequest, fixLanguage } from './diagramFix';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
-import type { ChatsData, ChatsStore } from '../state/chats';
+import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
 import { DitherStage } from '../fx/dither/DitherStage';
+import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -183,6 +184,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const emptyView = !currentId || (!!chat && chat.messages.length === 0);
   const leavingHere = !!currentId && leaving === currentId;
   const showField = emptyView || leavingHere;
+  // CHAT-BACKDROP-SPEC: a chat with messages has the backdrop instead — never both: it comes when the
+  // first message's burn-out has ended, and moves only while an answer is being written.
+  const showBackdrop = !showField && !!chat && chat.messages.length > 0;
   const newCopy = !currentId || (currentId === bornHere && !recording);
   const enter = leavingHere ? (reduced ? ' kb-chat__messages--fade' : ' kb-chat__messages--enter') : '';
   // F3: no text over the burning field — only the rising question until the burn-out ends; the
@@ -209,6 +213,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
       <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={reduced}>
+      {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
         {currentId && open?.load === 'loading' && !chat && <div className="kb-chat__wait"><Spinner label="Opening the chat" /></div>}
