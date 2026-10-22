@@ -161,19 +161,28 @@ for (const theme of THEMES) {
       await shot(`add-provider-${size.name}-${theme}`);
     });
 
-    test(`study block: long title, Rename, fold and a long save error keep the buttons — ${size.name} ${theme}`, async () => {
+    test(`study block: long title (click to rename), fold and a long save error keep the buttons — ${size.name} ${theme}`, async () => {
       await open(theme, size);
       await page.getByRole('region', { name: 'Chats' }).getByRole('button', { name: /Lecture 8 — cards/ }).click();
       const deck = page.getByRole('region', { name: /^Flashcards: ИТ-аудит/ });
       const head = (await deck.locator('.kb-st-head').boundingBox())!;
-      for (const name of ['Rename', 'Collapse']) {
-        const b = (await deck.getByRole('button', { name }).boundingBox())!;
+      const grow = (await deck.getByRole('button', { name: 'Bigger — beside the chat' }).boundingBox())!;
+      for (const b of [
+        (await deck.getByRole('button', { name: /^Rename: ИТ-аудит/ }).boundingBox())!,
+        (await deck.getByRole('button', { name: 'Collapse' }).boundingBox())!,
+        grow,
+      ]) {
         expect(right(b)).toBeLessThanOrEqual(right(head) + 1);
         expect(b.y).toBeGreaterThanOrEqual(head.y - 1);
       }
+      // The long title ellipsizes before the size button; it never sits on it.
+      expect(overlaps((await deck.getByRole('button', { name: /^Rename: ИТ-аудит/ }).boundingBox())!, grow)).toBe(false);
       await deck.getByRole('button', { name: 'Save to wiki' }).click();
       const error = deck.locator('.kb-st-save .kb-st-error');
       await expect(error).toContainText('Не удалось сохранить');
+      // The block's layout animation (the taller 3:2 card) may still be moving the row: measure once it has settled.
+      const box = async () => JSON.stringify([await error.boundingBox(), await deck.getByRole('button', { name: 'Save to wiki' }).boundingBox()]);
+      await expect.poll(async () => { const a = await box(); await page.waitForTimeout(120); return a === await box(); }, { timeout: 5000 }).toBe(true);
       const save = (await deck.getByRole('button', { name: 'Save to wiki' }).boundingBox())!;
       const deny = (await deck.getByRole('button', { name: 'Deny' }).boundingBox())!;
       const err = (await error.boundingBox())!;

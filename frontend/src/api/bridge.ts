@@ -175,25 +175,8 @@ export interface BridgeApi {
   onPrepareQuit?(listener: () => Promise<boolean>): () => void;
   /** Whether this OS can capture whole-system audio (macOS 14.2+, Windows). */
   readonly systemAudioSupported?: boolean;
-  /**
-   * 0.3.1 S (W2): a deck or test block in a small window of its own, with the same chat below it.
-   * One such window at a time (A-4): opening another block replaces it. Main window only.
-   */
-  openStudyWindow?(target: StudyWindowTarget): Promise<boolean>;
-  /** Close the block's window (the block went back to the chat or beside it). Either window. */
-  closeStudyWindow?(): Promise<boolean>;
-  /** The user closed the block's window: the main window brings the block back into the chat. */
-  onStudyWindowClosed?(listener: (target: StudyWindowTarget) => void): () => void;
-  /** The window entered or left macOS full screen (sent once on load, then on every change). Either window. */
+  /** The window entered or left macOS full screen (sent once on load, then on every change). */
   onFullScreen?(listener: (fullScreen: boolean) => void): () => void;
-  /** Set in the block's own window: which block and chat it shows (from its URL, checked by main). */
-  readonly studyWindow?: StudyWindowTarget | null;
-}
-
-/** The block a study window shows: ids as the backend gave them (one path segment each). */
-export interface StudyWindowTarget {
-  studyId: string;
-  chatId: string;
 }
 
 declare global {

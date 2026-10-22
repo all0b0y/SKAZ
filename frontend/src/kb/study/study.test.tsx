@@ -5,7 +5,8 @@ import type { KbStudyPart } from '../../api/kb/types.gen';
 import { serveFake, type FakeWorld } from '../test/fakeKb';
 import { studyWorld } from '../test/fixtures';
 import { renderKb } from '../test/renderKb';
-import type { HttpMethod, StudyWindowTarget } from '../../api/bridge';
+import type { BridgeRequest, HttpMethod } from '../../api/bridge';
+import { createFakeBridge } from '../test/fakeBridge';
 
 const call = (w: FakeWorld, method: HttpMethod, path: string, body?: unknown) => serveFake(w, { method, path, body });
 const block = (w: FakeWorld, id: string) =>
@@ -102,7 +103,8 @@ describe('Flashcards in the chat (variant C)', () => {
   it('Rename (U3): a new title without a new agent run; the page path drops characters a file can\'t hold', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-    await user.click(within(deck).getByRole('button', { name: 'Rename' }));
+    expect(within(deck).queryByRole('button', { name: 'Rename' })).toBeNull(); // no pencil: the title itself renames
+    await user.click(within(deck).getByRole('button', { name: 'Rename: Lecture 8' }));
     const field = within(deck).getByRole('textbox', { name: 'Deck name' });
     await user.clear(field);
     await user.type(field, 'Lecture 8: entropy{Enter}');
@@ -110,9 +112,54 @@ describe('Flashcards in the chat (variant C)', () => {
     expect(within(renamed).getByText('Wiki/Decks/Lecture 8 entropy.md')).toBeInTheDocument();
     expect(fake.calls.filter((c) => c.path === '/kb/study/st-deck/rename')).toHaveLength(1);
     expect(fake.calls.some((c) => c.path.endsWith('/messages'))).toBe(false);
-    await user.click(within(renamed).getByRole('button', { name: 'Rename' }));
+    await user.click(within(renamed).getByRole('button', { name: 'Rename: Lecture 8: entropy' }));
     await user.keyboard('{Escape}');
     expect(within(renamed).queryByRole('textbox', { name: 'Deck name' })).toBeNull();
+    expect(within(renamed).getByRole('button', { name: 'Rename: Lecture 8: entropy' })).toHaveFocus();
+  });
+
+  it('the title opens rename from the keyboard (Enter, F2); Esc cancels; Space on the title or in the field never flips the card', async () => {
+    const { user, fake } = await openChat(/Lecture 8 — cards/);
+    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    const title = within(deck).getByRole('button', { name: 'Rename: Lecture 8' });
+    expect(title).toHaveClass('kb-st-title__btn');
+    expect(title).toHaveTextContent(/^Lecture 8$/); // only the name, not «Flashcards ·»
+    expect(within(deck).getByText('Flashcards ·')).toBeInTheDocument();
+    const before = fake.calls.length;
+
+    title.focus();
+    await user.keyboard('{Enter}');
+    let field = within(deck).getByRole('textbox', { name: 'Deck name' });
+    expect(field).toHaveFocus();
+    await user.keyboard(' x');
+    expect(field).toHaveValue('Lecture 8 x');
+    expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull(); // not flipped
+    await user.keyboard('{Escape}');
+    expect(within(deck).queryByRole('textbox', { name: 'Deck name' })).toBeNull();
+    const back = within(deck).getByRole('button', { name: 'Rename: Lecture 8' });
+    expect(back).toHaveFocus();
+
+    await user.keyboard(' ');
+    field = await within(deck).findByRole('textbox', { name: 'Deck name' }); // Space activates the title: rename, no flip
+    expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull();
+    await user.keyboard('{Escape}');
+    within(deck).getByRole('button', { name: 'Rename: Lecture 8' }).focus();
+    await user.keyboard('{F2}');
+    expect(within(deck).getByRole('textbox', { name: 'Deck name' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(fake.calls.slice(before).filter((c) => c.path.startsWith('/kb/study/'))).toEqual([]); // nothing renamed, nothing flipped
+  });
+
+  it('a block the agent didn\'t make (Study from a deck page) has a plain title: no rename', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: studyWorld() });
+    await screen.findByRole('region', { name: 'Chats' });
+    act(() => services.ui.getState().openDocument({ type: 'page', id: 'p-deck' }));
+    await user.click(await screen.findByRole('button', { name: 'Hard first' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    const deck = within(panel).getByRole('region', { name: 'Flashcards: Thermodynamics' });
+    expect(within(deck).getByText('Thermodynamics')).toHaveClass('kb-st-title__text');
+    expect(within(deck).queryByRole('button', { name: /^Rename/ })).toBeNull();
   });
 
   it('U2: a deck starts open, folds to its title line without losing its place, and stays folded after a restart', async () => {
@@ -121,9 +168,12 @@ describe('Flashcards in the chat (variant C)', () => {
     const fold = within(deck).getByRole('button', { name: 'Collapse' });
     expect(fold).toHaveAttribute('aria-expanded', 'true');
     const before = fake.calls.length;
+    // The fold chevron comes first, before the icon and the title (chat only).
+    expect(deck.querySelector('.kb-st-head')!.firstElementChild).toBe(fold);
     await user.click(fold);
     expect(within(deck).queryByRole('progressbar')).toBeNull();
-    expect(within(deck).getByText('Flashcards · Lecture 8')).toBeInTheDocument();
+    expect(within(deck).getByText('Flashcards ·')).toBeInTheDocument();
+    expect(within(deck).getByRole('button', { name: 'Rename: Lecture 8' })).toBeInTheDocument();
     expect(within(deck).getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false');
     expect(fake.calls.slice(before)).toEqual([]); // no agent, no request
     unmount();
@@ -136,12 +186,12 @@ describe('Flashcards in the chat (variant C)', () => {
     expect(within(deck).getByText('1 / 3')).toBeInTheDocument();
   });
 
-  it('U2 (decision 5): a folded deck opened beside the chat is open there; the thread keeps a folded "Open in panel" row; back in the chat the fold is kept', async () => {
+  it('U2 (decision 5): a folded deck opened beside the chat is open there; the thread keeps a folded "Open beside the chat" row; back in the chat the fold is kept', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     let deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     await user.click(within(deck).getByRole('button', { name: 'Collapse' }));
     const before = fake.calls.length;
-    await user.click(within(deck).getByRole('button', { name: 'Open beside the chat' }));
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
 
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const beside = within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' });
@@ -152,7 +202,8 @@ describe('Flashcards in the chat (variant C)', () => {
 
     const row = screen.getByRole('group', { name: 'Flashcards: Lecture 8' });
     expect(within(row).getByText('Flashcards · Lecture 8')).toBeInTheDocument();
-    expect(within(row).getByText('Open in panel')).toBeInTheDocument();
+    expect(within(row).getByText('Open beside the chat')).toBeInTheDocument();
+    expect(row.querySelector('.kb-st-ph__where [data-icon="panelRight"]')).not.toBeNull();
     expect(within(row).queryByRole('progressbar')).toBeNull();
     expect(fake.calls.slice(before).map((c) => `${c.method} ${c.path}`).filter((c) => c.startsWith('POST') || c.includes('/kb/study/')))
       .toEqual(['PATCH /kb/study/st-deck']); // folding and moving call no agent
@@ -168,12 +219,12 @@ describe('Flashcards in the chat (variant C)', () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(screen.queryByRole('note', { name: /Agent sees/ })).toBeNull();
-    await user.click(within(deck).getByRole('button', { name: 'Open beside the chat' }));
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     expect(within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' })).toBeInTheDocument();
     expect(screen.getAllByRole('region', { name: 'Flashcards: Lecture 8' })).toHaveLength(1);
     const placeholder = screen.getByRole('group', { name: 'Flashcards: Lecture 8' });
-    expect(within(placeholder).getByText('Open in panel')).toBeInTheDocument();
+    expect(within(placeholder).getByText('Open beside the chat')).toBeInTheDocument();
     expect(screen.getByRole('note', { name: 'Agent sees: Flashcards, card 1 of 3 · question side, beside the chat' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('textbox', { name: 'Message' }));
@@ -188,34 +239,102 @@ describe('Flashcards in the chat (variant C)', () => {
     expect(fake.world.chats.find((c) => c.id === 'c12')!.messages[1]!.parts.find((p) => p.type === 'study')).toMatchObject({ place: 'chat' });
   });
 
-  it('closing the panel brings the block back into the chat', async () => {
+  it('one size button, two states: ⤢ in the chat, ⤡ beside it; the panel has no header or × of its own', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-    await user.click(within(deck).getByRole('button', { name: 'Open beside the chat' }));
+    const route = deck.querySelector('.kb-st-route')!;
+    expect(within(route as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Bigger — beside the chat']);
+    expect(route.querySelector('[data-icon="grow"]')).not.toBeNull();
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
+
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
-    await user.click(within(panel).getByRole('button', { name: 'Close — back into the chat' }));
+    const beside = within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' });
+    const sized = beside.querySelector('.kb-st-route')!;
+    expect(within(sized as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Smaller — back into the chat']);
+    expect(sized.querySelector('[data-icon="shrink"]')).not.toBeNull();
+    expect(within(beside).getByText('Flashcards ·')).toBeInTheDocument(); // the full «Kind · Title» beside the chat too
+    expect(within(beside).getByRole('button', { name: 'Rename: Lecture 8' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: /Close/ })).toBeNull();
+    expect(panel.querySelector('.kb-head')).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Bigger — beside the chat' })).toBeNull();
+
+    await user.click(within(beside).getByRole('button', { name: 'Smaller — back into the chat' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
+    const back = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    expect(within(back).getByRole('button', { name: 'Bigger — beside the chat' })).toBeInTheDocument();
+    await waitFor(() => expect(back).toHaveFocus());
+    await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('chat'));
+  });
+
+  it('closing the panel another way (Esc) still brings the block back into the chat', async () => {
+    const { user, fake, services } = await openChat(/Lecture 8 — cards/);
+    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
+    await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('panel'));
+    act(() => services.ui.getState().closeDoc());
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
     await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('chat'));
   });
 
-  it('opens in its own window through main and comes back when the window is closed', async () => {
-    let closed: ((t: StudyWindowTarget) => void) | null = null;
+  it('no separate window anywhere, even on a host that still offers one', async () => {
     const openStudyWindow = vi.fn(async () => true);
-    const closeStudyWindow = vi.fn(async () => true);
-    const { user, fake } = await openChat(/Lecture 8 — cards/, {
-      bridge: {
-        openStudyWindow, closeStudyWindow,
-        onStudyWindowClosed: (listener) => { closed = listener; return () => { closed = null; }; },
-      },
+    const { user } = await openChat(/Lecture 8 — cards/, {
+      // An old preload's members: nothing in the interface reads them any more.
+      bridge: { openStudyWindow, closeStudyWindow: vi.fn(async () => true), onStudyWindowClosed: () => () => undefined } as never,
     });
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-    await user.click(within(deck).getByRole('button', { name: 'Open in a separate window' }));
-    await waitFor(() => expect(openStudyWindow).toHaveBeenCalledWith({ studyId: 'st-deck', chatId: 'c12' }));
-    expect(within(screen.getByRole('group', { name: 'Flashcards: Lecture 8' })).getByText('Open in window')).toBeInTheDocument();
-    await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('window'));
-    act(() => closed?.({ studyId: 'st-deck', chatId: 'c12' }));
-    expect(await screen.findByRole('region', { name: 'Flashcards: Lecture 8' })).toBeInTheDocument();
+    expect(within(deck).queryByRole('button', { name: /window/i })).toBeNull();
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    expect(within(panel).queryByRole('button', { name: /window/i })).toBeNull();
+    expect(screen.queryByText(/window/i)).toBeNull();
+    expect(openStudyWindow).not.toHaveBeenCalled();
+  });
+
+  it('the panel of a block that is gone keeps a way out: Close', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: studyWorld() });
+    await screen.findByRole('region', { name: 'Chats' });
+    act(() => services.ui.getState().openStudy('c12', 'st-gone'));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    expect(within(panel).getByText('This block isn’t here any more')).toBeInTheDocument();
+    await user.click(within(panel).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
+  });
+});
+
+describe('A block stored in the retired own window (place «window»)', () => {
+  it('shows in the chat, not as a placeholder, and the backend is told once that it is in the chat', async () => {
+    const world = studyWorld();
+    call(world, 'PATCH', '/kb/study/st-deck', { place: 'window' });
+    const { fake } = await openChat(/Lecture 8 — cards/, { world });
+    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    expect(within(deck).getByRole('button', { name: 'Bigger — beside the chat' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Flashcards: Lecture 8' })).toBeNull();
     await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('chat'));
+    const moves = fake.calls.filter((c) => c.method === 'PATCH' && c.path === '/kb/study/st-deck');
+    expect(moves.map((c) => c.body)).toEqual([{ place: 'chat' }]);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fake.calls.filter((c) => c.method === 'PATCH' && c.path === '/kb/study/st-deck')).toHaveLength(1);
+    expect(screen.queryByRole('note', { name: /window/ })).toBeNull();
+  });
+
+  it('a failed move is ignored: the block stays in the chat, no error, no retry', async () => {
+    const world = studyWorld();
+    call(world, 'PATCH', '/kb/study/st-deck', { place: 'window' });
+    const inner = createFakeBridge(world);
+    const request = vi.fn((req: BridgeRequest) => (req.method === 'PATCH' && req.path === '/kb/study/st-deck'
+      ? Promise.resolve({ ok: false as const, status: 503, detail: 'Backend is busy' })
+      : inner.bridge.request(req)));
+    await openChat(/Lecture 8 — cards/, { world, bridge: { request: request as never } });
+    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    await waitFor(() => expect(request.mock.calls.filter(([r]) => r.method === 'PATCH' && r.path === '/kb/study/st-deck')).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole('region', { name: 'Flashcards: Lecture 8' })).toBe(deck);
+    expect(within(deck).queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('Backend is busy')).toBeNull();
+    expect(request.mock.calls.filter(([r]) => r.method === 'PATCH' && r.path === '/kb/study/st-deck')).toHaveLength(1);
   });
 });
 
@@ -252,6 +371,39 @@ describe('A test in the chat', () => {
     await user.click(within(test).getByRole('button', { name: 'Retake mistakes · 2' }));
     await waitFor(() => expect(within(test).getByText('1 / 2')).toBeInTheDocument());
     expect(fake.calls.find((c) => c.path.endsWith('/retake'))?.body).toEqual({ mistakes_only: true });
+  });
+
+  it('options carry A/B/C keys; with the block focused A/B/C or 1/2/3 pick one (radio semantics kept); typing in a field doesn\'t', async () => {
+    const { user, fake } = await openChat(/Lecture 8 — test/);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    const options = within(test).getAllByRole('radio');
+    expect(options.map((o) => o.querySelector('.kb-st-key')?.textContent)).toEqual(['A', 'B', 'C']);
+    expect(options.map((o) => o.getAttribute('aria-keyshortcuts'))).toEqual(['A 1', 'B 2', 'C 3']);
+    expect(options[0]).toHaveAccessibleName('S = k·W²'); // the badge is not read as part of the option
+    expect(test.querySelector('.kb-st-rad, .kb-st-box')).toBeNull();
+
+    test.focus();
+    await user.keyboard('b');
+    expect(within(test).getByRole('radio', { name: 'S = k·ln W' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(test).getByRole('radio', { name: 'S = k·W²' })).toHaveAttribute('aria-checked', 'false');
+    await user.keyboard('1');
+    expect(within(test).getByRole('radio', { name: 'S = k·W²' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(test).getByRole('radio', { name: 'S = k·ln W' })).toHaveAttribute('aria-checked', 'false');
+    await user.keyboard('d'); // no fourth option: nothing changes
+    expect(within(test).getByRole('radio', { name: 'S = k·W²' })).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(screen.getByRole('textbox', { name: 'Message' }));
+    await user.keyboard('c');
+    expect(within(test).getByRole('radio', { name: 'S = W / k' })).toHaveAttribute('aria-checked', 'false');
+    expect(fake.calls.filter((c) => c.path.endsWith('/answer'))).toEqual([]); // picking sends nothing; Check does
+
+    await user.click(within(test).getByRole('button', { name: 'Check' }));
+    expect(await within(test).findByText('Not quite.')).toBeInTheDocument();
+    expect(fake.calls.find((c) => c.path.endsWith('/answer'))?.body).toEqual({ item_id: 'q-1', choices: ['w0'] });
+    test.focus();
+    await user.keyboard('b'); // checked: keys pick nothing any more
+    expect(within(test).getByRole('radio', { name: /S = k·ln W/ })).toHaveAttribute('aria-checked', 'false');
+    expect(within(test).getByRole('radio', { name: /S = k·ln W/ }).closest('.kb-st-opt')).toHaveClass('is-ok');
   });
 
   it('the chat stays free while the agent checks an open answer', async () => {
@@ -331,50 +483,5 @@ describe('The deck page (S12)', () => {
     await user.clear(field);
     await user.type(field, '5{Enter}');
     await waitFor(() => expect(fake.world.studyNewPerDay).toBe(5));
-  });
-});
-
-// ---- the block's own window -------------------------------------------------------------------------
-
-describe('The block in its own window (W2)', () => {
-  it('shows the block and the same chat below it; closes itself when the block goes back', async () => {
-    const { StudyWindowApp } = await import('./StudyWindowApp');
-    const { createFakeBridge } = await import('../test/fakeBridge');
-    const { render } = await import('@testing-library/react');
-    const world = studyWorld();
-    call(world, 'PATCH', '/kb/study/st-deck', { place: 'window' });
-    const fake = createFakeBridge(world);
-    const closeStudyWindow = vi.fn(async () => true);
-    render(<StudyWindowApp target={{ studyId: 'st-deck', chatId: 'c12' }} bridge={{ ...fake.bridge, closeStudyWindow }} />);
-    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-    expect(within(deck).queryByRole('button', { name: 'Open in a separate window' })).toBeNull();
-    expect(within(deck).getByRole('button', { name: 'Back into the chat' })).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Chat' })).toHaveTextContent('Make cards from @Lecture 8');
-    expect(screen.getByRole('textbox', { name: 'Message' })).toBeInTheDocument();
-    expect(screen.getByRole('note', { name: /Agent sees: Flashcards, card 1 of 3/ })).toBeInTheDocument();
-    const user = userEvent.setup();
-    await user.click(within(deck).getByRole('button', { name: 'Back into the chat' }));
-    await waitFor(() => expect(closeStudyWindow).toHaveBeenCalled());
-    expect(block(fake.world, 'st-deck').place).toBe('chat');
-  });
-
-  it('U2 (decision 5): a deck folded in the chat is open in its window — the fold applies only in the chat', async () => {
-    const { StudyWindowApp } = await import('./StudyWindowApp');
-    const { createFakeBridge } = await import('../test/fakeBridge');
-    const { render } = await import('@testing-library/react');
-    localStorage.setItem('skaz.kb.folds', JSON.stringify({ 'study:st-deck': true }));
-    try {
-      const world = studyWorld();
-      call(world, 'PATCH', '/kb/study/st-deck', { place: 'window' });
-      const fake = createFakeBridge(world);
-      render(<StudyWindowApp target={{ studyId: 'st-deck', chatId: 'c12' }} bridge={fake.bridge} />);
-      const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-      expect(within(deck).getByRole('progressbar', { name: 'Progress' })).toBeInTheDocument();
-      expect(within(deck).getByText('1 / 3')).toBeInTheDocument();
-      expect(within(deck).queryByRole('button', { name: /^(Collapse|Expand)$/ })).toBeNull();
-      expect(JSON.parse(localStorage.getItem('skaz.kb.folds') ?? '{}')).toEqual({ 'study:st-deck': true }); // the chat's choice stays
-    } finally {
-      localStorage.clear();
-    }
   });
 });

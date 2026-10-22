@@ -1,6 +1,6 @@
 // 0.3.1 S: flashcards and tests — the /kb/study routes over the generated types. A block is a part of
 // its chat's message (`KbStudyPart`); every action answers with the block as it is now, which goes
-// back into the chat in place (the chat's `part_update` events say the same for other windows).
+// back into the chat in place (the chat's `part_update` events say the same everywhere else).
 
 import type {
   KbDeckStudy, KbDeckStudyResult, KbDeckView, KbStudyAnswerIn, KbStudyCard, KbStudyMarkIn, KbStudyMove, KbStudyPart,
@@ -10,7 +10,11 @@ import type { KbClient } from '../api/client';
 
 export type { KbDeckView, KbStudyCard, KbStudyPart, KbStudyQuestion };
 export type StudyGrade = 'again' | 'hard' | 'good' | 'easy';
-export type StudyPlace = KbStudyPart['place'];
+/**
+ * Where a block can be in this interface: in the chat or beside it. The backend still accepts the
+ * retired `window` (its own window, removed); such a block shows in the chat and is moved back there.
+ */
+export type StudyPlace = Exclude<KbStudyPart['place'], 'window'>;
 export type StudyMode = KbStudyPart['mode'];
 export type StudyMark = KbStudyMarkIn['mark'];
 
@@ -55,7 +59,10 @@ export const studyApi = {
 export const kindLabel = (p: Pick<KbStudyPart, 'kind'>): string => (p.kind === 'deck' ? 'Flashcards' : 'Test');
 
 /** Where a block is, as the agent is told (W2). */
-export const PLACE_LABEL: Record<StudyPlace, string> = { chat: 'in the chat', panel: 'beside the chat', window: 'in its window' };
+export const PLACE_LABEL: Record<StudyPlace, string> = { chat: 'in the chat', panel: 'beside the chat' };
+
+/** The place a block shows in: a stored `window` block is in the chat. */
+export const placeOf = (p: Pick<KbStudyPart, 'place'>): StudyPlace => (p.place === 'panel' ? 'panel' : 'chat');
 
 /** "card 3 of 12 · answer side" / "question 4 of 8 · not answered": the chip above the composer. */
 export function studyWhere(p: KbStudyPart): string {

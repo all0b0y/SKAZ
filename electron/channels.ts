@@ -34,10 +34,6 @@ export const CHANNELS = {
   updateCancel: 'app:update-cancel',
   updateInstall: 'app:update-install',
   updateState: 'app:update-state',
-  // A deck or test block in its own window (0.3.1 S).
-  studyOpen: 'study:open-window',
-  studyClose: 'study:close-window',
-  studyClosed: 'study:window-closed',
   // macOS full screen hides the traffic lights: the title bar drops the room it keeps for them.
   fullScreen: 'app:full-screen',
 } as const;

@@ -25,7 +25,7 @@ import {
   AtSign, AudioWaveform, BookOpenText, Bot, ChevronLeft, ChevronRight, CircleAlert,
   CircleDot, Command, Download, ExternalLink, FileMusic, FileText, FileVideoCamera, Folder, FolderPlus,
   Inbox, Info, Languages, Link, Minimize2, Maximize2, Monitor, Moon,
-  PanelLeftClose, PanelLeftOpen, Paperclip, Pin, Play, Plus, ShieldCheck,
+  PanelLeftClose, PanelLeftOpen, PanelRight, Paperclip, Pin, Play, Plus, ShieldCheck,
   Sun, Trash2, Pause, LayoutList, LayoutGrid, TriangleAlert, Type, Upload, Waypoints, Palette, HardDrive, Sparkles,
   ArrowUpDown, BookPlus, ChevronUp, Clock, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
@@ -132,6 +132,11 @@ const ICONS = {
   test: ListChecks,
   flip: RotateCcw,
   hard: Flame,
+  /** The block's one size button: bigger (beside the chat) / smaller (back into the chat). */
+  grow: Maximize2,
+  shrink: Minimize2,
+  /** "Open beside the chat": where a block is while it is in the right panel. */
+  panelRight: PanelRight,
   /** "What these labels mean" (wiki terms in Settings → Wiki). */
   help: CircleQuestionMark,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;

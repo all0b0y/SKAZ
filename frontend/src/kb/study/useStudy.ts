@@ -7,7 +7,7 @@ import { useChats, useServices, useUi } from '../state/context';
 import { partsOf } from '../api/permissions';
 import { isStudyPart, studyApi, type KbStudyPart, type StudyPlace } from './api';
 
-/** The block in its chat (live: a grade in one window shows in the other). */
+/** The block in its chat (live: the chat's updates show at once, wherever the block is). */
 export function useStudyPart(chatId: string, studyId: string): KbStudyPart | null {
   return useChats((s) => findStudy(s.chats[chatId]?.chat?.messages ?? [], studyId));
 }
@@ -26,8 +26,8 @@ export function studyParts(messages: ReadonlyArray<{ parts: readonly { type: str
 }
 
 /**
- * What the agent is told is open (W2 "Agent sees"): the block beside the chat or in its window;
- * otherwise the block of this chat the user worked with last, unless its chip was closed.
+ * What the agent is told is open (W2 "Agent sees"): the block beside the chat; otherwise the block
+ * of this chat the user worked with last, unless its chip was closed.
  */
 export function useOpenStudy(chatId: string | null): KbStudyPart | null {
   const messages = useChats((s) => (chatId ? s.chats[chatId]?.chat?.messages : undefined));
@@ -35,7 +35,7 @@ export function useOpenStudy(chatId: string | null): KbStudyPart | null {
   return useMemo(() => {
     if (!messages) return null;
     const parts = studyParts(messages);
-    const away = parts.find((p) => p.place !== 'chat');
+    const away = parts.find((p) => p.place === 'panel');
     if (away) return away;
     if (!focus?.on) return null;
     return parts.find((p) => p.id === focus.id) ?? null;
@@ -66,25 +66,22 @@ export function useStudyActions(chatId: string, studyId: string): StudyActions {
 }
 
 /**
- * Move a block to the chat, beside it or into its window (W2). The block is never in two places:
- * the store shows it in the new place at once, the right panel and the window follow, and the
- * backend records it (A-4: a block already away goes back to the chat there, and its update arrives).
+ * Move a block into the chat or beside it (W2). The block is never in two places: the store shows
+ * it in the new place at once, the right panel follows, and the backend records it (A-4: a block
+ * already away goes back to the chat there, and its update arrives).
  */
 export function useStudyRoute(chatId: string): (part: KbStudyPart, to: StudyPlace) => Promise<ActionResult<KbStudyPart>> {
-  const { client, chats, ui, bridge } = useServices();
+  const { client, chats, ui } = useServices();
   return useCallback(async (part, to) => {
     if (part.place === to) return { ok: true, value: part };
-    const from = part.place;
     chats.getState().applyPart(chatId, { ...part, place: to });
     ui.getState().focusStudy(chatId, part.id);
     const right = ui.getState().right;
     const shownBeside = right?.kind === 'study' && right.studyId === part.id;
     if (to === 'panel') ui.getState().openStudy(chatId, part.id);
     else if (shownBeside) ui.getState().closeDoc();
-    if (from === 'window' && !bridge.studyWindow) void bridge.closeStudyWindow?.();
     try {
       const moved = await studyApi.move(client, part.id, { place: to });
-      // The window itself is opened (and closed) by `useStudyPlacement`, which follows the place.
       chats.getState().applyPart(chatId, moved);
       return { ok: true, value: moved };
     } catch (error) {
@@ -92,36 +89,31 @@ export function useStudyRoute(chatId: string): (part: KbStudyPart, to: StudyPlac
       if (to === 'panel') ui.getState().closeDoc();
       return { ok: false, error: errorText(error) };
     }
-  }, [client, chats, ui, bridge, chatId]);
+  }, [client, chats, ui, chatId]);
 }
 
 /**
- * Keeps the main window in step with where the blocks of the open chat are (W2): a block beside
- * the chat is shown in the right panel (after a restart, from a deck page's "Study", from its
- * window's book button); one whose panel was closed or replaced goes back into the chat; a block in
- * its own window has that window, and closing the window brings it back. Main window only.
+ * Keeps the window in step with where the blocks of the open chat are (W2): a block beside the chat
+ * is shown in the right panel (after a restart, from a deck page's "Study"); one whose panel was
+ * closed or replaced goes back into the chat. A block stored in the retired own window (`window`,
+ * still legal in the backend) shows in the chat; the first time it is seen the backend is told it
+ * is there, so the agent isn't told "in its own window" (a failed call changes nothing visible).
  */
 export function useStudyPlacement(): void {
-  const { chats, ui, bridge, client } = useServices();
+  const { chats, ui, client } = useServices();
   const chatId = useChats((s) => s.currentId);
   const messages = useChats((s) => (s.currentId ? s.chats[s.currentId]?.chat?.messages : undefined));
   const right = useUi((s) => s.right);
   const parts = useMemo(() => (messages ? studyParts(messages) : []), [messages]);
   const beside = parts.find((p) => p.place === 'panel') ?? null;
-  // The one block in its own window, in whichever loaded chat it is (A-4: one away at a time).
-  const windowKey = useChats((s) => {
-    for (const [id, open] of Object.entries(s.chats)) {
-      const part = studyParts(open.chat?.messages ?? []).find((p) => p.place === 'window');
-      if (part) return `${id}/${part.id}`;
-    }
-    return null;
-  });
   const shownId = right?.kind === 'study' ? right.studyId : null;
   const lastShown = useRef<{ chatId: string; studyId: string } | null>(null);
+  /** Blocks once in the retired own window already sent back to the chat (once per block). */
+  const settled = useRef(new Set<string>());
 
-  const bringBack = useCallback((chat: string, studyId: string, expected: StudyPlace) => {
+  const bringBack = useCallback((chat: string, studyId: string) => {
     const part = findStudy(chats.getState().chats[chat]?.chat?.messages ?? [], studyId);
-    if (!part || part.place !== expected) return;
+    if (!part || part.place !== 'panel') return;
     chats.getState().applyPart(chat, { ...part, place: 'chat' });
     void studyApi.move(client, studyId, { place: 'chat' }).then(
       (moved) => chats.getState().applyPart(chat, moved),
@@ -129,34 +121,31 @@ export function useStudyPlacement(): void {
     );
   }, [chats, client]);
 
-  // The panel was closed (✕, Esc) or now shows something else: its block goes back into the chat.
+  // The panel was closed (Esc) or now shows something else: its block goes back into the chat.
   useEffect(() => {
     const before = lastShown.current;
     lastShown.current = right?.kind === 'study' ? { chatId: right.chatId, studyId: right.studyId } : null;
-    if (before && before.studyId !== shownId) bringBack(before.chatId, before.studyId, 'panel');
+    if (before && before.studyId !== shownId) bringBack(before.chatId, before.studyId);
   }, [right, shownId, bringBack]);
 
-  // A block that is beside the chat but not shown there: show it.
+  // A block that is beside the chat but not shown there: show it. Read the store again — the effect
+  // above may just have brought this very block back (its panel was closed or replaced).
   useEffect(() => {
-    if (chatId && beside && shownId !== beside.id) ui.getState().openStudy(chatId, beside.id);
-  }, [chatId, beside, shownId, ui]);
+    if (!chatId || !beside || shownId === beside.id) return;
+    if (findStudy(chats.getState().chats[chatId]?.chat?.messages ?? [], beside.id)?.place !== 'panel') return;
+    ui.getState().openStudy(chatId, beside.id);
+  }, [chatId, beside, shownId, ui, chats]);
 
-  // The block in its own window has that window (main focuses an open one instead of a second);
-  // when no block is in a window any more (brought back here, replaced by another), it closes.
-  const hadWindow = useRef(false);
+  // A block left in the retired own window: the backend is told it is in the chat, once.
   useEffect(() => {
-    if (!bridge.openStudyWindow) return;
-    if (!windowKey) {
-      if (hadWindow.current) void bridge.closeStudyWindow?.();
-      hadWindow.current = false;
-      return;
+    if (!chatId) return;
+    for (const part of parts) {
+      if (part.place !== 'window' || settled.current.has(part.id)) continue;
+      settled.current.add(part.id);
+      void studyApi.move(client, part.id, { place: 'chat' }).then(
+        (moved) => chats.getState().applyPart(chatId, moved),
+        () => undefined,
+      );
     }
-    hadWindow.current = true;
-    const [chat, studyId] = windowKey.split('/') as [string, string];
-    void bridge.openStudyWindow({ studyId, chatId: chat });
-  }, [windowKey, bridge]);
-
-  // Closing that window brings its block back into the chat.
-  useEffect(() => bridge.onStudyWindowClosed?.((target) => bringBack(target.chatId, target.studyId, 'window')),
-    [bridge, bringBack]);
+  }, [chatId, parts, chats, client]);
 }

@@ -22,8 +22,7 @@ type OptionalBridge = 'chooseStorageRoot' | 'getBackendStatus' | 'onBackendStatu
   | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder' | 'openSystemAudioSettings'
   | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure' | 'reportCaptureState'
   | 'chooseAudioFile' | 'systemAudioSupported' | 'mediaAccess' | 'chooseExportFolder' | 'showInFinder' | 'openInObsidian'
-  | 'updateState' | 'checkForUpdates' | 'prepareUpdate' | 'cancelUpdate' | 'installUpdate' | 'onUpdateState'
-  | 'openStudyWindow' | 'closeStudyWindow' | 'onStudyWindowClosed' | 'studyWindow';
+  | 'updateState' | 'checkForUpdates' | 'prepareUpdate' | 'cancelUpdate' | 'installUpdate' | 'onUpdateState';
 
 export type KbBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi, OptionalBridge>>;
 

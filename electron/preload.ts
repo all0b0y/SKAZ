@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { CHANNELS } from './channels';
 import { systemAudioSupported } from './systemAudio';
-import { parseStudyHash } from './studyWindow';
 import type {
   AudioFileChoice,
   BackendStatus,
@@ -15,7 +14,6 @@ import type {
   RevealTarget,
   UpdateState,
   TextFileSave,
-  StudyWindowTarget,
 } from '../frontend/src/api/bridge';
 
 // The only object exposed to the renderer. Context isolation is on and node
@@ -121,24 +119,11 @@ const api: BridgeApi = {
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
   },
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
-  openStudyWindow(target: StudyWindowTarget): Promise<boolean> {
-    return ipcRenderer.invoke(CHANNELS.studyOpen, { studyId: target.studyId, chatId: target.chatId }) as Promise<boolean>;
-  },
-  closeStudyWindow(): Promise<boolean> {
-    return ipcRenderer.invoke(CHANNELS.studyClose) as Promise<boolean>;
-  },
-  onStudyWindowClosed(listener: (target: StudyWindowTarget) => void): () => void {
-    const handler = (_event: unknown, target: StudyWindowTarget): void => listener(target);
-    ipcRenderer.on(CHANNELS.studyClosed, handler);
-    return () => ipcRenderer.removeListener(CHANNELS.studyClosed, handler);
-  },
   onFullScreen(listener: (fullScreen: boolean) => void): () => void {
     const handler = (_event: unknown, on: unknown): void => listener(on === true);
     ipcRenderer.on(CHANNELS.fullScreen, handler);
     return () => ipcRenderer.removeListener(CHANNELS.fullScreen, handler);
   },
-  // Which block this window shows, when it is a block's own window (main set the fragment).
-  studyWindow: parseStudyHash((globalThis as { location?: { hash?: string } }).location?.hash ?? ''),
 };
 
 contextBridge.exposeInMainWorld('skaz', api);

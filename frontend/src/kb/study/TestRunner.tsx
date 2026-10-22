@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { m } from 'motion/react';
 import { Button, Icon, Spinner } from '../ui';
 import { SPRING_SMALL } from '../ui/motion';
@@ -15,13 +15,30 @@ export const QUESTION_LABEL: Record<KbStudyQuestion['type'], string> = {
 
 const VERDICT: Record<string, string> = { right: 'Right.', partly: 'Partly right.', wrong: 'Not right.' };
 
+/** The key badge of option `i`: A, B, C… (the same letter, or its number 1, 2, 3…, picks it). */
+export const optionKey = (i: number): string => String.fromCharCode(65 + i);
+
+/** Which option a key picks: A/B/C… or 1/2/3…; null for any other key. */
+function optionIndex(key: string): number | null {
+  if (/^[a-z]$/i.test(key)) return key.toUpperCase().charCodeAt(0) - 65;
+  if (/^[1-9]$/.test(key)) return Number(key) - 1;
+  return null;
+}
+
 /**
  * A test in the block (S4): one question at a time. Choice, multi and short answers are checked by
  * SKAZ against the source; an open answer goes to the agent, whose verdict is shown as its opinion,
  * not a fact. Wrong options are said to be made up by the agent once the answer is checked.
+ * A/B/C… (or 1/2/3…) pick an option while the block has the focus and no text field does.
  */
-export function TestRunner({ part, actions, onError }: { part: KbStudyPart; actions: StudyActions; onError: (e: string | null) => void }) {
+export function TestRunner({ part, actions, onError, keys }: {
+  part: KbStudyPart; actions: StudyActions; onError: (e: string | null) => void;
+  /** The block's key handler slot: keys reach the focused block, not this inner element. */
+  keys: { current: ((event: React.KeyboardEvent) => void) | null };
+}) {
   const { client } = useServices();
+  /** Picks option `i` of the question on screen (set by it; null when there is nothing to pick). */
+  const pick = useRef<((index: number) => boolean) | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /** A question looked at again from the result (the attempt is finished; nothing is sent). */
   const [review, setReview] = useState<number | null>(null);
@@ -46,7 +63,16 @@ export function TestRunner({ part, actions, onError }: { part: KbStudyPart; acti
     void act('move', () => studyApi.move(client, part.id, { position: next }));
   };
 
+  keys.current = (event: React.KeyboardEvent) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const i = optionIndex(event.key);
+    if (i !== null && pick.current?.(i)) event.preventDefault();
+  };
+
   if (part.result && review === null) {
+    pick.current = null;
     return <TestResult part={part} busy={busy}
       onRetake={(mistakes) => void act(mistakes ? 'mistakes' : 'retake', () => studyApi.retake(client, part.id, mistakes))}
       onReview={setReview} />;
@@ -59,7 +85,7 @@ export function TestRunner({ part, actions, onError }: { part: KbStudyPart; acti
     <div className="kb-st-stage">
       <m.div key={question.id} className="kb-st-face kb-st-face--flat" initial={{ opacity: 0, x: 24 }}
         animate={{ opacity: 1, x: 0, transition: SPRING_SMALL }}>
-        <QuestionView key={question.id} part={part} question={question} busy={review !== null ? 'review' : busy}
+        <QuestionView key={question.id} part={part} question={question} busy={review !== null ? 'review' : busy} pick={pick}
           onAnswer={(body) => act('check', () => studyApi.answer(client, part.id, { item_id: question.id, ...body }))}
           onAskAgent={(text) => act('judge', () => studyApi.checkOpen(client, part.id, question.id, text))} />
       </m.div>
@@ -83,8 +109,9 @@ export function TestRunner({ part, actions, onError }: { part: KbStudyPart; acti
 
 interface AnswerBody { choices?: string[]; text?: string }
 
-function QuestionView({ part, question, busy, onAnswer, onAskAgent }: {
+function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
   part: KbStudyPart; question: KbStudyQuestion; busy: string | null;
+  pick: { current: ((index: number) => boolean) | null };
   onAnswer: (body: AnswerBody) => Promise<boolean>; onAskAgent: (text: string) => Promise<boolean>;
 }) {
   const response = question.response;
@@ -98,20 +125,29 @@ function QuestionView({ part, question, busy, onAnswer, onAskAgent }: {
   };
   const agent = agentName((part.engine ?? 'codex') as KbPermissionPart['engine']);
   const multi = question.type === 'multi';
+  const options = question.type === 'choice' || multi ? question.options : [];
+  // The keyboard picks what a click would: nothing once checked or while a request runs.
+  pick.current = (index) => {
+    const option = options[index];
+    if (!option || checked || busy) return false;
+    choose(option.id);
+    return true;
+  };
 
   return (
     <>
       <p className="kb-st-tq" id={`q-${question.id}`}>{question.question}</p>
       {(question.type === 'choice' || multi) && (
         <div className="kb-st-opts" role={multi ? 'group' : 'radiogroup'} aria-labelledby={`q-${question.id}`}>
-          {question.options.map((o) => {
+          {question.options.map((o, i) => {
             const sel = picked.includes(o.id);
             const right = o.origin === 'source';
             const state = !checked ? (sel ? 'sel' : '') : right ? 'ok' : sel ? 'bad' : '';
             return (
               <button key={o.id} type="button" className={`kb-st-opt${state ? ` is-${state}` : ''}${sel ? ' is-picked' : ''}`}
-                role={multi ? 'checkbox' : 'radio'} aria-checked={sel} disabled={checked || !!busy} onClick={() => choose(o.id)}>
-                <span className={multi ? 'kb-st-box' : 'kb-st-rad'} aria-hidden="true" />
+                role={multi ? 'checkbox' : 'radio'} aria-checked={sel} aria-keyshortcuts={`${optionKey(i)} ${i + 1}`}
+                disabled={checked || !!busy} onClick={() => choose(o.id)}>
+                <span className="kb-st-key" aria-hidden="true">{optionKey(i)}</span>
                 <span className="kb-st-opt__text">{o.text}</span>
                 {checked && (
                   <span className="kb-st-tag">
