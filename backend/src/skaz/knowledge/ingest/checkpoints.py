@@ -64,6 +64,8 @@ class Checkpoints:
         self.material_id = material_id
         self.revision = revision
         self.profile = profile
+        #: Whether this run changed the stored answers yet (then they are a stopped run's work).
+        self._changed = False
 
     def prepare(self) -> None:
         with self.db.write() as connection:
@@ -76,11 +78,13 @@ class Checkpoints:
                 # The material finished with another choice: this one writes it anew.
                 connection.execute("DELETE FROM wiki_checkpoint_answers WHERE material_id = ?",
                                    (self.material_id,))
+                connection.execute(
+                    "UPDATE wiki_checkpoints SET finished_profile = NULL WHERE material_id = ?",
+                                   (self.material_id,))
+            # A re-run by the choice that finished the material keeps it finished until it changes
+            # an answer (``put``): stopped before that, another choice still starts it over.
             connection.execute("INSERT OR IGNORE INTO wiki_checkpoints(material_id,fingerprint) VALUES (?,?)",
                                (self.material_id, self.revision))
-            # Until this run finishes, the kept answers are the work of a stopped run.
-            connection.execute("UPDATE wiki_checkpoints SET finished_profile = NULL WHERE material_id = ?",
-                               (self.material_id,))
 
     def get(self, key: str) -> str | None:
         saved = self.entry(key)
@@ -108,6 +112,12 @@ class Checkpoints:
                 "created_at=excluded.created_at, profile=excluded.profile",
                 (self.material_id, key, response, utc_now(), self.profile),
             )
+            if not self._changed:
+                # Until this run finishes, the kept answers are the work of a stopped run.
+                connection.execute(
+                    "UPDATE wiki_checkpoints SET finished_profile = NULL WHERE material_id = ?",
+                                   (self.material_id,))
+        self._changed = True
 
     def finished(self) -> None:
         """The material was written with this choice: another choice later starts it over."""

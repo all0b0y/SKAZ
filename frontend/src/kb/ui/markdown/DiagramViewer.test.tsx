@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MarkdownView } from './Markdown';
 
@@ -140,6 +140,27 @@ describe('Diagram: Open full size', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Copy Mermaid source' }));
     expect(await navigator.clipboard.readText()).toBe(FLOW);
     expect(within(dialog).getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  });
+
+  it('wheel events that arrive before a render all count, around the same point (C-11)', async () => {
+    canvasSize();
+    const { user, figure } = await drawn();
+    await user.click(within(figure).getByRole('button', { name: 'Open full size' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Diagram' });
+    const canvas = dialog.querySelector('.kb-dviewer__canvas') as HTMLElement;
+    const width = () => Number(viewerSvg(dialog).getAttribute('width'));
+    const at = () => { const host = viewerSvg(dialog).parentElement as HTMLElement; return [parseFloat(host.style.left), parseFloat(host.style.top)] as const; };
+    const notch = () => new WheelEvent('wheel', { deltaY: -100, metaKey: true, clientX: 300, clientY: 200, bubbles: true, cancelable: true });
+    // One render after each notch: the reference.
+    for (let i = 0; i < 3; i += 1) fireEvent(canvas, notch());
+    const [oneByOne, place] = [width(), at()];
+    await user.click(within(dialog).getByRole('button', { name: 'Fit' }));
+    expect(width()).toBeLessThan(oneByOne);
+    // A fast ⌘-scroll / pinch: three notches before React renders once.
+    act(() => { for (let i = 0; i < 3; i += 1) canvas.dispatchEvent(notch()); });
+    expect(width()).toBeCloseTo(oneByOne, 5);
+    expect(at()[0]).toBeCloseTo(place[0], 5);
+    expect(at()[1]).toBeCloseTo(place[1], 5);
   });
 
   it('a diagram that could not be drawn has no ⤢', async () => {

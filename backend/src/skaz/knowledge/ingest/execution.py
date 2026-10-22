@@ -135,7 +135,7 @@ class ExecutionScope:
         characters = completed = 0
         with self.db.read() as connection:
             for row in connection.execute(
-                    "SELECT data FROM wiki_execution WHERE json_extract(data, '$.root_job_id') = ?",
+                    "SELECT data FROM wiki_execution WHERE root_job_id = ?",
                     (self.root_job_id,)):
                 totals = json.loads(row["data"]).get("totals", {})
                 characters += sum(int(totals.get(key, 0)) for key in (
@@ -225,6 +225,11 @@ RETRY_DELAYS_S: tuple[float, ...] = (5.0, 15.0, 30.0)
 def never_sent(failure: Failed) -> bool:
     """The engine says the request never reached the model; where it can't tell, it may have."""
     return failure.unsent or failure.transient
+
+
+def retry_unsent(failure: Failed) -> bool:
+    """Never sent, and it may go through later (busy, couldn't start) — not a refusal that repeats."""
+    return never_sent(failure) and not failure.permanent
 
 
 #: Called with each piece of answer text as it arrives (C1-f); raising stops the answer.

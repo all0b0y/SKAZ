@@ -22,7 +22,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from ...native_io import disk_call
 from ..agents.engine import (
@@ -58,7 +58,6 @@ from ..permissions.web_tool import WEB_TOOL
 from ..service import KnowledgeService
 from ..skills.settings import enabled_skills
 from ..study.scheduling import Mode
-from ..study.service import StudyService
 from ..study.store import StudyBlock
 from .analysis import AnalysisWriter, Section
 from .context import ContextBuilder, history, instructions
@@ -84,6 +83,9 @@ from .parsing import CiteToken, ConnectionOut, Output, PageToken, StreamParser, 
 from .resolve import MaterialReader, Resolver
 from .store import RESTART_REASON, ChatRepository
 from .text import DEFAULT_TITLE, auto_title, preview, utc_now
+
+if TYPE_CHECKING:  # the study service imports chats (C-17); only annotations name it here
+    from ..study.service import StudyService
 
 log = logging.getLogger(__name__)
 

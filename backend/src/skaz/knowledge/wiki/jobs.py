@@ -8,6 +8,7 @@ interrupt_running``); closing the app interrupts running jobs the same way.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -71,6 +72,11 @@ class WikiJobs:
             for job_kind, job_target, _task in self._tasks.values()
         )
 
+    def running_job(self, kind: JobKind, target: str | None = None) -> str | None:
+        """The id of a running job of ``kind`` (and ``target``), if any."""
+        return next((job_id for job_id, (job_kind, job_target, _task) in self._tasks.items()
+                     if job_kind == kind and (target is None or job_target == target)), None)
+
     @property
     def any_running(self) -> bool:
         return bool(self._tasks)
@@ -96,15 +102,16 @@ class WikiJobs:
         return job
 
     async def _run(self, job_id: str, work: Work) -> None:
-        scope = await disk_call(stored_scope, self.jobs.db, job_id)
-        with execution_scope(scope):
-            await self._execute(job_id, work)
+        with contextlib.ExitStack() as scoped:
+            await self._execute(job_id, work, scoped)
 
-    async def _execute(self, job_id: str, work: Work) -> None:
+    async def _execute(self, job_id: str, work: Work, scoped: contextlib.ExitStack) -> None:
         state: JobState = "failed"
         error: str | None = UNEXPECTED
         code: str | None = None
         try:
+            # Inside the ``try``: a cancel while the snapshot is read still finishes the job.
+            scoped.enter_context(execution_scope(await disk_call(stored_scope, self.jobs.db, job_id)))
             await work(JobContext(self.jobs, job_id))
             state, error = "done", None
         except asyncio.CancelledError:

@@ -163,6 +163,8 @@ class Pair:
     second: Side
     language: str
     key: str
+    #: Answers for this exact input already not in the expected format (``unanswered``).
+    attempts: int = 0
 
     @property
     def ids(self) -> tuple[str, str]:
@@ -247,17 +249,26 @@ _FRAME_CHARS = len("Concept pages (statements are numbered across all pages):") 
 _PAIR_CHARS = len("Pair 9999: page 9999 — page 9999") + 1
 
 
+def _batch_pairs(attempts: int) -> int:
+    """How many pairs share a batch: a batch whose answer was not in the expected format is split
+    (halved) the next time, and a pair's last try is alone, so its failure is its own."""
+    if attempts >= MAX_ATTEMPTS - 1:
+        return 1
+    return max(1, (MAX_BATCH_ANSWER_CHARS // ANSWER_CHARS_PER_PAIR) >> attempts)
+
+
 def batches(pairs: Sequence[Pair]) -> list[list[Pair]]:
-    """Pairs in batches bounded by the prompt and answer size (one language per batch), in order.
+    """Pairs in batches bounded by the prompt and answer size (one language and one number of
+    failed attempts per batch), in order.
 
     A pair that alone exceeds the bound is a batch of its own: never dropped.
     """
-    groups: dict[str, list[Pair]] = {}
+    groups: dict[tuple[str, int], list[Pair]] = {}
     for item in pairs:
-        groups.setdefault(item.language, []).append(item)
+        groups.setdefault((item.language, min(item.attempts, MAX_ATTEMPTS - 1)), []).append(item)
     result: list[list[Pair]] = []
-    max_pairs = max(1, MAX_BATCH_ANSWER_CHARS // ANSWER_CHARS_PER_PAIR)
-    for group in groups.values():
+    for (_language, attempts), group in groups.items():
+        max_pairs = _batch_pairs(attempts)
         current: list[Pair] = []
         pages: set[str] = set()
         size = _FRAME_CHARS
@@ -446,6 +457,7 @@ class Connections:
                 if not other.statements:
                     continue
                 key = pair_key(own, other, language=language, profile=profile, decider=decider)
+                attempts = 0
                 if check is not None and check.key == key:
                     if check.outcome in ("none", "declined"):
                         decided[ids] = "reused"
@@ -453,8 +465,10 @@ class Connections:
                     if check.outcome == "unanswered" and check.attempts >= MAX_ATTEMPTS:
                         decided[ids] = "skipped"
                         continue
+                    if check.outcome == "unanswered":
+                        attempts = check.attempts
                 seen.add(ids)
-                todo.append(Pair(own, other, language, key))
+                todo.append(Pair(own, other, language, key, attempts))
                 slots += 1
         kinds = list(decided.values())
         return Plan(scope, tuple(todo), reused=kinds.count("reused"), skipped=kinds.count("skipped"),
@@ -509,21 +523,14 @@ class Connections:
         unfinished: set[str] = set()
         for batch in batches(to_ask):
             outcome.batches += 1
-            found = await self._ask(batch, caller)
-            if found is None:
-                given_up = await disk_call(self._unanswered, batch)
-                again = [item for item in batch if item.ids not in given_up]
-                outcome.unchecked += len(again)
-                outcome.skipped += len(given_up)
-                unfinished |= {item.first.page.id for item in again}
-                if again:
-                    await log(f"{len(again)} connection pair(s) got no answer in the expected format; "
-                              f"they will be checked again on the next run (up to {MAX_ATTEMPTS} times).")
-                if given_up:
-                    await log(f"{len(given_up)} connection pair(s) got no answer in the expected format "
-                              f"{MAX_ATTEMPTS} times; they are skipped until a page's statements change.")
+            answered = await self._ask(batch, caller)
+            if answered is None:
+                unfinished |= await self._not_answered(batch, log, outcome)
                 await count(outcome.counters())
                 continue
+            found, invalid = answered
+            if invalid:  # malformed entries count against their own pairs only
+                unfinished |= await self._not_answered(invalid, log, outcome)
             connected: set[tuple[str, str]] = set()
             by_page: dict[str, list[Found]] = {}
             for item, text, mine, theirs in found:
@@ -535,14 +542,32 @@ class Connections:
                 if targets:
                     record = next(item.first.page for item in batch if item.first.page.id == page_id)
                     await log(f"“{record.title}”: {len(targets)} connection(s) written.")
-            await disk_call(self._remember, [item for item in batch if item.ids not in connected], "none")
-            outcome.checked += len(batch)
+            settled = [item for item in batch if item not in invalid]
+            await disk_call(self._remember, [item for item in settled if item.ids not in connected], "none")
+            outcome.checked += len(settled)
             await count(outcome.counters())
         return unfinished
 
-    async def _ask(self, batch: Sequence[Pair], caller: AgentCaller) -> list[tuple[Pair, str, list[Statement],
-                                                                                     list[Statement]]] | None:
-        """One batch to the writing agent; its valid connections, or ``None`` when not in the format."""
+    async def _not_answered(self, pairs: Sequence[Pair], log: Log, outcome: Outcome) -> set[str]:
+        """Pairs whose answer was not in the expected format: one more attempt each, given up at
+        ``MAX_ATTEMPTS``; returns the pages left with pairs to check again."""
+        given_up = await disk_call(self._unanswered, pairs)
+        again = [item for item in pairs if item.ids not in given_up]
+        outcome.unchecked += len(again)
+        outcome.skipped += len(given_up)
+        if again:
+            await log(f"{len(again)} connection pair(s) got no answer in the expected format; "
+                      f"they will be checked again on the next run (up to {MAX_ATTEMPTS} times).")
+        if given_up:
+            await log(f"{len(given_up)} connection pair(s) got no answer in the expected format "
+                      f"{MAX_ATTEMPTS} times; they are skipped until a page's statements change.")
+        return {item.first.page.id for item in again}
+
+    async def _ask(self, batch: Sequence[Pair], caller: AgentCaller) -> tuple[
+            list[tuple[Pair, str, list[Statement], list[Statement]]], list[Pair]] | None:
+        """One batch to the writing agent: its valid connections and the pairs whose entry was not
+        in the expected format (statements of the wrong page, no text); ``None`` when the whole
+        answer was not."""
         pages: dict[str, Side] = {}
         for item in batch:
             pages.setdefault(item.first.page.id, item.first)
@@ -560,6 +585,7 @@ class Connections:
             return None
         result: list[tuple[Pair, str, list[Statement], list[Statement]]] = []
         taken: set[int] = set()
+        malformed: set[int] = set()
         for found in answer.connections:
             if not 1 <= found.pair <= len(batch) or found.pair in taken:
                 continue  # an unknown pair, or a second connection for one pair
@@ -567,11 +593,14 @@ class Connections:
             mine = [flat[n - 1] for n in dict.fromkeys(found.first_side) if owner.get(n) == first]
             theirs = [flat[n - 1] for n in dict.fromkeys(found.second_side) if owner.get(n) == second]
             text = clean_text(found.text)
-            if not mine or not theirs or not text or self.ctx.flagged(text):
+            if not mine or not theirs or not text:
+                malformed.add(found.pair)
                 continue
+            if self.ctx.flagged(text):
+                continue  # read as instructions: never written, the pair counts as checked
             taken.add(found.pair)
             result.append((batch[found.pair - 1], text, mine, theirs))
-        return result
+        return result, [batch[number - 1] for number in sorted(malformed - taken)]
 
     # -- writing ----------------------------------------------------------------------------------
 

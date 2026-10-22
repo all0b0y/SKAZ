@@ -298,10 +298,18 @@ async def test_a_vpn_fake_ip_answer_for_a_name_is_a_public_site_but_a_typed_fake
         return httpx.Response(200, headers={"content-type": "text/html"}, text="<title>TOGAF</title>")
 
     fetcher = SafeFetcher(transport=httpx.MockTransport(page), resolver=fake_ip)
-    fetched = await fetcher.fetch("https://opengroup.org/togaf", pin_address=True)
+    # Only for the user's own click (security review S-02; see test_security_031_fetch.py).
+    fetched = await fetcher.fetch("https://opengroup.org/togaf", pin_address=True, allow_vpn_fake_ip=True)
     assert fetched.status == 200 and hits == ["198.18.0.192 opengroup.org"]
     with pytest.raises(LinkRejected, match="public websites"):
         fetcher.check("http://198.18.0.192/")  # typed by hand: not a site name, stays refused
+    # S-03: the same address written as one number, short dotted or hex is a typed literal too.
+    for typed in ("http://3323068417/", "http://198.18.1/", "http://0xC6120001/"):
+        with pytest.raises(LinkRejected, match="public websites"):
+            fetcher.check(typed)
+        with pytest.raises(LinkRejected, match="public websites"):
+            await fetcher.fetch(typed, pin_address=True, allow_vpn_fake_ip=True)
+    assert hits == ["198.18.0.192 opengroup.org"]
 
 
 async def test_connection_goes_to_the_checked_address_with_the_original_host(

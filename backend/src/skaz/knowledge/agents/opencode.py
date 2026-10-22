@@ -736,11 +736,9 @@ class OpenCodeEngine:
     # -- run --------------------------------------------------------------------
 
     def run(self, turn: AgentTurn) -> AsyncIterator[AgentEvent]:
-        if turn.run_id in self._runs:
-            raise ValueError(f"Run {turn.run_id} is already active.")
-        active = _ActiveRun()
-        self._runs[turn.run_id] = active
-        return self._events(turn, active)
+        # The id is taken at the stream's first step (C-16): a stream that is never iterated has no
+        # frame to finalize, so taking it here would keep it forever.
+        return self._events(turn)
 
     async def interrupt(self, run_id: str) -> None:
         active = self._runs.get(run_id)
@@ -753,8 +751,13 @@ class OpenCodeEngine:
         elif active.process is not None and active.process.returncode is None:
             kill_group(active.process.pid, signal.SIGTERM)
 
-    async def _events(self, turn: AgentTurn, active: _ActiveRun) -> AsyncIterator[AgentEvent]:
+    async def _events(self, turn: AgentTurn) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
+        if run_id in self._runs:  # a deterministic refusal, as Codex's: never sent, not worth a retry
+            yield Failed(run_id, "other", "This answer is already running.", unsent=True)
+            return
+        active = _ActiveRun()
+        self._runs[run_id] = active
         work = self.runs_dir / uuid.uuid4().hex
         granted = False
         try:

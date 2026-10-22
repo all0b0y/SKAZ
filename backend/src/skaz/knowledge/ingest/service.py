@@ -11,6 +11,7 @@ at the next start continues the queue by itself.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 from collections.abc import Awaitable, Callable, Sequence
@@ -53,6 +54,7 @@ NO_DETECTOR = ("The safety check for wiki output isn't available in this build, 
 NO_ENGINE = "No agent is ready to write the wiki. Connect one in Settings → Models, then retry."
 UNEXPECTED = "Something went wrong while adding this material to the wiki. Retry."
 CANCELLED_QUEUED = "Stopped before it started. Nothing was saved."
+STOPPED = "Stopped. Nothing from this run was saved."
 
 #: How many materials each engine adds to the wiki at once. Codex runs at most 6 answers in parallel
 #: (``agents/codex.py``); ingest takes 4 of them so chats still answer while a large batch runs.
@@ -294,8 +296,12 @@ class IngestService:
         record = await disk_call(self.job, job_id)
         active = self._active.get(job_id)
         if record.state == "queued" and active is None:
-            await disk_call(lambda: self.jobs.finish(job_id, "cancelled", error=CANCELLED_QUEUED))
-            return await disk_call(self.job, job_id)
+            # Compare-and-set: the queue may claim the job between the read above and this write.
+            if await disk_call(self.jobs.cancel_queued, job_id, CANCELLED_QUEUED):
+                return await disk_call(self.job, job_id)
+            if self._pump_task is not None and not self._pump_task.done():
+                await asyncio.shield(self._pump_task)  # the claimed job gets its task; stop that
+            active = self._active.get(job_id)
         if active is None or active.task is None:
             raise JobNotCancellable("This job has already finished.")
         run = active.run
@@ -306,7 +312,9 @@ class IngestService:
             run.cancel_requested = True
             if run.current_run is not None:
                 await run.engine.interrupt(run.current_run)
-        active.task.cancel()
+            active.task.cancel()
+        # Without a run the job is still starting: it stops itself before its first step (a task
+        # cancelled before it ever ran would skip finishing the job).
         await asyncio.wait({active.task}, timeout=10)
         return await disk_call(self.job, record.id)
 
@@ -336,15 +344,27 @@ class IngestService:
     # -- one job ------------------------------------------------------------
 
     async def _run(self, job_id: str, active: _Active) -> None:
-        scope = await disk_call(stored_scope, self.kb.db, job_id)
-        with execution_scope(scope):
-            await self._execute(job_id, active)
+        with contextlib.ExitStack() as scoped:
+            await self._execute(job_id, active, scoped)
 
-    async def _execute(self, job_id: str, active: _Active) -> None:
+    def _stopped(self, active: _Active) -> tuple[JobState, str] | None:
+        """How a stopped job ends: the user's Stop, or back in the queue while SKAZ closes."""
+        if active.cancel_requested:
+            return "cancelled", STOPPED
+        if self._closing and active.kind in QUEUED_KINDS:
+            # SKAZ is closing: nothing was saved, and the job continues at the next start.
+            return "queued", ""
+        return None
+
+    async def _execute(self, job_id: str, active: _Active, scoped: contextlib.ExitStack) -> None:
         state: JobState = "failed"
         error = UNEXPECTED
         code: str | None = None
         try:
+            # Inside the ``try``: a Stop or quit while the snapshot is read still finishes the job.
+            scoped.enter_context(execution_scope(await disk_call(stored_scope, self.kb.db, job_id)))
+            if active.cancel_requested:
+                raise IngestCancelled()
             settings = self.settings()
             if self.detector is None:
                 raise IngestFailed(NO_DETECTOR)
@@ -362,18 +382,14 @@ class IngestService:
             await active.run.execute()
             state, error = "done", ""
         except IngestCancelled:
-            state, error = "cancelled", "Stopped. Nothing from this run was saved."
+            # While SKAZ closes, a real engine's interrupt awaits its reply and the answer reports
+            # "cancelled" before the task itself is cancelled: that is the quit, not a Stop.
+            state, error = self._stopped(active) or ("cancelled", STOPPED)
         except BudgetReached as reached:
             # C1-d: finished work is in the checkpoints; nothing unfinished was published.
             state, error, code = "paused", reached.message, BUDGET_REACHED
         except asyncio.CancelledError:
-            if active.cancel_requested:
-                state, error = "cancelled", "Stopped. Nothing from this run was saved."
-            elif self._closing and active.kind in QUEUED_KINDS:
-                # SKAZ is closing: nothing was saved, and the job continues at the next start.
-                state, error = "queued", ""
-            else:
-                state, error = "interrupted", INTERRUPTED_REASON
+            state, error = self._stopped(active) or ("interrupted", INTERRUPTED_REASON)
         except IngestFailed as failure:
             error, code = failure.message, failure.code
         except EngineUnavailable as failure:

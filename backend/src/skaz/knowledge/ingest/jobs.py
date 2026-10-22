@@ -169,9 +169,10 @@ class JobRepository:
             )
             connection.execute("INSERT INTO ingest_jobs(job_id) VALUES (?)", (job_id,))
             if profile is not None:
-                connection.execute("INSERT INTO wiki_execution(job_id, data) VALUES (?, ?)",
+                connection.execute("INSERT INTO wiki_execution(job_id, data, root_job_id) VALUES (?, ?, ?)",
                                    (job_id, new_execution(profile, job_id, root_job_id, budget=budget,
-                                                          material_id=budget_material)))
+                                                          material_id=budget_material),
+                                    root_job_id or job_id))
         record = self.get(job_id)
         assert record is not None
         return record
@@ -264,6 +265,17 @@ class JobRepository:
             if finished:
                 connection.execute("UPDATE ingest_jobs SET error_code = ? WHERE job_id = ?",
                                    (error_code, job_id))
+
+    def cancel_queued(self, job_id: str, error: str) -> bool:
+        """Stop a job that hasn't started: ``False`` when the queue claimed it meanwhile (or it ended)."""
+        with self.db.write() as connection:
+            stopped = connection.execute(
+                "UPDATE jobs SET state = 'cancelled', error = ?, updated_at = ? "
+                "WHERE id = ? AND state = 'queued'",
+                (error, utc_now(), job_id)).rowcount
+            if stopped:
+                connection.execute("UPDATE ingest_jobs SET error_code = NULL WHERE job_id = ?", (job_id,))
+        return bool(stopped)
 
     def update_counters(self, job_id: str, values: dict[str, int]) -> None:
         with self.db.write() as connection:

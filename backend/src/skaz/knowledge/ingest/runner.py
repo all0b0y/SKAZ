@@ -35,6 +35,7 @@ from .execution import (
     UNSENT_RETRIES,
     current_execution,
     never_sent,
+    retry_unsent,
     run_wiki_turn,
 )
 from .jobs import JobRepository, JobStep, agent_failure_code, agent_failure_text
@@ -121,6 +122,8 @@ class _Live:
     save: Callable[[str], Awaitable[None]] | None = None
     items: list[dict[str, Any]] = field(default_factory=list)
     stream: ItemStream | None = None
+    #: Items of this step now in its checkpoint (the latest ``save``), for an honest failure text.
+    saved: int = 0
 
     def reset(self) -> None:
         self.stream = ItemStream(self.unit)
@@ -144,6 +147,7 @@ class _Live:
             self.items.append(data)
             if self.save is not None:
                 await self.save(self.synthetic())
+                self.saved = len(self.items)
             await self.progress(self.operation.kept + len(self.items))
 
 
@@ -232,7 +236,7 @@ class IngestRun:
             if terminal.kind in STOP_KINDS:
                 raise IngestFailed(reason, agent_failure_code(terminal.kind))
             if never_sent(terminal):
-                if unsent < self.limits.transient_retries:
+                if retry_unsent(terminal) and unsent < self.limits.transient_retries:
                     await self._log("The agent was busy or couldn't start; trying the same step again "
                                     "shortly.")
                     await asyncio.sleep(delays[min(unsent, len(delays) - 1)])
@@ -330,6 +334,7 @@ class IngestRun:
                             await disk_call(scope.cache_hit, str(schema["title"]))
             live.items = []
             live.save = self._saver(cache_key)
+            live.saved = 0
             for attempt in range(0 if cached else 2):
                 operation.answers += 1
                 if operation.answers > self.limits.max_answers:
@@ -349,13 +354,17 @@ class IngestRun:
                     parsed = None
                     if attempt == 1:
                         raise IngestFailed(f"The agent's answer for the {operation.name} was not in the "
-                                           "expected format, twice. Nothing was saved; retry.") from error
+                                           "expected format, twice. "
+                                           f"{self._kept_note(operation.kept + live.saved, live.unit)}"
+                                           ) from error
                     messages += [TurnMessage("assistant", text, self.engine.id),
                                  TurnMessage("user", prompts.repair_message(str(error)))]
                     continue
                 if previous is not None and text.strip() == previous.strip():
+                    if self.checkpoints is not None:  # what streamed of it is the repeat: not kept
+                        await disk_call(self.checkpoints.discard, cache_key)
                     raise IngestFailed(f"The agent repeated its previous answer while writing the "
-                                       f"{operation.name}. Nothing was saved; retry.")
+                                       f"{operation.name}. {self._kept_note(operation.kept, live.unit)}")
                 break
             assert parsed is not None
             # A continuation needs the valid answer, not failed JSON/repair history. This also
@@ -391,6 +400,14 @@ class IngestRun:
         async def save(answer: str) -> None:
             await disk_call(checkpoints.put, key, answer)
         return save
+
+    def _kept_note(self, kept: int, unit: str) -> str:
+        """What a failed answer leaves for Retry: finished items stay in the checkpoint (C1-f)."""
+        if self.checkpoints is None or not kept:
+            return "Nothing was saved; retry."
+        if kept == 1:
+            return f"The 1 {unit[:-1]} before that is kept: Retry continues from it."
+        return f"The {kept} {unit} before that are kept: Retry continues from them."
 
     def _repeating(self, operation: _Operation, live: _Live, error: Repeating) -> IngestFailed:
         kept = operation.kept + len(live.items)

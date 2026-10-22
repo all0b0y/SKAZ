@@ -2,9 +2,10 @@
 
 Two signs, either one stops the answer: (1) a section (or concept) title repeats within one part —
 continuing the item just written, as a new answer may, is allowed; (2) three paragraphs nearly
-identical (≥90 % after normalisation) to ones already written. One or two repeats are allowed:
-lectures repeat a thought on purpose. Items kept from an earlier answer are remembered but never
-stop the run themselves.
+identical (≥90 % after normalisation) to ones already written, within one part. One or two repeats
+are allowed: lectures repeat a thought on purpose. Paragraphs shorter than ``MIN_WORDS`` (labels such
+as "Example:") are no sign at all. Items kept from an earlier answer are remembered but never stop
+the run themselves.
 """
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ from .pages import match_key
 
 NEAR = 0.9
 MAX_NEAR_REPEATS = 3
+#: Shorter paragraphs ("Пример:", "Formula:") repeat in healthy notes; they are never compared.
+MIN_WORDS = 8
 _WORD = re.compile(r"\w+", re.UNICODE)
 
 
@@ -29,8 +32,8 @@ class Repeating(Exception):
 
 def _shingles(text: str) -> frozenset[str]:
     words = _WORD.findall(text.casefold())
-    if len(words) < 3:
-        return frozenset({" ".join(words)}) if words else frozenset()
+    if len(words) < MIN_WORDS:
+        return frozenset()
     return frozenset(" ".join(words[i:i + 3]) for i in range(len(words) - 2))
 
 
@@ -51,8 +54,9 @@ class RepeatGuard:
         del self._paragraphs[paragraphs:]
 
     def new_part(self) -> None:
-        """Titles count per part; paragraphs are compared across the whole operation."""
+        """Titles and near repeats count per part; paragraphs are compared with the whole operation."""
         self._titles = set()
+        self.near_repeats = 0
 
     def remember(self, title: str, texts: Sequence[str]) -> None:
         self._take(title, texts, strict=False)

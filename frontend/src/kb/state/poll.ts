@@ -18,8 +18,12 @@ export interface PollStep<C> {
   done?: boolean;
 }
 
+/**
+ * `step` gets the loop's `signal`: aborted once `stop` ran. The request already on its way still
+ * answers, so a step that acts on the answer (beyond returning it) checks `signal.aborted` first.
+ */
 export function longPoll<C>(
-  step: (cursor: C, wait: number) => Promise<PollStep<C>>,
+  step: (cursor: C, wait: number, signal: AbortSignal) => Promise<PollStep<C>>,
   initial: C,
   { now = () => Date.now(), sleep = defaultSleep }: { now?: () => number; sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {},
 ): () => void {
@@ -31,7 +35,7 @@ export function longPoll<C>(
     while (!signal.aborted) {
       const started = now();
       try {
-        const result = await step(cursor, WAIT_S);
+        const result = await step(cursor, WAIT_S, signal);
         if (signal.aborted) return;
         cursor = result.cursor;
         errorDelay = ERROR_MIN_MS;

@@ -17,7 +17,14 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from ..agents.engine import AgentEngine, AgentTurn, Failed, TurnMessage
-from ..ingest.execution import RETRY_DELAYS_S, STOP_KINDS, UNSENT_RETRIES, never_sent, run_wiki_turn
+from ..ingest.execution import (
+    RETRY_DELAYS_S,
+    STOP_KINDS,
+    UNSENT_RETRIES,
+    never_sent,
+    retry_unsent,
+    run_wiki_turn,
+)
 from ..ingest.jobs import agent_failure_code, agent_failure_text
 from ..ingest.model import AnswerInvalid, parse_answer
 from ..ingest.prompts import repair_message
@@ -56,7 +63,7 @@ class AgentCaller:
             )
             reason = agent_failure_text(terminal.kind, terminal.message) + when
             delays = self.retry_delays_s
-            if terminal.kind not in STOP_KINDS and never_sent(terminal) and unsent < UNSENT_RETRIES:
+            if terminal.kind not in STOP_KINDS and retry_unsent(terminal) and unsent < UNSENT_RETRIES:
                 await asyncio.sleep(delays[min(unsent, len(delays) - 1)])
                 unsent += 1
                 continue

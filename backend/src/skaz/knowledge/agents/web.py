@@ -31,6 +31,8 @@ Per-agent verdict (checked 2026-10-21 on the installed builds, no model calls):
 """
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -140,14 +142,54 @@ def web_instructions(support: WebSupport, *, tool: bool = False) -> str:
     return WEB_ON if support.available else WEB_OFF
 
 
-def clean_query(query: object) -> str | None:
-    """The query as it may go out, or ``None`` when it is no plain search query."""
+#: The query is no plain one-line text (or too long).
+BAD_QUERY = f"Give a short plain search query (at most {MAX_QUERY} characters, one line)."
+#: S-01 (security review 0.3.1): a character the user can't see on the card.
+INVISIBLE_IN_QUERY = (
+    "The query contains invisible or formatting characters (zero-width, direction or tag characters), "
+    "so the user can't see everything that would be sent. Write it again in plain visible text."
+)
+#: S-04: a link or encoded data would make the searcher open a page or carry private text.
+LINK_IN_QUERY = (
+    "Search with short general terms, not links or encoded data: no \"://\" and no long unbroken "
+    "strings of letters and digits."
+)
+#: Unicode categories never allowed in a query: format, private use, unassigned, surrogates.
+_INVISIBLE_CATEGORIES = frozenset({"Cf", "Co", "Cn", "Cs"})
+#: Long unbroken runs of base64/hex/url-safe characters: encoded data, not search terms.
+_OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9+/=_-]{32,}")
+
+
+def _invisible(char: str) -> bool:
+    code = ord(char)
+    return (
+        unicodedata.category(char) in _INVISIBLE_CATEGORIES
+        or 0xE0000 <= code <= 0xE007F  # tag characters
+        or 0x202A <= code <= 0x202E or 0x2066 <= code <= 0x2069  # bidi embeddings / isolates
+        or 0x200B <= code <= 0x200D or code in (0x2060, 0xFEFF)  # zero-width, word joiner, BOM
+    )
+
+
+def query_problem(query: object) -> str | None:
+    """Why ``query`` may not go out as a search (``None``: it may). Refused, never silently changed:
+    the card must show exactly what is sent, and the agent gets the reason to write it again."""
     if not isinstance(query, str):
-        return None
+        return BAD_QUERY
     text = query.strip()
-    if not text or len(text) > MAX_QUERY or any(ord(char) < 32 and char not in "\t" for char in text):
+    if not text or len(text) > MAX_QUERY or any(ord(char) < 32 and char != "\t" for char in text):
+        return BAD_QUERY
+    if any(_invisible(char) for char in text):
+        return INVISIBLE_IN_QUERY
+    if "://" in unicodedata.normalize("NFKC", text) or _OPAQUE_TOKEN.search(text):
+        return LINK_IN_QUERY
+    return None
+
+
+def clean_query(query: object) -> str | None:
+    """The query as it may go out, or ``None`` when it is no plain search query (``query_problem``)."""
+    if not isinstance(query, str) or query_problem(query) is not None:
         return None
-    return text
+    return query.strip()
 
 
 def site_of(url: str) -> str:

@@ -13,7 +13,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -28,7 +28,7 @@ from ..corrections.settings import RecognitionSettings, read_recognition, update
 from ..corrections.store import CorrectionsLayer, CorrectionStore
 from ..errors import KnowledgeError, NotFound
 from ..ingest.execution import current_execution
-from ..ingest.jobs import JobRecord
+from ..ingest.jobs import JobKind, JobRecord
 from ..ingest.runner import SPEECH_KINDS
 from ..ingest.service import IngestService
 from ..ingest.writer import WikiWriter
@@ -283,16 +283,37 @@ class WikiService:
 
         The run keeps this source's own wiki profile (the caller's execution scope).
         """
+        await self._when_free("connections", None, lambda: self.find_connections(pages))
+
+    async def _when_free(self, kind: JobKind, target: str | None,
+                         start: Callable[[], Awaitable[JobRecord]]) -> None:
         while True:
             try:
-                await self.find_connections(pages)
+                await start()
                 return
             except WikiBusy:
-                if not self.jobs.running("connections"):
-                    return  # SKAZ is closing; the pages are found again on the next run they are in
-                await self.jobs.idle("connections")
+                if not self.jobs.running(kind, target):
+                    return  # SKAZ is closing; the work is found again on the next run it is in
+                await self.jobs.idle(kind)
             except KnowledgeError:
                 return
+
+    async def start_when_free(self, kind: JobKind, target: str | None,
+                              start: Callable[[], Awaitable[JobRecord]]) -> JobRecord:
+        """Start a job now or, while one of this kind (and target) runs, right after it in the
+        background (C1-d Continue of paused follow-ups). Returns the started job, or the running one
+        this work follows. The background start keeps the caller's execution scope."""
+        try:
+            return await start()
+        except WikiBusy:
+            running = self.jobs.running_job(kind, target)
+            if running is None:
+                raise  # SKAZ is closing
+            task = asyncio.get_running_loop().create_task(self._when_free(kind, target, start))
+            self._post_tasks.add(task)
+            task.add_done_callback(self._post_tasks.discard)
+            task.add_done_callback(_log_failure)
+            return await disk_call(self.ingest.job, running)
 
     # -- jobs -----------------------------------------------------------------
 

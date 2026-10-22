@@ -139,6 +139,9 @@ class Failed:
     #: retry costs nothing. ``False`` = it may have been sent and paid for: adapters set this only
     #: where they know. Not part of equality (the same failure, with or without this knowledge).
     unsent: bool = field(default=False, compare=False)
+    #: The same request would be refused again (too long, no tool access, the first check not done):
+    #: retrying it is pointless, so it fails at once. Only set with ``unsent``.
+    permanent: bool = field(default=False, compare=False)
 
 
 AgentEvent = TextDelta | ToolCall | ToolResult | Completed | Failed

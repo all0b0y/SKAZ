@@ -222,11 +222,17 @@ export function createChatsStore(client: KbClient): ChatsStore {
         };
       });
     };
-    const merge = (id: string, messages: KbMessage[]) => {
+    /**
+     * Put a request's answer into its chat. `created`: the new answer the request made (send, edit,
+     * regenerate, resume) is returned as it was created, and the long poll may already show more of
+     * it (C-19): a copy already here is the same or newer, so it stays.
+     */
+    const merge = (id: string, messages: KbMessage[], created?: KbMessage) => {
       const open = get().chats[id];
       if (!open?.chat) return;
       let next = open.chat.messages;
       for (const m of messages) next = upsertMessage(next, m);
+      if (created && !next.some((m) => m.id === created.id)) next = upsertMessage(next, created);
       const chat = { ...open.chat, messages: next, state: isAnswering({ messages: next }) ? 'answering' as const : 'idle' as const };
       set((s) => ({ chats: { ...s.chats, [id]: { ...open, chat } }, list: s.list.map((c) => (c.id === id ? { ...c, state: chat.state } : c)) }));
     };
@@ -352,7 +358,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
           });
           // Q-A2: a message of your own closes a waiting question (its part_update confirms it).
           supersedeQuestions(chatId);
-          merge(chatId, [res.user, res.assistant]);
+          merge(chatId, [res.user], res.assistant);
           patchSummary(chatId, { updated_at: res.user.created_at });
           set((s) => ({ list: [...s.list].sort(byUpdated) }));
           return { ok: true, value: chatId };
@@ -373,14 +379,14 @@ export function createChatsStore(client: KbClient): ChatsStore {
         const open = get().chats[chatId];
         if (open?.chat) {
           // What followed the question is gone (the `removed` events say the same to other windows).
-          const kept = open.chat.messages.filter((m) => m.seq <= res.user.seq);
+          const kept = open.chat.messages.filter((m) => m.seq <= res.user.seq || m.id === res.assistant.id);
           set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat: { ...open.chat!, messages: kept } } } }));
         }
-        merge(chatId, [res.user, res.assistant]);
+        merge(chatId, [res.user], res.assistant);
       }),
       regenerate: (chatId, messageId) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/regenerate', { path: { chat_id: chatId, message_id: messageId } });
-        merge(chatId, [res.assistant]);
+        merge(chatId, [], res.assistant);
       }),
       resume: (chatId, messageId) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/resume', { path: { chat_id: chatId, message_id: messageId } });
@@ -390,7 +396,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
           const kept = open.chat.messages.filter((m) => m.id !== messageId);
           set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat: { ...open.chat!, messages: kept } } } }));
         }
-        merge(chatId, [res.assistant]);
+        merge(chatId, [], res.assistant);
       }),
       saveMessage: (chatId, messageId) => act(async () => {
         const ref = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/save', { path: { chat_id: chatId, message_id: messageId } });

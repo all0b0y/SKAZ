@@ -248,7 +248,9 @@ class SourceService:
             raise SourceRejected(MEDIA_FILE_LINK)
         address = check_url(url)
         limit = MAX_LINKED_PDF_BYTES if offline is not None and offline.kind == "pdf" else MAX_PAGE_BYTES
-        fetched = await self.fetcher.fetch(address, max_bytes=limit)
+        # The user's click on this link: pinned to the checked address; a VPN fake-IP answer is accepted
+        # for a public name on the default port (``fetch`` module note, security review S-02/S-05).
+        fetched = await self.fetcher.fetch(address, max_bytes=limit, pin_address=True, allow_vpn_fake_ip=True)
         content_type = fetched.content_type
         domain = domain_of(address)
         origin = Origin.model_validate(
@@ -306,7 +308,7 @@ class SourceService:
             try:
                 fetched = await self.fetcher.fetch(
                     address, max_bytes=web_page.MAX_PAGE_BYTES, accept=web_page.ACCEPT,
-                    total_seconds=web_page.TOTAL_SECONDS, pin_address=True,
+                    total_seconds=web_page.TOTAL_SECONDS, pin_address=True, allow_vpn_fake_ip=True,
                 )
             except (FetchFailed, LinkRejected) as error:
                 raise WebPageUnavailable(error.message) from error
@@ -330,7 +332,10 @@ class SourceService:
         return await disk_call(self._publish, prepared, folder_id, title, to_wiki)
 
     async def classify(self, url: str, *, probe: bool = True) -> LinkInfo:
-        return await classify_link(url, self.fetcher, video_probe=self.video_probe if probe else None)
+        """The Add link dialog's check of a link the user put on the list (and the check ``add_link``'s
+        route makes for that click): a user-click request, so a VPN fake-IP answer counts (S-02)."""
+        return await classify_link(url, self.fetcher, video_probe=self.video_probe if probe else None,
+                                   allow_vpn_fake_ip=True)
 
     def _checked_file(self, raw: str | Path) -> Path:
         """The file path from the open dialog: absolute, a readable regular file of a supported type,

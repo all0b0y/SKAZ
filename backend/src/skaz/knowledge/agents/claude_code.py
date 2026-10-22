@@ -88,7 +88,7 @@ from .engine import (
 )
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .transcript import render_prompt
-from .web import CLAUDE_BLOCKED, WebLink, WebQuery, WebSearchGate, WebVerdict, clean_query
+from .web import CLAUDE_BLOCKED, WebLink, WebQuery, WebSearchGate, WebVerdict, clean_query, query_problem
 
 log = logging.getLogger(__name__)
 
@@ -395,7 +395,7 @@ class ClaudeCodeEngine:
 
     async def _precheck(self, turn: AgentTurn) -> Failed | None:
         if turn.tools and self.mcp is None:
-            return Failed(turn.run_id, "other", NO_TOOL_ACCESS, unsent=True)
+            return Failed(turn.run_id, "other", NO_TOOL_ACCESS, unsent=True, permanent=True)
         located = self._locate("claude")
         if located is None:
             return Failed(turn.run_id, "incompatible", NOT_INSTALLED)
@@ -511,7 +511,8 @@ class ClaudeCodeEngine:
             if use_id and tool == WEB_TOOL:
                 state.web_asked[use_id] = (False, str(given.get("query") or ""), None)
             log.info("Refused a %s prompt of Claude Code", str(tool)[:40])
-            return {"behavior": "deny", "message": WEB_REFUSED}
+            reason = query_problem(given.get("query")) if tool == WEB_TOOL and not unknown else None
+            return {"behavior": "deny", "message": reason or WEB_REFUSED}
         verdict: WebVerdict = await gate.approve(WebQuery(use_id, query, domains["allowed_domains"],
                                                           domains["blocked_domains"]))
         allowed = verdict.allowed and not active.cancel.is_set()

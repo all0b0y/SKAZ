@@ -332,7 +332,7 @@ def test_a_database_of_w2_gains_the_searcher_column() -> None:
     old_sql = "\n".join(line for line in old_sql.splitlines()
                         if "searcher" not in line and "W-3b" not in line)
     connection = sqlite3.connect(":memory:")
-    apply_schemas(connection, [SimpleNamespace(NAME="web_search", VERSION=1, SQL=old_sql)])  # type: ignore[list-item]
+    apply_schemas(connection, [SimpleNamespace(NAME="web_search", VERSION=1, SQL=old_sql)])
     assert "searcher" not in {row[1] for row in connection.execute("PRAGMA table_info(web_search_requests)")}
     apply_schemas(connection, [web_search])
     assert "searcher" in {row[1] for row in connection.execute("PRAGMA table_info(web_search_requests)")}

@@ -379,7 +379,7 @@ class CodexEngine:
             definitions = self.dynamic_tools(turn.tools)
             text = turn_input(turn.messages)
         except ValueError as error:
-            return Failed(run_id, "other", str(error), unsent=True)
+            return Failed(run_id, "other", str(error), unsent=True, permanent=True)
         names = [definition["name"] for definition in definitions]
         instructions = "\n\n".join(part for part in (
             BASE_INSTRUCTIONS, WITH_TOOLS if names else WITHOUT_TOOLS, turn.instructions.strip(),
@@ -397,7 +397,7 @@ class CodexEngine:
         largest = max(len(json.dumps(thread_params)), len(json.dumps(turn_params)))
         if largest > MAX_MESSAGE_BYTES - 4096:
             return Failed(run_id, "other", "This request is too long for Codex. Send a shorter text.",
-                          unsent=True)
+                          unsent=True, permanent=True)
         if run.cancelled:
             return Failed(run_id, "cancelled", STOPPED)
         try:

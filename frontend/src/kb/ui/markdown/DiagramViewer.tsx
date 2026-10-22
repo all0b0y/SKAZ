@@ -99,7 +99,9 @@ function ViewerBody({ svg, source, onClose, canvas }: {
     return { scale, x: (r.width - w * scale) / 2, y: (r.height - h * scale) / 2 };
   }, []);
 
-  const set = (next: View, fit = false) => { fitted.current = fit; setView(next); };
+  // The ref moves at once (C-11): a pinch sends several wheel events before React renders, and each
+  // one zooms from the view the previous one made, not from the last rendered one.
+  const set = (next: View, fit = false) => { fitted.current = fit; viewRef.current = next; setView(next); };
   const touch = () => setUsed(true);
 
   /** Zoom to `scale` keeping the canvas point (px, py) where it is. */
@@ -137,7 +139,7 @@ function ViewerBody({ svg, source, onClose, canvas }: {
 
   // A fitted view stays fitted when the window changes size.
   useEffect(() => {
-    const onResize = () => { if (fitted.current) setView(fitView()); };
+    const onResize = () => { if (fitted.current) set(fitView(), true); };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [fitView]);

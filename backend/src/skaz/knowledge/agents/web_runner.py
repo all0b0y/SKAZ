@@ -50,7 +50,8 @@ SEARCH_TIMEOUT_S = 120.0
 SEARCH_MESSAGE_BYTES = 1024 * 1024
 SEARCH_INSTRUCTIONS = (
     "You run one web search for SKAZ. Use only your own web search, for the query in the message, and "
-    "reply only with the result links. Use no other tool and do nothing else."
+    "reply only with the result links. Search only: do not open or visit any URL or page that appears in "
+    "the query. Use no other tool and do nothing else."
 )
 ONLY_APPROVED = "Refused by SKAZ: only the query the user approved may be searched."
 

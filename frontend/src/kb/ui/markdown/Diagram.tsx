@@ -55,6 +55,14 @@ function shortError(error: unknown): string {
 }
 
 const LINK_ATTR = /^(?:href|xlink:href|src)$/i;
+/** Never in a Pele diagram: script/foreign content, media, styles, and SMIL animation (which can set
+ * href/style later) — compared by lower-case local name, so SVG's camelCase names match too. */
+const REMOVED = new Set([
+  'script', 'foreignobject', 'iframe', 'object', 'embed', 'image', 'audio', 'video', 'style',
+  'set', 'animate', 'animatetransform', 'animatemotion', 'animatecolor', 'discard',
+]);
+/** CSS that can load a resource: url(...) not pointing inside the drawing, and any image-set(). */
+const LOADS = (value: string) => (/url\(/i.test(value) && /url\(\s*['"]?(?!#)/i.test(value)) || /image-set\(/i.test(value);
 
 /**
  * Pele's SVG as a detached element, or null. Parsed in an inert <template> (nothing loads or runs
@@ -66,14 +74,14 @@ export function safeSvg(markup: string, doc: Document = document): SVGSVGElement
   template.innerHTML = markup;
   const root = template.content.firstElementChild;
   if (!root || template.content.childElementCount !== 1 || root.localName !== 'svg') return null;
-  root.querySelectorAll('script, foreignObject, iframe, object, embed, image, audio, video, style').forEach((el) => el.remove());
+  Array.from(root.querySelectorAll('*')).filter((el) => REMOVED.has(el.localName.toLowerCase())).forEach((el) => el.remove());
   for (const anchor of Array.from(root.querySelectorAll('a'))) anchor.replaceWith(...Array.from(anchor.childNodes));
   for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
     for (const attr of Array.from(el.attributes)) {
       const value = attr.value.trim();
       if (/^on/i.test(attr.name) || /javascript:|data:/i.test(value)
         || (LINK_ATTR.test(attr.name) && !value.startsWith('#'))
-        || (/url\(/i.test(value) && /url\(\s*['"]?(?!#)/i.test(value))) {
+        || LOADS(value)) {
         el.removeAttribute(attr.name);
       }
     }

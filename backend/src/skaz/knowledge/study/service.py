@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import logging
 import unicodedata
@@ -20,7 +21,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Concatenate, Literal, ParamSpec, TypeVar
 
 from ...native_io import disk_call
 from ..chats.resolve import MaterialReader
@@ -30,6 +31,7 @@ from ..ids import utc_now as _now
 from ..ingest.drafts import file_name
 from ..ingest.pages import spaced
 from ..ingest.protocols import IdentityTextLayer, TextLayer
+from ..keyed_locks import KeyedThreadLocks
 from ..library.names import MAX_NAME_BYTES, numbered_name, validate_name
 from ..markdown.page import Cite, PageDocument, PageMeta, parse_page
 from ..markdown.text import name_key
@@ -123,6 +125,34 @@ def _order(seed: str, items: Sequence[str]) -> list[str]:
     return sorted(items, key=lambda item: hashlib.sha256(f"{seed}:{item}".encode()).hexdigest())
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_Key = TypeVar("_Key", bound="str | None")
+
+
+def _one_at_a_time(
+    method: Callable[Concatenate[StudyService, _Key, _P], _R],
+) -> Callable[Concatenate[StudyService, _Key, _P], _R]:
+    """Changes to one block run one at a time (C-04).
+
+    Each route call runs in its own worker thread and reads, changes and writes the block's whole
+    ``state``. Two grades at once kept only the last one; two Saves both wrote a page ("Deck (2)");
+    a grade during a Save stayed in the block and never entered FSRS. Holding the block makes the
+    second call read what the first one wrote: a second Save is refused as already saved, and a
+    grade after a Save goes straight to the saved cards. ``block_id`` ``None`` (the deck page) holds
+    nothing: those changes go to the saved cards only.
+    """
+
+    @functools.wraps(method)
+    def held(self: StudyService, block_id: _Key, /, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if block_id is None:
+            return method(self, block_id, *args, **kwargs)
+        with self._block_locks.hold(block_id):
+            return method(self, block_id, *args, **kwargs)
+
+    return held
+
+
 class StudyService:
     def __init__(
         self,
@@ -149,6 +179,8 @@ class StudyService:
         self._tasks: set[asyncio.Task[None]] = set()
         #: The app's event loop: blocks change in worker threads, listeners run on the loop.
         self._loop: asyncio.AbstractEventLoop | None = None
+        #: One change at a time per block (C-04); see ``_one_at_a_time``.
+        self._block_locks = KeyedThreadLocks()
 
     # -- helpers ------------------------------------------------------------------------------------
 
@@ -527,6 +559,7 @@ class StudyService:
 
     # -- moving around and grading ------------------------------------------------------------------------
 
+    @_one_at_a_time
     def move(
         self,
         block_id: str,
@@ -556,6 +589,7 @@ class StudyService:
         self._notify(updated)
         return updated
 
+    @_one_at_a_time
     def grade(self, block_id: str, card_id: str, grade: Grade) -> StudyBlock:
         block = self.get(block_id)
         if block.kind != "deck":
@@ -607,6 +641,7 @@ class StudyService:
         self._notify(updated)
         return updated
 
+    @_one_at_a_time
     def mark(
         self, block_id: str | None, card_ids: Sequence[str], mark: Mark, *, page_id: str | None = None
     ) -> None:
@@ -691,6 +726,7 @@ class StudyService:
     # -- tests (S4, A-2) ------------------------------------------------------------------------------------
 
     def _start_attempt(self, block: StudyBlock, order: Sequence[str], *, notify: bool = True) -> Attempt:
+        """For a new block or one its caller holds (``retake``)."""
         attempt = Attempt(
             new_id("att"),
             block.id,
@@ -729,13 +765,14 @@ class StudyService:
         return question
 
     def _put_answer(self, block: StudyBlock, item_id: str, answer: dict[str, Any]) -> StudyBlock:
-        attempt = self.attempt(block)
-        if attempt is None:
-            raise StudyError("Start the test again.")
-        items = dict(attempt.answers.get("items") or {})
-        items[item_id] = answer
-        self.store.put_attempt(replace(attempt, answers={**attempt.answers, "items": items}))
-        updated = self.store.update_block(block.id, updated_at=_now())
+        with self._block_locks.hold(block.id):  # answers to two questions at once both stay (C-04)
+            attempt = self.attempt(self.get(block.id))
+            if attempt is None:
+                raise StudyError("Start the test again.")
+            items = dict(attempt.answers.get("items") or {})
+            items[item_id] = answer
+            self.store.put_attempt(replace(attempt, answers={**attempt.answers, "items": items}))
+            updated = self.store.update_block(block.id, updated_at=_now())
         assert updated is not None
         self._notify(updated)
         return updated
@@ -830,6 +867,7 @@ class StudyService:
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
+    @_one_at_a_time
     def finish(self, block_id: str) -> StudyBlock:
         block = self.get(block_id)
         attempt = self.attempt(block)
@@ -846,6 +884,7 @@ class StudyService:
         self._notify(updated)
         return updated
 
+    @_one_at_a_time
     def retake(self, block_id: str, *, mistakes_only: bool) -> StudyBlock:
         block = self.get(block_id)
         last = self.attempt(block)
@@ -883,6 +922,7 @@ class StudyService:
 
     # -- saving to the wiki (S6, Q5) --------------------------------------------------------------------
 
+    @_one_at_a_time
     def save(self, block_id: str, decision: Literal["allow", "deny"]) -> StudyBlock:
         block = self.get(block_id)
         if block.origin != "agent":
@@ -934,6 +974,7 @@ class StudyService:
         self._notify(updated)
         return updated
 
+    @_one_at_a_time
     def rename(self, block_id: str, title: str) -> StudyBlock:
         """Rename a deck or test without a new agent run (U3-a); a saved one renames its page too."""
         block = self.get(block_id)

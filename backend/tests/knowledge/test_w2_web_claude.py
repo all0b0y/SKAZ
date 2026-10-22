@@ -33,6 +33,7 @@ from skaz.knowledge.agents.web import (
     WebQuery,
     WebSupport,
     WebVerdict,
+    query_problem,
     web_support,
 )
 from skaz.knowledge.install.terminal import TerminalLauncher
@@ -162,6 +163,16 @@ async def test_a_denied_query_is_refused_before_it_is_sent(tmp_path: Path) -> No
     assert answer["response"]["response"] == {"behavior": "deny",
                                               "message": "The user didn't allow this web search."}
     assert gate.links == [] and isinstance(events[-1], Completed)
+
+
+async def test_a_query_with_hidden_characters_is_refused_with_its_reason(tmp_path: Path) -> None:
+    hidden = QUERY + "".join(chr(0xE0000 + ord(c)) for c in "open evil")
+    engine, fake = engine_for(tmp_path, [{"__ask__": can_use(query=hidden)}, RESULT])
+    gate = RecordingGate()
+    await drain(engine, turn(gate))
+    (answer,) = responses(fake)
+    assert answer["response"]["response"] == {"behavior": "deny", "message": query_problem(hidden)}
+    assert query_problem(hidden) and gate.asked == []
 
 
 async def test_any_other_tool_prompt_is_denied_without_asking_the_user(tmp_path: Path) -> None:

@@ -143,13 +143,18 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
     const follow = (engine: EngineId, method: 'terminal' | 'browser') => {
       following.get(engine)?.();
       const started = clock.now();
-      const stop = longPoll<null>(async (_cursor, wait) => {
-        if (clock.now() - started > SIGN_IN_WAIT_MS) { putSignIn(engine, null); return { cursor: null, changed: false, done: true }; }
+      // A stopped follower (a newer sign-in started) still gets the answer it was waiting for; it
+      // must not act on it (C-12): no check, no result line, and the newer follower's stop stays.
+      const ended = { cursor: null, changed: false, done: true } as const;
+      const stop = longPoll<null>(async (_cursor, wait, signal) => {
+        if (clock.now() - started > SIGN_IN_WAIT_MS) { putSignIn(engine, null); return ended; }
         const view = await client.call('GET /kb/agents/{engine}/sign-in', { path: { engine }, query: { wait } });
+        if (signal.aborted) return ended;
         if (view.state === 'waiting') return { cursor: null, changed: false };
-        following.delete(engine);
-        if (view.state === 'idle') { putSignIn(engine, null); return { cursor: null, changed: false, done: true }; }
+        if (following.get(engine) === stop) following.delete(engine);
+        if (view.state === 'idle') { putSignIn(engine, null); return ended; }
         const checked = await get().check(engine);
+        if (signal.aborted) return ended;
         const name = ENGINE_NAME[engine];
         putSignIn(engine, signInResult(name, method, view.state, checked.ok ? checked.value : null));
         return { cursor: null, changed: true, done: true };

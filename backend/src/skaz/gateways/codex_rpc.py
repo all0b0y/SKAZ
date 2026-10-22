@@ -15,6 +15,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from ..knowledge.processes import CHILDREN
 from .codex_tools import CodexTools, tool_failure
 
 
@@ -67,6 +68,9 @@ class CodexRpc:
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, limit=self._max_message_bytes,
             )
+            # Quitting SKAZ SIGTERMs it with the other agents (``_Server.handle_exit``); Codex stays
+            # in SKAZ's process group, so it is signalled as one process.
+            CHILDREN.add(self._process, group=False)
             self._reader = asyncio.create_task(self._receive())
             await self.request("initialize", {
                 "clientInfo": {"name": "skaz", "version": "0.1.0"},
@@ -273,3 +277,4 @@ class CodexRpc:
                 with suppress(ProcessLookupError):
                     self._process.kill()
                 await self._process.wait()
+        CHILDREN.discard(self._process)

@@ -959,14 +959,14 @@ class HermesEngine:
         granted = False
         try:
             if turn.tools and self.mcp is None:
-                yield Failed(run_id, "other", NO_TOOL_ACCESS, unsent=True)
+                yield Failed(run_id, "other", NO_TOOL_ACCESS, unsent=True, permanent=True)
                 return
             located = self._locate("hermes")
             if located is None:
                 yield Failed(run_id, "incompatible", NOT_INSTALLED)
                 return
             if not self.checked():
-                yield Failed(run_id, "other", FIRST_CHECK, unsent=True)
+                yield Failed(run_id, "other", FIRST_CHECK, unsent=True, permanent=True)
                 return
             self._sweep_once()
             try:

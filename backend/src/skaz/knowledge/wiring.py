@@ -231,13 +231,18 @@ def follow_up_continuer(
         scope = ExecutionScope(wiki.kb.db, root, root, ingest.profile(), budget=ingest.settings().budget,
                                material_id=material_id)
         started: JobRecord | None = None
+        # Each kind on its own: one busy with another run (a wiki-wide connection run, this folder's
+        # overview) starts right after it in the background instead of refusing Continue.
         with execution_scope(scope):
             if "folder_overview" in kinds:
-                started = await wiki.write_overview(record.folder_id)
+                folder_id = record.folder_id
+                started = await wiki.start_when_free("folder_overview", folder_id,
+                                                     lambda: wiki.write_overview(folder_id))
             if "connections" in kinds:
                 pages = [page.id for page in await disk_call(lambda: wiki.kb.pages(kind="concept"))
                          if material_id in page.sources]
-                started = await wiki.find_connections(pages)
+                started = await wiki.start_when_free("connections", None,
+                                                     lambda: wiki.find_connections(pages))
         return started
 
     return run
