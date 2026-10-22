@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { errorText } from '../api/client';
-import { Banner, Button, Icon, IconButton, Modal, Segmented, Switch } from '../ui';
-import { NameField } from '../library/NameField';
+import { Banner, Button, Icon, IconButton, Modal, Segmented, Switch, TextField } from '../ui';
 import { languageName } from '../material/MaterialView';
 import { useAgents, useLibrary, useServices, useSettings, useUi } from '../state/context';
 import { agentOf } from '../state/agents';
@@ -18,7 +17,7 @@ interface WikiAuto { files: boolean; text: boolean }
 
 /** "+ Material" (v11): drop files, paste a link or any text, choose the folder, add. */
 export function AddMaterialModal() {
-  const { client, bridge, library } = useServices();
+  const { client, bridge, library, ui } = useServices();
   const open = useUi((s) => s.addMaterialOpen);
   const setOpen = useUi((s) => s.setAddMaterialOpen);
   const folders = useLibrary((s) => s.folders);
@@ -28,6 +27,9 @@ export function AddMaterialModal() {
   const [paste, setPaste] = useState('');
   const [folderId, setFolderId] = useState<string>('');
   const [creating, setCreating] = useState(false);
+  // 0.3.1 F1: a typed new folder name is made by Add itself — no separate Enter step to forget.
+  const [newName, setNewName] = useState('');
+  const [folderError, setFolderError] = useState<string | null>(null);
   const [auto, setAuto] = useState<WikiAuto>({ files: true, text: false });
   const [wikiEngine, setWikiEngine] = useState<EngineId | null>(null);
   const [speechSettings, setSpeechSettings] = useState<KbSpeechSettings | null>(null);
@@ -49,7 +51,16 @@ export function AddMaterialModal() {
   useEffect(() => {
     if (!open) return;
     setItems([]); setPaste(''); setErrors({}); setNoneAdded(false); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
-    client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
+    setCreating(false); setNewName(''); setFolderError(null);
+    // Files dropped on a folder row (0.3.1 F3) come with that folder; otherwise the last used one.
+    const preset = ui.getState().addMaterialPreset;
+    if (preset) {
+      setFolderId(preset.folderId);
+      if (preset.files.length) setItems(preset.files.map((f) => fileItem(f.path, f.name, f.size)));
+      if (preset.unreadable) setDropError('Some files couldn’t be read from the drop. Choose them on the computer instead.');
+    } else {
+      client.call('GET /kb/recordings/defaults').then((d) => setFolderId(d.folder_id), () => setFolderId(folders.find((f) => f.system)?.id ?? ''));
+    }
     client.call('GET /kb/settings/wiki').then((w) => {
       setAuto({ files: w.auto_add_files_links, text: w.auto_add_text });
       setWikiEngine(w.wiki_engine);
@@ -118,15 +129,38 @@ export function AddMaterialModal() {
   // A link that failed its check stays on the list with its reason; Add neither counts nor sends it (QA B23).
   const broken = (i: AddItem) => i.type === 'link' && i.error !== null;
   const sendable = items.filter((i) => !broken(i));
-  const submit = async () => {
-    if (!sendable.length || !folderId) return;
+  const typed = creating ? newName.trim() : '';
+  const taken = typed ? folders.find((f) => sameName(f.name, typed)) ?? null : null;
+  const pendingNew = typed !== '' && taken === null;
+  const leaveNew = () => { setCreating(false); setNewName(''); setFolderError(null); };
+  // Enter confirms the name alone (the list then shows the new folder); Add would make it too.
+  const makeFolder = async () => {
+    if (!pendingNew || busy) return;
     setBusy(true);
+    const made = await library.getState().createFolder(typed);
+    setBusy(false);
+    if (!made.ok) { setFolderError(made.error); return; }
+    setFolderId(made.value.id);
+    leaveNew();
+  };
+  const submit = async () => {
+    if (!sendable.length || (creating ? !pendingNew : !folderId)) return;
+    setBusy(true);
+    let target = folderId;
+    if (creating) {
+      const made = await library.getState().createFolder(typed);
+      // The backend's refusal (a name taken meanwhile, an invalid name) stays next to the field; nothing is sent.
+      if (!made.ok) { setFolderError(made.error); setBusy(false); return; }
+      target = made.value.id;
+      setFolderId(target);
+      leaveNew();
+    }
     const failed: Record<string, string> = {};
     const left: AddItem[] = items.filter(broken);
     let added = 0;
     for (const item of sendable) {
       try {
-        await submitItem(client, item, { folderId, language: language || null, translate, toWiki: wikiOn });
+        await submitItem(client, item, { folderId: target, language: language || null, translate, toWiki: wikiOn });
         added += 1;
       } catch (e) {
         failed[item.id] = errorText(e);
@@ -142,7 +176,7 @@ export function AddMaterialModal() {
   };
 
   const ready = sendable.length > 0 && items.every((i) => (i.type !== 'link' || !i.classifying) && (i.type !== 'file' || i.kind !== 'unsupported'))
-    && !blocked && folderId !== '';
+    && !blocked && (creating ? pendingNew : folderId !== '');
   const spokenOptions = [...new Set([...languages, ...SPOKEN])];
 
   return (
@@ -193,6 +227,11 @@ export function AddMaterialModal() {
                     options={[{ value: 'text', label: 'Text' }, { value: 'video', label: 'Video' }, { value: 'both', label: 'Both' }]}
                     onChange={(mode) => setItems((list) => list.map((i) => (i.id === item.id ? { ...item, mode } : i)))} />
                 )}
+                {item.type === 'link' && item.info?.kind === 'site' && !item.info.embedded_video && (
+                  <Segmented label="Save from the page" size="sm" value={item.page ? 'page' : 'article'}
+                    options={[{ value: 'article', label: 'Article' }, { value: 'page', label: 'Whole page' }]}
+                    onChange={(v) => setItems((list) => list.map((i) => (i.id === item.id ? { ...item, page: v === 'page' } : i)))} />
+                )}
                 <IconButton icon="close" size="sm" label={`Remove ${itemTitle(item)}`} onClick={() => setItems((list) => list.filter((i) => i.id !== item.id))} />
               </li>
             ))}
@@ -203,17 +242,20 @@ export function AddMaterialModal() {
             <div className="kb-arow">
               <span className="kb-arow__label" id="kb-add-folder">Folder</span>
               {creating ? (
-                <NameField label="New folder name" placeholder="Folder name"
-                  onSubmit={async (name) => {
-                    const result = await library.getState().createFolder(name);
-                    if (result.ok) setFolderId(result.value.id);
-                    return result;
-                  }}
-                  onDone={() => setCreating(false)} />
+                <span className="kb-afolder">
+                  <TextField label="New folder name" hideLabel placeholder="Folder name" leading="folder" maxLength={120}
+                    autoFocus value={newName} error={folderError} disabled={busy}
+                    onChange={(e) => { setNewName(e.target.value); setFolderError(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); void makeFolder(); }
+                      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); leaveNew(); }
+                    }} />
+                  <IconButton icon="close" size="sm" label="Back to the folder list" onClick={leaveNew} />
+                </span>
               ) : (
                 <span className="kb-select">
                   <select aria-labelledby="kb-add-folder" value={folderId}
-                    onChange={(e) => { if (e.target.value === '__new') setCreating(true); else setFolderId(e.target.value); }}>
+                    onChange={(e) => { if (e.target.value === '__new') { setCreating(true); setNewName(''); setFolderError(null); } else setFolderId(e.target.value); }}>
                     {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                     <option value="__new">New folder…</option>
                   </select>
@@ -221,6 +263,15 @@ export function AddMaterialModal() {
                 </span>
               )}
             </div>
+            {creating && taken && (
+              <p className="kb-arow__hint" data-testid="add-folder-taken">
+                <span className="kb-inline-error">A folder with this name exists.</span>{' '}
+                <button type="button" className="kb-linkbtn" onClick={() => { setFolderId(taken.id); leaveNew(); }}>{`Add to «${taken.name}»`}</button>
+              </p>
+            )}
+            {creating && pendingNew && !folderError && (
+              <p className="kb-arow__hint kb-muted">New folder — made when you press Add.</p>
+            )}
             <div className="kb-arow">
               <span className="kb-arow__label">Wiki</span>
               <Switch label="Add to wiki after processing" checked={wikiOn} onChange={setToWiki} />
@@ -258,9 +309,15 @@ export function AddMaterialModal() {
         <span className="kb-head__spacer" />
         <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
         <Button variant="fill" busy={busy} disabled={!ready} onClick={() => void submit()}>
-          {sendable.length > 1 ? `Add ${sendable.length}` : 'Add'}
+          {creating && pendingNew ? `Create «${typed}» and add ${sendable.length}` : sendable.length > 1 ? `Add ${sendable.length}` : 'Add'}
         </Button>
       </div>
     </Modal>
   );
+}
+
+/** Folder names compare like the backend does: Unicode-normalised, case-insensitive. */
+function sameName(a: string, b: string): boolean {
+  const key = (s: string) => s.normalize('NFC').toLocaleLowerCase();
+  return key(a.trim()) === key(b.trim());
 }

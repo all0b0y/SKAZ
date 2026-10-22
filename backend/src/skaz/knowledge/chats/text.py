@@ -7,7 +7,7 @@ import unicodedata
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from .model import CitePart, ConnectionPart, PagePart, Part, TextPart, ToolPart
+from .model import CitePart, ConnectionPart, PagePart, Part, StudyPart, TextPart, ToolPart
 
 PREVIEW_CHARS = 140
 TITLE_CHARS = 60
@@ -35,6 +35,8 @@ def plain_text(parts: Sequence[Part]) -> str:
             pieces.append(f" {part.title} ")
         elif isinstance(part, ConnectionPart):
             pieces.append("\n" + "\n".join(side.text for side in part.sides) + "\n" + part.inference + "\n")
+        elif isinstance(part, StudyPart):
+            pieces.append(f" {'Flashcards' if part.kind == 'deck' else 'Test'} · {part.title} ")
     return "".join(pieces)
 
 
@@ -61,6 +63,10 @@ def agent_text(parts: Sequence[Part]) -> str:
                 **({"page_id": part.page_id} if part.page_id else {}),
             }
             pieces.append("\n```skaz-connection\n" + json.dumps(payload, ensure_ascii=False) + "\n```\n")
+        elif isinstance(part, StudyPart):
+            # The agent's own block in the history: what it showed, not the cards (they are in SKAZ).
+            what = "flashcards" if part.kind == "deck" else "a test"
+            pieces.append(f"\n[You showed the user {what} “{part.title}” (study block {part.study_id}).]\n")
         elif isinstance(part, ToolPart):
             continue
     return "".join(pieces).strip()

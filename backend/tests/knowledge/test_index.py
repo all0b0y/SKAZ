@@ -229,3 +229,14 @@ def test_notifications_list_and_dismiss(ready: KnowledgeService) -> None:
     assert dismissed.dismissed_at is not None
     assert ready.notifications() == []
     assert [n.id for n in ready.notifications(include_dismissed=True)] == [note.id]
+
+
+def test_a_failing_text_index_is_degraded_search_not_nothing_found(
+    ready: KnowledgeService, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """L1: an index SQLite can't read used to answer exactly like "no matches", with no log."""
+    with ready.db.write() as connection:
+        connection.execute("DROP TABLE fragments_fts")
+    results = ready.search("энтропия")
+    assert results.degraded and results.fragments == ()
+    assert "Full-text search failed" in caplog.text

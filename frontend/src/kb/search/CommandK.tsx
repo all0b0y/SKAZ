@@ -166,6 +166,13 @@ export function CommandK() {
     ui.getState().showCenter('chat');
   };
 
+  // L5: the highlighted row is always on screen while ↑/↓ move through a long list.
+  useEffect(() => {
+    if (!open || !rows) return;
+    const row = document.getElementById(`${listId}-${active}`);
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, rows, active, listId]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'ArrowDown' && rows) { event.preventDefault(); setActive((i) => (i + 1) % rows); }
     else if (event.key === 'ArrowUp' && rows) { event.preventDefault(); setActive((i) => (i - 1 + rows) % rows); }
@@ -205,7 +212,13 @@ export function CommandK() {
         <div className="kb-search__results">
           {!query && <p className="kb-search__hint">Type to search. Enter opens, ⌘Enter asks the agent.</p>}
           {query && error && <p className="kb-inline-error kb-inline-error--flat" role="alert">Search: {error}</p>}
-          {query && !loading && answered === query && shown.length === 0 && !error && <p className="kb-search__hint">Nothing found for “{query}”.</p>}
+          {/* L1: a failing full-text index is not "nothing found": say so, the titles still match. */}
+          {query && res?.degraded && !error && (
+            <p className="kb-inline-error kb-inline-error--flat" role="alert">
+              Searching inside texts isn’t available right now; only titles were searched. Open the logs if this keeps happening.
+            </p>
+          )}
+          {query && !loading && answered === query && shown.length === 0 && !error && !res?.degraded && <p className="kb-search__hint">Nothing found for “{query}”.</p>}
           <ul id={listId} role="listbox" aria-label="Results" className="kb-search__list">
             {shown.map((h, i) => {
               const head = tab === 'all' && h.section !== lastSection ? h.section : null;

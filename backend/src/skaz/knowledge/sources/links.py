@@ -203,8 +203,11 @@ def _seconds(value: str | None) -> int | None:
 
 
 async def classify_link(
-    value: str, fetcher: SafeFetcher, *, video_probe: VideoProbe | None = None
+    value: str, fetcher: SafeFetcher, *, video_probe: VideoProbe | None = None,
+    allow_vpn_fake_ip: bool = False,
 ) -> LinkInfo:
+    """``allow_vpn_fake_ip``: the user clicked to add this very link (``fetch`` module note); the
+    follow-up oEmbed lookup, whose address comes from the page, never gets it."""
     offline = classify_offline(value)
     if offline is not None:
         if offline.kind == "video" and video_probe is not None:
@@ -221,7 +224,8 @@ async def classify_link(
             return replace(offline, title=title, duration_ms=duration_ms, label=label)
         return offline
     url = check_url(value)
-    fetched = await fetcher.fetch(url, max_bytes=PROBE_BYTES, allow_partial=True)
+    fetched = await fetcher.fetch(url, max_bytes=PROBE_BYTES, allow_partial=True, pin_address=True,
+                                  allow_vpn_fake_ip=allow_vpn_fake_ip)
     return await _classify_fetched(url, fetched, fetcher)
 
 
@@ -288,7 +292,7 @@ async def _classify_fetched(url: str, fetched: Fetched, fetcher: SafeFetcher) ->
 async def _oembed(url: str, fetcher: SafeFetcher) -> dict[str, Any]:
     try:
         fetched = await fetcher.fetch(
-            url, max_bytes=OEMBED_BYTES, allow_partial=False, accept="application/json"
+            url, max_bytes=OEMBED_BYTES, allow_partial=False, accept="application/json", pin_address=True
         )
         data = json.loads(fetched.body.decode("utf-8", errors="replace"))
     except (FetchFailed, LinkRejected, ValueError):

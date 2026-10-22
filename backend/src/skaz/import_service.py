@@ -339,6 +339,13 @@ class ImportService:
             await self._fail(session_id, str(error))
         except (ImportConflict, ProviderNotConfigured, OSError, media_tools.MediaError) as error:
             await self._fail(session_id, str(error))
+        except Exception as error:
+            # H5: anything else (a bug, a broken model cache, a corrupt row) used to end the task and
+            # leave the import "running" until the app restarted. It fails now, with Retry available.
+            logger.error("Import %s failed unexpectedly: %s", session_id, error_note(error))
+            kind = type(error).__name__
+            await self._fail(session_id, f"The import stopped unexpectedly ({kind}). Retry it; if it keeps "
+                                         "failing, open the logs.")
 
     async def _execute(self, record: ImportRecord) -> None:
         if import_provider(record.model) != "soniox":

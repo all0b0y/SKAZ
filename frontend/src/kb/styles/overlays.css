@@ -98,6 +98,11 @@
 .kb-agentcard__note { display: flex; align-items: flex-start; gap: 6px; padding: 6px 8px; border-radius: var(--kb-r-sm); background: var(--kb-warn-soft); font-size: var(--t-sm); }
 .kb-agentcard__note .kb-icon { color: var(--kb-warn); margin-top: 2px; flex: none; }
 .kb-agentcard__msg { font-size: var(--t-sm); }
+/* Accounts & keys v3: a sign-in SKAZ follows ("Finish in Terminal…"), then its result line. */
+.kb-signin { display: flex; align-items: flex-start; gap: 6px; margin: 0; text-align: left; }
+.kb-signin .kb-spinner, .kb-signin .kb-icon { flex: none; margin-top: 3px; }
+.kb-signin--signed_in { color: var(--kb-ok); }
+.kb-signin--failed, .kb-signin--not_signed_in { color: var(--kb-danger); }
 .kb-agentcard__consent { display: flex; align-items: flex-start; gap: 6px; font-size: var(--t-sm); color: var(--kb-muted); }
 .kb-agentcard__consent input { margin-top: 3px; accent-color: var(--kb-fill); }
 .kb-agentcard__manual { font-size: var(--t-sm); color: var(--kb-muted); }

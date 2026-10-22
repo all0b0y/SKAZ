@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { m } from 'motion/react';
-import { Icon, type IconName } from '../ui';
-import { useNotifications, usePrefs, useServices, useUi } from '../state/context';
+import { Icon, useIconPlay, type IconName } from '../ui';
+import { useChats, useNotifications, usePrefs, useServices, useUi } from '../state/context';
+import { isWaitingForUser } from '../api/permissions';
 import type { Section } from '../state/prefs';
 import { useProblems } from './problems';
 
@@ -16,6 +17,33 @@ const ITEMS: ReadonlyArray<{ id: Section; label: string; icon: IconName }> = [
 export const LABEL_DELAY_MS = 300;
 /** How long after a name hides the next one still comes at once. */
 export const LABEL_WARM_MS = 600;
+
+/** The bell moves at most once in this long, however fast notifications arrive. */
+export const BELL_MIN_GAP_MS = 5000;
+
+/**
+ * Feedback counter for the bell (animated-icons spec): it goes up when the unread count INCREASES —
+ * not for the count the first read brings, not when it falls (opening the list), and not within
+ * {@link BELL_MIN_GAP_MS} of the last time it moved.
+ */
+export function useBellPlay(): number {
+  const unread = useNotifications((s) => s.unread);
+  const ready = useNotifications((s) => s.load === 'ready');
+  const [play, replay] = useIconPlay();
+  const before = useRef<number | null>(null); // null until the first read has arrived
+  const movedAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (!ready) { before.current = null; return; }
+    const was = before.current;
+    before.current = unread;
+    if (was === null || unread <= was) return;
+    const now = Date.now();
+    if (movedAt.current !== null && now - movedAt.current < BELL_MIN_GAP_MS) return;
+    movedAt.current = now;
+    replay();
+  }, [ready, unread, replay]);
+  return play;
+}
 
 /**
  * Which rail item shows its name (v43 variant B, "slide-out pill"): one at a time. Hover waits
@@ -77,6 +105,8 @@ interface RailButtonProps {
   /** Muted after the name: a keyboard shortcut, or what needs attention. */
   hint?: string;
   icon: IconName;
+  /** Feedback counter for the icon (see `Icon`'s `play`). */
+  iconPlay?: number;
   active?: boolean;
   open?: boolean;
   labels: Labels;
@@ -90,7 +120,7 @@ interface RailButtonProps {
  * A rail button. Its name is its accessible name; on hover/focus its highlight slides out to the
  * right with the name beside the icon — one shape, decorative (aria-hidden: the button says it).
  */
-function RailButton({ id, label, hint, icon, active = false, open = false, labels, ariaLabel, attrs, onClick, children }: RailButtonProps) {
+function RailButton({ id, label, hint, icon, iconPlay, active = false, open = false, labels, ariaLabel, attrs, onClick, children }: RailButtonProps) {
   return (
     <button
       type="button"
@@ -106,7 +136,7 @@ function RailButton({ id, label, hint, icon, active = false, open = false, label
       onBlur={() => labels.hide(id)}
     >
       {active && <m.span layoutId="kb-rail-active" className="kb-rail__fill" aria-hidden="true" />}
-      <Icon name={icon} size={18} className="kb-rail__icon" />
+      <Icon name={icon} size={18} className="kb-rail__icon" play={iconPlay} />
       {labels.shown === id && (
         <span className="kb-rail__label" aria-hidden="true" data-testid="rail-label" data-overlay="">
           <Icon name={icon} size={18} />
@@ -121,8 +151,8 @@ function RailButton({ id, label, hint, icon, active = false, open = false, label
 
 /**
  * Icon rail (summary v39): narrow, icons only — names slide out on hover/focus (v43 B) and are the
- * accessible names; the SKAZ wordmark (v44 A) in the free space above search ⌘K and settings at the
- * bottom. Never moves: fixed width, fixed item
+ * accessible names; search ⌘K and settings at the bottom (the SKAZ wordmark of v44 A was removed:
+ * the empty chat already shows SKAZ). Never moves: fixed width, fixed item
  * heights, nothing appears or disappears when sections or panels change. The graph lives in the
  * Wiki section (v39).
  */
@@ -131,12 +161,19 @@ export function Rail() {
   const section = usePrefs((s) => s.section);
   const sideOpen = usePrefs((s) => s.sideOpen);
   const unread = useNotifications((s) => s.unread);
+  const bellPlay = useBellPlay();
   const openSettings = useUi((s) => s.openSettings);
   const settingsOpen = useUi((s) => s.settingsOpen);
   const searchOpen = useUi((s) => s.searchOpen);
+  const center = useUi((s) => s.center);
   const setSearchOpen = useUi((s) => s.setSearchOpen);
   const problems = useProblems();
   const labels = useRailLabels();
+  // 0.3.1 P4: a chat other than the one in front of you waits for an answer — a dot, nothing pops up.
+  const waiting = useChats((s) => {
+    const shown = center === 'chat' ? s.currentId : null;
+    return s.list.some((c) => c.id !== shown && isWaitingForUser(c));
+  });
 
   return (
     <nav className="kb-rail" data-pane="rail" aria-label="Sections">
@@ -144,24 +181,23 @@ export function Rail() {
         {ITEMS.map((item) => {
           const active = sideOpen && (section === item.id || (item.id === 'wiki' && section === 'graph'));
           const badge = item.id === 'notifications' ? unread : 0;
+          const waits = item.id === 'chats' && waiting;
           return (
             <li key={item.id}>
               <RailButton
-                id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : undefined} icon={item.icon} active={active} labels={labels}
-                ariaLabel={badge > 0 ? `${item.label}, ${badge} unread` : item.label}
+                id={item.id} label={item.label} hint={badge > 0 ? `${badge} unread` : waits ? 'Waiting for you' : undefined} icon={item.icon} iconPlay={item.id === 'notifications' ? bellPlay : undefined} active={active} labels={labels}
+                ariaLabel={badge > 0 ? `${item.label}, ${badge} unread` : waits ? `${item.label}, waiting for you` : item.label}
                 attrs={{ 'aria-current': active ? 'page' : undefined }}
                 onClick={() => prefs.getState().set({ section: item.id, sideOpen: true })}
               >
                 {badge > 0 && <span className="kb-badge" aria-hidden="true">{badge > 99 ? '99+' : badge}</span>}
+                {waits && <span className="kb-dot kb-dot--waiting" aria-hidden="true" data-testid="chats-waiting-dot" />}
               </RailButton>
             </li>
           );
         })}
       </ul>
-      <div className="kb-rail__spacer">
-        {/* Wordmark (v44 A): decorative, reads bottom-to-top; hidden when the rail has no room for it. */}
-        <span className="kb-rail__wordmark" aria-hidden="true">SKAZ</span>
-      </div>
+      <div className="kb-rail__spacer" />
       <RailButton id="search" label="Search" hint="⌘K" icon="search" open={searchOpen} labels={labels} ariaLabel="Search"
         attrs={{ 'aria-keyshortcuts': 'Meta+K', 'aria-haspopup': 'dialog' }} onClick={() => setSearchOpen(true)} />
       <RailButton

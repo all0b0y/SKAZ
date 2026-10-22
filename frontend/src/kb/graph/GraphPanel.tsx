@@ -283,7 +283,7 @@ export function GraphPanel() {
             </div>
           )}
           {graph && graph.nodes.length === 0 && (
-            <EmptyState icon="graph" title="No connections yet">Concepts appear here as materials are added to the wiki.</EmptyState>
+            <EmptyState icon="graph" title="No connections yet" field>Concepts appear here as materials are added to the wiki.</EmptyState>
           )}
           {graph && graph.nodes.length > 0 && (
             <>

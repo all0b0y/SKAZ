@@ -1,4 +1,5 @@
 import { expect, test, _electron as electron } from '@playwright/test';
+import { displayEnv, rootArgs } from './isolatedSmoke';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,9 +10,9 @@ test('dev and test use distinct real databases and knowledge libraries and persi
   test.setTimeout(120_000);
   const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'skaz-profiles-')));
   const launch = (profile: 'dev' | 'test') => electron.launch({
-    args: [path.join(root, 'scripts/profile-smoke/main.cjs')], cwd: root,
+    args: [...rootArgs(), path.join(root, 'scripts/profile-smoke/main.cjs')], cwd: root,
     env: { PATH: process.env.PATH ?? '', HOME: home, NODE_ENV: 'production',
-      SKAZ_PROFILE_SMOKE_HOME: home, SKAZ_PROFILE: profile, SKAZ_ALLOW_MODEL_DOWNLOAD: '0' },
+      SKAZ_PROFILE_SMOKE_HOME: home, SKAZ_PROFILE: profile, SKAZ_ALLOW_MODEL_DOWNLOAD: '0', ...displayEnv() },
   });
   try {
     for (const profile of ['dev', 'test', 'test'] as const) {

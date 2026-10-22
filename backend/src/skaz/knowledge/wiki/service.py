@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +27,8 @@ from ..corrections.service import CorrectionChange, CorrectionService
 from ..corrections.settings import RecognitionSettings, read_recognition, update_recognition
 from ..corrections.store import CorrectionsLayer, CorrectionStore
 from ..errors import KnowledgeError, NotFound
-from ..ingest.jobs import JobRecord
+from ..ingest.execution import current_execution
+from ..ingest.jobs import JobKind, JobRecord
 from ..ingest.runner import SPEECH_KINDS
 from ..ingest.service import IngestService
 from ..ingest.writer import WikiWriter
@@ -35,7 +37,7 @@ from ..markdown.page import PageDocument
 from ..notifications.feed import NotificationFeed, register_material_kinds
 from ..service import KnowledgeService, MaterialDetail, PageView
 from .agent import AgentCaller, WikiJobFailed
-from .connections import Connections
+from .connections import Connections, after_user_edit, linked_pages
 from .context import NO_DETECTOR, WikiContext
 from .delete import (
     DeletePlan,
@@ -101,6 +103,15 @@ class PageDetail:
     links: dict[str, list[LinkView]] = field(default_factory=dict)
 
 
+def _profile_key(caller: AgentCaller) -> dict[str, str | None]:
+    """Who answers a connection check: the job's pinned wiki profile, else the caller's own choice."""
+    scope = current_execution()
+    if scope is not None and scope.profile.engine == caller.engine.id:
+        profile = scope.profile
+        return {"engine": profile.engine, "model": profile.model, "effort": profile.effort}
+    return {"engine": caller.engine.id, "model": caller.model, "effort": caller.effort}
+
+
 def _log_failure(task: asyncio.Task[None]) -> None:
     error = None if task.cancelled() else task.exception()
     if error is not None:
@@ -128,7 +139,7 @@ class WikiService:
         self.connections = Connections(self.ctx)
         self.overviews = FolderOverviews(self.ctx)
         self.rechecks = Recheck(self.ctx)
-        self.jobs = WikiJobs(ingest.jobs)
+        self.jobs = WikiJobs(ingest.jobs, profile=ingest.profile)
         self.feed = NotificationFeed(kb)
         self.watcher = WikiWatcher(kb)
         self.recognition = RecognitionChecker(
@@ -146,6 +157,7 @@ class WikiService:
         self._background_signature: str | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._post_tasks: set[asyncio.Task[None]] = set()
+        self._connections_start = asyncio.Lock()
         self._writer = WikiWriter(kb, ingest.write_lock)
         self.gone = GoneMaterials(kb, self.graph, language=lambda: ingest.settings().language,
                                   after_cleanup=self._after_cleanup)
@@ -264,8 +276,44 @@ class WikiService:
         with contextlib.suppress(KnowledgeError):
             await self.write_overview(record.folder_id)
         if pages:
-            with contextlib.suppress(KnowledgeError):
-                await self.find_connections(pages)
+            await self._connections_when_free(pages)
+
+    async def _connections_when_free(self, pages: Sequence[str]) -> None:
+        """Connections of a new source's pages: after a connection run already going, never skipped (C1-a).
+
+        The run keeps this source's own wiki profile (the caller's execution scope).
+        """
+        await self._when_free("connections", None, lambda: self.find_connections(pages))
+
+    async def _when_free(self, kind: JobKind, target: str | None,
+                         start: Callable[[], Awaitable[JobRecord]]) -> None:
+        while True:
+            try:
+                await start()
+                return
+            except WikiBusy:
+                if not self.jobs.running(kind, target):
+                    return  # SKAZ is closing; the work is found again on the next run it is in
+                await self.jobs.idle(kind)
+            except KnowledgeError:
+                return
+
+    async def start_when_free(self, kind: JobKind, target: str | None,
+                              start: Callable[[], Awaitable[JobRecord]]) -> JobRecord:
+        """Start a job now or, while one of this kind (and target) runs, right after it in the
+        background (C1-d Continue of paused follow-ups). Returns the started job, or the running one
+        this work follows. The background start keeps the caller's execution scope."""
+        try:
+            return await start()
+        except WikiBusy:
+            running = self.jobs.running_job(kind, target)
+            if running is None:
+                raise  # SKAZ is closing
+            task = asyncio.get_running_loop().create_task(self._when_free(kind, target, start))
+            self._post_tasks.add(task)
+            task.add_done_callback(self._post_tasks.discard)
+            task.add_done_callback(_log_failure)
+            return await disk_call(self.ingest.job, running)
 
     # -- jobs -----------------------------------------------------------------
 
@@ -297,35 +345,48 @@ class WikiService:
         return await self.find_connections()
 
     async def find_connections(self, page_ids: Sequence[str] | None = None) -> JobRecord:
-        """``connections`` job: disagreements and connections, around ``page_ids`` or the whole wiki."""
-        if self.jobs.running("connections"):
-            raise WikiBusy("SKAZ is already looking for connections.")
-        self._touch()
-        scope = list(page_ids) if page_ids is not None else None
+        """``connections`` job: disagreements and connections, around ``page_ids`` or the whole wiki.
 
-        async def work(job: JobContext) -> None:
-            caller = self._caller("links")
-            pages = (
-                scope
-                if scope is not None
-                else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
-            )
-            await job.count(parts_total=len(pages), parts_done=0)
-            written = found = 0
-            for done, page_id in enumerate(pages, start=1):
-                await job.step("checking_discrepancies")
-                found += await self.discrepancies.check_page(page_id, None, caller, job.log)
-                await job.step("finding_connections")
-                written += await self.connections.find_for_page(page_id, caller, job.log)
-                await job.count(parts_done=done, blocks_written=written)
-            await disk_call(self.graph.refresh)
-            await job.log(
-                f"Looked at {len(pages)} concept page(s): {written} connection(s) written, "
-                f"{found} disagreement(s) marked."
-            )
+        Connections are checked in batches and only for pairs whose exact input wasn't checked
+        before (C1-a, ``Connections.find``); pages a failed run left pending are continued.
+        """
+        async with self._connections_start:  # the check and the start are one step for concurrent callers
+            if self.jobs.running("connections"):
+                raise WikiBusy("SKAZ is already looking for connections.")
             self._touch()
+            scope = list(page_ids) if page_ids is not None else None
 
-        return await self.jobs.start("connections", None, "finding_connections", work)
+            async def work(job: JobContext) -> None:
+                caller = self._caller("links")
+                pages = (
+                    scope
+                    if scope is not None
+                    else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
+                )
+                await job.count(parts_total=len(pages), parts_done=0)
+                found = 0
+                for done, page_id in enumerate(pages, start=1):
+                    await job.step("checking_discrepancies")
+                    found += await self.discrepancies.check_page(page_id, None, caller, job.log)
+                    await job.count(parts_done=done)
+                await job.step("finding_connections")
+
+                async def count(values: dict[str, int]) -> None:
+                    await job.count(**values)
+
+                outcome = await self.connections.find(scope, caller, job.log, count,
+                                                      profile=_profile_key(caller))
+                await job.count(blocks_written=outcome.written)
+                await disk_call(self.graph.refresh)
+                await job.log(
+                    f"Looked at {outcome.pages} concept page(s): {outcome.pairs} candidate pair(s) — "
+                    f"{outcome.reused} reused unchanged, {outcome.declined} ruled out by the decision layer, "
+                    f"{outcome.checked} checked by the agent in {outcome.batches} batch(es); "
+                    f"{outcome.written} connection(s) written, {found} disagreement(s) marked."
+                )
+                self._touch()
+
+            return await self.jobs.start("connections", None, "finding_connections", work)
 
     async def write_overview(self, folder_id: str) -> JobRecord:
         if self.jobs.running("folder_overview", folder_id):
@@ -646,22 +707,40 @@ class WikiService:
         self._touch()
         return self.page(page_id)
 
-    def update_block(self, page_id: str, block_id: str, text: str) -> PageDetail:
+    def _user_edit(self, page_id: str, edit: Callable[[], object]) -> PageDetail:
+        """A manual edit (C1-a, user decisions 2026-10-21, 4–5): a connection it takes away is never
+        suggested again, and the page waits for the next connection run at once."""
         with self.ctx.write_lock:
-            update_block(self.kb, page_id, block_id, text)
+            before = linked_pages(self.kb.db, page_id)
+            edit()
+            after_user_edit(self.kb.db, page_id, before)
         return self._edited(page_id)
+
+    def update_block(self, page_id: str, block_id: str, text: str) -> PageDetail:
+        return self._user_edit(page_id, lambda: update_block(self.kb, page_id, block_id, text))
 
     def add_note(
         self, page_id: str, text: str, *, after_block_id: str | None, section: str | None
     ) -> PageDetail:
-        with self.ctx.write_lock:
-            add_note(self.kb, page_id, text, after_block_id=after_block_id, section=section)
-        return self._edited(page_id)
+        return self._user_edit(page_id, lambda: add_note(
+            self.kb, page_id, text, after_block_id=after_block_id, section=section))
 
     def delete_note(self, page_id: str, block_id: str) -> PageDetail:
-        with self.ctx.write_lock:
-            delete_note(self.kb, page_id, block_id)
-        return self._edited(page_id)
+        """Delete the user's note, or a connection SKAZ wrote (remembered as the user's removal)."""
+        return self._user_edit(page_id, lambda: delete_note(self.kb, page_id, block_id))
+
+    # -- changes by chat agents (0.3.1 P: applied by SKAZ after the user allowed them) ----------
+
+    @property
+    def write_lock(self) -> threading.RLock:
+        """The one library write lock (re-entrant); hold it only in worker threads."""
+        return self.kb.writing()
+
+    def after_change(self) -> None:
+        """An agent's change landed or was undone: the graph and ``Wiki/index.md`` follow."""
+        self.graph.refresh(force=True)
+        self._refresh_index()
+        self._touch()
 
     def graph_view(self, folder_id: str | None) -> Graph:
         if folder_id is not None and self.kb.folder_repo.get(folder_id) is None:

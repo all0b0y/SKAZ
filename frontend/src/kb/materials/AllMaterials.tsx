@@ -4,8 +4,12 @@ import type { KbWikiState } from '../api/names';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL } from '../library/materialMeta';
 import { useFolderTone } from '../document/parts';
+import { errorText } from '../api/client';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
+import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
+import { useMaterialSelection } from './materialBatch';
+import { StippleStrip } from '../fx/stipple';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -46,19 +50,23 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
     ? 'reading' : material.status === 'failed' ? 'failed' : known ?? 'unknown';
   const view: Record<Shown, { icon: 'check' | 'close' | 'warning' | null; text: string; tone: string }> = {
     in_wiki: { icon: 'check', text: 'In wiki', tone: 'ok' },
+    queued: { icon: null, text: 'Queued', tone: 'run' },
     processing: { icon: null, text: 'Adding…', tone: 'run' },
     reading: { icon: null, text: material.status === 'recording' ? 'Recording…' : 'Processing…', tone: 'run' },
     not_in_wiki: { icon: 'close', text: 'Not in wiki', tone: 'off' },
     failed: { icon: 'warning', text: 'Error', tone: 'err' },
+    // C1-d: stopped at the material's wiki budget; Continue is on the material.
+    paused: { icon: 'warning', text: 'Paused', tone: 'off' },
     unknown: { icon: null, text: '—', tone: 'off' },
   };
   const v = view[state];
   return (
-    <span className={`kb-wk kb-wk--${v.tone}`} title={v.text}>
-      <span className="kb-stx" aria-hidden="true">
-        {v.icon ? <Icon name={v.icon} size={11} /> : v.tone === 'run' ? <span className="kb-spinner kb-spinner--xs" /> : null}
-      </span>
+    <span className={`kb-wk kb-wk--${v.tone}${v.tone === 'run' ? ' kb-wk--strip' : ''}`} title={v.text}>
+      <span className="kb-stx" aria-hidden="true">{v.icon && <Icon name={v.icon} size={11} />}</span>
       <span className="kb-wk__text">{v.text}</span>
+      {/* Queued / Processing… / Recording…: no percentages exist, so an endless dot strip — instead of
+          a spinner — laid UNDER the label without growing the row (materials.css .kb-wk--strip). */}
+      {v.tone === 'run' && <StippleStrip />}
     </span>
   );
 }
@@ -83,8 +91,25 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   useEffect(() => { reload(); }, [revision, reload]);
   const gone = useLibrary((s) => s.gone);
   const all = useMemo(() => (state.value ?? []).filter((m) => !gone.includes(m.id)), [state.value, gone]);
-  const busy = all.some((m) => m.status === 'processing' || m.status === 'recording' || m.wiki_state === 'processing');
+  const busy = all.some((m) => m.status === 'processing' || m.status === 'recording'
+    || m.wiki_state === 'processing' || m.wiki_state === 'queued');
   useInterval(busy && !hidden, 3000, reload);
+  const failedCount = all.filter((m) => m.wiki_state === 'failed' && m.status !== 'failed').length;
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  /** H2: every material whose wiki job failed or was interrupted goes back in the queue, in one click. */
+  const retryFailed = async () => {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await client.call('POST /kb/jobs/retry-failed');
+      reload();
+    } catch (error) {
+      setRetryError(errorText(error));
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const rows = useMemo(() => {
     const kinds = type === 'all' ? null : TYPE_KINDS[type];
@@ -93,6 +118,13 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
       : sort === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
     return out;
   }, [all, type, folderId, sort]);
+  const tableRows = layout === 'table' ? rows : [];
+  const { sel, overlays, dragProps } = useMaterialSelection({
+    rows: tableRows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
+    onOpen: (id) => openDocument({ type: 'material', id }),
+  });
+  const selectable = tableRows.filter((m) => !sel.reasonOf(m.id)).length;
+  const allState = sel.selected.size === 0 ? 'none' : sel.selected.size >= selectable ? 'all' : 'some';
   const folderName = (m: KbMaterialSummary) => m.folder_name || folders.find((f) => f.id === m.folder_id)?.name || '';
 
   return (
@@ -101,10 +133,16 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         <h1 className="kb-head__title kb-allmat__title">All materials</h1>
         <span className="kb-muted kb-allmat__count">{all.length || libraryCount}</span>
         <span className="kb-head__spacer" />
+        {failedCount > 0 && (
+          <Button size="sm" icon="retry" busy={retrying} onClick={() => void retryFailed()}
+            title={retryError ?? 'Add the materials that failed to the wiki again'}>
+            Retry failed ({failedCount})
+          </Button>
+        )}
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
       </header>
-      <div className="kb-allmat__body">
+      <div className="kb-allmat__body" {...sel.listProps}>
         <div className="kb-amf">
           <Segmented label="Type" size="sm" value={type} options={TYPE_OPTIONS} onChange={setType} />
           <span className="kb-head__spacer" />
@@ -135,24 +173,29 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           <Banner tone="error" title="Couldn’t load materials." actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {state.value && rows.length === 0 && (
-          <EmptyState icon="materials" title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
+          <EmptyState icon="materials" field={!all.length} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
             action={all.length ? undefined : <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add material</Button>}>
             {all.length ? 'Choose another type or folder.' : 'Record, drop files or paste a link — everything lands here.'}
           </EmptyState>
         )}
         {rows.length > 0 && layout === 'table' && (
-          <table className="kb-amt">
+          <table className="kb-amt" {...sel.gridProps} aria-label="Materials">
             <colgroup>
-              <col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
+              <col className="kb-amt__c-sel" /><col className="kb-amt__c-type" /><col className="kb-amt__c-name" /><col className="kb-amt__c-folder" />
               <col className="kb-amt__c-added" /><col className="kb-amt__c-wiki" />
             </colgroup>
             <thead>
-              <tr><th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
+              <tr><th className="kb-amt__sel"><SelectAllBox state={allState} onChange={(all) => (all ? sel.selectAll() : sel.clear())} /></th><th aria-label="Type" /><th>Name</th><th className="kb-amt__folder-col">Folder</th><th className="kb-amt__added">Added</th><th>Wiki</th></tr>
             </thead>
             <tbody>
               {rows.map((m) => (
-                <tr key={m.id} className={openedId === m.id ? 'is-current' : undefined} onClick={() => openDocument({ type: 'material', id: m.id })}>
-                  <td><Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} /></td>
+                <tr key={m.id} className={openedId === m.id ? 'is-current' : undefined} {...sel.rowProps(m.id)} {...dragProps(m)}
+                  onClick={() => openDocument({ type: 'material', id: m.id })}>
+                  {/* Own column, as in mockup lib-v1: the box never shares a cell with the type icon. */}
+                  <td className="kb-amt__sel"><SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} /></td>
+                  <td className="kb-amt__type">
+                    <Icon name={KIND_ICON[m.kind]} size={15} label={KIND_LABEL[m.kind]} />
+                  </td>
                   <td className="kb-amt__name">
                     <button type="button" className="kb-amt__open" onClick={(e) => { e.stopPropagation(); openDocument({ type: 'material', id: m.id }); }}>
                       {m.title}
@@ -166,6 +209,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
             </tbody>
           </table>
         )}
+        {overlays}
         {rows.length > 0 && layout === 'cards' && (
           <ul className="kb-amg" aria-label="Materials">
             {rows.map((m) => (

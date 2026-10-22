@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
 from ..agents.registry import EngineUnavailable
+from ..agents.web import site_of
 from ..chats.events import ChatEvent
 from ..chats.model import (
     CitePart,
@@ -23,14 +24,22 @@ from ..chats.model import (
     OpenContext,
     PagePart,
     Part,
+    PermissionPart,
+    QuestionPart,
     Quote,
     Ref,
+    StudyPart,
     TextPart,
+    WebSearchPart,
 )
 from ..chats.service import ChatConflict, ChatService, ChatView
 from ..errors import KnowledgeError
+from ..permissions.broker import PermissionConflict
+from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
+from ..permissions.web_search import WebSearchRecord, WebSearchStore
 from ..service import KnowledgeService
 from ..store.database import MAX_DB_INT
+from ..study.service import StudyService
 from .deps import kb_call
 from .schemas import KbCitation, KbPageRef
 from .schemas_chats import (
@@ -40,6 +49,7 @@ from .schemas_chats import (
     KbChatEvents,
     KbChatExport,
     KbChatFilter,
+    KbChatLastChoice,
     KbChatListEvents,
     KbChatPatch,
     KbChatSummary,
@@ -48,16 +58,26 @@ from .schemas_chats import (
     KbConnectionPart,
     KbFailure,
     KbMessage,
+    KbMessageEdit,
     KbMessageInput,
     KbMessagePart,
+    KbOpenContext,
     KbPagePart,
+    KbPermissionChange,
+    KbPermissionPart,
+    KbPermissionSummary,
+    KbQuestionOption,
+    KbQuestionPart,
     KbQuote,
     KbRef,
+    KbSavedAnalysis,
     KbSend,
     KbSendResult,
     KbTextPart,
     KbToolPart,
 )
+from .schemas_web import KbWebLink, KbWebSearchPart
+from .study import study_part
 
 MAX_WAIT_S = 25.0
 MAX_LIST = 500
@@ -67,6 +87,8 @@ def error_response(error: KnowledgeError) -> JSONResponse:
     content: dict[str, Any] = {"detail": error.message}
     if isinstance(error, ChatConflict):
         content.update(code=error.code, **error.extra)
+    elif isinstance(error, PermissionConflict):
+        content.update(code=error.code)
     elif isinstance(error, EngineUnavailable):
         content.update(code="AGENT_UNAVAILABLE", engine=error.engine, action=error.action)
     return JSONResponse(status_code=error.status_code, content=content)
@@ -107,6 +129,10 @@ class Presenter:
 
     def __init__(self, kb: KnowledgeService) -> None:
         self.kb = kb
+        self.controls = ControlStore(kb.db)
+        self.web = WebSearchStore(kb.db)
+        #: Reads study blocks for their parts (no writes: saving goes through the app's service).
+        self.study = StudyService(kb, None, language=lambda: "en")
         self._folders: dict[str, str] = {}
 
     def citation(self, material_id: str, seg: int, quote: str | None) -> KbCitation:
@@ -131,6 +157,22 @@ class Presenter:
         return self._folders[folder_id]
 
     def part(self, part: Part) -> KbMessagePart:
+        if isinstance(part, PermissionPart):
+            record = self.controls.permission(part.permission_id)
+            return KbMessagePart(permission_part(record) if record is not None
+                                 else KbTextPart(type="text", text=""))
+        if isinstance(part, QuestionPart):
+            found = self.controls.question(part.question_id)
+            return KbMessagePart(question_part(found) if found is not None
+                                 else KbTextPart(type="text", text=""))
+        if isinstance(part, WebSearchPart):
+            search = self.web.get(part.search_id)
+            return KbMessagePart(web_search_part(search) if search is not None
+                                 else KbTextPart(type="text", text=""))
+        if isinstance(part, StudyPart):
+            block = self.study.store.block(part.study_id)
+            return KbMessagePart(study_part(self.study, block, self.citation) if block is not None
+                                 else KbTextPart(type="text", text=""))
         if isinstance(part, TextPart):
             return KbMessagePart(KbTextPart(type="text", text=part.text))
         if isinstance(part, CitePart):
@@ -184,7 +226,45 @@ def summary(view: ChatView) -> KbChatSummary:
         effort=chat.effort,
         created_at=chat.created_at, updated_at=chat.updated_at, last_preview=chat.last_preview,
         recording_material_id=chat.recording_material_id, folder_ids=list(chat.folder_ids), state=view.state,
-        unread=chat.unread,
+        unread=chat.unread, waiting_for_user=view.waiting,
+    )
+
+
+def permission_part(record: PermissionRecord) -> KbPermissionPart:
+    preview = record.preview
+    found = preview.get("summary")
+    raw: dict[str, Any] = found if isinstance(found, dict) else {}
+    summary = KbPermissionSummary(added=int(raw.get("added", 0)), changed=int(raw.get("changed", 0)),
+                                  removed=int(raw.get("removed", 0)),
+                                  user_notes_untouched=bool(raw.get("user_notes_untouched", True)))
+    changes = [KbPermissionChange.model_validate(item) for item in preview.get("changes") or []
+               if isinstance(item, dict)]
+    return KbPermissionPart(
+        type="permission", id=record.id, kind=record.kind, engine=record.engine, page_id=record.page_id,
+        title=record.title, status=record.status, auto=record.auto, reason=record.reason, summary=summary,
+        changes=changes, path=preview.get("path") if isinstance(preview.get("path"), str) else None,
+        new_title=preview.get("new_title") if isinstance(preview.get("new_title"), str) else None,
+        linking_pages=int(preview.get("linking_pages") or 0),
+        links_unlinked=int(preview.get("links_unlinked") or 0),
+        undoable=record.status == "allowed" and record.applied and bool(record.undo),
+    )
+
+
+def web_search_part(record: WebSearchRecord) -> KbWebSearchPart:
+    links = [KbWebLink(title=link.title, url=link.url, site=site_of(link.url)) for link in record.links]
+    return KbWebSearchPart(
+        type="web_search", id=record.id, engine=cast(Any, record.engine), query=record.query,
+        allowed_domains=list(record.allowed_domains), blocked_domains=list(record.blocked_domains),
+        status=record.status, auto=record.auto, reason=record.reason, links=links,
+        searcher=cast(Any, record.searcher))
+
+
+def question_part(record: QuestionRecord) -> KbQuestionPart:
+    return KbQuestionPart(
+        type="question", id=record.id, engine=record.engine, question=record.question,
+        options=[KbQuestionOption(label=option.label, description=option.description,
+                                  recommended=option.recommended) for option in record.options],
+        allow_other=True, status=record.status, answer=record.answer,
     )
 
 
@@ -204,14 +284,16 @@ def _send_result(kb: KnowledgeService, pair: tuple[Message, Message]) -> KbSendR
     return KbSendResult(user=user, assistant=assistant)
 
 
-def to_input(body: KbSend) -> MessageInput:
+def to_input(body: KbSend | KbMessageEdit) -> MessageInput:
+    """What the composer sent; an edit carries no context (the question keeps its own)."""
+    context = body.context if isinstance(body, KbSend) else KbOpenContext()
     return MessageInput(
         text=body.text,
         mentions=tuple(Ref(ref.type, ref.id, ref.title) for ref in body.mentions),
         quotes=tuple(Quote(quote.source, quote.id, quote.text, quote.block_id, quote.seg, quote.message_id)
                      for quote in body.quotes),
         attachments=tuple(body.attachments),
-        context=OpenContext(body.context.open_page_id, body.context.open_material_id),
+        context=OpenContext(context.open_page_id, context.open_material_id, context.open_study_id),
     )
 
 
@@ -233,6 +315,12 @@ async def create_chat(chats: ChatsDep, body: KbChatCreate | None = None) -> KbCh
     view = await chats.create(title=request.title, engine=request.engine, model=request.model,
                               effort=request.effort, recording_material_id=request.recording_material_id)
     return await kb_call(full_chat, chats.kb, view)
+
+
+@router.put("/last-choice", status_code=204)
+async def remember_last_choice(chats: ChatsDep, body: KbChatLastChoice) -> None:
+    """The agent, model and reasoning picked in the New chat field: the next new chat starts from them."""
+    await chats.remember_choice(body.engine, body.model, body.effort)
 
 
 @router.get("/events")
@@ -302,18 +390,25 @@ async def resume_answer(chat_id: str, message_id: str, chats: ChatsDep) -> KbSen
     return await kb_call(_send_result, chats.kb, await chats.resume(chat_id, message_id))
 
 
+@router.post("/{chat_id}/messages/{message_id}/edit", status_code=202)
+async def edit_question(chat_id: str, message_id: str, body: KbMessageEdit, chats: ChatsDep) -> KbSendResult:
+    """Your question, changed: every later message goes and it is answered again (409 while answering)."""
+    return await kb_call(_send_result, chats.kb, await chats.edit(chat_id, message_id, to_input(body)))
+
+
 @router.post("/{chat_id}/messages/{message_id}/save")
-async def save_answer(chat_id: str, message_id: str, chats: ChatsDep) -> KbPageRef:
-    """The answer becomes an analysis page in ``Wiki/Analyses``; a second save is 409 ``ALREADY_SAVED``."""
-    page_id, kind, title = await chats.save_message(chat_id, message_id)
-    return KbPageRef.model_validate({"id": page_id, "kind": kind, "title": title})
+async def save_answer(chat_id: str, message_id: str, chats: ChatsDep) -> KbSavedAnalysis:
+    """The answer becomes an analysis page in ``Wiki/Analyses``; a second save is 409 ``ALREADY_SAVED``.
+    A diagram without material citations is left out and named in ``warning``."""
+    page_id, kind, title, warning = await chats.save_message(chat_id, message_id)
+    return KbSavedAnalysis.model_validate({"id": page_id, "kind": kind, "title": title, "warning": warning})
 
 
 @router.post("/{chat_id}/save")
-async def save_chat(chat_id: str, chats: ChatsDep) -> KbPageRef:
+async def save_chat(chat_id: str, chats: ChatsDep) -> KbSavedAnalysis:
     """The whole chat (each question with its latest finished answer) as one analysis page."""
-    page_id, kind, title = await chats.save_chat(chat_id)
-    return KbPageRef.model_validate({"id": page_id, "kind": kind, "title": title})
+    page_id, kind, title, warning = await chats.save_chat(chat_id)
+    return KbSavedAnalysis.model_validate({"id": page_id, "kind": kind, "title": title, "warning": warning})
 
 
 @router.get("/{chat_id}/export")

@@ -3,12 +3,14 @@ import type { EngineId } from '../api/names';
 import codexMark from '../../brand/agents/codex.svg';
 import claudeMark from '../../brand/agents/claude-code.svg';
 import hermesMark from '../../brand/agents/hermes.png';
+import opencodeMark from '../../brand/agents/opencode.svg';
 
 /** Colour brand marks (v42), bundled with the app (brand/agents/NOTICE.md): no external URL. */
 const MARK: Record<EngineId, { src: string; cls: string; name: string }> = {
   codex: { src: codexMark, cls: 'codex', name: 'Codex' },
   claude_code: { src: claudeMark, cls: 'claude', name: 'Claude Code' },
   hermes: { src: hermesMark, cls: 'hermes', name: 'Hermes Agent' },
+  opencode: { src: opencodeMark, cls: 'opencode', name: 'OpenCode' },
 };
 
 export type EngineBadgeSize = 16 | 20 | 32;

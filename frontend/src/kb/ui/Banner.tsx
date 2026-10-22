@@ -32,10 +32,11 @@ export function Banner({ tone, title, children, progress, progressLabel, actions
     <div className={`kb-banner kb-banner--${tone}`} role={tone === 'error' ? 'alert' : 'status'} data-tone={tone}>
       <Icon name={TONE_ICON[tone]} size={17} className="kb-banner__icon" />
       <div className="kb-banner__body">
-        <p className="kb-banner__text">
+        {/* A div, not a p: callers put icons in the text (Still works ✓ / Stopped ✕), and Hugeicons glyphs are divs. */}
+        <div className="kb-banner__text">
           <b>{title}</b>
           {children ? <> {children}</> : null}
-        </p>
+        </div>
         {tone === 'progress' && pct !== undefined && (
           <div
             className="kb-progress kb-progress--wide"

@@ -143,6 +143,8 @@ for (const theme of THEMES) {
     // Seven chips became numbers: duplicates merged, one number per document.
     await expect(answer.locator('.kb-chip[data-kind="document"]')).toHaveCount(0);
     await expect(answer.locator('.kb-cn')).toHaveText(['1', '1', '1', '2', '1', '3']);
+    // U2-a: the sources under an answer start folded to one line.
+    await answer.getByRole('button', { name: 'Sources · 3' }).click();
     const sources = answer.getByRole('group', { name: 'Sources' });
     await expect(sources.getByRole('button')).toHaveText([`1${SEMINAR}`, `2${BLACKROCK}`, '3Lecture 5']);
     await page.mouse.move(2, 300);
@@ -206,8 +208,8 @@ for (const theme of THEMES) {
     await page.keyboard.press('Meta+Comma');
     const settings = page.getByRole('dialog', { name: 'Settings' });
     await settings.getByRole('navigation').getByRole('button', { name: /^Accounts & keys/ }).click();
-    await expect(settings.locator('.kb-engine')).toHaveCount(3);
-    await marks([20, 20, 20], settings);
+    await expect(settings.locator('.kb-engine')).toHaveCount(4); // Codex, Claude Code, Hermes, OpenCode (W-1)
+    await marks([20, 20, 20, 20], settings);
     await check(`logos-settings-1440-${theme}`);
     await page.keyboard.press('Escape');
     await open(theme, '?onboarding=1');

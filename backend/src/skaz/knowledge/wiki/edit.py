@@ -4,7 +4,9 @@
   never rewrites it again. A ``user_note`` stays the user's.
 * New text is always a ``user_note`` owned by the user.
 * Only the user's own notes can be deleted here; agent statements are changed
-  by the agent (``recheck``) or edited, never silently dropped.
+  by the agent (``recheck``) or edited, never silently dropped. A connection SKAZ
+  wrote between two concepts can be deleted too: it is remembered and never
+  suggested again (C1-a, user decision 2026-10-21, 4 — ``WikiService`` records it).
 
 Unmarked paragraphs (``u-<n>``: text typed in Obsidian without a marker) are
 the user's too and can be edited, followed by a note, or deleted in place.
@@ -21,6 +23,7 @@ from ..errors import KnowledgeError, NotFound, ProtectedItem
 from ..ingest.pages import insert_into_section, match_key, spaced
 from ..markdown.page import Block, Heading, PageDocument, Part, RawText
 from ..service import KnowledgeService
+from .connections import LINK_PREFIX
 from .pages_io import page_path, reindex, rewrite
 
 _PARAGRAPH_SPLIT = re.compile(r"(\n[ \t]*\n)")
@@ -30,6 +33,9 @@ _UNMARKED = re.compile(r"u-([1-9]\d*)")
 #: A wikilink: target (with an optional ``#anchor``) and an optional ``|label``.
 _LINK = re.compile(r"\[\[([^\]|\n]+?)(?:\|([^\]\n]+))?\]\]")
 _CITATION_TARGET = re.compile(r"#\^seg-\d+$")
+#: A fenced code block (a ```mermaid diagram, D-11): its empty lines are not paragraph breaks.
+_FENCED = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?^ {0,3}\1[ \t]*$", re.MULTILINE | re.DOTALL)
+_FENCE_CLOSE = re.compile(r"(?:^|\n) {0,3}(?:`{3,}|~{3,})[ \t]*$")
 
 
 class InvalidText(KnowledgeError):
@@ -42,7 +48,7 @@ def clean_user_text(text: str) -> str:
     if not value:
         raise InvalidText("The text is empty.")
     # Plain words for what would break the page (QA C15).
-    if re.search(r"\n[ \t]*\n", value):
+    if re.search(r"\n[ \t]*\n", _FENCED.sub("", value)):
         raise InvalidText("Keep this to one paragraph: an empty line starts a new one. Add the rest as a "
                           "new note with “My note”.")
     if "%% skaz:" in value:
@@ -120,7 +126,12 @@ def relink(previous: str, text: str) -> str:
         taken.append((a, a + len(raw)))
         cursor = a + len(raw)
     missing = [raw for raw in dict.fromkeys(citations) if raw not in out]
-    return f"{out} {' '.join(missing)}" if missing else out
+    if not missing:
+        return out
+    # After a closing fence (a diagram) the links go on a line of their own: on the fence line
+    # they would leave the fence open.
+    gap = "\n" if _FENCE_CLOSE.search(out) else " "
+    return f"{out}{gap}{' '.join(missing)}"
 
 
 def new_note_id() -> str:
@@ -172,6 +183,11 @@ def _replace_unmarked(
     parts = list(document.parts)
     parts[index] = RawText("".join(pieces))
     return replace(document, parts=parts)
+
+
+def is_connection(block: Block) -> bool:
+    """A connection SKAZ wrote between two concepts (edited by the user or not)."""
+    return block.kind == "connection" and block.id.startswith(LINK_PREFIX)
 
 
 def _block_index(document: PageDocument, block_id: str) -> int | None:
@@ -287,9 +303,10 @@ def delete_note(kb: KnowledgeService, page_id: str, block_id: str) -> None:
             raise NotFound("Block not found.")
         block = document.parts[index]
         assert isinstance(block, Block)
-        if block.owner != "user":
+        if block.owner != "user" and not is_connection(block):
             raise ProtectedItem(
-                "Only your own notes can be deleted. Edit the statement or ask the agent to recheck it."
+                "Only your own notes and connections can be deleted. Edit the statement or ask the agent "
+                "to recheck it."
             )
         parts = [part for i, part in enumerate(document.parts) if i != index]
         return replace(document, parts=spaced(parts))

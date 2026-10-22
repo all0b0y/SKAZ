@@ -27,7 +27,10 @@ export interface PersistenceQueueState {
   completed: number;
   duplicates: number;
   failed: PersistenceFailure[];
+  /** Chunks refused for good: past the protected slots, or after such a gap (they can never be stored in order). */
   droppedCount: number;
+  /** Recording time those chunks covered. */
+  droppedMs: number;
   overflow: boolean;
   lastError: string | null;
 }
@@ -74,6 +77,8 @@ export class PersistenceQueue {
   private blocked = false;
   private overflow = false;
   private protectedOverflow = 0;
+  private dropped = 0;
+  private droppedMs = 0;
   private completed = 0;
   private duplicates = 0;
   private lastError: string | null = null;
@@ -94,7 +99,8 @@ export class PersistenceQueue {
       failed: this.blocked && this.items[0]
         ? [{ sequence: this.items[0].chunk.sequence, error: this.lastError ?? 'Storage failed', attempts: this.items[0].attempts }]
         : [],
-      droppedCount: 0,
+      droppedCount: this.dropped,
+      droppedMs: this.droppedMs,
       overflow: this.overflow,
       lastError: this.lastError,
     };
@@ -106,9 +112,15 @@ export class PersistenceQueue {
     // Two protected slots hold (1) the window whose rejection tells the
     // recorder to stop and (2) the one partial tail emitted by stop's barrier.
     // This keeps raw retention bounded at maxPending + 2 without dropping the
-    // capture tail.
+    // capture tail. Past them a chunk is refused and counted; every later one is
+    // refused too, because the backend only accepts consecutive sequences.
+    if (this.dropped > 0 || (atLimit && this.protectedOverflow >= 2)) {
+      this.dropped += 1;
+      this.droppedMs += Math.max(0, chunk.endMs - chunk.startMs);
+      this.emit();
+      return false;
+    }
     if (atLimit) {
-      if (this.protectedOverflow >= 2) return false;
       const firstOverflow = !this.overflow;
       this.overflow = true;
       this.protectedOverflow += 1;
@@ -184,7 +196,7 @@ export class PersistenceQueue {
       this.emit();
     }
     this.processing = false;
-    if (!this.blocked && this.items.length === 0) {
+    if (!this.blocked && this.items.length === 0 && this.dropped === 0) {
       this.overflow = false;
       this.protectedOverflow = 0;
     }

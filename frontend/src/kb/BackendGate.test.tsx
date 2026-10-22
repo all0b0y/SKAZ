@@ -54,6 +54,17 @@ describe('Startup gate', () => {
     await waitFor(() => expect(screen.queryByTestId('loading-tree')).toBeNull(), { timeout: 2000 });
   });
 
+  it('quitting: a plain spinner while the service stops on purpose — no tree, no error, no app', async () => {
+    const { emit } = await renderGate({ initial: { phase: 'ready' } });
+    expect(await screen.findByTestId('message-input')).toBeInTheDocument();
+    emit({ phase: 'quitting' });
+    expect(screen.getByTestId('quitting')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Closing SKAZ…');
+    expect(screen.queryByTestId('loading-tree')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByTestId('message-input')).toBeNull();
+  });
+
   it('a service that stops after it was up is a stop, not a failed start, in plain words (QA A16)', async () => {
     const { emit } = await renderGate({ initial: { phase: 'ready' } });
     emit({ phase: 'error', detail: 'backend exited (code null, signal SIGKILL)' });

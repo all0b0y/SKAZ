@@ -40,3 +40,19 @@ def thread_start_params(
         "baseInstructions": base_instructions,
         "dynamicTools": dynamic_tools,
     }
+
+
+def search_thread_params(
+    *, cwd: Path, base_instructions: str, disabled_features: Iterable[str] = DISABLED_FEATURES,
+) -> dict[str, Any]:
+    """W-3b's clean search run: a fresh ephemeral thread with Codex's own web search on and nothing
+    else — no environments (files/shell), read-only sandbox, no approvals, no SKAZ tools, features off.
+    ``sandbox`` + ``environments: []`` verified on codex-cli 0.160.0 (``thread/start`` answers
+    ``sandbox: {type: readOnly, networkAccess: false}``)."""
+    return {
+        "cwd": str(cwd), "ephemeral": True, "environments": [], "approvalPolicy": "never",
+        "sandbox": "read-only",
+        "config": {"web_search": "live", **{f"features.{name}": False for name in disabled_features}},
+        "baseInstructions": base_instructions,
+        "dynamicTools": [],
+    }

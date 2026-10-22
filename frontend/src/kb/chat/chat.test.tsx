@@ -37,6 +37,30 @@ describe('Chats in the side panel', () => {
     expect(panel.querySelector('.kb-chatmark--answering')?.className).not.toMatch(/pulse|blink/);
   });
 
+  it('U2: the sources under an answer start folded to one line; opening them is kept after a restart', async () => {
+    const user = userEvent.setup();
+    const first = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    let answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
+    const toggle = within(answer).getByRole('button', { name: 'Sources · 3' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(answer).queryByRole('group', { name: 'Sources' })).toBeNull();
+    // The footnote numbers in the text stay usable while the list is folded.
+    expect(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' }).length).toBeGreaterThan(0);
+    const before = first.fake.calls.length;
+    await user.click(toggle);
+    expect(within(answer).getByRole('group', { name: 'Sources' })).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(first.fake.calls.slice(before)).toEqual([]); // folding asks nothing of the backend
+    first.unmount();
+
+    renderKb({ world: chatWorld(), keepStorage: true });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
+    expect(within(answer).getByRole('button', { name: 'Sources · 3' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(answer).getByRole('group', { name: 'Sources' })).toBeInTheDocument();
+  });
+
   it('opens a chat: the answer with page and source chips, the connection folded, the tool trail folded', async () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
@@ -56,6 +80,7 @@ describe('Chats in the side panel', () => {
     await user.click(within(pop).getByRole('button', { name: /^Open at fragment/ }));
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
     // The answer ends with its sources, each once, numbered in order of appearance (connection included).
+    await user.click(within(answer).getByRole('button', { name: 'Sources · 3' }));
     const sources = within(answer).getByRole('group', { name: 'Sources' });
     expect(within(sources).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
       'Source 1: Lecture 5', 'Source 2: Lecture 8', 'Source 3: Textbook: Information theory, ch. 2']);
@@ -101,6 +126,9 @@ describe('Chats in the side panel', () => {
     expect(card).toHaveTextContent(/The limit resets/);
     await user.click(within(card).getByRole('button', { name: 'Resume' }));
     await waitFor(() => expect(fake.calls.some((c) => /\/resume$/.test(c.path))).toBe(true));
+    // 2026-10-21: the new answer takes the interrupted one's place — no second card piles up.
+    await waitFor(() => expect(screen.queryByText('Answer interrupted: subscription limit')).not.toBeInTheDocument());
+    expect(screen.getAllByRole('article', { name: 'Answer' })).toHaveLength(1);
   });
 
   it('⋯ menu: export goes through the native save dialog; save to wiki opens the analysis page; delete asks first', async () => {
@@ -189,6 +217,7 @@ describe('Chats in the side panel', () => {
     const answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
     expect(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' }).length).toBeGreaterThan(0);
     await act(async () => { await services.library.getState().forgetMaterial('m5'); });
+    await user.click(within(answer).getByRole('button', { name: /^Sources · / }));
     const sources = within(answer).getByRole('group', { name: 'Sources' });
     expect(within(sources).getByRole('button', { name: 'Source 1: Lecture 5 (no longer available)' })).toBeInTheDocument();
     await user.click(within(sources).getByRole('button', { name: /Source 1/ }));
@@ -328,5 +357,103 @@ describe('Answer text', () => {
     if (run.kind !== 'inline') throw new Error('inline run expected');
     expect(run.pieces).toEqual(['One clear recommendation.', 0, ' Next claim', 1]);
     expect(run.slots.map((s) => (s.type === 'cites' ? s.citations.map((x) => x.seg) : s.type))).toEqual([[1, 1, 2], [2]]);
+  });
+});
+
+describe('Selecting several chats in "All chats" (0.3.1 F4)', () => {
+  it('ticks rows without opening them; Pin pins both; a new search starts the selection over', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: 'All chats · 7' }));
+    const all = screen.getByRole('region', { name: 'All chats' });
+    const rowOf = (name: string) => within(all).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    await waitFor(() => expect(rowOf('Transformer paper review')).toBeTruthy());
+    const before = services.chats.getState().currentId;
+    await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
+    await user.keyboard('{Meta>}');
+    await user.click(within(rowOf('Compare regularisation')).getByRole('button', { name: /^Compare regularisation/ }));
+    await user.keyboard('{/Meta}');
+    expect(services.chats.getState().currentId).toBe(before);
+    const bar = within(all).getByRole('toolbar', { name: '2 selected' });
+    await user.click(within(bar).getByRole('button', { name: /^Pin/ }));
+    await waitFor(() => expect(fake.world.chats.filter((c) => c.pinned).map((c) => c.id)).toEqual(expect.arrayContaining(['c3', 'c6'])));
+    await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
+    expect(within(all).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
+    await user.type(within(all).getByRole('searchbox', { name: 'Find in chats' }), 'x');
+    await waitFor(() => expect(within(all).queryByRole('toolbar', { name: /selected/ })).not.toBeInTheDocument());
+  });
+});
+
+describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
+  async function chats() {
+    const user = userEvent.setup();
+    const r = renderKb({ world: chatWorld() });
+    const panel = side();
+    await within(panel).findByRole('region', { name: 'Pinned' });
+    const rowOf = (name: string) => within(panel).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    const tick = async (...names: string[]) => { for (const n of names) await user.click(rowOf(n).querySelector('[data-sel-box]')!); };
+    return { ...r, user, panel, rowOf, tick };
+  }
+
+  it('selecting doesn’t open a chat; Pin pins them with Undo; ⋯ marks as read and saves to the wiki', async () => {
+    const { user, panel, rowOf, tick, fake, services } = await chats();
+    const before = services.chats.getState().currentId;
+    await tick('Transformer paper review', 'Compare regularisation');
+    expect(rowOf('Transformer paper review')).toHaveAttribute('aria-selected', 'true');
+    expect(services.chats.getState().currentId).toBe(before);
+    const bar = within(panel).getByRole('toolbar', { name: '2 selected' });
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Pin', 'Export .md', 'More actions', 'Delete', 'Clear selection']);
+    await user.click(within(bar).getByRole('button', { name: 'More actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Mark as read/ }));
+    await waitFor(() => expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/kb/chats/c3/read')).toBe(true));
+    await tick('Transformer paper review', 'Compare regularisation');
+    await user.click(within(within(panel).getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'More actions' }));
+    // Decision 9: a chat saved without its uncited diagrams is counted in the toast.
+    fake.world.saveWarnings = { c3: 'Saved without 1 diagram: it has no quotes from your materials.' };
+    await user.click(await screen.findByRole('menuitem', { name: /Save to wiki as analyses/ }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent(
+      'Saved 2 chats to the wiki as analyses. 1 saved without diagrams: they have no quotes from your materials.');
+    await tick('Transformer paper review', 'Compare regularisation');
+    await user.click(within(within(panel).getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'Pin' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Pinned 2 chats');
+    expect(fake.world.chats.filter((c) => c.pinned).map((c) => c.id).sort()).toEqual(['c3', 'c4', 'c5', 'c6']);
+    await user.click(within(screen.getByTestId('toast')).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(fake.world.chats.filter((c) => c.pinned).map((c) => c.id).sort()).toEqual(['c4', 'c5']));
+  });
+
+  it('Delete asks once; wiki pages stay; a chat still answering is skipped and the toast says so', async () => {
+    const { user, rowOf, tick, fake } = await chats();
+    await tick('Why is there a logarithm', 'What did I miss in lecture 8');
+    within(rowOf('Why is there a logarithm')).getByRole('button').focus();
+    await user.keyboard('{Meta>}{Backspace}{/Meta}');
+    const dialog = await screen.findByRole('dialog', { name: 'Delete 2 chats?' });
+    expect(dialog).toHaveTextContent('Wiki pages saved from them stay');
+    expect(dialog).toHaveTextContent('still answering');
+    await user.click(await within(dialog).findByRole('button', { name: 'Delete 2' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Deleted 1, skipped 1 — “What did I miss in lecture 8” is still answering');
+    expect(fake.world.chats.some((c) => c.id === 'c1')).toBe(false);
+    expect(fake.world.chats.some((c) => c.id === 'c2')).toBe(true);
+  });
+
+  it('⌘⇧E exports the chosen chats; a folder that isn’t empty asks first', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    world.exportFolders = { '/Users/me/Documents/Busy': 2 };
+    const { fake } = renderKb({ world, bridge: { chooseExportFolder: vi.fn(async () => '/Users/me/Documents/Busy') } });
+    const panel = side();
+    await within(panel).findByRole('region', { name: 'Pinned' });
+    const rowOf = (name: string) => within(panel).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
+    await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
+    await user.click(rowOf('Seminar questions').querySelector('[data-sel-box]')!);
+    within(rowOf('Seminar questions')).getByRole('button').focus();
+    await user.keyboard('{Meta>}{Shift>}e{/Shift}{/Meta}');
+    const ask = await screen.findByRole('dialog', { name: 'Export into a folder that isn’t empty?' });
+    expect(ask).toHaveTextContent('“Busy” already holds 2 items.');
+    expect(fake.calls.some((c) => c.path === '/kb/export/items')).toBe(false);
+    await user.click(within(ask).getByRole('button', { name: 'Export here' }));
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Exported 2 files to «Busy»');
+    expect(fake.calls.find((c) => c.path === '/kb/export/items')?.body).toEqual({
+      path: '/Users/me/Documents/Busy', overwrite: true, items: [{ type: 'chat', id: 'c6' }, { type: 'chat', id: 'c7' }],
+    });
   });
 });

@@ -25,8 +25,9 @@ from .engine import (
     ModelOption,
 )
 
-ENGINE_IDS: tuple[EngineId, ...] = ("codex", "claude_code", "hermes")
-ENGINE_NAMES: dict[EngineId, str] = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent"}
+ENGINE_IDS: tuple[EngineId, ...] = ("codex", "claude_code", "hermes", "opencode")
+ENGINE_NAMES: dict[EngineId, str] = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
+                                     "opencode": "OpenCode"}
 DEFAULT_ENGINE_KEY = "agents.default_engine"
 #: A new library starts with Codex, the engine SKAZ already used (A-n in the report).
 DEFAULT_ENGINE: EngineId = "codex"
@@ -34,8 +35,19 @@ DEFAULT_ENGINE: EngineId = "codex"
 #: environment; the composer's agent picker reads it).
 AgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
 #: ``first_check``: Hermes' one-time check with SKAZ's own folder (B10); ``check``: look at the state again.
-AgentAction = Literal["install", "update", "login", "check", "first_check"]
+AgentAction = Literal["install", "update", "login", "check", "first_check", "repair"]
 LoginMethod = Literal["terminal", "browser"]
+#: A sign-in started in this SKAZ: ``waiting`` (browser page or Terminal window still open), ``done``
+#: (finished: check the agent now) or ``failed``; ``idle`` when none was started.
+SignInState = Literal["idle", "waiting", "done", "failed"]
+#: Agents SKAZ doesn't sign out: why, in the user's words.
+NO_SIGN_OUT: dict[EngineId, str] = {
+    "claude_code": ("Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn't sign "
+                    "it out: that would sign Claude Code out in your other apps too. Sign out in Claude "
+                    "Code itself."),
+    "hermes": ("Hermes signs in per provider. Open a provider under Hermes Agent and choose Remove… to sign "
+               "Hermes out of it."),
+}
 
 
 class EngineUnavailable(KnowledgeError):
@@ -87,12 +99,32 @@ class LoginOutcome:
     message: str
 
 
+@dataclass(frozen=True)
+class SignInView:
+    engine: EngineId
+    method: LoginMethod | None
+    state: SignInState
+
+
+def codex_login_progress(view: Mapping[str, Any]) -> Literal["waiting", "done", "failed"] | None:
+    """Codex's browser sign-in from its connection view (``login``: pending → idle once
+    ``account/login/completed`` arrived; failed / cancelled / timed_out otherwise)."""
+    state = view.get("login")
+    if state == "pending":
+        return "waiting"
+    if state == "idle":
+        return "done"
+    return "failed" if isinstance(state, str) else None
+
+
 def classify(status: EngineStatus, *, check_failed: bool = False) -> tuple[AgentState, AgentAction | None]:
     """State and fixing action. Installed without a known version and without sign-in = re-check."""
     if check_failed:
         return "unavailable", "check"
     if not status.installed:
         return "not_installed", "install"
+    if status.repairable:
+        return "unavailable", "repair"
     if status.incompatible:
         return "outdated", "update"
     if not status.signed_in:
@@ -153,6 +185,9 @@ class CodexStatusEngine:
         """Codex's own ``account/logout`` in SKAZ's Codex profile (``CodexConnection.logout``)."""
         await self.connection.logout()
 
+    def login_progress(self) -> Literal["waiting", "done", "failed"] | None:
+        return codex_login_progress(self.connection.view)
+
 
 def _first_run(target: object) -> FirstRun | None:
     reader = getattr(target, "first_run", None)
@@ -166,18 +201,52 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+class AbsentEngine:
+    """An agent the caller didn't wire (engine doubles that predate OpenCode): honestly not installed,
+    never started, and its runs fail plainly — nothing is routed to another engine."""
+
+    def __init__(self, engine: EngineId) -> None:
+        self._id: EngineId = engine
+
+    @property
+    def id(self) -> EngineId:
+        return self._id
+
+    async def status(self) -> EngineStatus:
+        return EngineStatus(self._id, installed=False, reason=f"{ENGINE_NAMES[self._id]} is not installed.")
+
+    async def models(self) -> Sequence[ModelOption]:
+        return ()
+
+    def run(self, turn: AgentTurn) -> AsyncIterator[AgentEvent]:
+        return self._absent(turn.run_id)
+
+    async def _absent(self, run_id: str) -> AsyncIterator[AgentEvent]:
+        yield Failed(run_id, "incompatible", f"{ENGINE_NAMES[self._id]} is not installed.")
+
+    async def interrupt(self, run_id: str) -> None:
+        return None
+
+
+#: Engines a caller may leave out (they are then :class:`AbsentEngine`); every other one is required.
+OPTIONAL_ENGINES: tuple[EngineId, ...] = ("opencode",)
+
+
 class EngineRegistry:
     def __init__(self, engines: Mapping[EngineId, AgentEngine], settings: SettingsStore, *,
                  check_timeout_s: float = 240.0, cache_s: float = 30.0) -> None:
-        missing = [engine for engine in ENGINE_IDS if engine not in engines]
+        missing = [engine for engine in ENGINE_IDS
+                   if engine not in engines and engine not in OPTIONAL_ENGINES]
         if missing:
             raise ValueError(f"Engines missing: {missing}")
-        self.engines = dict(engines)
+        self.engines = {**{engine: AbsentEngine(engine) for engine in OPTIONAL_ENGINES}, **dict(engines)}
         self.settings = settings
         self._timeout = check_timeout_s
         self._cache_s = cache_s
         self._cache: dict[EngineId, tuple[float, AgentView]] = {}
         self._locks: dict[EngineId, asyncio.Lock] = {engine: asyncio.Lock() for engine in ENGINE_IDS}
+        #: Sign-ins started in this SKAZ and how (watched until they end).
+        self._sign_ins: dict[EngineId, LoginMethod] = {}
 
     def engine(self, engine: EngineId) -> AgentEngine:
         return self.engines[engine]
@@ -194,6 +263,12 @@ class EngineRegistry:
 
     def forget(self, engine: EngineId) -> None:
         self._cache.pop(engine, None)
+
+    def last_view(self, engine: EngineId) -> AgentView | None:
+        """The latest checked view, however old (no check started): for cheap hints such as the
+        agent card's web-search line (W-3b); ``None`` before the first check."""
+        cached = self._cache.get(engine)
+        return cached[1] if cached is not None else None
 
     async def view(self, engine: EngineId, *, refresh: bool = False) -> AgentView:
         async with self._locks[engine]:
@@ -248,14 +323,17 @@ class EngineRegistry:
     async def logout(self, engine: EngineId) -> AgentView:
         """Sign out of an engine whose sign-in SKAZ owns (Codex: SKAZ's ``CODEX_HOME``), then re-check.
 
-        Claude Code and Hermes keep their sign-in in their own apps; SKAZ never removes it.
+        Codex: ``account/logout`` in SKAZ's ``CODEX_HOME``; OpenCode: ``opencode auth logout`` for each
+        provider of SKAZ's OpenCode folder. Claude Code uses this Mac's own sign-in and Hermes signs in
+        per provider (:data:`NO_SIGN_OUT`): SKAZ never signs them out here.
         """
         target: Any = self.engines[engine]
         name = ENGINE_NAMES[engine]
         logout = getattr(target, "logout", None)
-        if not callable(logout):
+        if engine in NO_SIGN_OUT or not callable(logout):
             raise EngineUnavailable(
-                engine, f"{name} keeps its sign-in in its own app. Sign out there.", "check")
+                engine, NO_SIGN_OUT.get(engine, f"{name} keeps its sign-in in its own app. Sign out there."),
+                "check")
         self.forget(engine)
         try:
             await logout()
@@ -265,7 +343,29 @@ class EngineRegistry:
         except Exception as error:  # the engine's own output is not shown: it is not SKAZ's text
             message = f"SKAZ couldn't sign out of {name}: it didn't answer. Check it and try again."
             raise EngineUnavailable(engine, message, "check") from error
+        self._sign_ins.pop(engine, None)
         return await self.view(engine, refresh=True)
+
+    def sign_in(self, engine: EngineId) -> SignInView:
+        """How the sign-in started in this SKAZ goes (no agent command is run: a file or a flag)."""
+        method = self._sign_ins.get(engine)
+        reader = getattr(self.engines[engine], "login_progress", None)
+        if method is None or not callable(reader):
+            return SignInView(engine, method, "idle")
+        progress = reader()
+        state: SignInState = progress if progress is not None else "waiting"
+        if state != "waiting":
+            self.forget(engine)  # the next check reads the agent again
+        return SignInView(engine, method, state)
+
+    async def wait_sign_in(self, engine: EngineId, wait_s: float, *, step_s: float = 0.5) -> SignInView:
+        """:meth:`sign_in`, waiting up to ``wait_s`` while it is still ``waiting``."""
+        view = self.sign_in(engine)
+        deadline = time.monotonic() + wait_s
+        while view.state == "waiting" and time.monotonic() < deadline:
+            await asyncio.sleep(min(step_s, max(deadline - time.monotonic(), 0)))
+            view = self.sign_in(engine)
+        return view
 
     async def login(self, engine: EngineId, *, consent: bool = False) -> LoginOutcome:
         target: Any = self.engines[engine]
@@ -274,14 +374,18 @@ class EngineRegistry:
         try:
             if hasattr(target, "login_url"):
                 url = await target.login_url(consent)
-                return LoginOutcome(engine, "browser", str(url), "Finish signing in in your browser.")
+                self._sign_ins[engine] = "browser"
+                return LoginOutcome(engine, "browser", str(url),
+                                    "Finish signing in in your browser. SKAZ checks as soon as it’s done.")
             await target.login()
+            self._sign_ins[engine] = "terminal"
         except FileNotFoundError as error:
             raise EngineUnavailable(engine, f"{name} is not installed.", "install") from error
         except ValueError as error:
             raise EngineUnavailable(engine, str(error) or f"{name} can't sign in now.", "check") from error
         except OSError as error:
             raise EngineUnavailable(engine, f"SKAZ couldn't open Terminal for {name}.", "check") from error
-        what = "choose a model and provider" if engine == "hermes" else "sign in"
+        what = ("choose a model and provider" if engine == "hermes"
+                else "sign in to a model provider" if engine == "opencode" else "sign in")
         return LoginOutcome(engine, "terminal", None,
-                            f"Terminal opened with {name}'s own setup: {what} there, then check again.")
+                            f"Finish in Terminal: {what} there. SKAZ checks as soon as Terminal finishes.")

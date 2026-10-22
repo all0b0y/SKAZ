@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from importlib import metadata
 
+from ...version import app_version
 from ..decisions.local import LLAMA_SERVER, LOCAL_MODEL
 
 
@@ -33,6 +33,8 @@ LICENSES: tuple[License, ...] = (
     License("Inter", "OFL-1.1", "https://github.com/rsms/inter"),
     License("Unbounded", "OFL-1.1", "https://github.com/googlefonts/unbounded"),
     License("Lucide", "ISC", "https://lucide.dev/license"),
+    License("AnimateIcons", "MIT", "https://github.com/Avijit07x/animateicons"),
+    License("Hugeicons", "MIT", "https://github.com/hugeicons/hugeicons-react"),
     License("Motion", "MIT", "https://github.com/motiondivision/motion"),
     License("React", "MIT", "https://github.com/facebook/react"),
     License("Electron", "MIT", "https://github.com/electron/electron"),
@@ -43,17 +45,6 @@ LICENSES: tuple[License, ...] = (
     License(f"llama.cpp {LLAMA_SERVER.build}", LLAMA_SERVER.license, "https://github.com/ggml-org/llama.cpp"),
     License(LOCAL_MODEL.title, LOCAL_MODEL.license, LOCAL_MODEL.homepage),
 )
-
-
-def app_version() -> str:
-    """The app version Electron passes (``SKAZ_APP_VERSION``), else the backend package's own."""
-    value = os.environ.get("SKAZ_APP_VERSION", "").strip()
-    if value:
-        return value[:40]
-    try:
-        return metadata.version("skaz")
-    except metadata.PackageNotFoundError:
-        return "unknown"
 
 
 def about() -> About:

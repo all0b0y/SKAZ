@@ -91,7 +91,17 @@ function bodyOf(bytes: number): ReadableStream<Uint8Array> {
   return new ReadableStream({ start(c) { c.enqueue(new Uint8Array(bytes)); c.close(); } });
 }
 
-function setup(over: Partial<UpdaterDeps> & { answers?: Array<() => Response>; sums?: string; dmgBytes?: number } = {}) {
+/** A server that sends one chunk and then nothing, until the request is aborted. */
+function trickle(signal: AbortSignal | null | undefined): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(new Uint8Array(3));
+      signal?.addEventListener('abort', () => c.error(signal.reason));
+    },
+  });
+}
+
+function setup(over: Partial<UpdaterDeps> & { answers?: Array<() => Response>; sums?: string; dmgBytes?: number; stalls?: boolean } = {}) {
   let store: UpdaterStore = { etag: null, release: null, notified: null };
   const answers = over.answers ?? [() => new Response(JSON.stringify(releaseJson()), { status: 200, headers: { etag: '"e1"' } })];
   const files = new Map<string, number>();
@@ -105,6 +115,7 @@ function setup(over: Partial<UpdaterDeps> & { answers?: Array<() => Response>; s
       return next();
     }
     if (u.endsWith('SHA256SUMS.txt')) return new Response(bodyOf(90), { status: 200 });
+    if (u.endsWith('.dmg') && over.stalls) return new Response(trickle(init?.signal), { status: 200 });
     if (u.endsWith('.dmg')) return new Response(bodyOf(over.dmgBytes ?? 12), { status: 200 });
     return new Response(null, { status: 404 });
   });
@@ -180,6 +191,37 @@ describe('Updates — the updater (fakes at fetch, files and processes)', () => 
     expect(await updater.install()).toBe(true);
     expect(deps.runInstaller).toHaveBeenCalledWith('0.3.0', '/cache/0.3.0');
     expect(deps.quit).toHaveBeenCalled();
+  });
+
+  it('Cancel stops a hanging download and goes back to "available"; the next try starts fresh (M2)', async () => {
+    const { updater, states } = setup({ stalls: true });
+    await updater.check();
+    const running = updater.prepare();
+    await vi.waitFor(() => expect(updater.snapshot.progress).toBeGreaterThan(0));
+    expect(updater.snapshot.phase).toBe('downloading');
+    updater.cancel();
+    const after = await running;
+    expect(after.phase).toBe('available');
+    expect(after.error).toBeNull();
+    expect(states).not.toContain('failed');
+  });
+
+  it('a download that receives nothing for a minute is stopped with a reason (M2)', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      let clock = Date.parse('2026-10-16T10:00:00Z');
+      const { updater } = setup({ stalls: true, now: () => new Date(clock) });
+      await updater.check();
+      const running = updater.prepare();
+      await vi.waitFor(() => expect(updater.snapshot.progress).toBeGreaterThan(0));
+      clock += 61_000;
+      vi.advanceTimersByTime(5_000);
+      const after = await running;
+      expect(after.phase).toBe('failed');
+      expect(after.error).toMatch(/stopped receiving data/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

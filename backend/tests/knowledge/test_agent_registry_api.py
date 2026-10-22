@@ -173,9 +173,12 @@ async def test_agents_api(agents_client: Any, kb_client: httpx.AsyncClient) -> N
     listed = (await kb_client.get("/kb/agents")).json()
     assert listed["default"] == "codex"
     by_id = {agent["id"]: agent for agent in listed["agents"]}
-    assert list(by_id) == ["codex", "claude_code", "hermes"]
+    assert list(by_id) == ["codex", "claude_code", "hermes", "opencode"]
     assert by_id["codex"]["state"] == "ready" and by_id["codex"]["models"] == [
-        {"id": "gpt-5.5", "label": "GPT-5.5", "efforts": ["low", "high"], "default_effort": "high"}
+        {"id": "gpt-5.5", "label": "GPT-5.5", "efforts": ["low", "high"], "default_effort": "high",
+         # 0.3.1 K2/K4: the picker's section, human name and visibility
+         "provider": "codex", "provider_label": "Codex", "name": "GPT-5.5", "tag": None, "visible": True,
+         "default_visible": True, "favorite": False}
     ]
     assert by_id["claude_code"] | {"checked_at": "-"} == {
         "id": "claude_code",
@@ -198,6 +201,14 @@ async def test_agents_api(agents_client: Any, kb_client: httpx.AsyncClient) -> N
         "install_task": None,
         "checked_at": "-",
         "first_run": None,  # only Hermes prepares its own environment (B10, area S3)
+        # 0.3.1 Q-A1: Claude Code's AskUserQuestion needs a permission channel SKAZ keeps closed.
+        "questions": "skaz",
+        "last_choice": None,  # models screen v2: nothing chosen in the message field yet
+        # W-2: Claude Code search is held for approval; W-3b `through` names a separate searcher (none here)
+        "web_search": {"available": True, "reason": None, "through": None},
+        # 0.3.1 K2: shown in the picker; no models, so no provider sections
+        "visible": True,
+        "providers": [],
     }
     assert by_id["hermes"]["action"] == "install" and by_id["hermes"]["min_version"] == "0.21.5"
 

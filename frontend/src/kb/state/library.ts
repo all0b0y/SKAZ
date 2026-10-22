@@ -53,6 +53,7 @@ export type LibraryStore = StoreApi<LibraryData & LibraryActions>;
 
 /** While the backend rescans the library (`indexing`), re-read its state this often — one read at a time. */
 export const INDEXING_POLL_MS = 1500;
+const INDEXING_MAX_BACKOFF_MS = 30_000;
 
 const newestFirst = (a: KbMaterialSummary, b: KbMaterialSummary) => b.created_at.localeCompare(a.created_at);
 
@@ -67,8 +68,12 @@ export function sortFolders(folders: KbFolder[]): KbFolder[] {
 export function createLibraryStore(client: KbClient, options: LibraryOptions = {}): LibraryStore {
   let indexingTimer: ReturnType<typeof setTimeout> | null = null;
   return createStore<LibraryData & LibraryActions>()((set, get) => {
-    /** Follow a running scan: the next read starts after the previous answered; content reloads at the end. */
-    const followIndexing = (library: KbLibrary) => {
+    /**
+     * Follow a running scan: the next read starts after the previous answered; content reloads at the
+     * end. A failed read waits twice as long each time (up to 30 s), so a backend that is down isn't
+     * asked every 1.5 s forever (L4); an answer brings the pace back.
+     */
+    const followIndexing = (library: KbLibrary, delay = INDEXING_POLL_MS) => {
       if (!library.indexing || indexingTimer) return;
       indexingTimer = setTimeout(() => {
         void (async () => {
@@ -77,7 +82,7 @@ export function createLibraryStore(client: KbClient, options: LibraryOptions = {
             next = await client.library();
           } catch {
             indexingTimer = null;
-            followIndexing(library); // a missed read changes nothing; try again later
+            followIndexing(library, Math.min(INDEXING_MAX_BACKOFF_MS, delay * 2));
             return;
           }
           indexingTimer = null;
@@ -85,7 +90,7 @@ export function createLibraryStore(client: KbClient, options: LibraryOptions = {
           if (!next.indexing && next.state === 'ready') await get().loadContent();
           followIndexing(next);
         })();
-      }, INDEXING_POLL_MS);
+      }, delay);
     };
     return {
       library: null,

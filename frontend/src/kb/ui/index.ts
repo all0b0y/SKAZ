@@ -1,4 +1,4 @@
-export { Icon, ICON_NAMES, ICON_STROKE, type IconName } from './Icon';
+export { Icon, ICON_NAMES, ICON_STROKE, useIconPlay, useIconPlayHold, ICON_PLAY_MS, type IconName, type IconSet } from './Icon';
 export { Button, IconButton, type ButtonVariant } from './Button';
 export { Chip, type ChipKind } from './Chip';
 export { Switch, Segmented, type SegmentedOption } from './Controls';
@@ -10,3 +10,4 @@ export { Popover, Menu, type MenuItem } from './Popover';
 export { Tooltip } from './Tooltip';
 export { MotionProvider, SPRING_SMALL, SPRING_LARGE, EXIT } from './motion';
 export { PathText } from './PathText';
+export { useCopied, COPIED_MS } from './useCopied';

@@ -24,10 +24,16 @@ html[data-kb-ui] {
   --kb-danger-soft: #f5e3de;
   --kb-warn: #8a5a00;
   --kb-warn-soft: #ede6d5;
+  /* 0.3.1 P: added blocks of an agent's change (never the only cue: «Added» is written). */
+  --kb-ok: #2f6b3a;
+  --kb-ok-soft: #e1eadc;
   --kb-folder-1: #2f62b0;
   --kb-folder-2: #7046b8;
   --kb-folder-3: #5a7420;
   --kb-folder-4: #11746a;
+  /* FX effects (FX-EFFECTS-SPEC): the one colour an effect flashes during an interaction. Light = dark cocoa
+     (chosen 2026-10-22; the folder olive stays a folder colour). */
+  --kb-fx-accent: #4a2c20;
   --kb-fill: #2c2e31;
   --kb-on-fill: #f9f8f3;
   --kb-fill-border: #2c2e31;
@@ -36,6 +42,9 @@ html[data-kb-ui] {
   --kb-scrim-strong: rgba(10, 14, 13, 0.55);
   --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.18);
   --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.08);
+  /* the study card (index card A): the sheet itself, and the lighter cards of the stack behind it */
+  --kb-shadow-card: 0 2px 4px rgba(0, 0, 0, 0.06), 0 14px 34px rgba(30, 30, 20, 0.12);
+  --kb-shadow-card-lo: 0 1px 2px rgba(0, 0, 0, 0.06), 0 6px 18px rgba(30, 30, 20, 0.08);
   --kb-art-tint: color-mix(in srgb, var(--kb-accent) 6%, transparent);
   color-scheme: light;
 
@@ -110,16 +119,21 @@ html[data-kb-ui][data-text-size='l'] {
     --kb-danger-soft: #473a3b;
     --kb-warn: #f0c060;
     --kb-warn-soft: #494438;
+    --kb-ok: #9fd3a6;
+    --kb-ok-soft: #36443a;
     --kb-folder-1: #8fb4f2;
     --kb-folder-2: #bfa4f4;
     --kb-folder-3: #b8d07a;
     --kb-folder-4: #f59ad6;
+    --kb-fx-accent: var(--kb-folder-2);
     --kb-fill: #f9f8f3;
     --kb-on-fill: #2c2e31;
     --kb-fill-border: #f9f8f3;
     --kb-badge-text: #2c2e31;
     --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
     --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --kb-shadow-card: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.5);
+    --kb-shadow-card-lo: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 22px rgba(0, 0, 0, 0.35);
     color-scheme: dark;
   }
 }
@@ -139,15 +153,21 @@ html[data-kb-ui][data-theme='dark'] {
   --kb-danger-soft: #473a3b;
   --kb-warn: #f0c060;
   --kb-warn-soft: #494438;
+  --kb-ok: #9fd3a6;
+  --kb-ok-soft: #36443a;
   --kb-folder-1: #8fb4f2;
   --kb-folder-2: #bfa4f4;
   --kb-folder-3: #b8d07a;
   --kb-folder-4: #f59ad6;
+  /* Dark = purple (folder 2), not dark olive. */
+  --kb-fx-accent: var(--kb-folder-2);
   --kb-fill: #f9f8f3;
   --kb-on-fill: #2c2e31;
   --kb-fill-border: #f9f8f3;
   --kb-badge-text: #2c2e31;
   --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
   --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --kb-shadow-card: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.5);
+  --kb-shadow-card-lo: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 22px rgba(0, 0, 0, 0.35);
   color-scheme: dark;
 }

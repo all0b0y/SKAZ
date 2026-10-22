@@ -62,7 +62,8 @@ async def test_a_wiki_job_whose_agent_is_signed_out_says_so_in_its_code(ready: K
     wiki_jobs = WikiJobs(repo)
     outcomes: dict[FailureKind, str | None] = {"auth": AGENT_UNAVAILABLE, "network": None}
     for kind, code in outcomes.items():
-        caller = AgentCaller(FakeEngine("codex", script=[Failed("", kind, "Sign in to Codex.")]), f"t-{kind}")
+        caller = AgentCaller(FakeEngine("codex", script=[Failed("", kind, "Sign in to Codex.")]), f"t-{kind}",
+                             retry_delays_s=(0.0,))  # "network" may have been sent: retried once
 
         async def work(_context: Any, caller: AgentCaller = caller) -> None:
             await caller.ask("", [], {})

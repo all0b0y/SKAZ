@@ -1,19 +1,21 @@
 """``runtime.kb_ingest``: request, follow and cancel ingest jobs; wiki settings.
 
-Each request starts its own asyncio task right away (no queue; jobs of
-different materials run in parallel). One material has at most one running
-job: a second request for it is refused, not queued. At construction, jobs
-left ``running`` by a previous process are marked ``interrupted`` (they never
-continue silently; the user retries). Closing the app interrupts running
-model calls the same way, but lets a job that is already saving pages finish.
+A request queues a job; the queue starts queued jobs in order while the wiki
+engine has a free slot (``ENGINE_SLOTS``), so adding a hundred materials at once
+runs them a few at a time instead of failing the ones past an engine's limit.
+One material has at most one queued or running job: a second request for it is
+refused. The queue is stored with the jobs: closing the app puts running model
+calls back in the queue (a job already saving pages finishes), and ``resume()``
+at the next start continues the queue by itself.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
 from typing import cast
 
 from ...native_io import disk_call
@@ -22,7 +24,17 @@ from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..logsafe import error_note
 from ..service import KnowledgeService
-from .jobs import AGENT_UNAVAILABLE, INTERRUPTED_REASON, JobKind, JobRecord, JobRepository, JobState
+from .budget import BUDGET_REACHED, BudgetReached, paused_follow_ups
+from .execution import ProcessingProfile, current_execution, execution_scope, stored_scope
+from .jobs import (
+    AGENT_UNAVAILABLE,
+    INTERRUPTED_REASON,
+    QUEUED_KINDS,
+    JobKind,
+    JobRecord,
+    JobRepository,
+    JobState,
+)
 from .protocols import (
     ConceptUpdateHook,
     EngineResolver,
@@ -41,6 +53,13 @@ NO_DETECTOR = ("The safety check for wiki output isn't available in this build, 
                "wiki. Update SKAZ and retry.")
 NO_ENGINE = "No agent is ready to write the wiki. Connect one in Settings → Models, then retry."
 UNEXPECTED = "Something went wrong while adding this material to the wiki. Retry."
+CANCELLED_QUEUED = "Stopped before it started. Nothing was saved."
+STOPPED = "Stopped. Nothing from this run was saved."
+
+#: How many materials each engine adds to the wiki at once. Codex runs at most 6 answers in parallel
+#: (``agents/codex.py``); ingest takes 4 of them so chats still answer while a large batch runs.
+ENGINE_SLOTS: dict[str, int] = {"codex": 4, "claude_code": 3, "hermes": 2}
+DEFAULT_SLOTS = 2
 
 
 class IngestBusy(KnowledgeError):
@@ -98,6 +117,10 @@ class IngestService:
         self.recognition: RecognitionCheck | None = None
         #: Called with ``(material_id, job)`` after a job finished ``done`` (W2: overview, connections).
         self.finished_listeners: list[Callable[[str, JobRecord], None]] = []
+        #: C1-d Continue of a material whose follow-up work paused at its budget: runs those job kinds
+        #: again inside the given execution scope (wired by the composition root; ``None``: not wired).
+        self.continue_follow_ups: (
+            Callable[[str, Sequence[JobKind]], Awaitable[JobRecord | None]] | None) = None
         self.limits = limits or Limits()
         # The library's one write lock (``KnowledgeService.writing``): wiki writes, W2 page edits,
         # library scans and the Wiki/ watcher never interleave. ``WikiWriter`` only enters it; the
@@ -107,21 +130,40 @@ class IngestService:
         self.write_lock = self._writer.lock
         self._active: dict[str, _Active] = {}
         self._closing = False
+        self._pump_task: asyncio.Task[None] | None = None
+        self._pump_again = False
         self.recovered = self.jobs.interrupt_running()
 
     # -- settings -----------------------------------------------------------
 
     def settings(self) -> WikiSettings:
-        return read_settings(self.kb.settings)
+        settings = read_settings(self.kb.settings)
+        scope = current_execution()
+        if scope is not None:
+            profile = scope.profile
+            return replace(settings, engine=profile.engine, model=profile.model, effort=profile.effort,
+                           language=profile.language)
+        return settings
+
+    def profile(self) -> ProcessingProfile:
+        scope = current_execution()
+        if scope is not None:
+            return scope.profile
+        settings = self.settings()
+        engine = self.engines(settings.engine) if self.engines is not None else None
+        return ProcessingProfile.selected(settings, engine)
 
     def update_settings(self, *, language: str | None = None, engine: str | None = None,
                         clear_engine: bool = False, auto_add_files_links: bool | None = None,
                         auto_add_text: bool | None = None, background_connections: bool | None = None,
-                        auto_corrections: bool | None = None) -> WikiSettings:
+                        auto_corrections: bool | None = None, model: str | None = None,
+                        effort: str | None = None, clear_model: bool = False,
+                        clear_effort: bool = False, budget: int | None = None) -> WikiSettings:
         return update_settings(self.kb.settings, language=language, engine=engine, clear_engine=clear_engine,
                                auto_add_files_links=auto_add_files_links, auto_add_text=auto_add_text,
                                background_connections=background_connections,
-                               auto_corrections=auto_corrections)
+                               auto_corrections=auto_corrections, model=model, effort=effort,
+                               clear_model=clear_model, clear_effort=clear_effort, budget=budget)
 
     # -- jobs ---------------------------------------------------------------
 
@@ -144,6 +186,11 @@ class IngestService:
             raise IngestBusy("SKAZ is closing. Retry after it starts again.")
         if any(active.material_id == material_id for active in self._active.values()):
             raise IngestBusy()
+        profile = self.profile()
+        scope = current_execution()
+        root_job_id = scope.root_job_id if scope is not None else None
+        # C1-d: a new root gets a fresh portion of the budget; work started inside a root shares it.
+        budget = scope.budget if scope is not None and scope.budget is not None else self.settings().budget
         reservation = _Active(material_id, kind)
         self._active[f"pending-{id(reservation)}"] = reservation
         try:
@@ -153,21 +200,108 @@ class IngestService:
                 raise NotFound("Material not found.")
             if record.status == "ready" and record.fragment_count == 0:
                 raise NothingToAdd.of(record.kind)
-            job = await disk_call(lambda: self.jobs.create(material_id, kind=kind))
+            if await disk_call(self.jobs.pending_for, material_id) is not None:
+                raise IngestBusy()
+            job = await disk_call(lambda: self.jobs.create(
+                material_id, kind=kind, state="queued", profile=profile, root_job_id=root_job_id,
+                budget=budget, budget_material=material_id))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)
+        # A queued job is kept even when SKAZ is closing now: it continues at the next start. With a
+        # free slot it starts right away, and the answer says so.
+        self._kick()
+        if self._pump_task is not None and not self._pump_task.done():
+            await asyncio.shield(self._pump_task)
+        return await disk_call(self.job, job.id)
+
+    async def request_from_user(self, material_id: str) -> JobRecord:
+        """"Add to wiki", "Try again" or "Continue" on a material (C1-d).
+
+        When the material finished but its follow-up work (overview, connections) paused at the
+        budget, only that work runs again, with another budget portion; otherwise the material is
+        (re)queued and continues from its checkpoint.
+        """
+        if self.continue_follow_ups is not None:
+            def paused() -> list[JobKind]:
+                with self.kb.db.read() as connection:
+                    rows = paused_follow_ups(connection, [material_id]).get(material_id, [])
+                return [cast(JobKind, row["kind"]) for row in rows]
+
+            kinds = await disk_call(paused)
+            if kinds and await disk_call(self.jobs.pending_for, material_id) is None:
+                record = await self.continue_follow_ups(material_id, kinds)
+                if record is not None:
+                    return record
+        return await self.request_ingest(material_id)
+
+    async def retry_failed(self) -> list[JobRecord]:
+        """Queue again every material whose latest ingest failed or was interrupted (one click)."""
+        queued: list[JobRecord] = []
+        for material_id in await disk_call(self.jobs.latest_failed_materials):
+            try:
+                queued.append(await self.request_ingest(material_id))
+            except KnowledgeError as error:  # gone, busy, nothing to add: the rest still retry
+                logger.info("retry of material %s did not queue: %s", material_id, error_note(error))
+        return queued
+
+    def resume(self) -> None:
+        """App start (running loop): continue the queue left by the previous process."""
+        self._kick()
+
+    def slots(self) -> int:
+        """How many ingest jobs may run at once with the current wiki engine."""
+        engine = self.engines(read_settings(self.kb.settings).engine) if self.engines is not None else None
+        return ENGINE_SLOTS.get(engine.id, DEFAULT_SLOTS) if engine is not None else DEFAULT_SLOTS
+
+    def _kick(self) -> None:
+        """Start queued jobs while there are free slots (one pump at a time; a kick during it repeats it)."""
         if self._closing:
-            # close() ran while this request was on a worker thread: it could not see a task to
-            # stop, so none may start now — the job ends as an interrupted one.
-            await disk_call(self.jobs.finish, job.id, "interrupted", error=INTERRUPTED_REASON)
-            raise IngestBusy("SKAZ is closing. Retry after it starts again.")
-        self._active[job.id] = reservation
-        reservation.task = asyncio.create_task(self._run(job.id, reservation), name=f"ingest-{job.id}")
-        return job
+            return
+        if self._pump_task is not None and not self._pump_task.done():
+            self._pump_again = True
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._pump_task = loop.create_task(self._pump(), name="ingest-queue")
+
+    async def _pump(self) -> None:
+        while True:
+            self._pump_again = False
+            try:
+                await self._start_queued()
+            except Exception as failure:  # the queue stays; the next kick tries again
+                logger.error("ingest queue could not start a job: %s", error_note(failure))
+            if not self._pump_again:
+                return
+
+    async def _start_queued(self) -> None:
+        while not self._closing:
+            running = sum(1 for active in self._active.values() if active.task is not None)
+            if running >= await disk_call(self.slots):
+                return
+            job = await disk_call(self.jobs.claim_next)
+            if job is None:
+                return
+            if self._closing:
+                await disk_call(self.jobs.requeue, job.id)
+                return
+            reservation = _Active(job.material_id or "", job.kind)
+            self._active[job.id] = reservation
+            reservation.task = asyncio.create_task(self._run(job.id, reservation), name=f"ingest-{job.id}")
+            reservation.task.add_done_callback(lambda _task: self._kick())
 
     async def cancel(self, job_id: str) -> JobRecord:
         record = await disk_call(self.job, job_id)
         active = self._active.get(job_id)
+        if record.state == "queued" and active is None:
+            # Compare-and-set: the queue may claim the job between the read above and this write.
+            if await disk_call(self.jobs.cancel_queued, job_id, CANCELLED_QUEUED):
+                return await disk_call(self.job, job_id)
+            if self._pump_task is not None and not self._pump_task.done():
+                await asyncio.shield(self._pump_task)  # the claimed job gets its task; stop that
+            active = self._active.get(job_id)
         if active is None or active.task is None:
             raise JobNotCancellable("This job has already finished.")
         run = active.run
@@ -178,13 +312,17 @@ class IngestService:
             run.cancel_requested = True
             if run.current_run is not None:
                 await run.engine.interrupt(run.current_run)
-        active.task.cancel()
+            active.task.cancel()
+        # Without a run the job is still starting: it stops itself before its first step (a task
+        # cancelled before it ever ran would skip finishing the job).
         await asyncio.wait({active.task}, timeout=10)
         return await disk_call(self.job, record.id)
 
     async def close(self) -> None:
-        """App shutdown: running model calls are stopped and their jobs marked interrupted."""
+        """App shutdown: running model calls are stopped and their jobs go back to the queue."""
         self._closing = True
+        if self._pump_task is not None and not self._pump_task.done():
+            self._pump_task.cancel()
         tasks = []
         for active in list(self._active.values()):
             if active.task is None:
@@ -206,11 +344,28 @@ class IngestService:
     # -- one job ------------------------------------------------------------
 
     async def _run(self, job_id: str, active: _Active) -> None:
+        with contextlib.ExitStack() as scoped:
+            await self._execute(job_id, active, scoped)
+
+    def _stopped(self, active: _Active) -> tuple[JobState, str] | None:
+        """How a stopped job ends: the user's Stop, or back in the queue while SKAZ closes."""
+        if active.cancel_requested:
+            return "cancelled", STOPPED
+        if self._closing and active.kind in QUEUED_KINDS:
+            # SKAZ is closing: nothing was saved, and the job continues at the next start.
+            return "queued", ""
+        return None
+
+    async def _execute(self, job_id: str, active: _Active, scoped: contextlib.ExitStack) -> None:
         state: JobState = "failed"
         error = UNEXPECTED
         code: str | None = None
         try:
-            settings = read_settings(self.kb.settings)
+            # Inside the ``try``: a Stop or quit while the snapshot is read still finishes the job.
+            scoped.enter_context(execution_scope(await disk_call(stored_scope, self.kb.db, job_id)))
+            if active.cancel_requested:
+                raise IngestCancelled()
+            settings = self.settings()
             if self.detector is None:
                 raise IngestFailed(NO_DETECTOR)
             engine = self.engines(settings.engine) if self.engines is not None else None
@@ -221,17 +376,20 @@ class IngestService:
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
                 writer=self._writer, hook=self.hook, language=settings.language, limits=self.limits,
                 recognition=self.recognition,
+                model=settings.model, effort=settings.effort,
             )
             active.run.cancel_requested = active.cancel_requested
             await active.run.execute()
             state, error = "done", ""
         except IngestCancelled:
-            state, error = "cancelled", "Stopped. Nothing from this run was saved."
+            # While SKAZ closes, a real engine's interrupt awaits its reply and the answer reports
+            # "cancelled" before the task itself is cancelled: that is the quit, not a Stop.
+            state, error = self._stopped(active) or ("cancelled", STOPPED)
+        except BudgetReached as reached:
+            # C1-d: finished work is in the checkpoints; nothing unfinished was published.
+            state, error, code = "paused", reached.message, BUDGET_REACHED
         except asyncio.CancelledError:
-            if active.cancel_requested:
-                state, error = "cancelled", "Stopped. Nothing from this run was saved."
-            else:
-                state, error = "interrupted", INTERRUPTED_REASON
+            state, error = self._stopped(active) or ("interrupted", INTERRUPTED_REASON)
         except IngestFailed as failure:
             error, code = failure.message, failure.code
         except EngineUnavailable as failure:
@@ -244,23 +402,28 @@ class IngestService:
             logger.error("ingest job %s failed: %s", job_id, error_note(failure))
         finally:
             try:
-                self.jobs.finish(job_id, state, error=error or None,
-                                 error_code=code if state == "failed" else None)
-                self._notify_blocked(job_id, active)
+                # L2: off the event loop; disk_call still finishes the write when the job is cancelled.
+                if state == "queued":
+                    await disk_call(self.jobs.requeue, job_id)
+                else:
+                    await disk_call(lambda: self.jobs.finish(
+                        job_id, state, error=error or None,
+                        error_code=code if state in ("failed", "paused") else None))
+                await disk_call(self._notify_blocked, job_id, active)
             finally:
                 self._active.pop(job_id, None)
             if state == "done":
-                self._tell_finished(job_id, active.material_id)
+                self._tell_finished(await disk_call(self.jobs.get, job_id), active.material_id)
 
-    def _tell_finished(self, job_id: str, material_id: str) -> None:
-        record = self.jobs.get(job_id)
+    def _tell_finished(self, record: JobRecord | None, material_id: str) -> None:
+        """On the event loop: listeners start their own follow-up tasks (W2 overview, connections)."""
         for listener in list(self.finished_listeners):
             if record is None:
                 break
             try:
                 listener(material_id, record)
             except Exception as failure:  # a listener's failure never changes the finished job
-                logger.error("ingest listener failed for job %s: %s", job_id, error_note(failure))
+                logger.error("ingest listener failed for job %s: %s", record.id, error_note(failure))
 
     def _notify_blocked(self, job_id: str, active: _Active) -> None:
         run = active.run

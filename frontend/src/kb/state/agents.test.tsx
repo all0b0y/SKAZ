@@ -21,12 +21,13 @@ const agent = (id: EngineId, extra: Partial<KbAgent> = {}): KbAgent => ({
 function fakeClient() {
   const calls: string[] = [];
   const pending: Array<() => void> = [];
-  const state: Record<EngineId, KbAgent> = { codex: agent('codex'), claude_code: agent('claude_code'), hermes: agent('hermes') };
+  // A backend that lists three agents: the store checks only the agents it lists.
+  const state: Partial<Record<EngineId, KbAgent>> = { codex: agent('codex'), claude_code: agent('claude_code'), hermes: agent('hermes') };
   const call = vi.fn(async (route: string, options?: { path?: { engine?: EngineId; task_id?: string } }) => {
     const engine = options?.path?.engine;
     calls.push(engine ? `${route}:${engine}` : route);
     await new Promise<void>((resolve) => pending.push(resolve));
-    if (route === 'GET /kb/agents') return { agents: Object.values(state), default: 'codex' } satisfies KbAgents;
+    if (route === 'GET /kb/agents') return { agents: Object.values(state) as KbAgent[], default: 'codex', favorites: [] } satisfies KbAgents;
     if (route === 'POST /kb/agents/{engine}/check') return state[engine!];
     if (route === 'POST /kb/agents/{engine}/login') return { engine, method: 'browser', url: 'https://example.org', message: 'Finish in the browser.' };
     if (route === 'GET /kb/agents/install/{task_id}') {

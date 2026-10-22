@@ -153,6 +153,10 @@ class ArticleExtraction:
     paragraphs: list[Paragraph]
     findings: list[Finding]
     site_name: str | None
+    #: ``<script>`` elements in the raw page (a page whose text needs JavaScript has some, little text).
+    scripts: int = 0
+    #: Password fields in the raw page (a sign-in form instead of the page).
+    password_fields: int = 0
 
 
 # -- CSS -------------------------------------------------------------------
@@ -682,7 +686,22 @@ def decode_html(body: bytes, charset: str | None) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-def extract_article(html: str) -> ArticleExtraction:
+@dataclass(frozen=True)
+class _Pruned:
+    """A parsed page with hidden content, scripts and styles removed (layer 2)."""
+
+    document: Any
+    body: Any
+    findings: list[Finding]
+    page_title: str | None
+    og_title: str | None
+    site_name: str | None
+    h1: str | None
+    scripts: int
+    password_fields: int
+
+
+def _pruned(html: str) -> _Pruned:
     if not html.strip():
         raise ArticleRejected("The page is empty.")
     try:
@@ -693,14 +712,47 @@ def extract_article(html: str) -> ArticleExtraction:
     page_title = title_tag.text_content() if title_tag is not None else None
     og_title = _meta(document, "og:title", "twitter:title")
     site_name = _meta(document, "og:site_name")
+    scripts = sum(1 for _ in document.iter("script"))
+    password_fields = sum(
+        1 for item in document.iter("input") if (item.get("type") or "").lower() == "password"
+    )
     pruner = _Pruner(document)
     body = document.find("body")
     pruner.prune(document, _Context())
     for element in document.iter():
         if isinstance(element.tag, str) and "style" in element.attrib:
             del element.attrib["style"]  # judged already; readability must not re-judge a visible child
+    h1 = document.find(".//h1")  # after pruning: a hidden heading never names the material
+    return _Pruned(document, body, list(pruner.findings), page_title, og_title, site_name,
+                   h1.text_content() if h1 is not None else None, scripts, password_fields)
+
+
+def _extraction(pruned: _Pruned, texts: list[Block], short_title: str | None = None) -> ArticleExtraction:
+    paragraphs: list[Paragraph] = []
+    findings = list(pruned.findings)
+    for block in texts:
+        cleaned = clean_invisible(block.text, index=len(paragraphs))
+        findings.extend(cleaned.findings)
+        if cleaned.text.strip():
+            text = code_text(cleaned.text) if block.role == "code" else " ".join(cleaned.text.split())
+            paragraphs.append(Paragraph(text, index=len(paragraphs), role=block.role, level=block.level))
+    title = (
+        sanitize_title(pruned.og_title)
+        or sanitize_title(short_title)
+        or sanitize_title(pruned.page_title)
+        or (sanitize_title(pruned.h1) if pruned.h1 is not None else None)
+    )
+    site_name = sanitize_title(pruned.site_name) if pruned.site_name else None
+    return ArticleExtraction(title, paragraphs, findings, site_name, pruned.scripts, pruned.password_fields)
+
+
+def extract_article(html: str) -> ArticleExtraction:
+    pruned = _pruned(html)
+    document, body = pruned.document, pruned.body
     cleaned_html = lxml.html.tostring(body if body is not None else document, encoding="unicode")
-    readable = Document(f"<html><head><title>{_escape(page_title or '')}</title></head>{cleaned_html}</html>")
+    readable = Document(
+        f"<html><head><title>{_escape(pruned.page_title or '')}</title></head>{cleaned_html}</html>"
+    )
     try:
         summary = readable.summary(html_partial=True)
         short_title = readable.short_title()
@@ -711,22 +763,24 @@ def extract_article(html: str) -> ArticleExtraction:
     )
     if not texts and body is not None:
         texts = _block_texts(body)
-    paragraphs: list[Paragraph] = []
-    findings = list(pruner.findings)
-    for block in texts:
-        cleaned = clean_invisible(block.text, index=len(paragraphs))
-        findings.extend(cleaned.findings)
-        if cleaned.text.strip():
-            text = code_text(cleaned.text) if block.role == "code" else " ".join(cleaned.text.split())
-            paragraphs.append(Paragraph(text, index=len(paragraphs), role=block.role, level=block.level))
-    h1 = document.find(".//h1")
-    title = (
-        sanitize_title(og_title)
-        or sanitize_title(short_title)
-        or sanitize_title(page_title)
-        or (sanitize_title(h1.text_content()) if h1 is not None else None)
-    )
-    return ArticleExtraction(title, paragraphs, findings, sanitize_title(site_name) if site_name else None)
+    return _extraction(pruned, texts, short_title)
+
+
+#: Site menus: part of every page of the site, not of this page's text (W-3 snapshot).
+_MENUS = "//nav | //*[@role='navigation']"
+
+
+def extract_page(html: str) -> ArticleExtraction:
+    """The whole visible page as text (W-3 "Add to wiki" snapshot), not readability's article guess.
+
+    Same layer 2 as articles (hidden content, scripts, styles, comments and
+    attributes never become text); site menus (``nav``) are left out.
+    """
+    pruned = _pruned(html)
+    root = pruned.body if pruned.body is not None else pruned.document
+    for menu in root.xpath(_MENUS):
+        _Pruner._drop(menu)
+    return _extraction(pruned, _block_texts(root))
 
 
 def _escape(text: str) -> str:

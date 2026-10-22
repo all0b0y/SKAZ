@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
@@ -32,9 +33,10 @@ from ..markdown.text import format_timestamp, name_key
 from ..service import KnowledgeService
 from ..sources.guard.visibility import UNREADABLE, ExclusionsUnreadable, excluded_segs
 from ..store.records import FolderRecord, FragmentRecord, MaterialRecord, PageRecord
-from .engine import ToolSpec
+from .engine import EngineId, ToolSpec
 from .prompting import untrusted_block
 
+log = logging.getLogger(__name__)
 #: Materials with a timeline (``start_ms``/``end_ms`` per fragment).
 TIMED_KINDS: frozenset[str] = frozenset({"recording", "audio", "video", "video_link"})
 DEFAULT_TIMEOUT_S = 10.0
@@ -43,7 +45,7 @@ TEXT_MAX_OUTPUT_BYTES = 48_000
 _SUMMARY_CHARS = 160
 _TRUNCATED = " …[truncated]"
 SearchKind = Literal["recording", "audio", "video", "video_link", "pdf", "book", "web", "text",
-                     "concept", "note", "folder", "analysis"]
+                     "concept", "note", "folder", "analysis", "deck", "test"]
 assert set(get_args(SearchKind)) == set(MATERIAL_KINDS) | set(PAGE_KINDS)
 
 
@@ -142,13 +144,32 @@ Handler = Callable[[KnowledgeService, Any], dict[str, Any]]
 
 
 @dataclass(frozen=True)
+class ToolContext:
+    """Which agent run a call belongs to (the MCP token's run, Codex's turn); ``None`` outside a run."""
+
+    run_id: str
+    engine: EngineId | None = None
+
+
+#: An interactive tool (it may wait for the user): runs on the event loop, never on a timer of SKAZ.
+AsyncHandler = Callable[[ToolContext | None, Any], Awaitable[dict[str, Any]]]
+
+
+@dataclass(frozen=True)
 class SkazTool:
     name: str
     description: str
     args: type[_Args]
-    handler: Handler
-    timeout_s: float = DEFAULT_TIMEOUT_S
+    handler: Handler | None = None
+    #: ``None`` = no SKAZ timeout (interactive tools wait for the user until Stop).
+    timeout_s: float | None = DEFAULT_TIMEOUT_S
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
+    #: Set for interactive tools (wiki changes, questions); ``handler`` is then unused.
+    run: AsyncHandler | None = None
+
+    @property
+    def interactive(self) -> bool:
+        return self.run is not None
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -164,10 +185,25 @@ class SkazTool:
 def input_schema(model: type[BaseModel]) -> dict[str, Any]:
     """Plain JSON schema of a tool's arguments: no titles, ``X | None`` shown as optional ``X``."""
     raw = model.model_json_schema()
-    if "$defs" in raw:  # nested models are not used by SKAZ tools; refuse rather than emit $refs
-        raise ValueError(f"{model.__name__} must not use nested models")
-    cleaned: dict[str, Any] = _clean(raw)
+    definitions = raw.pop("$defs", {})
+    # Nested models (the wiki tools' blocks and changes) are inlined: some agents refuse ``$ref``.
+    cleaned: dict[str, Any] = _clean(_inline(raw, definitions, ()))
     return cleaned
+
+
+def _inline(node: Any, definitions: Mapping[str, Any], seen: tuple[str, ...]) -> Any:
+    if isinstance(node, list):
+        return [_inline(item, definitions, seen) for item in node]
+    if not isinstance(node, dict):
+        return node
+    reference = node.get("$ref")
+    if isinstance(reference, str) and reference.startswith("#/$defs/"):
+        name = reference.removeprefix("#/$defs/")
+        if name in seen or name not in definitions:
+            raise ValueError(f"Tool schemas must not be recursive ({name})")
+        merged = {**definitions[name], **{key: value for key, value in node.items() if key != "$ref"}}
+        return _inline(merged, definitions, (*seen, name))
+    return {key: _inline(value, definitions, seen) for key, value in node.items()}
 
 
 def _clean(node: Any) -> Any:
@@ -644,6 +680,13 @@ class ToolRegistry:
     def names(self) -> tuple[str, ...]:
         return tuple(self._tools)
 
+    def add(self, tools: Sequence[SkazTool]) -> None:
+        """Register more tools (the interactive ones, once their services exist); names stay unique."""
+        for tool in tools:
+            if tool.name in self._tools or not tool.name.startswith("skaz_"):
+                raise ValueError("SKAZ tool names must be unique and start with skaz_")
+            self._tools[tool.name] = tool
+
     def get(self, name: str) -> SkazTool | None:
         return self._tools.get(name)
 
@@ -655,7 +698,7 @@ class ToolRegistry:
                 raise ValueError(f"Unknown SKAZ tools: {', '.join(sorted(unknown))}")
         return tuple(tool.spec() for tool in self._tools.values() if names is None or tool.name in names)
 
-    async def call(self, name: str, arguments: Any) -> ToolOutcome:
+    async def call(self, name: str, arguments: Any, context: ToolContext | None = None) -> ToolOutcome:
         tool = self._tools.get(name)
         if tool is None:
             return ToolOutcome(f"Unknown tool {name[:80]!r}.", is_error=True)
@@ -663,6 +706,9 @@ class ToolRegistry:
             args = tool.args.model_validate(arguments if arguments is not None else {})
         except ValidationError as error:
             return ToolOutcome(_describe(error), is_error=True)
+        if tool.run is not None:
+            return await self._interactive(tool, args, context)
+        assert tool.handler is not None
         try:
             async with asyncio.timeout(tool.timeout_s):
                 # Reads only; abandoning a slow read on timeout is harmless.
@@ -678,6 +724,25 @@ class ToolRegistry:
             return ToolOutcome("The result is too large. Ask for less (smaller range or limit).",
                                is_error=True)
         return ToolOutcome(text)
+
+
+    @staticmethod
+    async def _interactive(tool: SkazTool, args: Any, context: ToolContext | None) -> ToolOutcome:
+        """A wiki change or a question: waits for the user (no SKAZ timeout); SKAZ's own JSON, not data."""
+        assert tool.run is not None
+        try:
+            payload = await tool.run(context, args)
+        except ToolInputError as error:
+            return ToolOutcome(str(error), is_error=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            log.error("Tool %s failed: %s", tool.name, type(error).__name__)
+            return ToolOutcome("SKAZ could not do this right now.", is_error=True)
+        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        if size(text) > tool.max_output_bytes:
+            return ToolOutcome("The result is too large.", is_error=True)
+        return ToolOutcome(text, is_error=payload.get("status") == "error")
 
 
 def _describe(error: ValidationError) -> str:

@@ -1,9 +1,14 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbPageRef } from '../../api/kb/types.gen';
+import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbSavedAnalysis } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
+import {
+  answerQuestion, decidePermission, isWaitingPart, partsOf, undoPermission,
+  type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionDecision, type KbPermissionPart,
+  type KbQuestionAnswer, type KbQuestionPart,
+} from '../api/permissions';
 
 export interface OpenChat {
   chat: KbChat | null;
@@ -27,6 +32,8 @@ export interface ChatsData {
   chats: Record<string, OpenChat>;
   /** Agent/model/effort picked for the new chat before its first message. */
   draftAgent: AgentChoice | null;
+  /** How the user answered a permission request in this window (to say «Allowed in this chat»). */
+  decisions: Record<string, KbPermissionDecision['decision']>;
 }
 
 export interface ChatsActions {
@@ -41,9 +48,12 @@ export interface ChatsActions {
   send: (input: KbMessageInput, context: KbOpenContext, options?: { newChat?: boolean }) => Promise<ActionResult<string>>;
   stop: (chatId: string, messageId: string) => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
+  /** Your question changed in place: the messages after it go and it is answered again (409 while answering). */
+  edit: (chatId: string, messageId: string, input: KbMessageInput) => Promise<ActionResult>;
   resume: (chatId: string, messageId: string) => Promise<ActionResult>;
-  saveMessage: (chatId: string, messageId: string) => Promise<ActionResult<KbPageRef>>;
-  saveChat: (chatId: string) => Promise<ActionResult<KbPageRef>>;
+  /** The page written; `warning` names what was left out (a diagram without material quotes). */
+  saveMessage: (chatId: string, messageId: string) => Promise<ActionResult<KbSavedAnalysis>>;
+  saveChat: (chatId: string) => Promise<ActionResult<KbSavedAnalysis>>;
   exportChat: (chatId: string) => Promise<ActionResult<{ file_name: string; markdown: string }>>;
   rename: (chatId: string, title: string) => Promise<ActionResult>;
   setPinned: (chatId: string, pinned: boolean) => Promise<ActionResult>;
@@ -54,6 +64,14 @@ export interface ChatsActions {
   setDraftAgent: (choice: AgentChoice | null) => void;
   /** A material or page was deleted: mark it gone in every loaded chat (see `forgetInChat`). */
   forget: (gone: Gone) => void;
+  /** Answer an agent's permission request (0.3.1 P); the card shows the returned part. */
+  decide: (chatId: string, partId: string, body: KbPermissionDecision) => Promise<ActionResult<KbPermissionPart>>;
+  /** Undo a change allowed without a question; 409 = the page changed since (reason in words). */
+  undo: (chatId: string, partId: string) => Promise<ActionResult<KbPermissionPart>>;
+  /** Answer an agent's question by option or own text (also a late pick after writing instead). */
+  answer: (chatId: string, partId: string, body: KbQuestionAnswer) => Promise<ActionResult<KbQuestionPart>>;
+  /** A part as the backend answered it (a study block after a grade, 0.3.1 S): replaced in place. */
+  applyPart: (chatId: string, part: AnyMessagePart) => void;
 }
 
 export type ChatsStore = StoreApi<ChatsData & ChatsActions>;
@@ -115,11 +133,48 @@ export function forgetInChat(chat: KbChat, gone: Gone): KbChat {
   return changed ? { ...chat, messages } : chat;
 }
 
-/** Apply long-poll events to a chat. A `message` event is a full snapshot; `delta` appends text. */
+/** The message with the part replaced by the part with the same id (null = no such part). */
+export function replacePart(messages: KbMessage[], part: AnyMessagePart, messageId?: string | null): KbMessage[] | null {
+  const id = 'id' in part ? part.id : null;
+  if (!id) return null;
+  for (let i = 0; i < messages.length; i += 1) {
+    const m = messages[i]!;
+    if (messageId && m.id !== messageId) continue;
+    const at = partsOf(m).findIndex((p) => 'id' in p && p.id === id);
+    if (at < 0) continue;
+    const parts = m.parts.slice();
+    parts[at] = part as KbMessage['parts'][number];
+    const next = messages.slice();
+    next[i] = { ...m, parts };
+    return next;
+  }
+  return null;
+}
+
+const waitingOf = (chat: Pick<KbChat, 'messages'>): Partial<KbChatSummaryP> => ({ waiting_for_user: chatWaits(chat) });
+
+/** A permission or a question of this chat still waits for the user. */
+export function chatWaits(chat: Pick<KbChat, 'messages'>): boolean {
+  return chat.messages.some((m) => partsOf(m).some(isWaitingPart));
+}
+
+/**
+ * Apply long-poll events to a chat. A `message` event is a full snapshot; `delta` appends text;
+ * `part_update` (0.3.1 P) replaces the part with the same id.
+ */
 export function applyEvents(chat: KbChat, events: KbChatEvent[]): KbChat {
   let messages = chat.messages;
   let title = chat.title;
-  for (const e of events) {
+  for (const event of events) {
+    const e = event as KbChatEventP;
+    if (e.type === 'part_update') {
+      if (e.part) messages = replacePart(messages, e.part, e.message_id) ?? messages;
+      continue;
+    }
+    if (e.type === 'removed') {
+      messages = messages.filter((m) => m.id !== e.message_id);
+      continue;
+    }
     if (e.type === 'title') {
       if (e.text) title = e.text;
       continue;
@@ -139,7 +194,7 @@ export function applyEvents(chat: KbChat, events: KbChatEvent[]): KbChat {
       else parts.push({ type: 'text', text: e.text });
       next = { ...m, parts };
     } else if (e.type === 'part' && e.part) {
-      next = { ...m, parts: [...m.parts, e.part] };
+      next = { ...m, parts: [...m.parts, e.part as KbMessage['parts'][number]] };
     } else if (e.type === 'state' && e.text) {
       next = { ...m, state: e.text as KbMessage['state'] };
     }
@@ -167,13 +222,38 @@ export function createChatsStore(client: KbClient): ChatsStore {
         };
       });
     };
-    const merge = (id: string, messages: KbMessage[]) => {
+    /**
+     * Put a request's answer into its chat. `created`: the new answer the request made (send, edit,
+     * regenerate, resume) is returned as it was created, and the long poll may already show more of
+     * it (C-19): a copy already here is the same or newer, so it stays.
+     */
+    const merge = (id: string, messages: KbMessage[], created?: KbMessage) => {
       const open = get().chats[id];
       if (!open?.chat) return;
       let next = open.chat.messages;
       for (const m of messages) next = upsertMessage(next, m);
+      if (created && !next.some((m) => m.id === created.id)) next = upsertMessage(next, created);
       const chat = { ...open.chat, messages: next, state: isAnswering({ messages: next }) ? 'answering' as const : 'idle' as const };
       set((s) => ({ chats: { ...s.chats, [id]: { ...open, chat } }, list: s.list.map((c) => (c.id === id ? { ...c, state: chat.state } : c)) }));
+    };
+    /** A part the backend answered with: in place in its chat; the list's waiting mark follows. */
+    const putPart = (chatId: string, part: AnyMessagePart) => {
+      const open = get().chats[chatId];
+      if (!open?.chat) return;
+      const messages = replacePart(open.chat.messages, part);
+      if (!messages) return;
+      const chat = { ...open.chat, messages };
+      const waiting = waitingOf(chat);
+      set((s) => ({
+        chats: { ...s.chats, [chatId]: { ...open, chat } },
+        list: s.list.map((c) => (c.id === chatId ? { ...c, ...waiting } : c)),
+      }));
+    };
+    const supersedeQuestions = (chatId: string) => {
+      const open = get().chats[chatId];
+      for (const m of open?.chat?.messages ?? []) {
+        for (const p of partsOf(m)) if (p.type === 'question' && p.status === 'pending') putPart(chatId, { ...p, status: 'superseded' });
+      }
     };
     const act = async <T,>(fn: () => Promise<T>): Promise<ActionResult<T>> => {
       try {
@@ -191,6 +271,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
       currentId: null,
       chats: {},
       draftAgent: null,
+      decisions: {},
 
       loadList: async () => {
         set({ listLoad: get().listLoad === 'ready' ? 'ready' : 'loading', listError: null });
@@ -247,7 +328,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
           const chat = applyEvents(now.chat, fresh);
           set((s) => ({
             chats: { ...s.chats, [id]: { ...now, chat } },
-            list: s.list.map((c) => (c.id === id ? { ...c, title: chat.title, state: chat.state } : c)),
+            list: s.list.map((c) => (c.id === id ? { ...c, title: chat.title, state: chat.state, ...waitingOf(chat) } : c)),
           }));
         }
         return { cursor: res.cursor, changed: fresh.length > 0 };
@@ -275,7 +356,9 @@ export function createChatsStore(client: KbClient): ChatsStore {
             path: { chat_id: chatId },
             body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context },
           });
-          merge(chatId, [res.user, res.assistant]);
+          // Q-A2: a message of your own closes a waiting question (its part_update confirms it).
+          supersedeQuestions(chatId);
+          merge(chatId, [res.user], res.assistant);
           patchSummary(chatId, { updated_at: res.user.created_at });
           set((s) => ({ list: [...s.list].sort(byUpdated) }));
           return { ok: true, value: chatId };
@@ -288,13 +371,32 @@ export function createChatsStore(client: KbClient): ChatsStore {
         const m = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/stop', { path: { chat_id: chatId, message_id: messageId } });
         merge(chatId, [m]);
       }),
+      edit: (chatId, messageId, input) => act(async () => {
+        const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/edit', {
+          path: { chat_id: chatId, message_id: messageId },
+          body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments },
+        });
+        const open = get().chats[chatId];
+        if (open?.chat) {
+          // What followed the question is gone (the `removed` events say the same to other windows).
+          const kept = open.chat.messages.filter((m) => m.seq <= res.user.seq || m.id === res.assistant.id);
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat: { ...open.chat!, messages: kept } } } }));
+        }
+        merge(chatId, [res.user], res.assistant);
+      }),
       regenerate: (chatId, messageId) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/regenerate', { path: { chat_id: chatId, message_id: messageId } });
-        merge(chatId, [res.assistant]);
+        merge(chatId, [], res.assistant);
       }),
       resume: (chatId, messageId) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/resume', { path: { chat_id: chatId, message_id: messageId } });
-        merge(chatId, [res.assistant]);
+        // The new answer takes the interrupted one's place (2026-10-21; `removed` tells other windows).
+        const open = get().chats[chatId];
+        if (open?.chat) {
+          const kept = open.chat.messages.filter((m) => m.id !== messageId);
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat: { ...open.chat!, messages: kept } } } }));
+        }
+        merge(chatId, [], res.assistant);
       }),
       saveMessage: (chatId, messageId) => act(async () => {
         const ref = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/save', { path: { chat_id: chatId, message_id: messageId } });
@@ -333,7 +435,10 @@ export function createChatsStore(client: KbClient): ChatsStore {
       setAgent: async (chatId, choice) => {
         if (!chatId) {
           set({ draftAgent: choice });
-          return { ok: true, value: undefined };
+          // The next new chat starts from it too, after a restart (models screen v2).
+          return act(async () => {
+            await client.call('PUT /kb/chats/last-choice', { body: { engine: choice.engine, model: choice.model, effort: choice.effort } });
+          });
         }
         return act(async () => {
           const s = await client.call('PATCH /kb/chats/{chat_id}', {
@@ -343,6 +448,23 @@ export function createChatsStore(client: KbClient): ChatsStore {
         });
       },
       setDraftAgent: (choice) => set({ draftAgent: choice }),
+      decide: (chatId, partId, body) => act(async () => {
+        const part = await decidePermission(client, partId, body);
+        set((s) => ({ decisions: { ...s.decisions, [partId]: body.decision } }));
+        putPart(chatId, part);
+        return part;
+      }),
+      undo: (chatId, partId) => act(async () => {
+        const part = await undoPermission(client, partId);
+        putPart(chatId, part);
+        return part;
+      }),
+      answer: (chatId, partId, body) => act(async () => {
+        const part = await answerQuestion(client, partId, body);
+        putPart(chatId, part);
+        return part;
+      }),
+      applyPart: (chatId, part) => putPart(chatId, part),
       forget: (gone) => set((s) => {
         let changed = false;
         const chats: Record<string, OpenChat> = {};

@@ -45,6 +45,7 @@ from typing import Any, Literal
 from ...import_service import ImportRequest
 from ...native_io import disk_call
 from ..errors import KnowledgeError, NameTaken, NotFound
+from ..keyed_locks import KeyedLocks
 from ..library.layout import STAGING_PATH
 from ..library.library import INBOX_ID
 from ..library.names import numbered_name, validate_name
@@ -163,7 +164,7 @@ class SpeechService:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._live: dict[str, asyncio.Task[None]] = {}
         self._dirty: set[str] = set()
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks = KeyedLocks()
         self._closing = False
         #: Called with a material id when speech settled finished (Stop or a completed import,
         #: not a Pause): the wiki may process it now.
@@ -194,8 +195,8 @@ class SpeechService:
             return None
         return self.carriers.by_session(session_id)
 
-    def _lock(self, material_id: str) -> asyncio.Lock:
-        return self._locks.setdefault(material_id, asyncio.Lock())
+    def _lock(self, material_id: str) -> contextlib.AbstractAsyncContextManager[None]:
+        return self._locks.hold(material_id)
 
     def _spawn(self, work: Coroutine[Any, Any, None]) -> None:
         if self._closing:

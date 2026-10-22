@@ -10,7 +10,11 @@ export const MAX_DICTATION_SECONDS = 120;
 /** A saved text (chat export) — the user already sees it; this only bounds its size. */
 export const MAX_SAVE_TEXT_CHARS = 5 * 1024 * 1024;
 const MAX_FILE_NAME = 120;
-const MAX_CHOSEN_FILES = 50;
+/**
+ * Files one dialog may hand over. The wiki queue takes any number of materials (H2), so this is only
+ * a bound on one IPC answer — far above what anyone picks at once (it was 50, silently cutting more).
+ */
+const MAX_CHOSEN_FILES = 2000;
 
 /**
  * Checks the clip before it leaves main: a canonical RIFF/WAVE header, PCM16 mono, within the size

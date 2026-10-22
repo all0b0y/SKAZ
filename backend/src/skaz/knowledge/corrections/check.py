@@ -80,7 +80,8 @@ WORD_SIMILARITY = 0.5
 PHRASE_SIMILARITY = 0.75
 PART_BUDGET = 12_000
 OFF_LINE = "The recognition check is off in Settings → Models; the recognised text was used as is."
-AGENT_NAMES = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent"}
+AGENT_NAMES = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
+               "opencode": "OpenCode"}
 NO_CHECK_AGENT = "No agent is ready for the recognition check. Connect one in Settings → Accounts & keys."
 _WORD = re.compile(r"\w+(?:[-'’]\w+)*", re.UNICODE)
 _DIGITS = re.compile(r"\d+")

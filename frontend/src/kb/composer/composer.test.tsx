@@ -51,17 +51,35 @@ describe('Message field', () => {
     const { fake } = renderKb({ world: chatWorld() });
     await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
     const picker = await screen.findByTestId('agent-picker');
-    await waitFor(() => expect(picker).toHaveAccessibleName(/Claude Code, claude-opus-5-5/));
+    await waitFor(() => expect(picker).toHaveAccessibleName(/Claude Code, Opus 5\.5/));
     await user.click(picker);
     const menu = await screen.findByRole('menu', { name: 'Agent and model' });
     const hermes = within(menu).getByRole('group', { name: 'Hermes Agent' });
     expect(within(hermes).getByText('not installed')).toBeInTheDocument();
     expect(within(hermes).getByRole('menuitemradio')).toHaveAttribute('aria-disabled', 'true');
     expect(within(menu).getByText('A new agent gets this whole chat as context.')).toBeInTheDocument();
-    await user.click(within(menu).getByRole('menuitemradio', { name: 'gpt-5.6-luna' }));
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'GPT-5.6-luna' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/kb/chats/c1', body: { engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium' } })));
     expect(await screen.findByText('Switched to Codex', {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Effort: Medium' })).toBeInTheDocument();
+  });
+
+  it('a model change leaves a record in the chat; an effort change leaves none (2026-10-21)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
+    const picker = await screen.findByTestId('agent-picker');
+    await waitFor(() => expect(picker).toHaveAccessibleName(/Claude Code, Opus 5\.5/));
+    const notes = () => screen.queryAllByRole('note').map((n) => n.textContent ?? '');
+    await user.click(screen.getByRole('button', { name: 'Effort: Medium' }));
+    await user.click(within(await screen.findByRole('menu', { name: 'Effort' })).getByRole('menuitemradio', { name: 'High' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PATCH', path: '/kb/chats/c1', body: expect.objectContaining({ effort: 'high' }) })));
+    expect(await screen.findByRole('button', { name: 'Effort: High' })).toBeInTheDocument();
+    expect(notes().filter((t) => /effort/i.test(t))).toEqual([]);
+    await user.click(picker);
+    await user.click(within(await screen.findByRole('menu', { name: 'Agent and model' })).getByRole('menuitemradio', { name: 'Sonnet 5.5' }));
+    expect(await screen.findByText('Model changed to claude-sonnet-5-5', {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(notes().filter((t) => /effort/i.test(t))).toEqual([]);
   });
 
   it('an agent that can’t answer is refused with its reason; nothing is swapped silently', async () => {

@@ -27,7 +27,8 @@ from typing import Any, Literal, get_args
 from .frontmatter import FrontmatterError, render_frontmatter, split_frontmatter
 from .text import block_hash
 
-PageKind = Literal["concept", "note", "folder", "analysis"]
+#: ``deck`` / ``test``: flashcards and tests (0.3.1 S2, S6), in ``Wiki/Decks`` and ``Wiki/Tests``.
+PageKind = Literal["concept", "note", "folder", "analysis", "deck", "test"]
 BlockKind = Literal["from_source", "connection", "explanation", "user_note"]
 Owner = Literal["agent", "user", "user_edited"]
 PAGE_KINDS: tuple[PageKind, ...] = get_args(PageKind)
@@ -54,6 +55,11 @@ _MARKER = re.compile(r"%% skaz:block (.+?) %%")
 _HEADING = re.compile(r"(#{1,6})[ \t]+(.*?)[ \t#]*")
 _BLOCK_ID = re.compile(r"c-[A-Za-z0-9-]+")
 #: ``mat-x:seg-12`` or, with the exact quote the claim rests on, ``mat-x:seg-12~<base64url(utf-8)>``.
+#: Marker keys a block keeps besides its own (0.3.1 S: ``for`` an explanation's card, ``q`` a test
+#: question's type, ``role`` of an explanation, ``accept`` a short answer's spellings); values are
+#: plain tokens without spaces.
+EXTRA_KEYS: tuple[str, ...] = ("for", "q", "role", "accept")
+_EXTRA_VALUE = re.compile(r"[A-Za-z0-9_.:=-]+")
 _CITE = re.compile(r"(mat-[A-Za-z0-9-]+):seg-([1-9]\d*)(?:~([A-Za-z0-9_-]+))?")
 _BLANK_SPLIT = re.compile(r"\n[ \t]*\n")
 #: An opening or closing code fence (CommonMark: three or more backticks or tildes, up to 3 spaces in).
@@ -156,15 +162,25 @@ class Block:
     body: str
     #: Exact source text when parsed; ``None`` renders canonically.
     raw: str | None = None
+    #: Further marker keys (``EXTRA_KEYS``) in the order they were written.
+    attrs: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def create(cls, block_id: str, kind: BlockKind, body: str, *,
-               cites: tuple[Cite, ...] = (), owner: Owner = "agent") -> Block:
+               cites: tuple[Cite, ...] = (), owner: Owner = "agent",
+               attrs: tuple[tuple[str, str], ...] = ()) -> Block:
         if not _BLOCK_ID.fullmatch(block_id):
             raise ValueError("Block ids look like c-<id>.")
         if not body.strip() or _blank_outside_fence(body.replace("\r\n", "\n")):
             raise ValueError("A block is one non-empty paragraph or list item.")
-        return cls(id=block_id, kind=kind, owner=owner, hash=block_hash(body), cites=cites, body=body)
+        for key, value in attrs:
+            if key not in EXTRA_KEYS or not _EXTRA_VALUE.fullmatch(value):
+                raise ValueError(f"Unknown block marker key or value: {key}")
+        return cls(id=block_id, kind=kind, owner=owner, hash=block_hash(body), cites=cites, body=body,
+                   attrs=attrs)
+
+    def attr(self, key: str) -> str | None:
+        return next((value for name, value in self.attrs if name == key), None)
 
     def hash_matches(self) -> bool:
         return self.hash == block_hash(self.body)
@@ -173,6 +189,7 @@ class Block:
         parts = [f"id={self.id}", f"kind={self.kind}", f"owner={self.owner}", f"hash={self.hash}"]
         if self.cites:
             parts.append("cites=" + ",".join(cite.token for cite in self.cites))
+        parts += [f"{key}={value}" for key, value in self.attrs]
         return "%% skaz:block " + " ".join(parts) + " %%"
 
     def render(self) -> str:
@@ -321,7 +338,8 @@ def _meta(fields: dict[str, Any]) -> PageMeta:
     )
 
 
-def _marker(content: str) -> tuple[str, BlockKind, Owner, str, tuple[Cite, ...]] | None:
+def _marker(content: str) -> tuple[str, BlockKind, Owner, str, tuple[Cite, ...],
+                                  tuple[tuple[str, str], ...]] | None:
     match = _MARKER.fullmatch(content)
     if match is None:
         return None
@@ -340,7 +358,9 @@ def _marker(content: str) -> tuple[str, BlockKind, Owner, str, tuple[Cite, ...]]
         if cite is None:
             return None
         cites.append(Cite(cite.group(1), int(cite.group(2)), _decode_quote(cite.group(3))))
-    return block_id, kind, owner, digest, tuple(cites)
+    extra = tuple((key, value) for key, value in attrs.items()
+                  if key in EXTRA_KEYS and _EXTRA_VALUE.fullmatch(value))
+    return block_id, kind, owner, digest, tuple(cites), extra
 
 
 def parse_page(text: str) -> PageDocument:
@@ -395,7 +415,7 @@ def parse_page(text: str) -> PageDocument:
                     body_text = "".join(collected[:-1]) + last[: -len(f" ^{block_id}")]
                 parts.append(Block(
                     id=block_id, kind=marker[1], owner=marker[2], hash=marker[3], cites=marker[4],
-                    body=body_text, raw=line + "".join(collected),
+                    body=body_text, raw=line + "".join(collected), attrs=marker[5],
                 ))
                 index = cursor
                 continue

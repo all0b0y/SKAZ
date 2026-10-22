@@ -15,6 +15,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from ..knowledge.processes import CHILDREN
 from .codex_tools import CodexTools, tool_failure
 
 
@@ -67,6 +68,9 @@ class CodexRpc:
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, limit=self._max_message_bytes,
             )
+            # Quitting SKAZ SIGTERMs it with the other agents (``_Server.handle_exit``); Codex stays
+            # in SKAZ's process group, so it is signalled as one process.
+            CHILDREN.add(self._process, group=False)
             self._reader = asyncio.create_task(self._receive())
             await self.request("initialize", {
                 "clientInfo": {"name": "skaz", "version": "0.1.0"},
@@ -171,9 +175,9 @@ class CodexRpc:
                             else:
                                 self._tool_task = asyncio.create_task(self._run_tool(message))
                         else:
-                            await self._send({"id": message["id"], "error": {
-                                "code": -32601, "message": "Action not permitted",
-                            }})
+                            error = (self._tools.refusal(message["method"]) if self._tools is not None
+                                     else {"code": -32601, "message": "Action not permitted"})
+                            await self._send({"id": message["id"], "error": error})
                     else:
                         if message["method"] == "turn/completed" and self._tools is not None:
                             params = message.get("params", {})
@@ -182,7 +186,7 @@ class CodexRpc:
                                 params.get("threadId"), turn.get("id"),
                             ) and self._tool_task is not None:
                                 self._tool_task.cancel()
-                        self._events.put_nowait(message)
+                        await self._queue_event(message)
                 else:
                     identity = message.get("id")
                     if type(identity) is not int or identity not in self._pending:
@@ -211,6 +215,20 @@ class CodexRpc:
                 self._tools.revoke()
             if self._tool_task is not None:
                 self._tool_task.cancel()
+
+    async def _queue_event(self, message: dict[str, Any]) -> None:
+        """Buffered lines are read without yielding, so a fast stream fills the queue before its
+        reader runs: wait for room (Codex then waits on the pipe). Only events nobody reads within
+        half the request timeout count as a flood and end the connection (before a pending request
+        would report a mere timeout)."""
+        try:
+            self._events.put_nowait(message)
+        except asyncio.QueueFull:
+            try:
+                async with asyncio.timeout(self._timeout / 2):
+                    await self._events.put(message)
+            except TimeoutError:
+                raise CodexRpcError("Codex sent more events than were read") from None
 
     async def _run_tool(self, message: dict[str, Any]) -> None:
         assert self._tools is not None
@@ -259,3 +277,4 @@ class CodexRpc:
                 with suppress(ProcessLookupError):
                     self._process.kill()
                 await self._process.wait()
+        CHILDREN.discard(self._process)

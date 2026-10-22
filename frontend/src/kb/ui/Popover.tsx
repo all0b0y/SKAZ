@@ -21,12 +21,15 @@ export interface PopoverProps {
   autoFocus?: boolean;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   width?: number;
+  /** `pane` (default): stays inside the trigger's column. `window`: a panel wider than a narrow column
+   *  (the wiki legend from the Wiki panel) may cross it, still inside the window. */
+  scope?: 'pane' | 'window';
 }
 
 /** Floating panel anchored to a trigger. Stays inside the trigger's column; Escape/outside click close it. */
 export function Popover({
   open, onClose, anchorRef, placement = 'bottom-start', label, role = 'dialog', children, className,
-  autoFocus = true, onKeyDown, width,
+  autoFocus = true, onKeyDown, width, scope = 'pane',
 }: PopoverProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -42,7 +45,7 @@ export function Popover({
       const a = anchor.getBoundingClientRect();
       // offsetWidth/Height: the laid-out size, not the size mid entry animation (scale).
       const size = { width: pop.offsetWidth || pop.getBoundingClientRect().width, height: pop.offsetHeight || pop.getBoundingClientRect().height };
-      const next = placePopup(a, size, placement, boundaryFor(anchor, { placement }));
+      const next = placePopup(a, size, placement, boundaryFor(anchor, { placement, scope }));
       setPos((now) => (now && now.left === next.left && now.top === next.top ? now : next));
     };
     place();
@@ -52,7 +55,7 @@ export function Popover({
     ro?.observe(pop);
     window.addEventListener('resize', place);
     return () => { ro?.disconnect(); window.removeEventListener('resize', place); };
-  }, [open, placement, anchorRef]);
+  }, [open, placement, anchorRef, scope]);
 
   useEffect(() => {
     if (!open) return undefined;

@@ -22,7 +22,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
-EngineId = Literal["codex", "claude_code", "hermes"]
+from .web import WebSearchGate
+
+EngineId = Literal["codex", "claude_code", "hermes", "opencode"]
 FailureKind = Literal["limit", "auth", "incompatible", "network", "cancelled", "other"]
 Role = Literal["user", "assistant"]
 
@@ -37,6 +39,8 @@ class EngineStatus:
     incompatible: bool = False
     #: Plain-words reason when not ready ("Claude Code is not installed.").
     reason: str | None = None
+    #: The agent itself says how it is fixed (Hermes: ``hermes pm repair``) and SKAZ can run that.
+    repairable: bool = False
 
     @property
     def missing(self) -> bool:
@@ -82,6 +86,9 @@ class AgentTurn:
     effort: str | None = None
     #: Optional JSON schema the final answer must satisfy (structured ingest output).
     response_schema: Mapping[str, Any] | None = None
+    #: W-2: chat turns of an agent whose web search SKAZ can hold; each query waits here first.
+    #: ``None`` = no web search at all (wiki jobs, other agents).
+    web: WebSearchGate | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,15 @@ class Failed:
     message: str
     #: When the limit resets, if the engine says so.
     retry_at: datetime | None = None
+    #: The engine was only busy (all its parallel slots taken): the same turn can run a bit later.
+    transient: bool = False
+    #: The request certainly never reached the model (refused or failed before it was sent), so a
+    #: retry costs nothing. ``False`` = it may have been sent and paid for: adapters set this only
+    #: where they know. Not part of equality (the same failure, with or without this knowledge).
+    unsent: bool = field(default=False, compare=False)
+    #: The same request would be refused again (too long, no tool access, the first check not done):
+    #: retrying it is pointless, so it fails at once. Only set with ``unsent``.
+    permanent: bool = field(default=False, compare=False)
 
 
 AgentEvent = TextDelta | ToolCall | ToolResult | Completed | Failed

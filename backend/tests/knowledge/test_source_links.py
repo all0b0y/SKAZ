@@ -20,8 +20,8 @@ def fetcher(
     handler: Callable[[httpx.Request], httpx.Response], calls: list[str] | None = None
 ) -> SafeFetcher:
     def wrapped(request: httpx.Request) -> httpx.Response:
-        if calls is not None:
-            calls.append(str(request.url))
+        if calls is not None:  # by name: the connection itself goes to the checked address (S-05)
+            calls.append(str(request.url.copy_with(host=request.headers["host"])))
         return handler(request)
 
     return SafeFetcher(transport=httpx.MockTransport(wrapped), resolver=public)

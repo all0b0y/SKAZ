@@ -31,6 +31,9 @@ export const CHANNELS = {
   updateGet: 'app:update-get',
   updateCheck: 'app:update-check',
   updatePrepare: 'app:update-prepare',
+  updateCancel: 'app:update-cancel',
   updateInstall: 'app:update-install',
   updateState: 'app:update-state',
+  // macOS full screen hides the traffic lights: the title bar drops the room it keeps for them.
+  fullScreen: 'app:full-screen',
 } as const;

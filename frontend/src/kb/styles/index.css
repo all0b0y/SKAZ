@@ -2,6 +2,7 @@
 @import './tokens.css';
 @import './base.css';
 @import './ui.css';
+@import '../fx/fx.css';
 @import './shell.css';
 @import './settings.css';
 @import './onboarding.css';
@@ -12,3 +13,6 @@
 @import './recording.css';
 @import './graph.css';
 @import './cite.css';
+@import './selection.css';
+@import './study.css';
+@import './diagram.css';

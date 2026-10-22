@@ -22,9 +22,12 @@ async def test_ingest_routes_require_the_token(kb_app: Any) -> None:
 async def test_wiki_settings_defaults_and_partial_updates(kb_client: httpx.AsyncClient) -> None:
     defaults = (await kb_client.get("/kb/settings/wiki")).json()
     assert defaults == {"wiki_language": "en", "wiki_language_chosen": False, "wiki_engine": None,
+                        "wiki_model": None, "wiki_effort": None, "wiki_remembered": {},
                         "auto_add_files_links": True, "auto_add_text": False,
                         # W2: background connections need the user's permission; corrections are automatic.
-                        "background_connections": False, "auto_corrections": True}
+                        "background_connections": False, "auto_corrections": True,
+                        # C1-d: provisional until measured on the user's real run.
+                        "wiki_budget_characters": 2_000_000}
     updated = (await kb_client.put("/kb/settings/wiki", json={"wiki_language": "ru",
                                                               "wiki_engine": "claude_code"})).json()
     assert updated["wiki_language"] == "ru" and updated["wiki_language_chosen"] is True
@@ -46,7 +49,7 @@ async def test_ingest_job_lifecycle_over_http(kb_app: Any, kb_client: httpx.Asyn
 
     # Before the engine registry and the detector are wired, the job fails with a plain reason.
     started = await kb_client.post(f"/kb/materials/{material_id}/ingest")
-    assert started.status_code == 202 and started.json()["state"] == "running"
+    assert started.status_code == 202 and started.json()["state"] in ("queued", "running")
     await settle(lambda: not ingest.active_jobs())
     failed = (await kb_client.get(f"/kb/jobs/{started.json()['id']}")).json()
     assert failed["state"] == "failed" and failed["can_retry"] is True and "Retry" not in failed["label"]

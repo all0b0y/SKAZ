@@ -6,6 +6,11 @@ keep their words). Lines of one paragraph are joined with a space, as Markdown
 reads a single line break. A fragment never holds a blank line (the source
 format), so code is cut at its blank lines like ``html.code_text`` does.
 Nothing here is a full CommonMark parser: anything unusual is a paragraph.
+
+Obsidian notes (M1): their own syntax is cleaned, never shown as text. YAML front matter is
+skipped; ``[[note|alias]]`` keeps its words, ``![[embed]]`` and ``#tags`` go, as do ``%%comments%%``
+and block ids (`` ^id``); ``==marks==`` keep their text. A callout (``> [!note] Title``) stays a
+quote that starts with its title. Numbered source marks like ``[32]`` stay.
 """
 
 from __future__ import annotations
@@ -27,6 +32,15 @@ _IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _STRONG = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1")
 _CODE_SPAN = re.compile(r"`([^`\n]+)`")
+_EMBED = re.compile(r"!\[\[[^\]\n]*\]\]")
+_WIKILINK = re.compile(r"\[\[([^\]|\n]*)(?:\|([^\]\n]*))?\]\]")
+_COMMENT = re.compile(r"%%.*?%%", re.S)
+_HIGHLIGHT = re.compile(r"==(?=\S)(.+?)(?<=\S)==")
+_BLOCK_ID = re.compile(r"[ \t]+\^[A-Za-z0-9-]+[ \t]*$")
+#: ``#tag`` and ``#nested/tag`` (not ``#1``, not a heading: those need a space after ``#``).
+_TAG = re.compile(r"(?<![\w&/#])#[\w/-]*[^\W\d_][\w/-]*")
+_CALLOUT = re.compile(r"^\[!([A-Za-z-]+)\][+-]?[ \t]*(.*)$")
+_FRONT_MATTER_END = re.compile(r"^(?:---|\.\.\.)[ \t]*$")
 
 
 @dataclass(frozen=True)
@@ -36,8 +50,38 @@ class MarkdownBlock:
     offset: int
 
 
+def _wikilink(match: re.Match[str]) -> str:
+    """``[[note#Heading|alias]]`` → ``alias``; ``[[note#Heading]]`` → ``note › Heading``."""
+    alias = (match.group(2) or "").strip()
+    if alias:
+        return alias
+    target, _, anchor = match.group(1).partition("#")
+    anchor = anchor.lstrip("^")
+    if anchor and not match.group(1).split("#", 1)[1].startswith("^"):
+        return f"{target.strip()} › {anchor.strip()}" if target.strip() else anchor.strip()
+    return target.strip()
+
+
+def obsidian_text(text: str) -> str:
+    """Obsidian's own inline syntax out of a line of text (links keep their words); code spans stay."""
+    pieces = re.split(r"(`[^`\n]+`)", text)
+    return re.sub(r"[ \t]{2,}", " ", "".join(
+        piece if piece.startswith("`") and piece.endswith("`") and len(piece) > 1 else _obsidian(piece)
+        for piece in pieces)).strip()
+
+
+def _obsidian(text: str) -> str:
+    text = _COMMENT.sub("", text)
+    text = _EMBED.sub("", text)
+    text = _WIKILINK.sub(_wikilink, text)
+    text = _HIGHLIGHT.sub(lambda m: m.group(1), text)
+    text = _BLOCK_ID.sub("", text)
+    return _TAG.sub("", text)
+
+
 def inline_text(text: str) -> str:
     """Links and images keep their words; ``**strong**`` and `` `code` `` lose their marks."""
+    text = obsidian_text(text)
     text = _IMAGE.sub(lambda m: m.group(1), text)
     text = _LINK.sub(lambda m: m.group(1), text)
     text = _STRONG.sub(lambda m: m.group(2), text)
@@ -56,6 +100,13 @@ def markdown_blocks(text: str) -> list[MarkdownBlock]:
         starts.append(position)
         position += len(line) + 1
     blocks: list[MarkdownBlock] = []
+    # YAML front matter (``---`` … ``---``) of Obsidian notes: metadata, not text.
+    skip_until = 0
+    if lines and lines[0].strip() == "---":
+        for number in range(1, min(len(lines), 200)):
+            if _FRONT_MATTER_END.match(lines[number]):
+                skip_until = number + 1
+                break
 
     def add(body: str, role: FragmentRole, line_no: int, level: int | None = None) -> None:
         body = body.strip()
@@ -63,7 +114,7 @@ def markdown_blocks(text: str) -> list[MarkdownBlock]:
             blocks.append(MarkdownBlock(Paragraph(body, index=len(blocks), role=role, level=level),
                                         starts[line_no]))
 
-    index = 0
+    index = skip_until
     while index < len(lines):
         line = lines[index]
         if not line.strip() or _RULE.match(line):
@@ -109,6 +160,12 @@ def markdown_blocks(text: str) -> list[MarkdownBlock]:
         if quote:
             first = index
             parts: list[str] = []
+            callout = _CALLOUT.match(quote.group(1).strip())
+            if callout:
+                # ``> [!abstract] Коротко`` → a quote that starts "Коротко:" (the type when untitled).
+                title = obsidian_text(callout.group(2)) or callout.group(1).replace("-", " ").capitalize()
+                parts.append(f"{title}:")
+                index += 1
             while index < len(lines) and (match := _QUOTE.match(lines[index])):
                 inner = match.group(1)
                 while (nested := _QUOTE.match(inner)) is not None:

@@ -1,12 +1,14 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { BridgeApi } from '../../api/bridge';
+import type { KbAgents } from '../../api/kb/types.gen';
 import { KbClient } from '../api/client';
 import { nativeCapture, type CaptureFactory } from '../recording/capture';
 import { createRecordingStore, type RecordingActions, type RecordingData, type RecordingStore } from '../recording/recordingStore';
 import { createAgentsStore, type AgentsActions, type AgentsData, type AgentsStore } from './agents';
 import { createChatsStore, type ChatsActions, type ChatsData, type ChatsStore } from './chats';
 import { createComposerBus, type ComposerBus, type ComposerBusState } from './composer';
+import { createFoldsStore, type FoldsStore } from './folds';
 import { createLibraryStore, type LibraryActions, type LibraryData, type LibraryStore } from './library';
 import {
   createNotificationsStore, type NotificationsActions, type NotificationsData, type NotificationsStore,
@@ -20,7 +22,7 @@ type OptionalBridge = 'chooseStorageRoot' | 'getBackendStatus' | 'onBackendStatu
   | 'dictate' | 'saveTextFile' | 'chooseMaterialFiles' | 'droppedMediaFile' | 'openLogsFolder' | 'openSystemAudioSettings'
   | 'openNative' | 'sendNativeAudio' | 'endNative' | 'onNativeFailure' | 'reportCaptureState'
   | 'chooseAudioFile' | 'systemAudioSupported' | 'mediaAccess' | 'chooseExportFolder' | 'showInFinder' | 'openInObsidian'
-  | 'updateState' | 'checkForUpdates' | 'prepareUpdate' | 'installUpdate' | 'onUpdateState';
+  | 'updateState' | 'checkForUpdates' | 'prepareUpdate' | 'cancelUpdate' | 'installUpdate' | 'onUpdateState';
 
 export type KbBridge = Pick<BridgeApi, 'request'> & Partial<Pick<BridgeApi, OptionalBridge>>;
 
@@ -28,6 +30,7 @@ export interface KbServices {
   bridge: KbBridge;
   client: KbClient;
   prefs: PrefsStore;
+  folds: FoldsStore;
   library: LibraryStore;
   ui: UiStore;
   recording: RecordingStore;
@@ -75,17 +78,28 @@ export function createServices(
     capture: options.capture !== undefined ? options.capture : defaultCapture(bridge),
     onMaterialsChanged: () => { void library.getState().loadContent(); },
   });
+  const agents = createAgentsStore(client);
+  const settings = createSettingsStore(client);
+  // 0.3.1 H: whether an agent's answers carry a SKAZ skill follows its state (installed, updated,
+  // checked) — re-read the skills already on screen when an agent's state changes, no reopening.
+  const agentStates = (a: KbAgents | null) => a?.agents.map((x) => `${x.id}:${x.state}`).join(',') ?? '';
+  agents.subscribe((next, prev) => {
+    const loaded = settings.getState().skills;
+    if (agentStates(next.agents) === agentStates(prev.agents) || (!loaded.value && !loaded.error)) return;
+    void settings.getState().loadSkills();
+  });
   return {
     bridge,
     client,
     prefs: createPrefsStore(storage),
+    folds: createFoldsStore(storage),
     library,
     ui,
     recording,
     chats,
     notifications: createNotificationsStore(client),
-    agents: createAgentsStore(client),
-    settings: createSettingsStore(client),
+    agents,
+    settings,
     composer: createComposerBus(),
   };
 }
@@ -108,6 +122,13 @@ export function useServices(): KbServices {
 
 export function usePrefs<T>(selector: (state: Prefs & PrefsActions) => T): T {
   return useStore(useServices().prefs, selector);
+}
+
+/** A block's folded state in a chat (U2-a) and the way to change it; `byDefault` until the user chooses. */
+export function useFold(key: string, byDefault: boolean): [boolean, (folded: boolean) => void] {
+  const store = useServices().folds;
+  const folded = useStore(store, (s) => s.folds[key] ?? byDefault);
+  return [folded, (next) => store.getState().setFolded(key, next)];
 }
 
 export function useLibrary<T>(selector: (state: LibraryData & LibraryActions) => T): T {

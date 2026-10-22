@@ -1,8 +1,11 @@
 import type { KbJob, KbMaterial, KbMaterialWiki } from '../../api/kb/types.gen';
+import { useEffect, useState } from 'react';
+import { errorText } from '../api/client';
 import { Button, Icon, type IconName } from '../ui';
 import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';
 import { isWithoutSpeech, NO_SPEECH_REASON } from './NoSpeech';
+import { StippleStrip } from '../fx/stipple';
 
 const STEP_LABEL: Record<string, string> = {
   reading: 'Reading the material',
@@ -12,21 +15,49 @@ const STEP_LABEL: Record<string, string> = {
   saving: 'Saving to the wiki',
 };
 
+/** Steps whose backend label carries live progress ("part 3 of 4 · 14 sections", C1-f). */
+const LIVE_STEPS = new Set(['writing_notes', 'concepts']);
+
 /** What a running job is doing now, in words; unknown steps fall back to the job's own label. */
 export function stepLabel(job: KbJob): string {
+  if (job.step && LIVE_STEPS.has(job.step) && job.label) return job.label;
   const known = job.step ? STEP_LABEL[job.step] : undefined;
   if (known) return known;
   return job.label || 'Processing';
+}
+
+/** "3:20" since `startedAt`, ticking every second; null without a start time. */
+function useElapsed(startedAt: string | null | undefined): string | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!startedAt) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  if (!startedAt) return null;
+  const seconds = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = String(seconds % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+/** The running step with live progress and the time it has taken so far (C1-f): a sign of life. */
+function RunningPill({ job }: { job: KbJob }) {
+  const elapsed = useElapsed(job.step_started_at);
+  return <Pill tone="run">{elapsed ? `${stepLabel(job)} · ${elapsed}` : stepLabel(job)}</Pill>;
 }
 
 const SPEECH: ReadonlyArray<KbMaterial['kind']> = ['recording', 'audio', 'video', 'video_link'];
 /** `KbMaterialWiki.error_code`: the agent can't work until it is fixed in Settings → Accounts & keys. */
 const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
 
-function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
+/** The pill of a material whose wiki budget is used up (also explained in the wiki legend). */
+export const BUDGET_PAUSED_LABEL = 'Paused · budget reached';
+
+export function Pill({ tone, icon, children, onClick, label, wrap }: {
   tone: 'done' | 'run' | 'todo' | 'error' | 'warn';
   icon?: IconName;
-  spin?: boolean;
   children: string;
   onClick?: () => void;
   label?: string;
@@ -35,7 +66,7 @@ function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
 }) {
   const body = (
     <>
-      {spin ? <span className="kb-spinner kb-spinner--xs" aria-hidden="true" /> : icon ? <Icon name={icon} size={12} /> : null}
+      {icon ? <Icon name={icon} size={12} /> : null}
       <span>{children}</span>
       {onClick && <Icon name="external" size={11} />}
     </>
@@ -44,6 +75,30 @@ function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
     return <button type="button" className={`kb-pst kb-pst--${tone} is-link`} onClick={onClick} aria-label={label}>{body}</button>;
   }
   return <span className={`kb-pst kb-pst--${tone}${wrap ? ' kb-pst--wrap' : ''}`} role="status">{body}</span>;
+}
+
+const IMPORTED: ReadonlyArray<KbMaterial['kind']> = ['audio', 'video', 'video_link'];
+
+/** H5: an import that recognises speech can be stopped from here (it used to spin with no way out). */
+function StopImport({ materialId }: { materialId: string }) {
+  const { client } = useServices();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const stop = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await client.call('POST /kb/imports/{material_id}/cancel', { path: { material_id: materialId } });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <>
+    <Button size="sm" variant="quiet" icon="close" busy={busy} onClick={() => void stop()}>Stop</Button>
+    {error && <span className="kb-muted kb-pipe__why" role="alert">{error}</span>}
+  </>;
 }
 
 /** Processing strip (v10, decision 24): what is done, what runs now, links into the wiki. */
@@ -63,19 +118,25 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   const wiki = material.wiki as KbMaterialWiki | undefined;
   const counts = material.correction_counts;
   const silent = isWithoutSpeech(material);
+  // Any running status in this strip: one indeterminate dot strip in its own row (no percentages
+  // exist). It is the only progress indicator: the running pills carry no spinner (FX B2).
+  const inProgress = material.status === 'recording' || material.status === 'processing' || !!running
+    || wiki?.state === 'processing' || wiki?.state === 'queued';
 
   return (
     <div className="kb-pipe" aria-label="Processing">
-      {material.status === 'recording' && <Pill tone="run" spin>Recording</Pill>}
-      {material.status === 'processing' && <Pill tone="run" spin>{speech ? 'Recognising…' : 'Reading…'}</Pill>}
+      {material.status === 'recording' && <Pill tone="run">Recording</Pill>}
+      {material.status === 'processing' && <Pill tone="run">{speech ? 'Recognising…' : 'Reading…'}</Pill>}
+      {material.status === 'processing' && IMPORTED.includes(material.kind) && <StopImport materialId={material.id} />}
       {material.status === 'failed' && <Pill tone="error" icon="warning">{speech ? 'Recognition failed' : 'Couldn’t read'}</Pill>}
       {material.status === 'ready' && (silent ? <Pill tone="warn" icon="warning">No speech recognised</Pill>
         : <Pill tone="done" icon="check">{first}</Pill>)}
       {material.translation && material.translation.fragments.length > 0 && <Pill tone="done" icon="check">Translated</Pill>}
       {speech && counts.applied > 0 && <Pill tone="done" icon="check">{plural(counts.applied, 'correction')}</Pill>}
       {speech && counts.doubtful > 0 && <Pill tone="warn" icon="warning">{`${counts.doubtful} doubtful`}</Pill>}
-      {running && <Pill tone="run" spin>{stepLabel(running)}</Pill>}
-      {!running && wiki?.state === 'processing' && <Pill tone="run" spin>Adding to the wiki</Pill>}
+      {running && <RunningPill job={running} />}
+      {!running && wiki?.state === 'processing' && <Pill tone="run">Adding to the wiki</Pill>}
+      {!running && wiki?.state === 'queued' && <Pill tone="run">Queued for the wiki</Pill>}
       {wiki?.state === 'in_wiki' && wiki.note_page_id && (
         <Pill tone="done" icon="pdf" label="Open the notes" onClick={() => openDocument({ type: 'page', id: wiki.note_page_id! })}>Notes</Pill>
       )}
@@ -98,6 +159,15 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
           )}
         </>
       )}
+      {wiki?.state === 'paused' && (
+        <>
+          {/* C1-d: the material's wiki budget is used up. Finished work is kept and nothing
+              unfinished is shown as done; Continue picks up from the checkpoint. */}
+          <Pill tone="warn" icon="warning">{BUDGET_PAUSED_LABEL}</Pill>
+          {wiki.error && <span className="kb-muted kb-pipe__why">{wiki.error}</span>}
+          <Button size="sm" variant="outline" icon="play" busy={adding} onClick={onAddToWiki}>Continue</Button>
+        </>
+      )}
       {wiki?.state === 'failed' && (
         <>
           <Pill tone="error" icon="warning" wrap>{wiki.error ? `Wiki: ${wiki.error}` : 'Couldn’t add to the wiki'}</Pill>
@@ -109,6 +179,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
           <Button size="sm" variant="quiet" icon="retry" busy={adding} onClick={onAddToWiki}>Try again</Button>
         </>
       )}
+      {inProgress && <StippleStrip />}
     </div>
   );
 }

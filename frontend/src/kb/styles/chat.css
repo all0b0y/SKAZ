@@ -26,10 +26,52 @@
 }
 .kb-chat__scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
 .kb-chat__messages { display: flex; flex-direction: column; gap: 14px; padding: 16px 22px 20px; width: 100%; }
-/* Answers keep a readable line length; the question sits at the right edge (v39). */
+/* Answers keep a readable line length; the question sits at the right edge (v39). The chat backdrop
+   keeps this column clear: change fx/backdrop CHAT_COLUMN with the 22 px padding or the 760 px. */
 .kb-msg--assistant > * { max-width: 760px; }
 .kb-chat__wait { display: flex; justify-content: center; padding: 32px; }
 .kb-chat__scroll > .kb-banner { margin: 16px 22px; }
+
+/*
+ * FX (FX-EFFECTS-SPEC Batch A): the 1-bit dither field behind an empty chat. Decorative only — the
+ * canvas is aria-hidden, carries no text, and every word sits on the solid plate below it.
+ * The base `.kb-fx` rules live in fx/fx.css.
+ */
+.kb-chat__stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+/* The conversation is positioned so it paints above the canvas (DOM order, no z-index needed). */
+.kb-chat__stage > .kb-chat__scroll { position: relative; }
+/* While the first question rises, the thread is no scroll container: the bubble's 260 px offset
+   neither adds scroll height nor gets chased by the stick-to-bottom scroll; it emerges from the edge. */
+.kb-chat__stage[data-fx='leaving'] > .kb-chat__scroll { overflow: clip; }
+.kb-fx-field { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.kb-chat__stage[data-interactive='true'] { cursor: crosshair; }
+/* Reduced motion: the still frame just fades out with the first message (≤ 200 ms). */
+.kb-chat__stage[data-still='true'] .kb-fx-field { transition: opacity 200ms linear; }
+.kb-chat__stage[data-still='true'][data-fx='leaving'] .kb-fx-field { opacity: 0; }
+/*
+ * CHAT-BACKDROP-SPEC: behind a chat with messages, three faint dither patches that move only while
+ * the agent writes (fx/backdrop). It fills the stage (not the scroll content), so it stays put while
+ * the thread scrolls; the thread paints above it. It fades in when the empty field has burnt out.
+ * Its «keep text clear» column follows .kb-chat__messages / .kb-msg--assistant below (CHAT_COLUMN).
+ */
+.kb-chat__backdrop { position: absolute; inset: 0; pointer-events: none; animation: kb-fx-fade 600ms ease both; }
+.kb-fx-backdrop { width: 100%; height: 100%; }
+.kb-chat__plate { flex: none; padding: 6px 22px 10px; background: var(--kb-pane); transition: opacity 250ms ease; }
+.kb-chat__plate[data-leaving='true'] { opacity: 0; pointer-events: none; }
+.kb-chat__plate-title { font-family: var(--kb-font-display); font-weight: 600; font-size: var(--t-lg); letter-spacing: -0.01em; margin: 0 0 4px; }
+.kb-chat__plate-text { color: var(--kb-muted); font-size: var(--t-sm); line-height: 1.45; max-width: 520px; margin: 0; }
+/* The first question rises from the composer into the thread while the field burns out. */
+.kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-up 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.kb-chat__messages--fade > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
+@keyframes kb-fx-up { from { transform: translateY(260px); opacity: 0; } 35% { opacity: 1; } to { transform: none; opacity: 1; } }
+@keyframes kb-fx-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .kb-chat__plate { transition-duration: 200ms; }
+  .kb-chat__backdrop { animation-duration: 200ms; }
+  .kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
+}
+/* «Connecting nodes» beside «Writing an answer…» (FX §7). */
+.kb-msg__think { width: 84px; height: 16px; flex: none; }
 
 .kb-msg { display: flex; flex-direction: column; min-width: 0; }
 .kb-msg--user { align-items: flex-end; }
@@ -44,10 +86,42 @@
 }
 .kb-msg__attach { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-msg--assistant { align-items: stretch; }
-.kb-msg__body { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; }
-.kb-msg__wait { color: var(--kb-muted); }
+/* Own stacking context: a citation chip's stipple canvas (z-index:-1) paints above the pane, below the text (F1). */
+.kb-msg__body { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; isolation: isolate; }
+.kb-msg__wait { color: var(--kb-muted); display: flex; align-items: center; gap: 10px; }
 .kb-msg__note { color: var(--kb-muted); font-size: var(--t-sm); margin-top: 4px; }
 .kb-msg__actions { display: flex; gap: 2px; margin-top: 6px; color: var(--kb-muted); }
+/*
+ * Your message (chat-actions v1): Copy · Edit · Resend under the bubble, seen on hover and on
+ * keyboard focus. The row keeps its place while hidden, so nothing below moves when it shows.
+ */
+.kb-msg__actions--user { margin-top: 4px; opacity: 0; }
+.kb-msg--user:hover .kb-msg__actions--user,
+.kb-msg--user:focus-within .kb-msg__actions--user { opacity: 1; }
+.kb-msg__actions--user .kb-iconbtn[aria-disabled='true'] { opacity: 0.45; cursor: default; }
+.kb-msg__actions--user .kb-iconbtn[aria-disabled='true']:hover { background: transparent; color: inherit; }
+@media (prefers-reduced-motion: no-preference) { .kb-msg__actions--user { transition: opacity 120ms ease; } }
+.kb-msg--user .kb-msg__error { align-self: flex-end; margin-top: 4px; }
+/* Edit in place: the bubble becomes a field of the same width, with the note and Cancel · Send. */
+.kb-msg__edit {
+  width: min(88%, 620px);
+  padding: 9px 12px;
+  border: 1.5px solid var(--kb-text);
+  border-radius: var(--kb-r-lg);
+  background: var(--kb-pane);
+}
+.kb-msg__editfield {
+  min-height: 1.55em;
+  max-height: 240px;
+  overflow-y: auto;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+.kb-msg__edit .kb-inline-error { margin-top: 6px; }
+.kb-msg__editfoot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.kb-msg__editfoot small { flex: 1; min-width: 0; color: var(--kb-muted); font-size: var(--t-xs); line-height: 1.3; }
 .kb-msg--system {
   flex-direction: row;
   align-items: center;
@@ -287,6 +361,11 @@
 .kb-agentmenu__state { margin-left: auto; color: var(--kb-warn); font-size: var(--t-xs); font-weight: 600; }
 .kb-agentmenu__item { padding-left: 34px; }
 .kb-agentmenu__foot { border-top: 1px solid var(--kb-line); margin-top: 4px; padding-top: 4px; }
+/* Models screen v2: each agent's last choice, extra choices on top, reasoning at the bottom. */
+.kb-agentmenu__last { margin-left: auto; color: var(--kb-muted); font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-agentmenu__state + .kb-agentmenu__last { margin-left: 6px; }
+.kb-agentmenu__top { border-bottom: 1px solid var(--kb-line); margin-bottom: 4px; padding-bottom: 4px; }
+.kb-agentmenu__reasoning { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--kb-muted); font-size: var(--t-xs); border-top: 1px solid var(--kb-line); margin-top: 4px; padding: 8px 8px 4px; }
 .kb-agentmenu__note { color: var(--kb-muted); font-size: var(--t-xs); padding: 4px 8px; white-space: normal; }
 
 /* "+" attachments. */
@@ -480,3 +559,293 @@
   line-height: 18px;
   flex: none;
 }
+
+/* ---- 0.3.1 P: agent permission request in the chat (perm-parts.html, variant A) ---- */
+.kb-perm {
+  margin-top: 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-lg);
+  background: var(--kb-pane);
+  overflow: hidden;
+  line-height: 1.45;
+}
+.kb-perm__head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 12px; font-size: var(--t-base); min-width: 0; }
+.kb-perm__head b { font-weight: 600; white-space: nowrap; }
+.kb-perm__path { color: var(--kb-muted); font-size: var(--t-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-perm__to { font-size: var(--t-sm); white-space: nowrap; flex: none; }
+.kb-perm__spacer { flex: 1; }
+.kb-perm__sum { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0 12px 8px; }
+.kb-perm__pill { font-size: var(--t-xs); border: 1px solid var(--kb-line); border-radius: var(--kb-r-pill); padding: 1px 8px; white-space: nowrap; color: var(--kb-text); }
+.kb-perm__pill--add { border-color: color-mix(in srgb, var(--kb-ok) 55%, var(--kb-line)); }
+.kb-perm__pill--chg { border-color: color-mix(in srgb, var(--kb-warn) 55%, var(--kb-line)); }
+.kb-perm__pill--del { border-color: color-mix(in srgb, var(--kb-danger) 55%, var(--kb-line)); }
+.kb-perm__body {
+  border-top: 1px solid var(--kb-line);
+  background: var(--kb-bg);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.kb-perm__changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; align-self: stretch; }
+.kb-perm__blk { border-left: 3px solid var(--kb-line); padding: 2px 0 2px 10px; font-size: var(--t-base); }
+.kb-perm__blk--add { border-left-color: var(--kb-ok); }
+.kb-perm__blk--chg { border-left-color: var(--kb-warn); }
+.kb-perm__blk--del { border-left-color: var(--kb-danger); }
+.kb-perm__lab { font-size: var(--t-xs); color: var(--kb-muted); margin-bottom: 2px; }
+.kb-perm__tag { font-weight: 600; }
+.kb-perm__blk--add .kb-perm__tag { color: var(--kb-ok); }
+.kb-perm__blk--chg .kb-perm__tag { color: var(--kb-warn); }
+.kb-perm__blk--del .kb-perm__tag { color: var(--kb-danger); }
+.kb-perm__old { display: block; color: var(--kb-muted); text-decoration-color: color-mix(in srgb, var(--kb-danger) 70%, transparent); }
+.kb-perm__text { margin: 0; overflow-wrap: anywhere; }
+.kb-perm__note { margin: 0; font-size: var(--t-sm); color: var(--kb-muted); border-left: 3px dashed var(--kb-line); padding-left: 10px; }
+.kb-perm__more { font: inherit; font-size: var(--t-sm); border: 0; background: none; color: var(--kb-text); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; padding: 0; }
+.kb-perm__foot,
+.kb-perm__deny { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--kb-line); }
+.kb-perm__deny { background: var(--kb-bg); }
+.kb-perm__reason {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--t-base);
+  padding: 5px 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-pane);
+  color: var(--kb-text);
+}
+.kb-perm__reason:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-btn.kb-perm__delete { background: var(--kb-danger); border-color: var(--kb-danger); color: var(--kb-bg); }
+.kb-btn.kb-perm__delete:hover:not(:disabled) { background: color-mix(in srgb, var(--kb-danger) 88%, var(--kb-text)); }
+.kb-perm__error { margin: 0; padding: 6px 12px; }
+.kb-perm-done {
+  margin-top: 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-pane);
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+}
+.kb-perm-done__row { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 11px; min-height: 36px; min-width: 0; }
+.kb-perm-done__row b { color: var(--kb-text); font-weight: 600; white-space: nowrap; }
+.kb-perm-done__line,
+.kb-perm-done__detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-perm-done__line { flex: 0 1 auto; }
+.kb-perm-done__detail { flex: 0 1 auto; }
+.kb-perm-done__detail::before { content: '· '; }
+.kb-perm-done__icon { flex: none; color: var(--kb-text); }
+.kb-perm-done[data-status='denied'] .kb-perm-done__icon { color: var(--kb-danger); }
+
+/* Review beside the chat (perm-parts.html B inside A): the changes as on a page, the bar at the bottom. */
+.kb-review { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--kb-pane); }
+.kb-review__legend { display: flex; gap: 12px; font-size: var(--t-xs); color: var(--kb-muted); padding: 8px 14px; border-bottom: 1px solid var(--kb-line); white-space: nowrap; }
+.kb-review__legend i { display: inline-block; width: 10px; height: 3px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
+.kb-review__body { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.kb-review__title { font-family: var(--kb-font-display); font-size: var(--t-xl); font-weight: 600; margin: 0; line-height: 1.3; }
+.kb-review__meta { font-size: var(--t-sm); color: var(--kb-muted); margin: 0; }
+.kb-review .kb-perm__changes { gap: 10px; }
+.kb-review .kb-perm__blk { padding: 4px 8px 4px 10px; border-radius: 0 var(--kb-r-xs) var(--kb-r-xs) 0; }
+.kb-review .kb-perm__blk--add { background: var(--kb-ok-soft); }
+.kb-review .kb-perm__blk--chg { background: var(--kb-warn-soft); }
+.kb-review .kb-perm__blk--del { background: var(--kb-danger-soft); }
+.kb-review__bottom { border-top: 1px solid var(--kb-line); background: var(--kb-pane); }
+.kb-review__bottom .kb-perm__foot,
+.kb-review__bottom .kb-perm__deny { border-top: 0; }
+.kb-review__bottom .kb-perm-done { margin: 8px 12px; }
+
+/* ---- 0.3.1 P: agent question (v2-parts.html, view 1 «Rows with descriptions») ---- */
+.kb-q {
+  margin-top: 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-lg);
+  background: var(--kb-pane);
+  overflow: hidden;
+}
+.kb-q:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+.kb-q__head { display: flex; align-items: center; gap: 7px; padding: 10px 12px 4px; font-size: var(--t-xs); color: var(--kb-muted); }
+.kb-q__text { margin: 0; padding: 0 12px 8px; font-weight: 600; font-size: var(--t-base); line-height: 1.4; }
+.kb-q__opts { list-style: none; margin: 0; padding: 0; }
+.kb-q__opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-top: 1px solid var(--kb-line);
+  background: none;
+  color: var(--kb-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kb-q__opt:hover:not(:disabled) { background: var(--kb-bg); }
+.kb-q__opt:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: -2px; }
+.kb-q__opt:disabled { cursor: progress; }
+.kb-q__num {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid var(--kb-line);
+  font-size: var(--t-xs);
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--kb-muted);
+}
+.kb-q__label { display: block; font-weight: 600; font-size: var(--t-base); }
+.kb-q__rec { font-size: var(--t-xs); color: var(--kb-muted); font-weight: 400; margin-left: 6px; }
+.kb-q__desc { display: block; font-size: var(--t-sm); color: var(--kb-muted); line-height: 1.4; margin-top: 1px; }
+.kb-q__other { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--kb-line); color: var(--kb-muted); }
+.kb-q__other input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--t-base);
+  padding: 5px 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-pane);
+  color: var(--kb-text);
+}
+.kb-q__other input:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-q__error { margin: 0; padding: 6px 12px; }
+.kb-q-done {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-md);
+  padding: 5px 6px 5px 11px;
+  min-height: 36px;
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+  background: var(--kb-pane);
+  min-width: 0;
+}
+.kb-q-done b { color: var(--kb-text); font-weight: 600; }
+.kb-q-done__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-q-done .kb-icon { flex: none; color: var(--kb-text); }
+
+/* ---- 0.3.1 P: «Waiting for you» in chat lists, the dot on the Chats rail icon ---- */
+.kb-chatwait { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: var(--t-xs); font-weight: 600; color: var(--kb-text); white-space: nowrap; }
+.kb-chatwait::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--kb-warn); }
+.kb-dot--waiting { background: var(--kb-warn); }
+
+/* Agent picker (0.3.1 K4): search, favourites, provider sections, stars. */
+.kb-agentmenu { max-width: 340px; }
+.kb-agentmenu__search {
+  display: flex; align-items: center; gap: 6px; margin: 2px 4px 6px; padding: 0 8px; height: 30px;
+  border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); background: var(--kb-pane); color: var(--kb-muted);
+}
+.kb-agentmenu__search:focus-within { border-color: var(--kb-accent); }
+.kb-agentmenu__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--kb-text); font: inherit; font-size: var(--t-sm); }
+.kb-agentmenu__favorites .kb-agentmenu__head .kb-icon { color: var(--kb-warn); }
+.kb-agentmenu__favrow { display: flex; align-items: center; gap: 6px; padding-left: 8px; }
+.kb-agentmenu__favrow .kb-agentmenu__row { flex: 1; min-width: 0; }
+.kb-agentmenu__favrow .kb-agentmenu__item { padding-left: 4px; }
+.kb-agentmenu__row { display: flex; align-items: center; min-width: 0; position: relative; }
+.kb-agentmenu__row .kb-agentmenu__item { flex: 1; min-width: 0; padding-right: 30px; }
+.kb-agentmenu__star {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: var(--kb-r-sm);
+  background: transparent; color: var(--kb-muted); cursor: pointer; opacity: 0;
+}
+.kb-agentmenu__row:hover .kb-agentmenu__star, .kb-agentmenu__row:focus-within .kb-agentmenu__star, .kb-agentmenu__star.is-on, .kb-agentmenu__star:focus-visible { opacity: 1; }
+.kb-agentmenu__star.is-on { color: var(--kb-warn); }
+.kb-agentmenu__star.is-on svg { fill: currentColor; }
+.kb-agentmenu__star:hover { background: color-mix(in srgb, var(--kb-text) 7%, transparent); }
+.kb-agentmenu__tag { color: var(--kb-muted); font-size: var(--t-xs); flex: none; }
+.kb-agentmenu__hidden { color: var(--kb-muted); font-size: var(--t-xs); border: 1px dashed var(--kb-line); border-radius: var(--kb-r-pill); padding: 0 6px; flex: none; }
+.kb-agentmenu__head .kb-agentmenu__hidden { margin-left: 2px; }
+.kb-agentmenu__provider { padding-left: 26px; gap: 6px; color: var(--kb-muted-strong); font-size: var(--t-xs); font-weight: 600; min-height: 26px; }
+.kb-agentmenu__section .kb-agentmenu__item { padding-left: 34px; }
+.kb-agentmenu__more { padding-left: 34px; color: var(--kb-muted); font-size: var(--t-xs); min-height: 24px; }
+@media (prefers-reduced-motion: no-preference) { .kb-agentmenu__star { transition: opacity 120ms ease; } }
+
+/* "Edit models" (0.3.1 K4). */
+.kb-editmodels { width: min(760px, calc(100vw - 32px)); }
+.kb-editmodels__frame { gap: 10px; }
+.kb-editmodels__intro { margin: 0; font-size: var(--t-sm); }
+.kb-editmodels__search { margin: 0; }
+.kb-editmodels__body { display: grid; grid-template-columns: minmax(200px, 250px) 1fr; gap: 12px; min-height: 0; height: min(460px, 62vh); }
+.kb-editmodels__side { overflow: auto; border-right: 1px solid var(--kb-line); padding-right: 8px; display: flex; flex-direction: column; gap: 10px; }
+.kb-editmodels__side ul { list-style: none; margin: 0; padding: 0; }
+.kb-editmodels__agenthead { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.kb-editmodels__agentname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-editmodels__provider { display: flex; align-items: center; gap: 4px; }
+.kb-editmodels__provider .kb-row { flex: 1; min-width: 0; gap: 8px; }
+.kb-editmodels__provider.is-current .kb-row { background: color-mix(in srgb, var(--kb-text) 8%, transparent); }
+.kb-editmodels__count { font-size: var(--t-xs); font-variant-numeric: tabular-nums; flex: none; }
+.kb-editmodels__note { margin: 2px 0 6px; font-size: var(--t-xs); }
+.kb-editmodels__main { overflow: auto; min-width: 0; display: flex; flex-direction: column; }
+/* U1: title (cut with …) on the left, both actions together on the right; when there is no room the
+   actions move as one group to their own line — never Hide all alone over the note. */
+.kb-editmodels__mainhead { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-height: 30px; margin-bottom: 2px; }
+.kb-editmodels__heading { display: flex; align-items: center; gap: 8px; flex: 1 1 180px; min-width: 0; }
+.kb-editmodels__title { padding: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-editmodels__actions { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.kb-editmodels__models { list-style: none; margin: 0; padding: 0; }
+.kb-editmodels__model { display: flex; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--kb-line); position: relative; padding-right: 28px; }
+.kb-editmodels__check { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; cursor: pointer; }
+.kb-editmodels__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kb-editmodels__where, .kb-editmodels__id { font-size: var(--t-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kb-editmodels__id { max-width: 38%; }
+.kb-editmodels__star { opacity: 1; }
+@media (max-width: 640px) { .kb-editmodels__body { grid-template-columns: 1fr; height: auto; } .kb-editmodels__side { border-right: 0; } }
+
+/* ---- W-2: an agent's own web search (query shown before it is sent; links apart from sources) ---- */
+.kb-web__body { max-height: none; }
+.kb-web__query {
+  margin: 0;
+  align-self: stretch;
+  font-family: var(--kb-font-mono, ui-monospace, monospace);
+  font-size: var(--t-sm);
+  padding: 6px 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-pane);
+  color: var(--kb-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.kb-web__domains { margin: 0; font-size: var(--t-xs); color: var(--kb-muted); overflow-wrap: anywhere; }
+/* Web results v1 «Folded line + quiet rows» (2026-10-21): one line like «Looked at», quiet rows under it. */
+.kb-web-done--links { margin: 2px 0 6px; }
+.kb-web-fold { display: flex; width: max-content; max-width: 100%; align-items: center; gap: 6px; margin-left: -6px; padding: 3px 6px; border-radius: var(--kb-r-xs); color: var(--kb-muted); font-size: var(--t-sm); }
+.kb-web-fold:hover, .kb-web-fold[aria-expanded="true"] { color: var(--kb-text); background: var(--kb-accent-soft); }
+.kb-web-fold:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-web-fold b { font-weight: 600; color: var(--kb-text); white-space: nowrap; }
+.kb-web-fold__query { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-web-fold__count { flex: none; white-space: nowrap; }
+.kb-web-fold .kb-icon { flex: none; }
+.kb-web__links { list-style: none; margin: 4px 0 2px; padding: 0 0 0 2px; display: flex; flex-direction: column; border-left: 2px solid var(--kb-line); }
+.kb-web__link { min-width: 0; }
+.kb-web__row { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; padding: 0 4px 0 12px; border-radius: 0 var(--kb-r-xs) var(--kb-r-xs) 0; }
+.kb-web__row:hover, .kb-web__row:focus-within { background: var(--kb-accent-soft); }
+.kb-web__title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: var(--kb-text); text-decoration: none; }
+.kb-web__title:hover, .kb-web__title:focus-visible { text-decoration: underline; }
+.kb-web__site { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-xs); color: var(--kb-muted); }
+.kb-web__add { flex: none; opacity: 0; }
+.kb-web__row:hover .kb-web__add, .kb-web__row:focus-within .kb-web__add, .kb-web__link[data-state="error"] .kb-web__add { opacity: 1; }
+@media (hover: none) { .kb-web__add { opacity: 1; } }
+.kb-web__busy { flex: none; width: 26px; display: inline-flex; align-items: center; justify-content: center; }
+.kb-web__added { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: var(--t-xs); color: var(--kb-muted); white-space: nowrap; }
+.kb-web__error { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 4px 4px 12px; font-size: var(--t-xs); color: var(--kb-danger); min-width: 0; }
+.kb-web__error .kb-icon { flex: none; }
+.kb-web__error-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-web__retry, .kb-web__more { flex: none; color: var(--kb-text); font-size: var(--t-xs); text-decoration: underline; border-radius: var(--kb-r-xs); padding: 0 2px; }
+.kb-web__retry:focus-visible, .kb-web__more:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-web__more-row { padding: 2px 0 2px 10px; }
+.kb-web__more { color: var(--kb-muted); }
+.kb-web-chip { cursor: pointer; border: 1px solid var(--kb-line); background: var(--kb-pane); }
+.kb-web-chip:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-web-pop { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; font-size: var(--t-sm); line-height: 1.45; }
+.kb-web-pop p { margin: 0; }
+.kb-web-note { display: block; }

@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-KbEngineId = Literal["codex", "claude_code", "hermes"]
+KbEngineId = Literal["codex", "claude_code", "hermes", "opencode"]
 #: ``preparing``: Hermes' first check is running (wire name kept; it no longer downloads anything).
 KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
 #: ``first_check``: Hermes' one-time check with SKAZ's own folder; ``check``: look at the state again.
-KbAgentAction = Literal["install", "update", "login", "check", "first_check"]
-KbInstallAction = Literal["install", "update", "first_check"]
+KbAgentAction = Literal["install", "update", "login", "check", "first_check", "repair"]
+KbInstallAction = Literal["install", "update", "first_check", "repair"]
 KbInstallState = Literal["running", "succeeded", "failed", "cancelled"]
 
 
@@ -24,6 +24,27 @@ class KbAgentModel(BaseModel):
     #: Empty when the agent has no reasoning levels (Hermes: set in Hermes itself).
     efforts: list[str]
     default_effort: str | None
+    #: The provider section it is listed under (Hermes' provider; Codex/Claude Code: the agent itself).
+    provider: str
+    provider_label: str
+    #: Human name ("Opus 5.5", "GPT-6.1 Sol") and a grey variant tag ("Fast", "1M"), 0.3.1 K4.
+    name: str
+    tag: str | None
+    #: Shown in the picker (the user's choice, else the first 50 of its provider).
+    visible: bool
+    #: What the default rule alone would do ("Show defaults").
+    default_visible: bool
+    favorite: bool
+
+
+class KbAgentProvider(BaseModel):
+    id: str
+    label: str
+    #: The whole provider section is shown in the picker.
+    visible: bool
+    #: Models shown / all models of the provider.
+    shown: int
+    total: int
 
 
 class KbAgentInstallInfo(BaseModel):
@@ -41,6 +62,24 @@ class KbAgentFirstRun(BaseModel):
     checked: bool
     #: What the check does (shown on the card before it runs).
     note: str
+
+
+class KbAgentLastChoice(BaseModel):
+    """The model and reasoning last chosen for this agent in the message field; ``model: null`` = as set
+    in the agent. A new chat and a switch to this agent start from it (models screen v2)."""
+
+    model: str | None
+    effort: str | None
+
+
+class KbAgentWebSearch(BaseModel):
+    """W-2: whether this agent can search the web with the user's approval of each query; why not, in
+    plain words. W-3b: Codex, Hermes and OpenCode search through SKAZ's ``skaz_web_search``, run by
+    ``through``'s own search in a separate query-only run (available while a searcher is connected)."""
+
+    available: bool
+    reason: str | None
+    through: Literal["codex", "claude_code"] | None = None
 
 
 class KbAgent(BaseModel):
@@ -65,12 +104,45 @@ class KbAgent(BaseModel):
     checked_at: str
     #: Agents SKAZ starts only after a one-time check (Hermes); ``null`` for the others.
     first_run: KbAgentFirstRun | None
+    #: How the agent asks the user a question: its own tool, or SKAZ's (the card says
+    #: "Questions: through SKAZ" — known before a chat, not during it; Q-A1).
+    questions: Literal["native", "skaz"] = "skaz"
+    last_choice: KbAgentLastChoice | None = None
+    #: Shown in the composer's agent picker (0.3.1 K2; the default agent always is).
+    visible: bool
+    #: Provider sections of its models, in the agent's order.
+    providers: list[KbAgentProvider]
+    #: W-2: the agent's own web search in chats (asked before each query), or why it is off.
+    web_search: KbAgentWebSearch = KbAgentWebSearch(available=False, reason=None)
+
+
+class KbFavoriteModel(BaseModel):
+    engine: KbEngineId
+    model: str
 
 
 class KbAgents(BaseModel):
     agents: list[KbAgent]
     #: Engine for new chats (Settings → Models).
     default: KbEngineId
+    #: Starred models, in the order they were added (top of the picker).
+    favorites: list[KbFavoriteModel]
+
+
+KbModelChangeKind = Literal["agent", "provider", "model", "favorite", "defaults", "hide_all"]
+
+
+class KbModelChange(_Request):
+    kind: KbModelChangeKind
+    engine: KbEngineId
+    provider: str | None = Field(default=None, max_length=200)
+    model: str | None = Field(default=None, max_length=300)
+    #: agent / provider / model: shown; favorite: starred. Ignored by defaults / hide_all.
+    value: bool = True
+
+
+class KbModelChanges(_Request):
+    changes: list[KbModelChange] = Field(min_length=1, max_length=500)
 
 
 class KbAgentDefault(_Request):
@@ -117,3 +189,89 @@ class KbAgentLoginResult(BaseModel):
     method: Literal["terminal", "browser"]
     url: str | None
     message: str
+
+
+class KbAgentSignIn(BaseModel):
+    """A sign-in started in this SKAZ: ``waiting`` while the browser page or Terminal window is open,
+    then ``done`` (check the agent now) or ``failed``; ``idle`` when none was started."""
+
+    engine: KbEngineId
+    method: Literal["terminal", "browser"] | None
+    state: Literal["idle", "waiting", "done", "failed"]
+
+
+# -- Hermes providers (0.3.1 K1/K3) -----------------------------------------------------------
+
+KbHermesProviderGroup = Literal["subscription", "api_key", "cloud"]
+KbHermesCredentialState = Literal["ready", "limited", "signed_out", "error"]
+
+
+class KbHermesCredential(BaseModel):
+    """One credential Hermes keeps for a provider; never the key or token itself."""
+
+    #: 1-based place in Hermes' list for the provider (its try order).
+    index: int
+    id: str
+    label: str
+    #: ``oauth`` (a sign-in) or ``api_key``.
+    auth_type: str
+    priority: int
+    state: KbHermesCredentialState
+    #: ``limited``: when Hermes tries it again (ISO-8601 UTC), if it said.
+    until: str | None
+    #: Hermes' own status words ("rate-limited (429)").
+    detail: str | None
+    #: Hermes' next pick for this provider.
+    current: bool
+
+
+class KbHermesProvider(BaseModel):
+    id: str
+    name: str
+    credentials: list[KbHermesCredential]
+    #: Hermes' free tier ("Free tier · <model>"), not a credential the user added.
+    free_tier: str | None
+    #: 0 = Hermes' main provider, 1.. = its fallback chain; ``null`` = not in Hermes' order.
+    order: int | None
+
+
+class KbHermesCatalogItem(BaseModel):
+    id: str
+    name: str
+    group: KbHermesProviderGroup
+    keywords: str
+
+
+class KbHermesTerminal(BaseModel):
+    """The Terminal window SKAZ opened for Hermes: still running, done, or stopped with an error."""
+
+    provider: str | None
+    title: str
+    state: Literal["running", "done", "failed"]
+    started_at: str
+
+
+class KbHermesProviders(BaseModel):
+    state: Literal["ready", "not_installed", "unavailable"]
+    reason: str | None
+    providers: list[KbHermesProvider]
+    catalog: list[KbHermesCatalogItem]
+    #: When the catalog was last checked against Hermes' own provider list.
+    catalog_checked: str
+    terminal: KbHermesTerminal | None
+    read_at: str
+
+
+class KbHermesProviderAdd(_Request):
+    provider: str = Field(min_length=1, max_length=64)
+    group: KbHermesProviderGroup
+
+
+class KbHermesKeyAdd(_Request):
+    #: The key's name in Hermes (``--label``); the key itself is pasted in Terminal, never sent here.
+    label: str = Field(min_length=1, max_length=80)
+
+
+class KbHermesCredentialMove(_Request):
+    #: 0 = tried first.
+    priority: int = Field(ge=0, le=100)

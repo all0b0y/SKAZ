@@ -19,7 +19,8 @@ export interface BridgeRequest {
 
 export type JsonResponse<T> =
   | { ok: true; status: number; data: T }
-  | { ok: false; status: number; detail: string };
+  /** `code`: the backend's machine-readable `error_code`, when the answer has one (W-3 `web_page_unavailable`). */
+  | { ok: false; status: number; detail: string; code?: string };
 
 /** Containers Soniox documents for automatic format detection on file input. */
 export const AUDIO_EXTENSIONS = [
@@ -33,7 +34,8 @@ export interface AudioFileChoice {
   name: string;
 }
 
-export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped';
+/** `quitting`: the app is closing and the service is being stopped on purpose — not a failure. */
+export type BackendPhase = 'starting' | 'ready' | 'error' | 'stopped' | 'quitting';
 
 export interface BackendStatus {
   phase: BackendPhase;
@@ -157,6 +159,8 @@ export interface BridgeApi {
   updateState?(): Promise<UpdateState>;
   checkForUpdates?(): Promise<UpdateState>;
   prepareUpdate?(): Promise<UpdateState>;
+  /** Stop a running download (M2); back to "available". */
+  cancelUpdate?(): Promise<UpdateState>;
   installUpdate?(): Promise<boolean>;
   onUpdateState?(listener: (state: UpdateState) => void): () => void;
   /** Native folder chooser; returns a candidate only, never writes preferences. */
@@ -171,6 +175,8 @@ export interface BridgeApi {
   onPrepareQuit?(listener: () => Promise<boolean>): () => void;
   /** Whether this OS can capture whole-system audio (macOS 14.2+, Windows). */
   readonly systemAudioSupported?: boolean;
+  /** The window entered or left macOS full screen (sent once on load, then on every change). */
+  onFullScreen?(listener: (fullScreen: boolean) => void): () => void;
 }
 
 declare global {

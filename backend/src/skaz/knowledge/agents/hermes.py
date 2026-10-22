@@ -98,10 +98,11 @@ from collections.abc import AsyncIterator, Coroutine, Iterator, Mapping, Sequenc
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ...native_io import disk_call
 from ..install.system import (
+    Captured,
     Located,
     LocateFn,
     Version,
@@ -113,7 +114,8 @@ from ..install.system import (
     refuse_sudo,
     run_capture,
 )
-from ..install.terminal import TerminalLauncher
+from ..install.terminal import TerminalLauncher, terminal_progress
+from ..permissions.refusals import HERMES_CLARIFY_TIMEOUT_S, HERMES_MCP_TOOL_CALL_S, OUTSIDE, refused
 from ..processes import CHILDREN
 from .acp_client import METHOD_NOT_FOUND, PROTOCOL_VERSION, AcpClosed, AcpConnection, AcpError
 from .engine import (
@@ -146,6 +148,22 @@ MIN_HERMES_VERSION: Version = (0, 21, 5)
 _VERSION = re.compile(r"Hermes Agent v(\d+)\.(\d+)\.(\d+)")
 _INSTALL_DIR = re.compile(r"^Install directory:\s*(.+)$", re.MULTILINE)
 NOT_INSTALLED = "Hermes Agent is not installed."
+#: Commands Hermes may suggest in its own error output that SKAZ offers as the card's Repair action:
+#: its repairs only, never anything else a message happens to say.
+REPAIR_COMMANDS: frozenset[tuple[str, ...]] = frozenset({("pm", "repair")})
+_SUGGESTED = re.compile(r"run\s+`hermes\s+([a-z][a-z -]*?)`", re.I)
+#: Decision 11: ``hermes pm repair`` builds a whole dependency environment for SKAZ's Hermes folder
+#: (``uv`` into ``installs/<key>/environments``, ~1 GB, with its own ``cache/uv``). It is never part of
+#: a status check — only the Repair action the user starts (``install/recipes.py`` ``HERMES_REPAIR``).
+REPAIR_NOTE = ("Hermes Agent has to set up its dependencies for SKAZ's own Hermes folder once (a download "
+               "that can take a few minutes). Press Repair to start it.")
+#: Left by a ``hermes pm repair`` that did not finish (``hermes_cli/_early_recovery.py``
+#: ``recover_if_needed``): while it exists Hermes restarts the whole repair at the boot of ANY command,
+#: ``--version`` included, so SKAZ starts no Hermes command for its folder then.
+_REPAIR_UNFINISHED = "installs/*/.repair-incomplete"
+UNREADABLE_NOTE = ("Hermes Agent started but didn't say its version. Check it again; if that keeps "
+                   "happening, open the logs.")
+RUN_FAIL_NOTE = "SKAZ couldn't start Hermes Agent. Check it again; if that keeps happening, reinstall it."
 NO_PROVIDER = "Choose a model and provider for Hermes in its setup (opened from SKAZ)."
 SETUP_AUTH_METHOD = "hermes-setup"
 NO_TOOLS_LISTING = "No tools available."
@@ -153,6 +171,7 @@ _ENABLED_TOOLSETS = "Enabled toolsets:"
 #: Hermes 0.22 registers an ACP client's MCP server as ``editor_<name>_<8 hex>`` (one per session).
 _EDITOR_TOOLSET = re.compile(rf"mcp-editor_{MCP_SERVER_NAME}_(?P<tag>[0-9a-f]{{8}})")
 _EDITOR_TOOL = re.compile(rf"mcp__editor_{MCP_SERVER_NAME}_[0-9a-f]{{8}}__(?P<tool>.+)")
+SETUP_NAME = "hermes-setup"
 SETUP_TITLE = "SKAZ opened the Hermes model setup for SKAZ's own Hermes folder."
 LIMITS_NOT_APPLIED = "Hermes did not apply SKAZ's tool limits, so SKAZ stopped the run. Update Hermes."
 CHECKED_FILE = "hermes-checked.json"
@@ -185,10 +204,23 @@ HERMES_POLICY: dict[str, Any] = {
     "platform_toolsets": {"acp": ["no_mcp"]},
     # ``coding_context: focus`` would swap ``platform_toolsets.acp`` for the coding toolsets in a code
     # folder (0.22 ``gateway/session_policy.py:310-312, 433``); SKAZ's sessions never take that posture.
-    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS), "coding_context": "off"},
+    "agent": {"disabled_toolsets": list(DISABLED_TOOLSETS), "coding_context": "off",
+              # An agent's question waits for the user without a limit (Q-A2).
+              "clarify_timeout": HERMES_CLARIFY_TIMEOUT_S},
+    # A SKAZ wiki tool waits for the user's Allow / Deny (P3); see ``permissions/refusals.py``.
+    "timeouts": {"mcp": {"tool_call": HERMES_MCP_TOOL_CALL_S}},
     "memory": {"memory_enabled": False, "user_profile_enabled": False},
     "skills": {"project_discovery": False, "external_dirs": []},
 }
+
+
+def suggested_repair(stderr: str) -> tuple[str, ...] | None:
+    """The repair command Hermes asks for in its error output, if it is one SKAZ may run by itself."""
+    for match in _SUGGESTED.finditer(stderr):
+        command = tuple(match.group(1).split())
+        if command in REPAIR_COMMANDS:
+            return command
+    return None
 
 
 def parse_hermes_version(text: str) -> Version | None:
@@ -305,6 +337,8 @@ class _ActiveRun:
     process: asyncio.subprocess.Process | None = None
     connection: AcpConnection | None = None
     session_id: str | None = None
+    #: The request was handed to Hermes (``session/prompt``): a failure after it may have been paid.
+    prompted: bool = False
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     requests: _Requests = field(default_factory=lambda: _Requests())
 
@@ -385,8 +419,10 @@ class _Requests:
                 option = model_switch_option(params, *self._switch)
                 if option is not None:
                     return {"outcome": {"outcome": "selected", "optionId": option}}
+            refused("hermes", "permission")
             return _reject(params)
-        raise AcpError(METHOD_NOT_FOUND, "Not available in SKAZ.")
+        refused("hermes", method)
+        raise AcpError(METHOD_NOT_FOUND, OUTSIDE)
 
 
 class HermesEngine:
@@ -411,7 +447,10 @@ class HermesEngine:
         self._status_timeout = status_timeout_s
         self._grace = interrupt_grace_s
         self._runs: dict[str, _ActiveRun] = {}
+        #: Readable versions only: a failed read is asked again every time (it may be repaired meanwhile).
         self._checked: dict[tuple[str, float], tuple[Version | None, Path | None]] = {}
+        #: The repair Hermes suggested at the last unreadable version, if SKAZ may offer it.
+        self._repair: tuple[str, ...] | None = None
         self.current_model: str | None = None
         self._history_tasks: set[asyncio.Task[None]] = set()
         self._swept = False
@@ -452,6 +491,10 @@ class HermesEngine:
         """``hermes model`` has written a configuration into SKAZ's Hermes folder (contents are not read)."""
         return (self.home / "config.yaml").is_file() or (self.home / ".env").is_file()
 
+    def repair_unfinished(self) -> bool:
+        """A repair of SKAZ's Hermes folder was stopped midway: any Hermes command would redo it."""
+        return any(self.home.glob(_REPAIR_UNFINISHED))
+
     def environment(self, located: Located) -> dict[str, str]:
         env = base_env(located.path, self._user_home)
         env["HERMES_HOME"] = str(ensure_private_home(self.home, home=self._user_home))
@@ -479,12 +522,19 @@ class HermesEngine:
         """Forget the remembered version (the launcher script does not change on ``hermes update``)."""
         self._checked.clear()
 
-    async def _version(self, located: Located) -> tuple[Version | None, Path | None]:
+    @staticmethod
+    def _key(located: Located) -> tuple[str, float]:
         try:
             stamp = located.binary.stat().st_mtime
         except OSError:
             stamp = 0.0
-        key = (str(located.binary), stamp)
+        return (str(located.binary), stamp)
+
+    async def _version(self, located: Located) -> tuple[Version | None, Path | None]:
+        key = self._key(located)
+        if self.repair_unfinished():
+            self._repair = ("pm", "repair")
+            return None, None
         if key not in self._checked:
             self.prepare()
             watch = self.watch(located)
@@ -493,7 +543,16 @@ class HermesEngine:
                                         timeout=self._status_timeout)
             finally:
                 watch.check()
-            self._checked[key] = (parse_hermes_version(out.stdout), install_dir_of(out.stdout))
+            version = parse_hermes_version(out.stdout)
+            if version is None:
+                # Never remembered: the next status asks again. The output says why, without secrets
+                # (``--version`` prints none); it is cut short for the log.
+                self._repair = suggested_repair(out.stderr)
+                logger.warning("Hermes '--version' (exit %s) wasn't understood: stdout=%r stderr=%r",
+                               out.returncode, out.stdout[:300], out.stderr[:300])
+                return None, None
+            self._repair = None
+            self._checked[key] = (version, install_dir_of(out.stdout))
         return self._checked[key]
 
     async def install_dir(self) -> Path | None:
@@ -507,15 +566,19 @@ class HermesEngine:
         if located is None:
             return EngineStatus("hermes", installed=False, reason=NOT_INSTALLED)
         try:
+            # A status check only asks the version (decision 11): when Hermes says it must be repaired
+            # for SKAZ's folder (``run `hermes pm repair```), the card offers Repair; never run here.
             version, _ = await self._version(located)
         except LauncherTampered as error:
             return EngineStatus("hermes", installed=True, incompatible=True, reason=str(error))
         except (OSError, TimeoutError):
-            return EngineStatus("hermes", installed=True, incompatible=True,
-                                reason="SKAZ couldn't start Hermes Agent. Reinstall it.")
+            return EngineStatus("hermes", installed=True, reason=RUN_FAIL_NOTE)
         if version is None:
-            return EngineStatus("hermes", installed=True, incompatible=True,
-                                reason="SKAZ couldn't read the Hermes Agent version. Reinstall it.")
+            # Not "outdated": an update can't fix a launcher that doesn't start (and Hermes refuses to
+            # "update" a newer build), so the action is the repair Hermes named, or a new check.
+            if self._repair is not None:
+                return EngineStatus("hermes", installed=True, repairable=True, reason=REPAIR_NOTE)
+            return EngineStatus("hermes", installed=True, reason=UNREADABLE_NOTE)
         shown = dotted(version)
         if version < MIN_HERMES_VERSION:
             return EngineStatus("hermes", installed=True, version=shown, incompatible=True,
@@ -579,7 +642,50 @@ class HermesEngine:
         self.watch(located)  # never open it on a launcher that already points into SKAZ's folder
         env = self.environment(located)
         shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR", "HERMES_RUNTIME_DIR")}
-        await self._launcher.open("hermes-setup", SETUP_TITLE, [str(located.binary), "model"], shown)
+        await self._launcher.open(SETUP_NAME, SETUP_TITLE, [str(located.binary), "model"], shown,
+                                  agent="Hermes")
+
+    def login_progress(self) -> Literal["waiting", "done", "failed"] | None:
+        """The setup window SKAZ opened: still open, finished, or stopped (``None``: never opened)."""
+        return terminal_progress(self._launcher, SETUP_NAME)
+
+    # -- short Hermes commands for SKAZ's folder (providers, K1/K3) ------------------
+
+    async def cli(self, *args: str, timeout: float | None = None) -> Captured:
+        """A short Hermes command (``auth list``, ``config get …``) in SKAZ's folder, under the launcher
+        watch. Never one that asks for a secret: those run in Terminal (:meth:`open_terminal`)."""
+        located = self._locate("hermes")
+        if located is None:
+            raise FileNotFoundError(NOT_INSTALLED)
+        if self.repair_unfinished():
+            return Captured(1, "", REPAIR_NOTE)
+        self.prepare()
+        watch = self.watch(located)
+        try:
+            return await run_capture([str(located.binary), *args], env=self.environment(located),
+                                     cwd=self.home, timeout=timeout or self._status_timeout)
+        finally:
+            watch.check()
+
+    async def open_terminal(self, name: str, title: str, commands: Sequence[Sequence[str]], *,
+                            close_on_success: bool = True, done_note: str | None = None) -> None:
+        """Hermes commands for SKAZ's folder in Terminal (the user answers Hermes there; SKAZ sees
+        nothing)."""
+        located = self._locate("hermes")
+        if located is None:
+            raise FileNotFoundError(NOT_INSTALLED)
+        self.prepare()
+        self.watch(located)  # never on a launcher that already points into SKAZ's folder
+        env = self.environment(located)
+        shown = {key: env[key] for key in ("PATH", "HERMES_HOME", "HERMES_MANAGED_DIR", "HERMES_RUNTIME_DIR")}
+        steps = [[str(located.binary), *argv] for argv in commands]
+        await self._launcher.open_steps(name, title, steps, shown, agent="Hermes",
+                                        close_on_success=close_on_success,
+                                        **({"done_note": done_note} if done_note else {}))
+
+    def terminal_finished(self, name: str) -> int | None:
+        """Exit code of a Terminal window SKAZ opened (``None`` while it runs)."""
+        return self._launcher.finished(name)
 
     # -- SKAZ conversations in Hermes' session store ----------------------------
 
@@ -667,7 +773,8 @@ class HermesEngine:
         """
         self._swept = True
         located = self._locate("hermes")
-        if located is None or not self.checked() or not (self.set_up() or self.pending_history()):
+        if (located is None or not self.checked() or not (self.set_up() or self.pending_history())
+                or self.repair_unfinished()):
             return
         running = {active.session_id for active in self._runs.values()}
         await self._forget([item for item in self.pending_history() if item not in running])
@@ -731,6 +838,8 @@ class HermesEngine:
     @contextlib.asynccontextmanager
     async def _acp(self, located: Located, work: Path,
                    active: _ActiveRun | None = None) -> AsyncIterator[tuple[AcpConnection, dict[str, Any]]]:
+        if self.repair_unfinished():
+            raise _Refused(Failed("", "incompatible", REPAIR_NOTE))
         self.prepare()
         work.mkdir(mode=0o700, parents=True, exist_ok=True)
         argv = [str(located.binary), "acp"]
@@ -850,20 +959,23 @@ class HermesEngine:
         granted = False
         try:
             if turn.tools and self.mcp is None:
-                yield Failed(run_id, "other", NO_TOOL_ACCESS)
+                yield Failed(run_id, "other", NO_TOOL_ACCESS, unsent=True, permanent=True)
                 return
             located = self._locate("hermes")
             if located is None:
                 yield Failed(run_id, "incompatible", NOT_INSTALLED)
                 return
             if not self.checked():
-                yield Failed(run_id, "other", FIRST_CHECK)
+                yield Failed(run_id, "other", FIRST_CHECK, unsent=True, permanent=True)
                 return
             self._sweep_once()
             try:
                 version, _ = await self._version(located)
             except LauncherTampered as error:
                 yield Failed(run_id, "incompatible", str(error))
+                return
+            if version is None and self._repair is not None:
+                yield Failed(run_id, "incompatible", REPAIR_NOTE, unsent=True)
                 return
             if version is None or version < MIN_HERMES_VERSION:
                 yield Failed(run_id, "incompatible", f"This Hermes Agent version can't be used. Update to "
@@ -885,11 +997,13 @@ class HermesEngine:
                     yield event
         except _Refused as refused:
             failure = refused.failure
+            # Refusals happen while Hermes starts, before the request is sent (``_Refused``).
             yield Failed(run_id, "cancelled" if active.cancel.is_set() else failure.kind,
-                         "The answer was stopped." if active.cancel.is_set() else failure.message)
+                         "The answer was stopped." if active.cancel.is_set() else failure.message,
+                         unsent=True)
         except (OSError, ValueError) as error:
             yield Failed(run_id, "other", "SKAZ couldn't start Hermes Agent." if isinstance(error, OSError)
-                         else str(error))
+                         else str(error), unsent=not active.prompted)
         finally:
             self._runs.pop(run_id, None)
             if granted and self.mcp is not None:
@@ -922,6 +1036,7 @@ class HermesEngine:
             return
         watcher = asyncio.create_task(self._stop_after_cancel(active))
         try:
+            active.prompted = True  # from here the request may have reached the model
             request = asyncio.create_task(connection.request(
                 "session/prompt", {"sessionId": session_id, "prompt": [{"type": "text", "text": prompt}]}))
             async for event in self._updates(run_id, session_id, connection, request):

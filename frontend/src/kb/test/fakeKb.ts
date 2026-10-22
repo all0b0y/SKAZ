@@ -13,9 +13,14 @@ import type {
   KbAbout, KbAgents, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
-  KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink,
+  KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
+  KbWebSearchPart,
 } from '../../api/kb/types.gen';
+import {
+  isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
+  type KbPermissionPart, type KbQuestionPart,
+} from '../api/permissions';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -29,6 +34,8 @@ export interface FakeExcluded {
 }
 
 export interface FakeWorld {
+  /** The backend's full-text index fails (L1): search answers `degraded`. */
+  searchDegraded?: boolean;
   library: KbLibrary;
   folders: KbFolder[];
   materials: KbMaterial[];
@@ -55,6 +62,10 @@ export interface FakeWorld {
   readUpTo: number;
   // Settings, agents (S3, A2, D1)
   agents: KbAgents;
+  /** Hermes' providers in SKAZ's folder (0.3.1 K1/K3). */
+  hermesProviders: KbHermesProviders;
+  /** Accounts & keys v3: how each sign-in started here ends (default: it goes through). */
+  signIns?: Partial<Record<string, 'waiting' | 'done' | 'failed'>>;
   installTasks: Record<string, KbInstallTask>;
   keys: KbKeys;
   speech: KbSpeechSettings;
@@ -96,6 +107,22 @@ export interface FakeWorld {
   /** What a new streamed answer cites (defaults: the first concept page, the last fragment of the first material). */
   answerPage?: KbPageRef;
   answerCite?: KbCitation;
+  /** 0.3.1 P: kinds allowed without a question per chat («Allow in this chat»). */
+  permissionGrants?: Record<string, string[]>;
+  /** W-2: chats whose web search is allowed without a question → since when (ISO). */
+  webGrants?: Record<string, string>;
+  /** D (decision 9): what «Save to wiki» left out, by answer id (one answer) or chat id (whole chat). */
+  saveWarnings?: Record<string, string>;
+  /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
+  undoRefusals?: Record<string, string>;
+  /** 0.3.1 H: SKAZ skills switched off (absent = every skill on, as the backend's default). */
+  skillsOff?: string[];
+  /** 0.3.1 S: saved decks (the deck page), by page id. */
+  decks?: Record<string, KbDeckView>;
+  /** 0.3.1 S: new cards per day and folder (absent = 20, the backend's default). */
+  studyNewPerDay?: number;
+  /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
+  judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean };
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -153,7 +180,9 @@ function pageSummary(p: KbPage): KbPageSummary {
 function chatSummary(c: KbChat): KbChatSummary {
   const { messages: _m, cursor: _c, ...rest } = c;
   void _m; void _c;
-  return rest;
+  // 0.3.1 P: a permission or a question waits for the user somewhere in the chat.
+  const summary: KbChatSummaryP = { ...rest, waiting_for_user: c.messages.some((m) => partsOf(m).some(isWaitingPart)) };
+  return summary;
 }
 
 /** The world's time now: the fixed clock, or the real one. */
@@ -188,7 +217,7 @@ function newJob(world: FakeWorld, kind: KbJob['kind'], materialId: string | null
   const job: KbJob = {
     id: `j${++world.seq}`, kind, material_id: materialId, state, step: state === 'done' ? 'done' : 'reading', label, error: null, error_code: null, can_retry: false,
     progress: { parts_total: 1, parts_done: state === 'done' ? 1 : 0, concepts_found: 0, blocks_written: 0, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 0, concepts_updated: 0 },
-    journal: [], created_at: stamp(world), updated_at: stamp(world),
+    execution: null, journal: [], created_at: stamp(world), updated_at: stamp(world),
   };
   world.jobs.push(job);
   return job;
@@ -286,6 +315,10 @@ function applyToMessage(m: KbMessage, e: Omit<KbChatEvent, 'seq'>): void {
     else m.parts.push({ type: 'text', text: e.text });
   } else if (e.type === 'part' && e.part) {
     m.parts.push(e.part);
+  } else if ((e as KbChatEventP).type === 'part_update' && e.part) {
+    const part = e.part as AnyMessagePart;
+    const i = partsOf(m).findIndex((p) => 'id' in p && 'id' in part && p.id === part.id);
+    if (i >= 0) m.parts[i] = e.part;
   } else if ((e.type === 'state' || e.type === 'message') && e.message) {
     Object.assign(m, e.message);
   }
@@ -386,6 +419,24 @@ export function syncSpeechConsent(w: FakeWorld): void {
   for (const flow of w.privacy.flows) if (/soniox/i.test(flow.where)) flow.enabled = w.speech.provider === 'soniox' && w.speech.cloud_consent;
 }
 
+/** The backend's `/kb/settings/skills` (0.3.1 H): the pinned Humanizer, its state per agent from the agents. */
+export function fakeSkills(w: FakeWorld): KbSkills {
+  const enabled = !(w.skillsOff ?? []).includes('humanizer');
+  const engines = w.agents.agents.map((a): KbSkillEngine => {
+    if (!enabled) return { engine: a.id, state: 'off', reason: null };
+    if (a.state === 'ready' || a.state === 'signed_out') return { engine: a.id, state: 'loaded', reason: null };
+    if (a.state === 'not_installed') return { engine: a.id, state: 'not_loaded', reason: `${a.name} is not installed.` };
+    if (a.state === 'outdated') return { engine: a.id, state: 'not_loaded', reason: `This ${a.name} version isn't supported. Update it.` };
+    return { engine: a.id, state: 'not_loaded', reason: `SKAZ couldn't check ${a.name}.` };
+  });
+  return {
+    skills: [{
+      id: 'humanizer', name: 'Humanizer', version: '3.1.0', license: 'MIT',
+      source_url: 'https://github.com/blader/humanizer', enabled, engines,
+    }],
+  };
+}
+
 export function finishAnswer(world: FakeWorld, chatId: string): void {
   delete world.pendingAnswers[chatId];
   finishers.get(world)?.[chatId]?.();
@@ -420,7 +471,7 @@ function search(world: FakeWorld, q: string): KbSearchResults {
   const blocks = world.pages.flatMap((p) => p.blocks.filter((b) => has(b.text)).slice(0, 1).map((b) => ({
     page_id: p.id, page_title: p.title, page_kind: p.kind, block_id: b.id, kind: b.kind, owner: b.owner, snippet: snippet(b.text, q),
   }))).slice(0, 5);
-  return { query: q, pages, blocks, fragments, materials, counts: { wiki: pages.length + blocks.length, materials: materials.length + fragments.length, chats: 0 } };
+  return { query: q, pages, blocks, fragments, materials, counts: { wiki: pages.length + blocks.length, materials: materials.length + fragments.length, chats: 0 }, degraded: world.searchDegraded === true };
 }
 
 // ---- Notifications --------------------------------------------------------------------------
@@ -429,6 +480,370 @@ function bump(world: FakeWorld, n: KbNotification): void {
   world.notificationSeq += 1;
   n.seq = world.notificationSeq;
 }
+
+// ---- Agent permissions and questions (0.3.1 phase P) --------------------------------------------
+
+type FakeWaiting<T> = { chat: KbChat; message: KbMessage; part: T };
+
+function findPart<T extends KbPermissionPart | KbQuestionPart>(w: FakeWorld, type: T['type'], id: string): FakeWaiting<T> {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = partsOf(message).find((p) => p.type === type && p.id === id);
+      if (part) return { chat, message, part: part as T };
+    }
+  }
+  return fail(404, type === 'permission' ? 'Permission request not found.' : 'Question not found.');
+}
+
+/** A part changed: `part_update` with the whole part; an answer that waited for nothing else goes on (here: ends). */
+function updated(w: FakeWorld, { chat, message, part }: FakeWaiting<AnyMessagePart>): void {
+  const event: Omit<KbChatEventP, 'seq'> = { type: 'part_update', message_id: message.id, part: structuredClone(part) };
+  pushEvent(w, chat.id, event as Omit<KbChatEvent, 'seq'>);
+  if (message.state === 'streaming' && !partsOf(message).some(isWaitingPart)) {
+    emit(w, chat, [{ type: 'state', message_id: message.id, message: { ...structuredClone(message), state: 'done' } }]);
+    chat.state = 'idle';
+  }
+  touchList(w, chat);
+}
+
+/** The user wrote instead of picking: a waiting question closes as «superseded» (Q-A2). */
+function supersedeQuestions(w: FakeWorld, c: KbChat): void {
+  for (const message of c.messages) {
+    for (const part of partsOf(message)) {
+      if (part.type !== 'question' || part.status !== 'pending') continue;
+      part.status = 'superseded';
+      updated(w, { chat: c, message, part });
+    }
+  }
+}
+
+type PSpec<R extends keyof KbPermissionEndpoints> = KbPermissionEndpoints[R];
+type PEntry<R extends keyof KbPermissionEndpoints> = readonly [PSpec<R>['status'], (world: FakeWorld, call: {
+  path: PSpec<R>['path']; query: Partial<PSpec<R>['query']>; body: PSpec<R>['body'];
+}) => PSpec<R>['response']];
+
+/**
+ * Phase-P routes, kept apart from ROUTES only for readability;
+ * FAKE_ROUTES (the IPC-policy check) includes them.
+ */
+const PERMISSION_ROUTES: { [R in keyof KbPermissionEndpoints]: PEntry<R> } = {
+  'POST /kb/permissions/{permission_id}/decide': [200, (w, { path, body }) => {
+    const found = findPart<KbPermissionPart>(w, 'permission', path.permission_id);
+    const { part, chat } = found;
+    if (!['allow', 'allow_chat', 'deny'].includes(body.decision)) fail(422, 'Unknown decision.');
+    if ((body.reason ?? '').length > 500) fail(422, 'The reason is longer than 500 characters.');
+    if (body.decision === 'allow_chat' && part.kind === 'delete') fail(422, 'Deleting a page always asks.');
+    if (part.status !== 'pending') fail(409, 'This request was already answered.');
+    part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    part.reason = body.decision === 'deny' ? (body.reason?.trim() || null) : null;
+    if (body.decision === 'allow_chat') {
+      const grants = (w.permissionGrants ??= {});
+      grants[chat.id] = [...new Set([...(grants[chat.id] ?? []), part.kind])];
+    }
+    updated(w, found);
+    return structuredClone(part);
+  }],
+  'POST /kb/permissions/{permission_id}/undo': [200, (w, { path }) => {
+    const found = findPart<KbPermissionPart>(w, 'permission', path.permission_id);
+    if (found.part.status !== 'allowed') fail(409, 'Only an applied change can be undone.');
+    const refusal = w.undoRefusals?.[found.part.id];
+    if (refusal) fail(409, refusal);
+    found.part.status = 'undone';
+    updated(w, found);
+    return structuredClone(found.part);
+  }],
+  'POST /kb/questions/{question_id}/answer': [200, (w, { path, body }) => {
+    const found = findPart<KbQuestionPart>(w, 'question', path.question_id);
+    const { part, chat } = found;
+    const index = body.option_index ?? null;
+    const text = body.text?.trim() ?? '';
+    if (index === null && !text) fail(422, 'Pick an option or write an answer.');
+    if (index !== null && !part.options[index]) fail(422, 'There is no such option.');
+    if (part.status === 'answered' || part.status === 'cancelled') fail(409, 'This question is already closed.');
+    const late = part.status === 'superseded';
+    part.status = 'answered';
+    part.answer = index !== null ? part.options[index]!.label : text;
+    updated(w, found);
+    if (late) {
+      // A pick after the user wrote their own message goes to the agent as a new message (Q-A2).
+      const said = `Answer to the question: ${part.answer}`;
+      const user = chatMessage(`${chat.id}-u${++w.seq}`, (chat.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: said }]);
+      chat.messages.push(user);
+      pushEvent(w, chat.id, { type: 'message', message_id: user.id, message: structuredClone(user) });
+      touchList(w, chat);
+    }
+    return structuredClone(part);
+  }],
+};
+
+// ---- Flashcards and tests (0.3.1 phase S) -------------------------------------------------------
+
+type FakeStudy = { chat: KbChat; message: KbMessage; part: KbStudyPart };
+
+function findStudy(w: FakeWorld, id: string): FakeStudy {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = partsOf(message).find((p) => p.type === 'study' && p.id === id);
+      if (part) return { chat, message, part: part as KbStudyPart };
+    }
+  }
+  return fail(404, 'This deck or test is no longer in the chat.');
+}
+
+/** A block changed: `part_update` with the whole block, the answer back. */
+function studyChanged(w: FakeWorld, found: FakeStudy): KbStudyPart {
+  found.part.total = found.part.kind === 'deck' ? found.part.cards.length : found.part.questions.length;
+  const counts = { new: 0, learning: 0, known: 0, hard: 0 };
+  for (const c of found.part.cards) counts[c.group] += 1;
+  found.part.groups = counts;
+  const event: Omit<KbChatEventP, 'seq'> = { type: 'part_update', message_id: found.message.id, part: structuredClone(found.part) };
+  pushEvent(w, found.chat.id, event as Omit<KbChatEvent, 'seq'>);
+  touchList(w, found.chat);
+  return structuredClone(found.part);
+}
+
+const GRADE_GROUP: Record<string, KbStudyCard['group']> = { again: 'learning', hard: 'learning', good: 'learning', easy: 'known' };
+
+function studyCardsOf(w: FakeWorld, pageId: string): KbStudyCard[] {
+  return w.decks?.[pageId]?.cards ?? fail(404, 'This page is not a deck.');
+}
+
+function markCards(cards: KbStudyCard[], ids: string[], mark: string): void {
+  for (const c of cards) {
+    if (!ids.includes(c.id)) continue;
+    if (mark === 'hide') { c.suspended = true; c.group = c.marked_hard ? 'hard' : 'known'; }
+    if (mark === 'unhide') c.suspended = false;
+    if (mark === 'hard') { c.marked_hard = true; c.group = 'hard'; }
+    if (mark === 'unhard') { c.marked_hard = false; c.group = c.state === 'new' ? 'new' : 'learning'; }
+    if (mark === 'known') { c.marked_hard = false; c.group = 'known'; c.state = 'review'; }
+  }
+}
+
+function deckView(w: FakeWorld, pageId: string): KbDeckView {
+  const deck = w.decks?.[pageId] ?? fail(404, 'This page is not a deck.');
+  const counts = { new: 0, learning: 0, known: 0, hard: 0 };
+  for (const c of deck.cards) counts[c.group] += 1;
+  deck.groups = counts;
+  return structuredClone(deck);
+}
+
+const normalized = (t: string) => t.trim().toLowerCase().replace(/[.!?]+$/, '');
+
+/** W-2: an agent's web search waits for the user; «Allow in this chat» is kept per chat, like the backend. */
+function findWebSearch(w: FakeWorld, id: string): FakeWaiting<KbWebSearchPart> {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = partsOf(message).find((p) => p.type === 'web_search' && p.id === id);
+      if (part) return { chat, message, part: part as KbWebSearchPart };
+    }
+  }
+  return fail(404, 'Web search not found.');
+}
+
+const webGrant = (w: FakeWorld, chatId: string) => {
+  if (!w.chats.some((c) => c.id === chatId)) fail(404, 'Chat not found.');
+  const at = w.webGrants?.[chatId] ?? null;
+  return { allowed: at !== null, granted_at: at };
+};
+
+const WEB_ROUTES: FakeRoutes = {
+  'POST /kb/web-searches/{search_id}/decide': [200, (w, { path, body }) => {
+    const found = findWebSearch(w, path.search_id);
+    if (found.part.status !== 'pending') fail(409, 'This request was already answered.');
+    found.part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    if (body.decision === 'allow_chat') (w.webGrants ??= {})[found.chat.id] = new Date().toISOString();
+    updated(w, found);
+    return structuredClone(found.part);
+  }],
+  'GET /kb/chats/{chat_id}/web-search': [200, (w, { path }) => webGrant(w, path.chat_id)],
+  'DELETE /kb/chats/{chat_id}/web-search': [200, (w, { path }) => {
+    webGrant(w, path.chat_id);
+    if (w.webGrants) delete w.webGrants[path.chat_id];
+    return webGrant(w, path.chat_id);
+  }],
+};
+
+const STUDY_ROUTES: FakeRoutes = {
+  'GET /kb/study/settings': [200, (w) => ({ new_per_day: w.studyNewPerDay ?? 20 })],
+  'PATCH /kb/study/settings': [200, (w, { body }) => {
+    if (body.new_per_day < 0 || body.new_per_day > 9999) fail(422, 'New cards per day is a number from 0 to 9999.');
+    w.studyNewPerDay = body.new_per_day;
+    return { new_per_day: body.new_per_day };
+  }],
+  'GET /kb/study/decks/{page_id}': [200, (w, { path }) => deckView(w, path.page_id)],
+  'POST /kb/study/decks/{page_id}/marks': [200, (w, { path, body }) => {
+    markCards(studyCardsOf(w, path.page_id), body.item_ids, body.mark);
+    return deckView(w, path.page_id);
+  }],
+  'POST /kb/study/decks/{page_id}/study': [200, (w, { path, body }) => {
+    const deck = deckView(w, path.page_id);
+    const mode = body.mode ?? 'due';
+    const live = deck.cards.filter((c) => !c.suspended && (!body.card_ids || body.card_ids.includes(c.id)));
+    const cards = mode === 'hard' ? live.filter((c) => c.group === 'hard') : mode === 'new' ? live.filter((c) => c.group === 'new') : live;
+    let chat: KbChat;
+    if (body.chat_id) chat = findChat(w, body.chat_id);
+    else {
+      chat = {
+        id: `c-study-${++w.seq}`, title: `Study · ${deck.title}`, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+        created_at: clock(w), updated_at: clock(w), last_preview: '', recording_material_id: null, folder_ids: [], state: 'idle', unread: false,
+        messages: [], cursor: 0,
+      };
+      w.chats.unshift(chat);
+      w.chatEvents[chat.id] = [];
+    }
+    for (const other of w.chats.flatMap((c) => c.messages.flatMap((m) => partsOf(m).filter((p) => p.type === 'study')))) {
+      if ((other as KbStudyPart).place !== 'chat') (other as KbStudyPart).place = 'chat';
+    }
+    const id = `st-${++w.seq}`;
+    const messageId = `${chat.id}-s${w.seq}`;
+    const part: KbStudyPart = {
+      type: 'study', id, kind: 'deck', title: deck.title, engine: chat.engine, origin: 'show', mode, place: 'panel', position: 0, side: 'question',
+      total: cards.length, cards: structuredClone(cards), questions: [], groups: deck.groups, held_back: 0,
+      save: { status: 'saved', path: `Wiki/Decks/${deck.title}.md`, page_id: path.page_id }, result: null, chat_id: chat.id, message_id: messageId,
+    };
+    const message = chatMessage(messageId, (chat.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [part as unknown as KbMessage['parts'][number]]);
+    chat.messages.push(message);
+    pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) });
+    touchList(w, chat);
+    return { chat_id: chat.id, study: structuredClone(part) };
+  }],
+  'GET /kb/study/{block_id}': [200, (w, { path }) => structuredClone(findStudy(w, path.block_id).part)],
+  'PATCH /kb/study/{block_id}': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (body.place && body.place !== part.place) {
+      if (body.place !== 'chat') {
+        // A-4: one block beside the chat or in a window; the one there goes back to the chat.
+        for (const chat of w.chats) {
+          for (const message of chat.messages) {
+            for (const p of partsOf(message)) {
+              if (p.type === 'study' && p.id !== part.id && (p as KbStudyPart).place !== 'chat') {
+                (p as KbStudyPart).place = 'chat';
+                studyChanged(w, { chat, message, part: p as KbStudyPart });
+              }
+            }
+          }
+        }
+      }
+      part.place = body.place;
+    }
+    const total = part.kind === 'deck' ? part.cards.length : part.questions.length;
+    if (typeof body.position === 'number') { part.position = Math.max(0, Math.min(body.position, total)); part.side = 'question'; }
+    if (body.side) part.side = body.side;
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/grade': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const i = found.part.cards.findIndex((c) => c.id === body.item_id);
+    if (i < 0) fail(404, 'This card is not in the block.');
+    const card = found.part.cards[i]!;
+    card.graded = body.grade;
+    if (!card.marked_hard) card.group = GRADE_GROUP[body.grade]!;
+    card.state = body.grade === 'easy' ? 'review' : 'learning';
+    found.part.position = i + 1;
+    found.part.side = 'question';
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/mark': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    markCards(found.part.cards, body.item_ids, body.mark);
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/answer': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const q = found.part.questions.find((x) => x.id === body.item_id) ?? fail(404, 'This question is not in the test.');
+    if (q.type === 'choice' || q.type === 'multi') {
+      const picked = body.choices ?? [];
+      if (!picked.length) fail(409, 'Choose one of the options.');
+      const right = q.options.filter((o) => o.origin === 'source').map((o) => o.id).sort();
+      const ok = JSON.stringify([...picked].sort()) === JSON.stringify(right);
+      q.response = { choices: picked, text: null, checked: true, score: ok ? 1 : 0, verdict: null, missing: null, comment: null, checking: false, error: null };
+    } else {
+      const text = (body.text ?? '').trim();
+      if (!text) fail(409, 'Write an answer first.');
+      const ok = q.type === 'short' && q.answers.some((a) => normalized(a) === normalized(text));
+      q.response = { choices: [], text, checked: q.type === 'short', score: q.type === 'short' ? (ok ? 1 : 0) : null,
+        verdict: null, missing: null, comment: null, checking: false, error: null };
+    }
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/check-open': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const q = found.part.questions.find((x) => x.id === body.item_id) ?? fail(404, 'This question is not in the test.');
+    if (q.type !== 'open') fail(409, 'Only open answers are checked by the agent.');
+    const text = (body.text ?? '').trim();
+    if (!text) fail(409, 'Write an answer first.');
+    q.response = { choices: [], text, checked: false, score: null, verdict: null, missing: null, comment: null, checking: true, error: null };
+    const answered = studyChanged(w, found);
+    const judge = w.judge ?? { verdict: 'partly' as const, missing: 'It doesn’t say the entropies add up.', comment: 'Close: the idea of joining systems is there.' };
+    if (!judge.hold) {
+      // The verdict arrives later, as an update of the block: the request never waits for it.
+      q.response = { choices: [], text, checked: true, score: { right: 1, partly: 0.5, wrong: 0 }[judge.verdict], verdict: judge.verdict,
+        missing: judge.missing || null, comment: judge.comment || null, checking: false, error: null };
+      studyChanged(w, found);
+    }
+    return answered;
+  }],
+  'POST /kb/study/{block_id}/finish': [200, (w, { path }) => {
+    const found = findStudy(w, path.block_id);
+    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null }));
+    found.part.result = {
+      correct: rows.reduce((n, r) => n + (r.score ?? 0), 0), total: rows.length,
+      mistakes: rows.filter((r) => (r.score ?? 0) < 1).length, partly: rows.filter((r) => r.score === 0.5).length, rows,
+    };
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/retake': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (body.mistakes_only) {
+      const wrong = part.questions.filter((q) => (q.response?.score ?? 0) < 1);
+      if (!wrong.length) fail(409, 'No mistakes to retake.');
+      part.questions = wrong;
+    }
+    for (const q of part.questions) q.response = null;
+    part.result = null;
+    part.position = 0;
+    return studyChanged(w, found);
+  }],
+  'POST /kb/study/{block_id}/save': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (part.origin !== 'agent') fail(409, 'This block shows saved pages already.');
+    if (part.save.status === 'saved') fail(409, 'Already saved to the wiki.');
+    if (body.decision === 'deny') { part.save.status = 'denied'; return studyChanged(w, found); }
+    const pageId = `p-${part.kind}-${++w.seq}`;
+    w.pages.push({
+      id: pageId, kind: part.kind, title: part.title, original: null, aliases: [], folders: [], sources: [], language: 'en', blocks: [],
+      related: [], mentioned_in: [], folder_names: [], updated_at: clock(w), is_analysis_source_forbidden: false,
+    });
+    part.save = { status: 'saved', path: part.save.path, page_id: pageId };
+    for (const c of part.cards) c.page_id = pageId;
+    if (part.kind === 'deck') {
+      (w.decks ??= {})[pageId] = { page_id: pageId, title: part.title, cards: structuredClone(part.cards), groups: part.groups, due: 0 };
+    }
+    return studyChanged(w, found);
+  }],
+  // U3: like the backend — the page file name drops characters a file can't hold; a saved block's page follows.
+  'POST /kb/study/{block_id}/rename': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (part.origin !== 'agent') fail(409, 'Rename this deck from its wiki page.');
+    const title = body.title.trim();
+    if (!title) fail(422, 'The name is empty. Choose another name.');
+    const fileName = title.replace(/[/\\:*?"<>|#^[\]]/g, ' ').split(/\s+/).filter(Boolean).join(' ');
+    const dir = part.kind === 'deck' ? 'Wiki/Decks' : 'Wiki/Tests';
+    if (part.save.status === 'saved') {
+      part.title = fileName;
+      const page = w.pages.find((p) => p.id === part.save.page_id);
+      if (page) page.title = fileName;
+    } else {
+      part.title = title;
+    }
+    part.save = { ...part.save, path: `${dir}/${fileName}.md` };
+    return studyChanged(w, found);
+  }],
+};
 
 // ---- The typed route table ------------------------------------------------------------------
 
@@ -538,11 +953,22 @@ const ROUTES: FakeRoutes = {
     const video = info.kind === 'video' && body.mode !== 'text';
     return added(w, newMaterial(w, body.title ?? info.title ?? info.domain, video ? 'video_link' : 'web', body.folder_id, 'processing', []));
   }],
+  // W-3: like sources/web_page.py — the whole page, or 422 with the Save-as-PDF advice.
+  'POST /kb/materials/web': [201, (w, { body }) => {
+    if (/signin/.test(body.url)) fail(422, 'This page asks you to sign in before it shows its text. Save the page as PDF and import it.');
+    const info = classifyFake(body.url);
+    return structuredClone(newMaterial(w, info.domain, 'web', body.folder_id ?? 'inbox', 'ready', ['The whole page as text.']));
+  }],
   'POST /kb/links/classify': [200, (_w, { body }) => classifyFake(body.url)],
   'POST /kb/imports': [201, (w, { body }) => {
     const name = body.title ?? (body.url ? classifyFake(body.url).title ?? 'Video' : (body.path ?? '').split('/').pop()!.replace(/\.[^.]+$/, ''));
     const m = newMaterial(w, name, body.url ? 'video_link' : 'audio', body.folder_id ?? w.lastFolderId, 'processing', []);
     return { ...speechView(m, `s-${m.id}`, null), import_state: 'running', import_stage: 'transcribing' };
+  }],
+  'POST /kb/imports/{material_id}/cancel': [200, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    Object.assign(m, { status: 'failed', failure_reason: 'The import was cancelled.', can_retry: true });
+    return { ...speechView(m, `s-${m.id}`, null), import_state: 'cancelled', import_stage: null };
   }],
   'POST /kb/imports/{material_id}/retry': [200, (w, { path }) => {
     const m = findMaterial(w, path.material_id);
@@ -558,6 +984,13 @@ const ROUTES: FakeRoutes = {
   'POST /kb/corrections/{correction_id}/reapply': [200, (w, { path }) => applyCorrection(w, findCorrection(w, path.correction_id), 'reapply')],
 
   // -- jobs --
+  // Like ingest/service.py retry_failed: every readable material whose wiki job failed is queued again.
+  'POST /kb/jobs/retry-failed': [200, (w) => w.materials.filter((m) => m.wiki.state === 'failed' && m.status !== 'failed').map((m) => {
+    const job = newJob(w, 'ingest', m.id, 'queued', 'Queued');
+    m.wiki = materialWiki('queued', { job_id: job.id });
+    m.wiki_state = 'queued';
+    return job;
+  })],
   'GET /kb/jobs': [200, (w, { query }) => w.jobs.filter((j) => !query.material_id || j.material_id === query.material_id)],
   'GET /kb/jobs/{job_id}': [200, (w, { path }) => w.jobs.find((j) => j.id === path.job_id) ?? fail(404, 'Job not found.')],
 
@@ -607,7 +1040,10 @@ const ROUTES: FakeRoutes = {
   'DELETE /kb/wiki/pages/{page_id}/blocks/{block_id}': [200, (w, { path }) => {
     const page = findPage(w, path.page_id);
     const b = page.blocks.find((x) => x.id === path.block_id) ?? fail(404, 'Block not found.');
-    if (b.owner !== 'user') fail(409, 'Only your own notes can be deleted.');
+    // Like wiki/edit.py delete_note: own notes and connections SKAZ wrote (`c-link-*`) only.
+    if (b.owner !== 'user' && !(b.kind === 'connection' && b.id.startsWith('c-link-'))) {
+      fail(409, 'Only your own notes and connections can be deleted. Edit the statement or ask the agent to recheck it.');
+    }
     page.blocks = page.blocks.filter((x) => x !== b);
     return page;
   }],
@@ -687,7 +1123,18 @@ const ROUTES: FakeRoutes = {
     w.chats.push(c);
     w.chatEvents[c.id] = [];
     touchList(w, c);
+    if (body?.model) a!.last_choice = { model: body.model, effort: body.effort ?? null };
     return structuredClone(c);
+  }],
+  // Models screen v2: a choice made in New chat, before the chat exists; checked like a chat's.
+  'PUT /kb/chats/last-choice': [204, (w, { body }) => {
+    const a = w.agents.agents.find((x) => x.id === body.engine);
+    if (!a) fail(422, 'Unknown agent.');
+    const m = body.model ? a!.models.find((x) => x.id === body.model) : undefined;
+    if (body.model && !m) fail(422, `${a!.name} has no model ${body.model}.`);
+    if (body.effort && !m?.efforts.includes(body.effort)) fail(422, 'This model has no such reasoning.');
+    a!.last_choice = { model: body.model ?? null, effort: body.effort ?? null };
+    return undefined;
   }],
   'GET /kb/chats/{chat_id}': [200, (w, { path }) => structuredClone(findChat(w, path.chat_id))],
   'PATCH /kb/chats/{chat_id}': [200, (w, { path, body }) => {
@@ -702,8 +1149,19 @@ const ROUTES: FakeRoutes = {
       const sys = chatMessage(`${c.id}-s${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [{ type: 'text', text: `Switched to ${a!.name}` }], { engine: a!.id });
       c.messages.push(sys);
       pushEvent(w, c.id, { type: 'message', message_id: sys.id, message: structuredClone(sys) });
-    } else if (typeof body.model === 'string') c.model = body.model;
+    } else if (typeof body.model === 'string' && body.model !== c.model) {
+      // As the backend (chats/service.py `_switch_note`): a model change is recorded; an effort change is not.
+      c.model = body.model;
+      const label = w.agents.agents.find((x) => x.id === c.engine)?.models.find((x) => x.id === body.model)?.label ?? body.model;
+      const sys = chatMessage(`${c.id}-s${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [{ type: 'text', text: `Model changed to ${label}` }], { engine: c.engine });
+      c.messages.push(sys);
+      pushEvent(w, c.id, { type: 'message', message_id: sys.id, message: structuredClone(sys) });
+    }
     if (typeof body.effort === 'string') c.effort = body.effort;
+    if (body.engine || body.model !== undefined || body.effort !== undefined) {
+      const a = w.agents.agents.find((x) => x.id === c.engine);
+      if (a) a.last_choice = { model: c.model, effort: c.effort };
+    }
     touchList(w, c);
     return chatSummary(c);
   }],
@@ -717,6 +1175,7 @@ const ROUTES: FakeRoutes = {
   }],
   'POST /kb/chats/{chat_id}/messages': [202, (w, { path, body }) => {
     const c = findChat(w, path.chat_id);
+    supersedeQuestions(w, c);
     if (c.state === 'answering') fail(409, 'The agent is still answering in this chat.');
     const user = chatMessage(`${c.id}-u${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: body.text }], {
       input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] },
@@ -741,6 +1200,21 @@ const ROUTES: FakeRoutes = {
     return structuredClone(msg);
   }],
   'POST /kb/chats/{chat_id}/messages/{message_id}/regenerate': [202, (w, { path }) => answerAgain(w, path.chat_id, path.message_id, false)],
+  // As chats/service.py `edit`: the question changes in place, everything after it goes, a new answer starts.
+  'POST /kb/chats/{chat_id}/messages/{message_id}/edit': [202, (w, { path, body }) => {
+    const c = findChat(w, path.chat_id);
+    if (c.state === 'answering') fail(409, 'The agent is still answering in this chat. Stop it or wait for the answer.');
+    const msg = findMessage(c, path.message_id);
+    if (msg.role !== 'user') fail(422, 'Only your own question can be edited.');
+    for (const gone of c.messages.filter((m) => m.seq > msg.seq)) pushEvent(w, c.id, { type: 'removed', message_id: gone.id });
+    c.messages = c.messages.filter((m) => m.seq <= msg.seq);
+    msg.parts = [{ type: 'text', text: body.text }];
+    msg.input = { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] };
+    pushEvent(w, c.id, { type: 'message', message_id: msg.id, message: structuredClone(msg) });
+    const assistant = startAnswer(w, c, body.text);
+    touchList(w, c);
+    return { user: structuredClone(msg), assistant: structuredClone(c.messages.find((x) => x.id === assistant.id)!) };
+  }],
   'POST /kb/chats/{chat_id}/messages/{message_id}/resume': [202, (w, { path }) => answerAgain(w, path.chat_id, path.message_id, true)],
   'POST /kb/chats/{chat_id}/messages/{message_id}/save': [200, (w, { path }) => {
     const c = findChat(w, path.chat_id);
@@ -748,11 +1222,11 @@ const ROUTES: FakeRoutes = {
     if (msg.saved_page_id) fail(409, 'This answer is already saved to the wiki.');
     msg.saved_page_id = `p-${msg.id}`;
     emit(w, c, [{ type: 'message', message_id: msg.id, message: structuredClone(msg) }]);
-    return { id: msg.saved_page_id, kind: 'analysis', title: c.title };
+    return { id: msg.saved_page_id, kind: 'analysis', title: c.title, warning: w.saveWarnings?.[msg.id] ?? null };
   }],
   'POST /kb/chats/{chat_id}/save': [200, (w, { path }) => {
     const c = findChat(w, path.chat_id);
-    return { id: `p-${c.id}`, kind: 'analysis', title: c.title };
+    return { id: `p-${c.id}`, kind: 'analysis', title: c.title, warning: w.saveWarnings?.[c.id] ?? null };
   }],
   'GET /kb/chats/{chat_id}/export': [200, (w, { path }) => {
     const c = findChat(w, path.chat_id);
@@ -835,6 +1309,8 @@ const ROUTES: FakeRoutes = {
     p.configured = body.key.length > 0;
     p.valid = null;
     p.checked_at = null;
+    // As the backend: the decision layer reads the same OpenRouter key.
+    if (p.id === 'openrouter') w.decisions.openrouter_key = p.configured;
     return structuredClone(p);
   }],
   'POST /kb/settings/keys/{provider}/check': [200, (w, { path }) => {
@@ -858,6 +1334,14 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/privacy': [200, (w) => structuredClone(w.privacy)],
   'GET /kb/settings/about': [200, (w) => structuredClone(w.about)],
+  'GET /kb/settings/skills': [200, (w) => fakeSkills(w)],
+  'PUT /kb/settings/skills/{skill_id}': [200, (w, { path, body }) => {
+    if (path.skill_id !== 'humanizer') fail(404, 'Unknown skill.');
+    const off = new Set(w.skillsOff ?? []);
+    if (body.enabled) off.delete(path.skill_id); else off.add(path.skill_id);
+    w.skillsOff = [...off];
+    return fakeSkills(w);
+  }],
   'GET /kb/wiki/files/{name}': [200, (w, { path }) => {
     const file = w.wikiFiles?.[path.name] ?? { text: path.name === 'index' ? '# Index\n' : '# Log\n', links: [] };
     return { name: path.name, text: file.text, links: file.links };
@@ -879,6 +1363,22 @@ const ROUTES: FakeRoutes = {
     job.progress.parts_done = 3;
     return job;
   }],
+  'POST /kb/export/items': [200, (w, { body }) => {
+    const root = w.library.root ?? '';
+    if (root && (body.path === root || body.path.startsWith(`${root}/`))) fail(409, 'Choose a folder outside the SKAZ library: the export is a separate copy.');
+    if ((w.exportFolders?.[body.path] ?? 0) > 0 && !body.overwrite) fail(409, 'The folder isn\'t empty. Confirm to replace files with the same names.');
+    const written: Array<{ type: 'chat' | 'page' | 'material'; id: string; file: string }> = [];
+    const skipped: Array<{ type: 'chat' | 'page' | 'material'; id: string; reason: string }> = [];
+    for (const item of body.items) {
+      const title = item.type === 'page' ? w.pages.find((p) => p.id === item.id)?.title
+        : item.type === 'material' ? w.materials.find((m) => m.id === item.id)?.title : w.chats.find((c) => c.id === item.id)?.title;
+      const noun = item.type === 'page' ? 'Page' : item.type === 'material' ? 'Material' : 'Chat';
+      if (!title) skipped.push({ type: item.type, id: item.id, reason: `${noun} not found.` });
+      else written.push({ type: item.type, id: item.id, file: `${item.type === 'chat' ? 'Chats' : item.type === 'page' ? 'Wiki' : 'Materials'}/${title}.md` });
+    }
+    w.exportFolders = { ...w.exportFolders, [body.path]: (w.exportFolders?.[body.path] ?? 0) + written.length };
+    return { written, skipped };
+  }],
   'GET /kb/settings/recognition': [200, (w) => structuredClone(w.recognition ?? { engine: 'same_as_wiki', model: null, effort: null })],
   'PUT /kb/settings/recognition': [200, (w, { body }) => {
     const own = body.engine !== 'same_as_wiki' && body.engine !== 'off';
@@ -896,9 +1396,25 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/wiki': [200, (w) => structuredClone(w.wiki)],
   'PUT /kb/settings/wiki': [200, (w, { body }) => {
+    // Like ingest/settings.py update_settings (models screen v2): another agent without a model in
+    // the request gets its last model and reasoning back.
+    const remembered = w.wiki.wiki_remembered ?? {};
+    if ('wiki_engine' in body && (body.wiki_engine ?? null) !== w.wiki.wiki_engine) {
+      const back = body.wiki_engine && !('wiki_model' in body) ? remembered[body.wiki_engine] : undefined;
+      w.wiki.wiki_model = back?.model ?? null;
+      w.wiki.wiki_effort = back?.effort ?? null;
+    }
+    if ('wiki_model' in body && body.wiki_model !== w.wiki.wiki_model && !('wiki_effort' in body)) w.wiki.wiki_effort = null;
     for (const [k, v] of Object.entries(body)) if (v !== undefined && k !== 'wiki_engine') (w.wiki as unknown as Record<string, unknown>)[k] = v;
     if ('wiki_engine' in body) w.wiki.wiki_engine = body.wiki_engine ?? null;
     if (body.wiki_language) w.wiki.wiki_language_chosen = true;
+    const engine = w.wiki.wiki_engine;
+    if (engine) {
+      const next = { ...remembered };
+      if (w.wiki.wiki_model) next[engine] = { model: w.wiki.wiki_model, effort: w.wiki.wiki_effort };
+      else if ('wiki_model' in body) delete next[engine];
+      w.wiki.wiki_remembered = next;
+    }
     return structuredClone(w.wiki);
   }],
   'GET /kb/decisions': [200, (w) => structuredClone(w.decisions)],
@@ -923,7 +1439,7 @@ const ROUTES: FakeRoutes = {
 
   // -- agents --
   'GET /kb/agents': [200, (w) => structuredClone(w.agents)],
-  'PUT /kb/agents/default': [200, (w, { body }) => { w.agents.default = body.engine; return structuredClone(w.agents); }],
+  'PUT /kb/agents/default': [200, (w, { body }) => { w.agents.default = body.engine; findAgent(w, body.engine).visible = true; return structuredClone(w.agents); }],
   'POST /kb/agents/{engine}/check': [200, (w, { path }) => {
     const a = findAgent(w, path.engine);
     a.checked_at = stamp(w);
@@ -932,12 +1448,106 @@ const ROUTES: FakeRoutes = {
   'POST /kb/agents/{engine}/login': [200, (w, { path, body }) => {
     const a = findAgent(w, path.engine);
     if (a.id === 'codex' && body?.consent !== true) fail(409, 'Confirm the ChatGPT privacy notice first.');
-    Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
-    return { engine: a.id, method: 'terminal', url: null, message: `${a.name} sign-in opened in Terminal. Come back when it says you’re signed in.` };
+    // Accounts & keys v3: the sign-in is followed until it ends (GET …/sign-in); a test may hold or fail it.
+    w.signIns = { ...w.signIns, [a.id]: w.signIns?.[a.id] ?? 'done' };
+    if (w.signIns[a.id] === 'done') Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
+    if (a.id === 'codex') {
+      return { engine: a.id, method: 'browser', url: 'https://auth.openai.com/authorize?fake=1',
+        message: 'Finish signing in in your browser. SKAZ checks as soon as it’s done.' };
+    }
+    return { engine: a.id, method: 'terminal', url: null, message: 'Finish in Terminal: sign in there. SKAZ checks as soon as Terminal finishes.' };
   }],
-  'POST /kb/agents/codex/logout': [200, (w) => {
-    const a = findAgent(w, 'codex');
-    Object.assign(a, { state: 'signed_out', signed_in: false, reason: 'Sign in with ChatGPT to use Codex.', action: 'login', models: [], current_model: null });
+  'GET /kb/agents/{engine}/sign-in': [200, (w, { path }) => {
+    const a = findAgent(w, path.engine);
+    const state = w.signIns?.[a.id];
+    return { engine: a.id, method: state ? (a.id === 'codex' ? 'browser' : 'terminal') : null, state: state ?? 'idle' };
+  }],
+  // 0.3.1 K2/K4: what the picker shows (the real backend keeps it in SKAZ's settings).
+  'PATCH /kb/agents/models': [200, (w, { body }) => {
+    for (const change of body.changes) {
+      const a = findAgent(w, change.engine);
+      const value = change.value ?? true;
+      const inProvider = (m: KbAgent['models'][number]) => !change.provider || m.provider === change.provider;
+      if (change.kind === 'agent') {
+        if (!value && w.agents.default === a.id) fail(409, 'The default agent can’t be hidden. Choose another default agent first.');
+        a.visible = value;
+      } else if (change.kind === 'provider') {
+        const p = a.providers.find((x) => x.id === change.provider);
+        if (p) p.visible = value;
+      } else if (change.kind === 'model') {
+        const m = a.models.find((x) => x.id === change.model);
+        if (m) m.visible = value;
+      } else if (change.kind === 'favorite') {
+        w.agents.favorites = w.agents.favorites.filter((f) => !(f.engine === a.id && f.model === change.model));
+        if (value && change.model) w.agents.favorites.push({ engine: a.id, model: change.model });
+        const m = a.models.find((x) => x.id === change.model);
+        if (m) m.favorite = value;
+      } else if (change.kind === 'defaults') {
+        a.models.filter(inProvider).forEach((m) => { m.visible = m.default_visible; });
+      } else {
+        a.models.filter(inProvider).forEach((m) => { m.visible = false; });
+      }
+      a.providers = a.providers.map((p) => ({
+        ...p, shown: a.models.filter((m) => m.provider === p.id && m.visible).length, total: a.models.filter((m) => m.provider === p.id).length,
+      }));
+    }
+    return structuredClone(w.agents);
+  }],
+  // -- Hermes providers (0.3.1 K1/K3): Terminal opens are recorded as a running window --
+  'GET /kb/agents/hermes/providers': [200, (w) => structuredClone(w.hermesProviders)],
+  'POST /kb/agents/hermes/providers/add': [200, (w, { body }) => {
+    const item = w.hermesProviders.catalog.find((c) => c.id === body.provider && c.group === body.group)
+      ?? fail(404, 'SKAZ doesn’t know this provider. Use “Other provider…” to add it in Hermes.');
+    w.hermesProviders.terminal = { provider: item.id, title: `SKAZ opened Hermes to add ${item.name}.`, state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/other': [200, (w) => {
+    w.hermesProviders.terminal = { provider: null, title: 'SKAZ opened Hermes’ credential manager.', state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/order': [200, (w) => {
+    w.hermesProviders.terminal = { provider: null, title: 'SKAZ opened Hermes’ fallback providers.', state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/{provider}/credentials/{credential_id}/sign-in': [200, (w, { path }) => {
+    hermesCredential(w, path.provider, path.credential_id);
+    w.hermesProviders.terminal = { provider: path.provider, title: 'SKAZ opened Hermes to sign in again.', state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/{provider}/credentials/{credential_id}/priority': [200, (w, { path, body }) => {
+    const { pool, credential } = hermesCredential(w, path.provider, path.credential_id);
+    const rest = pool.credentials.filter((c) => c.id !== credential.id);
+    rest.splice(Math.min(body.priority, rest.length), 0, credential);
+    pool.credentials = rest.map((c, i) => ({ ...c, index: i + 1, priority: i }));
+    return structuredClone(w.hermesProviders);
+  }],
+  'POST /kb/agents/hermes/providers/{provider}/keys': [200, (w, { path, body }) => {
+    const label = body.label.trim();
+    if (!label || label.length > 40 || /[\u0000-\u001f]/.test(label)) fail(422, 'Give the key a name of up to 40 characters, on one line.');
+    const pool = w.hermesProviders.providers.find((p) => p.id === path.provider);
+    if (pool?.credentials.some((c) => c.label === label)) fail(409, `${pool.name} already has a key named “${label}”. Choose another name.`);
+    w.hermesProviders.terminal = { provider: path.provider, title: `SKAZ opened Hermes to add the key “${label}”.`, state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'DELETE /kb/agents/hermes/providers/{provider}': [200, (w, { path }) => {
+    const pool = w.hermesProviders.providers.find((p) => p.id === path.provider && p.credentials.length > 0)
+      ?? fail(404, 'This provider is no longer in Hermes. The list was read again.');
+    w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
+    return structuredClone(w.hermesProviders);
+  }],
+  'DELETE /kb/agents/hermes/providers/{provider}/credentials/{credential_id}': [200, (w, { path }) => {
+    const { pool, credential } = hermesCredential(w, path.provider, path.credential_id);
+    pool.credentials = pool.credentials.filter((c) => c.id !== credential.id).map((c, i) => ({ ...c, index: i + 1, priority: i }));
+    if (pool.credentials.length === 0 && !pool.free_tier) w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
+    return structuredClone(w.hermesProviders);
+  }],
+  // Accounts & keys v3: Codex and OpenCode sign out of SKAZ's own folders; Claude Code and Hermes refuse.
+  'POST /kb/agents/{engine}/logout': [200, (w, { path }) => {
+    const a = findAgent(w, path.engine);
+    if (a.id === 'claude_code') fail(409, 'Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn’t sign it out.');
+    if (a.id === 'hermes') fail(409, 'Hermes signs in per provider. Open a provider under Hermes Agent and choose Remove… to sign Hermes out of it.');
+    const reason = a.id === 'codex' ? 'Sign in with ChatGPT to use Codex.' : 'Sign in to a model provider to use OpenCode.';
+    Object.assign(a, { state: 'signed_out', signed_in: false, reason, action: 'login', models: [], current_model: null });
     return structuredClone(a);
   }],
   'POST /kb/agents/{engine}/install': [202, (w, { path, body }) => {
@@ -996,6 +1606,13 @@ function findNotification(w: FakeWorld, id: string): KbNotification {
   return w.notifications.find((n) => n.id === id) ?? fail(404, 'Notification not found.');
 }
 
+function hermesCredential(w: FakeWorld, provider: string, id: string) {
+  const pool = w.hermesProviders.providers.find((p) => p.id === provider);
+  const credential = pool?.credentials.find((c) => c.id === id);
+  if (!pool || !credential) return fail(404, 'This credential is no longer in Hermes. The list was read again.');
+  return { pool, credential };
+}
+
 function findAgent(w: FakeWorld, id: string) {
   return w.agents.agents.find((a) => a.id === id) ?? fail(404, 'Unknown agent.');
 }
@@ -1021,7 +1638,17 @@ function answerAgain(w: FakeWorld, chatId: string, messageId: string, resume: bo
   if (resume && msg.state !== 'interrupted') fail(409, 'This answer wasn’t interrupted.');
   const idx = c.messages.indexOf(msg);
   const question = [...c.messages.slice(0, idx)].reverse().find((x) => x.role === 'user');
+  if (resume) {  // like the backend (2026-10-21): the interrupted answer gives its place to the new one
+    c.messages.splice(idx, 1);
+    pushEvent(w, c.id, { type: 'removed', message_id: msg.id });
+  }
   const answer = startAnswer(w, c, resume ? '' : (question?.input?.text ?? ''));
+  if (resume) {
+    const at = c.messages.findIndex((x) => x.id === answer.id);
+    const [moved] = c.messages.splice(at, 1);
+    moved!.seq = msg.seq;
+    c.messages.splice(idx, 0, moved!);
+  }
   touchList(w, c);
   return { user: structuredClone(question ?? msg), assistant: structuredClone(c.messages.find((x) => x.id === answer.id)!) };
 }
@@ -1059,7 +1686,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
-const COMPILED: Compiled[] = (Object.entries(ROUTES) as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1070,10 +1697,10 @@ const COMPILED: Compiled[] = (Object.entries(ROUTES) as Array<[KbRoute, Entry<Kb
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = Object.keys(ROUTES) as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
-const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections)(\/|$)/;
+const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;
 
 const ok = <T,>(data: T, status = 200): JsonResponse<T> => ({ ok: true, status, data });
 const failed = (status: number, detail: string): JsonResponse<never> => ({ ok: false, status, detail });

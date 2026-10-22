@@ -32,6 +32,19 @@ const chunk = (sequence: number) => ({ sequence, startMs: sequence * 100, endMs:
   wav: encodeWavPcm16Mono(new Float32Array(1600).fill(0.25), 16000) });
 
 describe('native writer at the renderer bridge boundary', () => {
+  it('asks for a reconnect after a failed delivery, and the reconnect resumes in order', async () => {
+    const f = fixture();
+    expect(f.writer.needsReconnect).toBe(false);
+    await f.writer.open(16000);
+    f.loseAck();
+    await expect(f.writer.store(chunk(0))).rejects.toThrow('ack lost');
+    expect(f.writer.needsReconnect).toBe(true);
+    await f.writer.open();
+    expect(f.writer.needsReconnect).toBe(false);
+    expect((await f.writer.store(chunk(0))).duplicate).toBe(true);
+    await f.writer.store(chunk(1));
+    expect(f.sent).toEqual([0, 1]);
+  });
   it('does not report pending background transcription as lost audio', async () => {
     const f = fixture();
     await f.writer.open(16000);

@@ -117,6 +117,7 @@ export function registerUpdates(window: () => BrowserWindow | null, trusted: (ev
   ipcMain.handle(CHANNELS.updateGet, (event) => (trusted(event) ? updater.snapshot : null));
   ipcMain.handle(CHANNELS.updateCheck, (event) => (trusted(event) ? updater.check() : null));
   ipcMain.handle(CHANNELS.updatePrepare, (event) => (trusted(event) ? updater.prepare() : null));
+  ipcMain.handle(CHANNELS.updateCancel, (event) => (trusted(event) ? updater.cancel() : null));
   ipcMain.handle(CHANNELS.updateInstall, (event) => (trusted(event) ? updater.install() : false));
 
   if (updateChecksEnabled(process.env)) {

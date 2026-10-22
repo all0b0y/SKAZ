@@ -9,7 +9,8 @@ import type {
 
 /** A failed /kb request: HTTP status and the backend's plain-English reason, shown to the user as is. */
 export class KbApiError extends Error {
-  constructor(public readonly status: number, public readonly detail: string) {
+  /** `code`: the backend's `error_code` when it sends one (W-3: `web_page_unavailable`). */
+  constructor(public readonly status: number, public readonly detail: string, public readonly code?: string) {
     super(detail);
     this.name = 'KbApiError';
   }
@@ -59,7 +60,7 @@ export class KbClient {
       query: cleanQuery(options.query as Record<string, unknown> | undefined),
       body: options.body,
     });
-    if (!res.ok) throw new KbApiError(res.status, res.detail || `Request failed (${res.status}).`);
+    if (!res.ok) throw new KbApiError(res.status, res.detail || `Request failed (${res.status}).`, res.code);
     return res.data;
   }
 

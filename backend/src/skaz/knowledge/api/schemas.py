@@ -58,9 +58,12 @@ class KbOrigin(BaseModel):
     type: Literal["recording", "file", "url", "paste"]
     url: str | None
     file_name: str | None
+    #: W-3 web page snapshots: when SKAZ fetched the page (UTC, ISO 8601); ``null`` otherwise.
+    fetched_at: str | None = None
 
 
-KbWikiState = Literal["not_in_wiki", "processing", "in_wiki", "failed"]
+#: ``paused``: stopped at the material's wiki budget (C1-d); "Continue" is ``POST /kb/materials/{id}/ingest``.
+KbWikiState = Literal["not_in_wiki", "queued", "processing", "in_wiki", "failed", "paused"]
 
 
 class KbMaterialSummary(BaseModel):
@@ -280,6 +283,8 @@ class KbSearchResults(BaseModel):
     #: Materials whose title matches (newest first).
     materials: list[KbMaterialHit]
     counts: KbSearchCounts
+    #: The full-text index failed: say "search isn't available", not "nothing found".
+    degraded: bool
 
 
 class KbNotificationAction(BaseModel):

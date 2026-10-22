@@ -35,6 +35,8 @@ FOLDER_MARKER = Path(SERVICE_DIR) / "folder.json"
 MATERIAL_MANIFEST = Path(SERVICE_DIR) / "material.json"
 WIKI_SUBDIRS: dict[str, str] = {
     "concept": "Concepts", "note": "Notes", "folder": "Folders", "analysis": "Analyses",
+    # 0.3.1 S2/S6: flashcard decks and tests.
+    "deck": "Decks", "test": "Tests",
 }
 DEFAULT_NAME = "SKAZ"
 FALLBACK_NAME = "SKAZ Library"

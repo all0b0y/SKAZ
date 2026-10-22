@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMakeStudy } from '../study/makeFrom';
 import type { KbCorrection, KbCorrectionChange, KbJob, KbMaterial } from '../../api/kb/types.gen';
 import { errorText, KbApiError } from '../api/client';
 import { Banner, Button, Icon, IconButton, Menu, Segmented, Spinner } from '../ui';
@@ -92,7 +93,8 @@ export function useMaterialData(materialId: string) {
   // A material being recorded right now grows from the recording's live poll, not by re-reading it.
   const { material, followed } = useLiveMaterial(materialId, data?.material ?? null, loader.reload);
   const busy = data !== null && !followed && (data.material.status === 'processing' || data.material.status === 'recording'
-    || data.material.wiki?.state === 'processing' || data.jobs.some((j) => j.state === 'running'));
+    || data.material.wiki?.state === 'processing' || data.material.wiki?.state === 'queued'
+    || data.jobs.some((j) => j.state === 'running' || j.state === 'queued'));
   // The next read starts 2 s after the previous one answered (the interval stops while one runs).
   useInterval(busy && loader.state.load !== 'loading', 2000, loader.reload);
   const state = useMemo(
@@ -128,6 +130,7 @@ function useContinuable(material: KbMaterial | null): boolean {
 export function MaterialView({ target, nonce }: { target: DocTarget; nonce: number }) {
   const { client, recording } = useServices();
   const askAbout = useAskAbout();
+  const make = useMakeStudy();
   const expanded = useUi((s) => s.docExpanded);
   const closeDoc = useUi((s) => s.closeDoc);
   const { state, reload, set } = useMaterialData(target.id);
@@ -193,6 +196,10 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label="Material actions" items={[
                 { id: 'move', label: 'Move to folder', icon: 'folder', onSelect: () => setDialog('move') },
                 { id: 'rename', label: 'Rename', icon: 'pencil', onSelect: () => setDialog('rename') },
+                ...(material ? [
+                  { id: 'cards', label: 'Make cards from this', icon: 'deck' as const, onSelect: () => make('cards', [{ type: 'material', id: material.id, title: material.title }]) },
+                  { id: 'test', label: 'Make a test from this', icon: 'test' as const, onSelect: () => make('test', [{ type: 'material', id: material.id, title: material.title }]) },
+                ] : []),
                 ...(recheck.item ? [recheck.item] : []),
                 {
                   id: 'delete', label: 'Delete…', icon: 'trash', danger: true,

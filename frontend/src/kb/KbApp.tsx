@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BackendStatus } from '../api/bridge';
 import { LoadingTree } from '../brand/LoadingTree';
-import { Banner, Button } from './ui';
+import { Banner, Button, Spinner } from './ui';
 import { MotionProvider } from './ui/motion';
 import { KbServicesProvider, useLibrary, usePrefs, useServices, useUi, type KbServices } from './state/context';
 import { Shell } from './shell/Shell';
 import { useProblems } from './shell/problems';
 import type { SettingsSection } from './state/ui';
+import { EditModelsModal } from './composer/EditModels';
 import { SettingsModal } from './settings/SettingsModal';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
 import { CommandK } from './search/CommandK';
 import { DecisionModal } from './notifications/DecisionModal';
 import { SelectionToolbar } from './ui/Selection';
 import { AddMaterialModal } from './materials/AddMaterialModal';
+import { Toast } from './ui/Toast';
+import { useStudyPlacement } from './study/useStudy';
 
 /** Mirror theme and text size onto <html>, where the tokens read them. */
 function ThemeSync() {
@@ -77,6 +80,15 @@ function BackendGate({ children }: { children: ReactNode }) {
       if (!restarted) void bridge.getBackendStatus?.().then(setStatus);
     });
   };
+  // SKAZ is closing: the service stops on purpose. A plain spinner until the window closes —
+  // no tree, no error, and nothing that makes the user wait longer than the service needs.
+  if (phase === 'quitting') {
+    return (
+      <div className="kb-quitting" data-testid="quitting">
+        <Spinner label="Closing SKAZ…" />
+      </div>
+    );
+  }
   return (
     <>
       {phase === 'ready' ? children : null}
@@ -177,19 +189,29 @@ function Workspace() {
   const setLibrarySetupOpen = useUi((s) => s.setLibrarySetupOpen);
   useSettingsShortcut();
   useLiveData();
+  useStudyPlacement();
   useEffect(() => { void library.getState().loadLibrary(); }, [library]);
   return (
     <>
       <Shell />
       <SettingsModal />
+      <EditModelsModal />
       <CommandK />
       <DecisionModal />
       <SelectionToolbar />
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
       <AddMaterialModal />
+      <ToastHost />
     </>
   );
+}
+
+/** The window's toast (0.3.1 F2–F4: moved / deleted / Undo). */
+function ToastHost() {
+  const toast = useUi((s) => s.toast);
+  const closeToast = useUi((s) => s.closeToast);
+  return <Toast toast={toast} onClose={closeToast} />;
 }
 
 function QuitAnswer() {

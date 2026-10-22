@@ -22,6 +22,9 @@ export const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 export const CERT_SHA1 = '9aaf0dac082309848f22aebfdbc43efcba45b13e';
 export const SUMS_NAME = 'SHA256SUMS.txt';
 const MAX_REDIRECTS = 5;
+/** A download that receives nothing for this long is stopped (M2: it used to hang for good). */
+const STALL_MS = 60_000;
+const CANCELLED = 'cancelled';
 const MAX_DMG_BYTES = 2 * 1024 ** 3;
 const MAX_SUMS_BYTES = 64 * 1024;
 
@@ -192,6 +195,8 @@ export class Updater {
   private release: Release | null = null;
   private busy = false;
   private downloaded: { version: string; folder: string } | null = null;
+  /** Stops the running download: Cancel, or nothing arrived for STALL_MS. */
+  private abort: AbortController | null = null;
 
   constructor(private readonly deps: UpdaterDeps) {
     this.store = (() => { try { return deps.load(); } catch { return { etag: null, release: null, notified: null }; } })();
@@ -257,11 +262,11 @@ export class Updater {
     return this.snapshot;
   }
 
-  private async download(asset: ReleaseAsset, path: string, onBytes: (bytes: number) => void): Promise<number> {
+  private async download(asset: ReleaseAsset, path: string, onBytes: (bytes: number) => void, signal: AbortSignal): Promise<number> {
     let url = asset.url;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
       if (!isAllowedUpdateUrl(url, 'download')) throw new Error('The download went to an address SKAZ doesn’t trust.');
-      const res = await this.deps.fetch(url, { redirect: 'manual', headers: { 'User-Agent': `SKAZ/${this.deps.version}` } });
+      const res = await this.deps.fetch(url, { redirect: 'manual', signal, headers: { 'User-Agent': `SKAZ/${this.deps.version}` } });
       if (res.status >= 300 && res.status < 400) {
         const next = res.headers.get('location');
         if (!next) throw new Error('The download was redirected nowhere.');
@@ -284,18 +289,30 @@ export class Updater {
     if (!release || this.busy || !['available', 'failed'].includes(this.state.phase)) return this.snapshot;
     this.busy = true;
     const folder = this.deps.downloadDir(release.version);
+    const abort = new AbortController();
+    this.abort = abort;
+    let lastBytes = this.deps.now().getTime();
+    const stall = setInterval(() => {
+      if (this.deps.now().getTime() - lastBytes >= STALL_MS) {
+        abort.abort(new Error('The download stopped receiving data for a minute. Check the connection and try again.'));
+      }
+    }, 5_000);
+    stall.unref?.();
     try {
       if (!release.sums) throw new Error('The release has no SHA256SUMS.txt, so the download can’t be checked. Not installing.');
       this.set({ phase: 'downloading', progress: 0, error: null });
-      const sumsBytes = await this.download(release.sums, `${folder}/${SUMS_NAME}`, () => undefined);
+      const sumsBytes = await this.download(release.sums, `${folder}/${SUMS_NAME}`, () => { lastBytes = this.deps.now().getTime(); }, abort.signal);
       if (sumsBytes > MAX_SUMS_BYTES) throw new Error('SHA256SUMS.txt is unexpectedly large. Not installing.');
       let received = 0;
       const dmgPath = `${folder}/${release.dmg.name}`;
       const size = await this.download(release.dmg, dmgPath, (bytes) => {
+        lastBytes = this.deps.now().getTime();
+        if (abort.signal.aborted) throw abort.signal.reason instanceof Error ? abort.signal.reason : new Error(CANCELLED);
         received += bytes;
         if (received > release.dmg.size) throw new Error('The download is bigger than the release says. Not installing.');
         this.set({ progress: Math.min(1, received / release.dmg.size) });
-      });
+      }, abort.signal);
+      if (abort.signal.aborted) throw abort.signal.reason instanceof Error ? abort.signal.reason : new Error(CANCELLED);
       this.set({ phase: 'verifying', progress: 1 });
       if (size !== release.dmg.size) throw new Error('The download is incomplete (its size doesn’t match the release). Not installing.');
       const actual = (await this.deps.sha256(dmgPath)).toLowerCase();
@@ -308,10 +325,24 @@ export class Updater {
       this.set({ phase: 'ready', error: null });
     } catch (error) {
       this.downloaded = null;
-      this.set({ phase: 'failed', progress: null, error: error instanceof Error ? error.message : 'The update couldn’t be prepared.' });
+      const reason: unknown = abort.signal.aborted ? abort.signal.reason : error;
+      if (reason instanceof Error && reason.message === CANCELLED) {
+        // The user stopped it: back to "available", nothing to report.
+        this.set({ phase: 'available', progress: null, error: null });
+      } else {
+        this.set({ phase: 'failed', progress: null, error: reason instanceof Error ? reason.message : 'The update couldn’t be prepared.' });
+      }
     } finally {
+      clearInterval(stall);
+      if (this.abort === abort) this.abort = null;
       this.busy = false;
     }
+    return this.snapshot;
+  }
+
+  /** Stop a running download (M2). Verification and installing are not interrupted. */
+  cancel(): UpdateState {
+    if (this.state.phase === 'downloading') this.abort?.abort(new Error(CANCELLED));
     return this.snapshot;
   }
 

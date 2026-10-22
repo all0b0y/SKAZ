@@ -37,8 +37,8 @@
 .kb-cap__folder--warn { color: var(--kb-warn); font-weight: 600; }
 .kb-cap .kb-capsule__div { background: currentColor; opacity: 0.3; }
 .kb-cap .kb-icon { color: var(--kb-muted); }
-.kb-lvl { display: inline-flex; align-items: center; gap: 2px; height: 12px; }
-.kb-lvl i { display: block; width: 2.5px; border-radius: 2px; background: var(--kb-danger); }
+.kb-lvl { display: inline-flex; align-items: center; width: 36px; height: 14px; flex: none; }
+.kb-lvl .kb-fx-speech { width: 36px; height: 14px; }
 .kb-pzd { width: 8px; height: 8px; border-radius: 2px; background: var(--kb-warn); display: inline-block; flex: none; }
 .kb-cap__resume { height: 28px; }
 

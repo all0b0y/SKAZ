@@ -3,12 +3,15 @@ import type { KbDecisions, KbProblem, KbSpeechSettings } from '../../api/kb/type
 import type { EngineId, KeyProviderId } from '../api/names';
 import { KbApiError, errorText } from '../api/client';
 import { Banner, Button, Icon, Modal, Segmented, Switch } from '../ui';
-import { ENGINE_NAME, ENGINE_ORDER, agentOf } from '../state/agents';
+import { ENGINE_NAME, ENGINE_ORDER, agentOf, startingChoice } from '../state/agents';
+import { effortLabel } from '../composer/AgentPicker';
+import { EngineBadge } from '../ui/EngineBadge';
 import { HEALTH_TO_SECTION } from '../state/settings';
 import { useAgents, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import { AgentCard } from './AgentCard';
 import { LANGUAGES, languageName } from './Languages';
+import { modelName } from '../composer/modelCatalog';
 
 /** Visible, honest "not here yet" (no dummy buttons). */
 export function NotYet({ text = 'Not connected yet' }: { text?: string }) {
@@ -305,7 +308,10 @@ export function DefaultAgentRow({ label }: { label: string }) {
           if (!ready.has(v)) { show({ ok: false, error: `${ENGINE_NAME[v]} isn’t connected — set it up in Accounts & keys.` }); return; }
           show(await agents.getState().setDefault(v));
         }}
-        options={ENGINE_ORDER.map((e) => ({ value: e, label: ENGINE_NAME[e].replace(' Agent', ''), name: `${ENGINE_NAME[e]}${ready.has(e) ? '' : ' (not connected)'}` }))} />
+        options={ENGINE_ORDER.map((e) => ({
+          value: e, name: `${ENGINE_NAME[e]}${ready.has(e) ? '' : ' (not connected)'}`,
+          label: <span className="kb-seg__agent"><EngineBadge engine={e} size={16} />{ENGINE_NAME[e].replace(' Agent', '')}</span>,
+        }))} />
       {result}
     </>
   );
@@ -316,30 +322,19 @@ export function ChatModelRow() {
   const data = useAgents((s) => s.agents);
   if (!data) return <Reading />;
   const a = agentOf(data, data.default);
-  const model = a?.models.find((m) => m.id === a.current_model);
-  return <span className="kb-muted">{a?.name}: {model?.label ?? (a?.id === 'hermes' ? 'as set in Hermes' : 'agent default')} · change it in the message field</span>;
-}
-
-export function WikiModelRow({ label }: { label: string }) {
-  const { settings } = useServices();
-  const wiki = useSettings((s) => s.wiki);
-  const data = useAgents((s) => s.agents);
-  const [result, show] = useResult();
-  if (!wiki.value) return wiki.error ? <Failed error={wiki.error} retry={() => void settings.getState().loadWiki()} /> : <Reading />;
-  const value = wiki.value.wiki_engine ?? 'default';
+  // What a new chat starts with: the default agent's last choice (models screen v2).
+  const start = startingChoice(data, data.default);
+  const model = a?.models.find((m) => m.id === start.model);
+  // One line like the mock-up: the agent's mark, then its model and reasoning; the hint says where to change it.
   return (
-    <>
-      <Segmented<string> label={label} size="sm" value={value}
-        onChange={async (v) => {
-          const engine = v === 'default' ? null : (v as EngineId);
-          if (engine && agentOf(data, engine)?.state !== 'ready') { show({ ok: false, error: `${ENGINE_NAME[engine]} isn’t connected.` }); return; }
-          show(await settings.getState().updateWiki({ wiki_engine: engine }));
-        }}
-        options={[{ value: 'default', label: 'Default agent' }, ...ENGINE_ORDER.map((e) => ({ value: e, label: ENGINE_NAME[e].replace(' Agent', '') }))]} />
-      {result}
-    </>
+    <span className="kb-chatmodel" aria-label={`${a?.name ?? ''}: ${model ? modelName(model) : 'agent default'}`}>
+      <EngineBadge engine={data.default} size={16} />
+      <span>{model ? modelName(model) : (a?.id === 'hermes' ? 'As set in Hermes' : 'Agent default')}{model && start.effort ? ` · ${effortLabel(start.effort)}` : ''}</span>
+    </span>
   );
 }
+
+export { WikiModelNote, WikiModelRow } from './WikiModelRow';
 
 type Provider = KbDecisions['provider'];
 
@@ -540,6 +535,34 @@ export function WikiSwitchRow({ field, label }: { field: WikiFlag; label: string
       {result}
     </>
   );
+}
+
+// ---- Skills (0.3.1 H3) -------------------------------------------------------------------------
+
+/** One SKAZ skill on or off: sent at once; the answer carries the new status of every agent. */
+export function SkillSwitchRow({ skillId, label }: { skillId: string; label: string }) {
+  const { settings } = useServices();
+  const skills = useSettings((s) => s.skills);
+  const [result, show] = useResult();
+  const skill = skills.value?.skills.find((k) => k.id === skillId);
+  if (!skill) return skills.error ? <Failed error={skills.error} retry={() => void settings.getState().loadSkills()} /> : <Reading />;
+  return (
+    <>
+      <Switch label={label} checked={skill.enabled} onChange={async (v) => show(await settings.getState().setSkillEnabled(skillId, v))} />
+      {result}
+    </>
+  );
+}
+
+/** Whether this agent's answers carry the skill now: Loaded, the reason it isn't, or Off. */
+export function SkillEngineRow({ skillId, engine }: { skillId: string; engine: EngineId }) {
+  const { settings } = useServices();
+  const skills = useSettings((s) => s.skills);
+  const status = skills.value?.skills.find((k) => k.id === skillId)?.engines.find((e) => e.engine === engine);
+  if (!status) return skills.error ? <Failed error={skills.error} retry={() => void settings.getState().loadSkills()} /> : <Reading />;
+  if (status.state === 'loaded') return <span className="kb-status kb-status--ok"><Icon name="check" size={13} />Loaded</span>;
+  if (status.state === 'off') return <span className="kb-status kb-status--off">Off</span>;
+  return <span className="kb-status kb-status--warn"><Icon name="warning" size={13} />{status.reason ?? 'Not loaded'}</span>;
 }
 
 /** Background search for connections: switched on only after an explicit "Allow" (W2 §2.5). */

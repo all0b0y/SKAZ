@@ -4,6 +4,7 @@ import { copyToClipboard } from '../../lib/clipboard';
 import type { KbQuote } from '../../api/kb/types.gen';
 import { useServices } from '../state/context';
 import { Icon } from './Icon';
+import { useCopied } from './useCopied';
 
 /**
  * Shared text selection → "Ask / Add to question / Copy" (decision 21, item 3). Any element that
@@ -53,7 +54,7 @@ export function readSelectionQuote(selection: Selection | null): KbQuote | null 
 export function SelectionToolbar() {
   const { composer } = useServices();
   const [state, setState] = useState<{ quote: KbQuote; left: number; top: number } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied();
   const barRef = useRef<HTMLDivElement | null>(null);
 
   const update = useCallback(() => {

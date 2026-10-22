@@ -20,7 +20,7 @@ MODEL = "recognition_model"
 EFFORT = "recognition_effort"
 SAME_AS_WIKI = "same_as_wiki"
 OFF = "off"
-RecognitionEngine = Literal["same_as_wiki", "off", "codex", "claude_code", "hermes"]
+RecognitionEngine = Literal["same_as_wiki", "off", "codex", "claude_code", "hermes", "opencode"]
 CHOICES: tuple[str, ...] = (SAME_AS_WIKI, OFF, *ENGINE_IDS)
 #: A model id or an effort name as the agents list them (``gpt-5.5``, ``claude-opus-5-5``, ``high``).
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,99}$")

@@ -1,5 +1,6 @@
 /* Inter (UI, answers, wiki) and Unbounded 600/700 (headings). Local files only: the CSP
-   allows fonts from 'self', never from the network. OFL licences: public/licenses/.
+   allows fonts from 'self', never from the network. OFL licences: public/licenses/ (the icon libraries'
+   MIT/ISC notices are there too: AnimateIcons-MIT.txt).
    Unbounded cyrillic-ext is left out on purpose: those files are ~1 KB, Vite would inline them as
    data: URLs (blocked by font-src 'self'), and the rare glyphs fall back to Inter. */
 

@@ -68,6 +68,24 @@ class KbAddLink(_Request):
     to_wiki: bool | None = None
 
 
+class KbAddWebPage(_Request):
+    """W-3 "Add to wiki" for a web page (chat web sources, "+ Material")."""
+
+    url: str = Field(min_length=1, max_length=4096)
+    #: ``null`` = the Inbox.
+    folder_id: str | None = Field(default=None, min_length=1, max_length=64)
+    #: Add the saved page to the wiki (the button's meaning); ``false`` only keeps the snapshot.
+    to_wiki: bool = True
+
+
+class KbWebPageUnavailable(BaseModel):
+    """The 422 answer of ``POST /kb/materials/web`` when SKAZ can't save the page itself."""
+
+    #: Plain English: why, and "Save the page as PDF and import it."
+    detail: str
+    error_code: Literal["web_page_unavailable"]
+
+
 class KbClassifyLink(_Request):
     url: str = Field(min_length=1, max_length=4096)
     #: Ask the video tool for duration/availability (videos on supported hosts only).

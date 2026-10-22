@@ -13,7 +13,8 @@ import json
 from .engine import AgentTurn, TurnMessage
 from .prompting import untrusted_block
 
-_ENGINE_LABELS = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent"}
+_ENGINE_LABELS = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
+                  "opencode": "OpenCode"}
 
 
 def _speaker(message: TurnMessage) -> str:

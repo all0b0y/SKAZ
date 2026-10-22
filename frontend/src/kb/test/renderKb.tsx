@@ -7,8 +7,12 @@ import { createFakeBridge } from './fakeBridge';
 import type { FakeWorld } from './fakeKb';
 
 /** Render the whole new interface on a fake bridge over one world, with stored prefs seeded first. */
-export function renderKb(options: { world?: FakeWorld; prefs?: Partial<Prefs>; capture?: CaptureFactory | null; bridge?: Partial<KbBridge> } = {}) {
-  localStorage.clear();
+export function renderKb(options: {
+  world?: FakeWorld; prefs?: Partial<Prefs>; capture?: CaptureFactory | null; bridge?: Partial<KbBridge>;
+  /** Keep what the last render stored (a restart of the app), not a clean profile. */
+  keepStorage?: boolean;
+} = {}) {
+  if (!options.keepStorage) localStorage.clear();
   localStorage.setItem(PREFS_KEY, JSON.stringify({ onboardingDone: true, ...options.prefs }));
   const fake = createFakeBridge(options.world);
   // Host methods a test adds (macOS privacy state, system audio support, …) on the same bridge object.

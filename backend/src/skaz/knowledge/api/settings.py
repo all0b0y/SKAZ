@@ -1,4 +1,4 @@
-"""``/kb/settings/{health,keys,speech,privacy,about}``: the new settings over the existing stores (S3).
+"""``/kb/settings/{health,keys,speech,privacy,about,skills}``: settings over the existing stores (S3, H3).
 
 ``/kb/settings/wiki`` belongs to the ingest area (W1). Keys and speech choices
 are written through the legacy ``PUT /settings`` logic (same validation,
@@ -31,6 +31,9 @@ from ..settings.speech import (
     speech_settings,
     to_legacy,
 )
+from ..skills import SkazSkill, catalog
+from ..skills.settings import is_enabled, set_enabled
+from ..skills.status import engine_statuses
 from .schemas_settings import (
     KbAbout,
     KbKeyProvider,
@@ -46,6 +49,10 @@ from .schemas_settings import (
     KbProblemAction,
     KbSettingsHealth,
     KbSettingsSection,
+    KbSkill,
+    KbSkillEngine,
+    KbSkills,
+    KbSkillUpdate,
     KbSpeechSettings,
     KbSpeechSettingsUpdate,
 )
@@ -56,6 +63,7 @@ assert set(get_args(KbKeyProvider)) == set(get_args(KeyProvider))
 
 ProblemId = Annotated[str, Path(min_length=1, max_length=80, pattern=r"^[a-z0-9_-]+$")]
 ActionId = Annotated[str, Path(min_length=1, max_length=40, pattern=r"^[a-z0-9_]+$")]
+SkillId = Annotated[str, Path(min_length=1, max_length=40, pattern=r"^[a-z0-9-]+$")]
 
 
 def _http(error: KnowledgeError) -> HTTPException:
@@ -217,3 +225,36 @@ async def read_about() -> KbAbout:
     return KbAbout(version=info.version, build=info.build,
                    licenses=[KbLicense(name=item.name, license=item.license, url=item.url)
                              for item in info.licenses])
+
+
+# -- skills (0.3.1 H3) ------------------------------------------------------------------
+
+
+async def _skills(runtime: Runtime) -> KbSkills:
+    """SKAZ's own skills with the switch and, per agent, whether its turns carry the skill now."""
+    views = await runtime.kb_agents.registry.views()
+    settings = runtime.kb.settings
+
+    def view(item: SkazSkill, enabled: bool) -> KbSkill:
+        return KbSkill(id=item.id, name=item.name, version=item.version, license=item.license,
+                       source_url=item.source_url, enabled=enabled,
+                       engines=[KbSkillEngine(engine=status.engine, state=status.state, reason=status.reason)
+                                for status in engine_statuses(enabled, views)])
+
+    enabled = await disk_call(lambda: {item.id: is_enabled(settings, item.id) for item in catalog()})
+    return KbSkills(skills=[view(item, enabled[item.id]) for item in catalog()])
+
+
+@router.get("/skills")
+async def read_skills(runtime: RuntimeDep) -> KbSkills:
+    return await _skills(runtime)
+
+
+@router.put("/skills/{skill_id}")
+async def update_skill(skill_id: SkillId, body: KbSkillUpdate, runtime: RuntimeDep) -> KbSkills:
+    """Switch one SKAZ skill on or off. Applies from the next turn; running answers are not touched."""
+    try:
+        await disk_call(set_enabled, runtime.kb.settings, skill_id, body.enabled)
+    except KnowledgeError as error:
+        raise _http(error) from error
+    return await _skills(runtime)

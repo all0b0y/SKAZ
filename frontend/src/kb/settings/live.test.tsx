@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
@@ -75,10 +75,15 @@ describe('Live settings (package 2)', () => {
     expect(within(def).getByRole('alert')).toHaveTextContent('isn’t connected');
     await user.click(within(def).getByRole('radio', { name: 'Codex' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/agents/default', body: { engine: 'codex' } })));
-    expect(row(dialog, 'Chat')).toHaveTextContent('Codex: gpt-5.6-luna');
+    expect(row(dialog, 'Chat model')).toHaveTextContent('GPT-5.6-luna');
+    expect(row(dialog, 'Chat model').querySelector('.kb-srow__control [data-engine="codex"]')).not.toBeNull();
 
-    await user.click(within(row(dialog, 'Wiki pages and notes')).getByRole('radio', { name: 'Claude Code' }));
-    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/wiki', body: { wiki_engine: 'claude_code' } })));
+    // Models screen v2: the wiki model is one picker like the message field's.
+    await user.click(within(row(dialog, 'Wiki model')).getByRole('button', { name: /^Wiki model:/ }));
+    const menu = await screen.findByRole('menu', { name: 'Wiki model' });
+    await user.click(within(within(menu).getByRole('group', { name: 'Claude Code' })).getByRole('menuitemradio', { name: 'Opus 5.5' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/wiki',
+      body: { wiki_engine: 'claude_code', wiki_model: 'claude-opus-5-5', wiki_effort: 'medium' } })));
 
     await user.click(within(row(dialog, 'Wiki decisions')).getByRole('radio', { name: 'OpenRouter · Jev' }));
     const consent = await screen.findByRole('dialog', { name: 'Send decision questions to OpenRouter?' });
@@ -86,6 +91,27 @@ describe('Live settings (package 2)', () => {
     await user.click(within(consent).getByRole('button', { name: 'Allow and use' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ path: '/kb/decisions/provider', body: { provider: 'openrouter_jev', cloud_consent: true } })));
     expect(dialog).toHaveTextContent('never switches to another on its own');
+  });
+
+  it('a key saved in Accounts & keys counts at once in Models — no reopening Settings (0.3.1 fix)', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    world.keys.providers = world.keys.providers.map((p) => (p.id === 'openrouter' ? { ...p, configured: false, valid: null, checked_at: null } : p));
+    world.decisions = { ...world.decisions, provider: 'off', cloud_consent: false, openrouter_key: false };
+    renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: 'Models' }));
+    await user.click(await within(row(dialog, 'Wiki decisions')).findByRole('radio', { name: 'OpenRouter · Jev' }));
+    expect(within(row(dialog, 'Wiki decisions')).getByRole('alert')).toHaveTextContent('Add an OpenRouter key');
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const keyRow = await within(dialog).findByRole('group', { name: 'OpenRouter' });
+    await user.click(within(keyRow).getByRole('button', { name: 'Add key…' }));
+    await user.type(within(keyRow).getByLabelText('OpenRouter key'), 'sk-or-test');
+    await user.click(within(keyRow).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(within(keyRow).getByText('Key saved')).toBeInTheDocument());
+    await user.click(within(dialog).getByRole('button', { name: 'Models' }));
+    await user.click(await within(row(dialog, 'Wiki decisions')).findByRole('radio', { name: 'OpenRouter · Jev' }));
+    expect(await screen.findByRole('dialog', { name: 'Send decision questions to OpenRouter?' })).toBeInTheDocument();
   });
 
   it('Recording & speech and Wiki read and write the backend; background connections ask first; "Find now" starts a job', async () => {
@@ -196,6 +222,22 @@ describe('Live settings (package 2)', () => {
     expect(await within(hermes).findByRole('status')).toHaveTextContent('Checking…');
     expect(within(hermes).getByLabelText('Install log')).toHaveTextContent('Checking Hermes Agent…');
   });
+
+  it('Hermes that asks for its own repair (H3): Repair runs it, never Update or Reinstall', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    const hermesAgent = world.agents.agents.find((a) => a.id === 'hermes')!;
+    Object.assign(hermesAgent, { state: 'unavailable', installed: true, version: null, action: 'repair',
+      reason: "Hermes Agent has to set up its dependencies for SKAZ's own Hermes folder once (a download that can take a few minutes). Press Repair to start it." });
+    const { fake } = renderKb({ world });
+    const dialog = await openSettings();
+    await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
+    const hermes = row(dialog, 'Hermes Agent');
+    expect(within(hermes).queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+    await user.click(within(hermes).getByRole('button', { name: 'Repair' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/hermes/install', body: { action: 'repair' } })));
+    expect(await within(hermes).findByRole('status')).toHaveTextContent('Repairing…');
+  });
 });
 
 describe('First launch, step "Agent" (v21)', () => {
@@ -215,9 +257,13 @@ describe('First launch, step "Agent" (v21)', () => {
     // Codex sign-in needs the ChatGPT privacy consent first.
     const codex = byEngine('codex');
     await user.click(within(codex).getByRole('checkbox'));
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null);
     await user.click(within(codex).getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ path: '/kb/agents/codex/login', body: { consent: true } })));
-    expect(await within(codex).findByText(/sign-in opened in Terminal/)).toBeInTheDocument();
+    // Accounts & keys v3: the sign-in page opens at once and SKAZ checks as soon as Codex says it is done.
+    expect(opened).toHaveBeenCalledWith('https://auth.openai.com/authorize?fake=1', '_blank', 'noopener');
+    expect(await within(codex).findByText('Signed in. Codex is connected.')).toBeInTheDocument();
+    opened.mockRestore();
 
     await user.click(within(dialog).getByRole('button', { name: 'Next' }));
     expect(within(dialog).getByRole('heading', { name: 'How should speech be recognised?' })).toBeInTheDocument();

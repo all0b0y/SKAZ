@@ -8,6 +8,9 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
   no administrator rights. Re-running it installs the latest version (update).
 * Codex CLI — https://github.com/openai/codex (README) and
   https://developers.openai.com/codex/cli: ``curl -fsSL https://chatgpt.com/codex/install.sh | sh``.
+* OpenCode — https://opencode.ai/docs/ ("Install"): ``curl -fsSL https://opencode.ai/install | bash``
+  (installs to ``~/.opencode/bin/opencode``, checked on 2026-10-21 against the installed 1.17.18);
+  update: ``opencode upgrade`` (``opencode --help``).
 * Hermes Agent — https://hermes-agent.nousresearch.com/docs/getting-started/installation:
   ``curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`` with
   ``--non-interactive`` (skips the stages that need input; setup is done later
@@ -37,7 +40,7 @@ from typing import Literal
 
 from ..agents.engine import EngineId
 
-Action = Literal["install", "update", "first_check"]
+Action = Literal["install", "update", "first_check", "repair"]
 CHECKED_ON = "2026-10-15"
 
 
@@ -64,6 +67,8 @@ class Recipe:
     checked_on: str = CHECKED_ON
     #: SKAZ starts the agent only after a one-time check (``first_check`` action; Hermes only).
     first_check: bool = False
+    #: The agent has its own repair command (``repair`` action; Hermes only).
+    repair: bool = False
 
 
 def _shell(command: str) -> tuple[str, ...]:
@@ -73,6 +78,7 @@ def _shell(command: str) -> tuple[str, ...]:
 
 CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash"
 CODEX_INSTALL = "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+OPENCODE_INSTALL = "curl -fsSL https://opencode.ai/install | bash"
 HERMES_INSTALL = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive"
 HERMES_ACP_EXTRA = ("{install_dir}/scripts/run-in-hermes-env", "python", "-c",
                     "import pm; pm.sync_venv(['acp'], explicit=True)")
@@ -86,6 +92,12 @@ def _codex(action: Action) -> tuple[Step, ...]:
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
 
 
+def _opencode(action: Action) -> tuple[Step, ...]:
+    if action == "update":  # OpenCode's own upgrade of the install it made (``opencode upgrade``)
+        return (Step("Update OpenCode", ("{binary}", "upgrade")),)
+    return (Step("Run the official OpenCode installer", _shell(OPENCODE_INSTALL)),)
+
+
 #: SKAZ's own Hermes folder and policy on the user's own tool store (review C1,
 #: ``agents/hermes_launchers.py``): without ``HERMES_RUNTIME_DIR`` Hermes would build a store
 #: in SKAZ's folder and re-point the user's launcher.
@@ -93,11 +105,17 @@ SKAZ_HERMES_ENV = (("HERMES_HOME", "{hermes_home}"), ("HERMES_MANAGED_DIR", "{he
                    ("HERMES_RUNTIME_DIR", "{hermes_runtime}"))
 HERMES_FIRST_CHECK = Step("Check that Hermes Agent runs with SKAZ's own Hermes folder",
                           ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV)
+#: Hermes keeps its dependencies per data folder (``HERMES_HOME``); for SKAZ's own folder it may have
+#: none yet, and its launcher then asks for ``hermes pm repair`` — Hermes' own fix, run for that folder.
+HERMES_REPAIR = Step("Repair Hermes Agent for SKAZ's own Hermes folder", ("{binary}", "pm", "repair"),
+                     env=SKAZ_HERMES_ENV)
 
 
 def _hermes(action: Action) -> tuple[Step, ...]:
     if action == "first_check":
         return (HERMES_FIRST_CHECK,)
+    if action == "repair":
+        return (HERMES_REPAIR, Step("Check ACP support", ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV))
     first = (Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL)) if action == "install"
              else Step("Update Hermes Agent", ("{binary}", "update")))
     return (
@@ -115,5 +133,7 @@ RECIPES: dict[EngineId, Recipe] = {
     "hermes": Recipe("hermes", "Hermes Agent", "hermes",
                      "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
                      "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", _hermes,
-                     first_check=True),
+                     first_check=True, repair=True),
+    "opencode": Recipe("opencode", "OpenCode", "opencode", "https://opencode.ai/docs/", OPENCODE_INSTALL,
+                       _opencode, checked_on="2026-10-21"),
 }

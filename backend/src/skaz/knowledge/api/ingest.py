@@ -1,6 +1,7 @@
 """``/kb/materials/{id}/ingest``, ``/kb/jobs``, ``/kb/settings/wiki`` (area W1)."""
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,28 +29,44 @@ def job_view(record: JobRecord) -> KbJob:
         "id": record.id, "kind": record.kind, "material_id": record.material_id, "state": record.state,
         "step": record.step, "label": record.label, "error": record.error,
         "error_code": record.error_code, "can_retry": record.can_retry,
+        "execution": asdict(record.execution) if record.execution is not None else None,
         "progress": KbJobProgress(**{name: counters.get(name, 0) for name in KbJobProgress.model_fields}),
         "journal": [KbJobLogEntry(at=entry.at, message=entry.message) for entry in record.journal],
         "created_at": record.created_at, "updated_at": record.updated_at,
+        "step_started_at": record.step_started_at,
     })
 
 
 def settings_view(settings: WikiSettings) -> KbWikiSettings:
     return KbWikiSettings.model_validate({
         "wiki_language": settings.language, "wiki_language_chosen": settings.language_chosen,
-        "wiki_engine": settings.engine, "auto_add_files_links": settings.auto_add_files_links,
+        "wiki_engine": settings.engine, "wiki_model": settings.model, "wiki_effort": settings.effort,
+        "wiki_remembered": {engine: {"model": model, "effort": effort}
+                            for engine, (model, effort) in settings.remembered.items()},
+        "auto_add_files_links": settings.auto_add_files_links,
         "auto_add_text": settings.auto_add_text, "background_connections": settings.background_connections,
         "auto_corrections": settings.auto_corrections,
+        "wiki_budget_characters": settings.budget,
     })
 
 
 @router.post("/kb/materials/{material_id}/ingest", status_code=202)
 async def request_ingest(material_id: str, ingest: IngestDep) -> KbJob:
-    """Start adding the material to the wiki (or retry). 409 while a job for it is running."""
+    """Queue the material for the wiki (or retry). 409 while a job for it is queued or running.
+
+    C1-d Continue: a material paused at its wiki budget continues from its checkpoint; when only
+    its follow-up work (overview, connections) paused, just that work runs again.
+    """
     try:
-        return job_view(await ingest.request_ingest(material_id))
+        return job_view(await ingest.request_from_user(material_id))
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+
+@router.post("/kb/jobs/retry-failed")
+async def retry_failed(ingest: IngestDep) -> list[KbJob]:
+    """Queue again every material whose latest wiki job failed or was interrupted."""
+    return [job_view(record) for record in await ingest.retry_failed()]
 
 
 @router.get("/kb/jobs")
@@ -81,7 +98,11 @@ async def update_wiki_settings(body: KbWikiSettingsUpdate, ingest: IngestDep) ->
     settings = await kb_call(
         ingest.update_settings, language=body.wiki_language, engine=body.wiki_engine,
         clear_engine="wiki_engine" in fields and body.wiki_engine is None,
+        model=body.wiki_model, effort=body.wiki_effort,
+        clear_model="wiki_model" in fields and body.wiki_model is None,
+        clear_effort="wiki_effort" in fields and body.wiki_effort is None,
         auto_add_files_links=body.auto_add_files_links, auto_add_text=body.auto_add_text,
         background_connections=body.background_connections, auto_corrections=body.auto_corrections,
+        budget=body.wiki_budget_characters,
     )
     return settings_view(settings)

@@ -8,7 +8,7 @@ export interface MentionOption {
   ref: KbRef;
   icon: IconName;
   meta: string;
-  group: 'Wiki' | 'Materials' | 'Chats';
+  group: 'Decks' | 'Tests' | 'Wiki' | 'Materials' | 'Chats';
 }
 
 const PAGE_META: Record<string, { icon: IconName; meta: string }> = {
@@ -16,16 +16,26 @@ const PAGE_META: Record<string, { icon: IconName; meta: string }> = {
   note: { icon: 'note', meta: 'notes' },
   analysis: { icon: 'analysis', meta: 'analysis' },
   folder: { icon: 'folder', meta: 'folder overview' },
+  deck: { icon: 'deck', meta: 'deck' },
+  test: { icon: 'test', meta: 'test' },
 };
 
-/** Flatten `/kb/mentions` into one ordered list (Wiki · Materials · Chats), the keyboard order. */
+const PAGE_GROUP: Record<string, MentionOption['group']> = { deck: 'Decks', test: 'Tests' };
+const GROUP_ORDER: ReadonlyArray<MentionOption['group']> = ['Decks', 'Tests', 'Wiki'];
+
+/**
+ * Flatten `/kb/mentions` into one ordered list, the keyboard order: decks and tests first (0.3.1 S12:
+ * "@deck, let's review"), then Wiki · Materials · Chats.
+ */
 export function mentionOptions(res: KbMentions | null,
   material: (id: string) => { icon: IconName; folder: string } | undefined = () => undefined): MentionOption[] {
   if (!res) return [];
+  const pages = res.pages.map((p): MentionOption => ({
+    ref: { type: 'page', id: p.id, title: p.title }, icon: PAGE_META[p.kind]?.icon ?? 'wiki', meta: PAGE_META[p.kind]?.meta ?? 'page',
+    group: PAGE_GROUP[p.kind] ?? 'Wiki',
+  }));
   return [
-    ...res.pages.map((p): MentionOption => ({
-      ref: { type: 'page', id: p.id, title: p.title }, icon: PAGE_META[p.kind]?.icon ?? 'wiki', meta: PAGE_META[p.kind]?.meta ?? 'page', group: 'Wiki',
-    })),
+    ...GROUP_ORDER.flatMap((group) => pages.filter((o) => o.group === group)),
     ...res.materials.map((m): MentionOption => {
       const known = material(m.id);
       return { ref: m, icon: known?.icon ?? 'pdf', meta: known?.folder ?? 'material', group: 'Materials' };

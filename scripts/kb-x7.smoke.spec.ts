@@ -203,38 +203,16 @@ for (const theme of THEMES) {
     await check(`rail-focus-${theme}`, search, 'Search⌘K');
   });
 
-  test(`SKAZ wordmark in the rail above Search (v44 A) — ${theme}`, async () => {
+  test(`rail without a wordmark; a short window keeps the icons — ${theme}`, async () => {
     await open(theme);
     await page.mouse.move(700, 400);
     const rail = page.getByRole('navigation', { name: 'Sections' });
-    const mark = rail.locator('.kb-rail__wordmark');
-    await expect(mark).toBeVisible();
-    await page.evaluate(() => document.fonts.ready);
-    const geo = await mark.evaluate((el) => {
-      const s = getComputedStyle(el);
-      const r = el.getBoundingClientRect();
-      const search = document.querySelector('[data-section="search"]')!.getBoundingClientRect();
-      const bell = document.querySelector('[data-section="notifications"]')!.getBoundingClientRect();
-      return {
-        writing: s.writingMode, family: s.fontFamily, weight: s.fontWeight, select: s.userSelect,
-        gapToSearch: search.top - r.bottom, clearOfBell: r.top - bell.bottom, width: r.width, height: r.height,
-      };
-    });
-    expect(geo.writing).toBe('vertical-rl');
-    expect(geo.family).toContain('SKAZ Unbounded');
-    expect(geo.weight).toBe('700');
-    expect(geo.select).toBe('none');
-    expect(geo.gapToSearch).toBeGreaterThanOrEqual(4);
-    expect(geo.gapToSearch).toBeLessThanOrEqual(24);
-    expect(geo.clearOfBell).toBeGreaterThan(0);
-    await page.screenshot({ path: path.join(shots, `rail-wordmark-${theme}.png`), clip: { x: 0, y: 0, width: 360, height: 860 } });
-    // A short window: the wordmark leaves, the icons keep their size and nothing overlaps.
+    await expect(rail.locator('.kb-rail__wordmark')).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 330 });
-    await expect(mark).toBeHidden();
     const items = await rail.locator('.kb-rail__item').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).map((r) => ({ h: r.height, top: r.top, bottom: r.bottom })));
     for (const it of items) expect(it.h).toBe(36);
     for (let i = 1; i < items.length; i++) expect(items[i]!.top).toBeGreaterThanOrEqual(items[i - 1]!.bottom);
-    await page.screenshot({ path: path.join(shots, `rail-wordmark-short-${theme}.png`), clip: { x: 0, y: 0, width: 360, height: 330 } });
+    await page.screenshot({ path: path.join(shots, `rail-short-${theme}.png`), clip: { x: 0, y: 0, width: 360, height: 330 } });
   });
 
   test(`material pages read as documents — 1440 ${theme}`, async () => {

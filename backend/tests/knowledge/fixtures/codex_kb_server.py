@@ -72,6 +72,16 @@ def start_turn() -> None:
         send({"id": "tool-1", "method": "item/tool/call", "params": {
             "threadId": THREAD, "turnId": TURN, "callId": "call-1", "namespace": None,
             "tool": name, "arguments": arguments}})
+    elif mode == "wait_tool":  # a SKAZ tool that waits for the user (0.3.1 P: the deadline stands still)
+        send({"id": "tool-1", "method": "item/tool/call", "params": {
+            "threadId": THREAD, "turnId": TURN, "callId": "call-1", "namespace": None,
+            "tool": "skaz_test_wait", "arguments": {}}})
+    elif mode == "approval":  # despite approvalPolicy never (0.3.1 A-1)
+        # Shape: CommandExecutionRequestApprovalParams.json of codex-cli 0.160.0.
+        send({"id": "approval-1", "method": "item/commandExecution/requestApproval", "params": {
+            "threadId": THREAD, "turnId": TURN, "itemId": "cmd-1", "startedAtMs": 1,
+            "command": "rm -rf ~/secret",
+            "cwd": "/tmp", "reason": "PRIVATE REASON"}})
     elif mode == "ingest":
         send({"id": "tool-x", "method": "item/tool/call", "params": {
             "threadId": THREAD, "turnId": TURN, "callId": "call-x", "namespace": None,
@@ -93,6 +103,16 @@ def start_turn() -> None:
         event("item/agentMessage/delta", itemId="h1", delta="Working")
     elif mode == "crash":
         sys.exit(9)
+    elif mode == "websearch":  # W-3b: the clean search run (ThreadItem webSearch of codex-cli 0.160.0)
+        event("item/started", item={"id": "w1", "type": "webSearch", "query": "", "action": None})
+        event("item/completed", item={"id": "w1", "type": "webSearch", "query": "entropy definition",
+                                      "action": {"type": "search", "query": "entropy definition"},
+                                      "results": [{"title": "Entropy — Britannica",
+                                                   "url": "https://www.britannica.com/science/entropy"}]})
+        answer("s1", "- [Entropy — Wikipedia](https://en.wikipedia.org/wiki/Entropy)\n"
+                     "- Entropy (Stanford Encyclopedia): https://plato.stanford.edu/entries/entropy/\n"
+                     "- [Bad](javascript:alert(1))")
+        complete()
 
 
 for line in sys.stdin:
@@ -103,6 +123,9 @@ for line in sys.stdin:
         if message.get("id") == "tool-1":
             ok = message["result"]["success"]
             answer("t1", f"Tool answered: {ok}")
+            complete()
+        elif message.get("id") == "approval-1":
+            answer("t3", f"Refused: {message['error']['message']}")
             complete()
         elif message.get("id") == "tool-x":
             answer("t2", "No tools")

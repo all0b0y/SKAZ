@@ -44,8 +44,9 @@ function auditExtras(): Extra[] {
     const size = parseFloat(getComputedStyle(el).fontSize);
     if (size < 12 && !el.closest('.kb-badge, .kb-count, .kb-cn')) out.push({ kind: 'small-text', selector: describe(el), detail: `${size}px “${el.textContent!.trim().slice(0, 30)}”` });
   }
-  for (const svg of Array.from(document.querySelectorAll('svg.kb-icon'))) {
-    if (visible(svg) && svg.childElementCount === 0) out.push({ kind: 'empty-icon', selector: describe(svg), detail: svg.getAttribute('data-icon') ?? '' });
+  // Static Lucide icons are `svg.kb-icon`; animated-icons glyphs are a `div.kb-icon--lib` around their svg.
+  for (const svg of Array.from(document.querySelectorAll('svg.kb-icon, .kb-icon--lib > svg'))) {
+    if (visible(svg) && svg.childElementCount === 0) out.push({ kind: 'empty-icon', selector: describe(svg), detail: svg.closest('[data-icon]')?.getAttribute('data-icon') ?? '' });
   }
   const expectH = (sel: string, h: number) => {
     for (const el of Array.from(document.querySelectorAll(sel))) {
@@ -182,7 +183,7 @@ for (const theme of THEMES) {
       await page.getByTestId('agent-picker').click();
       await expect(page.getByRole('menu', { name: 'Agent and model' })).toBeVisible();
       await check(`engine-${tag}`);
-      await page.getByRole('menuitemradio', { name: 'gpt-5.6-luna', exact: true }).click();
+      await page.getByRole('menuitemradio', { name: 'GPT-5.6-luna', exact: true }).click();
       await expect(page.getByText('Switched to Codex')).toBeVisible();
       await check(`engine-switched-${tag}`);
     });

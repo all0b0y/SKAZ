@@ -1,0 +1,7 @@
+/*
+ * FX base (FX-EFFECTS-SPEC «Core module API»): every effect canvas is an FxCanvas with the `kb-fx`
+ * class. Imported once from styles/index.css; feature stylesheets only size and place their canvas.
+ */
+.kb-fx { display: block; }
+/* «Connecting nodes» is 84×16 css px wherever it is used (its backing store follows this box). */
+.kb-fx-connect { width: 84px; height: 16px; flex: none; }

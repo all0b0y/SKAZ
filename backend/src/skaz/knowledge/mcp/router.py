@@ -6,12 +6,18 @@ the app-wide ``local_only`` middleware like every other route.
 """
 from __future__ import annotations
 
-from typing import cast
+import asyncio
+import json
+from collections.abc import AsyncIterator, Coroutine
+from typing import Any, cast
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from .server import MAX_BODY_BYTES, McpServer
+from .server import MAX_BODY_BYTES, McpReply, McpServer
+
+#: Seconds between keep-alive comments on a call that waits for the user.
+KEEPALIVE_S = 20.0
 
 router = APIRouter(prefix="/kb/mcp", include_in_schema=False)
 
@@ -26,11 +32,36 @@ async def mcp_post(request: Request) -> Response:
         declared = request.headers.get("content-length")
         too_large = declared is not None and declared.isdigit() and int(declared) > MAX_BODY_BYTES
         body = b"" if too_large else await _bounded_body(request)
-        reply = await server.handle(headers=request.headers, body=body,
-                                    too_large=too_large or len(body) > MAX_BODY_BYTES)
+        too_large = too_large or len(body) > MAX_BODY_BYTES
+        if not too_large and server.waits_for_user(request.headers, body):
+            return StreamingResponse(_waiting(server.handle(headers=request.headers, body=body)),
+                                     media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-store"})
+        reply = await server.handle(headers=request.headers, body=body, too_large=too_large)
     if reply.body is None:
         return Response(status_code=reply.status, headers=reply.headers)
     return JSONResponse(reply.body, status_code=reply.status, headers=reply.headers)
+
+
+async def _waiting(reply: Coroutine[Any, Any, McpReply]) -> AsyncIterator[bytes]:
+    """The reply of a call that waits for the user, as one SSE message after keep-alive comments.
+
+    Hermes 0.22.1 reads its MCP HTTP stream with ``read=300.0`` s (``tools/mcp_tool_transport.py:571``):
+    a byte every :data:`KEEPALIVE_S` keeps a wait for Allow / Deny open. If the client goes away the
+    call is cancelled — the broker then records the request as cancelled.
+    """
+    task = asyncio.ensure_future(reply)
+    try:
+        while not task.done():
+            done, _pending = await asyncio.wait({task}, timeout=KEEPALIVE_S)
+            if not done:
+                yield b": waiting for the user\n\n"
+        body = task.result().body or {}
+        yield b"event: message\ndata: " + json.dumps(body, ensure_ascii=False).encode() + b"\n\n"
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def _bounded_body(request: Request) -> bytes:

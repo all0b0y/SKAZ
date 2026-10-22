@@ -68,7 +68,39 @@ class ToolPart:
     label: str
 
 
-Part = TextPart | CitePart | PagePart | ConnectionPart | ToolPart
+@dataclass(frozen=True)
+class PermissionPart:
+    """An agent's wiki change waiting for (or decided by) the user; the card reads the request by id."""
+
+    permission_id: str
+
+
+@dataclass(frozen=True)
+class QuestionPart:
+    """An agent's question to the user; the block reads the question by id."""
+
+    question_id: str
+
+
+@dataclass(frozen=True)
+class StudyPart:
+    """A deck or a test the agent made or showed (0.3.1 S5); the block reads the study block by id."""
+
+    study_id: str
+    #: Kind and title when the block was made (the history and previews read these).
+    kind: str = "deck"
+    title: str = ""
+
+
+@dataclass(frozen=True)
+class WebSearchPart:
+    """An agent's web search held for the user (W-2); the card reads the request by id."""
+
+    search_id: str
+
+
+Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
+        | WebSearchPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -83,6 +115,14 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "connection", "inference": part.inference, "page_id": part.page_id,
                 "sides": [{"folder_id": side.folder_id, "text": side.text, "material_id": side.material_id,
                            "seg": side.seg, "quote": side.quote} for side in part.sides]}
+    if isinstance(part, PermissionPart):
+        return {"type": "permission", "id": part.permission_id}
+    if isinstance(part, QuestionPart):
+        return {"type": "question", "id": part.question_id}
+    if isinstance(part, StudyPart):
+        return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
+    if isinstance(part, WebSearchPart):
+        return {"type": "web_search", "id": part.search_id}
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -102,6 +142,14 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return ConnectionPart(sides, str(data.get("inference", "")), _optional(data.get("page_id")))
     if kind == "tool":
         return ToolPart(str(data.get("name", "")), str(data.get("label", "")))
+    if kind == "permission":
+        return PermissionPart(str(data["id"]))
+    if kind == "question":
+        return QuestionPart(str(data["id"]))
+    if kind == "study":
+        return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
+    if kind == "web_search":
+        return WebSearchPart(str(data["id"]))
     return None
 
 
@@ -139,6 +187,8 @@ class OpenContext:
 
     page_id: str | None = None
     material_id: str | None = None
+    #: The deck or test block open now (0.3.1 W2 "Agent sees").
+    study_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,7 +208,8 @@ class MessageInput:
                         "block_id": quote.block_id, "seg": quote.seg, "message_id": quote.message_id}
                        for quote in self.quotes],
             "attachments": list(self.attachments),
-            "context": {"page_id": self.context.page_id, "material_id": self.context.material_id},
+            "context": {"page_id": self.context.page_id, "material_id": self.context.material_id,
+                        "study_id": self.context.study_id},
         }
 
     @classmethod
@@ -174,7 +225,8 @@ class MessageInput:
                                _optional(item.get("message_id")))
                          for item in data.get("quotes", [])),
             attachments=tuple(str(item) for item in data.get("attachments", [])),
-            context=OpenContext(_optional(context.get("page_id")), _optional(context.get("material_id"))),
+            context=OpenContext(_optional(context.get("page_id")), _optional(context.get("material_id")),
+                                _optional(context.get("study_id"))),
         )
 
 
@@ -216,6 +268,16 @@ class Message:
 
     def with_parts(self, parts: Sequence[Part]) -> Message:
         return replace(self, parts=tuple(parts))
+
+
+#: How SKAZ before 2026-10-21 recorded an effort change in the chat ("Effort set to high").
+_EFFORT_NOTE = "Effort set to "
+
+
+def is_effort_note(message: Message) -> bool:
+    """A stored record of an effort change: no longer shown — only agent and model changes are."""
+    return (message.role == "system" and len(message.parts) == 1 and isinstance(message.parts[0], TextPart)
+            and message.parts[0].text.startswith(_EFFORT_NOTE))
 
 
 @dataclass(frozen=True)

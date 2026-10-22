@@ -19,6 +19,7 @@ function host(initial: Partial<UpdateState>) {
     updateState: vi.fn(async () => state),
     checkForUpdates: vi.fn(async () => state),
     prepareUpdate: vi.fn(async () => state),
+    cancelUpdate: vi.fn(async () => { state = { ...state, phase: 'available', progress: null }; return state; }),
     installUpdate: vi.fn(async () => true),
     onUpdateState: vi.fn((l: (s: UpdateState) => void) => { listener = l; return () => { listener = null; }; }),
   };
@@ -58,6 +59,10 @@ describe('Settings → About → Updates (B20)', () => {
     h.push({ phase: 'downloading', progress: 0.42 });
     expect(await within(row).findByRole('progressbar', { name: 'Downloading the update' })).toHaveAttribute('aria-valuenow', '42');
     expect(within(row).queryByRole('button', { name: 'Check now' })).not.toBeInTheDocument();
+    // M2: a download can be stopped; it goes back to "available".
+    await user.click(within(row).getByRole('button', { name: 'Cancel' }));
+    expect(h.bridge.cancelUpdate).toHaveBeenCalled();
+    expect(await within(row).findByRole('button', { name: 'Update' })).toBeInTheDocument();
     h.push({ phase: 'ready', progress: 1 });
     const ask = await screen.findByRole('dialog', { name: 'SKAZ will close to update' });
     expect(h.bridge.installUpdate).not.toHaveBeenCalled();

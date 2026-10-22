@@ -17,10 +17,14 @@
   align-items: center;
   gap: 10px;
   padding: 0 12px 0 80px;
+  transition: padding-left 200ms ease;
   background: var(--kb-side);
   border-bottom: 1px solid var(--kb-line);
   -webkit-app-region: drag;
 }
+/* Full screen: no traffic lights, so the toggle moves to the edge (M-1). */
+html[data-full-screen] .kb-titlebar { padding-left: 12px; }
+@media (prefers-reduced-motion: reduce) { .kb-titlebar { transition: none; } }
 .kb-titlebar__group { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; min-width: 0; }
 .kb-titlebar__drag { flex: 1; min-width: 0; align-self: stretch; }
 
@@ -77,23 +81,6 @@
   padding-bottom: 10px;
   container-type: size;
 }
-/* Wordmark (v44 A): vertical, bottom-to-top, the text colour at 32 % in both themes. Decorative.
-   It lives in the flexible space and leaves when that space is too short for it — the icons are
-   never squeezed (the spacer may shrink to 0). */
-.kb-rail__wordmark {
-  font-family: var(--kb-font-display);
-  font-weight: 700;
-  font-size: 15px;
-  line-height: 1;
-  letter-spacing: 0.22em;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  color: color-mix(in srgb, var(--kb-text) 32%, transparent);
-  user-select: none;
-  pointer-events: none;
-  white-space: nowrap;
-}
-@container (max-height: 96px) { .kb-rail__wordmark { display: none; } }
 .kb-rail__item {
   position: relative;
   width: 36px;

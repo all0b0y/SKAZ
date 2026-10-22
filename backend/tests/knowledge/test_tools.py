@@ -41,7 +41,9 @@ def test_registry_declares_the_brief_set_with_strict_plain_schemas() -> None:
         assert set(schema["properties"]) == set(tool.args.model_fields), tool.name
         assert "anyOf" not in json.dumps(schema) and '"title"' not in json.dumps(schema).replace(
             '"title": {', "")
-        assert tool.description and tool.timeout_s > 0 and tool.max_output_bytes <= 60_000
+        # None: a tool that waits for the user (no SKAZ timeout).
+        assert tool.description and (tool.timeout_s is None or tool.timeout_s > 0)
+        assert tool.max_output_bytes <= 60_000
     assert "title" in TOOLS[1].input_schema["properties"]  # a property named title survives cleaning
 
 

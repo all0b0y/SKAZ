@@ -29,10 +29,11 @@ export function NoSpeech({ material, onDelete }: { material: KbMaterial; onDelet
   const what = material.kind === 'recording' ? 'recording' : 'file';
   return (
     <div className="kb-excl kb-nospeech" role="note" aria-label="No speech">
-      <p className="kb-excl__toggle">
+      {/* A div, not a p: the mic is a Hugeicons glyph whose root is a div. */}
+      <div className="kb-excl__toggle">
         <Icon name="mic" size={14} />
         <span>No speech was recognised in this {what}</span>
-      </p>
+      </div>
       {length !== null && length > 0 && <p className="kb-muted">Length {formatTime(length)}</p>}
       <p className="kb-muted">There is no text to read, ask about or add to the wiki. If nothing worth keeping was said, delete it.</p>
       <Button size="sm" variant="outline" icon="trash" onClick={onDelete}>Delete</Button>

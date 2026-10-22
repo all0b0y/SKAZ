@@ -157,6 +157,9 @@ def test_the_backend_deadline_fits_inside_the_electron_grace() -> None:
     assert grace_s == ELECTRON_GRACE_S
     # The knowledge part plus a margin for the rest of the shutdown (recordings, imports, the database).
     assert grace_s >= shutdown_module.DEADLINE_S + 1.0
+    # Uvicorn first waits for requests still in flight (bounded since decision 11), then the lifespan.
+    from skaz.__main__ import REQUESTS_GRACE_S
+    assert grace_s >= REQUESTS_GRACE_S + shutdown_module.DEADLINE_S + 0.5
 
 
 async def test_codex_stops_its_running_answers_together(kb_app: Any) -> None:

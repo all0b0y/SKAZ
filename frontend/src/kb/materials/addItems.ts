@@ -20,6 +20,8 @@ export interface LinkItem {
   id: string; type: 'link'; url: string; info: KbLinkInfo | null; classifying: boolean; error: string | null;
   /** Article with an embedded video: what to take (text / video / both). */
   mode: 'text' | 'video' | 'both';
+  /** W-3: a site link saved as the whole page (`POST /kb/materials/web`) instead of the article. */
+  page?: boolean;
 }
 export interface TextItem { id: string; type: 'text'; text: string }
 export type AddItem = FileItem | LinkItem | TextItem;
@@ -176,6 +178,11 @@ export async function submitItem(client: KbClient, item: AddItem, o: AddOptions)
   if (item.info?.kind === 'video') {
     const view = await client.call('POST /kb/imports', { body: { url: item.url, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
     return [{ materialId: view.material_id, ready: view.status === 'ready' }];
+  }
+  // W-3: the whole page as SKAZ fetched it, then the normal ingest (when the switch is on).
+  if (item.page && item.info?.kind === 'site' && !item.info.embedded_video) {
+    const material = await client.call('POST /kb/materials/web', { body: { url: item.url, folder_id: o.folderId, to_wiki: o.toWiki } });
+    return [fromSummary(material)];
   }
   const added = await client.call('POST /kb/materials/link', {
     body: { url: item.url, folder_id: o.folderId, to_wiki: o.toWiki, ...(item.info?.embedded_video ? { mode: item.mode } : {}) },

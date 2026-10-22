@@ -180,6 +180,14 @@ function hardenSession(): void {
   });
 }
 
+/** Tell the page whether its window is in full screen (no traffic lights then), now and on every change. */
+function reportFullScreen(win: BrowserWindow): void {
+  const send = (): void => { if (!win.webContents.isDestroyed()) win.webContents.send(CHANNELS.fullScreen, win.isFullScreen()); };
+  win.on('enter-full-screen', send);
+  win.on('leave-full-screen', send);
+  win.webContents.on('did-finish-load', send);
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -201,6 +209,7 @@ function createWindow(): void {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  reportFullScreen(mainWindow);
 
   // Block navigation away from the app and any new windows. Only hand safe
   // http/https links to the OS browser; never local/custom schemes from content.
@@ -243,7 +252,8 @@ function offerMoveToApplications(): boolean {
   if (!shouldOfferMoveToApplications({
     platform: process.platform,
     isPackaged: app.isPackaged,
-    isInApplicationsFolder: app.isInApplicationsFolder(),
+    // A macOS-only API: elsewhere it does not exist (and nothing is offered there).
+    isInApplicationsFolder: process.platform === 'darwin' && app.isInApplicationsFolder(),
     declinedForever: readDeclinedForever(userData),
     customUserData: app.commandLine.hasSwitch('user-data-dir'),
   })) return false;

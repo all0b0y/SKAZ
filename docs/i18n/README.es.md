@@ -17,9 +17,9 @@ Graba o añade una fuente · pregunta con citas exactas · una wiki que se manti
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="Recorrido por SKAZ: grabar una clase en una carpeta, preguntar sobre ella, abrir el momento citado, la página de la wiki, la búsqueda y el tema oscuro" width="880">
+<img src="../images/skaz-tour.webp" alt="Recorrido por SKAZ: grabar una clase, preguntar sobre ella con una nota al pie, permitir la edición de un agente, estudiar tarjetas hechas a partir de la clase" width="880">
 
-<sub>Recorrido del producto · perfil de demostración con datos preparados · <a href="../images/skaz-tour.mp4">Vídeo en Full HD (MP4, 23 s)</a></sub>
+<sub>Recorrido del producto · perfil de demostración con datos preparados · <a href="../images/skaz-tour.mp4">El recorrido completo en Full HD (MP4, 80 s)</a></sub>
 
 <br><br>
 
@@ -57,17 +57,22 @@ La IA puede equivocarse. Las citas ayudan a comprobar una respuesta; no garantiz
 <td width="50%"><img src="../images/tour-ask.webp" alt="Una respuesta con notas al pie"><br><b>Respuestas con citas</b><br>Cada afirmación lleva una nota al pie. Ábrela y SKAZ salta a la cita en la fuente.</td>
 </tr>
 <tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="Una página de concepto de la wiki"><br><b>Una wiki que se escribe sola</b><br>Páginas de conceptos y apuntes creados a partir de tus fuentes, marcando qué es cita y qué dedujo el agente.</td>
-<td width="50%"><img src="../images/tour-search.webp" alt="Buscar en todo con ⌘K"><br><b>Busca en todo</b><br>⌘K encuentra páginas de la wiki, materiales y chats, o le pasa la pregunta al agente.</td>
+<td width="50%"><img src="../images/tour-edit.webp" alt="Un agente pide permiso antes de editar una página de la wiki"><br><b>Los agentes preguntan primero</b><br>Un agente cambia la wiki solo a través de SKAZ, y ves el cambio antes de que ocurra: Allow o Deny.</td>
+<td width="50%"><img src="../images/tour-cards.webp" alt="Tarjetas y un test hechos a partir de una clase"><br><b>Tarjetas y tests</b><br>Pide tarjetas o un test sobre una clase. Cada respuesta se apoya en una cita comprobada; las tarjetas vuelven con repetición espaciada.</td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="../images/tour-theme.webp" alt="Cambiar al tema oscuro" width="50%"><br><b>Claro y oscuro</b><br>Sigue a tu Mac, o elige un tema en <b>Settings → Appearance</b>.</td>
+<td width="50%"><img src="../images/tour-web.webp" alt="Aprobar una búsqueda web y añadir una página encontrada a la biblioteca"><br><b>Búsqueda web, con tu permiso</b><br>Ves la consulta exacta antes de enviarla. Una página encontrada entra en la biblioteca con un clic.</td>
+<td width="50%"><img src="../images/tour-diagram.webp" alt="Un diagrama en una respuesta, abierto a tamaño completo"><br><b>Diagramas</b><br>Las respuestas pueden dibujar un diagrama, generado en tu Mac. Ábrelo a tamaño completo y amplía.</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/tour-wiki.webp" alt="Una página de concepto de la wiki y sus conexiones"><br><b>Una wiki que se escribe sola</b><br>Páginas de conceptos de todas tus fuentes, conectadas entre sí, marcadas con lo que es cita y lo que dedujo el agente.</td>
+<td width="50%"><img src="../images/tour-theme.webp" alt="Cambiar al tema oscuro"><br><b>Claro y oscuro</b><br>Sigue a tu Mac, o elige un tema en <b>Settings → Appearance</b>.</td>
 </tr>
 </table>
 
-<sub>Creado a partir de la propia interfaz de SKAZ 0.3.0 (su HTML y CSS) con <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
-La clase, la respuesta y las páginas de la wiki son datos de demostración preparados, no
-reconocimiento de voz real ni resultados reales de IA.</sub>
+<sub>Creado a partir de la propia interfaz de SKAZ 0.3.1 (su HTML y CSS) con <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
+La clase, las diapositivas, las respuestas, las tarjetas y los resultados web son datos de demostración
+preparados, no reconocimiento de voz, resultados de IA ni búsquedas reales.</sub>
 
 ## ✨ Funciones
 
@@ -76,8 +81,10 @@ reconocimiento de voz real ni resultados reales de IA.</sub>
 | 🎙️ **Grabación en vivo** | Micrófono y, si quieres, el sonido del Mac (Zoom, vídeos; requiere macOS 14.2+ y permiso del sistema). Reconocimiento con **Soniox** (en la nube y en streaming, separación de hablantes, traducción) o **Whisper en este ordenador** (funciona sin conexión). SKAZ nunca cambia de servicio sin avisar. |
 | 📚 **Cualquier fuente** | PDF, documentos, archivos de texto y Markdown, audio y vídeo, artículos web (limpios), texto pegado de cualquier longitud y enlaces de vídeo de YouTube, VK Video, RuTube y Vimeo. Usa solo material que tengas permiso para procesar. |
 | 🧠 **Una wiki viva** | Apuntes de cada fuente, una página por concepto para todas las carpetas y análisis guardados. Cada afirmación está marcada: cita de una fuente, conexión deducida por el agente o explicación del agente. Cuando las fuentes no coinciden, se muestran ambas versiones y decides tú. |
-| 💬 **Chats con notas al pie** | Pregunta sobre toda la biblioteca; el agente sabe qué está abierto y si hay una grabación en curso. Las notas abren el momento exacto de una grabación o la página de un documento. Señala una página, un material o un chat con **@**. |
-| 🤖 **Tu agente** | **Codex**, **Claude Code** o **Hermes Agent**, con tu propia suscripción o clave; SKAZ puede instalarlos por ti. Los agentes leen la biblioteca con herramientas de SKAZ de solo lectura. Las pequeñas decisiones de organización pueden ir a un modelo local o a OpenRouter. |
+| 💬 **Chats con notas al pie** | Pregunta sobre toda la biblioteca; el agente sabe qué está abierto y si hay una grabación en curso. Las notas abren el momento exacto de una grabación o la página de un documento. Señala una página, un material o un chat con **@**. Las respuestas pueden incluir diagramas con un visor a tamaño completo. |
+| 🃏 **Tarjetas y tests** | Pide tarjetas o un test sobre una página, un material o un chat. Cada respuesta correcta se apoya en una cita comprobada. Las tarjetas se repasan con repetición espaciada FSRS; las barajas y los tests se pueden guardar en la wiki. |
+| 🌐 **Búsqueda web, con tu permiso** | Antes de que nada salga de tu Mac ves la consulta exacta y eliges Allow once, Allow in this chat o Deny. Solo se envía la consulta. Una página encontrada se puede añadir a la biblioteca con un clic. |
+| 🤖 **Tu agente** | **Codex**, **Claude Code**, **Hermes Agent** u **OpenCode**, con tu propia suscripción o clave; SKAZ puede instalarlos por ti. Los agentes leen la biblioteca con herramientas de SKAZ y cambian páginas de la wiki solo cuando lo permites, con Undo; tus propias notas nunca se tocan. Elige un modelo por chat y marca tus favoritos con una estrella. Las pequeñas decisiones de organización pueden ir a un modelo local o a OpenRouter. |
 | ✍️ **Corrección del reconocimiento** | Una revisión opcional encuentra posibles errores de reconocimiento, corrige los seguros y solo resalta los dudosos. Toda corrección se puede deshacer. |
 | 🗂️ **Archivos normales** | La biblioteca es una carpeta de archivos `.md`. Ábrela en **Obsidian** o exporta todo a Markdown con las fuentes como notas al pie. Tus propias ediciones de la wiki están protegidas frente al agente. |
 | 🔄 **Actualizaciones** | SKAZ consulta las versiones de GitHub al iniciar y una vez al día e instala una actualización verificada desde **Settings → About**. |
@@ -112,7 +119,7 @@ No desactives las protecciones de macOS de forma global.
 
 ### 🚀 Primer arranque
 
-1. **Agente.** Elige Codex, Claude Code o Hermes Agent e inicia sesión con tu propia cuenta.
+1. **Agente.** Elige Codex, Claude Code, Hermes Agent u OpenCode e inicia sesión con tu propia cuenta.
    SKAZ puede instalar el agente por ti. Se aplican las condiciones, límites y cargos del proveedor.
 2. **Voz.** Añade una clave de Soniox y permite enviar audio a Soniox, o elige **Whisper on this
    computer** y descarga un modelo de voz (se muestra su tamaño antes; no hace falta clave).
@@ -135,6 +142,7 @@ Todo se puede cambiar después en **Settings**.
 | Audio en vivo | No se guarda como archivo para reproducirlo. Puede usarse audio temporal para procesar o recuperar. |
 | Reconocimiento de voz | **Soniox:** el audio se envía tras tu consentimiento, que puedes retirar en cualquier momento. **Whisper en este ordenador:** el audio no sale de tu Mac. |
 | Agente | Tu pregunta y las partes de la biblioteca que lee van al agente que elegiste; se aplican sus políticas de conservación y entrenamiento. |
+| Búsqueda web | Solo una consulta que aprobaste, enviada a la búsqueda del agente indicado en la tarjeta: sin historial del chat ni texto de la biblioteca. Añadir una página encontrada hace una sola petición a esa dirección. |
 | Claves | Un archivo local cifrado en la carpeta de la app SKAZ, con su clave de cifrado al lado. Los permisos de archivo son la barrera principal, no una protección frente a procesos que se ejecutan con tu usuario. |
 | Registro de actividad | Sin texto de las conversaciones ni claves. |
 | Backend | Python, solo loopback, con un token nuevo en cada arranque. |
@@ -150,8 +158,8 @@ Consulta la [política de seguridad](../../SECURITY.md) para limitaciones y el c
 Micrófono / audio del sistema / archivos / enlaces → Electron → Python ── Soniox | Whisper en este Mac
                                                       ↓          ↓
                                                   React UI   Biblioteca: Materials/*.md, Wiki/*.md
-                                                                 ↕  herramientas de SKAZ de solo lectura
-                                                      Codex | Claude Code | Hermes Agent
+                                                                 ↕  herramientas de SKAZ (cambios solo con tu permiso)
+                                                      Codex | Claude Code | Hermes Agent | OpenCode
 ```
 
 | Capa | Tecnología |

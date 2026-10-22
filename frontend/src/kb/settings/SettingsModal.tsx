@@ -1,22 +1,27 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { NewCardsRow } from '../study/StudySettingsRow';
 import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
-import { usePrefs, useLibrary, useServices, useUi } from '../state/context';
+import { usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
 import {
   AgentRow, AsrRow, BackgroundLinksRow, ChatModelRow, DecisionsRow, DefaultAgentRow, FindLinksNowRow, HealthPlates, KeyRow,
-  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SonioxConsentRow, SpeechLanguagesRow, SpeechModelRow,
+  Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SkillEngineRow, SkillSwitchRow, SonioxConsentRow,
+  SpeechLanguagesRow, SpeechModelRow,
   TranslationRow, VersionRow,
-  WikiLanguageRow, WikiModelRow, WikiSwitchRow,
+  WikiLanguageRow, WikiModelNote, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
 import { EngineBadge } from '../ui/EngineBadge';
 import { ActivityLogRow } from './ActivityLog';
 import { MicRow, SystemAudioRow } from './SoundRows';
 import { RecognitionCheckRow } from './RecognitionCheckRow';
+import { WikiBudgetRow } from './WikiBudgetRow';
 import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
 import { UpdatesRow } from './UpdatesRow';
+import { HermesProviders } from './HermesProviders';
+import { WikiTermsShowButton } from '../wiki/WikiTermsButton';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -35,13 +40,16 @@ function RowControl({ row }: { row: RowDef }) {
     case 'agent-codex': return <AgentRow engine="codex" />;
     case 'agent-claude': return <AgentRow engine="claude_code" />;
     case 'agent-hermes': return <AgentRow engine="hermes" />;
+    case 'agent-opencode': return <AgentRow engine="opencode" />;
     case 'key-openrouter': return <KeyRow provider="openrouter" />;
     case 'key-soniox': return <KeyRow provider="soniox" />;
     case 'local-whisper': return <LocalWhisperRow />;
     case 'local-decisions': return <LocalDecisionsRow />;
     case 'default-agent': return <DefaultAgentRow label={row.label} />;
     case 'chat-model': return <ChatModelRow />;
+    case 'picker-models': return <PickerModelsRow />;
     case 'wiki-model': return <WikiModelRow label={row.label} />;
+    case 'wiki-budget': return <WikiBudgetRow label={row.label} />;
     case 'decisions': return <DecisionsRow label={row.label} />;
     case 'recognition-check': return <RecognitionCheckRow label={row.label} />;
     case 'mic': return <MicRow />;
@@ -57,6 +65,13 @@ function RowControl({ row }: { row: RowDef }) {
     case 'auto-fix': return <WikiSwitchRow field="auto_corrections" label={row.label} />;
     case 'bg-links': return <BackgroundLinksRow label={row.label} />;
     case 'links-now': return <FindLinksNowRow />;
+    case 'study-new': return <NewCardsRow label={row.label} />;
+    case 'wiki-terms': return <WikiTermsShowButton />;
+    case 'humanizer': return <SkillSwitchRow skillId="humanizer" label={row.label} />;
+    case 'skill-codex': return <SkillEngineRow skillId="humanizer" engine="codex" />;
+    case 'skill-claude': return <SkillEngineRow skillId="humanizer" engine="claude_code" />;
+    case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
+    case 'skill-opencode': return <SkillEngineRow skillId="humanizer" engine="opencode" />;
     case 'lib-folder':
       if (library?.state === 'ready' || library?.state === 'unavailable') {
         return (
@@ -113,7 +128,17 @@ function RowControl({ row }: { row: RowDef }) {
   }
 }
 
-const ENGINE_OF_ROW: Record<string, EngineId | undefined> = { 'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes' };
+/** Settings → Models → "Models in the picker" (0.3.1 K4; models screen v2): one "Edit models…" button on
+ *  the label's line, like the mock-up — no count beside it. */
+function PickerModelsRow() {
+  const openEditModels = useUi((s) => s.openEditModels);
+  return <Button size="sm" icon="editModels" onClick={() => openEditModels()}>Edit models…</Button>;
+}
+
+const ENGINE_OF_ROW: Record<string, EngineId | undefined> = {
+  'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes', 'agent-opencode': 'opencode',
+  'skill-codex': 'codex', 'skill-claude': 'claude_code', 'skill-hermes': 'hermes', 'skill-opencode': 'opencode',
+};
 
 function Row({ row }: { row: RowDef }) {
   const labelId = useId();
@@ -122,8 +147,10 @@ function Row({ row }: { row: RowDef }) {
       <div className="kb-srow__text">
         <div id={labelId} className="kb-srow__label">{ENGINE_OF_ROW[row.id] && <EngineBadge engine={ENGINE_OF_ROW[row.id]!} />}{row.label}</div>
         {row.hint && <div className="kb-srow__hint">{row.hint}</div>}
+        {row.id === 'wiki-model' && <WikiModelNote />}
       </div>
       <div className="kb-srow__control"><RowControl row={row} /></div>
+      {row.id === 'agent-hermes' && <HermesProviders />}
     </div>
   );
 }
@@ -178,12 +205,27 @@ function StorageBanner() {
   return null;
 }
 
+/** When a switch takes effect (H3): from the next answer; running answers finish as they started. */
+function SkillsNote() {
+  const on = useSettings((s) => s.skills.value?.skills.find((k) => k.id === 'humanizer')?.enabled);
+  if (on === undefined) return null;
+  return (
+    <p className="kb-shint">
+      {on ? 'Turning it off applies from the next answer; running answers finish as they started.'
+        : 'Off: agents write without Humanizer from the next answer.'}
+    </p>
+  );
+}
+
 function SectionBody({ section }: { section: SettingsSection }) {
   const rows = ROWS.filter((r) => r.section === section);
   return (
     <>
       {section === 'storage' && <StorageBanner />}
       <HealthPlates section={section} />
+      {section === 'skills' && (
+        <p className="kb-sintro">Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.</p>
+      )}
       {groupsOf(rows).map((g, i) => (
         <section key={`${g.title}-${i}`} className="kb-sgroup" aria-label={g.title || undefined}>
           {g.title && <h4 className="kb-sgroup__title">{g.title}</h4>}
@@ -194,6 +236,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
         <p className="kb-snote"><Icon name="warning" size={14} />If the chosen model is unavailable, SKAZ says so and never switches to another on its own.</p>
       )}
       {section === 'about' && <Licenses />}
+      {section === 'skills' && <SkillsNote />}
     </>
   );
 }
@@ -218,6 +261,7 @@ export function SettingsModal() {
     void s.loadDecisions();
     void s.loadPrivacy();
     void s.loadAbout();
+    void s.loadSkills();
     // Agents: checked by themselves on open (at most every 30 s each; Check forces it).
     agents.getState().autoCheck('open');
   }, [open, settings, agents]);

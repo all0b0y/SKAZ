@@ -30,12 +30,14 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from ...gateways.codex_connection import parse_codex_version
 from ...gateways.codex_rpc import CodexRpc, CodexRpcError
 from ...gateways.codex_session import DISABLED_FEATURES, dynamic_tool, thread_start_params
 from ...gateways.codex_tools import CodexTools
+from ..permissions.refusals import OUTSIDE, refused
+from ..permissions.waits import RunWaits
 from .engine import (
     AgentEvent,
     AgentTurn,
@@ -53,10 +55,14 @@ from .engine import (
     Usage,
 )
 from .prompting import untrusted_block
-from .tools import ToolRegistry
+from .registry import codex_login_progress
+from .tools import ToolContext, ToolRegistry
 
 MAX_PARALLEL_RUNS = 6
+#: The whole answer's deadline; time spent waiting for the user (permissions, questions) is not counted.
 RUN_TIMEOUT_S = 900.0
+#: How often a run that may wait for the user re-checks its deadline.
+WAIT_POLL_S = 1.0
 #: Per-frame cap of the run's transport (the legacy default is 1 MiB; ingest chunks can be larger).
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 HISTORY_BUDGET_CHARS = 60_000
@@ -73,7 +79,8 @@ BASE_INSTRUCTIONS = (
 )
 WITH_TOOLS = "Use only the registered SKAZ tools; cite what they return by its refs."
 WITHOUT_TOOLS = "You have no tools: work only with the text given in this conversation."
-ENGINE_LABELS: dict[str, str] = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent"}
+ENGINE_LABELS: dict[str, str] = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
+                                 "opencode": "OpenCode"}
 
 STOPPED = "The answer was stopped."
 TOO_LONG = "Codex took too long; the answer was stopped."
@@ -135,20 +142,27 @@ class _RunTools(CodexTools):
     def __init__(self, run: _Run, registry: ToolRegistry, names: Sequence[str], thread_id: str,
                  turn_id: str) -> None:
         async def call(name: str, arguments: dict[str, Any]) -> str:
-            outcome = await registry.call(name, arguments)
+            outcome = await registry.call(name, arguments, ToolContext(run.run_id, "codex"))
             run.tool_error = outcome.is_error
             return f"Error: {outcome.text}" if outcome.is_error else outcome.text
 
         def handler(name: str) -> Any:
             return lambda arguments: call(name, arguments)
 
-        timeouts = {}
+        timeouts: dict[str, float | None] = {}
         for name in names:
             tool = registry.get(name)
             if tool is not None:
-                timeouts[name] = tool.timeout_s + 5
+                # Interactive tools wait for the user: no SKAZ-side limit (decision P3).
+                timeouts[name] = None if tool.timeout_s is None else tool.timeout_s + 5
         super().__init__(thread_id, turn_id, {name: handler(name) for name in names}, tool_timeouts=timeouts)
         self._run = run
+
+    def refusal(self, method: str) -> dict[str, Any]:
+        """A-1: an approval (or any other request) Codex sends despite ``approvalPolicy: never`` is
+        refused quietly, with the reason, and one log line without content."""
+        refused("codex", method)
+        return {"code": -32601, "message": OUTSIDE}
 
     async def invoke(self, params: dict[str, Any]) -> dict[str, Any]:
         run = self._run
@@ -168,7 +182,7 @@ class _RunTools(CodexTools):
 class CodexEngine:
     def __init__(self, connection: CodexProcesses, registry: ToolRegistry | None, *,
                  max_parallel: int = MAX_PARALLEL_RUNS, run_timeout_s: float = RUN_TIMEOUT_S,
-                 status_max_age_s: float = STATUS_MAX_AGE_S) -> None:
+                 status_max_age_s: float = STATUS_MAX_AGE_S, waits: RunWaits | None = None) -> None:
         if max_parallel < 1 or run_timeout_s <= 0:
             raise ValueError("Invalid Codex engine limits")
         self._connection = connection
@@ -180,6 +194,8 @@ class CodexEngine:
         self._status_at = 0.0
         self._status_lock = asyncio.Lock()
         self._runs: dict[str, _Run] = {}
+        #: Runs waiting for the user (a permission or a question): their deadline stands still (P3).
+        self.waits = waits
 
     @property
     def id(self) -> EngineId:
@@ -217,6 +233,11 @@ class CodexEngine:
             await logout()
         finally:
             self._status = None
+
+    def login_progress(self) -> Literal["waiting", "done", "failed"] | None:
+        """The browser sign-in started from SKAZ (Codex's ``account/login/completed``)."""
+        view = getattr(self._connection, "view", None)
+        return codex_login_progress(view) if isinstance(view, dict) else None
 
     async def models(self) -> Sequence[ModelOption]:
         """Visible models from ``model/list``; empty when Codex is missing or does not answer."""
@@ -283,11 +304,12 @@ class CodexEngine:
     async def _events(self, turn: AgentTurn) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
         if run_id in self._runs:
-            yield Failed(run_id, "other", "This answer is already running.")
+            yield Failed(run_id, "other", "This answer is already running.", unsent=True)
             return
         if len(self._runs) >= self._max_parallel:
             yield Failed(run_id, "other", f"Too many Codex answers are running at once (limit "
-                                          f"{self._max_parallel}). Wait for one to finish or stop one.")
+                                          f"{self._max_parallel}). Wait for one to finish or stop one.",
+                         transient=True, unsent=True)
             return
         run = _Run(run_id)
         self._runs[run_id] = run
@@ -307,6 +329,8 @@ class CodexEngine:
 
     async def _release(self, run: _Run) -> None:
         self._runs.pop(run.run_id, None)
+        if self.waits is not None:
+            self.waits.forget(run.run_id)
         await run.shutdown()
 
     async def _drive(self, turn: AgentTurn, run: _Run) -> AsyncGenerator[AgentEvent, None]:
@@ -317,11 +341,17 @@ class CodexEngine:
             return
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._run_timeout_s
+        waits = self.waits
         while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                yield Failed(run_id, "other", TOO_LONG)
-                return
+            if waits is not None and waits.waiting(run_id):
+                remaining = WAIT_POLL_S  # waiting for the user: the deadline stands still
+            else:
+                remaining = deadline + (waits.paused_s(run_id) if waits is not None else 0.0) - loop.time()
+                if remaining <= 0:
+                    yield Failed(run_id, "other", TOO_LONG)
+                    return
+                if waits is not None:
+                    remaining = min(remaining, WAIT_POLL_S)  # notice a wait that starts meanwhile
             try:
                 item = await asyncio.wait_for(run.queue.get(), remaining)
             except TimeoutError:
@@ -349,7 +379,7 @@ class CodexEngine:
             definitions = self.dynamic_tools(turn.tools)
             text = turn_input(turn.messages)
         except ValueError as error:
-            return Failed(run_id, "other", str(error))
+            return Failed(run_id, "other", str(error), unsent=True, permanent=True)
         names = [definition["name"] for definition in definitions]
         instructions = "\n\n".join(part for part in (
             BASE_INSTRUCTIONS, WITH_TOOLS if names else WITHOUT_TOOLS, turn.instructions.strip(),
@@ -366,7 +396,8 @@ class CodexEngine:
         }
         largest = max(len(json.dumps(thread_params)), len(json.dumps(turn_params)))
         if largest > MAX_MESSAGE_BYTES - 4096:
-            return Failed(run_id, "other", "This request is too long for Codex. Send a shorter text.")
+            return Failed(run_id, "other", "This request is too long for Codex. Send a shorter text.",
+                          unsent=True, permanent=True)
         if run.cancelled:
             return Failed(run_id, "cancelled", STOPPED)
         try:
@@ -378,7 +409,7 @@ class CodexEngine:
             await rpc.__aenter__()
         except CodexRpcError:
             return Failed(run_id, "cancelled", STOPPED) if run.cancelled else Failed(
-                run_id, "other", "Codex could not start.")
+                run_id, "other", "Codex could not start.", unsent=True)
         run.pump = asyncio.create_task(_pump(run, rpc))
         registry = self._registry
 

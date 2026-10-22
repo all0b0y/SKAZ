@@ -1,5 +1,6 @@
 import type { IconName } from '../ui';
 import type { SettingsSection } from '../state/ui';
+import { WIKI_TERMS_KEYWORDS } from './wikiTerms';
 
 export interface SectionDef {
   id: SettingsSection;
@@ -16,6 +17,7 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'models', label: 'Models', icon: 'models' },
       { id: 'rec', label: 'Recording & speech', icon: 'mic' },
       { id: 'wiki', label: 'Wiki', icon: 'wiki' },
+      { id: 'skills', label: 'Skills', icon: 'skills' },
     ],
   },
   {
@@ -49,19 +51,23 @@ export interface RowDef {
  */
 export const ROWS: ReadonlyArray<RowDef> = [
   // Accounts & keys
-  { id: 'agent-codex', section: 'conn', group: 'Agent', label: 'Codex', hint: 'ChatGPT subscription · chat answers and wiki pages', keywords: 'openai chatgpt login sign in' },
+  { id: 'agent-codex', section: 'conn', group: 'Agent', label: 'Codex', hint: 'ChatGPT subscription', keywords: 'openai chatgpt login sign in' },
   { id: 'agent-claude', section: 'conn', group: 'Agent', label: 'Claude Code', hint: 'Claude subscription or Anthropic key', keywords: 'anthropic login sign in' },
-  { id: 'agent-hermes', section: 'conn', group: 'Agent', label: 'Hermes Agent', hint: 'Models and keys come from Hermes settings', keywords: 'nous' },
+  { id: 'agent-hermes', section: 'conn', group: 'Agent', label: 'Hermes Agent', hint: 'Subscriptions and API keys, added through Hermes', keywords: 'nous provider providers subscription api key sign in openrouter anthropic gemini deepseek fallback order' },
+  { id: 'agent-opencode', section: 'conn', group: 'Agent', label: 'OpenCode', hint: 'Model providers you sign in to through OpenCode', keywords: 'opencode provider providers subscription api key sign in anthropic openai copilot zen' },
   { id: 'key-openrouter', section: 'conn', group: 'API keys', label: 'OpenRouter', hint: 'Other models with an API key', keywords: 'key token jev' },
   { id: 'key-soniox', section: 'conn', group: 'API keys', label: 'Soniox', hint: 'Live recording and translation', keywords: 'key speech asr' },
   { id: 'local-whisper', section: 'conn', group: 'On this computer', label: 'Whisper on this computer', hint: 'Works without internet', keywords: 'local offline speech asr download' },
   { id: 'local-decisions', section: 'conn', group: 'On this computer', label: 'Decision model on this computer', hint: 'Where to file, whether to merge pages — without sending data', keywords: 'local download llama' },
   // Models
-  { id: 'default-agent', section: 'models', group: 'Agent', label: 'Default agent', hint: 'For new chats; can be changed in any chat', keywords: 'codex claude hermes engine' },
-  { id: 'chat-model', section: 'models', group: 'Agent', label: 'Chat', hint: 'Can also be changed in the message field', keywords: 'model effort' },
-  { id: 'wiki-model', section: 'models', group: 'Agent', label: 'Wiki pages and notes', keywords: 'model effort summary' },
-  { id: 'decisions', section: 'models', group: 'Helpers', label: 'Wiki decisions', hint: 'Where to file a material, whether to merge or link pages', keywords: 'openrouter jev local system one' },
-  { id: 'recognition-check', section: 'models', group: 'Helpers', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model effort corrections agent off' },
+  // Models screen v2 (2026-10-20): grouped by purpose — Chats / Wiki / Recordings.
+  { id: 'default-agent', section: 'models', group: 'Chats', label: 'Default agent', hint: 'For new chats; any chat can change it', keywords: 'codex claude hermes engine' },
+  { id: 'chat-model', section: 'models', group: 'Chats', label: 'Chat model', hint: 'Change it in the message field; each agent keeps its last choice', keywords: 'model effort reasoning last remembered' },
+  { id: 'picker-models', section: 'models', group: 'Chats', label: 'Models in the picker', hint: 'Which agents, providers and models the message field lists; favourites on top', keywords: 'edit models visible hidden show hide favorites favourites star providers' },
+  { id: 'wiki-model', section: 'models', group: 'Wiki', label: 'Wiki model', hint: 'Notes, concepts, connections · new jobs only', keywords: 'model effort reasoning summary pages notes' },
+  { id: 'wiki-budget', section: 'models', group: 'Wiki', label: 'Wiki budget per material', hint: 'Characters to and from the model for one material, its connections included. When reached, it pauses with Continue', keywords: 'budget limit characters spend cost usage pause continue' },
+  { id: 'decisions', section: 'models', group: 'Wiki', label: 'Wiki decisions', hint: 'Where to file a material, whether to merge or link pages', keywords: 'openrouter jev local system one' },
+  { id: 'recognition-check', section: 'models', group: 'Recordings', label: 'Recognition check', hint: 'Finds recognition errors in recordings', keywords: 'model effort corrections agent off' },
   // Recording & speech
   { id: 'mic', section: 'rec', group: 'Sound', label: 'Microphone', hint: 'Default for new recordings', keywords: 'input device level permission' },
   { id: 'system-audio', section: 'rec', group: 'Sound', label: 'Computer audio', hint: 'Record together with the microphone (Zoom, video)', keywords: 'system sound permission' },
@@ -77,6 +83,15 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'auto-fix', section: 'wiki', group: 'Upkeep', label: 'Fix recognition automatically', hint: 'Doubtful places are only highlighted', keywords: 'corrections' },
   { id: 'bg-links', section: 'wiki', group: 'Upkeep', label: 'Find connections in the background', hint: 'When the app is idle, with your permission', keywords: 'links graph' },
   { id: 'links-now', section: 'wiki', group: 'Upkeep', label: 'Find connections now', keywords: 'links graph run' },
+  { id: 'study-new', section: 'wiki', group: 'Study', label: 'New cards per day', hint: 'For each folder; the rest wait for another day', keywords: 'flashcards cards deck review fsrs limit learn' },
+  // The wiki legend (wiki-terms v1 A): the search finds this row by any term's name or meaning.
+  { id: 'wiki-terms', section: 'wiki', group: 'Help', label: 'Wiki terms', hint: 'What each label on a wiki page means', keywords: WIKI_TERMS_KEYWORDS },
+  // Skills (0.3.1 H3): SKAZ's own skills folder only
+  { id: 'humanizer', section: 'skills', group: 'Writing', label: 'Humanizer', hint: 'Writes like a person: no filler, no AI tells. Used only in ordinary chat replies, not wiki processing, cards or tests. Quotes from sources are never changed. v3.1.0 · MIT · github.com/blader/humanizer', keywords: 'skills writing ai style tells filler human natural' },
+  { id: 'skill-codex', section: 'skills', group: 'Applies to', label: 'Codex', keywords: 'humanizer skills loaded status' },
+  { id: 'skill-claude', section: 'skills', group: 'Applies to', label: 'Claude Code', keywords: 'humanizer skills loaded status' },
+  { id: 'skill-hermes', section: 'skills', group: 'Applies to', label: 'Hermes Agent', keywords: 'humanizer skills loaded status' },
+  { id: 'skill-opencode', section: 'skills', group: 'Applies to', label: 'OpenCode', keywords: 'humanizer skills loaded status' },
   // Storage
   { id: 'lib-folder', section: 'storage', group: 'Library', label: 'Folder', hint: 'Materials and wiki are plain .md files', keywords: 'library path location documents' },
   { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The library folder opens as an Obsidian vault; SKAZ adds it to Obsidian’s vaults the first time.', keywords: 'vault obsidian markdown' },

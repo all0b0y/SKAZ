@@ -1,6 +1,6 @@
 [project]
 name = "skaz"
-version = "0.1.0"
+version = "0.3.1"
 description = "SKAZ local backend: audio ingestion, ASR, temporal agent, notes"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
     "websockets>=15.0,<18",
     "pypdf>=6.20.1",
     "readability-lxml>=0.9",
+    "fsrs==6.3.2",
 ]
 
 [project.optional-dependencies]
@@ -60,7 +61,7 @@ module = ["faster_whisper.*", "numpy.*", "onnxruntime.*"]
 ignore_missing_imports = true
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = ["src", "tests"]
 strict = true
 warn_unused_ignores = true

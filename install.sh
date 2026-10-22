@@ -3,8 +3,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
 #
-# It downloads the release's DMG and SHA256SUMS.txt, checks the checksum and that SKAZ.app is
-# signed with SKAZ's own certificate, copies SKAZ.app into /Applications and opens it. A running
+# It downloads the release's DMG and SHA256SUMS.txt from that one release tag, checks the checksum,
+# that SKAZ.app is signed with SKAZ's own certificate and is the release's version, copies SKAZ.app
+# into /Applications and opens it. A running
 # SKAZ is asked to quit first; your sessions, notes and settings stay where they are. SKAZ is not
 # notarized by Apple (that needs a paid Apple developer account), so a copy downloaded by a
 # browser makes macOS show "Apple could not verify…" on the first launch. Files downloaded by curl
@@ -59,6 +60,11 @@ main() {
     || die "could not open the DMG."
   codesign --verify --deep --strict -R="certificate leaf = H\"$CERT_SHA1\"" "$tmp/mnt/SKAZ.app" 2>/dev/null \
     || die "SKAZ.app is not signed with SKAZ's certificate; not installing."
+  # The app inside must be the version of the release it came from (a renamed or swapped DMG isn't).
+  local inside
+  inside=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$tmp/mnt/SKAZ.app/Contents/Info.plist" 2>/dev/null) \
+    || die "could not read the version of SKAZ.app; not installing."
+  [ "$inside" = "$version" ] || die "the DMG of release ${version} holds SKAZ ${inside}; not installing."
 
   # Only the copy being replaced is asked to quit, never a SKAZ running from somewhere else.
   # SKAZ may ask to confirm when a recording is unfinished, so it is never killed.

@@ -4,12 +4,16 @@ import { MaterialView } from '../material/MaterialView';
 import { GraphPanel } from '../graph/GraphPanel';
 import { LivePanel } from '../recording/LivePanel';
 import { WikiFileView } from '../wiki/WikiFileView';
+import { PermissionReview } from '../chat/PermissionReview';
+import { StudyPanel } from '../study/StudyBlock';
 
 const LABEL: Record<RightView['kind'], string> = {
   doc: 'Document',
   graph: 'Graph of connections',
   live: 'Live recording',
   wikifile: 'Document',
+  review: 'Review',
+  study: 'Flashcards and tests',
 };
 
 /**
@@ -33,6 +37,8 @@ export function DocPanel({ view, expanded, width }: { view: RightView; expanded:
       {view.kind === 'graph' && <GraphPanel />}
       {view.kind === 'live' && <LivePanel materialId={view.materialId} />}
       {view.kind === 'wikifile' && <WikiFileView key={view.name} name={view.name} />}
+      {view.kind === 'review' && <PermissionReview key={view.partId} chatId={view.chatId} partId={view.partId} />}
+      {view.kind === 'study' && <StudyPanel key={view.studyId} chatId={view.chatId} studyId={view.studyId} />}
     </aside>
   );
 }

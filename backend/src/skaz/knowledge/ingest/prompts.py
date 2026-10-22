@@ -217,6 +217,7 @@ def match_prompt(new_concept: str, candidates: Sequence[str]) -> str:
 
 
 def instructions_for(template: str, language: str) -> str:
+    """Task instructions retain citation/JSON rules; conversational skills never enter wiki jobs."""
     return template.replace("{language}", language_name(language))
 
 

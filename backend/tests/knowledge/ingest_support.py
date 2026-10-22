@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from skaz.knowledge.agents.engine import AgentTurn, Completed, TextDelta
+from skaz.knowledge.agents.engine import AgentTurn, Completed, ModelOption, TextDelta, Usage
 from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.decisions.protocol import Answer, Question
 from skaz.knowledge.ingest import prompts
@@ -91,24 +91,28 @@ class ScriptedWiki:
 
     def __init__(self, *, notes: Sequence[str] = (), concepts: Sequence[str] = (),
                  matches: Sequence[int] = (), gate: asyncio.Event | None = None,
-                 answers: Mapping[str, Sequence[str]] | None = None) -> None:
-        self.queues: dict[str, list[str]] = {
+                 answers: Mapping[str, Sequence[str]] | None = None,
+                 models: Sequence[ModelOption] | None = None, usage: Usage | None = None) -> None:
+        #: Queued answers; a callable is authored from the turn it answers (e.g. a batch prompt).
+        self.queues: dict[str, list[str | Callable[[AgentTurn], str]]] = {
             prompts.NOTES_SCHEMA_TITLE: list(notes),
             prompts.CONCEPTS_SCHEMA_TITLE: list(concepts),
             prompts.MATCH_SCHEMA_TITLE: [json.dumps({"choice": choice}) for choice in matches],
         }
         # W2 answers (recognition check, disagreements, connections, overviews, recheck) by schema title.
         for title, queued in (answers or {}).items():
-            self.queues[title] = list(queued)
+            self.queues[title] = list[str | Callable[[AgentTurn], str]](queued)
         self.gate = gate
-        self.engine = FakeEngine("codex", script=self._answer)
+        self.usage = usage
+        self.engine = FakeEngine("codex", script=self._answer, models=models)
 
     def _answer(self, turn: AgentTurn) -> list[ScriptItem]:
         assert turn.response_schema is not None
         title = str(turn.response_schema["title"])
         queue = self.queues.setdefault(title, [])
         if queue:
-            text = queue.pop(0)
+            queued = queue.pop(0)
+            text = queued(turn) if callable(queued) else queued
         elif title == prompts.NOTES_SCHEMA_TITLE:
             text = notes()
         elif title == prompts.CONCEPTS_SCHEMA_TITLE:
@@ -120,7 +124,7 @@ class ScriptedWiki:
         items: list[ScriptItem] = []
         if self.gate is not None:
             items.append(Gate(self.gate))
-        items += [TextDelta("", text), Completed("")]
+        items += [TextDelta("", text), Completed("", self.usage)]
         return items
 
     def turns(self, title: str) -> list[AgentTurn]:

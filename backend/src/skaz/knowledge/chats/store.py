@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
@@ -9,9 +10,22 @@ from typing import Any, cast
 
 from ..agents.engine import EngineId
 from ..index.search import fts_query
+from ..logsafe import error_note
 from ..store.database import KnowledgeDatabase
-from .model import Chat, Failure, Message, MessageInput, MessageState, Role, part_to_json, parts_from_json
+from .model import (
+    Chat,
+    Failure,
+    Message,
+    MessageInput,
+    MessageState,
+    Role,
+    is_effort_note,
+    part_to_json,
+    parts_from_json,
+)
 from .text import plain_text
+
+log = logging.getLogger(__name__)
 
 _CHAT_COLUMNS = frozenset({
     "title", "title_auto", "pinned", "engine", "model", "effort", "folder_ids", "unread", "last_preview",
@@ -113,7 +127,8 @@ class ChatRepository:
             try:
                 rows = connection.execute("SELECT DISTINCT chat_id FROM chat_fts WHERE chat_fts MATCH ?",
                                           (expression,)).fetchall()
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as error:
+                log.warning("Chat search failed: %s", error_note(error))
                 return set()
         return {row[0] for row in rows}
 
@@ -163,19 +178,55 @@ class ChatRepository:
             for offset, given in enumerate(messages, start=1):
                 message = replace(given, seq=last + offset)
                 added.append(message)
-                connection.execute(
-                    "INSERT INTO chat_messages(id, chat_id, seq, role, state, engine, model, effort, parts, "
-                    "failure, input, reply_to, saved_page_id, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (message.id, message.chat_id, message.seq, message.role, message.state, message.engine,
-                     message.model, message.effort, _dump([part_to_json(part) for part in message.parts]),
-                     _dump(message.failure.to_json()) if message.failure else None,
-                     _dump(message.input.to_json()) if message.input else None, message.reply_to,
-                     message.saved_page_id, message.created_at),
-                )
-                self._index_message(connection, message)
+                self._insert(connection, message)
             self._set_chat(connection, chat_id, chat_update)
         return added
+
+    def rewrite_from(self, question: Message, answer: Message,
+                     chat_update: Mapping[str, Any]) -> tuple[list[str], Message]:
+        """An edited question (2026-10-21): every later message goes, its new input is stored and its
+        new answer follows it — one transaction. Returns the removed ids and the answer as stored."""
+        with self.db.write() as connection:
+            removed = [row[0] for row in connection.execute(
+                "SELECT id FROM chat_messages WHERE chat_id = ? AND seq > ? ORDER BY seq",
+                (question.chat_id, question.seq)).fetchall()]
+            connection.execute("DELETE FROM chat_messages WHERE chat_id = ? AND seq > ?",
+                               (question.chat_id, question.seq))
+            connection.executemany("DELETE FROM chat_fts WHERE message_id = ?", [(id_,) for id_ in removed])
+            connection.execute(
+                "UPDATE chat_messages SET parts = ?, input = ? WHERE id = ?",
+                (_dump([part_to_json(part) for part in question.parts]),
+                 _dump(question.input.to_json()) if question.input else None, question.id),
+            )
+            self._index_message(connection, question)
+            stored = replace(answer, seq=question.seq + 1)
+            self._insert(connection, stored)
+            self._set_chat(connection, question.chat_id, chat_update)
+        return removed, stored
+
+    def replace_answer(self, old: Message, answer: Message, chat_update: Mapping[str, Any]) -> Message:
+        """Resume (2026-10-21): the interrupted answer gives its place to the new one — one transaction."""
+        with self.db.write() as connection:
+            connection.execute("DELETE FROM chat_messages WHERE id = ?", (old.id,))
+            connection.execute("DELETE FROM chat_fts WHERE message_id = ?", (old.id,))
+            stored = replace(answer, seq=old.seq)
+            self._insert(connection, stored)
+            self._set_chat(connection, old.chat_id, chat_update)
+        return stored
+
+    @classmethod
+    def _insert(cls, connection: sqlite3.Connection, message: Message) -> None:
+        connection.execute(
+            "INSERT INTO chat_messages(id, chat_id, seq, role, state, engine, model, effort, parts, "
+            "failure, input, reply_to, saved_page_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (message.id, message.chat_id, message.seq, message.role, message.state, message.engine,
+             message.model, message.effort, _dump([part_to_json(part) for part in message.parts]),
+             _dump(message.failure.to_json()) if message.failure else None,
+             _dump(message.input.to_json()) if message.input else None, message.reply_to,
+             message.saved_page_id, message.created_at),
+        )
+        cls._index_message(connection, message)
 
     def save_message(self, message: Message, chat_update: Mapping[str, Any] | None = None) -> None:
         """Write a message's current parts/state/failure (a checkpoint or the end of an answer)."""
@@ -193,7 +244,7 @@ class ChatRepository:
         with self.db.read() as connection:
             rows = connection.execute("SELECT * FROM chat_messages WHERE chat_id = ? ORDER BY seq",
                                       (chat_id,)).fetchall()
-        return [_message(row) for row in rows]
+        return [message for message in map(_message, rows) if not is_effort_note(message)]
 
     def message(self, chat_id: str, message_id: str) -> Message | None:
         with self.db.read() as connection:

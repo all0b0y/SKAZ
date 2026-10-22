@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from skaz.knowledge.agents.engine import AgentEngine, FailureKind
+from skaz.knowledge.agents.engine import AgentEngine, Failed, FailureKind
 from skaz.knowledge.agents.prompting import UNTRUSTED_HEADER
 from skaz.knowledge.decisions.protocol import ChoiceAnswer, ChoiceQuestion, Question, Undecided
 from skaz.knowledge.ingest import prompts
@@ -385,7 +385,8 @@ async def test_two_materials_run_in_parallel(ready: KnowledgeService) -> None:
     ingest = service_for(ready, wiki)
     jobs = [await ingest.request_ingest(first), await ingest.request_ingest(second)]
     await settle(lambda: len(wiki.engine.active_runs()) == 2)
-    assert all(ingest.job(job.id).label == "Writing notes" for job in jobs)
+    # C1-f: the label says which part is being written.
+    assert all(ingest.job(job.id).label == "Writing notes · part 1 of 1" for job in jobs)
     with pytest.raises(IngestBusy):
         await ingest.request_ingest(first)
     gate.set()
@@ -409,37 +410,43 @@ async def test_cancel_stops_the_run_and_writes_nothing(ready: KnowledgeService) 
         await ingest.cancel(job.id)
 
 
-async def test_restart_marks_running_jobs_interrupted_and_never_resumes(ready: KnowledgeService) -> None:
+async def test_restart_queues_a_running_job_again_and_it_continues(ready: KnowledgeService) -> None:
     material_id = add_material(ready, "Физика", "Лекция 8")
-    wiki = ScriptedWiki(notes=[NOTES_OK], gate=asyncio.Event())
+    gate = asyncio.Event()
+    # The first process's answer is interrupted by the restart; the second process asks again.
+    wiki = ScriptedWiki(notes=[NOTES_OK, NOTES_OK], gate=gate)
     first_process = service_for(ready, wiki)
     job = await first_process.request_ingest(material_id)
     await settle(lambda: bool(wiki.engine.active_runs()))
-    turns_before = len(wiki.engine.turns)
 
     second_process = service_for(ready, wiki)  # the backend started again on the same database
     record = second_process.job(job.id)
-    assert record.state == "interrupted" and record.can_retry and record.label == "Interrupted"
-    assert "Retry" in (record.error or "") and second_process.recovered == [job.id]
-    assert len(wiki.engine.turns) == turns_before
-    await first_process.close()  # the old process going away does not turn it back into anything else
-    assert first_process.job(job.id).state == "interrupted"
+    assert record.state == "queued" and not record.can_retry and record.label == "Queued"
+    assert second_process.recovered == []
+    await first_process.close()  # the old process going away leaves the job in the queue
+    assert first_process.job(job.id).state == "queued"
     assert list((wiki_dir(ready) / "Notes").iterdir()) == []
 
+    gate.set()
+    second_process.resume()
+    record = await wait_finished(second_process, job.id)
+    assert record.state == "done", record.error
+    assert (wiki_dir(ready) / "Notes" / "Лекция 8.md").exists()
 
-async def test_close_interrupts_running_jobs(ready: KnowledgeService) -> None:
+
+async def test_close_puts_running_jobs_back_in_the_queue(ready: KnowledgeService) -> None:
     material_id = add_material(ready, "Физика", "Лекция 8")
     wiki = ScriptedWiki(notes=[NOTES_OK], gate=asyncio.Event())
     ingest = service_for(ready, wiki)
     job = await ingest.request_ingest(material_id)
     await settle(lambda: bool(wiki.engine.active_runs()))
     await ingest.close()
-    assert ingest.job(job.id).state == "interrupted"
+    assert ingest.job(job.id).state == "queued"
 
 
 async def test_a_request_that_races_close_starts_nothing(ready: KnowledgeService,
                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    """close() while a request is between its checks and its task: no job outlives the service."""
+    """close() while a request is between its checks and its task: no job runs, the job waits in the queue."""
     material_id = add_material(ready, "Физика", "Лекция 8")
     wiki = ScriptedWiki(notes=[NOTES_OK], gate=asyncio.Event())
     ingest = service_for(ready, wiki)
@@ -459,12 +466,81 @@ async def test_a_request_that_races_close_starts_nothing(ready: KnowledgeService
         return create(*args, **kwargs)
 
     monkeypatch.setattr(ingest.jobs, "create", create_while_closing)
-    with pytest.raises(IngestBusy):
-        await ingest.request_ingest(material_id)
+    job = await ingest.request_ingest(material_id)
     await asyncio.gather(*closing)
+    assert job.state == "queued"
     assert not [task for task in asyncio.all_tasks() if task.get_name().startswith("ingest-")]
-    assert [job.state for job in ingest.jobs.list_all(material_id=material_id)] == ["interrupted"]
+    assert [item.state for item in ingest.jobs.list_all(material_id=material_id)] == ["queued"]
     assert wiki.engine.turns == []
+
+
+async def test_the_queue_runs_a_large_batch_a_few_at_a_time(ready: KnowledgeService) -> None:
+    """H2: twelve materials at once never fail for an engine's parallel limit — the rest wait their turn."""
+    materials = [add_material(ready, "Физика", f"Лекция {n}") for n in range(12)]
+    gate = asyncio.Event()
+    wiki = ScriptedWiki(notes=[NOTES_OK] * 12, gate=gate)
+    ingest = service_for(ready, wiki)
+    jobs = [await ingest.request_ingest(material_id) for material_id in materials]
+    slots = ingest.slots()
+    await settle(lambda: len(ingest.active_jobs()) == slots)
+    states = [ingest.job(job.id).state for job in jobs]
+    assert states.count("running") == slots and states.count("queued") == 12 - slots
+    assert {ingest.job(job.id).label for job in jobs if ingest.job(job.id).state == "queued"} == {"Queued"}
+    # A queued material is busy too: a second request is refused, not queued twice.
+    with pytest.raises(IngestBusy):
+        await ingest.request_ingest(materials[-1])
+    gate.set()
+    finished = [await wait_finished(ingest, job.id, timeout=20) for job in jobs]
+    assert [record.state for record in finished] == ["done"] * 12
+
+
+async def test_a_queued_job_can_be_cancelled_before_it_starts(ready: KnowledgeService) -> None:
+    first, second = add_material(ready, "Физика", "Лекция 1"), add_material(ready, "Физика", "Лекция 2")
+    wiki = ScriptedWiki(notes=[NOTES_OK, NOTES_OK], gate=asyncio.Event())
+    ingest = service_for(ready, wiki)
+    ingest.slots = lambda: 1  # type: ignore[method-assign]
+    await ingest.request_ingest(first)
+    waiting = await ingest.request_ingest(second)
+    assert waiting.state == "queued"
+    cancelled = await ingest.cancel(waiting.id)
+    assert cancelled.state == "cancelled" and "before it started" in (cancelled.error or "")
+    await ingest.close()
+
+
+async def test_retry_failed_queues_every_failed_material_again(ready: KnowledgeService) -> None:
+    first, second = add_material(ready, "Физика", "Лекция 1"), add_material(ready, "Физика", "Лекция 2")
+    broken = service_for(ready, None)  # no agent: both fail
+    for material_id in (first, second):
+        record = await wait_finished(broken, (await broken.request_ingest(material_id)).id)
+        assert record.state == "failed"
+    wiki = ScriptedWiki(notes=[NOTES_OK, NOTES_OK])
+    ingest = service_for(ready, wiki)
+    queued = await ingest.retry_failed()
+    assert sorted(job.material_id or "" for job in queued) == sorted([first, second])
+    for job in queued:
+        assert (await wait_finished(ingest, job.id)).state == "done"
+    assert await ingest.retry_failed() == []
+
+
+async def test_a_busy_engine_is_retried_instead_of_failing_the_material(ready: KnowledgeService) -> None:
+    material_id = add_material(ready, "Физика", "Лекция 8")
+    wiki = ScriptedWiki(notes=[NOTES_OK])
+    calls = 0
+    run = wiki.engine.run
+
+    def busy_once(turn: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            async def refused() -> Any:
+                yield Failed(turn.run_id, "other", "Too many answers at once.", transient=True)
+            return refused()
+        return run(turn)
+
+    wiki.engine.run = busy_once  # type: ignore[method-assign]
+    ingest = service_for(ready, wiki, limits=Limits(retry_delays_s=(0.0,)))
+    await run_ingest(ingest, material_id)
+    assert calls >= 2
 
 
 async def test_long_source_is_cut_into_parts_covering_every_fragment(ready: KnowledgeService) -> None:
@@ -500,6 +576,7 @@ async def test_continuation_parts_and_guard_without_shortening(ready: KnowledgeS
                for n in range(10)]
     other = add_material(ready, "Физика", "Лекция 9")
     wiki2 = ScriptedWiki(notes=endless)
+    await ingest.close()  # one service per database, as in the app: its queue never takes the next job
     capped = service_for(ready, wiki2, limits=Limits(max_answers=3))
     job = await capped.request_ingest(other)
     record = await wait_finished(capped, job.id)

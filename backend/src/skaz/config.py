@@ -38,7 +38,8 @@ class AppConfig:
 
     @classmethod
     def from_env(cls, port: int) -> AppConfig:
-        token = os.environ.get("SKAZ_TOKEN", "").strip()
+        # L3: read once and removed, so ffmpeg, yt-dlp and installers started later never inherit it.
+        token = os.environ.pop("SKAZ_TOKEN", "").strip()
         if not token:
             raise SystemExit(
                 "SKAZ_TOKEN is required; the desktop process must supply a per-run token."

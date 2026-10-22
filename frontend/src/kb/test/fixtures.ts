@@ -7,10 +7,12 @@
 // them; they differ only in what the scenes need. Pure — no test-runner imports.
 
 import type {
-  KbAgent, KbChat, KbCitation, KbFolder, KbGraph, KbGraphEdge, KbMaterial, KbMessagePart, KbNotification, KbPage, KbPageRef,
+  KbAgent, KbChat, KbHermesCatalogItem, KbCitation, KbFolder, KbGraph, KbGraphEdge, KbMaterial, KbMessagePart, KbNotification, KbPage, KbPageRef,
+  KbStudyCard, KbStudyPart,
 } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { block, chatMessage, fragment, materialWiki, pageRef, type FakeWorld } from './fakeKb';
+import type { AnyMessagePart, KbPermissionPart, KbQuestionPart } from '../api/permissions';
 
 const NOW = '2026-10-15T09:00:00Z';
 const MIN = 60_000;
@@ -20,7 +22,7 @@ const T = (min: number) => Math.round(min * MIN);
 
 const LIBRARY_ROOT = '/Users/me/Documents/SKAZ';
 
-function agent(id: EngineId, name: string, state: KbAgent['state'], extra: Partial<KbAgent> = {}): KbAgent {
+export function agent(id: EngineId, name: string, state: KbAgent['state'], extra: Partial<KbAgent> = {}): KbAgent {
   const ready = state === 'ready';
   return {
     id, name, state, installed: state !== 'not_installed', version: state === 'not_installed' ? null : '1.0.0', min_version: '1.0.0',
@@ -29,8 +31,21 @@ function agent(id: EngineId, name: string, state: KbAgent['state'], extra: Parti
     action: state === 'not_installed' ? 'install' : state === 'signed_out' ? 'login' : null,
     models: [], current_model: null,
     install: { docs_url: `https://example.org/${id}`, manual_command: `install-${id}`, checked_on: '2026-10-14' },
-    install_task: null, checked_at: ago(1), first_run: null, ...extra,
+    install_task: null, checked_at: ago(1), first_run: null, visible: true, ...extra,
+    providers: extra.providers ?? providersOf(extra.models ?? []),
   };
+}
+
+/** The provider sections the backend derives from an agent's models (0.3.1 K2). */
+export function providersOf(models: ReadonlyArray<KbAgent['models'][number]>): KbAgent['providers'] {
+  const out: KbAgent['providers'] = [];
+  for (const m of models) {
+    let p = out.find((x) => x.id === m.provider);
+    if (!p) { p = { id: m.provider, label: m.provider_label, visible: true, shown: 0, total: 0 }; out.push(p); }
+    p.total += 1;
+    if (m.visible) p.shown += 1;
+  }
+  return out;
 }
 
 /** The parts every world has: agents, settings, an empty chat list and feed. */
@@ -42,24 +57,48 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
     notifications: [], notificationSeq: 0, readUpTo: 0,
     agents: {
       default: 'claude_code',
+      favorites: [],
       agents: [
         agent('codex', 'Codex', 'ready', {
           current_model: 'gpt-5.6-luna',
           models: [
-            { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
-            { id: 'gpt-5.6-luna-mini', label: 'gpt-5.6-luna-mini', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
+            { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'codex', provider_label: 'Codex', name: 'GPT-5.6-luna', tag: null, visible: true, default_visible: true, favorite: false },
+            { id: 'gpt-5.6-luna-mini', label: 'gpt-5.6-luna-mini', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'codex', provider_label: 'Codex', name: 'GPT-5.6-luna-mini', tag: null, visible: true, default_visible: true, favorite: false },
           ],
         }),
         agent('claude_code', 'Claude Code', 'ready', {
           current_model: 'claude-opus-5-5',
           models: [
-            { id: 'claude-opus-5-5', label: 'claude-opus-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
-            { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium' },
+            { id: 'claude-opus-5-5', label: 'claude-opus-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'claude_code', provider_label: 'Claude Code', name: 'Opus 5.5', tag: null, visible: true, default_visible: true, favorite: false },
+            { id: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5', efforts: ['low', 'medium', 'high'], default_effort: 'medium', provider: 'claude_code', provider_label: 'Claude Code', name: 'Sonnet 5.5', tag: null, visible: true, default_visible: true, favorite: false },
           ],
         }),
         agent('hermes', 'Hermes Agent', 'not_installed', {
           first_run: { checked: false, note: "The check starts Hermes once with SKAZ's own Hermes folder, on the Hermes you installed. Your ~/.hermes stays untouched. Nothing starts until you press Check." },
         }),
+      ],
+    },
+    hermesProviders: {
+      state: 'ready', reason: null, catalog_checked: '2026-10-18 · Hermes v0.22.2', terminal: null, read_at: ago(0),
+      providers: [
+        { id: 'openai-codex', name: 'ChatGPT or Codex subscription', order: 0, free_tier: null, credentials: [
+          { index: 1, id: 'c0dex1', label: 'me@example.com', auth_type: 'oauth', priority: 0, state: 'limited', until: '2026-10-15T09:30:00Z', detail: 'rate-limited (429) (1h 5m left)', current: false },
+          { index: 2, id: 'c0dex2', label: 'second account', auth_type: 'oauth', priority: 1, state: 'ready', until: null, detail: null, current: true },
+        ] },
+        { id: 'anthropic', name: 'Anthropic', order: 1, free_tier: null, credentials: [
+          { index: 1, id: 'a1b2c3', label: 'work key', auth_type: 'api_key', priority: 0, state: 'signed_out', until: null, detail: 'auth failed (401) (re-auth may be required)', current: true },
+        ] },
+        { id: 'nous', name: 'Nous Portal', order: null, free_tier: 'Free tier · Hermes-4-70B', credentials: [] },
+      ],
+      catalog: [
+        { id: 'openai-codex', name: 'ChatGPT or Codex subscription', group: 'subscription', keywords: 'openai chatgpt' },
+        { id: 'anthropic', name: 'Claude subscription', group: 'subscription', keywords: 'claude' },
+        { id: 'nous', name: 'Nous Portal', group: 'subscription', keywords: 'nous' },
+        { id: 'openrouter', name: 'OpenRouter', group: 'api_key', keywords: 'or' },
+        { id: 'anthropic', name: 'Anthropic API', group: 'api_key', keywords: 'claude console' },
+        { id: 'deepseek', name: 'DeepSeek', group: 'api_key', keywords: '' },
+        { id: 'gmi', name: 'GMI Cloud', group: 'api_key', keywords: '' },
+        { id: 'bedrock', name: 'AWS Bedrock', group: 'cloud', keywords: 'aws amazon' },
       ],
     },
     installTasks: {},
@@ -74,8 +113,8 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
       cloud_consent: true,
     },
     wiki: {
-      wiki_language: 'en', wiki_language_chosen: true, wiki_engine: null, auto_add_files_links: true, auto_add_text: false,
-      auto_corrections: true, background_connections: false,
+      wiki_language: 'en', wiki_language_chosen: true, wiki_engine: null, wiki_model: null, wiki_effort: null, wiki_remembered: {}, auto_add_files_links: true, auto_add_text: false,
+      auto_corrections: true, background_connections: false, wiki_budget_characters: 2_000_000,
     },
     decisions: {
       provider: 'openrouter_jev', cloud_consent: true, openrouter_key: true, cloud_model: 'jev', stats: { decided: 0, undecided: 0 },
@@ -467,8 +506,257 @@ export function docWorld(): FakeWorld {
     jobs: [{
       id: 'j-l5', kind: 'ingest', material_id: 'm-l5', state: 'running', step: 'writing_notes', label: 'Writing notes', error: null, error_code: null, can_retry: false,
       progress: { parts_total: 4, parts_done: 2, concepts_found: 5, blocks_written: 7, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 1, concepts_updated: 2 },
-      journal: [], created_at: NOW, updated_at: NOW,
+      execution: null, journal: [], created_at: NOW, updated_at: NOW,
     }],
     lastFolderId: 'phys',
   });
+}
+
+// ---- agent permissions and questions (0.3.1 phase P) -------------------------------------------
+
+const asPart = (p: AnyMessagePart) => p as KbMessagePart;
+
+/** A permission request in the contract's shape (Entropy page, edit by Codex, waiting by default). */
+export function permissionPart(id: string, extra: Partial<KbPermissionPart> = {}): KbPermissionPart {
+  return {
+    type: 'permission', id, kind: 'edit', engine: 'codex', page_id: 'p-entropy', title: 'Entropy', status: 'pending', auto: false, reason: null,
+    summary: { added: 2, changed: 1, removed: 0, user_notes_untouched: true },
+    changes: [
+      { op: 'replace', block_id: 'b1', label: 'From sources', block_kind: 'from_source', before: 'A measure of the disorder of a system.', after: 'A measure of the disorder of a system: the logarithm of the number of microstates.' },
+      { op: 'add', block_id: null, label: 'Agent explanation', block_kind: 'explanation', before: null, after: 'Like counting the ways to arrange a messy room.' },
+      { op: 'add', block_id: null, label: 'Connections (agent inference)', block_kind: 'connection', before: null, after: 'Linked to “Cross-entropy”: the same formula in ML.' },
+    ],
+    ...extra,
+  };
+}
+
+/** An agent question in the contract's shape (Codex, four rows, the first recommended). */
+export function questionPart(id: string, extra: Partial<KbQuestionPart> = {}): KbQuestionPart {
+  return {
+    type: 'question', id, engine: 'codex', question: 'Where shall we start reviewing “Lecture 8”?', allow_other: true, status: 'pending', answer: null,
+    options: [
+      { label: 'Hard cards first', description: '3 cards you often forget, then due ones', recommended: true },
+      { label: 'Everything due today', description: '8 cards whose review date has come', recommended: false },
+      { label: 'Quick 10', description: 'The 10 closest to being forgotten', recommended: false },
+      { label: 'All 12 cards', description: 'Practice: only Again changes the schedule', recommended: false },
+    ],
+    ...extra,
+  };
+}
+
+/**
+ * chatWorld plus the phase-P chats: an edit waiting for the user (c8), a question waiting (c9), a chat
+ * with decided requests — allowed in this chat (Undo), denied with a reason, cancelled (c10) — and a
+ * delete waiting (c11).
+ */
+export function agentControlsWorld(): FakeWorld {
+  const w = chatWorld();
+  const chat = (id: string, title: string, minutesAgo: number, messages: KbChat['messages'], answering: boolean): KbChat => ({
+    id, title, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+    created_at: ago(minutesAgo + 10), updated_at: ago(minutesAgo), last_preview: '', recording_material_id: null,
+    folder_ids: [], state: answering ? 'answering' : 'idle', unread: false, messages, cursor: 0,
+  });
+  const ask = (id: string, text: string, min: number) => chatMessage(id, 1, 'user', ago(min), [{ type: 'text', text }]);
+  const answer = (id: string, min: number, parts: AnyMessagePart[], state: 'streaming' | 'done') =>
+    chatMessage(id, 2, 'assistant', ago(min), parts.map(asPart), { engine: 'codex', model: 'gpt-5.6-luna', state });
+  w.chats.push(
+    chat('c8', 'Entropy — edit', 1, [
+      ask('c8-u1', 'Add the microstates to “Entropy” and explain it simply', 2),
+      answer('c8-a1', 1, [{ type: 'text', text: 'I propose an edit of the page: the formula from the lecture and a plain explanation.' }, permissionPart('perm-edit')], 'streaming'),
+    ], true),
+    chat('c9', 'Review lecture 8', 1.5, [
+      ask('c9-u1', 'Let’s review lecture 8', 2),
+      answer('c9-a1', 1.5, [questionPart('q1')], 'streaming'),
+    ], true),
+    chat('c10', 'Wiki tidy-up', 2, [
+      ask('c10-u1', 'Tidy the entropy pages', 3),
+      answer('c10-a1', 2, [
+        permissionPart('perm-auto', { status: 'allowed', auto: true, title: 'Cross-entropy', page_id: 'p-xent' }),
+        permissionPart('perm-denied', { status: 'denied', reason: 'Only from the lecture, no comparisons' }),
+        permissionPart('perm-cancelled', { kind: 'create', status: 'cancelled', title: 'Microstate', page_id: null }),
+      ], 'done'),
+    ], false),
+    chat('c11', 'Remove Spike', 2.5, [
+      ask('c11-u1', 'Delete the page about spikes', 3),
+      answer('c11-a1', 2.5, [permissionPart('perm-del', {
+        kind: 'delete', title: 'Spike', page_id: 'p-spike', summary: { added: 0, changed: 0, removed: 3, user_notes_untouched: true },
+        changes: [{ op: 'remove', block_id: null, label: 'Whole page', block_kind: 'page', before: '“Spike” — 3 blocks, made by the agent', after: null }],
+      })], 'streaming'),
+    ], true),
+  );
+  for (const id of ['c8', 'c9', 'c10', 'c11']) w.chatEvents[id] = [];
+  return w;
+}
+
+// ---- flashcards and tests (0.3.1 phase S) ------------------------------------------------------
+
+const LECTURE8 = 'Lecture 8 — entropy';
+const INTERVALS_NEW = { again: '1m', hard: '6m', good: '10m', easy: '3d' };
+
+/** A card in the contract's shape: new, answer from the lecture with its checked quote. */
+export function studyCard(id: string, question: string, answer: string, extra: Partial<KbStudyCard> = {}): KbStudyCard {
+  return {
+    id, page_id: null, question, answer, citations: [cite('m1', LECTURE8, 1, { start_ms: 2_600_000 }, 'entropy as S = k·ln W')],
+    explanation: null, group: 'new', state: 'new', suspended: false, marked_hard: false, intervals: { ...INTERVALS_NEW },
+    graded: null, due: null, ...extra,
+  };
+}
+
+const SAVE_PENDING = (kind: 'deck' | 'test', title: string): KbStudyPart['save'] => (
+  { status: 'pending', path: `Wiki/${kind === 'deck' ? 'Decks' : 'Tests'}/${title}.md`, page_id: null });
+
+/** A deck the agent just made in a chat (Codex, three cards, Save to wiki waiting). */
+export function deckPart(id: string, chatId: string, messageId: string, extra: Partial<KbStudyPart> = {}): KbStudyPart {
+  return {
+    type: 'study', id, kind: 'deck', title: 'Lecture 8', engine: 'codex', origin: 'agent', mode: 'new', place: 'chat',
+    position: 0, side: 'question', total: 3,
+    cards: [
+      studyCard('c-1', 'How did Boltzmann write entropy?', 'S = k·ln W', { explanation: 'Like counting the ways to arrange a messy room.' }),
+      studyCard('c-2', 'Why a logarithm?', 'So that the entropies of independent systems add up.',
+        { citations: [cite('m1', LECTURE8, 2, { start_ms: 2_620_000 }, 'the entropies of two independent systems should add up')] }),
+      studyCard('c-3', 'What is entropy in information theory?', 'The average uncertainty of a random variable.',
+        { citations: [cite('m2', 'Textbook: Information theory, ch. 2', 9, { page: 31 }, 'the average uncertainty of a random variable')] }),
+    ],
+    questions: [], groups: { new: 3, learning: 0, known: 0, hard: 0 }, held_back: 0, save: SAVE_PENDING('deck', 'Lecture 8'),
+    result: null, chat_id: chatId, message_id: messageId, ...extra,
+  };
+}
+
+/** A test the agent just made: one question of each kind. */
+export function testPart(id: string, chatId: string, messageId: string, extra: Partial<KbStudyPart> = {}): KbStudyPart {
+  const lecture = [cite('m1', LECTURE8, 1, { start_ms: 2_600_000 }, 'entropy as S = k·ln W')];
+  return {
+    type: 'study', id, kind: 'test', title: 'Lecture 8 check', engine: 'codex', origin: 'agent', mode: 'all', place: 'chat',
+    position: 0, side: 'question', total: 3, cards: [],
+    questions: [
+      { id: 'q-1', type: 'choice', question: 'How did Boltzmann write entropy?', answers: ['S = k·ln W'], citations: lecture, explanation: null, response: null,
+        options: [{ id: 'w0', text: 'S = k·W²', origin: 'agent' }, { id: 'r0', text: 'S = k·ln W', origin: 'source' }, { id: 'w1', text: 'S = W / k', origin: 'agent' }] },
+      { id: 'q-2', type: 'short', question: 'What letter stands for the number of microstates?', answers: ['W'], citations: lecture, explanation: null, response: null, options: [] },
+      { id: 'q-3', type: 'open', question: 'Explain why entropy uses a logarithm.', answers: ['So that the entropies of independent systems add up.'],
+        citations: [cite('m1', LECTURE8, 2, { start_ms: 2_620_000 }, 'the entropies of two independent systems should add up')],
+        explanation: 'Think of what happens to the count of arrangements when you join two systems.', response: null, options: [] },
+    ],
+    groups: { new: 0, learning: 0, known: 0, hard: 0 }, held_back: 0, save: SAVE_PENDING('test', 'Lecture 8 check'),
+    result: null, chat_id: chatId, message_id: messageId, ...extra,
+  };
+}
+
+/**
+ * chatWorld plus phase S: a chat whose answer holds a new deck (c12), one with a test (c13), and a
+ * saved deck page "Thermodynamics" (p-deck) with cards in every group.
+ */
+export function studyWorld(): FakeWorld {
+  const w = chatWorld();
+  const chat = (id: string, title: string, minutesAgo: number, messages: KbChat['messages']): KbChat => ({
+    id, title, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+    created_at: ago(minutesAgo + 10), updated_at: ago(minutesAgo), last_preview: '', recording_material_id: null,
+    folder_ids: [], state: 'idle', unread: false, messages, cursor: 0,
+  });
+  const ask = (id: string, text: string, min: number) => chatMessage(id, 1, 'user', ago(min), [{ type: 'text', text }]);
+  const answer = (id: string, min: number, parts: AnyMessagePart[]) =>
+    chatMessage(id, 2, 'assistant', ago(min), parts.map(asPart), { engine: 'codex', model: 'gpt-5.6-luna' });
+  w.chats.push(
+    chat('c12', 'Lecture 8 — cards', 0.5, [
+      ask('c12-u1', 'Make cards from @Lecture 8', 1),
+      answer('c12-a1', 0.5, [{ type: 'text', text: 'Here are three cards from the lecture.' }, deckPart('st-deck', 'c12', 'c12-a1')]),
+    ]),
+    chat('c13', 'Lecture 8 — test', 0.8, [
+      ask('c13-u1', 'Test me on lecture 8', 1),
+      answer('c13-a1', 0.8, [{ type: 'text', text: 'A short test: wrong options are made up by me.' }, testPart('st-test', 'c13', 'c13-a1')]),
+    ]),
+  );
+  w.chatEvents.c12 = [];
+  w.chatEvents.c13 = [];
+  const phys = w.folders.find((f) => f.id === 'phys')!;
+  const deckCards = [
+    studyCard('d-1', 'How did Boltzmann write entropy?', 'S = k·ln W', { page_id: 'p-deck', group: 'hard', state: 'relearning', marked_hard: true, due: ago(-60) }),
+    studyCard('d-2', 'Why a logarithm?', 'So that entropies add up.', { page_id: 'p-deck', group: 'learning', state: 'learning', due: ago(-10) }),
+    studyCard('d-3', 'Second law?', 'Entropy of an isolated system does not decrease.', { page_id: 'p-deck', group: 'known', state: 'review', due: ago(-60 * 24 * 3) }),
+    studyCard('d-4', 'What is a microstate?', 'One arrangement of the particles.', { page_id: 'p-deck', group: 'new' }),
+  ];
+  w.pages.push(page('p-deck', 'deck', 'Thermodynamics', [phys], deckCards.map((c) => block(c.id, 'from_source', null, `${c.question}::${c.answer}`, c.citations))));
+  w.decks = { 'p-deck': { page_id: 'p-deck', title: 'Thermodynamics', cards: deckCards, groups: { new: 1, learning: 1, known: 1, hard: 1 }, due: 1 } };
+  return w;
+}
+
+/** Hermes' whole provider catalogue as the backend sends it (hermes_providers.CATALOG, 45 ways). */
+export const HERMES_CATALOG: KbHermesCatalogItem[] = [
+  { id: 'openai-codex', name: 'ChatGPT or Codex subscription', group: 'subscription', keywords: 'openai chatgpt codex plus pro' },
+  { id: 'anthropic', name: 'Claude subscription', group: 'subscription', keywords: 'anthropic claude pro max' },
+  { id: 'nous', name: 'Nous Portal', group: 'subscription', keywords: 'nous research hermes' },
+  { id: 'xai-oauth', name: 'xAI Grok (SuperGrok / Premium+)', group: 'subscription', keywords: 'grok x supergrok' },
+  { id: 'qwen-oauth', name: 'Qwen Code', group: 'subscription', keywords: 'qwen alibaba' },
+  { id: 'minimax-oauth', name: 'MiniMax', group: 'subscription', keywords: 'minimax' },
+  { id: 'openrouter', name: 'OpenRouter', group: 'api_key', keywords: 'or many models' },
+  { id: 'openai-api', name: 'OpenAI API', group: 'api_key', keywords: 'openai gpt platform' },
+  { id: 'anthropic', name: 'Anthropic API', group: 'api_key', keywords: 'claude console' },
+  { id: 'gemini', name: 'Google AI Studio', group: 'api_key', keywords: 'google gemini' },
+  { id: 'deepseek', name: 'DeepSeek', group: 'api_key', keywords: '' },
+  { id: 'xai', name: 'xAI', group: 'api_key', keywords: 'grok' },
+  { id: 'zai', name: 'Z.AI (GLM)', group: 'api_key', keywords: 'glm zhipu' },
+  { id: 'kimi-coding', name: 'Kimi / Moonshot', group: 'api_key', keywords: 'moonshot kimi' },
+  { id: 'kimi-coding-cn', name: 'Kimi / Moonshot (China)', group: 'api_key', keywords: 'moonshot kimi china' },
+  { id: 'minimax', name: 'MiniMax API', group: 'api_key', keywords: '' },
+  { id: 'minimax-cn', name: 'MiniMax (China)', group: 'api_key', keywords: '' },
+  { id: 'alibaba', name: 'Qwen Cloud', group: 'api_key', keywords: 'alibaba dashscope qwen' },
+  { id: 'alibaba-coding-plan', name: 'Alibaba Cloud (Coding Plan)', group: 'api_key', keywords: 'dashscope qwen' },
+  { id: 'nvidia', name: 'NVIDIA NIM', group: 'api_key', keywords: 'nemotron' },
+  { id: 'huggingface', name: 'Hugging Face', group: 'api_key', keywords: 'hf' },
+  { id: 'ai-gateway', name: 'Vercel AI Gateway', group: 'api_key', keywords: 'vercel' },
+  { id: 'opencode-zen', name: 'OpenCode Zen', group: 'api_key', keywords: 'opencode' },
+  { id: 'opencode-go', name: 'OpenCode Go', group: 'api_key', keywords: 'opencode' },
+  { id: 'kilocode', name: 'Kilo Code', group: 'api_key', keywords: 'kilo' },
+  { id: 'copilot', name: 'GitHub Copilot', group: 'api_key', keywords: 'github token' },
+  { id: 'deepinfra', name: 'DeepInfra', group: 'api_key', keywords: '' },
+  { id: 'fireworks', name: 'Fireworks AI', group: 'api_key', keywords: '' },
+  { id: 'novita', name: 'NovitaAI', group: 'api_key', keywords: '' },
+  { id: 'nebius-token-factory', name: 'Nebius Token Factory', group: 'api_key', keywords: 'nebius' },
+  { id: 'stepfun', name: 'StepFun Step Plan', group: 'api_key', keywords: 'step' },
+  { id: 'xiaomi', name: 'Xiaomi MiMo', group: 'api_key', keywords: 'mimo' },
+  { id: 'tencent-tokenhub', name: 'Tencent TokenHub', group: 'api_key', keywords: 'hunyuan' },
+  { id: 'tencent-tokenplan', name: 'Tencent TokenPlan', group: 'api_key', keywords: 'hunyuan' },
+  { id: 'ollama-cloud', name: 'Ollama Cloud', group: 'api_key', keywords: 'ollama' },
+  { id: 'upstage', name: 'Upstage Solar', group: 'api_key', keywords: 'solar' },
+  { id: 'arcee', name: 'Arcee AI', group: 'api_key', keywords: '' },
+  { id: 'gmi', name: 'GMI Cloud', group: 'api_key', keywords: '' },
+  { id: 'meta-ai', name: 'Meta Model API', group: 'api_key', keywords: 'meta muse' },
+  { id: 'commandcode', name: 'CommandCode', group: 'api_key', keywords: '' },
+  { id: 'actual', name: 'Actual Computer', group: 'api_key', keywords: '' },
+  { id: 'lmstudio', name: 'LM Studio on this computer', group: 'api_key', keywords: 'local' },
+  { id: 'bedrock', name: 'AWS Bedrock', group: 'cloud', keywords: 'aws amazon' },
+  { id: 'vertex', name: 'Google Vertex AI', group: 'cloud', keywords: 'google gcp' },
+  { id: 'azure-foundry', name: 'Azure Foundry', group: 'cloud', keywords: 'microsoft azure' },
+];
+
+/**
+ * Settings → Accounts & keys as in the confirmed v3 mock-up (.dev/ui-redesign/accounts/accounts-v3.html):
+ * four agents (OpenCode not signed in), Hermes with ChatGPT (a sign-in) and OpenRouter (three named
+ * keys: one at its limit, one in use, one rejected), the full catalogue.
+ */
+export function accountsWorld(base: FakeWorld = chatWorld()): FakeWorld {
+  const w = base;
+  w.health.sections[0] = { id: 'accounts', state: 'ok', problems: [] }; // Hermes is installed here
+  const set = (id: EngineId, extra: Partial<KbAgent>) => Object.assign(w.agents.agents.find((a) => a.id === id)!, extra);
+  set('codex', { version: '0.160', checked_at: ago(0) });
+  set('claude_code', { version: '2.1.281', checked_at: ago(2) });
+  set('hermes', { state: 'ready', installed: true, signed_in: true, version: '0.22.1', reason: null, action: null,
+    first_run: { checked: true, note: '' }, checked_at: ago(2) });
+  if (!w.agents.agents.some((a) => a.id === 'opencode')) {
+    w.agents.agents.push(agent('opencode', 'OpenCode', 'signed_out', { version: '1.17.18', checked_at: ago(1) }));
+  }
+  const until = new Date(Date.now() + 90 * MIN).toISOString();
+  w.hermesProviders = {
+    state: 'ready', reason: null, catalog_checked: 'Hermes v0.22.2', terminal: null, read_at: ago(0), catalog: HERMES_CATALOG,
+    providers: [
+      { id: 'openai-codex', name: 'ChatGPT', order: 0, free_tier: null, credentials: [
+        { index: 1, id: 'c0dex1', label: 'you@example.com', auth_type: 'oauth', priority: 0, state: 'ready', until: null, detail: null, current: true },
+      ] },
+      { id: 'openrouter', name: 'OpenRouter', order: 1, free_tier: null, credentials: [
+        { index: 1, id: 'or0001', label: 'Personal', auth_type: 'api_key', priority: 0, state: 'limited', until, detail: 'rate-limited (429)', current: false },
+        { index: 2, id: 'or0002', label: 'Work', auth_type: 'api_key', priority: 1, state: 'ready', until: null, detail: null, current: true },
+        { index: 3, id: 'or0003', label: 'Spare', auth_type: 'api_key', priority: 2, state: 'error', until: null, detail: 'exhausted (402)', current: false },
+      ] },
+    ],
+  };
+  return w;
 }

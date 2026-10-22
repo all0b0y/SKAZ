@@ -143,8 +143,10 @@ def _require_session(runtime: RuntimeDep, session_id: str) -> Session:
 async def patch_session(session_id: str, payload: PatchSessionRequest, runtime: RuntimeDep) -> Session:
     """Title and pause/stop status. Native recordings settle their transcript themselves, so
     ``flush_transcription`` is accepted for compatibility and has nothing left to flush."""
-    _require_session(runtime, session_id)
-    updated = repo.update_session(runtime.db, session_id, status=payload.status, title=payload.title)
+    # L2: off the event loop, like every other database call of the routes (a commit is an fsync).
+    await disk_call(_require_session, runtime, session_id)
+    updated = await disk_call(lambda: repo.update_session(runtime.db, session_id, status=payload.status,
+                                                          title=payload.title))
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' does not exist.")
     return updated

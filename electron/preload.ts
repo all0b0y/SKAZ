@@ -74,6 +74,9 @@ const api: BridgeApi = {
   prepareUpdate(): Promise<UpdateState> {
     return ipcRenderer.invoke(CHANNELS.updatePrepare) as Promise<UpdateState>;
   },
+  cancelUpdate(): Promise<UpdateState> {
+    return ipcRenderer.invoke(CHANNELS.updateCancel) as Promise<UpdateState>;
+  },
   installUpdate(): Promise<boolean> {
     return ipcRenderer.invoke(CHANNELS.updateInstall) as Promise<boolean>;
   },
@@ -116,6 +119,11 @@ const api: BridgeApi = {
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
   },
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
+  onFullScreen(listener: (fullScreen: boolean) => void): () => void {
+    const handler = (_event: unknown, on: unknown): void => listener(on === true);
+    ipcRenderer.on(CHANNELS.fullScreen, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.fullScreen, handler);
+  },
 };
 
 contextBridge.exposeInMainWorld('skaz', api);

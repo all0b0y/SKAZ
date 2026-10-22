@@ -205,3 +205,55 @@ export function insertText(root: HTMLElement, value: string): void {
 export function clearEditor(root: HTMLElement): void {
   root.replaceChildren();
 }
+
+/**
+ * A sent message's text cut into plain runs and its tokens, in order: each mention/quote is found
+ * where it stands in the text (`@Title`, `“quote…”`), once. The bubble draws it; Edit refills a field.
+ */
+export function inputPieces(input: { text: string; mentions: readonly KbRef[]; quotes: readonly KbQuote[] }): Array<string | Token> {
+  const marks: Array<{ at: number; len: number; token: Token }> = [];
+  const used = new Set<number>();
+  const find = (token: Token) => {
+    const needle = tokenText(token);
+    let from = 0;
+    for (;;) {
+      const at = input.text.indexOf(needle, from);
+      if (at < 0) return;
+      if (![...used].some((u) => u >= at && u < at + needle.length)) {
+        for (let i = at; i < at + needle.length; i += 1) used.add(i);
+        marks.push({ at, len: needle.length, token });
+        return;
+      }
+      from = at + 1;
+    }
+  };
+  input.mentions.forEach((ref) => find({ kind: 'mention', ref }));
+  input.quotes.forEach((quote) => find({ kind: 'quote', quote }));
+  marks.sort((a, b) => a.at - b.at);
+  const out: Array<string | Token> = [];
+  let pos = 0;
+  for (const mk of marks) {
+    if (mk.at > pos) out.push(input.text.slice(pos, mk.at));
+    out.push(mk.token);
+    pos = mk.at + mk.len;
+  }
+  if (pos < input.text.length) out.push(input.text.slice(pos));
+  return out;
+}
+
+/** Put a sent message back into an editor: its text with its mentions and quotes as tokens. */
+export function fillEditor(root: HTMLElement, input: Parameters<typeof inputPieces>[0]): void {
+  const doc = root.ownerDocument;
+  root.replaceChildren(...inputPieces(input).map((piece) => (typeof piece === 'string' ? doc.createTextNode(piece) : tokenElement(piece, doc))));
+}
+
+/** The caret at the end of an editor's content (Edit opens with it after the last word). */
+export function caretToEnd(root: HTMLElement): void {
+  const selection = root.ownerDocument.getSelection();
+  if (!selection) return;
+  const range = root.ownerDocument.createRange();
+  range.selectNodeContents(root);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}

@@ -38,13 +38,14 @@ function buildUrl(port: number, path: string, query?: BridgeRequest['query']): s
   return url.toString();
 }
 
-async function readDetail(res: Response): Promise<string> {
+/** The backend's plain-English `detail` and, when present, its machine-readable `error_code`. */
+async function readFailure(res: Response): Promise<{ detail: string; code?: string }> {
   try {
-    const body = (await res.json()) as { detail?: unknown };
-    if (typeof body?.detail === 'string') return body.detail;
-    return `HTTP ${res.status}`;
+    const body = (await res.json()) as { detail?: unknown; error_code?: unknown };
+    const detail = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+    return typeof body?.error_code === 'string' ? { detail, code: body.error_code } : { detail };
   } catch {
-    return `HTTP ${res.status}`;
+    return { detail: `HTTP ${res.status}` };
   }
 }
 
@@ -269,7 +270,7 @@ export function registerIpc(
         body: hasBody ? JSON.stringify(req.body) : undefined,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-      if (!res.ok) return { ok: false, status: res.status, detail: await readDetail(res) };
+      if (!res.ok) return { ok: false, status: res.status, ...(await readFailure(res)) };
       const text = await res.text();
       const data = text.length > 0 ? (JSON.parse(text) as unknown) : null;
       return { ok: true, status: res.status, data };
