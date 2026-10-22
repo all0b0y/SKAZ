@@ -34,10 +34,11 @@ describe('Electron IPC policy — knowledge library (/kb) routes of the new inte
 
   it('allows the package-2 calls of chat, composer, ⌘K, notifications, settings and first launch (U2)', () => {
     const allowed: Array<[string, string]> = [
-      ['GET', '/kb/chats'], ['POST', '/kb/chats'], ['GET', '/kb/chats/events'],
+      ['GET', '/kb/chats'], ['POST', '/kb/chats'], ['GET', '/kb/chats/events'], ['PUT', '/kb/chats/last-choice'],
       ['GET', '/kb/chats/c1'], ['PATCH', '/kb/chats/c1'], ['DELETE', '/kb/chats/c1'],
       ['POST', '/kb/chats/c1/messages'], ['GET', '/kb/chats/c1/events'],
       ['POST', '/kb/chats/c1/messages/m1/stop'], ['POST', '/kb/chats/c1/messages/m1/regenerate'],
+      ['POST', '/kb/chats/c1/messages/m1/edit'],
       ['POST', '/kb/chats/c1/messages/m1/resume'], ['POST', '/kb/chats/c1/messages/m1/save'],
       ['POST', '/kb/chats/c1/save'], ['POST', '/kb/chats/c1/read'], ['GET', '/kb/chats/c1/export'],
       ['GET', '/kb/mentions'],
@@ -53,7 +54,7 @@ describe('Electron IPC policy — knowledge library (/kb) routes of the new inte
       ['POST', '/kb/agents/codex/login'], ['POST', '/kb/agents/claude_code/check'],
       ['GET', '/kb/agents/install/t1'], ['POST', '/kb/agents/install/t1/cancel'],
       ['GET', '/kb/decisions'], ['PUT', '/kb/decisions/provider'], ['POST', '/kb/decisions/local/download'], ['POST', '/kb/decisions/local/cancel'],
-      ['POST', '/kb/materials/file'], ['POST', '/kb/materials/link'], ['POST', '/kb/materials/text'],
+      ['POST', '/kb/materials/file'], ['POST', '/kb/materials/link'], ['POST', '/kb/materials/text'], ['POST', '/kb/materials/web'],
       ['POST', '/kb/materials/m1/ingest'], ['POST', '/kb/imports'], ['POST', '/kb/links/classify'],
     ];
     for (const [method, path] of allowed) {
@@ -197,10 +198,12 @@ describe('Electron IPC policy — /kb rules match the real backend routes (I1)',
 });
 
 describe('Electron IPC policy — restored capabilities (F2)', () => {
-  it('lets Codex sign out and the local speech model be deleted — nothing wider', () => {
+  it('lets Codex and OpenCode sign out and the local speech model be deleted — nothing wider', () => {
     expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/codex/logout' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/opencode/logout' })).toBeNull();
     expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/settings/speech/local-model' })).toBeNull();
     for (const [method, path] of [
+      // Claude Code uses this Mac's own sign-in; Hermes signs out per provider (Accounts & keys v3).
       ['POST', '/kb/agents/claude_code/logout'], ['POST', '/kb/agents/hermes/logout'], ['GET', '/kb/agents/codex/logout'],
       ['DELETE', '/kb/settings/speech'], ['DELETE', '/kb/settings/speech/local-model/x'], ['POST', '/kb/settings/speech/local-model'],
       ['DELETE', '/kb/decisions/local'],
@@ -208,7 +211,26 @@ describe('Electron IPC policy — restored capabilities (F2)', () => {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
     }
   });
+});
 
+describe('Electron IPC policy — Accounts & keys v3', () => {
+  it('lets the window follow a sign-in, add a named Hermes key and remove a whole provider — nothing wider', () => {
+    for (const engine of ['codex', 'claude_code', 'hermes', 'opencode']) {
+      expect(validateBridgeRequest({ method: 'GET', path: `/kb/agents/${engine}/sign-in` }), engine).toBeNull();
+    }
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/hermes/providers/openrouter/keys', body: { label: 'Team' } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/agents/hermes/providers/openrouter' })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/agents/codex/sign-in'], ['GET', '/kb/agents/gemini/sign-in'],
+      ['GET', '/kb/agents/hermes/providers/openrouter/keys'], ['POST', '/kb/agents/hermes/providers/Open Router/keys'],
+      ['DELETE', '/kb/agents/hermes/providers/../x'], ['DELETE', '/kb/agents/hermes/providers/-x'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — activity log', () => {
   it('lets the activity log be read, and nothing else under /logs', () => {
     expect(validateBridgeRequest({ method: 'GET', path: '/logs' })).toBeNull();
     for (const [method, path] of [['POST', '/logs'], ['DELETE', '/logs'], ['GET', '/logs/1'], ['GET', '/logs/../settings']] as const) {
@@ -240,6 +262,22 @@ describe('Electron IPC policy — agents ask permission and questions (0.3.1 P)'
       ['POST', '/kb/permissions/../chats/c1/decide'], ['DELETE', '/kb/permissions/perm-1/undo'],
       ['GET', '/kb/questions/q-1/answer'], ['POST', '/kb/questions/q-1'], ['POST', '/kb/questions/q-1/answer/x'],
       ['POST', '/kb/questions'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — web search the user approves (W-2)', () => {
+  it('lets the user decide a query and see / revoke the chat\'s grant — one id segment, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/web-searches/web-1/decide', body: { decision: 'allow_chat' } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/chats/c1/web-search' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/chats/c1/web-search' })).toBeNull();
+    for (const [method, path] of [
+      ['GET', '/kb/web-searches/web-1/decide'], ['POST', '/kb/web-searches/web-1'], ['POST', '/kb/web-searches'],
+      ['POST', '/kb/web-searches/a/b/decide'], ['POST', '/kb/web-searches/../chats/c1/decide'],
+      ['POST', '/kb/chats/c1/web-search'], ['PUT', '/kb/chats/c1/web-search'], ['GET', '/kb/chats/a/b/web-search'],
+      ['GET', '/kb/web-search'], ['POST', '/kb/web-searches/web-1/send'],
     ] as const) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
     }

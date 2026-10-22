@@ -4,19 +4,24 @@ from __future__ import annotations
 
 from typing import cast
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from ..errors import KnowledgeError
+from ..library.library import INBOX_ID
 from ..sources.links import LinkInfo, classify_offline
 from ..sources.service import GuardReport, IntakeResult, SourceService, location_label
+from ..sources.web_page import WebPageUnavailable
 from ..speech.service import SpeechInvalid, SpeechService, SpeechView
+from ..wiki.service import WikiService
 from .deps import kb_call
-from .materials import material_summaries
-from .schemas import KbMaterialSummary
+from .materials import material_summaries, material_view
+from .schemas import KbMaterial, KbMaterialSummary
 from .schemas_sources import (
     KbAddFile,
     KbAddLink,
     KbAddText,
+    KbAddWebPage,
     KbClassifyLink,
     KbExcludedFragment,
     KbFragmentLocation,
@@ -25,6 +30,7 @@ from .schemas_sources import (
     KbMaterialAdded,
     KbMaterialGuard,
     KbRestoredFragment,
+    KbWebPageUnavailable,
 )
 
 router = APIRouter(tags=["kb"])
@@ -187,6 +193,39 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
     except KnowledgeError as error:
         return added.model_copy(update={"video_failure_reason": error.message})
     return added.model_copy(update={"video": await _summary(sources, view.material_id)})
+
+
+@router.post(
+    "/kb/materials/web",
+    status_code=201,
+    response_model=KbMaterial,
+    responses={422: {"model": KbWebPageUnavailable}},
+)
+async def add_web_page(
+    payload: KbAddWebPage, request: Request, response: Response
+) -> KbMaterial | JSONResponse:
+    """W-3 "Add to wiki": SKAZ itself fetches only this URL, saves the whole page as text with the link
+    and the date, and the normal ingest follows. 201 = new material; 200 = the same page was already in
+    the folder (no request made; ingest is asked for again if it isn't in the wiki). A page SKAZ can't
+    save (sign-in, paywall, JavaScript-only, not HTML, too large, too slow, an error answer, a blocked
+    address): 422 ``{detail, error_code: "web_page_unavailable"}``."""
+    sources = get_sources(request)
+    try:
+        folder_id = payload.folder_id or INBOX_ID
+        saved = await sources.add_web_page(payload.url, folder_id, to_wiki=payload.to_wiki)
+    except WebPageUnavailable as error:
+        body = KbWebPageUnavailable(detail=error.message, error_code="web_page_unavailable")
+        return JSONResponse(status_code=error.status_code, content=body.model_dump())
+    except KnowledgeError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+    except OSError as error:
+        raise HTTPException(
+            status_code=503, detail=f"SKAZ couldn't use the library folder: {error.strerror or error}."
+        ) from error
+    if saved.existing:
+        response.status_code = 200
+    wiki = cast(WikiService, request.app.state.runtime.kb_wiki)
+    return await kb_call(material_view, sources.kb, saved.material_id, wiki)
 
 
 @router.post("/kb/links/classify")

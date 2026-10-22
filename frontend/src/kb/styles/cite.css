@@ -40,6 +40,15 @@
   min-width: 0;
 }
 .kb-srcs__head { margin-right: 2px; }
+/* U2-a: the sources under a chat answer fold to "Sources · N". */
+.kb-srcs-fold { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--kb-line); min-width: 0; }
+.kb-srcs__toggle {
+  display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px; margin-left: -4px;
+  border-radius: var(--kb-r-xs); color: var(--kb-muted); font-size: var(--t-xs);
+}
+.kb-srcs__toggle:hover { color: var(--kb-text); }
+.kb-srcs__toggle:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 2px; }
+.kb-srcs.kb-srcs--folding { margin-top: 6px; padding-top: 0; border-top: 0; }
 .kb-srcs__item {
   display: inline-flex;
   align-items: center;

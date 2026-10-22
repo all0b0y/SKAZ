@@ -103,6 +103,16 @@ def start_turn() -> None:
         event("item/agentMessage/delta", itemId="h1", delta="Working")
     elif mode == "crash":
         sys.exit(9)
+    elif mode == "websearch":  # W-3b: the clean search run (ThreadItem webSearch of codex-cli 0.160.0)
+        event("item/started", item={"id": "w1", "type": "webSearch", "query": "", "action": None})
+        event("item/completed", item={"id": "w1", "type": "webSearch", "query": "entropy definition",
+                                      "action": {"type": "search", "query": "entropy definition"},
+                                      "results": [{"title": "Entropy — Britannica",
+                                                   "url": "https://www.britannica.com/science/entropy"}]})
+        answer("s1", "- [Entropy — Wikipedia](https://en.wikipedia.org/wiki/Entropy)\n"
+                     "- Entropy (Stanford Encyclopedia): https://plato.stanford.edu/entries/entropy/\n"
+                     "- [Bad](javascript:alert(1))")
+        complete()
 
 
 for line in sys.stdin:

@@ -121,7 +121,7 @@ def test_auth_list_is_read_as_hermes_prints_it() -> None:
     assert dead.state == "signed_out" and dead.index == 3 and dead.until is None
     (retry,) = pools["openrouter"].credentials
     assert retry.state == "ready" and retry.source == "manual"
-    assert pools["openai-codex"].name == "ChatGPT or Codex subscription"
+    assert pools["openai-codex"].name == "ChatGPT"  # a short name for its chip (Accounts & keys v3)
 
 
 def test_provider_order_is_main_then_fallback_chain() -> None:
@@ -157,10 +157,12 @@ def test_step_script_runs_the_second_command_only_after_the_first_and_leaves_its
     env = {"LOG": str(log), "PATH": "/usr/bin:/bin", "TERM": "dumb"}
     path = write_steps(tmp_path / "launch", "two", "Title", [[str(bad)], [str(good)]], env)
     assert read_done(tmp_path / "launch", "two") is None
-    subprocess.run(["/bin/bash", str(path)], check=False, capture_output=True, env=env)
+    subprocess.run(["/bin/bash", str(path)], check=False, capture_output=True, env=env,
+                   stdin=subprocess.DEVNULL)
     assert read_done(tmp_path / "launch", "two") == 3 and not log.exists()
     path = write_steps(tmp_path / "launch", "two", "Title", [[str(good)], [str(good)]], env)
-    subprocess.run(["/bin/bash", str(path)], check=False, capture_output=True, env=env)
+    subprocess.run(["/bin/bash", str(path)], check=False, capture_output=True, env=env,
+                   stdin=subprocess.DEVNULL)
     assert read_done(tmp_path / "launch", "two") == 0 and log.read_text() == "ran\nran\n"
     assert oct(path.stat().st_mode & 0o777) == "0o700"
 

@@ -353,6 +353,7 @@ async def test_tools_without_mcp_access_fail_plainly(tmp_path: Path) -> None:
     engine, fake = engine_for(tmp_path, {"stream": SUCCESS})
     events = await drain(engine, turn())
     assert len(events) == 1 and isinstance(events[0], Failed) and events[0].kind == "other"
+    assert events[0].unsent  # refused before Claude Code was started
     assert not any("-p" in item["argv"] for item in fake.records("start"))
 
 

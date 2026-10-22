@@ -31,8 +31,15 @@ export interface KbAddText {
   to_wiki?: boolean | null;
 }
 
+/** W-3 "Add to wiki" for a web page (chat web sources, "+ Material"). */
+export interface KbAddWebPage {
+  url: string;
+  folder_id?: string | null;
+  to_wiki?: boolean;
+}
+
 export interface KbAgent {
-  id: "codex" | "claude_code" | "hermes";
+  id: "codex" | "claude_code" | "hermes" | "opencode";
   name: string;
   state: "ready" | "not_installed" | "outdated" | "signed_out" | "unavailable" | "preparing";
   installed: boolean;
@@ -49,12 +56,14 @@ export interface KbAgent {
   checked_at: string;
   first_run: KbAgentFirstRun | null;
   questions?: "native" | "skaz";
+  last_choice?: KbAgentLastChoice | null;
   visible: boolean;
   providers: KbAgentProvider[];
+  web_search?: KbAgentWebSearch;
 }
 
 export interface KbAgentDefault {
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
 }
 
 /** Hermes is checked once with SKAZ's own folder (B10); nothing starts until the user asks. */
@@ -69,12 +78,18 @@ export interface KbAgentInstallInfo {
   checked_on: string;
 }
 
+/** The model and reasoning last chosen for this agent in the message field; ``model: null`` = as set in the agent. A new chat and a switch to this agent start from it (models screen v2). */
+export interface KbAgentLastChoice {
+  model: string | null;
+  effort: string | null;
+}
+
 export interface KbAgentLogin {
   consent?: boolean;
 }
 
 export interface KbAgentLoginResult {
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   method: "terminal" | "browser";
   url: string | null;
   message: string;
@@ -102,9 +117,23 @@ export interface KbAgentProvider {
   total: number;
 }
 
+/** A sign-in started in this SKAZ: ``waiting`` while the browser page or Terminal window is open, then ``done`` (check the agent now) or ``failed``; ``idle`` when none was started. */
+export interface KbAgentSignIn {
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  method: "terminal" | "browser" | null;
+  state: "idle" | "waiting" | "done" | "failed";
+}
+
+/** W-2: whether this agent can search the web with the user's approval of each query; why not, in plain words. W-3b: Codex, Hermes and OpenCode search through SKAZ's ``skaz_web_search``, run by ``through``'s own search in a separate query-only run (available while a searcher is connected). */
+export interface KbAgentWebSearch {
+  available: boolean;
+  reason: string | null;
+  through?: "codex" | "claude_code" | null;
+}
+
 export interface KbAgents {
   agents: KbAgent[];
-  default: "codex" | "claude_code" | "hermes";
+  default: "codex" | "claude_code" | "hermes" | "opencode";
   favorites: KbFavoriteModel[];
 }
 
@@ -151,7 +180,7 @@ export interface KbChat {
   id: string;
   title: string;
   pinned: boolean;
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   model: string | null;
   effort: string | null;
   created_at: string;
@@ -168,16 +197,16 @@ export interface KbChat {
 
 export interface KbChatCreate {
   title?: string | null;
-  engine?: "codex" | "claude_code" | "hermes" | null;
+  engine?: "codex" | "claude_code" | "hermes" | "opencode" | null;
   model?: string | null;
   effort?: string | null;
   recording_material_id?: string | null;
 }
 
-/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part; ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question, study). */
+/** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part; ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question, study); ``removed`` takes the message out of the chat (an edited question's later messages). */
 export interface KbChatEvent {
   seq: number;
-  type: "message" | "delta" | "part" | "state" | "title" | "part_update";
+  type: "message" | "delta" | "part" | "state" | "title" | "part_update" | "removed";
   message_id: string | null;
   text?: string | null;
   part?: KbMessagePart | null;
@@ -194,6 +223,13 @@ export interface KbChatExport {
   markdown: string;
 }
 
+/** A choice made in the New chat field before the chat exists (models screen v2). */
+export interface KbChatLastChoice {
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  model?: string | null;
+  effort?: string | null;
+}
+
 /** Chats changed since the cursor (all chats when the cursor is unknown to the server). */
 export interface KbChatListEvents {
   chats: KbChatSummary[];
@@ -203,7 +239,7 @@ export interface KbChatListEvents {
 export interface KbChatPatch {
   title?: string | null;
   pinned?: boolean | null;
-  engine?: "codex" | "claude_code" | "hermes" | null;
+  engine?: "codex" | "claude_code" | "hermes" | "opencode" | null;
   model?: string | null;
   effort?: string | null;
 }
@@ -212,7 +248,7 @@ export interface KbChatSummary {
   id: string;
   title: string;
   pinned: boolean;
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   model: string | null;
   effort: string | null;
   created_at: string;
@@ -223,6 +259,12 @@ export interface KbChatSummary {
   state: "idle" | "answering";
   unread: boolean;
   waiting_for_user?: boolean;
+}
+
+/** The chat's "Allow in this chat" for web search (the header chip; revoked with DELETE). */
+export interface KbChatWebSearch {
+  allowed: boolean;
+  granted_at: string | null;
 }
 
 export interface KbCitation {
@@ -411,7 +453,7 @@ export interface KbFailure {
 }
 
 export interface KbFavoriteModel {
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   model: string;
 }
 
@@ -510,6 +552,10 @@ export interface KbHermesCredentialMove {
   priority: number;
 }
 
+export interface KbHermesKeyAdd {
+  label: string;
+}
+
 export interface KbHermesProvider {
   id: string;
   name: string;
@@ -574,7 +620,7 @@ export interface KbInstallStart {
 
 export interface KbInstallTask {
   id: string;
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   action: "install" | "update" | "first_check" | "repair";
   state: "running" | "succeeded" | "failed" | "cancelled";
   lines: KbInstallLine[];
@@ -591,16 +637,18 @@ export interface KbJob {
   id: string;
   kind: "ingest" | "refresh" | "recheck" | "connections" | "folder_overview" | "corrections" | "export";
   material_id: string | null;
-  state: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
+  state: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted" | "paused";
   step: "reading" | "checking_recognition" | "writing_notes" | "concepts" | "saving" | "done" | "checking_discrepancies" | "finding_connections" | "rechecking" | "writing_overview" | "exporting" | null;
   label: string;
   error: string | null;
   error_code: string | null;
   can_retry: boolean;
   progress: KbJobProgress;
+  execution: KbWikiExecution | null;
   journal: KbJobLogEntry[];
   created_at: string;
   updated_at: string;
+  step_started_at?: string | null;
 }
 
 export interface KbJobLogEntry {
@@ -617,6 +665,7 @@ export interface KbJobProgress {
   blocks_blocked: number;
   concepts_created: number;
   concepts_updated: number;
+  notes_sections?: number;
 }
 
 export interface KbKeyStatus {
@@ -722,7 +771,7 @@ export interface KbMaterial {
   languages: string[];
   created_at: string;
   fragment_count: number;
-  wiki_state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed";
+  wiki_state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed" | "paused";
   folder_name: string;
   origin: KbOrigin | null;
   fragments: KbFragment[];
@@ -771,7 +820,7 @@ export interface KbMaterialSummary {
   languages: string[];
   created_at: string;
   fragment_count: number;
-  wiki_state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed";
+  wiki_state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed" | "paused";
   folder_name: string;
 }
 
@@ -781,7 +830,7 @@ export interface KbMaterialUpdate {
 }
 
 export interface KbMaterialWiki {
-  state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed";
+  state: "not_in_wiki" | "queued" | "processing" | "in_wiki" | "failed" | "paused";
   note_page_id: string | null;
   concept_count: number;
   job_id: string | null;
@@ -800,13 +849,21 @@ export interface KbMessage {
   seq: number;
   role: "user" | "assistant" | "system";
   created_at: string;
-  engine: "codex" | "claude_code" | "hermes" | null;
+  engine: "codex" | "claude_code" | "hermes" | "opencode" | null;
   model: string | null;
   state: "streaming" | "done" | "interrupted" | "failed" | "cancelled";
   parts: KbMessagePart[];
   failure: KbFailure | null;
   saved_page_id: string | null;
   input: KbMessageInput | null;
+}
+
+/** Your question, changed (``…/messages/{id}/edit``): what was open when it was asked is kept. */
+export interface KbMessageEdit {
+  text: string;
+  mentions?: KbRef[];
+  quotes?: KbQuote[];
+  attachments?: string[];
 }
 
 export interface KbMessageInput {
@@ -816,11 +873,11 @@ export interface KbMessageInput {
   attachments: string[];
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   provider?: string | null;
   model?: string | null;
   value?: boolean;
@@ -874,6 +931,7 @@ export interface KbOrigin {
   type: "recording" | "file" | "url" | "paste";
   url: string | null;
   file_name: string | null;
+  fetched_at?: string | null;
 }
 
 export interface KbPage {
@@ -966,7 +1024,7 @@ export interface KbPermissionPart {
   type: "permission";
   id: string;
   kind: "create" | "edit" | "rename" | "delete";
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   page_id: string | null;
   title: string;
   status: "pending" | "allowed" | "denied" | "cancelled" | "undone";
@@ -1032,7 +1090,7 @@ export interface KbQuestionOption {
 export interface KbQuestionPart {
   type: "question";
   id: string;
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   question: string;
   options: KbQuestionOption[];
   allow_other: boolean;
@@ -1052,14 +1110,14 @@ export interface KbQuote {
 
 /** Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it. */
 export interface KbRecognitionSettings {
-  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes";
+  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes" | "opencode";
   model: string | null;
   effort: string | null;
 }
 
 /** The whole choice; a model and effort go only with a chosen agent. */
 export interface KbRecognitionSettingsUpdate {
-  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes";
+  engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes" | "opencode";
   model?: string | null;
   effort?: string | null;
 }
@@ -1098,6 +1156,14 @@ export interface KbRestoredFragment {
   seg: number;
   text_hash: string;
   restored_at: string;
+}
+
+/** The analysis page "Save to wiki" wrote, and what it left out (decision 9, 2026-10-21). */
+export interface KbSavedAnalysis {
+  id: string;
+  kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
+  title: string;
+  warning: string | null;
 }
 
 /** Totals per ⌘K section (not the length of the returned lists). */
@@ -1151,7 +1217,7 @@ export interface KbSkill {
 }
 
 export interface KbSkillEngine {
-  engine: "codex" | "claude_code" | "hermes";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
   state: "loaded" | "not_loaded" | "off";
   reason: string | null;
 }
@@ -1306,6 +1372,10 @@ export interface KbStudyQuestion {
   response: KbStudyResponse | null;
 }
 
+export interface KbStudyRenameIn {
+  title: string;
+}
+
 /** The user's answer to one question in the current attempt. */
 export interface KbStudyResponse {
   choices: string[];
@@ -1385,6 +1455,46 @@ export interface KbTranslationFragment {
   text: string;
 }
 
+export interface KbWebLink {
+  title: string;
+  url: string;
+  site: string;
+}
+
+export interface KbWebSearchDecide {
+  decision: "allow" | "allow_chat" | "deny";
+}
+
+/** An agent's web search: the exact query waits for Allow once / Allow in this chat / Deny; once sent, the links it found — shown apart from the material citations, never wiki sources by themselves ("Add to wiki" saves a page as a material, ``POST /kb/materials/web``). */
+export interface KbWebSearchPart {
+  type: "web_search";
+  id: string;
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  query: string;
+  allowed_domains: string[];
+  blocked_domains: string[];
+  status: "pending" | "allowed" | "denied" | "cancelled";
+  auto: boolean;
+  reason: string | null;
+  links: KbWebLink[];
+  searcher?: "codex" | "claude_code" | "hermes" | "opencode" | null;
+}
+
+export interface KbWikiChoice {
+  model: string;
+  effort: string | null;
+}
+
+export interface KbWikiExecution {
+  profile: KbWikiProcessingProfile;
+  root_job_id: string;
+  usage: KbWikiUsage;
+  stages: KbWikiStageUsage[];
+  observed_model: string | null;
+  observed_effort: string | null;
+  budget_characters?: number | null;
+}
+
 /** ``Wiki/index.md`` / ``Wiki/log.md`` for the read-only view (B20). */
 export interface KbWikiFile {
   name: "index" | "log";
@@ -1392,24 +1502,57 @@ export interface KbWikiFile {
   links: KbBlockLink[];
 }
 
+export interface KbWikiProcessingProfile {
+  engine: "codex" | "claude_code" | "hermes" | "opencode" | null;
+  model: string | null;
+  effort: string | null;
+  language: string;
+}
+
 export interface KbWikiSettings {
   wiki_language: string;
   wiki_language_chosen: boolean;
-  wiki_engine: "codex" | "claude_code" | "hermes" | null;
+  wiki_engine: "codex" | "claude_code" | "hermes" | "opencode" | null;
+  wiki_model: string | null;
+  wiki_effort: string | null;
+  wiki_remembered: Record<string, KbWikiChoice>;
   auto_add_files_links: boolean;
   auto_add_text: boolean;
   background_connections: boolean;
   auto_corrections: boolean;
+  wiki_budget_characters: number;
 }
 
 /** Only the fields present are changed; ``wiki_engine: null`` returns to the default agent. */
 export interface KbWikiSettingsUpdate {
   wiki_language?: string | null;
-  wiki_engine?: "codex" | "claude_code" | "hermes" | null;
+  wiki_engine?: "codex" | "claude_code" | "hermes" | "opencode" | null;
+  wiki_model?: string | null;
+  wiki_effort?: string | null;
   auto_add_files_links?: boolean | null;
   auto_add_text?: boolean | null;
   background_connections?: boolean | null;
   auto_corrections?: boolean | null;
+  wiki_budget_characters?: number | null;
+}
+
+export interface KbWikiStageUsage {
+  stage: string;
+  usage: KbWikiUsage;
+}
+
+export interface KbWikiUsage {
+  calls: number;
+  cache_hits: number;
+  completed_calls: number;
+  failed_calls: number;
+  unknown_usage_calls: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  instruction_characters: number;
+  message_characters: number;
+  output_characters: number;
+  duration_ms: number;
 }
 
 /** Every /kb route: path and query parameters, JSON body and JSON response. */
@@ -1419,13 +1562,6 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbAgents;
-    status: 200;
-  };
-  "POST /kb/agents/codex/logout": {
-    path: Record<string, never>;
-    query: Record<string, never>;
-    body: never;
-    response: KbAgent;
     status: 200;
   };
   "PUT /kb/agents/default": {
@@ -1463,6 +1599,13 @@ export interface KbEndpoints {
     response: KbHermesProviders;
     status: 200;
   };
+  "DELETE /kb/agents/hermes/providers/{provider}": {
+    path: { provider: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbHermesProviders;
+    status: 200;
+  };
   "DELETE /kb/agents/hermes/providers/{provider}/credentials/{credential_id}": {
     path: { provider: string; credential_id: string };
     query: Record<string, never>;
@@ -1481,6 +1624,13 @@ export interface KbEndpoints {
     path: { provider: string; credential_id: string };
     query: Record<string, never>;
     body: never;
+    response: KbHermesProviders;
+    status: 200;
+  };
+  "POST /kb/agents/hermes/providers/{provider}/keys": {
+    path: { provider: string };
+    query: Record<string, never>;
+    body: KbHermesKeyAdd;
     response: KbHermesProviders;
     status: 200;
   };
@@ -1506,24 +1656,38 @@ export interface KbEndpoints {
     status: 200;
   };
   "POST /kb/agents/{engine}/check": {
-    path: { engine: "codex" | "claude_code" | "hermes" };
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
     query: Record<string, never>;
     body: never;
     response: KbAgent;
     status: 200;
   };
   "POST /kb/agents/{engine}/install": {
-    path: { engine: "codex" | "claude_code" | "hermes" };
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
     query: Record<string, never>;
     body: KbInstallStart | null;
     response: KbInstallTask;
     status: 202;
   };
   "POST /kb/agents/{engine}/login": {
-    path: { engine: "codex" | "claude_code" | "hermes" };
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
     query: Record<string, never>;
     body: KbAgentLogin | null;
     response: KbAgentLoginResult;
+    status: 200;
+  };
+  "POST /kb/agents/{engine}/logout": {
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
+    query: Record<string, never>;
+    body: never;
+    response: KbAgent;
+    status: 200;
+  };
+  "GET /kb/agents/{engine}/sign-in": {
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
+    query: { wait?: number };
+    body: never;
+    response: KbAgentSignIn;
     status: 200;
   };
   "GET /kb/chats": {
@@ -1546,6 +1710,13 @@ export interface KbEndpoints {
     body: never;
     response: KbChatListEvents;
     status: 200;
+  };
+  "PUT /kb/chats/last-choice": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbChatLastChoice;
+    response: void;
+    status: 204;
   };
   "GET /kb/chats/{chat_id}": {
     path: { chat_id: string };
@@ -1589,6 +1760,13 @@ export interface KbEndpoints {
     response: KbSendResult;
     status: 202;
   };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/edit": {
+    path: { chat_id: string; message_id: string };
+    query: Record<string, never>;
+    body: KbMessageEdit;
+    response: KbSendResult;
+    status: 202;
+  };
   "POST /kb/chats/{chat_id}/messages/{message_id}/regenerate": {
     path: { chat_id: string; message_id: string };
     query: Record<string, never>;
@@ -1607,7 +1785,7 @@ export interface KbEndpoints {
     path: { chat_id: string; message_id: string };
     query: Record<string, never>;
     body: never;
-    response: KbPageRef;
+    response: KbSavedAnalysis;
     status: 200;
   };
   "POST /kb/chats/{chat_id}/messages/{message_id}/stop": {
@@ -1628,7 +1806,21 @@ export interface KbEndpoints {
     path: { chat_id: string };
     query: Record<string, never>;
     body: never;
-    response: KbPageRef;
+    response: KbSavedAnalysis;
+    status: 200;
+  };
+  "GET /kb/chats/{chat_id}/web-search": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChatWebSearch;
+    status: 200;
+  };
+  "DELETE /kb/chats/{chat_id}/web-search": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChatWebSearch;
     status: 200;
   };
   "POST /kb/corrections/{correction_id}/accept": {
@@ -1888,6 +2080,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbAddText;
     response: KbMaterialAdded;
+    status: 201;
+  };
+  "POST /kb/materials/web": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbAddWebPage;
+    response: KbMaterial;
     status: 201;
   };
   "GET /kb/materials/{material_id}": {
@@ -2261,6 +2460,13 @@ export interface KbEndpoints {
     response: KbStudyPart;
     status: 200;
   };
+  "POST /kb/study/{block_id}/rename": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyRenameIn;
+    response: KbStudyPart;
+    status: 200;
+  };
   "POST /kb/study/{block_id}/retake": {
     path: { block_id: string };
     query: Record<string, never>;
@@ -2273,6 +2479,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbStudySaveIn;
     response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/web-searches/{search_id}/decide": {
+    path: { search_id: string };
+    query: Record<string, never>;
+    body: KbWebSearchDecide;
+    response: KbWebSearchPart;
     status: 200;
   };
   "POST /kb/wiki/connections/find": {

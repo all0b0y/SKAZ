@@ -54,6 +54,8 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
     reading: { icon: null, text: material.status === 'recording' ? 'Recording…' : 'Processing…', tone: 'run' },
     not_in_wiki: { icon: 'close', text: 'Not in wiki', tone: 'off' },
     failed: { icon: 'warning', text: 'Error', tone: 'err' },
+    // C1-d: stopped at the material's wiki budget; Continue is on the material.
+    paused: { icon: 'warning', text: 'Paused', tone: 'off' },
     unknown: { icon: null, text: '—', tone: 'off' },
   };
   const v = view[state];

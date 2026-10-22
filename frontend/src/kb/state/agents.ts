@@ -23,12 +23,35 @@ export interface AgentsData {
   checkedAt: Partial<Record<EngineId, number>>;
   /** Sign-in started here and finishes outside SKAZ: the next return to the window checks at once. */
   awaitingSignIn: Partial<Record<EngineId, number>>;
+  /** Accounts & keys v3: a sign-in started here, followed until it ends, then its result line. */
+  signIns: Partial<Record<EngineId, SignInView>>;
+}
+
+/** A sign-in started from SKAZ: what to show while it is open and once SKAZ has checked it. */
+export interface SignInView {
+  state: 'waiting' | 'signed_in' | 'not_signed_in' | 'failed';
+  method: 'terminal' | 'browser';
+  /** The backend's line while waiting, then SKAZ's result line. */
+  message: string;
+  /** Codex: the sign-in page the backend returned for this sign-in (opened at once). */
+  url: string | null;
 }
 
 /** Automatic checks (open, window focus) skip an agent checked less than this long ago. */
 export const AUTO_CHECK_MIN_MS = 30_000;
 /** How long a started sign-in keeps bypassing that limit. */
 export const SIGN_IN_WAIT_MS = 15 * 60_000;
+
+/** The result line once SKAZ has checked a finished sign-in (Accounts & keys v3). */
+export function signInResult(name: string, method: 'terminal' | 'browser', ended: 'done' | 'failed', agent: KbAgent | null): SignInView {
+  if (ended === 'done' && agent?.signed_in) return { state: 'signed_in', method, message: `Signed in. ${name} is connected.`, url: null };
+  if (ended === 'done') {
+    return { state: 'not_signed_in', method, url: null,
+      message: method === 'terminal' ? `${name} finished in Terminal, but it isn’t signed in yet. Try again.` : `${name} isn’t signed in yet. Try again.` };
+  }
+  return { state: 'failed', method, url: null,
+    message: method === 'terminal' ? `${name} stopped before it finished in Terminal. Try again.` : 'The sign-in didn’t finish. Try again.' };
+}
 export type AutoCheckReason = 'open' | 'focus';
 
 export interface AgentsActions {
@@ -46,16 +69,20 @@ export interface AgentsActions {
    * once per AUTO_CHECK_MIN_MS per agent (a started sign-in bypasses it), never during an install.
    */
   autoCheck: (reason: AutoCheckReason, engines?: readonly EngineId[]) => void;
-  /** Codex only: sign out of SKAZ's own Codex profile (other Codex apps keep their sign-in). */
-  logoutCodex: () => Promise<ActionResult<KbAgent>>;
+  /** Sign out in SKAZ's own folder only (Codex, OpenCode); the backend refuses Claude Code and Hermes. */
+  logout: (engine: EngineId) => Promise<ActionResult<KbAgent>>;
   /** 0.3.1 K2/K4: show / hide agents, providers and models in the picker; star models. */
   changeModels: (changes: KbModelChange[]) => Promise<ActionResult>;
+  /** The backend kept this as the agent's last chat choice (models screen v2): mirror it locally. */
+  noteLastChoice: (engine: EngineId, model: string | null, effort: string | null) => void;
 }
 
 export type AgentsStore = StoreApi<AgentsData & AgentsActions>;
 
-export const ENGINE_ORDER: readonly EngineId[] = ['codex', 'claude_code', 'hermes'];
-export const ENGINE_NAME: Record<EngineId, string> = { codex: 'Codex', claude_code: 'Claude Code', hermes: 'Hermes Agent' };
+export const ENGINE_ORDER: readonly EngineId[] = ['codex', 'claude_code', 'hermes', 'opencode'];
+export const ENGINE_NAME: Record<EngineId, string> = {
+  codex: 'Codex', claude_code: 'Claude Code', hermes: 'Hermes Agent', opencode: 'OpenCode',
+};
 
 const DEFAULT_CLOCK = {
   now: () => Date.now(),
@@ -64,6 +91,22 @@ const DEFAULT_CLOCK = {
 
 export function agentOf(agents: KbAgents | null, engine: EngineId): KbAgent | undefined {
   return agents?.agents.find((a) => a.id === engine);
+}
+
+/**
+ * Where the message field starts for `engine` (models screen v2): the model and reasoning last
+ * chosen for it, while the agent still lists that model; else the agent's own current model.
+ */
+export function startingChoice(agents: KbAgents, engine: EngineId): { engine: EngineId; model: string | null; effort: string | null } {
+  const a = agentOf(agents, engine);
+  const last = a?.last_choice;
+  if (last && (last.model === null || a?.models.some((m) => m.id === last.model))) {
+    const m = a?.models.find((x) => x.id === last.model);
+    const effort = last.effort && m?.efforts.includes(last.effort) ? last.effort : m?.default_effort ?? null;
+    return { engine, model: last.model, effort };
+  }
+  const model = a?.models.find((m) => m.id === a.current_model) ?? a?.models[0];
+  return { engine, model: model?.id ?? null, effort: model?.default_effort ?? null };
 }
 
 /** The picker as it will look after `changes` (the backend's answer replaces it). */
@@ -91,6 +134,28 @@ function optimistic(agents: KbAgents, changes: KbModelChange[]): KbAgents {
 export function createAgentsStore(client: KbClient, clock: { now: () => number; hidden: () => boolean } = DEFAULT_CLOCK): AgentsStore {
   return createStore<AgentsData & AgentsActions>()((set, get) => {
     const inflight = new Map<EngineId, Promise<ActionResult<KbAgent>>>();
+    const following = new Map<EngineId, () => void>();
+    const putSignIn = (engine: EngineId, view: SignInView | null) => set((st) => {
+      const { [engine]: _old, ...rest } = st.signIns;
+      return { signIns: view ? { ...rest, [engine]: view } : rest };
+    });
+    /** Follow a started sign-in on the backend (no agent command runs there) and check as soon as it ends. */
+    const follow = (engine: EngineId, method: 'terminal' | 'browser') => {
+      following.get(engine)?.();
+      const started = clock.now();
+      const stop = longPoll<null>(async (_cursor, wait) => {
+        if (clock.now() - started > SIGN_IN_WAIT_MS) { putSignIn(engine, null); return { cursor: null, changed: false, done: true }; }
+        const view = await client.call('GET /kb/agents/{engine}/sign-in', { path: { engine }, query: { wait } });
+        if (view.state === 'waiting') return { cursor: null, changed: false };
+        following.delete(engine);
+        if (view.state === 'idle') { putSignIn(engine, null); return { cursor: null, changed: false, done: true }; }
+        const checked = await get().check(engine);
+        const name = ENGINE_NAME[engine];
+        putSignIn(engine, signInResult(name, method, view.state, checked.ok ? checked.value : null));
+        return { cursor: null, changed: true, done: true };
+      }, null);
+      following.set(engine, stop);
+    };
     let reading: Promise<void> | null = null;
     const stamped = (engines: readonly EngineId[]) => {
       const at = clock.now();
@@ -118,6 +183,7 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
       checking: {},
       checkedAt: {},
       awaitingSignIn: {},
+      signIns: {},
 
       refresh: () => {
         reading ??= (async () => {
@@ -181,8 +247,11 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
       login: async (engine, consent) => {
         try {
           const res = await client.call('POST /kb/agents/{engine}/login', { path: { engine }, body: consent ? { consent: true } : {} });
-          // The sign-in finishes in the browser/Terminal: coming back to the window checks it.
+          // The sign-in finishes in the browser/Terminal: SKAZ follows it and checks as soon as it ends;
+          // coming back to the window checks it too.
           set((st) => ({ awaitingSignIn: { ...st.awaitingSignIn, [engine]: clock.now() } }));
+          putSignIn(engine, { state: 'waiting', method: res.method, message: res.message, url: res.url });
+          follow(engine, res.method);
           return { ok: true, value: res };
         } catch (error) {
           return { ok: false, error: errorText(error) };
@@ -203,10 +272,16 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
         }
       },
 
-      logoutCodex: async () => {
+      noteLastChoice: (engine, model, effort) => {
+        const agents = get().agents;
+        if (!agents) return;
+        set({ agents: { ...agents, agents: agents.agents.map((a) => (a.id === engine ? { ...a, last_choice: { model, effort } } : a)) } });
+      },
+      logout: async (engine) => {
         try {
-          const agent = await client.call('POST /kb/agents/codex/logout');
+          const agent = await client.call('POST /kb/agents/{engine}/logout', { path: { engine } });
           putAgent(agent);
+          putSignIn(engine, null);
           return { ok: true, value: agent };
         } catch (error) {
           return { ok: false, error: errorText(error) };
@@ -240,6 +315,7 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
         if (reading) return; // a full read is on its way: it checks every agent
         const now = clock.now();
         for (const engine of engines) {
+          if (!st.agents.agents.some((a) => a.id === engine)) continue; // an agent this backend doesn't list
           if (st.installs[engine]?.task.state === 'running') continue;
           const signIn = st.awaitingSignIn[engine];
           const waiting = signIn !== undefined && now - signIn < SIGN_IN_WAIT_MS;

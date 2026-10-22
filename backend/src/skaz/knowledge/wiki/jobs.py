@@ -15,6 +15,13 @@ from dataclasses import dataclass
 from ...native_io import disk_call
 from ..agents.registry import EngineUnavailable
 from ..errors import KnowledgeError
+from ..ingest.budget import BUDGET_REACHED, BudgetReached
+from ..ingest.execution import (
+    ProcessingProfile,
+    current_execution,
+    execution_scope,
+    stored_scope,
+)
 from ..ingest.jobs import (
     AGENT_UNAVAILABLE,
     WIKI_INTERRUPTED_REASON,
@@ -51,8 +58,10 @@ Work = Callable[[JobContext], Awaitable[None]]
 
 
 class WikiJobs:
-    def __init__(self, jobs: JobRepository) -> None:
+    def __init__(self, jobs: JobRepository, *,
+                 profile: Callable[[], ProcessingProfile] | None = None) -> None:
         self.jobs = jobs
+        self.profile = profile
         self._tasks: dict[str, tuple[JobKind, str | None, asyncio.Task[None]]] = {}
         self._closing = False
 
@@ -69,7 +78,15 @@ class WikiJobs:
     async def start(self, kind: JobKind, target: str | None, step: JobStep, work: Work) -> JobRecord:
         if self._closing:
             raise WikiBusy("SKAZ is closing. Retry after it starts again.")
-        job = await disk_call(lambda: self.jobs.create(target, kind=kind, step=step))
+        parent = current_execution()
+        profile = parent.profile if parent is not None else self.profile() if self.profile else None
+        root_job_id = parent.root_job_id if parent is not None else None
+        # C1-d: follow-up work of a material shares its root's budget; wiki-wide work has none.
+        budget = parent.budget if parent is not None else None
+        material = parent.material_id if parent is not None else None
+        job = await disk_call(lambda: self.jobs.create(
+            target, kind=kind, step=step, profile=profile, root_job_id=root_job_id,
+            budget=budget, budget_material=material))
         if self._closing:
             # close() ran while the job row was being written: start nothing after it.
             await disk_call(self.jobs.finish, job.id, "interrupted", error=WIKI_INTERRUPTED_REASON)
@@ -79,6 +96,11 @@ class WikiJobs:
         return job
 
     async def _run(self, job_id: str, work: Work) -> None:
+        scope = await disk_call(stored_scope, self.jobs.db, job_id)
+        with execution_scope(scope):
+            await self._execute(job_id, work)
+
+    async def _execute(self, job_id: str, work: Work) -> None:
         state: JobState = "failed"
         error: str | None = UNEXPECTED
         code: str | None = None
@@ -87,6 +109,10 @@ class WikiJobs:
             state, error = "done", None
         except asyncio.CancelledError:
             state, error = "interrupted", WIKI_INTERRUPTED_REASON
+        except BudgetReached as reached:
+            # C1-d: the material's budget is used up; Continue on the material runs this work again.
+            state, error = ("paused" if reached.progressed else "failed"), reached.message
+            code = BUDGET_REACHED if reached.progressed else None
         except WikiJobFailed as failure:
             error, code = failure.message, failure.code
         except EngineUnavailable as failure:
@@ -100,8 +126,8 @@ class WikiJobs:
         finally:
             try:
                 # L2: off the event loop; disk_call still finishes the write when the job is cancelled.
-                await disk_call(lambda: self.jobs.finish(job_id, state, error=error,
-                                                         error_code=code if state == "failed" else None))
+                await disk_call(lambda: self.jobs.finish(
+                    job_id, state, error=error, error_code=code if state in ("failed", "paused") else None))
             finally:
                 self._tasks.pop(job_id, None)
 
@@ -109,6 +135,12 @@ class WikiJobs:
         entry = self._tasks.get(job_id)
         if entry is not None:
             await asyncio.wait({entry[2]})
+
+    async def idle(self, kind: JobKind) -> None:
+        """Wait until the running jobs of ``kind`` have finished (however they end)."""
+        tasks = [task for job_kind, _target, task in self._tasks.values() if job_kind == kind]
+        if tasks:
+            await asyncio.wait(tasks)
 
     async def close(self) -> None:
         self._closing = True

@@ -4,7 +4,7 @@ import { useMakeStudy } from '../study/makeFrom';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
 import { errorText, KbApiError } from '../api/client';
 import { AnswerMarkdown, type InAppLink } from '../ui/AnswerMarkdown';
-import { Banner, Button, EmptyState, Icon, IconButton, Menu, Spinner } from '../ui';
+import { Banner, Button, EmptyState, Icon, IconButton, Menu, Modal, Spinner } from '../ui';
 import { useServices, useUi } from '../state/context';
 import type { DocTarget } from '../state/document';
 import {
@@ -13,12 +13,17 @@ import {
 import { blockMarkdown, inAppTarget, plural, readableBlockText, relativeTime } from '../document/text';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useScrollTarget } from '../document/useScrollTarget';
-import { canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavigation, namesItsKind, type ClaimKind } from './blocks';
+import {
+  canEdit, CLAIM_ICON, CLAIM_LABEL, groupSections, isEditedByUser, isNavigation, isSkazConnection, namesItsKind,
+} from './blocks';
 import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 import { useOpenInObsidian } from '../document/fileActions';
 import { DeletePageDialog, RenamePageDialog, type PageDialog } from './PageDialogs';
+import { DiagramPreviews } from '../ui/markdown/Diagram';
+import { WikiTermsButton } from './WikiTermsButton';
+import { ClaimLabel } from './ClaimLabel';
 
 const NO_CITES: never[] = [];
 const PAGE_GONE = 'Page was removed from the wiki.';
@@ -46,15 +51,7 @@ function BlockMarkdown({ block, quote }: { block: KbBlock; quote: QuoteSource })
   );
 }
 
-/** Statement-type label: icon + caption + its own pill style (decision 20). */
-export function ClaimLabel({ kind, edited = false }: { kind: ClaimKind; edited?: boolean }) {
-  return (
-    <span className={`kb-claim kb-claim--${edited ? 'edited' : kind}`} data-claim={edited ? 'edited' : kind}>
-      <Icon name={edited ? 'pencil' : CLAIM_ICON[kind]} size={12} />
-      {edited ? 'Edited by you' : CLAIM_LABEL[kind]}
-    </span>
-  );
-}
+export { ClaimLabel };
 
 /** A re-check that ended without a result: the job's own reason, and whether Settings fixes it. */
 export interface RecheckFailure {
@@ -131,6 +128,8 @@ function BlockEditor({ initial, agentBlock, onSave, onCancel, onRecheck }: {
         }}
         autoFocus
       />
+      {/* D-11: a diagram in the block is edited as its Mermaid text with a live preview. */}
+      <DiagramPreviews text={text} />
       <div className="kb-edbox__row">
         <span className="kb-edbox__note">
           {agentBlock ? 'The edited block becomes yours — the agent won’t rewrite it.' : 'Your note is never changed by the agent.'}
@@ -149,13 +148,36 @@ function BlockEditor({ initial, agentBlock, onSave, onCancel, onRecheck }: {
   );
 }
 
+/** Deleting a connection SKAZ wrote is remembered: the pair is never suggested again, so it asks first. */
+function DeleteConnectionDialog({ open, onClose, onDelete }: { open: boolean; onClose: () => void; onDelete: () => Promise<string | null> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal open={open} onClose={onClose} title="Delete this connection?" className="kb-confirm" testId="confirm-delete-connection">
+      <div className="kb-confirm__body">
+        <p>SKAZ won’t suggest it again.</p>
+      </div>
+      <footer className="kb-confirm__foot">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="danger" busy={busy} onClick={async () => {
+          setBusy(true);
+          await onDelete();
+          setBusy(false);
+          onClose();
+        }}>Delete</Button>
+      </footer>
+    </Modal>
+  );
+}
+
 function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlock; label: boolean; actions: BlockActions }) {
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const edited = isEditedByUser(block);
   const busy = actions.rechecking(block.id);
   const failure = busy ? null : actions.failure(block.id);
   const agentBlock = block.owner !== 'user';
+  const connection = isSkazConnection(block);
   const run = async (work: () => Promise<string | null>) => {
     setError(null);
     const result = await work();
@@ -187,13 +209,20 @@ function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlo
           )}
         </div>
       )}
-      {!editing && !busy && (canEdit(block) || block.owner === 'user') && (
+      {!editing && !busy && (canEdit(block) || block.owner === 'user' || connection) && (
         <div className="kb-block__icons">
           {canEdit(block) && <IconButton icon="pencil" size="sm" label="Edit block" className="kb-block__edit" onClick={() => setEditing(true)} />}
           {block.owner === 'user' && (
             <IconButton icon="trash" size="sm" label="Delete note" className="kb-block__edit" onClick={() => void run(() => actions.remove(block))} />
           )}
+          {connection && (
+            <IconButton icon="trash" size="sm" label="Delete connection" className="kb-block__edit" onClick={() => setConfirmDelete(true)} />
+          )}
         </div>
+      )}
+      {connection && (
+        <DeleteConnectionDialog open={confirmDelete} onClose={() => setConfirmDelete(false)}
+          onDelete={() => run(() => actions.remove(block))} />
       )}
       {!editing && (busy || edited) && (
         <div className="kb-block__tools">
@@ -409,6 +438,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
             </>
           )}
         >
+          <WikiTermsButton />
           <IconButton icon="chats" label="Ask about page" disabled={!page}
             onClick={() => page && askAbout({ type: 'page', id: page.id, title: page.title })} />
           {page?.kind !== 'deck' && page?.kind !== 'test' && (

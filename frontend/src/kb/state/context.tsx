@@ -8,6 +8,7 @@ import { createRecordingStore, type RecordingActions, type RecordingData, type R
 import { createAgentsStore, type AgentsActions, type AgentsData, type AgentsStore } from './agents';
 import { createChatsStore, type ChatsActions, type ChatsData, type ChatsStore } from './chats';
 import { createComposerBus, type ComposerBus, type ComposerBusState } from './composer';
+import { createFoldsStore, type FoldsStore } from './folds';
 import { createLibraryStore, type LibraryActions, type LibraryData, type LibraryStore } from './library';
 import {
   createNotificationsStore, type NotificationsActions, type NotificationsData, type NotificationsStore,
@@ -30,6 +31,7 @@ export interface KbServices {
   bridge: KbBridge;
   client: KbClient;
   prefs: PrefsStore;
+  folds: FoldsStore;
   library: LibraryStore;
   ui: UiStore;
   recording: RecordingStore;
@@ -91,6 +93,7 @@ export function createServices(
     bridge,
     client,
     prefs: createPrefsStore(storage),
+    folds: createFoldsStore(storage),
     library,
     ui,
     recording,
@@ -120,6 +123,13 @@ export function useServices(): KbServices {
 
 export function usePrefs<T>(selector: (state: Prefs & PrefsActions) => T): T {
   return useStore(useServices().prefs, selector);
+}
+
+/** A block's folded state in a chat (U2-a) and the way to change it; `byDefault` until the user chooses. */
+export function useFold(key: string, byDefault: boolean): [boolean, (folded: boolean) => void] {
+  const store = useServices().folds;
+  const folded = useStore(store, (s) => s.folds[key] ?? byDefault);
+  return [folded, (next) => store.getState().setFolded(key, next)];
 }
 
 export function useLibrary<T>(selector: (state: LibraryData & LibraryActions) => T): T {

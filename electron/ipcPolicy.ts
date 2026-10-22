@@ -62,12 +62,13 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/chats$/ },
   { method: 'POST', pattern: /^\/kb\/chats$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/events$/ },
+  { method: 'PUT', pattern: /^\/kb\/chats\/last-choice$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+$/ },
   { method: 'PATCH', pattern: /^\/kb\/chats\/[^/]+$/ },
   { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/events$/ },
-  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/(?:stop|regenerate|resume|save)$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/(?:stop|regenerate|resume|save|edit)$/ },
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/(?:save|read)$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/export$/ },
   { method: 'GET', pattern: /^\/kb\/mentions$/ },
@@ -91,13 +92,13 @@ const ROUTES: readonly Route[] = [
   { method: 'PUT', pattern: /^\/kb\/agents\/default$/ },
   // 0.3.1 K2/K4: show / hide agents, providers and models in the picker; favourites.
   { method: 'PATCH', pattern: /^\/kb\/agents\/models$/ },
-  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes)\/(?:check|install|login)$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes|opencode)\/(?:check|install|login)$/ },
   { method: 'GET', pattern: /^\/kb\/agents\/install\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/install\/[^/]+\/cancel$/ },
   { method: 'GET', pattern: /^\/kb\/decisions$/ },
   { method: 'PUT', pattern: /^\/kb\/decisions\/provider$/ },
   { method: 'POST', pattern: /^\/kb\/decisions\/local\/(?:download|cancel)$/ },
-  { method: 'POST', pattern: /^\/kb\/materials\/(?:file|link|text)$/ },
+  { method: 'POST', pattern: /^\/kb\/materials\/(?:file|link|text|web)$/ },
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/ingest$/ },
   // H2: queue every material whose wiki job failed or was interrupted again, in one click.
   { method: 'POST', pattern: /^\/kb\/jobs\/retry-failed$/ },
@@ -131,7 +132,9 @@ const ROUTES: readonly Route[] = [
   // G: the live panel's text after the material (open monologue + words still being recognised).
   { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+\/live$/ },
   // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
-  { method: 'POST', pattern: /^\/kb\/agents\/codex\/logout$/ },
+  // Accounts & keys v3: OpenCode signs out of SKAZ's own OpenCode folder too (Claude Code uses this
+  // Mac's own sign-in and Hermes signs out per provider, so neither has a sign-out here).
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|opencode)\/logout$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
   // B20: "Check recognition again" of a recording (a backend job on the chosen agent).
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/recognition-check$/ },
@@ -146,12 +149,23 @@ const ROUTES: readonly Route[] = [
   // 0.3.1 P: the user's answers to agents — Allow / Allow in this chat / Deny, Undo, a question's answer.
   { method: 'POST', pattern: /^\/kb\/permissions\/[^/]+\/(?:decide|undo)$/ },
   { method: 'POST', pattern: /^\/kb\/questions\/[^/]+\/answer$/ },
+  // W-2: an agent's web search — Allow once / Allow in this chat / Deny; the chat's grant is read and
+  // revoked from the header chip. The query itself is sent by the agent, never by the renderer.
+  { method: 'POST', pattern: /^\/kb\/web-searches\/[^/]+\/decide$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
+  { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
   // 0.3.1 K1/K3: Hermes' providers in SKAZ's folder. Adding and signing in again open Hermes' own
   // command in Terminal (no key passes through SKAZ); remove / priority carry no secret.
   { method: 'GET', pattern: /^\/kb\/agents\/hermes\/providers$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/(?:add|other|order)$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/credentials\/[A-Za-z0-9_-]{1,64}\/(?:sign-in|priority)$/ },
   { method: 'DELETE', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/credentials\/[A-Za-z0-9_-]{1,64}$/ },
+  // Accounts & keys v3: a sign-in started here is followed until it ends (no agent command runs);
+  // another named Hermes API key (only its name — Hermes asks for the key in Terminal); a whole
+  // provider removed from Hermes.
+  { method: 'GET', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes|opencode)\/sign-in$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}\/keys$/ },
+  { method: 'DELETE', pattern: /^\/kb\/agents\/hermes\/providers\/[a-z0-9][a-z0-9._-]{0,62}$/ },
   // 0.3.1 S: decks and tests — a block's view and place, grades, answers, Save to wiki (one id segment);
   // the deck page (its marks, "Study"); the daily limit of new cards.
   { method: 'GET', pattern: /^\/kb\/study\/settings$/ },
@@ -160,7 +174,7 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/study\/decks\/[^/]+\/(?:marks|study)$/ },
   { method: 'GET', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
-  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|mark|answer|check-open|finish|retake|save)$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|mark|answer|check-open|finish|retake|save|rename)$/ },
 ];
 
 /**

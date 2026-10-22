@@ -17,6 +17,7 @@ from .schemas_agents import (
     KbHermesCatalogItem,
     KbHermesCredential,
     KbHermesCredentialMove,
+    KbHermesKeyAdd,
     KbHermesProvider,
     KbHermesProviderAdd,
     KbHermesProviders,
@@ -113,5 +114,23 @@ async def remove_credential(provider: ProviderId, credential_id: CredentialId,
                             accounts: AccountsDep) -> KbHermesProviders:
     try:
         return view(await accounts.remove(provider, credential_id))
+    except KnowledgeError as error:
+        raise _http(error) from error
+
+
+@router.post("/{provider}/keys")
+async def add_key(provider: ProviderId, body: KbHermesKeyAdd, accounts: AccountsDep) -> KbHermesProviders:
+    """Another named API key: Terminal opens Hermes, which asks for the key (SKAZ sends only the name)."""
+    try:
+        return view(await accounts.add_key(provider, body.label))
+    except KnowledgeError as error:
+        raise _http(error) from error
+
+
+@router.delete("/{provider}")
+async def remove_provider(provider: ProviderId, accounts: AccountsDep) -> KbHermesProviders:
+    """Every credential of the provider removed from Hermes (each with ``hermes auth remove``)."""
+    try:
+        return view(await accounts.remove_provider(provider))
     except KnowledgeError as error:
         raise _http(error) from error

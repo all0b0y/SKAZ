@@ -74,15 +74,18 @@ CONNECTIONS_SCHEMA = _object(
     {
         "connections": _items(
             {
-                "page": {"type": "integer", "description": "Number of the candidate page."},
+                "pair": {"type": "integer", "description": "Number P of the checked pair [Pair P]."},
                 "text": {
                     "type": "string",
                     "description": "One sentence: how the two concepts are connected.",
                 },
-                "this_side": {**_NUMBERS, "description": "Statements of this concept that support it."},
-                "other_side": {
+                "first_side": {
                     **_NUMBERS,
-                    "description": "Statements of the candidate page that support it.",
+                    "description": "Statements of the pair's first page that support it.",
+                },
+                "second_side": {
+                    **_NUMBERS,
+                    "description": "Statements of the pair's second page that support it.",
                 },
             }
         )
@@ -128,12 +131,14 @@ existing ones only. In "explanation" ({{language}}) say neutrally what differs; 
 version seems more likely right and why. An empty list is a good answer. {_DATA_RULE}"""
 
 CONNECTIONS_INSTRUCTIONS = f"""\
-You look for meaningful connections between one concept of a personal knowledge wiki and candidate
-concepts, often from other folders or disciplines. A connection is worth writing when a reader of
-one page clearly benefits from the other: the same idea in another field, one is used to explain the
-other, a cause and its effect, a special case. Every connection rests on numbered statements of both
-sides; no outside knowledge. Write "text" as one sentence in {{language}}. Weak or obvious
-connections are not wanted; an empty list is a good answer. {_DATA_RULE}"""
+You look for meaningful connections between concepts of a personal knowledge wiki, often from
+other folders or disciplines. You get concept pages with numbered statements and a list of numbered
+pairs of those pages; check every listed pair, and only those. A connection is worth writing when a
+reader of one page clearly benefits from the other: the same idea in another field, one is used to
+explain the other, a cause and its effect, a special case. Each connection names its pair and rests
+on numbered statements of both pages of that pair; no outside knowledge. At most one connection per
+pair. Write "text" as one sentence in {{language}}. Weak or obvious connections are not wanted; a pair
+without a connection is simply left out, and an empty list is a good answer. {_DATA_RULE}"""
 
 RECHECK_INSTRUCTIONS = f"""\
 You recheck one statement of a personal knowledge wiki against its sources and rewrite it so that it
@@ -163,10 +168,10 @@ class DiscrepanciesOut(_Model):
 
 
 class ConnectionOut(_Model):
-    page: int
+    pair: int
     text: str
-    this_side: list[int] = Field(default_factory=list)
-    other_side: list[int] = Field(default_factory=list)
+    first_side: list[int] = Field(default_factory=list)
+    second_side: list[int] = Field(default_factory=list)
 
 
 class ConnectionsOut(_Model):
@@ -208,25 +213,24 @@ def discrepancy_prompt(title: str, new: Sequence[Statement], existing: Sequence[
 
 
 def connections_prompt(
-    title: str, own: Sequence[Statement], candidates: Sequence[tuple[str, Sequence[Statement]]]
+    pages: Sequence[tuple[str, Sequence[Statement]]], pairs: Sequence[tuple[int, int]]
 ) -> tuple[str, dict[int, int]]:
-    """The prompt and ``statement number → candidate index`` for the other side."""
-    lines = [
-        f"This concept: {title[:200]}",
-        untrusted_block("this concept", "\n".join(item.line(n) for n, item in enumerate(own, start=1))),
-    ]
+    """One batch: every page once with its statements numbered across the batch, then the pairs.
+
+    ``pairs`` hold 1-based page numbers. Returns the prompt and ``statement number → page number``.
+    """
+    lines = ["Concept pages (statements are numbered across all pages):"]
     owner: dict[int, int] = {}
-    number = len(own)
-    for index, (name, statements) in enumerate(candidates, start=1):
+    number = 0
+    for index, (title, statements) in enumerate(pages, start=1):
         rows = []
         for item in statements:
             number += 1
             owner[number] = index
             rows.append(item.line(number))
-        lines += [
-            f"Candidate page {index}: {name[:200]}",
-            untrusted_block(f"candidate {index}", "\n".join(rows)),
-        ]
+        lines += [f"Page {index}: {title[:200]}", untrusted_block(f"page {index}", "\n".join(rows))]
+    lines.append("Pairs to check (first page — second page):")
+    lines.append("\n".join(f"Pair {n}: page {a} — page {b}" for n, (a, b) in enumerate(pairs, start=1)))
     return "\n\n".join(lines), owner
 
 

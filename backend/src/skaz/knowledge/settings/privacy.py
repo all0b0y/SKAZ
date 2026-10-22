@@ -29,6 +29,7 @@ AGENT_DESTINATIONS: dict[EngineId, str] = {
     "codex": "Codex · OpenAI (your ChatGPT account)",
     "claude_code": "Claude Code · Anthropic (your Claude account)",
     "hermes": "Hermes Agent · the model provider you chose in Hermes",
+    "opencode": "OpenCode · the model provider you signed in to in OpenCode",
 }
 
 

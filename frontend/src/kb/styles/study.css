@@ -131,14 +131,25 @@
 .kb-st-path { color: var(--kb-muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 0; white-space: nowrap; }
 .kb-st-save[data-status='denied'] .kb-st-path { white-space: normal; }
 .kb-st-sv { margin-left: auto; display: flex; gap: 6px; flex: none; }
+/* U1: a save error takes its own wrapped line under the row; it never pushes the buttons away. */
+.kb-st-save > .kb-st-error { flex: 1 0 100%; margin: 0; white-space: normal; overflow-wrap: anywhere; }
+.kb-st-head .kb-rename { flex: 1 1 auto; }
+.kb-st-head .kb-rename .kb-inline-error { white-space: normal; }
 
-/* placeholder in the thread (W2) */
+/* placeholder in the thread (W2): the block folded to one row while it is open elsewhere (U2, decision 5) */
 .kb-st-ph {
-  margin-top: 8px; display: flex; align-items: center; gap: 10px; border: 1px dashed var(--kb-line);
-  border-radius: var(--kb-r-lg); padding: 8px 8px 8px 12px; font-size: var(--t-sm); color: var(--kb-muted);
+  margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px dashed var(--kb-line);
+  border-radius: var(--kb-r-lg); padding: 6px 8px 6px 12px; font-size: var(--t-sm); color: var(--kb-muted);
+  white-space: nowrap; outline: none;
 }
-.kb-st-ph__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kb-st-ph b { color: var(--kb-text); font-weight: 600; }
+.kb-st-ph:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+.kb-st-ph__title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--kb-text); font-weight: 600; font-size: 13px; }
+.kb-st-ph__cnt { flex: none; font-variant-numeric: tabular-nums; }
+.kb-st-ph__where {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--kb-line);
+  border-radius: 6px; padding: 0 6px; background: var(--kb-pane); color: var(--kb-text); font-size: var(--t-xs); line-height: 20px;
+}
+.kb-st-ph > .kb-inline-error { flex: 1 0 100%; margin: 0; white-space: normal; overflow-wrap: anywhere; }
 
 /* "Agent sees" above the message field */
 .kb-st-ctx {

@@ -7,7 +7,7 @@
 // them; they differ only in what the scenes need. Pure — no test-runner imports.
 
 import type {
-  KbAgent, KbChat, KbCitation, KbFolder, KbGraph, KbGraphEdge, KbMaterial, KbMessagePart, KbNotification, KbPage, KbPageRef,
+  KbAgent, KbChat, KbHermesCatalogItem, KbCitation, KbFolder, KbGraph, KbGraphEdge, KbMaterial, KbMessagePart, KbNotification, KbPage, KbPageRef,
   KbStudyCard, KbStudyPart,
 } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
@@ -22,7 +22,7 @@ const T = (min: number) => Math.round(min * MIN);
 
 const LIBRARY_ROOT = '/Users/me/Documents/SKAZ';
 
-function agent(id: EngineId, name: string, state: KbAgent['state'], extra: Partial<KbAgent> = {}): KbAgent {
+export function agent(id: EngineId, name: string, state: KbAgent['state'], extra: Partial<KbAgent> = {}): KbAgent {
   const ready = state === 'ready';
   return {
     id, name, state, installed: state !== 'not_installed', version: state === 'not_installed' ? null : '1.0.0', min_version: '1.0.0',
@@ -113,8 +113,8 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
       cloud_consent: true,
     },
     wiki: {
-      wiki_language: 'en', wiki_language_chosen: true, wiki_engine: null, auto_add_files_links: true, auto_add_text: false,
-      auto_corrections: true, background_connections: false,
+      wiki_language: 'en', wiki_language_chosen: true, wiki_engine: null, wiki_model: null, wiki_effort: null, wiki_remembered: {}, auto_add_files_links: true, auto_add_text: false,
+      auto_corrections: true, background_connections: false, wiki_budget_characters: 2_000_000,
     },
     decisions: {
       provider: 'openrouter_jev', cloud_consent: true, openrouter_key: true, cloud_model: 'jev', stats: { decided: 0, undecided: 0 },
@@ -506,7 +506,7 @@ export function docWorld(): FakeWorld {
     jobs: [{
       id: 'j-l5', kind: 'ingest', material_id: 'm-l5', state: 'running', step: 'writing_notes', label: 'Writing notes', error: null, error_code: null, can_retry: false,
       progress: { parts_total: 4, parts_done: 2, concepts_found: 5, blocks_written: 7, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 1, concepts_updated: 2 },
-      journal: [], created_at: NOW, updated_at: NOW,
+      execution: null, journal: [], created_at: NOW, updated_at: NOW,
     }],
     lastFolderId: 'phys',
   });
@@ -676,5 +676,87 @@ export function studyWorld(): FakeWorld {
   ];
   w.pages.push(page('p-deck', 'deck', 'Thermodynamics', [phys], deckCards.map((c) => block(c.id, 'from_source', null, `${c.question}::${c.answer}`, c.citations))));
   w.decks = { 'p-deck': { page_id: 'p-deck', title: 'Thermodynamics', cards: deckCards, groups: { new: 1, learning: 1, known: 1, hard: 1 }, due: 1 } };
+  return w;
+}
+
+/** Hermes' whole provider catalogue as the backend sends it (hermes_providers.CATALOG, 45 ways). */
+export const HERMES_CATALOG: KbHermesCatalogItem[] = [
+  { id: 'openai-codex', name: 'ChatGPT or Codex subscription', group: 'subscription', keywords: 'openai chatgpt codex plus pro' },
+  { id: 'anthropic', name: 'Claude subscription', group: 'subscription', keywords: 'anthropic claude pro max' },
+  { id: 'nous', name: 'Nous Portal', group: 'subscription', keywords: 'nous research hermes' },
+  { id: 'xai-oauth', name: 'xAI Grok (SuperGrok / Premium+)', group: 'subscription', keywords: 'grok x supergrok' },
+  { id: 'qwen-oauth', name: 'Qwen Code', group: 'subscription', keywords: 'qwen alibaba' },
+  { id: 'minimax-oauth', name: 'MiniMax', group: 'subscription', keywords: 'minimax' },
+  { id: 'openrouter', name: 'OpenRouter', group: 'api_key', keywords: 'or many models' },
+  { id: 'openai-api', name: 'OpenAI API', group: 'api_key', keywords: 'openai gpt platform' },
+  { id: 'anthropic', name: 'Anthropic API', group: 'api_key', keywords: 'claude console' },
+  { id: 'gemini', name: 'Google AI Studio', group: 'api_key', keywords: 'google gemini' },
+  { id: 'deepseek', name: 'DeepSeek', group: 'api_key', keywords: '' },
+  { id: 'xai', name: 'xAI', group: 'api_key', keywords: 'grok' },
+  { id: 'zai', name: 'Z.AI (GLM)', group: 'api_key', keywords: 'glm zhipu' },
+  { id: 'kimi-coding', name: 'Kimi / Moonshot', group: 'api_key', keywords: 'moonshot kimi' },
+  { id: 'kimi-coding-cn', name: 'Kimi / Moonshot (China)', group: 'api_key', keywords: 'moonshot kimi china' },
+  { id: 'minimax', name: 'MiniMax API', group: 'api_key', keywords: '' },
+  { id: 'minimax-cn', name: 'MiniMax (China)', group: 'api_key', keywords: '' },
+  { id: 'alibaba', name: 'Qwen Cloud', group: 'api_key', keywords: 'alibaba dashscope qwen' },
+  { id: 'alibaba-coding-plan', name: 'Alibaba Cloud (Coding Plan)', group: 'api_key', keywords: 'dashscope qwen' },
+  { id: 'nvidia', name: 'NVIDIA NIM', group: 'api_key', keywords: 'nemotron' },
+  { id: 'huggingface', name: 'Hugging Face', group: 'api_key', keywords: 'hf' },
+  { id: 'ai-gateway', name: 'Vercel AI Gateway', group: 'api_key', keywords: 'vercel' },
+  { id: 'opencode-zen', name: 'OpenCode Zen', group: 'api_key', keywords: 'opencode' },
+  { id: 'opencode-go', name: 'OpenCode Go', group: 'api_key', keywords: 'opencode' },
+  { id: 'kilocode', name: 'Kilo Code', group: 'api_key', keywords: 'kilo' },
+  { id: 'copilot', name: 'GitHub Copilot', group: 'api_key', keywords: 'github token' },
+  { id: 'deepinfra', name: 'DeepInfra', group: 'api_key', keywords: '' },
+  { id: 'fireworks', name: 'Fireworks AI', group: 'api_key', keywords: '' },
+  { id: 'novita', name: 'NovitaAI', group: 'api_key', keywords: '' },
+  { id: 'nebius-token-factory', name: 'Nebius Token Factory', group: 'api_key', keywords: 'nebius' },
+  { id: 'stepfun', name: 'StepFun Step Plan', group: 'api_key', keywords: 'step' },
+  { id: 'xiaomi', name: 'Xiaomi MiMo', group: 'api_key', keywords: 'mimo' },
+  { id: 'tencent-tokenhub', name: 'Tencent TokenHub', group: 'api_key', keywords: 'hunyuan' },
+  { id: 'tencent-tokenplan', name: 'Tencent TokenPlan', group: 'api_key', keywords: 'hunyuan' },
+  { id: 'ollama-cloud', name: 'Ollama Cloud', group: 'api_key', keywords: 'ollama' },
+  { id: 'upstage', name: 'Upstage Solar', group: 'api_key', keywords: 'solar' },
+  { id: 'arcee', name: 'Arcee AI', group: 'api_key', keywords: '' },
+  { id: 'gmi', name: 'GMI Cloud', group: 'api_key', keywords: '' },
+  { id: 'meta-ai', name: 'Meta Model API', group: 'api_key', keywords: 'meta muse' },
+  { id: 'commandcode', name: 'CommandCode', group: 'api_key', keywords: '' },
+  { id: 'actual', name: 'Actual Computer', group: 'api_key', keywords: '' },
+  { id: 'lmstudio', name: 'LM Studio on this computer', group: 'api_key', keywords: 'local' },
+  { id: 'bedrock', name: 'AWS Bedrock', group: 'cloud', keywords: 'aws amazon' },
+  { id: 'vertex', name: 'Google Vertex AI', group: 'cloud', keywords: 'google gcp' },
+  { id: 'azure-foundry', name: 'Azure Foundry', group: 'cloud', keywords: 'microsoft azure' },
+];
+
+/**
+ * Settings → Accounts & keys as in the confirmed v3 mock-up (.dev/ui-redesign/accounts/accounts-v3.html):
+ * four agents (OpenCode not signed in), Hermes with ChatGPT (a sign-in) and OpenRouter (three named
+ * keys: one at its limit, one in use, one rejected), the full catalogue.
+ */
+export function accountsWorld(base: FakeWorld = chatWorld()): FakeWorld {
+  const w = base;
+  w.health.sections[0] = { id: 'accounts', state: 'ok', problems: [] }; // Hermes is installed here
+  const set = (id: EngineId, extra: Partial<KbAgent>) => Object.assign(w.agents.agents.find((a) => a.id === id)!, extra);
+  set('codex', { version: '0.160', checked_at: ago(0) });
+  set('claude_code', { version: '2.1.281', checked_at: ago(2) });
+  set('hermes', { state: 'ready', installed: true, signed_in: true, version: '0.22.1', reason: null, action: null,
+    first_run: { checked: true, note: '' }, checked_at: ago(2) });
+  if (!w.agents.agents.some((a) => a.id === 'opencode')) {
+    w.agents.agents.push(agent('opencode', 'OpenCode', 'signed_out', { version: '1.17.18', checked_at: ago(1) }));
+  }
+  const until = new Date(Date.now() + 90 * MIN).toISOString();
+  w.hermesProviders = {
+    state: 'ready', reason: null, catalog_checked: 'Hermes v0.22.2', terminal: null, read_at: ago(0), catalog: HERMES_CATALOG,
+    providers: [
+      { id: 'openai-codex', name: 'ChatGPT', order: 0, free_tier: null, credentials: [
+        { index: 1, id: 'c0dex1', label: 'you@example.com', auth_type: 'oauth', priority: 0, state: 'ready', until: null, detail: null, current: true },
+      ] },
+      { id: 'openrouter', name: 'OpenRouter', order: 1, free_tier: null, credentials: [
+        { index: 1, id: 'or0001', label: 'Personal', auth_type: 'api_key', priority: 0, state: 'limited', until, detail: 'rate-limited (429)', current: false },
+        { index: 2, id: 'or0002', label: 'Work', auth_type: 'api_key', priority: 1, state: 'ready', until: null, detail: null, current: true },
+        { index: 3, id: 'or0003', label: 'Spare', auth_type: 'api_key', priority: 2, state: 'error', until: null, detail: 'exhausted (402)', current: false },
+      ] },
+    ],
+  };
   return w;
 }

@@ -98,7 +98,7 @@ for (const theme of THEMES) {
     await deck.getByRole('button', { name: 'Open beside the chat' }).click();
     const panel = page.getByRole('complementary', { name: 'Flashcards and tests' });
     await expect(panel.getByRole('region', { name: 'Flashcards: Lecture 8' })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Flashcards: Lecture 8' })).toContainText('open beside the chat');
+    await expect(page.getByRole('group', { name: 'Flashcards: Lecture 8' })).toContainText('Open in panel');
     await expect(page.getByRole('note', { name: /Agent sees: Flashcards, card 1 of 3/ })).toBeVisible();
     await check(`cards-beside-${theme}`);
     await page.getByRole('group', { name: 'Flashcards: Lecture 8' }).getByRole('button', { name: 'Bring back' }).click();

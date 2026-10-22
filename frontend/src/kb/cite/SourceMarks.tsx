@@ -3,6 +3,7 @@ import type { KbCitation } from '../../api/kb/types.gen';
 import { Icon, Popover } from '../ui';
 import { clock } from '../ui/time';
 import { citationRef, useOpenDocument } from '../state/document';
+import { useFold } from '../state/context';
 import { useFragmentText } from './fragments';
 import { claimSources, indexSources, type SourceEntry, type SourceIndex } from './sources';
 
@@ -158,13 +159,37 @@ export function SourceMarks({ citations }: { citations: ReadonlyArray<KbCitation
   );
 }
 
-/** "Sources 1 [doc] Title …" at the end of an answer or a page. */
+/** "Sources 1 [doc] Title …" at the end of a page. */
 export function SourcesRow({ index }: { index: SourceIndex }) {
   if (index.list.length === 0) return null;
   return (
     <div className="kb-srcs" role="group" aria-label="Sources">
       <span className="kb-srcs__head" aria-hidden="true">Sources</span>
       {index.list.map((entry) => <SourceTrigger key={entry.key} entry={entry} quotes={entry.quotes} row />)}
+    </div>
+  );
+}
+
+/**
+ * The sources under a chat answer (U2-a): folded to "Sources · N" until the user opens them; the
+ * choice is kept per answer across restarts. The numbers in the answer's text work either way.
+ */
+export function FoldedSourcesRow({ index, foldKey }: { index: SourceIndex; foldKey: string }) {
+  const [folded, setFolded] = useFold(foldKey, true);
+  const listId = useId();
+  if (index.list.length === 0) return null;
+  return (
+    <div className="kb-srcs-fold" data-folded={folded || undefined}>
+      <button type="button" className="kb-srcs__toggle" aria-expanded={!folded} aria-controls={listId}
+        onClick={() => setFolded(!folded)}>
+        {`Sources · ${index.list.length}`}
+        <Icon name={folded ? 'chevronDown' : 'chevronUp'} size={12} />
+      </button>
+      {!folded && (
+        <div id={listId} className="kb-srcs kb-srcs--folding" role="group" aria-label="Sources">
+          {index.list.map((entry) => <SourceTrigger key={entry.key} entry={entry} quotes={entry.quotes} row />)}
+        </div>
+      )}
     </div>
   );
 }

@@ -64,11 +64,16 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
   };
   const save = async (ids: string[]) => {
     sel.clear();
+    let partial = 0;
     const res = await each(ids, async (id) => {
       const r = await chats.getState().saveChat(id);
+      if (r.ok && r.value.warning) partial += 1;
       return r.ok ? { ok: true as const } : r;
     });
-    toast(res.skipped.length ? resultText('Saved', res, 'chat') : `Saved ${countOf(res.done.length, 'chat')} to the wiki as analyses`, res);
+    // Decision 9: diagrams without material quotes are left out — the toast says in how many chats.
+    const leftOut = partial ? ` ${partial} saved without diagrams: they have no quotes from your materials.` : '';
+    toast(res.skipped.length ? `${resultText('Saved', res, 'chat')}${leftOut}`
+      : `Saved ${countOf(res.done.length, 'chat')} to the wiki as analyses${leftOut ? `.${leftOut}` : ''}`, res);
   };
 
   const ids = () => sel.ordered;

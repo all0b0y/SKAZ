@@ -13,10 +13,17 @@ from skaz.knowledge.agents.fake import FakeEngine
 from skaz.knowledge.decisions.protocol import Answer, Question, YesNoAnswer
 from skaz.knowledge.markdown.page import parse_page
 from skaz.knowledge.service import KnowledgeService
-from skaz.knowledge.wiki.statements import page_statements
 
 from .ingest_support import PatternDetector
-from .wiki_support import CONNECTIONS, DISCREPANCIES, OVERVIEW, TwoSources, two_sources
+from .wiki_support import (
+    CONNECTIONS,
+    DISCREPANCIES,
+    OVERVIEW,
+    TwoSources,
+    connecting,
+    forget_connection_checks,
+    two_sources,
+)
 
 ENTROPY = "Энтропия (entropy)"
 
@@ -152,21 +159,12 @@ async def test_a_confident_no_from_the_decision_layer_drops_the_pair(ready: Know
 
 
 async def connected(case: TwoSources) -> str:
-    """Run "Find connections" with a scripted connection Энтропия → Температура; returns the block id."""
-    # Statements are numbered: this page's first, then the candidate's (Температура: one statement).
-    own = page_statements(case.kb, case.concept_id(ENTROPY), limit=10)
-    mine = next(n for n, item in enumerate(own, start=1) if "газа растёт" in item.text)
-    answer = {
-        "connections": [
-            {
-                "page": 1,
-                "text": "Рост температуры увеличивает энтропию газа.",
-                "this_side": [mine],
-                "other_side": [len(own) + 1],
-            }
-        ]
-    }
-    case.wiki.queues.setdefault(CONNECTIONS, []).append(json.dumps(answer, ensure_ascii=False))
+    """Run "Find connections" with an authored connection Энтропия → Температура; returns the block id."""
+    # The answer is authored from the batch prompt: the pair's number and both sides' statement numbers.
+    forget_connection_checks(case.kb)
+    case.wiki.queues.setdefault(CONNECTIONS, []).append(connecting(
+        (ENTROPY, "Температура", "газа растёт", "энергию частиц",
+         "Рост температуры увеличивает энтропию газа.")))
     job = await case.service.find_connections([case.concept_id(ENTROPY)])
     await case.service.jobs.wait(job.id)
     record = case.ingest.job(job.id)

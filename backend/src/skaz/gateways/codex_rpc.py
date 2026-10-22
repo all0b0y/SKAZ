@@ -182,7 +182,7 @@ class CodexRpc:
                                 params.get("threadId"), turn.get("id"),
                             ) and self._tool_task is not None:
                                 self._tool_task.cancel()
-                        self._events.put_nowait(message)
+                        await self._queue_event(message)
                 else:
                     identity = message.get("id")
                     if type(identity) is not int or identity not in self._pending:
@@ -211,6 +211,20 @@ class CodexRpc:
                 self._tools.revoke()
             if self._tool_task is not None:
                 self._tool_task.cancel()
+
+    async def _queue_event(self, message: dict[str, Any]) -> None:
+        """Buffered lines are read without yielding, so a fast stream fills the queue before its
+        reader runs: wait for room (Codex then waits on the pipe). Only events nobody reads within
+        half the request timeout count as a flood and end the connection (before a pending request
+        would report a mere timeout)."""
+        try:
+            self._events.put_nowait(message)
+        except asyncio.QueueFull:
+            try:
+                async with asyncio.timeout(self._timeout / 2):
+                    await self._events.put(message)
+            except TimeoutError:
+                raise CodexRpcError("Codex sent more events than were read") from None
 
     async def _run_tool(self, message: dict[str, Any]) -> None:
         assert self._tools is not None

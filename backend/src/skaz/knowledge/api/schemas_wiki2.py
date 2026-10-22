@@ -126,7 +126,7 @@ class KbGraph(BaseModel):
     edges: list[KbGraphEdge]
 
 
-KbRecognitionEngine = Literal["same_as_wiki", "off", "codex", "claude_code", "hermes"]
+KbRecognitionEngine = Literal["same_as_wiki", "off", "codex", "claude_code", "hermes", "opencode"]
 
 
 class KbRecognitionSettings(BaseModel):

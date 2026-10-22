@@ -227,6 +227,11 @@ export function AddMaterialModal() {
                     options={[{ value: 'text', label: 'Text' }, { value: 'video', label: 'Video' }, { value: 'both', label: 'Both' }]}
                     onChange={(mode) => setItems((list) => list.map((i) => (i.id === item.id ? { ...item, mode } : i)))} />
                 )}
+                {item.type === 'link' && item.info?.kind === 'site' && !item.info.embedded_video && (
+                  <Segmented label="Save from the page" size="sm" value={item.page ? 'page' : 'article'}
+                    options={[{ value: 'article', label: 'Article' }, { value: 'page', label: 'Whole page' }]}
+                    onChange={(v) => setItems((list) => list.map((i) => (i.id === item.id ? { ...item, page: v === 'page' } : i)))} />
+                )}
                 <IconButton icon="close" size="sm" label={`Remove ${itemTitle(item)}`} onClick={() => setItems((list) => list.filter((i) => i.id !== item.id))} />
               </li>
             ))}

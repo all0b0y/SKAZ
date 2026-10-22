@@ -19,7 +19,8 @@ export interface BridgeRequest {
 
 export type JsonResponse<T> =
   | { ok: true; status: number; data: T }
-  | { ok: false; status: number; detail: string };
+  /** `code`: the backend's machine-readable `error_code`, when the answer has one (W-3 `web_page_unavailable`). */
+  | { ok: false; status: number; detail: string; code?: string };
 
 /** Containers Soniox documents for automatic format detection on file input. */
 export const AUDIO_EXTENSIONS = [

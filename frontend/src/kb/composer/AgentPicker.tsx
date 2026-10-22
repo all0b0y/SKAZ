@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { KbAgent, KbAgentModel } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
-import { Icon } from '../ui';
+import { Icon, Segmented } from '../ui';
 import { Popover } from '../ui/Popover';
 import { EngineBadge } from '../ui/EngineBadge';
 import { ProviderIcon } from '../ui/ProviderIcon';
@@ -78,10 +78,38 @@ function ModelItem({ agent, model, checked, ready, label, onPick, onStar }: {
  * there, "+ N hidden" to see the rest. Only connected agents can be chosen — the others say why. On
  * an existing chat the new agent gets the conversation as context. Nothing is swapped silently.
  */
-export function AgentPicker({ choice, onChoose, existingChat }: {
+/** A choice above the agents in the menu (Settings: "Same as wiki model", "Off", "Default agent…"). */
+export interface PickerTopItem {
+  id: string;
+  label: string;
+  checked: boolean;
+  onPick: () => void;
+}
+
+/** The last model and reasoning chosen for an agent, shown as "last: …" and restored on a switch. */
+export type LastOf = (engine: EngineId) => { model: string | null; effort: string | null } | null | undefined;
+
+/** The same menu in Settings (models screen v2): its own name and button text, extra items, reasoning. */
+export interface PickerSettingsUse {
+  menuLabel: string;
+  buttonLabel: string;
+  buttonText: string;
+  buttonEngine: EngineId | null;
+  topItems?: PickerTopItem[];
+  /** Reasoning of the chosen model, as buttons at the bottom of the menu. */
+  reasoning?: { efforts: string[]; value: string | null; onChange: (effort: string) => void };
+  testId: string;
+}
+
+const lastOfAgent = (agents: { agents: KbAgent[] } | null): LastOf => (engine) => agents?.agents.find((a) => a.id === engine)?.last_choice;
+
+export function AgentPicker({ choice, onChoose, existingChat, lastOf, settings }: {
   choice: AgentChoice | null;
   onChoose: (choice: AgentChoice) => void;
   existingChat: boolean;
+  /** Default: each agent's last chat choice (models screen v2). */
+  lastOf?: LastOf;
+  settings?: PickerSettingsUse;
 }) {
   const anchor = useRef<HTMLButtonElement | null>(null);
   const search = useRef<HTMLInputElement | null>(null);
@@ -102,10 +130,15 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
     ? (currentModel ? modelName(currentModel) : choice.model)
     : current?.id === 'hermes' ? 'As set in Hermes' : choice ? ENGINE_NAME[choice.engine] : 'No agent';
 
+  const last = lastOf ?? lastOfAgent(agents);
   const pick = (engine: EngineId, model: string | null) => {
     const agent = agents?.agents.find((a) => a.id === engine);
     const m = agent?.models.find((x) => x.id === model);
-    const effort = engine === choice?.engine && m?.efforts.includes(choice.effort ?? '') ? choice.effort : m?.default_effort ?? null;
+    const remembered = last(engine);
+    // The same agent keeps its reasoning; another one gets back what was chosen for that model last.
+    const effort = engine === choice?.engine && m?.efforts.includes(choice.effort ?? '') ? choice.effort
+      : remembered && remembered.model === model && m?.efforts.includes(remembered.effort ?? '') ? remembered.effort
+        : m?.default_effort ?? null;
     setOpen(false);
     anchor.current?.focus({ preventScroll: true });
     onChoose({ engine, model, effort });
@@ -122,6 +155,13 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
   const searching = query.trim().length > 0;
   const favorites = agents ? favoritesOf(agents) : [];
 
+  const lastLabel = (agent: KbAgent): string | null => {
+    if (agent.id === choice?.engine) return null;
+    const remembered = last(agent.id);
+    if (!remembered?.model) return null;
+    const m = agent.models.find((x) => x.id === remembered.model);
+    return m ? modelName(m) : remembered.model;
+  };
   const agentGroup = (agent: KbAgent) => {
     const ready = agent.state === 'ready';
     const note = STATE_LABEL[agent.state];
@@ -131,6 +171,7 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
         <b>{agent.name}</b>
         {!agent.visible && <span className="kb-agentmenu__hidden">hidden</span>}
         {note && <span className="kb-agentmenu__state">{note}</span>}
+        {lastLabel(agent) && <span className="kb-agentmenu__last">last: {lastLabel(agent)}</span>}
       </div>
     );
     if (agent.models.length === 0) {
@@ -198,15 +239,24 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
 
   return (
     <>
-      <button ref={anchor} type="button" className="kb-picker" aria-haspopup="menu" aria-expanded={open}
-        aria-label={`Agent and model: ${[choice ? ENGINE_NAME[choice.engine] : 'none', modelLabel].filter((v, i, all) => all.indexOf(v) === i).join(', ')}`}
-        onClick={() => setOpen((v) => !v)} data-testid="agent-picker">
-        {choice && <EngineBadge engine={choice.engine} size={16} />}
-        <span className="kb-picker__label">{modelLabel}</span>
-        <Icon name="chevronDown" size={12} />
-      </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} placement="top-end" label="Agent and model"
-        role="menu" className="kb-menu kb-agentmenu" onKeyDown={moveFocus} width={340}>
+      {settings ? (
+        <button ref={anchor} type="button" className="kb-picker kb-picker--field" aria-haspopup="menu" aria-expanded={open}
+          aria-label={settings.buttonLabel} onClick={() => setOpen((v) => !v)} data-testid={settings.testId}>
+          {settings.buttonEngine && <EngineBadge engine={settings.buttonEngine} size={16} />}
+          <span className="kb-picker__label">{settings.buttonText}</span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+      ) : (
+        <button ref={anchor} type="button" className="kb-picker" aria-haspopup="menu" aria-expanded={open}
+          aria-label={`Agent and model: ${[choice ? ENGINE_NAME[choice.engine] : 'none', modelLabel].filter((v, i, all) => all.indexOf(v) === i).join(', ')}`}
+          onClick={() => setOpen((v) => !v)} data-testid="agent-picker">
+          {choice && <EngineBadge engine={choice.engine} size={16} />}
+          <span className="kb-picker__label">{modelLabel}</span>
+          <Icon name="chevronDown" size={12} />
+        </button>
+      )}
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} placement={settings ? 'bottom-end' : 'top-end'}
+        label={settings?.menuLabel ?? 'Agent and model'} role="menu" className="kb-menu kb-agentmenu" onKeyDown={moveFocus} width={340}>
         <div className="kb-agentmenu__search">
           <Icon name="search" size={13} />
           <input ref={search} type="search" aria-label="Search models" placeholder="Search models, hidden ones too" value={query}
@@ -216,6 +266,17 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
             }} />
         </div>
         {!agents && <p className="kb-agentmenu__note">Agents couldn’t be read. Try again in a moment.</p>}
+        {settings?.topItems && !searching && (
+          <div className="kb-agentmenu__group kb-agentmenu__top" role="group" aria-label="Options">
+            {settings.topItems.map((t) => (
+              <button key={t.id} type="button" role="menuitemradio" tabIndex={-1} className="kb-menu__item kb-agentmenu__item" aria-checked={t.checked}
+                onClick={() => { setOpen(false); anchor.current?.focus({ preventScroll: true }); t.onPick(); }}>
+                <span className="kb-menu__label">{t.label}</span>
+                {t.checked && <Icon name="check" size={14} />}
+              </button>
+            ))}
+          </div>
+        )}
         {favoriteRows.length > 0 && (
           <div className="kb-agentmenu__group kb-agentmenu__favorites" role="group" aria-label="Favorites">
             <div className="kb-agentmenu__head"><Icon name="star" size={14} /><b>Favorites</b></div>
@@ -229,16 +290,26 @@ export function AgentPicker({ choice, onChoose, existingChat }: {
         )}
         {groups}
         {agents && searching && groups.length === 0 && <p className="kb-agentmenu__note">No model matches “{query.trim()}”.</p>}
+        {settings?.reasoning && settings.reasoning.efforts.length > 0 && (
+          <div className="kb-agentmenu__reasoning">
+            <span aria-hidden="true">Reasoning</span>
+            <Segmented<string> label="Reasoning" size="sm" value={settings.reasoning.value ?? ''}
+              onChange={(e) => settings.reasoning!.onChange(e)}
+              options={settings.reasoning.efforts.map((e) => ({ value: e, label: effortLabel(e) }))} />
+          </div>
+        )}
         <div className="kb-agentmenu__foot">
           {existingChat && <p className="kb-agentmenu__note">A new agent gets this whole chat as context.</p>}
           <button type="button" role="menuitem" tabIndex={-1} className="kb-menu__item"
             onClick={() => { setOpen(false); openEditModels(choice ? { engine: choice.engine } : undefined); }}>
             <Icon name="editModels" size={14} /><span className="kb-menu__label">Edit models…</span>
           </button>
-          <button type="button" role="menuitem" tabIndex={-1} className="kb-menu__item"
-            onClick={() => { setOpen(false); openSettings('models'); }}>
-            <Icon name="settings" size={14} /><span className="kb-menu__label">Manage models…</span>
-          </button>
+          {!settings && (
+            <button type="button" role="menuitem" tabIndex={-1} className="kb-menu__item"
+              onClick={() => { setOpen(false); openSettings('models'); }}>
+              <Icon name="settings" size={14} /><span className="kb-menu__label">Manage models…</span>
+            </button>
+          )}
         </div>
       </Popover>
     </>

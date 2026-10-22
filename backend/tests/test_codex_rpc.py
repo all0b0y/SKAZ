@@ -39,6 +39,26 @@ async def test_invalid_peer_terminates_connection(tmp_path: Path, kind: str) -> 
 
 
 @pytest.mark.asyncio
+async def test_a_fast_burst_that_is_being_read_is_not_a_flood(tmp_path: Path) -> None:
+    """A long answer streams hundreds of deltas at once (a 12-minute wiki Notes turn died here with
+    "Codex stopped unexpectedly"): while someone reads the events, the reader waits for room
+    instead of closing the connection."""
+    async with CodexRpc((sys.executable, str(FIXTURE)), cwd=tmp_path, env={}, max_events=128) as client:
+        read = 0
+
+        async def consume() -> None:
+            nonlocal read
+            while read < 1000:
+                await client.next_event()
+                read += 1
+
+        consumer = asyncio.create_task(consume())
+        assert await client.request("fixture/burst", {"count": 1000}) == "done"
+        await asyncio.wait_for(consumer, 5)
+        assert read == 1000 and not client.closed
+
+
+@pytest.mark.asyncio
 async def test_rpc_error_is_sanitized_without_closing_connection(tmp_path: Path) -> None:
     async with CodexRpc((sys.executable, str(FIXTURE)), cwd=tmp_path, env={}) as client:
         with pytest.raises(CodexRpcError, match=r"^Codex request rejected$"):

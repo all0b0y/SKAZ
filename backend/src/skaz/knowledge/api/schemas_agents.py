@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-KbEngineId = Literal["codex", "claude_code", "hermes"]
+KbEngineId = Literal["codex", "claude_code", "hermes", "opencode"]
 #: ``preparing``: Hermes' first check is running (wire name kept; it no longer downloads anything).
 KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unavailable", "preparing"]
 #: ``first_check``: Hermes' one-time check with SKAZ's own folder; ``check``: look at the state again.
@@ -64,6 +64,24 @@ class KbAgentFirstRun(BaseModel):
     note: str
 
 
+class KbAgentLastChoice(BaseModel):
+    """The model and reasoning last chosen for this agent in the message field; ``model: null`` = as set
+    in the agent. A new chat and a switch to this agent start from it (models screen v2)."""
+
+    model: str | None
+    effort: str | None
+
+
+class KbAgentWebSearch(BaseModel):
+    """W-2: whether this agent can search the web with the user's approval of each query; why not, in
+    plain words. W-3b: Codex, Hermes and OpenCode search through SKAZ's ``skaz_web_search``, run by
+    ``through``'s own search in a separate query-only run (available while a searcher is connected)."""
+
+    available: bool
+    reason: str | None
+    through: Literal["codex", "claude_code"] | None = None
+
+
 class KbAgent(BaseModel):
     id: KbEngineId
     name: str
@@ -89,10 +107,13 @@ class KbAgent(BaseModel):
     #: How the agent asks the user a question: its own tool, or SKAZ's (the card says
     #: "Questions: through SKAZ" — known before a chat, not during it; Q-A1).
     questions: Literal["native", "skaz"] = "skaz"
+    last_choice: KbAgentLastChoice | None = None
     #: Shown in the composer's agent picker (0.3.1 K2; the default agent always is).
     visible: bool
     #: Provider sections of its models, in the agent's order.
     providers: list[KbAgentProvider]
+    #: W-2: the agent's own web search in chats (asked before each query), or why it is off.
+    web_search: KbAgentWebSearch = KbAgentWebSearch(available=False, reason=None)
 
 
 class KbFavoriteModel(BaseModel):
@@ -170,6 +191,15 @@ class KbAgentLoginResult(BaseModel):
     message: str
 
 
+class KbAgentSignIn(BaseModel):
+    """A sign-in started in this SKAZ: ``waiting`` while the browser page or Terminal window is open,
+    then ``done`` (check the agent now) or ``failed``; ``idle`` when none was started."""
+
+    engine: KbEngineId
+    method: Literal["terminal", "browser"] | None
+    state: Literal["idle", "waiting", "done", "failed"]
+
+
 # -- Hermes providers (0.3.1 K1/K3) -----------------------------------------------------------
 
 KbHermesProviderGroup = Literal["subscription", "api_key", "cloud"]
@@ -235,6 +265,11 @@ class KbHermesProviders(BaseModel):
 class KbHermesProviderAdd(_Request):
     provider: str = Field(min_length=1, max_length=64)
     group: KbHermesProviderGroup
+
+
+class KbHermesKeyAdd(_Request):
+    #: The key's name in Hermes (``--label``); the key itself is pasted in Terminal, never sent here.
+    label: str = Field(min_length=1, max_length=80)
 
 
 class KbHermesCredentialMove(_Request):

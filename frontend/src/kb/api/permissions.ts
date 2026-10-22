@@ -43,9 +43,9 @@ export const isQuestionPart = (p: { type: string }): p is KbQuestionPart => p.ty
 /** The parts of a message, seen with the phase-P part types. */
 export const partsOf = (m: { parts: readonly KbMessagePart[] }): readonly AnyMessagePart[] => m.parts;
 
-/** A permission or a question still waits for the user's answer. */
+/** A permission, a question or a web search still waits for the user's answer. */
 export function isWaitingPart(p: AnyMessagePart): boolean {
-  return (p.type === 'permission' || p.type === 'question') && p.status === 'pending';
+  return (p.type === 'permission' || p.type === 'question' || p.type === 'web_search') && p.status === 'pending';
 }
 
 export const isWaitingForUser = (c: KbChatSummary): boolean => c.waiting_for_user === true;

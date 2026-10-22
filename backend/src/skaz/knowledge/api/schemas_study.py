@@ -175,6 +175,10 @@ class KbStudySaveIn(_Request):
     decision: Literal["allow", "deny"]
 
 
+class KbStudyRenameIn(_Request):
+    title: str = Field(max_length=1000)
+
+
 class KbDeckView(BaseModel):
     page_id: str
     title: str

@@ -92,7 +92,15 @@ class StudyPart:
     title: str = ""
 
 
-Part = TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
+@dataclass(frozen=True)
+class WebSearchPart:
+    """An agent's web search held for the user (W-2); the card reads the request by id."""
+
+    search_id: str
+
+
+Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
+        | WebSearchPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -113,6 +121,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "question", "id": part.question_id}
     if isinstance(part, StudyPart):
         return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
+    if isinstance(part, WebSearchPart):
+        return {"type": "web_search", "id": part.search_id}
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -138,6 +148,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return QuestionPart(str(data["id"]))
     if kind == "study":
         return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
+    if kind == "web_search":
+        return WebSearchPart(str(data["id"]))
     return None
 
 
@@ -256,6 +268,16 @@ class Message:
 
     def with_parts(self, parts: Sequence[Part]) -> Message:
         return replace(self, parts=tuple(parts))
+
+
+#: How SKAZ before 2026-10-21 recorded an effort change in the chat ("Effort set to high").
+_EFFORT_NOTE = "Effort set to "
+
+
+def is_effort_note(message: Message) -> bool:
+    """A stored record of an effort change: no longer shown — only agent and model changes are."""
+    return (message.role == "system" and len(message.parts) == 1 and isinstance(message.parts[0], TextPart)
+            and message.parts[0].text.startswith(_EFFORT_NOTE))
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ import pytest
 from skaz.knowledge.agents.engine import AgentTurn, EngineId, ModelOption, ToolCall
 from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.agents.tools import TOOL_NAMES
+from skaz.knowledge.chats.model import Message, TextPart
 from skaz.knowledge.chats.service import ChatService
 from skaz.knowledge.markdown.page import Heading, parse_page, render_page
 from skaz.knowledge.permissions.wiki_tools import WIKI_TOOL_NAMES
@@ -243,6 +244,31 @@ async def test_model_and_effort_changes_are_recorded_and_checked(env: Env) -> No
     assert env.agents.engines["codex"].turns[-1].model == "fake-model"
 
 
+async def test_only_model_and_agent_changes_are_recorded_never_effort(env: Env) -> None:
+    """User request 2026-10-21: an effort change leaves no record in the chat; a model change does."""
+    with_models(env, "codex", ModelOption("fast", "Fast", ("low", "high"), "low"),
+                ModelOption("deep", "Deep", ("medium", "xhigh")))
+    chat = await env.chat(model="fast", effort="low")
+    effort = await env.client.patch(f"/kb/chats/{chat['id']}", json={"effort": "high"})
+    assert effort.status_code == 200 and effort.json()["effort"] == "high"
+    assert (await env.client.get(f"/kb/chats/{chat['id']}")).json()["messages"] == []
+    # Model and effort together: only the model change is recorded.
+    both = await env.client.patch(f"/kb/chats/{chat['id']}", json={"model": "deep", "effort": "xhigh"})
+    assert both.status_code == 200 and (both.json()["model"], both.json()["effort"]) == ("deep", "xhigh")
+    messages = (await env.client.get(f"/kb/chats/{chat['id']}")).json()["messages"]
+    assert [all_text(m) for m in messages] == ["Model changed to Deep"]
+    # A record an older SKAZ stored is no longer shown, nor sent to a reader that reconnects.
+    legacy = Message(id="msg-legacy-effort", chat_id=chat["id"], seq=0, role="system", state="done",
+                     created_at="2026-10-20T10:00:00Z", parts=(TextPart("Effort set to medium"),),
+                     engine="codex", model="deep", effort="medium")
+    env.chats.repo.add_messages([legacy], {})
+    messages = (await env.client.get(f"/kb/chats/{chat['id']}")).json()["messages"]
+    assert [all_text(m) for m in messages] == ["Model changed to Deep"]
+    snapshot = (await env.client.get(f"/kb/chats/{chat['id']}/events", params={"after": 10**9})).json()
+    texts = [all_text(e["message"]) for e in snapshot["events"] if e["type"] == "message"]
+    assert texts == ["Model changed to Deep"]
+
+
 def with_models(env: Env, engine_id: EngineId, *models: ModelOption) -> None:
     script = env.agents.scripts
     env.agents.engines[engine_id] = FakeEngine(engine_id, script=lambda turn: script[engine_id](turn),
@@ -321,6 +347,32 @@ async def test_limit_interrupts_and_resume_answers_again(env: Env) -> None:
     assert [m.role for m in attempts[1].messages] == ["user"]  # the broken answer is not history
     not_interrupted = await env.client.post(f"/kb/chats/{chat['id']}/messages/{again['id']}/resume")
     assert not_interrupted.status_code == 409 and not_interrupted.json()["code"] == "NOT_INTERRUPTED"
+    # 2026-10-21: Resume replaces the interrupted answer in its place — no pile of "Answer interrupted" cards.
+    messages = (await env.client.get(f"/kb/chats/{chat['id']}")).json()["messages"]
+    assert [(m["seq"], m["role"]) for m in messages] == [(1, "user"), (2, "assistant")]
+    assert messages[1]["id"] == again["id"] and interrupted["id"] not in {m["id"] for m in messages}
+
+
+async def test_resume_keeps_the_answer_in_its_place_and_later_messages_untouched(env: Env) -> None:
+    calls = 0
+
+    def script(_turn: AgentTurn) -> list[ScriptItem]:
+        nonlocal calls
+        calls += 1
+        return [*text("Обрыв…"), limit_failure()] if calls == 1 else text(f"Ответ {calls}.")
+
+    env.agents.scripts["codex"] = script
+    chat = await env.chat()
+    broken = await env.answered(chat["id"], "Первый вопрос")
+    later = await env.answered(chat["id"], "Второй вопрос")
+    resumed = await env.client.post(f"/kb/chats/{chat['id']}/messages/{broken['id']}/resume")
+    assert resumed.status_code == 202
+    await finished(env.chats)
+    messages = (await env.client.get(f"/kb/chats/{chat['id']}")).json()["messages"]
+    shown = [(m["role"], all_text(m) if m["role"] == "assistant" else m["input"]["text"]) for m in messages]
+    assert shown == [("user", "Первый вопрос"), ("assistant", "Ответ 3."),
+                     ("user", "Второй вопрос"), ("assistant", "Ответ 2.")]
+    assert messages[1]["id"] == resumed.json()["assistant"]["id"] and messages[3]["id"] == later["id"]
 
 
 async def test_regenerate_keeps_the_earlier_answer(env: Env) -> None:
@@ -379,10 +431,11 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     assert tools == [("skaz_search", "Searched “энтропия”"), ("skaz_read_page", "Read page Энтропия"),
                      ("skaz_read_material", "Read Лекция 8")]
     turn = env.agents.engines["codex"].turns[-1]
-    # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool.
+    # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool;
+    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first).
     assert turn.tools is not None
     assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *STUDY_TOOL_NAMES,
-                                                             "skaz_ask_user")
+                                                             "skaz_ask_user", "skaz_web_search")
     assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
     assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions

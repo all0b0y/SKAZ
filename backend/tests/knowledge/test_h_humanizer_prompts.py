@@ -1,4 +1,4 @@
-"""Humanizer in every prompt where the agent writes text (0.3.1 H1/H2), and nowhere once it is off.
+"""Humanizer for ordinary chat replies only; task generation keeps its own rules.
 
 Delivery (H2, decided per engine in ``skills/prompting.py``): the pinned SKILL.md
 is part of SKAZ's own turn instructions for all three agents — no native skill
@@ -27,11 +27,6 @@ from tests.knowledge.test_chats_api import Env, env  # noqa: F401 - the chat API
 from tests.knowledge.wiki_support import two_sources
 
 HUMANIZER = skill("humanizer")
-#: Turn kinds in which the agent writes prose that ends up in the wiki.
-WRITING = {prompts.NOTES_SCHEMA_TITLE, prompts.CONCEPTS_SCHEMA_TITLE, wiki_prompts.DISCREPANCY_TITLE,
-           wiki_prompts.CONNECTIONS_TITLE, wiki_prompts.OVERVIEW_TITLE, wiki_prompts.RECHECK_TITLE}
-
-
 def mentions_humanizer(turn: AgentTurn) -> bool:
     everything = turn.instructions + "".join(message.content for message in turn.messages)
     return "humanizer" in everything.lower()
@@ -113,12 +108,12 @@ async def test_turning_it_off_leaves_a_running_answer_alone_and_applies_from_the
 # -- ingest and wiki jobs (no tools) ----------------------------------------------------------------
 
 
-def test_ingest_instructions_put_humanizer_after_the_quote_rules() -> None:
+def test_ingest_keeps_quote_and_json_rules_without_the_chat_skill() -> None:
     for template in (NOTES_INSTRUCTIONS, CONCEPTS_INSTRUCTIONS):
-        on = instructions_for(template, "ru", skills=(HUMANIZER,))
-        assert on.index("copied word for word") < on.index(PRECEDENCE_RULE) < on.index(HUMANIZER.text)
-        assert on.index("Answer with JSON only") < on.index(PRECEDENCE_RULE)
-        assert "humanizer" not in instructions_for(template, "ru", skills=()).lower()
+        task = instructions_for(template, "ru")
+        assert "copied word for word" in task
+        assert "Answer with JSON only" in task
+        assert "humanizer" not in task.lower()
 
 
 def _writing_turns(turns: list[AgentTurn]) -> dict[str, list[AgentTurn]]:
@@ -130,7 +125,7 @@ def _writing_turns(turns: list[AgentTurn]) -> dict[str, list[AgentTurn]]:
     return out
 
 
-async def test_ingest_and_wiki_jobs_write_with_humanizer_by_default(ready: KnowledgeService) -> None:
+async def test_ingest_and_wiki_jobs_never_inherit_the_chat_humanizer(ready: KnowledgeService) -> None:
     case = await two_sources(ready)
     job = await case.service.find_connections()
     await case.service.jobs.wait(job.id)
@@ -139,10 +134,7 @@ async def test_ingest_and_wiki_jobs_write_with_humanizer_by_default(ready: Knowl
             wiki_prompts.DISCREPANCY_TITLE} <= set(by_kind)
     for kind, turns in by_kind.items():
         for turn in turns:
-            if kind in WRITING:
-                assert HUMANIZER.text in turn.instructions, kind
-            else:  # a concept match is a choice, not text
-                assert not mentions_humanizer(turn), kind
+            assert not mentions_humanizer(turn), kind
 
 
 async def test_ingest_and_wiki_jobs_carry_nothing_of_humanizer_when_off(ready: KnowledgeService) -> None:

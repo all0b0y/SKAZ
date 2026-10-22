@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import type { KbPage } from '../../api/kb/types.gen';
 import { Banner, Button, Icon, IconButton, Spinner } from '../ui';
-import { useListSelection } from '../ui/listSelection';
+import { SelectionCheckbox, useListSelection } from '../ui/listSelection';
 import { errorText } from '../api/client';
 import { useServices } from '../state/context';
 import { useAskAbout } from '../document/parts';
@@ -94,6 +94,7 @@ export function DeckPage({ page }: { page: KbPage }) {
       <ul className="kb-deck__list" aria-label="Cards" {...sel.gridProps} {...sel.listProps} onKeyDown={onKeyDown}>
         {deck.cards.map((card) => (
           <li key={card.id} className="kb-deck__row" {...sel.rowProps(card.id)}>
+            <SelectionCheckbox checked={sel.selected.has(card.id)} />
             <span className="kb-deck__q" role="gridcell" tabIndex={-1}>
               {card.question}<small>{card.answer}</small>
             </span>

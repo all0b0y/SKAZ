@@ -57,7 +57,35 @@ if "--mcp-config" in args:
     record("mcp_config", path=path, mode=oct(os.stat(path).st_mode & 0o777), content=json.load(open(path)))
 os.write(1, b"")
 line = sys.stdin.readline()
-record("stdin", line=line, rest=sys.stdin.read())
+# W-2: with web search the host keeps stdin open for its control responses (SDK control protocol).
+record("stdin", line=line, rest="" if SCENARIO.get("web") else sys.stdin.read())
+
+def ask(item):
+    # A ``can_use_tool`` control request as the 2.1.281 binary sends it (``sendRequest`` of the stdio
+    # permission prompt), then what the CLI does with the answer: run WebSearch with the host's
+    # ``updatedInput`` (``call(r)`` reads ``r.query``) or report the denial as the tool's error result.
+    request = item["__ask__"]
+    print(json.dumps(request), flush=True)
+    answer = sys.stdin.readline()
+    record("control_response", line=answer)
+    if "__then__" not in item:
+        return
+    body = json.loads(answer)["response"].get("response") or {}
+    use_id = request["request"].get("tool_use_id")
+    main = {"parent_tool_use_id": None, "session_id": "s-1"}
+    if body.get("behavior") == "allow":
+        query = (body.get("updatedInput") or request["request"]["input"])["query"]
+        result = {"query": query, "results": [{"tool_use_id": "srvtoolu_1", "content": item["__then__"]}],
+                  "durationSeconds": 1.0, "searchCount": 1}
+        print(json.dumps({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": use_id,
+             "content": "Web search results for query: " + query}]},
+            "tool_use_result": result, **main}), flush=True)
+    else:
+        print(json.dumps({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": use_id, "content": body.get("message", ""),
+             "is_error": True}]}, "tool_use_result": "Error: " + body.get("message", ""), **main}),
+              flush=True)
 
 def on_sigint(signum, frame):
     record("sigint")
@@ -69,6 +97,9 @@ signal.signal(signal.SIGINT, on_sigint)
 if SCENARIO.get("stubborn"):
     stubborn()
 for item in SCENARIO.get("stream", []):
+    if isinstance(item, dict) and "__ask__" in item:
+        ask(item)
+        continue
     print(json.dumps(item), flush=True)
 if SCENARIO.get("hang"):
     while True:

@@ -15,6 +15,11 @@ import {
  * - The selection is local and not saved: it clears on Esc, when `resetKey` changes (another
  *   folder or filter) and when the caller calls `clear()` after an action; rows that leave the
  *   list leave the selection.
+ * - Finder (F7): ⌘A with the pointer over a list selects all of it, wherever the keyboard focus is
+ *   (a text field keeps its own ⌘A). A press anywhere but on a row of the list — its empty space
+ *   or outside — clears at once; the selection bar, the list's menus and windows (a confirmation,
+ *   ⌘/) and a click that only closes an open menu or window don't count. Esc clears even when the
+ *   focus is not in the list. The boxes show only while the list is selecting (`data-selecting`).
  */
 export interface ListSelectionOptions {
   /** Row ids in display order. */
@@ -58,6 +63,7 @@ export interface ListSelection {
     ref: (el: HTMLElement | null) => void;
     onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
     onKeyUp: (event: KeyboardEvent<HTMLElement>) => void;
+    'data-sel-list': '';
     'data-selecting'?: true;
   };
   /** On each list/table of rows. */
@@ -73,6 +79,30 @@ const TEXT_ENTRY = 'input, textarea, select, [contenteditable=""], [contentedita
 function rowElement(list: HTMLElement | null, id: string): HTMLElement | null {
   if (!list) return null;
   return Array.from(list.querySelectorAll<HTMLElement>('[data-sel-id]')).find((el) => el.getAttribute('data-sel-id') === id) ?? null;
+}
+
+/** Presses here are not "outside" the list: its bar, its menus and windows, a tooltip, a toast. */
+const KEEP = '[data-sel-bar], [data-sel-keep], .kb-popover, .kb-modal-layer, [role="menu"], [role="dialog"], [role="alertdialog"], [role="tooltip"], .kb-toast';
+/** A menu or window is open: the next press only closes it. */
+const OPEN_LAYER = '.kb-popover, .kb-modal-layer:not([data-closing])';
+
+// The element under the pointer, for ⌘A over a list (one listener for every list).
+let hovered: Element | null = null;
+let tracking = false;
+function trackPointer() {
+  if (tracking || typeof document === 'undefined') return;
+  tracking = true;
+  document.addEventListener('pointerover', (event) => { hovered = event.target instanceof Element ? event.target : null; }, true);
+  document.addEventListener('pointerout', (event) => { if (!event.relatedTarget) hovered = null; }, true);
+}
+
+/** A press on the scroll bar of a scrolling element (not on its content). */
+function onScrollbar(el: Element, event: PointerEvent): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const scrolls = el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth;
+  if (!scrolls || !el.clientWidth) return false;
+  const r = el.getBoundingClientRect();
+  return event.clientX - r.left - el.clientLeft >= el.clientWidth || event.clientY - r.top - el.clientTop >= el.clientHeight;
 }
 
 function focusTarget(row: HTMLElement): HTMLElement {
@@ -134,6 +164,12 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
   const selectAll = useCallback(() => {
     setSelected(new Set(opts.current.ids.filter(can)));
   }, [can]);
+  const selectAllHere = useCallback(() => {
+    const list = opts.current.ids.filter(can);
+    if (!list.length) return false;
+    setSelected(new Set(list));
+    return true;
+  }, [can]);
   const targets = useCallback(() => {
     const now = selectedRef.current;
     if (now.size) return opts.current.ids.filter((id) => now.has(id));
@@ -148,6 +184,54 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     if (a < 0 || b < 0) return [to];
     return list.slice(Math.min(a, b), Math.max(a, b) + 1);
   }, []);
+
+  // ⌘A over the list under the pointer (Finder), before the focused list's own keys see it.
+  useEffect(() => {
+    trackPointer();
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'a') return;
+      const list = listRef.current;
+      if (!list || !hovered || !list.contains(hovered)) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest(TEXT_ENTRY) || target?.closest('.kb-popover, .kb-modal-layer')) return;
+      if (document.querySelector(OPEN_LAYER)) return;
+      if (!selectAllHere()) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [selectAllHere]);
+
+  // While something is selected: a press outside the rows clears; Esc clears from anywhere.
+  const selecting = selected.size > 0;
+  useEffect(() => {
+    if (!selecting) return undefined;
+    const onDown = (event: PointerEvent) => {
+      const list = listRef.current;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!list || !target) return;
+      const row = target.closest('[data-sel-id]');
+      if (row && list.contains(row)) return;
+      if (target.closest(KEEP)) return;
+      if (document.querySelector(OPEN_LAYER)) return;
+      if (onScrollbar(target, event)) return;
+      clear();
+    };
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && (listRef.current?.contains(target) || target.closest(TEXT_ENTRY) || target.closest(KEEP))) return;
+      if (document.querySelector(OPEN_LAYER)) return;
+      clear();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [selecting, clear]);
 
   const moveFocus = (id: string) => {
     setFocus(id);
@@ -274,7 +358,7 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     targets,
     reasonOf,
     rowProps,
-    listProps: { ref: setListRef, onKeyDown, onKeyUp, ...(selected.size ? { 'data-selecting': true as const } : {}) },
+    listProps: { ref: setListRef, onKeyDown, onKeyUp, 'data-sel-list': '', ...(selected.size ? { 'data-selecting': true as const } : {}) },
     gridProps: { role: 'grid', 'aria-multiselectable': true },
     listRef,
     shortcutsOpen,

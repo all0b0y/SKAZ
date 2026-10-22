@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { m, useReducedMotion } from 'motion/react';
 import { Button, EmptyState, Icon, IconButton } from '../ui';
 import { SPRING_LARGE, SPRING_SMALL } from '../ui/motion';
@@ -6,8 +6,9 @@ import { PathText } from '../ui/PathText';
 import { SourcesProvider } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 import { useOpenDocument } from '../state/document';
-import { useServices } from '../state/context';
+import { useFold, useServices } from '../state/context';
 import { agentName } from '../chat/permission';
+import { RenameForm } from '../chat/ChatMenu';
 import type { KbPermissionPart } from '../api/permissions';
 import { MODE_LABEL, PLACE_LABEL, kindLabel, studyApi, studyWhere, type KbStudyPart, type StudyPlace } from './api';
 import { CardStack } from './CardStack';
@@ -22,19 +23,45 @@ const ROUTE: Record<StudyPlace, { icon: 'chats' | 'wiki' | 'expand'; label: stri
 
 const engineOf = (p: KbStudyPart) => (p.engine ?? 'codex') as KbPermissionPart['engine'];
 
+/** What the thread's row says while the block is elsewhere (U2, decision 5). */
+const AWAY: Record<Exclude<StudyPlace, 'chat'>, string> = { panel: 'Open in panel', window: 'Open in window' };
+
+/**
+ * Where keyboard focus lands after a move the user asked for: the block in its new place (chat,
+ * panel) or, when it went into its own window, its row in the thread — never lost to the page.
+ * Set just before the move, taken by whichever element mounts there first.
+ */
+let focusAfterMove: string | null = null;
+const focusKey = (studyId: string, at: StudyPlace | 'row') => `${at}:${studyId}`;
+const takeFocus = (studyId: string, at: StudyPlace | 'row') => {
+  if (focusAfterMove !== focusKey(studyId, at)) return false;
+  focusAfterMove = null;
+  return true;
+};
+/** Move a block and keep the keyboard with it. */
+function moveWithFocus(route: ReturnType<typeof useStudyRoute>, part: KbStudyPart, to: StudyPlace) {
+  focusAfterMove = focusKey(part.id, to === 'window' ? 'row' : to);
+  return route(part, to);
+}
+
 /**
  * A deck or test block (S5, W2): header with the route buttons (speech bubbles = back into the chat,
  * book = beside the chat, two arrows = its own window), progress, the stack or the test, and the
  * "Save to wiki" row. The same block in the chat, beside it or in its window — never in two places.
  */
 export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbStudyPart; where: StudyPlace }) {
-  const { bridge, ui } = useServices();
+  const { bridge, ui, client } = useServices();
   const actions = useStudyActions(chatId, part.id);
   const route = useStudyRoute(chatId);
   const reduced = useReducedMotion();
   const ref = useRef<HTMLElement | null>(null);
   const keys = useRef<((event: React.KeyboardEvent) => void) | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  // U2-a: only in the chat a block folds to its title line; open by default, kept across restarts.
+  // Beside the chat or in its window it is always open (it was moved there to work with it).
+  const [foldedInChat, setFolded] = useFold(`study:${part.id}`, false);
+  const folded = where === 'chat' && foldedInChat;
   const deck = part.kind === 'deck';
   const total = deck ? part.cards.length : part.questions.length;
   const shown = Math.min(part.position + 1, total);
@@ -55,40 +82,65 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
       await ref.current.animate([{ transform: 'none', opacity: 1 }, { transform: 'scale(0.94)', opacity: 0 }],
         { duration: 180, easing: 'cubic-bezier(.4,0,1,1)' }).finished.catch(() => undefined);
     }
-    const res = await route(part, to);
+    const res = await moveWithFocus(route, part, to);
     if (!res.ok) setError(res.error);
   };
+  useEffect(() => { if (takeFocus(part.id, where)) ref.current?.focus(); }, [part.id, where]);
 
   return (
-    <m.section ref={ref} className={`kb-st kb-st--${where}`} data-kind={part.kind} tabIndex={0}
+    <m.section ref={ref} className={`kb-st kb-st--${where}`} data-kind={part.kind} data-folded={folded || undefined} tabIndex={0}
       aria-label={`${kindLabel(part)}: ${part.title}`} layoutId={inWindow ? undefined : `study-${part.id}`}
       initial={reduced ? { opacity: 0 } : false} animate={{ opacity: 1, transition: reduced ? { duration: 0.14, ease: 'linear' } : SPRING_LARGE }}
       transition={SPRING_LARGE}
-      onFocusCapture={() => ui.getState().focusStudy(chatId, part.id)} onKeyDown={(e) => keys.current?.(e)}>
-      <header className="kb-st-head">
+      onFocusCapture={() => ui.getState().focusStudy(chatId, part.id)} onKeyDown={(e) => { if (!folded) keys.current?.(e); }}>
+      <header className="kb-st-head" data-renaming={renaming || undefined}>
         <Icon name={deck ? 'deck' : 'test'} size={15} />
-        <span className="kb-st-title" title={part.title}>
-          {where === 'chat' ? `${kindLabel(part)} · ${part.title}` : kindLabel(part)}
-        </span>
-        {subtitle && <span className="kb-st-sub">· {subtitle}</span>}
-        {question && <span className="kb-st-sub">· {QUESTION_LABEL[question.type]}</span>}
-        <span className="kb-st-cnt">{!deck && part.result ? 'done' : total ? `${shown} / ${total}` : '0'}</span>
+        {renaming ? (
+          // U3-a: a new title without a new agent run; a saved block renames its page (links follow).
+          <RenameForm title={part.title} label={deck ? 'Deck name' : 'Test name'} onCancel={() => setRenaming(false)}
+            onSave={async (next) => {
+              const r = await actions.run(() => studyApi.rename(client, part.id, next));
+              if (!r.ok) return r.error;
+              setRenaming(false);
+              return null;
+            }} />
+        ) : (
+          <>
+            <span className="kb-st-title" title={part.title}>
+              {where === 'chat' ? `${kindLabel(part)} · ${part.title}` : kindLabel(part)}
+            </span>
+            {subtitle && <span className="kb-st-sub">· {subtitle}</span>}
+            {question && <span className="kb-st-sub">· {QUESTION_LABEL[question.type]}</span>}
+            <span className="kb-st-cnt">{!deck && part.result ? 'done' : total ? `${shown} / ${total}` : '0'}</span>
+          </>
+        )}
         <span className="kb-st-route">
+          {part.origin === 'agent' && !renaming && (
+            <IconButton icon="pencil" label="Rename" size="sm" onClick={() => { setError(null); setRenaming(true); }} />
+          )}
           {places.map((p) => (
             <IconButton key={p} icon={ROUTE[p].icon} label={ROUTE[p].label} size="sm" onClick={() => void move(p)} />
           ))}
+          {where === 'chat' && (
+            <IconButton icon={folded ? 'chevronDown' : 'chevronUp'} label={folded ? 'Expand' : 'Collapse'} size="sm"
+              aria-expanded={!folded} onClick={() => setFolded(!folded)} />
+          )}
         </span>
       </header>
-      <div className="kb-st-bar" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={total} aria-valuenow={Math.round(progress * total)}>
-        <i style={{ width: `${progress * 100}%` }} />
-      </div>
-      <SourcesProvider index={sources}>
-        {deck
-          ? <CardStack part={part} actions={actions} onError={setError} keys={keys} />
-          : <TestRunner part={part} actions={actions} onError={setError} />}
-      </SourcesProvider>
-      {error && <p className="kb-inline-error kb-st-error" role="alert">{error}</p>}
-      {part.origin === 'agent' && <SaveRow chatId={chatId} part={part} />}
+      {!folded && (
+        <>
+          <div className="kb-st-bar" role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={total} aria-valuenow={Math.round(progress * total)}>
+            <i style={{ width: `${progress * 100}%` }} />
+          </div>
+          <SourcesProvider index={sources}>
+            {deck
+              ? <CardStack part={part} actions={actions} onError={setError} keys={keys} />
+              : <TestRunner part={part} actions={actions} onError={setError} />}
+          </SourcesProvider>
+          {error && <p className="kb-inline-error kb-st-error" role="alert">{error}</p>}
+          {part.origin === 'agent' && <SaveRow chatId={chatId} part={part} />}
+        </>
+      )}
     </m.section>
   );
 }
@@ -142,21 +194,29 @@ function SaveRow({ chatId, part }: { chatId: string; part: KbStudyPart }) {
   );
 }
 
-/** What stays in the thread while the block is beside the chat or in its window (W2). */
+/**
+ * What stays in the thread while the block is beside the chat or in its window (W2): the block
+ * folded to one row (U2, decision 5) — its title, size and where it is open, and Bring back. The
+ * block itself is always open there; its fold in the chat is kept for when it comes back.
+ */
 export function StudyPlaceholder({ chatId, part }: { chatId: string; part: KbStudyPart }) {
   const route = useStudyRoute(chatId);
+  const ref = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   const deck = part.kind === 'deck';
   const total = deck ? part.cards.length : part.questions.length;
+  const away = part.place === 'window' ? 'window' : 'panel';
+  useEffect(() => { if (takeFocus(part.id, 'row')) ref.current?.focus(); }, [part.id, part.place]);
   return (
-    <m.div className="kb-st-ph" role="group" aria-label={`${kindLabel(part)}: ${part.title}`}
-      initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0, transition: { ...SPRING_SMALL, delay: 0.12 } }}>
+    <m.div ref={ref} className="kb-st-ph" role="group" aria-label={`${kindLabel(part)}: ${part.title}`} tabIndex={-1}
+      data-place={away} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0, transition: { ...SPRING_SMALL, delay: 0.12 } }}>
       <Icon name={deck ? 'deck' : 'test'} size={15} />
-      <span className="kb-st-ph__text">
-        <b>{kindLabel(part)} · {part.title}</b> · {total} {deck ? (total === 1 ? 'card' : 'cards') : (total === 1 ? 'question' : 'questions')} ·{' '}
-        {part.place === 'panel' ? 'open beside the chat' : 'open in its own window'}
+      <b className="kb-st-ph__title" title={part.title}>{`${kindLabel(part)} · ${part.title}`}</b>
+      <span className="kb-st-ph__cnt">
+        {total} {deck ? (total === 1 ? 'card' : 'cards') : (total === 1 ? 'question' : 'questions')}
       </span>
-      <Button size="sm" onClick={async () => { const r = await route(part, 'chat'); setError(r.ok ? null : r.error); }}>Bring back</Button>
+      <span className="kb-st-ph__where"><Icon name={ROUTE[away].icon} size={12} />{AWAY[away]}</span>
+      <Button size="sm" onClick={async () => { const r = await moveWithFocus(route, part, 'chat'); setError(r.ok ? null : r.error); }}>Bring back</Button>
       {error && <p className="kb-inline-error" role="alert">{error}</p>}
     </m.div>
   );
@@ -181,7 +241,7 @@ export function StudyPanel({ chatId, studyId }: { chatId: string; studyId: strin
         </span>
         <span className="kb-head__spacer" />
         <IconButton icon="close" label="Close — back into the chat" size="sm"
-          onClick={() => (part ? void route(part, 'chat') : ui.getState().closeDoc())} />
+          onClick={() => (part ? void moveWithFocus(route, part, 'chat') : ui.getState().closeDoc())} />
       </header>
       <div className="kb-st-panel__body">
         {part

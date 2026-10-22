@@ -269,6 +269,7 @@ async def test_hermes_022_run_is_refused_when_another_toolset_is_listed(tmp_path
     engine, fake = engine_for(tmp_path, plan, mcp=RecordingMcp())
     events = await drain(engine, turn())
     assert events == [Failed("run-1", "incompatible", LIMITS_NOT_APPLIED)]
+    assert isinstance(events[0], Failed) and events[0].unsent  # the request itself was never sent
     assert [m["params"]["prompt"][0]["text"] for m in received(fake, "session/prompt")] == ["/tools"]
 
 
@@ -562,29 +563,39 @@ async def test_the_gateway_of_skaz_folder_is_registered_after_a_run(tmp_path: Pa
         user.close()
 
 
-async def test_a_repair_hermes_asks_for_is_run_once_by_itself_and_the_agent_works(tmp_path: Path) -> None:
-    """H3: ``--version`` exits 1 asking for ``hermes pm repair``: SKAZ runs exactly that, then asks again."""
-    engine, fake = engine_for(tmp_path, scenario(needs_repair=True))
-    status = await engine.status()
-    assert status.version is not None and not status.incompatible and not status.repairable
-    repairs = fake.records("repair")
-    assert len(repairs) == 1 and repairs[0]["home"] == str(engine.home)
-
-
-async def test_a_repair_that_does_not_help_asks_for_repair_not_an_update(
+async def test_a_status_check_never_runs_the_repair_hermes_asks_for_it_offers_repair(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
-    engine, fake = engine_for(tmp_path, scenario(needs_repair=True, repair_works=False))
+    """Decision 11: ``hermes pm repair`` builds a whole dependency environment (uv, ~1 GB) in SKAZ's
+    Hermes folder. A status check (window focus, Settings, the agent picker) never starts it: the
+    card offers Repair, which the user starts and sees in the task log."""
+    engine, fake = engine_for(tmp_path, scenario(needs_repair=True))
     caplog.set_level(logging.WARNING)
     status = await engine.status()
     assert status.repairable and not status.incompatible and status.version is None
     assert "Repair" in (status.reason or "") and "Reinstall" not in (status.reason or "")
     assert classify(status) == ("unavailable", "repair")
     assert "no dependency environment is committed" in caplog.text
-    # One automatic attempt per binary: a second status doesn't repeat it, but asks Hermes again.
+    # Asked again on the next check (it may be repaired meanwhile), and still never repaired by itself.
     await engine.status()
-    assert len(fake.records("repair")) == 1
-    assert sum(1 for item in fake.records("start") if item["argv"] == ["--version"]) >= 3
+    assert fake.records("repair") == []
+    assert sum(1 for item in fake.records("start") if item["argv"] == ["--version"]) == 2
+
+
+async def test_a_status_check_does_not_start_hermes_while_its_repair_is_unfinished(tmp_path: Path) -> None:
+    """A repair that was stopped (SKAZ quit) leaves ``installs/<key>/.repair-incomplete``; Hermes then
+    restarts the whole repair at the boot of ANY command, ``--version`` included
+    (``hermes_bootstrap.py`` → ``_early_recovery.recover_if_needed``), so SKAZ doesn't run one."""
+    engine, fake = engine_for(tmp_path, scenario())
+    marker = engine.home / "installs" / "0123456789abcdef" / ".repair-incomplete"
+    marker.parent.mkdir(parents=True)
+    marker.write_text('{"attempts": 1}', encoding="utf-8")
+    status = await engine.status()
+    assert status.repairable and classify(status) == ("unavailable", "repair")
+    assert fake.records("start") == []
+    # The run path refuses the same way instead of starting Hermes.
+    events = await drain(engine, turn(tools=None))
+    assert isinstance(events[-1], Failed) and fake.records("start") == []
 
 
 async def test_an_unreadable_version_is_not_remembered_and_never_means_outdated(tmp_path: Path) -> None:

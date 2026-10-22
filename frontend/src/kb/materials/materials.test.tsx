@@ -195,6 +195,29 @@ describe('+ Material (v11, decisions 15–16)', () => {
     });
   });
 
+  it('a web link can be saved as the whole page (W-3): POST /kb/materials/web; a page SKAZ can’t fetch says Save as PDF', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    const box = within(dialog).getByRole('textbox', { name: 'Link or any text' });
+    await user.type(box, 'https://habr.com/post/1{Enter}');
+    const choice = await within(dialog).findByRole('radiogroup', { name: 'Save from the page' });
+    expect(within(choice).getByRole('radio', { name: 'Article' })).toBeChecked();
+    await user.click(within(choice).getByRole('radio', { name: 'Whole page' }));
+    await user.type(box, 'https://news.example/signin-wall{Enter}');
+    const second = (await within(dialog).findAllByRole('radiogroup', { name: 'Save from the page' }))[1]!;
+    await user.click(within(second).getByRole('radio', { name: 'Whole page' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Add 2' }));
+    expect(await within(dialog).findByText(/Save the page as PDF and import it\./)).toBeInTheDocument();
+    const web = fake.calls.filter((c) => c.path === '/kb/materials/web');
+    expect(web.map((c) => c.body)).toEqual([
+      { url: 'https://habr.com/post/1', folder_id: 'phys', to_wiki: true },
+      { url: 'https://news.example/signin-wall', folder_id: 'phys', to_wiki: true },
+    ]);
+    expect(fake.calls.some((c) => c.path === '/kb/materials/link')).toBe(false);
+  });
+
   it('pasted text goes to the wiki only when asked; the switch travels with the add request', async () => {
     const user = userEvent.setup();
     const { fake } = await ready();

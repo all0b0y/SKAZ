@@ -4,7 +4,7 @@ import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
-import { agentOf } from '../state/agents';
+import { agentOf, startingChoice } from '../state/agents';
 import { isAnswering, type AgentChoice } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
@@ -34,9 +34,7 @@ export function useAgentChoice(chatId: string | null): AgentChoice | null {
     if (chat) return { engine: chat.engine, model: chat.model, effort: chat.effort };
     if (draft) return draft;
     if (!agents) return null;
-    const a = agentOf(agents, agents.default);
-    const model = a?.models.find((m) => m.id === a.current_model) ?? a?.models[0];
-    return { engine: agents.default, model: model?.id ?? null, effort: model?.default_effort ?? null };
+    return startingChoice(agents, agents.default);
   }, [chat, draft, agents]);
 }
 
@@ -462,12 +460,14 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               setError(null);
               const res = await chats.getState().setAgent(chatId, next);
               if (!res.ok) setError(res.error);
+              else services.agents.getState().noteLastChoice(next.engine, next.model, next.effort);
             }} />
           {choice && model && (
             <EffortPicker efforts={model.efforts} value={choice.effort}
               onChange={async (effort) => {
                 const res = await chats.getState().setAgent(chatId, { ...choice, effort });
                 if (!res.ok) setError(res.error);
+                else services.agents.getState().noteLastChoice(choice.engine, choice.model, effort);
               }} />
           )}
           {bridge.dictate ? (

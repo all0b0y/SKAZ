@@ -20,14 +20,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 
+from ..native_io import disk_call
 from .agents.engine import AgentEngine, EngineId, ToolSpec
 from .agents.mcp_access import McpAccess as EngineMcpAccess
 from .agents.registry import ENGINE_IDS
 from .corrections.offer import AutoFixesOffer
 from .decisions.protocol import Answer, DeciderId, DecisionLayer, Question, Undecided
 from .decisions.service import DecisionService
+from .ids import new_id
+from .ingest.execution import ExecutionScope, execution_scope
+from .ingest.jobs import JobKind, JobRecord
 from .ingest.service import IngestService
 from .logsafe import error_note
 from .mcp.server import McpServer
@@ -208,7 +212,35 @@ def engine_resolver(engines: Mapping[EngineId, AgentEngine],
 def wire_wiki(wiki: WikiService) -> WikiService:
     """Area W2: corrections layer, recognition check, discrepancy hook, notification kinds (one line)."""
     wiki.connect()
+    wiki.ingest.continue_follow_ups = follow_up_continuer(wiki)
     return wiki
+
+
+def follow_up_continuer(
+    wiki: WikiService,
+) -> Callable[[str, Sequence[JobKind]], Awaitable[JobRecord | None]]:
+    """C1-d Continue of a material whose overview/connections paused at its wiki budget: only that
+    work runs again, under a new execution root of the material — another budget portion, the wiki
+    choice of now. Finished connection pairs are not checked again (``Connections.find`` keeps them)."""
+    async def run(material_id: str, kinds: Sequence[JobKind]) -> JobRecord | None:
+        record = await disk_call(wiki.kb.material_repo.get, material_id)
+        if record is None:
+            return None
+        ingest = wiki.ingest
+        root = new_id("job")  # the root of this portion; its jobs carry it, it has no row of its own
+        scope = ExecutionScope(wiki.kb.db, root, root, ingest.profile(), budget=ingest.settings().budget,
+                               material_id=material_id)
+        started: JobRecord | None = None
+        with execution_scope(scope):
+            if "folder_overview" in kinds:
+                started = await wiki.write_overview(record.folder_id)
+            if "connections" in kinds:
+                pages = [page.id for page in await disk_call(lambda: wiki.kb.pages(kind="concept"))
+                         if material_id in page.sources]
+                started = await wiki.find_connections(pages)
+        return started
+
+    return run
 
 
 def wire(

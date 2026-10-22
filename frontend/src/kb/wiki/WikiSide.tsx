@@ -11,6 +11,7 @@ import { Snippet } from '../ui/Highlight';
 import { SelectionCheckbox, type ListSelection } from '../ui/listSelection';
 import { usePageSelection } from './pageBatch';
 import type { DragRowProps } from '../materials/materialBatch';
+import { WikiTermsButton } from './WikiTermsButton';
 
 interface Hit {
   key: string;
@@ -209,7 +210,10 @@ export function WikiSide() {
   return (
     <div className="kb-side__scroll">
       <WikiSearch />
-      <h3 className="kb-subhead" id="kb-wiki-sections">Sections</h3>
+      <div className="kb-subhead kb-subhead--row">
+        <h3 className="kb-subhead__text" id="kb-wiki-sections">Sections</h3>
+        <WikiTermsButton size="sm" placement="bottom-start" />
+      </div>
       <ul className="kb-list" aria-labelledby="kb-wiki-sections">
         {SECTIONS.map((s) => {
           const n = pages.filter((p) => p.kind === s.kind).length;

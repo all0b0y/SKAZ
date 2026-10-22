@@ -27,6 +27,7 @@ from .schemas_study import (
     KbStudyOption,
     KbStudyPart,
     KbStudyQuestion,
+    KbStudyRenameIn,
     KbStudyResponse,
     KbStudyResult,
     KbStudyResultRow,
@@ -247,3 +248,10 @@ async def retake_test(block_id: str, body: KbStudyRetake, study: StudyDep, reque
 @router.post("/{block_id}/save")
 async def save_block(block_id: str, body: KbStudySaveIn, study: StudyDep, request: Request) -> KbStudyPart:
     return await _act(request, study, lambda: study.save(block_id, body.decision))
+
+
+@router.post("/{block_id}/rename")
+async def rename_block(block_id: str, body: KbStudyRenameIn, study: StudyDep,
+                       request: Request) -> KbStudyPart:
+    """A new title without a new agent run (U3-a); a saved deck/test renames its page and links follow."""
+    return await _act(request, study, lambda: study.rename(block_id, body.title))

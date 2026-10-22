@@ -106,6 +106,15 @@ copied verbatim from the fragment, at least {min_quote} characters, after a bar:
 Formatting: Markdown. Write formulas in LaTeX between $…$ inline, or between $$ and $$ on lines of \
 their own; never put a citation token inside a formula.
 
+Diagrams: when the user asks for a diagram, or when a structure is clearer drawn than told (a \
+process, a sequence of steps or messages, a cycle, entities and their relations, a hierarchy, a \
+timeline), add one Mermaid diagram in a ```mermaid fenced block next to the text that explains it; \
+otherwise don't draw. Pick the type that fits: flowchart, sequenceDiagram, stateDiagram-v2, \
+erDiagram, classDiagram, mindmap, timeline, C4 or usecase-beta. Keep it small (about 15 nodes at \
+most) with short labels in the language of the answer; no click, links, images, styles or init \
+directives. Never put a citation token inside a diagram: cite the fragments it rests on right \
+after the closing ``` — without them the user can't save the diagram to the wiki.
+
 Answer in the language of the user's question{language}. Be concise and concrete."""
 
 _LANGUAGE_HINT = "; when it is unclear, use the user's wiki language ({code})"

@@ -37,8 +37,10 @@ from ..agents.engine import (
     ToolSpec,
     TurnMessage,
 )
+from ..agents.last_choice import LastChoice
 from ..agents.registry import ENGINE_NAMES, EngineRegistry, EngineUnavailable
 from ..agents.tools import ToolRegistry
+from ..agents.web import NATIVE_WEB, web_instructions, web_support
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
@@ -51,6 +53,8 @@ from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
+from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
+from ..permissions.web_tool import WEB_TOOL
 from ..service import KnowledgeService
 from ..skills.settings import enabled_skills
 from ..study.scheduling import Mode
@@ -74,6 +78,7 @@ from .model import (
     QuestionPart,
     StudyPart,
     TextPart,
+    WebSearchPart,
 )
 from .parsing import CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
 from .resolve import MaterialReader, Resolver
@@ -150,7 +155,8 @@ class ChatService:
                  stop_timeout_s: float = STOP_TIMEOUT_S, close_stop_s: float = CLOSE_STOP_S,
                  permissions: PermissionBroker | None = None,
                  questions: QuestionBroker | None = None,
-                 study: StudyService | None = None) -> None:
+                 study: StudyService | None = None,
+                 web: WebSearchBroker | None = None) -> None:
         self.kb = kb
         self.repo = ChatRepository(kb.db)
         self._agents = agents
@@ -177,6 +183,11 @@ class ChatService:
         self.study = study
         if study is not None:
             study.listeners.append(self._on_study)
+        #: W-2: agents' web searches wait here for the user before they are sent (chats only).
+        self.web = web
+        if web is not None:
+            web.recover()
+            web.listeners.append(self._on_web)
         self._feeds: dict[str, ChatFeed] = {}
         self._list = ListFeed()
         self._runs: dict[str, _Run] = {}
@@ -203,7 +214,8 @@ class ChatService:
         """Chats with a pending permission request or question (one query; a worker thread)."""
         store = self.permissions.store if self.permissions is not None else (
             self.questions.store if self.questions is not None else None)
-        return store.waiting_chats() if store is not None else set()
+        waiting = store.waiting_chats() if store is not None else set()
+        return waiting | (self.web.store.waiting_chats() if self.web is not None else set())
 
     def _view(self, chat: Chat, waiting: set[str], messages: tuple[Message, ...] = (),
               cursor: int = 0) -> ChatView:
@@ -222,6 +234,9 @@ class ChatService:
 
     def _on_permission(self, record: PermissionRecord) -> None:
         self._on_part(record.chat_id, record.message_id, PermissionPart(record.id))
+
+    def _on_web(self, record: WebSearchRecord) -> None:
+        self._on_part(record.chat_id, record.message_id, WebSearchPart(record.id))
 
     def _on_question(self, record: QuestionRecord) -> None:
         self._on_part(record.chat_id, record.message_id, QuestionPart(record.id))
@@ -371,6 +386,9 @@ class ChatService:
                     engine=chosen, model=model, effort=effort, recording_material_id=recording_material_id,
                     folder_ids=folder_ids, unread=False, last_preview="", created_at=now, updated_at=now)
         await disk_call(self.repo.create, chat)
+        # An explicit choice; "as set in the agent" in New chat is remembered when it is picked.
+        if model is not None:
+            await disk_call(LastChoice(self.registry.settings).remember, chosen, model, effort)
         self._list.touch(chat.id)
         return ChatView(chat, "idle", (), self._feed(chat.id).cursor)
 
@@ -405,6 +423,12 @@ class ChatService:
                 raise ChatInvalid(f"{option.label} of {name} has no effort levels. Leave the effort unset.")
             raise ChatInvalid(f"{option.label} of {name} has no “{effort}” effort level.")
 
+    async def remember_choice(self, engine: EngineId, model: str | None, effort: str | None) -> None:
+        """A choice made in the New chat field, before the chat exists: checked like a chat's."""
+        await self.registry.require(engine)
+        await self._check_model(engine, model, effort)
+        await disk_call(LastChoice(self.registry.settings).remember, engine, model, effort)
+
     async def patch(self, chat_id: str, changes: Mapping[str, Any]) -> ChatView:
         chat = await self._chat(chat_id)
         updates: dict[str, Any] = {}
@@ -425,7 +449,10 @@ class ChatService:
         if engine_changed or model != chat.model or effort != chat.effort:
             await self._check_model(engine, model, effort)
             updates.update(engine=engine, model=model, effort=effort)
-            notes.append(await self._switch_note(chat, engine, model, effort))
+            note = await self._switch_note(chat, engine, model)
+            if note is not None:
+                notes.append(note)
+            await disk_call(LastChoice(self.registry.settings).remember, engine, model, effort)
         if not updates:
             return await self.summary(chat_id)
         now = utc_now()
@@ -446,13 +473,14 @@ class ChatService:
         self._list.touch(chat_id)
         return await self.summary(chat_id)
 
-    async def _switch_note(self, chat: Chat, engine: EngineId, model: str | None, effort: str | None) -> str:
+    async def _switch_note(self, chat: Chat, engine: EngineId, model: str | None) -> str | None:
+        """The record of a change of agent or model; an effort change alone leaves none (2026-10-21)."""
+        if engine == chat.engine and model == chat.model:
+            return None
         label = await self._model_label(engine, model)
         if engine != chat.engine:
             return f"Switched to {ENGINE_NAMES[engine]}" + (f" · {label}" if label else "")
-        if model != chat.model:
-            return f"Model changed to {label or 'the default model'}"
-        return f"Effort set to {effort or 'default'}"
+        return f"Model changed to {label or 'the default model'}"
 
     async def _model_label(self, engine: EngineId, model: str | None) -> str | None:
         if model is None:
@@ -540,12 +568,53 @@ class ChatService:
             messages = await disk_call(self.repo.messages, chat_id)
             prior = [message for message in messages if message.seq < question.seq]
             now = utc_now()
-            (answer,) = await disk_call(self.repo.add_messages, [self._new_answer(chat, question.id, now)],
-                                        {"updated_at": now, "unread": False})
+            fresh = self._new_answer(chat, question.id, now)
+            chat_update = {"updated_at": now, "unread": False}
+            if resume:  # the interrupted answer gives its place to the new one (2026-10-21)
+                answer = await disk_call(self.repo.replace_answer, target, fresh, chat_update)
+            else:
+                (answer,) = await disk_call(self.repo.add_messages, [fresh], chat_update)
         except BaseException:
             self._reserved.discard(chat_id)
             raise
+        if resume:
+            self._feed(chat_id).emit("removed", target.id)
         self._feed(chat_id).emit("message", answer.id, message=answer)
+        self._start(chat, engine, answer, question, prior)
+        return question, answer
+
+    async def edit(self, chat_id: str, message_id: str, given: MessageInput) -> tuple[Message, Message]:
+        """Your question, changed in place (2026-10-21): every later message of the chat goes (answers,
+        records, later questions) and it is answered again by the chat's current agent and model.
+        Saved wiki pages stay. The question keeps what was open when it was first asked."""
+        chat = await self._chat(chat_id)
+        self._reserve(chat_id)
+        try:
+            target = await self._message(chat_id, message_id)
+            if target.role != "user":
+                raise ChatInvalid("Only your own question can be edited.")
+            engine = await self.registry.require(chat.engine)
+            messages = await disk_call(self.repo.messages, chat_id)
+            prior = [message for message in messages if message.seq < target.seq]
+            context = target.input.context if target.input is not None else given.context
+            question = replace(target, parts=(TextPart(given.text),), input=replace(given, context=context))
+            now = utc_now()
+            updates: dict[str, Any] = {"updated_at": now, "last_preview": preview(question.parts),
+                                       "unread": False}
+            folders = await disk_call(self._input_folders, given)
+            merged = tuple(dict.fromkeys((*chat.folder_ids, *folders)))
+            if merged != chat.folder_ids:
+                updates["folder_ids"] = merged
+            removed, answer = await disk_call(self.repo.rewrite_from, question,
+                                              self._new_answer(chat, question.id, now), updates)
+        except BaseException:
+            self._reserved.discard(chat_id)
+            raise
+        feed = self._feed(chat_id)
+        for gone in removed:
+            feed.emit("removed", gone)
+        feed.emit("message", question.id, message=question)
+        feed.emit("message", answer.id, message=answer)
         self._start(chat, engine, answer, question, prior)
         return question, answer
 
@@ -583,11 +652,14 @@ class ChatService:
     # -- one answer -------------------------------------------------------------------
 
     def _tools_for(self, chat: Chat) -> tuple[ToolSpec, ...]:
-        """The turn's SKAZ tools: ``skaz_ask_user`` only where the agent's own question tool can't work."""
-        specs = self.tools.specs()
+        """The turn's SKAZ tools: ``skaz_ask_user`` only where the agent's own question tool can't work;
+        ``skaz_web_search`` (W-3b) only where the agent's own search isn't held (and SKAZ holds searches)."""
+        dropped: set[str] = set()
         if chat.engine in NATIVE_QUESTIONS:
-            return tuple(spec for spec in specs if spec.name != ASK_TOOL)
-        return specs
+            dropped.add(ASK_TOOL)
+        if self.web is None or chat.engine in NATIVE_WEB:
+            dropped.add(WEB_TOOL)
+        return tuple(spec for spec in self.tools.specs() if spec.name not in dropped)
 
     async def _drive(self, run: _Run, chat: Chat, question: Message, prior: list[Message]) -> None:
         reader = MaterialReader(self.kb, self._text_layer())
@@ -602,8 +674,17 @@ class ChatService:
             language = await disk_call(self._wiki_language)
             # Read when the turn is built: switching a skill applies from the next answer (H3).
             skills = await disk_call(enabled_skills, self.kb.settings)
+            # W-2: the agent's own web search, only where SKAZ can hold each query before it is sent;
+            # W-3b: the other agents search only through ``skaz_web_search`` (their own search stays off).
+            native = run.engine.id in NATIVE_WEB
+            web = web_support(run.engine)
+            gate = (ChatWebGate(self.web, RunRef(run.run_id, run.chat_id, run.message.id, run.engine.id))
+                    if self.web is not None and native and web.available else None)
+            told = instructions(language, skills)
+            if self.web is not None:
+                told = f"{told}\n\n{web_instructions(web, tool=not native)}"
             turn = AgentTurn(run_id=run.run_id, messages=(*history(prior), TurnMessage("user", request)),
-                             instructions=instructions(language, skills), tools=self._tools_for(chat),
+                             instructions=told, tools=self._tools_for(chat), web=gate,
                              model=chat.model, effort=chat.effort)
             stream = run.engine.run(turn)
             async for event in stream:
@@ -734,6 +815,8 @@ class ChatService:
                 await self.permissions.cancel_run(run_id, reason)
             if self.questions is not None:
                 await self.questions.cancel_run(run_id)
+            if self.web is not None:
+                await self.web.cancel_run(run_id, reason)
         except Exception as error:
             log.error("Cancelling the requests of chat answer %s failed: %s", run_id, error_note(error))
 
@@ -798,13 +881,13 @@ class ChatService:
         settings = read_settings(self.kb.settings)
         return AnalysisWriter(self.kb, MaterialReader(self.kb, self._text_layer()), settings.language)
 
-    async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
+    async def save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str, str | None]:
         """The answer as an analysis page; a repeated (also a concurrent) save is 409 ``ALREADY_SAVED``
-        naming the page the first one wrote."""
+        naming the page the first one wrote. The last item is the warning about what was left out."""
         async with self._saving.hold(message_id):
             return await self._save_message(chat_id, message_id)
 
-    async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str]:
+    async def _save_message(self, chat_id: str, message_id: str) -> tuple[str, str, str, str | None]:
         chat = await self._chat(chat_id)
         message = await self._message(chat_id, message_id)
         if message.role != "assistant" or message.state != "done":
@@ -822,9 +905,9 @@ class ChatService:
         updated = replace(message, saved_page_id=record.id)
         await disk_call(self.repo.save_message, updated)
         self._feed(chat_id).emit("state", updated.id, message=updated)
-        return record.id, record.kind, record.title
+        return record.id, record.kind, record.title, writer.warning
 
-    async def save_chat(self, chat_id: str) -> tuple[str, str, str]:
+    async def save_chat(self, chat_id: str) -> tuple[str, str, str, str | None]:
         chat = await self._chat(chat_id)
         messages = self._live(await disk_call(self.repo.messages, chat_id))
         answers: dict[str, Message] = {}
@@ -833,8 +916,9 @@ class ChatService:
                 answers[message.reply_to] = message  # the latest finished answer to each question
         sections = [Section(message.input.text, answers[message.id].parts) for message in messages
                     if message.role == "user" and message.input is not None and message.id in answers]
-        record = await disk_call(self._writer().save, [chat.title], sections, chat_id)
-        return record.id, record.kind, record.title
+        writer = self._writer()
+        record = await disk_call(writer.save, [chat.title], sections, chat_id)
+        return record.id, record.kind, record.title, writer.warning
 
     async def export(self, chat_id: str) -> ChatExport:
         chat = await self._chat(chat_id)

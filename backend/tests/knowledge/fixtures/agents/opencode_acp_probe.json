@@ -1,0 +1,247 @@
+{
+ "_note": "Recorded 2026-10-21 from the installed OpenCode 1.17.18 run offline with SKAZ's own folder (OpenCodeEngine.environment; catalogue from a local models.dev file; dummy, non-working Anthropic credential for the signed-in listings). Model lists trimmed to three models.",
+ "version_output": "1.17.18\n",
+ "debug_agent_skaz": {
+  "name": "skaz",
+  "mode": "primary",
+  "permission": [
+   {
+    "permission": "*",
+    "action": "allow",
+    "pattern": "*"
+   },
+   {
+    "permission": "doom_loop",
+    "action": "ask",
+    "pattern": "*"
+   },
+   {
+    "permission": "external_directory",
+    "pattern": "*",
+    "action": "ask"
+   },
+   {
+    "permission": "external_directory",
+    "pattern": "<skaz-opencode>/data/opencode/tool-output/*",
+    "action": "allow"
+   },
+   {
+    "permission": "external_directory",
+    "pattern": "<skaz-opencode>/tmp/opencode/*",
+    "action": "allow"
+   },
+   {
+    "permission": "question",
+    "action": "deny",
+    "pattern": "*"
+   },
+   {
+    "permission": "plan_enter",
+    "action": "deny",
+    "pattern": "*"
+   },
+   {
+    "permission": "plan_exit",
+    "action": "deny",
+    "pattern": "*"
+   },
+   {
+    "permission": "read",
+    "pattern": "*",
+    "action": "allow"
+   },
+   {
+    "permission": "read",
+    "pattern": "*.env",
+    "action": "ask"
+   },
+   {
+    "permission": "read",
+    "pattern": "*.env.*",
+    "action": "ask"
+   },
+   {
+    "permission": "read",
+    "pattern": "*.env.example",
+    "action": "allow"
+   },
+   {
+    "permission": "*",
+    "action": "deny",
+    "pattern": "*"
+   },
+   {
+    "permission": "*",
+    "action": "deny",
+    "pattern": "*"
+   },
+   {
+    "permission": "skaz_*",
+    "action": "allow",
+    "pattern": "*"
+   },
+   {
+    "permission": "external_directory",
+    "pattern": "<skaz-opencode>/data/opencode/tool-output/*",
+    "action": "allow"
+   }
+  ],
+  "options": {},
+  "native": false,
+  "description": "SKAZ library assistant",
+  "tools": {
+   "invalid": false,
+   "question": false,
+   "bash": false,
+   "read": false,
+   "glob": false,
+   "grep": false,
+   "edit": false,
+   "write": false,
+   "task": false,
+   "webfetch": false,
+   "todowrite": false,
+   "websearch": false,
+   "skill": false
+  }
+ },
+ "auth_list_empty": "┌  Credentials \u001b[90m<data>/opencode/auth.json\n│\n└  0 credentials\n\n",
+ "auth_list_anthropic": "┌  Credentials \u001b[90m<data>/opencode/auth.json\n│\n●  Anthropic \u001b[90mapi\n│\n└  1 credentials\n\n",
+ "models_verbose": "opencode/big-pickle\n{\n  \"id\": \"big-pickle\",\n  \"providerID\": \"opencode\",\n  \"name\": \"Big Pickle\",\n  \"family\": \"big-pickle\",\n  \"api\": {\n    \"id\": \"big-pickle\",\n    \"url\": \"https://opencode.ai/inference/openai/v1\",\n    \"npm\": \"@ai-sdk/openai-compatible\"\n  },\n  \"status\": \"active\",\n  \"headers\": {},\n  \"options\": {},\n  \"cost\": {\n    \"input\": 0,\n    \"output\": 0,\n    \"cache\": {\n      \"read\": 0,\n      \"write\": 0\n    }\n  },\n  \"limit\": {\n    \"context\": 200000,\n    \"input\": 160000,\n    \"output\": 32000\n  },\n  \"capabilities\": {\n    \"temperature\": true,\n    \"reasoning\": true,\n    \"attachment\": false,\n    \"toolcall\": true,\n    \"input\": {\n      \"text\": true,\n      \"audio\": false,\n      \"image\": false,\n      \"video\": false,\n      \"pdf\": false\n    },\n    \"output\": {\n      \"text\": true,\n      \"audio\": false,\n      \"image\": false,\n      \"video\": false,\n      \"pdf\": false\n    },\n    \"interleaved\": {\n      \"field\": \"reasoning_content\"\n    }\n  },\n  \"release_date\": \"2025-10-17\",\n  \"variants\": {}\n}\nanthropic/claude-haiku-4-5\n{\n  \"id\": \"claude-haiku-4-5\",\n  \"providerID\": \"anthropic\",\n  \"name\": \"Claude Haiku 4.5 (latest)\",\n  \"family\": \"claude-haiku\",\n  \"api\": {\n    \"id\": \"claude-haiku-4-5\",\n    \"url\": \"\",\n    \"npm\": \"@ai-sdk/anthropic\"\n  },\n  \"status\": \"active\",\n  \"headers\": {},\n  \"options\": {},\n  \"cost\": {\n    \"input\": 1,\n    \"output\": 5,\n    \"cache\": {\n      \"read\": 0.1,\n      \"write\": 1.25\n    }\n  },\n  \"limit\": {\n    \"context\": 200000,\n    \"output\": 64000\n  },\n  \"capabilities\": {\n    \"temperature\": true,\n    \"reasoning\": true,\n    \"attachment\": true,\n    \"toolcall\": true,\n    \"input\": {\n      \"text\": true,\n      \"audio\": false,\n      \"image\": true,\n      \"video\": false,\n      \"pdf\": true\n    },\n    \"output\": {\n      \"text\": true,\n      \"audio\": false,\n      \"image\": false,\n      \"video\": false,\n      \"pdf\": false\n    },\n    \"interleaved\": false\n  },\n  \"release_date\": \"2025-10-15\",\n  \"variants\": {\n    \"high\": {\n      \"thinking\": {\n        \"type\": \"enabled\",\n        \"budgetTokens\": 16000\n      }\n    },\n    \"max\": {\n      \"thinking\": {\n        \"type\": \"enabled\",\n        \"budgetTokens\": 31999\n      }\n    }\n  }\n}\nanthropic/claude-sonnet-4-5-20250929\n{\n  \"id\": \"claude-sonnet-4-5-20250929\",\n  \"providerID\": \"anthropic\",\n  \"name\": \"Claude Sonnet 4.5\",\n  \"family\": \"claude-sonnet\",\n  \"api\": {\n    \"id\": \"claude-sonnet-4-5-20250929\",\n    \"url\": \"\",\n    \"npm\": \"@ai-sdk/anthropic\"\n  },\n  \"status\": \"active\",\n  \"headers\": {},\n  \"options\": {},\n  \"cost\": {\n    \"input\": 3,\n    \"output\": 15,\n    \"cache\": {\n      \"read\": 0.3,\n      \"write\": 3.75\n    }\n  },\n  \"limit\": {\n    \"context\": 200000,\n    \"output\": 64000\n  },\n  \"capabilities\": {\n    \"temperature\": true,\n    \"reasoning\": true,\n    \"attachment\": true,\n    \"toolcall\": true,\n    \"input\": {\n      \"text\": true,\n      \"audio\": false,\n      \"image\": true,\n      \"video\": false,\n      \"pdf\": true\n    },\n    \"output\": {\n      \"text\": true,\n      \"audio\": false,\n      \"image\": false,\n      \"video\": false,\n      \"pdf\": false\n    },\n    \"interleaved\": false\n  },\n  \"release_date\": \"2025-09-29\",\n  \"variants\": {\n    \"high\": {\n      \"thinking\": {\n        \"type\": \"enabled\",\n        \"budgetTokens\": 16000\n      }\n    },\n    \"max\": {\n      \"thinking\": {\n        \"type\": \"enabled\",\n        \"budgetTokens\": 31999\n      }\n    }\n  }\n}\n",
+ "initialize": {
+  "protocolVersion": 1,
+  "agentCapabilities": {
+   "loadSession": true,
+   "mcpCapabilities": {
+    "http": true,
+    "sse": true
+   },
+   "promptCapabilities": {
+    "embeddedContext": true,
+    "image": true
+   },
+   "sessionCapabilities": {
+    "close": {},
+    "fork": {},
+    "list": {},
+    "resume": {}
+   }
+  },
+  "authMethods": [
+   {
+    "description": "Run `opencode auth login` in the terminal",
+    "name": "Login with opencode",
+    "id": "opencode-login"
+   }
+  ],
+  "agentInfo": {
+   "name": "OpenCode",
+   "version": "1.17.18"
+  }
+ },
+ "session_new": {
+  "sessionId": "ses_ea4bdff1bffeMbK3Xru1K6Whlz",
+  "configOptions": [
+   {
+    "id": "model",
+    "name": "Model",
+    "category": "model",
+    "type": "select",
+    "currentValue": "opencode/big-pickle",
+    "options": [
+     {
+      "value": "anthropic/claude-haiku-4-5",
+      "name": "Anthropic/Claude Haiku 4.5 (latest)"
+     },
+     {
+      "value": "anthropic/claude-sonnet-4-5-20250929",
+      "name": "Anthropic/Claude Sonnet 4.5"
+     },
+     {
+      "value": "opencode/big-pickle",
+      "name": "OpenCode/Big Pickle"
+     }
+    ]
+   },
+   {
+    "id": "mode",
+    "name": "Session Mode",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "skaz",
+    "options": [
+     {
+      "value": "skaz",
+      "name": "skaz",
+      "description": "SKAZ library assistant"
+     }
+    ]
+   }
+  ]
+ },
+ "set_model": {
+  "configOptions": [
+   {
+    "id": "model",
+    "name": "Model",
+    "category": "model",
+    "type": "select",
+    "currentValue": "anthropic/claude-sonnet-4-5-20250929",
+    "options": [
+     {
+      "value": "anthropic/claude-haiku-4-5",
+      "name": "Anthropic/Claude Haiku 4.5 (latest)"
+     },
+     {
+      "value": "anthropic/claude-sonnet-4-5-20250929",
+      "name": "Anthropic/Claude Sonnet 4.5"
+     },
+     {
+      "value": "opencode/big-pickle",
+      "name": "OpenCode/Big Pickle"
+     }
+    ]
+   },
+   {
+    "id": "effort",
+    "name": "Effort",
+    "description": "Available effort levels for this model",
+    "category": "thought_level",
+    "type": "select",
+    "currentValue": "high",
+    "options": [
+     {
+      "value": "high",
+      "name": "High"
+     },
+     {
+      "value": "max",
+      "name": "Max"
+     }
+    ]
+   },
+   {
+    "id": "mode",
+    "name": "Session Mode",
+    "category": "mode",
+    "type": "select",
+    "currentValue": "skaz",
+    "options": [
+     {
+      "value": "skaz",
+      "name": "skaz",
+      "description": "SKAZ library assistant"
+     }
+    ]
+   }
+  ]
+ },
+ "set_effort_error": {
+  "code": -32602,
+  "message": "Invalid params: effort not found: nonsense",
+  "data": {
+   "effort": "nonsense"
+  }
+ },
+ "session_list": "Session ID                      Title                                   Updated\n───────────────────────────────────────────────────────────────────────────────\nses_ea4bdff1bffeMbK3Xru1K6Whlz  New session - 2026-10-20T21:40:14.692Z  12:40 AM\n"
+}

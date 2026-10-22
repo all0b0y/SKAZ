@@ -13,8 +13,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
 from typing import cast
 
 from ...native_io import disk_call
@@ -23,7 +23,8 @@ from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..logsafe import error_note
 from ..service import KnowledgeService
-from ..skills.settings import enabled_skills
+from .budget import BUDGET_REACHED, BudgetReached, paused_follow_ups
+from .execution import ProcessingProfile, current_execution, execution_scope, stored_scope
 from .jobs import (
     AGENT_UNAVAILABLE,
     INTERRUPTED_REASON,
@@ -114,6 +115,10 @@ class IngestService:
         self.recognition: RecognitionCheck | None = None
         #: Called with ``(material_id, job)`` after a job finished ``done`` (W2: overview, connections).
         self.finished_listeners: list[Callable[[str, JobRecord], None]] = []
+        #: C1-d Continue of a material whose follow-up work paused at its budget: runs those job kinds
+        #: again inside the given execution scope (wired by the composition root; ``None``: not wired).
+        self.continue_follow_ups: (
+            Callable[[str, Sequence[JobKind]], Awaitable[JobRecord | None]] | None) = None
         self.limits = limits or Limits()
         # The library's one write lock (``KnowledgeService.writing``): wiki writes, W2 page edits,
         # library scans and the Wiki/ watcher never interleave. ``WikiWriter`` only enters it; the
@@ -130,16 +135,33 @@ class IngestService:
     # -- settings -----------------------------------------------------------
 
     def settings(self) -> WikiSettings:
-        return read_settings(self.kb.settings)
+        settings = read_settings(self.kb.settings)
+        scope = current_execution()
+        if scope is not None:
+            profile = scope.profile
+            return replace(settings, engine=profile.engine, model=profile.model, effort=profile.effort,
+                           language=profile.language)
+        return settings
+
+    def profile(self) -> ProcessingProfile:
+        scope = current_execution()
+        if scope is not None:
+            return scope.profile
+        settings = self.settings()
+        engine = self.engines(settings.engine) if self.engines is not None else None
+        return ProcessingProfile.selected(settings, engine)
 
     def update_settings(self, *, language: str | None = None, engine: str | None = None,
                         clear_engine: bool = False, auto_add_files_links: bool | None = None,
                         auto_add_text: bool | None = None, background_connections: bool | None = None,
-                        auto_corrections: bool | None = None) -> WikiSettings:
+                        auto_corrections: bool | None = None, model: str | None = None,
+                        effort: str | None = None, clear_model: bool = False,
+                        clear_effort: bool = False, budget: int | None = None) -> WikiSettings:
         return update_settings(self.kb.settings, language=language, engine=engine, clear_engine=clear_engine,
                                auto_add_files_links=auto_add_files_links, auto_add_text=auto_add_text,
                                background_connections=background_connections,
-                               auto_corrections=auto_corrections)
+                               auto_corrections=auto_corrections, model=model, effort=effort,
+                               clear_model=clear_model, clear_effort=clear_effort, budget=budget)
 
     # -- jobs ---------------------------------------------------------------
 
@@ -162,6 +184,11 @@ class IngestService:
             raise IngestBusy("SKAZ is closing. Retry after it starts again.")
         if any(active.material_id == material_id for active in self._active.values()):
             raise IngestBusy()
+        profile = self.profile()
+        scope = current_execution()
+        root_job_id = scope.root_job_id if scope is not None else None
+        # C1-d: a new root gets a fresh portion of the budget; work started inside a root shares it.
+        budget = scope.budget if scope is not None and scope.budget is not None else self.settings().budget
         reservation = _Active(material_id, kind)
         self._active[f"pending-{id(reservation)}"] = reservation
         try:
@@ -173,7 +200,9 @@ class IngestService:
                 raise NothingToAdd.of(record.kind)
             if await disk_call(self.jobs.pending_for, material_id) is not None:
                 raise IngestBusy()
-            job = await disk_call(lambda: self.jobs.create(material_id, kind=kind, state="queued"))
+            job = await disk_call(lambda: self.jobs.create(
+                material_id, kind=kind, state="queued", profile=profile, root_job_id=root_job_id,
+                budget=budget, budget_material=material_id))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)
         # A queued job is kept even when SKAZ is closing now: it continues at the next start. With a
@@ -182,6 +211,26 @@ class IngestService:
         if self._pump_task is not None and not self._pump_task.done():
             await asyncio.shield(self._pump_task)
         return await disk_call(self.job, job.id)
+
+    async def request_from_user(self, material_id: str) -> JobRecord:
+        """"Add to wiki", "Try again" or "Continue" on a material (C1-d).
+
+        When the material finished but its follow-up work (overview, connections) paused at the
+        budget, only that work runs again, with another budget portion; otherwise the material is
+        (re)queued and continues from its checkpoint.
+        """
+        if self.continue_follow_ups is not None:
+            def paused() -> list[JobKind]:
+                with self.kb.db.read() as connection:
+                    rows = paused_follow_ups(connection, [material_id]).get(material_id, [])
+                return [cast(JobKind, row["kind"]) for row in rows]
+
+            kinds = await disk_call(paused)
+            if kinds and await disk_call(self.jobs.pending_for, material_id) is None:
+                record = await self.continue_follow_ups(material_id, kinds)
+                if record is not None:
+                    return record
+        return await self.request_ingest(material_id)
 
     async def retry_failed(self) -> list[JobRecord]:
         """Queue again every material whose latest ingest failed or was interrupted (one click)."""
@@ -287,11 +336,16 @@ class IngestService:
     # -- one job ------------------------------------------------------------
 
     async def _run(self, job_id: str, active: _Active) -> None:
+        scope = await disk_call(stored_scope, self.kb.db, job_id)
+        with execution_scope(scope):
+            await self._execute(job_id, active)
+
+    async def _execute(self, job_id: str, active: _Active) -> None:
         state: JobState = "failed"
         error = UNEXPECTED
         code: str | None = None
         try:
-            settings = read_settings(self.kb.settings)
+            settings = self.settings()
             if self.detector is None:
                 raise IngestFailed(NO_DETECTOR)
             engine = self.engines(settings.engine) if self.engines is not None else None
@@ -301,13 +355,17 @@ class IngestService:
                 kb=self.kb, jobs=self.jobs, job_id=job_id, material_id=active.material_id, engine=engine,
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
                 writer=self._writer, hook=self.hook, language=settings.language, limits=self.limits,
-                recognition=self.recognition, skills=enabled_skills(self.kb.settings),
+                recognition=self.recognition,
+                model=settings.model, effort=settings.effort,
             )
             active.run.cancel_requested = active.cancel_requested
             await active.run.execute()
             state, error = "done", ""
         except IngestCancelled:
             state, error = "cancelled", "Stopped. Nothing from this run was saved."
+        except BudgetReached as reached:
+            # C1-d: finished work is in the checkpoints; nothing unfinished was published.
+            state, error, code = "paused", reached.message, BUDGET_REACHED
         except asyncio.CancelledError:
             if active.cancel_requested:
                 state, error = "cancelled", "Stopped. Nothing from this run was saved."
@@ -332,8 +390,9 @@ class IngestService:
                 if state == "queued":
                     await disk_call(self.jobs.requeue, job_id)
                 else:
-                    await disk_call(lambda: self.jobs.finish(job_id, state, error=error or None,
-                                                             error_code=code if state == "failed" else None))
+                    await disk_call(lambda: self.jobs.finish(
+                        job_id, state, error=error or None,
+                        error_code=code if state in ("failed", "paused") else None))
                 await disk_call(self._notify_blocked, job_id, active)
             finally:
                 self._active.pop(job_id, None)

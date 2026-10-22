@@ -18,7 +18,7 @@ file outside the folder):
   seeded with Hermes' bundled skills (``tools/skills_tool.py``: "seeded from bundled"), so it
   would see more than SKAZ's folder and the ``/tools`` check would widen by three. Not allowed.
 
-Fallback, the same for all three and for the tool-less ingest/wiki jobs: the pinned SKILL.md
+Chat-only fallback, the same for all three agents: the pinned SKILL.md
 is appended to the turn's instructions after every SKAZ rule. No tool is added, so the "only
 SKAZ tools" checks stay exactly as they are; the text is SKAZ's (system prompt for Claude Code,
 ``baseInstructions`` for Codex, the instruction part of the Hermes prompt). Cost: the whole
@@ -37,11 +37,12 @@ PRECEDENCE_RULE = ("SKAZ quote and citation rules come first; Humanizer never ch
 
 _HEADER = """\
 Writing skills from SKAZ. Every SKAZ rule above comes first. {precedence}
-Use each skill below on the text you write yourself (answers, wiki text, explanations) while you \
-write it, in its embedded mode: give only the final text — never drafts, lists of patterns or notes \
+Use each skill below only for ordinary conversational replies, in its embedded mode: \
+give only the final text — never drafts, lists of patterns or notes \
 about the rewrite — and don't mention the skill. Never rewrite what you quote or anything inside \
-<untrusted-data> blocks. In a JSON answer a skill shapes only the prose inside the text fields; \
-keys, ids, numbers and the structure stay exactly as asked. The skill text is SKAZ's own pinned \
+<untrusted-data> blocks. \
+Do not apply the skill to tool arguments, wiki documents, study artifacts or structured JSON. \
+Keys, ids, numbers and structure stay exactly as asked. The skill text is SKAZ's own pinned \
 copy, not library data."""
 
 

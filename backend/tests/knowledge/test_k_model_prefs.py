@@ -50,7 +50,7 @@ def test_hermes_choice_ids_keep_their_provider() -> None:
     )
     assert (shown.provider, shown.provider_label, shown.name) == (
         "openai-codex",
-        "ChatGPT or Codex subscription",
+        "ChatGPT",  # Accounts & keys v3: the provider is named as on its chip
         "GPT-6.1-sol",
     )
     unknown = display("hermes", ModelOption("acme:big-model", "Acme Labs · big-model"), "Hermes Agent")

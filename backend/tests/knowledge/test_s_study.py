@@ -692,3 +692,84 @@ async def test_an_emptied_page_index_is_read_again_from_the_files(world: Any) ->
     await asyncio.to_thread(runtime.kb.rescan)
     assert runtime.kb.page_repo.get(library.concept) is not None
     assert runtime.kb.page_repo.get(page_id).kind == "deck"
+
+
+# -- U3: a generated title a file can't hold is saved under a valid name; Rename without a new run --------
+
+
+AUDIT_TITLE = "ИТ-аудит: тест по презентации PowerPoint"
+AUDIT_NAME = "ИТ-аудит тест по презентации PowerPoint"
+
+
+async def test_a_generated_test_title_with_a_colon_is_saved_at_once_and_keeps_the_answers(
+    world: Any, kb_client: httpx.AsyncClient,
+) -> None:
+    runtime, library, _ref = world
+    made = await _tool(runtime, "skaz_study_make_test",
+                       {"title": AUDIT_TITLE, "questions": _questions(library)})
+    block_id = made["study_id"]
+    first = runtime.kb_study.questions(runtime.kb_study.get(block_id))[0]
+    options = _options(runtime, runtime.kb_study.get(block_id), 0)
+    right = next(o["id"] for o in options if o["text"] == "мера беспорядка")
+    await kb_client.post(f"/kb/study/{block_id}/answer", json={"item_id": first.id, "choices": [right]})
+    part = (await kb_client.get(f"/kb/study/{block_id}")).json()
+    assert part["title"] == AUDIT_TITLE  # the block shows what the agent wrote until it is a page
+    assert part["save"]["path"] == f"Wiki/Tests/{AUDIT_NAME}.md"
+    saved = await kb_client.post(f"/kb/study/{block_id}/save", json={"decision": "allow"})
+    assert saved.status_code == 200, saved.text
+    view = saved.json()
+    assert view["save"]["status"] == "saved" and view["title"] == AUDIT_NAME
+    assert runtime.kb.page_repo.get(view["save"]["page_id"]).rel_path == f"Wiki/Tests/{AUDIT_NAME}.md"
+    items = runtime.kb_study.attempt(runtime.kb_study.get(block_id)).answers["items"]
+    assert items[first.id]["score"] == 1.0  # the given answer survives the save
+
+
+async def test_every_forbidden_character_and_a_long_title_still_give_a_deck_page(world: Any) -> None:
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    odd = await _deck(runtime, library, title='Энтропия/порядок: что? "хаос" <да> | #тег ^x [[a]]')
+    saved = await asyncio.to_thread(study.save, odd.id, "allow")
+    assert runtime.kb.page_repo.get(saved.page_id).rel_path == \
+        "Wiki/Decks/Энтропия порядок что хаос да тег x a.md"
+    long_title = "Термодинамика необратимых процессов " * 3  # 108 letters: under the tool's 120, > 200 bytes
+    long = await asyncio.to_thread(study.save, (await _deck(runtime, library, title=long_title)).id, "allow")
+    stem = Path(runtime.kb.page_repo.get(long.page_id).rel_path).stem
+    assert len(stem) < len(long_title.strip())  # cut to fit the file-name limit, not refused
+    assert stem.startswith("Термодинамика необратимых процессов")
+    again = await asyncio.to_thread(study.save, (await _deck(runtime, library, title=long_title)).id, "allow")
+    assert Path(runtime.kb.page_repo.get(again.page_id).rel_path).stem.endswith(" (2)")
+
+
+async def test_rename_before_saving_changes_the_title_without_asking_the_agent(
+    world: Any, kb_client: httpx.AsyncClient,
+) -> None:
+    runtime, library, _ref = world
+    block = await _deck(runtime, library)
+    renamed = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "  Энтропия: основы  "})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["title"] == "Энтропия: основы"
+    assert renamed.json()["save"]["path"] == "Wiki/Decks/Энтропия основы.md"
+    assert renamed.json()["save"]["status"] == "pending"
+    empty = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "   "})
+    assert empty.status_code == 422
+
+
+async def test_rename_after_saving_moves_the_page_keeps_fsrs_and_links_follow(
+    world: Any, kb_client: httpx.AsyncClient,
+) -> None:
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _deck(runtime, library)
+    card = _ids(runtime, block)[0]
+    await asyncio.to_thread(study.grade, block.id, card, "good")
+    saved = await asyncio.to_thread(study.save, block.id, "allow")
+    other = await _deck(runtime, library, title="Другая колода")
+    await asyncio.to_thread(study.save, other.id, "allow")
+    renamed = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "Энтропия: колода"})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["title"] == "Энтропия колода"
+    record = runtime.kb.page_repo.get(saved.page_id)
+    assert record.rel_path == "Wiki/Decks/Энтропия колода.md"
+    assert study.store.cards([card])[card].page_id == saved.page_id  # FSRS stays with the page id
+    taken = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "Другая колода"})
+    assert taken.status_code == 409

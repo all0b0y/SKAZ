@@ -145,7 +145,7 @@ describe('Edit models (K4)', () => {
     const settings = await screen.findByRole('dialog', { name: 'Settings' });
     await user.click(within(settings).getByRole('button', { name: /^Models$/ }));
     const row = within(settings).getByRole('group', { name: 'Models in the picker' });
-    expect(row).toHaveTextContent('7 of 8 shown · 1 favourite');
+    expect(row).not.toHaveTextContent(/ shown/); // models screen v2: just the button, no count
     await user.click(within(row).getByRole('button', { name: 'Edit models…' }));
     expect(await screen.findByRole('dialog', { name: 'Edit models' })).toBeInTheDocument();
   });

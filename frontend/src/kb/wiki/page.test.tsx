@@ -178,6 +178,37 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     await waitFor(() => expect(within(doc).queryByText('Ask about this at the seminar.')).not.toBeInTheDocument());
   });
 
+  it('a connection SKAZ wrote can be deleted after a short confirmation; other agent blocks can’t', async () => {
+    const user = userEvent.setup();
+    const world = docWorld();
+    const entropy = world.pages.find((p) => p.id === 'p-entropy')!;
+    entropy.blocks.push(block('c-link-g-ce', 'connection', 'Connections (agent inference)', 'Cross-entropy measures the same uncertainty for a model’s errors.'));
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'page', id: 'p-entropy' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const link = (await within(doc).findByText(/for a model’s errors/)).closest('[data-block-id]') as HTMLElement;
+    // Agent statements and connections the agent wrote into the text stay non-deletable.
+    for (const text of [/Boltzmann’s and Shannon’s formulas/, /A measure of disorder/, /The logarithm makes the entropy/]) {
+      const other = within(doc).getByText(text).closest('[data-block-id]') as HTMLElement;
+      expect(within(other).queryByRole('button', { name: /^Delete/ })).not.toBeInTheDocument();
+    }
+    // Cancel changes nothing.
+    await user.click(within(link).getByRole('button', { name: 'Delete connection' }));
+    let confirm = await screen.findByRole('dialog', { name: 'Delete this connection?' });
+    expect(within(confirm).getByText('SKAZ won’t suggest it again.')).toBeInTheDocument();
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(r.fake.calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(within(doc).getByText(/for a model’s errors/)).toBeInTheDocument();
+    // Delete removes it and the page shows what the backend returned.
+    await user.click(within(link).getByRole('button', { name: 'Delete connection' }));
+    confirm = await screen.findByRole('dialog', { name: 'Delete this connection?' });
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(within(doc).queryByText(/for a model’s errors/)).not.toBeInTheDocument());
+    expect(screen.queryByRole('dialog', { name: 'Delete this connection?' })).not.toBeInTheDocument();
+    expect(r.fake.calls.some((c) => c.method === 'DELETE' && c.path === '/kb/wiki/pages/p-entropy/blocks/c-link-g-ce')).toBe(true);
+  });
+
   it('an analysis says it is not a source; Related chips open other pages', async () => {
     const user = userEvent.setup();
     const { doc } = await openPage('p-entropy');

@@ -91,7 +91,8 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
     origin = None
     if detail.origin is not None:
         origin = KbOrigin(type=detail.origin["type"], url=detail.origin.get("url"),
-                          file_name=detail.origin.get("file_name"))
+                          file_name=detail.origin.get("file_name"),
+                          fetched_at=detail.origin.get("fetched_at"))
     fragments: list[KbFragment]
     if corrections is None:  # no wiki service (tests of the index alone): the recognised text as is
         fragments = [KbFragment(id=f.id, seg=f.seg, text=f.text, start_ms=f.start_ms, end_ms=f.end_ms,

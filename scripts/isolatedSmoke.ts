@@ -47,7 +47,9 @@ export async function launchIsolatedSmoke(prefix: string, options: IsolatedSmoke
   const close = async () => {
     // Do not delete an in-use profile if closing Electron fails.
     await app?.close();
-    if (!options.keepProfile) fs.rmSync(profile, { recursive: true, force: true });
+    // An agent CLI the app started (Hermes setting up its tool environment in SKAZ's own agent folder) may
+    // still be finishing for a few seconds after quit: retry instead of failing on cleanup.
+    if (!options.keepProfile) fs.rmSync(profile, { recursive: true, force: true, maxRetries: 60, retryDelay: 250 });
   };
   try {
     app = await electron.launch({

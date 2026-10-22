@@ -13,13 +13,14 @@ from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
 from .schemas_study import KbStudyPart
+from .schemas_web import KbWebSearchPart
 
 KbChatState = Literal["idle", "answering"]
 KbChatFilter = Literal["all", "pinned", "recording"]
 KbMessageRole = Literal["user", "assistant", "system"]
 KbMessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
 KbFailureKind = Literal["limit", "auth", "incompatible", "network", "cancelled", "other"]
-KbChatEventType = Literal["message", "delta", "part", "state", "title", "part_update"]
+KbChatEventType = Literal["message", "delta", "part", "state", "title", "part_update", "removed"]
 KbPermissionKind = Literal["create", "edit", "rename", "delete"]
 KbPermissionStatus = Literal["pending", "allowed", "denied", "cancelled", "undone"]
 KbQuestionStatus = Literal["pending", "answered", "superseded", "cancelled"]
@@ -169,7 +170,8 @@ class KbQuestionPart(BaseModel):
 
 
 class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
-                                        | KbPermissionPart | KbQuestionPart | KbStudyPart,
+                                        | KbPermissionPart | KbQuestionPart | KbStudyPart
+                                        | KbWebSearchPart,
                                         Field(discriminator="type")]]):
     pass
 
@@ -247,6 +249,15 @@ class KbChatCreate(_Request):
     recording_material_id: str | None = Field(default=None, max_length=200)
 
 
+class KbChatLastChoice(_Request):
+    """A choice made in the New chat field before the chat exists (models screen v2)."""
+
+    engine: KbEngineId
+    #: ``null`` = as set in the agent.
+    model: str | None = Field(default=None, max_length=200)
+    effort: str | None = Field(default=None, max_length=50)
+
+
 class KbChatPatch(_Request):
     title: str | None = Field(default=None, max_length=200)
     pinned: bool | None = None
@@ -272,6 +283,16 @@ class KbSend(_Request):
     context: KbOpenContext = Field(default_factory=KbOpenContext)
 
 
+class KbMessageEdit(_Request):
+    """Your question, changed (``…/messages/{id}/edit``): what was open when it was asked is kept."""
+
+    text: str = Field(min_length=1, max_length=MAX_TEXT)
+    mentions: list[KbRef] = Field(default_factory=list, max_length=MAX_ITEMS)
+    quotes: list[KbQuote] = Field(default_factory=list, max_length=MAX_ITEMS)
+    attachments: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list,
+                                                                                  max_length=MAX_ITEMS)
+
+
 class KbSendResult(BaseModel):
     user: KbMessage
     assistant: KbMessage
@@ -280,7 +301,7 @@ class KbSendResult(BaseModel):
 class KbChatEvent(BaseModel):
     """``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part;
     ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question,
-    study)."""
+    study); ``removed`` takes the message out of the chat (an edited question's later messages)."""
 
     seq: int
     type: KbChatEventType
@@ -301,6 +322,13 @@ class KbChatListEvents(BaseModel):
 
     chats: list[KbChatSummary]
     cursor: int
+
+
+class KbSavedAnalysis(KbPageRef):
+    """The analysis page "Save to wiki" wrote, and what it left out (decision 9, 2026-10-21)."""
+
+    #: E.g. "Saved without 1 diagram: it has no quotes from your materials."; ``null`` when complete.
+    warning: str | None
 
 
 class KbChatExport(BaseModel):

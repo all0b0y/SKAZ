@@ -12,8 +12,6 @@ from typing import Any
 from ..agents.prompting import untrusted_block
 from ..markdown.source import Fragment
 from ..markdown.text import format_timestamp
-from ..skills import SkazSkill
-from ..skills.prompting import with_skills
 
 NOTES_SCHEMA_TITLE = "skaz_ingest_notes"
 CONCEPTS_SCHEMA_TITLE = "skaz_ingest_concepts"
@@ -218,9 +216,9 @@ def match_prompt(new_concept: str, candidates: Sequence[str]) -> str:
     ])
 
 
-def instructions_for(template: str, language: str, *, skills: Sequence[SkazSkill]) -> str:
-    """A writing prompt of ingest or a wiki job; the skills that are on go after every SKAZ rule (H2)."""
-    return with_skills(template.replace("{language}", language_name(language)), skills)
+def instructions_for(template: str, language: str) -> str:
+    """Task instructions retain citation/JSON rules; conversational skills never enter wiki jobs."""
+    return template.replace("{language}", language_name(language))
 
 
 def repair_message(error: str) -> str:

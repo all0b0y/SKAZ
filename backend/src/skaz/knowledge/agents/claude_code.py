@@ -28,12 +28,23 @@ Flags (checked 2026-10-15 against code.claude.com/docs/en/cli-reference,
   prompt; a file, so instruction text is never parsed as a flag.
 * Interrupt: SIGINT ends the turn (headless docs: "To end the turn instead,
   send SIGINT"), then the process is stopped.
+
+W-2 web search (chat turns with ``turn.web``; verified in the 2.1.281 binary,
+see ``web.py``): ``--tools WebSearch`` (no WebFetch, shell or files),
+``--permission-mode default --permission-prompt-tool stdio`` (no
+``--permission-prompts none``): every WebSearch call arrives as a
+``can_use_tool`` control request and waits on stdin for SKAZ's answer — the
+user's Allow / Deny — before anything is sent; SKAZ allows with
+``updatedInput`` = the exact approved input. Any other prompt or control
+request is refused. A WebSearch result SKAZ never approved (or for another
+query) fails the answer and turns web search off for Claude Code until restart.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -44,7 +55,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ..install.system import (
     Located,
@@ -58,7 +69,7 @@ from ..install.system import (
     refuse_sudo,
     run_capture,
 )
-from ..install.terminal import TerminalLauncher
+from ..install.terminal import TerminalLauncher, terminal_progress
 from ..permissions.refusals import CLAUDE_MCP_TIMEOUT_MS
 from ..processes import CHILDREN
 from .engine import (
@@ -77,6 +88,9 @@ from .engine import (
 )
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .transcript import render_prompt
+from .web import CLAUDE_BLOCKED, WebLink, WebQuery, WebSearchGate, WebVerdict, clean_query
+
+log = logging.getLogger(__name__)
 
 #: Oldest Claude Code whose flags SKAZ relies on: ``--permission-prompts`` needs
 #: 2.1.259 (``--restricted`` 2.1.248, ``--mcp-config`` waiting for servers in -p
@@ -88,6 +102,11 @@ NOT_INSTALLED = "Claude Code is not installed."
 UNUSABLE = f"This Claude Code version can't be used. Update to {dotted(MIN_CLAUDE_VERSION)} or newer."
 MODEL_UNAVAILABLE = "This Claude model is not available for your account. Choose another model."
 SIGN_IN = "Sign in to Claude Code to use it in SKAZ."
+SIGN_IN_NAME = "claude-code-sign-in"
+#: Claude Code in SKAZ uses this Mac's own Claude Code sign-in (the user's HOME), so SKAZ never signs it out.
+SHARED_SIGN_IN = (
+    "Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn't sign it out: that "
+    "would sign Claude Code out in your other apps too. Sign out in Claude Code itself.")
 _EFFORTS = ("low", "medium", "high", "xhigh", "max")
 #: Documented model aliases (code.claude.com/docs/en/model-config#model-aliases).
 CLAUDE_MODELS: tuple[ModelOption, ...] = (
@@ -98,6 +117,12 @@ CLAUDE_MODELS: tuple[ModelOption, ...] = (
 )
 _LINE_LIMIT = 32 * 1024 * 1024
 _STRUCTURED_TOOL = "StructuredOutput"
+#: Claude Code's own web search tool (the only built-in tool a chat turn may get, W-2).
+WEB_TOOL = "WebSearch"
+#: Tool uses that are no "Looked at" chip: structured output, and web searches (their own card).
+_NOT_CHIPS = (_STRUCTURED_TOOL, WEB_TOOL)
+WEB_REFUSED = "Refused by SKAZ: only web searches the user approves are allowed here."
+NOT_SUPPORTED = "Not supported by SKAZ."
 _AUTH_ERRORS = {"authentication_failed", "oauth_org_not_allowed", "account_on_hold"}
 _LIMIT_ERRORS = {"rate_limit", "billing_error"}
 _MODEL_ERRORS = {"model_not_found"}
@@ -141,6 +166,12 @@ class _RunState:
     no_response: bool = False
     limit_reset: datetime | None = None
     limit_rejected: bool = False
+    #: W-2: tool_use ids of WebSearch calls the agent made, and SKAZ's answer to each prompt
+    #: (allowed, the approved query, SKAZ's request id).
+    web_uses: set[str] = field(default_factory=set)
+    web_asked: dict[str, tuple[bool, str, str | None]] = field(default_factory=dict)
+    #: A WebSearch ran that SKAZ never approved (or for another query): the answer fails.
+    web_breach: bool = False
 
 
 def classify_failure(state: _RunState, result: Mapping[str, Any] | None) -> tuple[FailureKind, str,
@@ -180,6 +211,8 @@ class ClaudeCodeEngine:
         self._status_timeout = status_timeout_s
         self._runs: dict[str, _ActiveRun] = {}
         self._checked: dict[tuple[str, float], Version | None] = {}
+        #: W-2: set when Claude Code searched the web without SKAZ's approval; web stays off until restart.
+        self.web_blocked: str | None = None
 
     @property
     def id(self) -> EngineId:
@@ -246,19 +279,29 @@ class ClaudeCodeEngine:
         located = self._locate("claude")
         if located is None:
             raise FileNotFoundError(NOT_INSTALLED)
-        await self._launcher.open("claude-code-sign-in", "SKAZ opened the Claude Code sign-in.",
-                                  [str(located.binary), "auth", "login"], {"PATH": located.path})
+        await self._launcher.open(SIGN_IN_NAME, "SKAZ opened the Claude Code sign-in.",
+                                  [str(located.binary), "auth", "login"], {"PATH": located.path},
+                                  agent="Claude Code")
+
+    def login_progress(self) -> Literal["waiting", "done", "failed"] | None:
+        """The sign-in window SKAZ opened: still open, finished, or stopped (``None``: never opened)."""
+        return terminal_progress(self._launcher, SIGN_IN_NAME)
 
     # -- run ------------------------------------------------------------------
 
     def command(self, binary: str, turn: AgentTurn, mcp_config: Path | None,
                 system_prompt: Path) -> list[str]:
         """``system_prompt`` is a file, so instruction text never becomes a command-line word."""
+        web = turn.web is not None and self.web_blocked is None
         argv = [binary, "-p", "--output-format", "stream-json", "--input-format", "stream-json",
-                "--verbose", "--include-partial-messages", "--restricted", "--tools", "",
-                "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
-                "--permission-mode", "dontAsk", "--permission-prompts", "none",
-                "--system-prompt-file", str(system_prompt)]
+                "--verbose", "--include-partial-messages", "--restricted", "--tools", WEB_TOOL if web else "",
+                "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]
+        if web:
+            # Every WebSearch call asks SKAZ over stdio before it runs (W-2); nothing else may ask.
+            argv += ["--permission-mode", "default", "--permission-prompt-tool", "stdio"]
+        else:
+            argv += ["--permission-mode", "dontAsk", "--permission-prompts", "none"]
+        argv += ["--system-prompt-file", str(system_prompt)]
         if turn.model and turn.model != "default":
             argv += ["--model", turn.model]
         if turn.effort:
@@ -336,7 +379,8 @@ class ClaudeCodeEngine:
                 yield event
         except (OSError, ValueError) as error:
             message = "SKAZ couldn't start Claude Code." if isinstance(error, OSError) else str(error)
-            yield Failed(run_id, "other", message)
+            # Before the process exists nothing was sent; after that, the request may have been.
+            yield Failed(run_id, "other", message, unsent=active.process is None)
         finally:
             self._runs.pop(run_id, None)
             running = active.process
@@ -351,7 +395,7 @@ class ClaudeCodeEngine:
 
     async def _precheck(self, turn: AgentTurn) -> Failed | None:
         if turn.tools and self.mcp is None:
-            return Failed(turn.run_id, "other", NO_TOOL_ACCESS)
+            return Failed(turn.run_id, "other", NO_TOOL_ACCESS, unsent=True)
         located = self._locate("claude")
         if located is None:
             return Failed(turn.run_id, "incompatible", NOT_INSTALLED)
@@ -383,10 +427,12 @@ class ClaudeCodeEngine:
         assert process.stdin is not None and process.stdout is not None and process.stderr is not None
         message = {"type": "user", "message": {"role": "user", "content": prompt},
                    "parent_tool_use_id": None}
+        gate = turn.web if self.web_blocked is None else None
         try:
             process.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode())
             await process.stdin.drain()
-            process.stdin.close()
+            if gate is None:
+                process.stdin.close()
         except (BrokenPipeError, ConnectionResetError):
             pass
         stderr_tail: deque[str] = deque(maxlen=40)
@@ -404,9 +450,20 @@ class ClaudeCodeEngine:
                     continue
                 if not isinstance(item, dict):
                     continue
+                if item.get("type") == "control_request":
+                    await self._control(process, item, gate, state, active)
+                    continue
                 if item.get("type") == "result":
+                    _close_stdin(process)
                     for event in self._finish(state, item, active):
                         yield event
+                    return
+                await self._web_result(item, gate, state)
+                if state.web_breach:
+                    # Fail closed: Claude Code searched without SKAZ's approval (or for another query).
+                    self.web_blocked = CLAUDE_BLOCKED
+                    log.warning("Claude Code ran a web search SKAZ didn't approve; web search is off")
+                    yield Failed(run_id, "other", CLAUDE_BLOCKED)
                     return
                 for event in self._translate(state, item):
                     yield event
@@ -423,6 +480,78 @@ class ClaudeCodeEngine:
             killer.cancel()
             stderr_task.cancel()
             await asyncio.gather(killer, stderr_task, return_exceptions=True)
+
+    # -- W-2 web search ----------------------------------------------------------------
+
+    async def _control(self, process: asyncio.subprocess.Process, item: Mapping[str, Any],
+                       gate: WebSearchGate | None, state: _RunState, active: _ActiveRun) -> None:
+        """Answer one control request: a WebSearch prompt goes to the user (through ``gate``),
+        every other prompt is denied and every other request refused."""
+        request_id = item.get("request_id")
+        request = item.get("request")
+        body: Mapping[str, Any] = request if isinstance(request, Mapping) else {}
+        if body.get("subtype") != "can_use_tool":
+            await _answer(process, {"subtype": "error", "request_id": request_id, "error": NOT_SUPPORTED})
+            return
+        decision = await self._decide(body, gate, state, active)
+        await _answer(process, {"subtype": "success", "request_id": request_id, "response": decision})
+
+    async def _decide(self, body: Mapping[str, Any], gate: WebSearchGate | None, state: _RunState,
+                      active: _ActiveRun) -> dict[str, Any]:
+        tool = body.get("tool_name")
+        raw = body.get("input")
+        given: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
+        use_id = str(body.get("tool_use_id") or "")
+        query = clean_query(given.get("query"))
+        domains = {key: tuple(str(d) for d in given.get(key) or () if isinstance(d, str))
+                   for key in ("allowed_domains", "blocked_domains")}
+        unknown = set(given) - {"query", "allowed_domains", "blocked_domains"}
+        refused = tool != WEB_TOOL or gate is None or query is None or unknown or not use_id
+        if refused or gate is None or query is None or active.cancel.is_set():
+            if use_id and tool == WEB_TOOL:
+                state.web_asked[use_id] = (False, str(given.get("query") or ""), None)
+            log.info("Refused a %s prompt of Claude Code", str(tool)[:40])
+            return {"behavior": "deny", "message": WEB_REFUSED}
+        verdict: WebVerdict = await gate.approve(WebQuery(use_id, query, domains["allowed_domains"],
+                                                          domains["blocked_domains"]))
+        allowed = verdict.allowed and not active.cancel.is_set()
+        state.web_asked[use_id] = (allowed, query, verdict.search_id)
+        if not allowed:
+            return {"behavior": "deny", "message": verdict.message or WEB_REFUSED}
+        # Exactly what the user saw — nothing the model might add later.
+        exact: dict[str, Any] = {"query": query}
+        exact.update({key: list(value) for key, value in domains.items() if value})
+        return {"behavior": "allow", "updatedInput": exact}
+
+    async def _web_result(self, item: Mapping[str, Any], gate: WebSearchGate | None,
+                          state: _RunState) -> None:
+        """Note WebSearch calls; check each WebSearch result against SKAZ's approval; keep its links."""
+        kind = item.get("type")
+        content = (item.get("message") or {}).get("content")
+        blocks = [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+        if kind == "assistant":
+            state.web_uses.update(str(block.get("id") or "") for block in blocks
+                                  if block.get("type") == "tool_use" and block.get("name") == WEB_TOOL)
+            return
+        if kind != "user":
+            return
+        for block in blocks:
+            use_id = str(block.get("tool_use_id") or "")
+            if block.get("type") != "tool_result" or use_id not in state.web_uses:
+                continue
+            asked = state.web_asked.get(use_id)
+            output = item.get("tool_use_result")
+            if asked is None:
+                state.web_breach = True
+                return
+            allowed, query, search_id = asked
+            if not isinstance(output, dict):
+                continue  # a denial or an error: nothing was searched
+            if not allowed or output.get("query") != query:
+                state.web_breach = True
+                return
+            if gate is not None and search_id:
+                await gate.results(search_id, _links(output))
 
     async def _stop_after_cancel(self, process: asyncio.subprocess.Process, active: _ActiveRun) -> None:
         await active.cancel.wait()
@@ -463,7 +592,7 @@ class ClaudeCodeEngine:
                     continue
                 if block.get("type") == "text" and message_id not in state.streamed_messages:
                     events.extend(self._text(state, str(block.get("text") or "")))
-                elif block.get("type") == "tool_use" and block.get("name") != _STRUCTURED_TOOL:
+                elif block.get("type") == "tool_use" and block.get("name") not in _NOT_CHIPS:
                     raw_input = block.get("input")
                     arguments: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
                     events.append(ToolCall(run_id, str(block.get("id") or ""),
@@ -471,7 +600,8 @@ class ClaudeCodeEngine:
         elif kind == "user":
             content = (item.get("message") or {}).get("content")
             for block in content if isinstance(content, list) else []:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
+                if (isinstance(block, dict) and block.get("type") == "tool_result"
+                        and str(block.get("tool_use_id") or "") not in state.web_uses):
                     events.append(ToolResult(run_id, str(block.get("tool_use_id") or ""),
                                              _text_of(block.get("content")), bool(block.get("is_error"))))
         elif kind == "rate_limit_event":
@@ -518,3 +648,31 @@ async def _drain(stream: asyncio.StreamReader, tail: deque[str]) -> None:
         if not line:
             return
         tail.append(line.decode(errors="replace").strip())
+
+
+async def _answer(process: asyncio.subprocess.Process, response: Mapping[str, Any]) -> None:
+    """One control response on stdin (the CLI may already be gone after a Stop)."""
+    if process.stdin is None or process.stdin.is_closing():
+        return
+    line = json.dumps({"type": "control_response", "response": response}, ensure_ascii=False) + "\n"
+    with contextlib.suppress(BrokenPipeError, ConnectionResetError, RuntimeError):
+        process.stdin.write(line.encode())
+        await process.stdin.drain()
+
+
+def _close_stdin(process: asyncio.subprocess.Process) -> None:
+    if process.stdin is not None and not process.stdin.is_closing():
+        with contextlib.suppress(Exception):
+            process.stdin.close()
+
+
+def _links(output: Mapping[str, Any]) -> list[WebLink]:
+    """Links of a WebSearch ``tool_use_result``: ``results`` holds ``{tool_use_id, content: [{title,
+    url}]}`` entries and plain text commentary (2.1.281 ``dn``)."""
+    links: list[WebLink] = []
+    for entry in output.get("results") or []:
+        hits = entry.get("content") if isinstance(entry, dict) else None
+        for hit in hits if isinstance(hits, list) else []:
+            if isinstance(hit, dict) and isinstance(hit.get("url"), str):
+                links.append(WebLink(str(hit.get("title") or ""), hit["url"]))
+    return links

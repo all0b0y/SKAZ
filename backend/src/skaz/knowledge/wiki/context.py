@@ -12,8 +12,6 @@ from ..ingest.checks import clean_text, flags_instructions
 from ..ingest.protocols import InstructionDetector
 from ..ingest.settings import WikiSettings
 from ..service import KnowledgeService
-from ..skills import SkazSkill
-from ..skills.settings import enabled_skills
 from .graph import GraphIndex
 from .statements import Citations
 
@@ -43,10 +41,6 @@ class WikiContext:
     decisions: Callable[[], DecisionLayer | None]
     detector: Callable[[], InstructionDetector | None]
     settings: Callable[[], WikiSettings]
-
-    def skills(self) -> tuple[SkazSkill, ...]:
-        """SKAZ skills that are on now (Humanizer, H2), read when a writing prompt is built."""
-        return enabled_skills(self.kb.settings)
 
     def citations(self) -> Citations:
         return Citations(self.kb, self.store)

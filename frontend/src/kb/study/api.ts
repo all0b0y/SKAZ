@@ -39,6 +39,8 @@ export const studyApi = {
     c.call('POST /kb/study/{block_id}/retake', { path: { block_id: id }, body: { mistakes_only: mistakesOnly } }),
   save: (c: KbClient, id: string, decision: 'allow' | 'deny') =>
     c.call('POST /kb/study/{block_id}/save', { path: { block_id: id }, body: { decision } }),
+  rename: (c: KbClient, id: string, title: string) =>
+    c.call('POST /kb/study/{block_id}/rename', { path: { block_id: id }, body: { title } }),
   deck: (c: KbClient, pageId: string): Promise<KbDeckView> => c.call('GET /kb/study/decks/{page_id}', { path: { page_id: pageId } }),
   markDeck: (c: KbClient, pageId: string, itemIds: string[], mark: StudyMark): Promise<KbDeckView> =>
     c.call('POST /kb/study/decks/{page_id}/marks', { path: { page_id: pageId }, body: { item_ids: itemIds, mark } }),

@@ -8,7 +8,7 @@ import {
   ArrowUpDown, BookPlus, ChevronUp, Clock, Copy, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
   CircleCheck, CircleX, CircleSlash, Undo2, PenLine, Star, Eye as EyeOn, EyeOff, SlidersHorizontal,
-  Layers, ListChecks, RotateCcw, Flame,
+  Layers, ListChecks, RotateCcw, Flame, CircleQuestionMark, Minus, Scan,
 } from 'lucide-react';
 
 /**
@@ -57,6 +57,9 @@ const ICONS = {
   chevronLeft: ChevronLeft,
   chevronRight: ChevronRight,
   expand: Maximize2,
+  // Chat actions v1 (2026-10-21): the diagram viewer's zoom out and Fit.
+  minus: Minus,
+  fit: Scan,
   collapse: Minimize2,
   play: Play,
   concept: CircleDot,
@@ -117,6 +120,8 @@ const ICONS = {
   test: ListChecks,
   flip: RotateCcw,
   hard: Flame,
+  /** "What these labels mean" (wiki terms in Settings → Wiki). */
+  help: CircleQuestionMark,
 } satisfies Record<string, ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number | string }>>;
 
 export type IconName = keyof typeof ICONS;

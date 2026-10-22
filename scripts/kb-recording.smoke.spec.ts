@@ -4,6 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { launchIsolatedSmoke } from './isolatedSmoke';
 
+/** An agent CLI the app started (e.g. Hermes setting up its tool environment in SKAZ's own agent folder)
+ *  may still be finishing for a few seconds after quit; retry instead of failing the test on cleanup. */
+function removeProfile(dir: string): void {
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 60, retryDelay: 250 });
+}
+
 // Recording in the Knowledge Wiki interface on the REAL built Electron app, real preload/IPC policy
 // and real local backend, in an isolated profile (ported from the old save-on-quit,
 // transcript-only and recording-retry smokes, audit AUDIT-L1 violation 3).
@@ -141,9 +147,17 @@ async function live(page: Page, sessionId: string) {
 }
 
 /** Every file under a directory (the strongest form of "no audio was archived"). */
-function filesUnder(dir: string): string[] {
+/** Files under `dir`, skipping folders named in `skip` (walked by hand: an agent may be changing its own folder). */
+function filesUnder(dir: string, skip: readonly string[] = []): string[] {
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => path.join(e.parentPath, e.name));
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (skip.includes(full)) continue;
+    if (entry.isDirectory()) out.push(...filesUnder(full, skip));
+    else if (entry.isFile()) out.push(full);
+  }
+  return out;
 }
 
 async function recordingIds(page: Page) {
@@ -249,7 +263,10 @@ for (const outcome of ['acknowledged', 'quit-timeout'] as const) {
       // Transcript-only (the old transcript-only smoke): the PCM advanced the clock and was never archived.
       expect((await live(again, view.data.session_id)).data).toMatchObject({ audio_retained: false, saved_samples: first.data.saved_samples + FRAME });
       expect(await again.evaluate(() => 'fetchAudio' in window.skaz)).toBe(false);
-      const audio = [...filesUnder(path.join(profile, 'data')), ...filesUnder(path.join(profile, 'Documents'))]
+      // Agent homes (data/agents/*) hold the agents' own files — e.g. Hermes provisions a tool workspace with
+      // sample .wav files; they are not recordings.
+      const audio = [...filesUnder(path.join(profile, 'data'), [path.join(profile, 'data', 'agents')]),
+        ...filesUnder(path.join(profile, 'Documents'))]
         .filter((f) => /\.(wav|pcm|webm|ogg|m4a|mp3|flac)$/i.test(f));
       expect(audio).toEqual([]);
     } finally {
@@ -257,7 +274,7 @@ for (const outcome of ['acknowledged', 'quit-timeout'] as const) {
         await run.app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 1; }).catch(() => {});
         await run.close();
       }
-      fs.rmSync(profile, { recursive: true, force: true });
+      removeProfile(profile);
     }
   });
 }
@@ -294,7 +311,7 @@ test('continuous speech with no pause: the live panel shows the words before any
     await expect(panel).toContainText('fixture');
   } finally {
     await run.close();
-    fs.rmSync(run.profile, { recursive: true, force: true });
+    removeProfile(run.profile);
   }
 });
 
@@ -350,7 +367,7 @@ test('provider error: Record says why without a key; recognition stops on its ow
     expect((await recordingIds(page)).filter((id) => !before.has(id))).toEqual([materialId]);
   } finally {
     await run.close();
-    fs.rmSync(run.profile, { recursive: true, force: true });
+    removeProfile(run.profile);
     fs.rmSync(path.dirname(control), { recursive: true, force: true });
   }
 });

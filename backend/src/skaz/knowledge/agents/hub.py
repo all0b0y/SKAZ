@@ -18,6 +18,7 @@ from .engine import AgentEngine, EngineId, EngineStatus
 from .hermes import HermesEngine
 from .hermes_accounts import HermesAccounts
 from .mcp_access import McpAccessProvider
+from .opencode import OpenCodeEngine, locate_opencode
 from .registry import AgentAction, AgentState, AgentView, CodexStatusEngine, EngineRegistry, SettingsStore
 
 
@@ -44,6 +45,9 @@ class AgentsHub:
         hermes = self.registry.engines.get("hermes")
         if isinstance(hermes, HermesEngine):
             hermes.sweep_at_start()
+        opencode = self.registry.engines.get("opencode")
+        if isinstance(opencode, OpenCodeEngine):
+            opencode.sweep_at_start()  # sessions earlier runs left in SKAZ's OpenCode folder
 
     async def aclose(self) -> None:
         hermes = self.registry.engines.get("hermes")
@@ -61,6 +65,8 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
                      user_home: Path | None = None) -> AgentsHub:
     agents_dir = data_dir / "agents"
     finder: LocateFn = locate_cli or locate
+    #: OpenCode's installer puts it in ``~/.opencode/bin``, outside the usual search path.
+    opencode_finder: LocateFn = locate_cli or (lambda name: locate_opencode(name, home=user_home))
     if engines is None:
         launcher = TerminalLauncher(agents_dir / "launch")
         engines = {
@@ -70,6 +76,8 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
                                             launcher=launcher),
             "hermes": HermesEngine(data_dir, mcp=mcp, locate_cli=finder, launcher=launcher,
                                    user_home=user_home, first_run_gate=True),
+            "opencode": OpenCodeEngine(data_dir, mcp=mcp, locate_cli=opencode_finder, launcher=launcher,
+                                       user_home=user_home),
         }
     registry = EngineRegistry(engines, settings)
 
@@ -78,7 +86,7 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
 
     async def resolve(engine: EngineId) -> dict[str, str]:
         values: dict[str, str] = {}
-        located = finder(RECIPES[engine].binary)
+        located = (opencode_finder if engine == "opencode" else finder)(RECIPES[engine].binary)
         if located is not None:
             values["binary"] = str(located.binary)
         if engine == "hermes":

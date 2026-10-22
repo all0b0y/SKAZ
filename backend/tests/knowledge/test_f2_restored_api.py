@@ -56,11 +56,12 @@ async def test_codex_sign_out_goes_through_the_connection_and_the_view_follows(
         assert view.state == "signed_out" and view.action == "login" and not view.status.signed_in
 
 
-async def test_only_codex_signs_out_from_skaz(service: KnowledgeService, tmp_path: Path) -> None:
+async def test_claude_code_is_never_signed_out_from_skaz(service: KnowledgeService, tmp_path: Path) -> None:
     registry = hub_for(service, tmp_path).registry
     with pytest.raises(EngineUnavailable) as refused:
         await registry.logout("claude_code")
-    assert refused.value.status_code == 409 and "own" in refused.value.message
+    # SKAZ's Claude Code uses this Mac's own sign-in: signing it out would reach the user's other apps.
+    assert refused.value.status_code == 409 and "this Mac" in refused.value.message
 
 
 async def test_codex_logout_route(kb_app: Any, kb_client: httpx.AsyncClient, tmp_path: Path) -> None:
@@ -71,8 +72,8 @@ async def test_codex_logout_route(kb_app: Any, kb_client: httpx.AsyncClient, tmp
     assert response.status_code == 200, response.text
     assert response.json()["id"] == "codex" and response.json()["state"] == "signed_out"
     assert response.json()["signed_in"] is False and connection.logouts == 1
-    # Other engines are signed out in their own apps; there is no route for them.
-    assert (await kb_client.post("/kb/agents/claude_code/logout")).status_code in (404, 405)
+    # Claude Code keeps this Mac's own sign-in: the route refuses with the reason (Accounts & keys v3).
+    assert (await kb_client.post("/kb/agents/claude_code/logout")).status_code == 409
 
 
 async def test_codex_logout_failure_is_said_plainly(

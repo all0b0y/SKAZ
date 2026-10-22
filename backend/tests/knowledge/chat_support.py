@@ -88,7 +88,7 @@ class Agents:
     engines: dict[EngineId, FakeEngine] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for engine_id in ("codex", "claude_code", "hermes"):
+        for engine_id in ("codex", "claude_code", "hermes", "opencode"):
             self.scripts[engine_id] = lambda _turn: text("OK.")
             self.engines[engine_id] = self._engine(engine_id)
 

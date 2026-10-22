@@ -25,7 +25,8 @@ describe('Settings → Skills (0.3.1 H3, variant B)', () => {
       'Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.',
     );
     const humanizer = row(dialog, 'Humanizer');
-    expect(humanizer).toHaveTextContent('Writes like a person: no filler, no AI tells. Used in chat answers, wiki pages, cards and tests. Quotes from sources are never changed.');
+    // C1-b: Humanizer is for ordinary chat replies only, not wiki processing, cards or tests.
+    expect(humanizer).toHaveTextContent('Writes like a person: no filler, no AI tells. Used only in ordinary chat replies, not wiki processing, cards or tests. Quotes from sources are never changed.');
     expect(humanizer).toHaveTextContent('v3.1.0 · MIT · github.com/blader/humanizer');
     expect(await within(humanizer).findByRole('switch', { name: 'Humanizer' })).toBeChecked();
     expect(within(dialog).getByRole('region', { name: 'Writing' })).toContainElement(humanizer);

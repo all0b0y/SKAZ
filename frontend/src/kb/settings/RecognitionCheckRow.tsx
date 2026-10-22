@@ -2,18 +2,19 @@ import { useState } from 'react';
 import type { KbRecognitionSettings } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { errorText } from '../api/client';
-import { Icon, Segmented } from '../ui';
-import { ENGINE_NAME, ENGINE_ORDER, agentOf } from '../state/agents';
+import { Icon } from '../ui';
+import { ENGINE_NAME, agentOf } from '../state/agents';
 import { useAgents, useServices } from '../state/context';
 import { useLoad } from '../document/useLoad';
 import { modelName } from '../composer/modelCatalog';
+import { AgentPicker, effortLabel } from '../composer/AgentPicker';
 
 type Choice = KbRecognitionSettings['engine'];
 
 /**
- * Settings → Models → Recognition check (B20): the agent that checks recordings for recognition
- * errors — the same as \"Wiki pages and notes\" by default, a chosen agent with its own model and
- * effort, or Off (the step is skipped and the job says so).
+ * Settings → Models → Recognition check (B20; models screen v2): the agent that checks recordings
+ * for recognition errors — the same picker as the wiki model, with "Same as wiki model" (default)
+ * and "Off" (the step is skipped and the job says so) on top.
  */
 export function RecognitionCheckRow({ label }: { label: string }) {
   const { client } = useServices();
@@ -42,41 +43,30 @@ export function RecognitionCheckRow({ label }: { label: string }) {
   };
   const chosen = value.engine !== 'same_as_wiki' && value.engine !== 'off' ? agentOf(agents, value.engine as EngineId) : undefined;
   const model = chosen?.models.find((m) => m.id === value.model);
+  const words = value.engine === 'same_as_wiki' ? ['Same as wiki model'] : value.engine === 'off' ? ['Off']
+    : [ENGINE_NAME[value.engine as EngineId].replace(' Agent', ''), model ? modelName(model) : value.model ?? 'agent’s own setting',
+      ...(model && value.effort ? [effortLabel(value.effort)] : [])];
   return (
     <span className="kb-recog">
-      <Segmented<Choice> label={label} size="sm" value={value.engine}
-        onChange={(v) => {
-          if (v !== 'same_as_wiki' && v !== 'off' && agentOf(agents, v)?.state !== 'ready') {
-            setError(`${ENGINE_NAME[v]} isn’t connected — set it up in Accounts & keys.`);
+      <AgentPicker existingChat={false} lastOf={() => null}
+        choice={chosen ? { engine: chosen.id, model: value.model, effort: value.effort } : null}
+        onChoose={(next) => {
+          if (agentOf(agents, next.engine)?.state !== 'ready') {
+            setError(`${ENGINE_NAME[next.engine]} isn’t connected — set it up in Accounts & keys.`);
             return;
           }
-          void save({ engine: v });
+          void save({ engine: next.engine, model: next.model, effort: next.model ? next.effort : null });
         }}
-        options={[
-          { value: 'same_as_wiki', label: 'Same as wiki pages' },
-          ...ENGINE_ORDER.map((e) => ({ value: e as Choice, label: ENGINE_NAME[e].replace(' Agent', '') })),
-          { value: 'off', label: 'Off' },
-        ]} />
-      {chosen && chosen.models.length > 0 && (
-        <span className="kb-select">
-          <select aria-label="Model for the recognition check" value={value.model ?? ''}
-            onChange={(e) => void save({ engine: value.engine, model: e.target.value || null, effort: null })}>
-            <option value="">Agent default model</option>
-            {chosen.models.map((m) => <option key={m.id} value={m.id}>{modelName(m)}{chosen.id === 'hermes' ? ` · ${m.provider_label}` : ''}</option>)}
-          </select>
-          <Icon name="chevronDown" size={12} className="kb-select__chev" />
-        </span>
-      )}
-      {model && model.efforts.length > 0 && (
-        <span className="kb-select">
-          <select aria-label="Effort for the recognition check" value={value.effort ?? ''}
-            onChange={(e) => void save({ engine: value.engine, model: value.model, effort: e.target.value || null })}>
-            <option value="">Default effort{model.default_effort ? ` (${model.default_effort})` : ''}</option>
-            {model.efforts.map((effort) => <option key={effort} value={effort}>{effort}</option>)}
-          </select>
-          <Icon name="chevronDown" size={12} className="kb-select__chev" />
-        </span>
-      )}
+        settings={{
+          menuLabel: label, testId: 'recognition-picker', buttonEngine: chosen?.id ?? null,
+          buttonLabel: `${label}: ${words.join(', ')}`, buttonText: words.join(' · '),
+          topItems: [
+            { id: 'same', label: 'Same as wiki model', checked: value.engine === 'same_as_wiki', onPick: () => void save({ engine: 'same_as_wiki' }) },
+            { id: 'off', label: 'Off', checked: value.engine === 'off', onPick: () => void save({ engine: 'off' }) },
+          ],
+          reasoning: model ? { efforts: model.efforts, value: value.effort,
+            onChange: (e) => void save({ engine: value.engine, model: value.model, effort: e }) } : undefined,
+        }} />
       {value.engine === 'off' && <span className="kb-muted">Recordings go to the wiki as recognised.</span>}
       {error && <span className="kb-inline-error kb-inline-error--flat" role="alert">{error}</span>}
     </span>

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KbMessage } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Spinner } from '../ui';
 import { Composer } from '../composer/Composer';
@@ -8,25 +8,30 @@ import { AgentFix } from './AgentFix';
 import { useOpenDocument } from '../state/document';
 import { ChatMenu, RenameForm } from './ChatMenu';
 import { AssistantMessage, SystemMessage, UserMessage } from './Message';
+import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
+import { WebSearchChip } from './webSearch';
+import { DiagramFixProvider, type DiagramFix } from '../ui/markdown/Diagram';
+import { diagramFixRequest, fixLanguage } from './diagramFix';
+import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
   const parts = chat?.messages.flatMap((m) => partsOf(m)) ?? [];
   if (parts.some((p) => p.type === 'question' && p.status === 'pending')) return 'Pick an option above, or just type…';
-  if (parts.some((p) => p.type === 'permission' && p.status === 'pending')) return 'You can keep typing — the request waits';
+  if (parts.some((p) => (p.type === 'permission' || p.type === 'web_search') && p.status === 'pending')) return 'You can keep typing — the request waits';
   return null;
 }
 
-function useNotice(): [string | null, (text: string | null) => void] {
+function useNotice(): [string | null, (text: string | null, ms?: number) => void] {
   const [notice, setNotice] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
-  return [notice, (text: string | null) => {
+  return [notice, (text: string | null, ms = 5000) => {
     setNotice(text);
     window.clearTimeout(timer.current);
-    if (text !== null) timer.current = window.setTimeout(() => setNotice(null), 5000);
+    if (text !== null) timer.current = window.setTimeout(() => setNotice(null), ms);
   }];
 }
 
@@ -35,7 +40,7 @@ function useNotice(): [string | null, (text: string | null) => void] {
  * Streamed text is shown as it comes, never animated (decision 36).
  */
 export function ChatView({ hidden }: { hidden: boolean }) {
-  const { chats } = useServices();
+  const { chats, settings } = useServices();
   const currentId = useChats((s) => s.currentId);
   const open = useChats((s) => (s.currentId ? s.chats[s.currentId] : undefined));
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
@@ -50,6 +55,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const stick = useRef(true);
 
   const chat = open?.chat ?? null;
+  const questionActions = useQuestionActions(currentId, chat);
   const title = chat?.title ?? summary?.title ?? 'New chat';
 
   useEffect(() => {
@@ -83,10 +89,24 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     if (!res.ok && what !== 'save') setActionError({ id: message.id, text: res.error });
     else if (!res.ok) setNotice(res.error);
     else if (what === 'save' && res.value) {
-      setNotice(`Saved to the wiki as “${res.value.title}”.`);
+      // Decision 9: what was left out stays readable a little longer than a plain notice.
+      setNotice(savedText(res.value), res.value.warning ? 10000 : undefined);
       openDoc({ type: 'page', id: res.value.id });
     }
   };
+
+  // D-12: a diagram that can't be drawn asks this chat's agent for a fix — one message, only when
+  // the user presses "Ask the agent to fix"; it is a normal question the user sees in the chat.
+  // Decision 10: the request asks for the reply in the answer language (diagramFix.ts).
+  const askDiagramFix = useCallback<DiagramFix>(async (source, error) => {
+    if (!settings.getState().wiki.value) await settings.getState().loadWiki();
+    const s = chats.getState();
+    const messages = s.currentId ? s.chats[s.currentId]?.chat?.messages ?? [] : [];
+    const language = fixLanguage(settings.getState().wiki.value, messages.some((m) => m.role === 'user'));
+    const text = diagramFixRequest(source, error, language);
+    const res = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [] }, {});
+    return res.ok ? null : res.error;
+  }, [chats, settings]);
 
   const recording = !!(chat?.recording_material_id ?? summary?.recording_material_id);
   const engine = chat?.engine ?? summary?.engine;
@@ -108,6 +128,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         )}
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         <span className="kb-head__spacer" />
+        {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
@@ -134,8 +155,9 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           </EmptyState>
         )}
         {chat && chat.messages.length > 0 && (
+          <DiagramFixProvider value={askDiagramFix}>
           <div className="kb-chat__messages">
-            {chat.messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} message={m} />
+            {chat.messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} message={m} actions={questionActions(m)} />
               : m.role === 'system' ? <SystemMessage key={m.id} chatId={chat.id} message={m} />
                 : (
                   <AssistantMessage key={m.id} chatId={chat.id} message={m} actions={{
@@ -148,6 +170,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                   }} />
                 )))}
           </div>
+          </DiagramFixProvider>
         )}
       </div>
       <Composer chatId={currentId}

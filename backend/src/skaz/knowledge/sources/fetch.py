@@ -4,7 +4,16 @@
   credentials and resolve only to public addresses — no ``localhost``, private,
   link-local or reserved ranges (a page must not make SKAZ read the user's
   router or the SKAZ backend itself). DNS can change between this check and
-  the connection (rebinding); that window is not closed here.
+  the connection (rebinding); ``fetch(pin_address=True)`` closes that window by
+  connecting to the very address that was checked (the ``Host`` header and TLS
+  SNI/certificate check keep the original name). Other callers keep the window.
+* ``allow_address`` is a test seam only (a local test server on 127.0.0.1);
+  production code never passes it, so only global addresses are allowed.
+* A site NAME may also resolve into ``FAKE_IP`` (198.18.0.0/15, RFC 2544
+  benchmarking — no home or office network uses it): VPN/proxy apps in TUN
+  "fake-IP" mode (Clash, Mihomo, sing-box, Surge…) answer every name with such
+  an address and route the connection by the name, so it is still the public
+  site. A typed literal 198.18.x.x address stays refused.
 * No cookies are kept (a fresh jar per hop), ``.netrc``/proxy variables are
   ignored (``trust_env=False``), the body is streamed and cut at the limit.
 """
@@ -33,6 +42,19 @@ USER_AGENT = (
 )
 
 Resolver = Callable[[str], Awaitable[list[str]]]
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+AddressPolicy = Callable[[IPAddress], bool]
+NOT_PUBLIC = "SKAZ only opens public websites, not addresses on this computer or network."
+FAKE_IP = ipaddress.ip_network("198.18.0.0/15")
+
+
+def public_address(address: IPAddress) -> bool:
+    return address.is_global
+
+
+def fake_ip(address: IPAddress) -> bool:
+    """An address a VPN/proxy in fake-IP mode gave for a site name (see the module note)."""
+    return address.version == 4 and address in FAKE_IP
 
 
 class LinkRejected(KnowledgeError):
@@ -59,7 +81,7 @@ class Fetched:
     truncated: bool = False
 
 
-def check_url(value: str) -> str:
+def check_url(value: str, *, allow_address: AddressPolicy = public_address) -> str:
     """The trimmed URL when it is a plain public-looking http(s) address; ``LinkRejected`` otherwise."""
     url = value.strip()
     if not url or len(url) > 4096 or any(ord(char) < 32 for char in url):
@@ -77,14 +99,25 @@ def check_url(value: str) -> str:
         raise LinkRejected("This web address isn't valid.")
     host = parts.hostname.lower().rstrip(".")
     if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
-        raise LinkRejected("SKAZ only opens public websites, not addresses on this computer or network.")
+        raise LinkRejected(NOT_PUBLIC)
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         return url
-    if not address.is_global:
-        raise LinkRejected("SKAZ only opens public websites, not addresses on this computer or network.")
+    if not allow_address(address):
+        raise LinkRejected(NOT_PUBLIC)
     return url
+
+
+def _pinned(url: str, address: str) -> tuple[str, dict[str, str], dict[str, object]]:
+    """``url`` aimed at the checked ``address``: the ``Host`` header and TLS name stay the original."""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    literal = f"[{address}]" if ":" in address else address
+    netloc = f"{literal}:{parts.port}" if parts.port is not None else literal
+    host_header = f"{host}:{parts.port}" if parts.port is not None else host
+    extensions: dict[str, object] = {"sni_hostname": host} if parts.scheme == "https" else {}
+    return parts._replace(netloc=netloc).geturl(), {"Host": host_header}, extensions
 
 
 async def system_resolver(host: str) -> list[str]:
@@ -94,16 +127,26 @@ async def system_resolver(host: str) -> list[str]:
 
 class SafeFetcher:
     def __init__(
-        self, *, transport: httpx.AsyncBaseTransport | None = None, resolver: Resolver | None = None
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        resolver: Resolver | None = None,
+        allow_address: AddressPolicy = public_address,
     ) -> None:
         self.transport = transport
         self.resolver = resolver or system_resolver
+        self.allow_address = allow_address
 
-    async def _check_host(self, url: str) -> None:
+    def check(self, url: str) -> str:
+        """``check_url`` with this fetcher's address policy."""
+        return check_url(url, allow_address=self.allow_address)
+
+    async def _check_host(self, url: str) -> str | None:
+        """The first checked address of a host name; ``None`` for a literal address."""
         host = (urlsplit(url).hostname or "").lower()
         try:
             ipaddress.ip_address(host)
-            return  # literal addresses were checked by ``check_url``
+            return None  # literal addresses were checked by ``check_url``
         except ValueError:
             pass
         try:
@@ -114,15 +157,18 @@ class SafeFetcher:
             ) from error
         if not addresses:
             raise FetchFailed("SKAZ couldn't find this website. Check the address and the connection.")
+        checked: list[str] = []
         for raw in addresses:
             try:
                 address = ipaddress.ip_address(raw.split("%", 1)[0])
             except ValueError:
                 continue
-            if not address.is_global:
-                raise LinkRejected(
-                    "SKAZ only opens public websites, not addresses on this computer or network."
-                )
+            if not (self.allow_address(address) or fake_ip(address)):
+                raise LinkRejected(NOT_PUBLIC)
+            checked.append(str(address))
+        if not checked:
+            raise FetchFailed("SKAZ couldn't find this website. Check the address and the connection.")
+        return checked[0]
 
     async def fetch(
         self,
@@ -131,15 +177,19 @@ class SafeFetcher:
         max_bytes: int = MAX_PAGE_BYTES,
         allow_partial: bool = False,
         accept: str = "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.5",
+        total_seconds: float | None = None,
+        pin_address: bool = False,
     ) -> Fetched:
         try:
-            async with asyncio.timeout(TOTAL_SECONDS):
-                return await self._fetch(url, max_bytes, allow_partial, accept)
+            async with asyncio.timeout(TOTAL_SECONDS if total_seconds is None else total_seconds):
+                return await self._fetch(url, max_bytes, allow_partial, accept, pin_address)
         except TimeoutError as error:
             raise FetchFailed("The website took too long to answer. Try again later.") from error
 
-    async def _fetch(self, url: str, max_bytes: int, allow_partial: bool, accept: str) -> Fetched:
-        current = check_url(url)
+    async def _fetch(
+        self, url: str, max_bytes: int, allow_partial: bool, accept: str, pin_address: bool
+    ) -> Fetched:
+        current = self.check(url)
         headers = {"User-Agent": USER_AGENT, "Accept": accept, "Accept-Language": "en,ru;q=0.9"}
         async with httpx.AsyncClient(
             transport=self.transport,
@@ -149,15 +199,20 @@ class SafeFetcher:
             headers=headers,
         ) as client:
             for _hop in range(MAX_REDIRECTS + 1):
-                await self._check_host(current)
+                checked = await self._check_host(current)
                 client.cookies.clear()
+                target, pinned_headers, extensions = current, dict[str, str](), dict[str, object]()
+                if pin_address and checked is not None:
+                    target, pinned_headers, extensions = _pinned(current, checked)
                 try:
-                    async with client.stream("GET", current) as response:
+                    async with client.stream(
+                        "GET", target, headers=pinned_headers, extensions=extensions
+                    ) as response:
                         if response.is_redirect:
                             location = response.headers.get("location")
                             if not location:
                                 raise FetchFailed("The website sent a broken redirect.")
-                            current = check_url(urljoin(current, location))
+                            current = self.check(urljoin(current, location))
                             continue
                         return await self._read(response, current, max_bytes, allow_partial)
                 except httpx.TimeoutException as error:
@@ -173,6 +228,8 @@ class SafeFetcher:
         status = response.status_code
         if status in (401, 403):
             raise FetchFailed("This page needs a sign-in or blocks automatic access.")
+        if status == 402:
+            raise FetchFailed("This page needs a paid subscription.")
         if status == 404 or status == 410:
             raise FetchFailed("The page wasn't found. Check the address.")
         if status == 451:

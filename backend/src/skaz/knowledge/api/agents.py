@@ -12,8 +12,12 @@ from ..agents.claude_code import MIN_CLAUDE_VERSION
 from ..agents.engine import EngineId
 from ..agents.hermes import CHECKING_NOTE, MIN_HERMES_VERSION
 from ..agents.hub import AgentsHub
+from ..agents.last_choice import LastChoice
 from ..agents.model_prefs import Change, ModelPrefs, PrefsError
+from ..agents.opencode import MIN_OPENCODE_VERSION
 from ..agents.registry import AgentView, EngineUnavailable
+from ..agents.web import TOOL_WEB, web_support
+from ..agents.web_runner import known_searcher
 from ..errors import KnowledgeError
 from ..install.recipes import Recipe
 from ..install.system import dotted
@@ -24,11 +28,14 @@ from .schemas_agents import (
     KbAgentDefault,
     KbAgentFirstRun,
     KbAgentInstallInfo,
+    KbAgentLastChoice,
     KbAgentLogin,
     KbAgentLoginResult,
     KbAgentModel,
     KbAgentProvider,
     KbAgents,
+    KbAgentSignIn,
+    KbAgentWebSearch,
     KbEngineId,
     KbFavoriteModel,
     KbInstallLine,
@@ -40,7 +47,7 @@ from .schemas_agents import (
 router = APIRouter(prefix="/kb/agents", tags=["kb"])
 MIN_VERSIONS: dict[EngineId, str] = {
     "codex": dotted(MIN_CODEX_VERSION), "claude_code": dotted(MIN_CLAUDE_VERSION),
-    "hermes": dotted(MIN_HERMES_VERSION),
+    "hermes": dotted(MIN_HERMES_VERSION), "opencode": dotted(MIN_OPENCODE_VERSION),
 }
 MAX_WAIT_S = 25.0
 
@@ -61,6 +68,10 @@ def _install_info(recipe: Recipe) -> KbAgentInstallInfo:
                               checked_on=recipe.checked_on)
 
 
+#: Key of each agent's last chat choice inside the data :func:`read_prefs` returns.
+LAST_CHOICES = "_last_chat"
+
+
 def agent_view(hub: AgentsHub, view: AgentView, prefs: Mapping[str, Any] | None = None) -> KbAgent:
     """``prefs``: ``ModelPrefs.raw()`` read off the event loop (:func:`read_prefs`), else read here."""
     status = view.status
@@ -68,6 +79,9 @@ def agent_view(hub: AgentsHub, view: AgentView, prefs: Mapping[str, Any] | None 
     state, action = hub.state(view)
     first = view.first_run
     listed = ModelPrefs(hub.registry.settings).agent(view.engine, view.models, view.name, prefs)
+    remembered = prefs.get(LAST_CHOICES) if prefs is not None else None
+    choices = remembered if isinstance(remembered, dict) else LastChoice(hub.registry.settings).all()
+    last = choices.get(view.engine)
     return KbAgent(
         id=view.engine, name=view.name, state=state, installed=status.installed, version=status.version,
         min_version=MIN_VERSIONS[view.engine], signed_in=status.signed_in, incompatible=status.incompatible,
@@ -84,7 +98,20 @@ def agent_view(hub: AgentsHub, view: AgentView, prefs: Mapping[str, Any] | None 
         current_model=view.current_model, install=_install_info(hub.installs.recipes[view.engine]),
         install_task=running.id if running else None, checked_at=view.checked_at,
         questions="native" if view.engine in NATIVE_QUESTIONS else "skaz",
+        last_choice=KbAgentLastChoice(model=last[0], effort=last[1]) if last is not None else None,
+        web_search=_web_search(hub, view.engine),
     )
+
+
+def _web_search(hub: AgentsHub, engine_id: str) -> KbAgentWebSearch:
+    """W-2: the engine itself (it may have turned its web search off) or, without one, its id.
+    W-3b: Codex, Hermes and OpenCode — through the searcher the latest checks show connected."""
+    engines = getattr(hub.registry, "engines", None)
+    engine = engines.get(engine_id, engine_id) if isinstance(engines, dict) else engine_id
+    searcher = known_searcher(hub.registry, engine_id) if engine_id in TOOL_WEB else None
+    support = web_support(engine, searcher)
+    return KbAgentWebSearch(available=support.available, reason=support.reason,
+                            through=cast(Any, support.through))
 
 
 def task_view(task: InstallTask, after: int) -> KbInstallTask:
@@ -99,7 +126,12 @@ def task_view(task: InstallTask, after: int) -> KbInstallTask:
 
 
 async def read_prefs(hub: AgentsHub) -> dict[str, Any]:
-    return await disk_call(ModelPrefs(hub.registry.settings).raw)  # a database read: off the event loop
+    """Picker preferences and each agent's last chat choice, read off the event loop (database reads)."""
+    def read() -> dict[str, Any]:
+        data = ModelPrefs(hub.registry.settings).raw()
+        data[LAST_CHOICES] = LastChoice(hub.registry.settings).all()
+        return data
+    return await disk_call(read)
 
 
 @router.get("")
@@ -185,15 +217,22 @@ async def login_agent(engine: KbEngineId, hub: HubDep,
                               message=outcome.message)
 
 
-@router.post("/codex/logout")
-async def logout_codex(hub: HubDep) -> KbAgent:
-    """Sign out of Codex in SKAZ's own Codex profile (Codex's ``account/logout``); the agent re-checked.
+@router.get("/{engine}/sign-in")
+async def sign_in_progress(engine: KbEngineId, hub: HubDep,
+                           wait: Annotated[float, Query(ge=0, le=MAX_WAIT_S)] = 0) -> KbAgentSignIn:
+    """The sign-in started from SKAZ (no agent command runs): waits up to ``wait`` s while it is open."""
+    view = await hub.registry.wait_sign_in(engine, wait)
+    return KbAgentSignIn(engine=view.engine, method=view.method, state=view.state)
 
-    Only Codex: its sign-in lives in SKAZ's ``CODEX_HOME``. Claude Code and Hermes keep theirs in
-    their own apps, which SKAZ never touches.
+
+@router.post("/{engine}/logout")
+async def logout_agent(engine: KbEngineId, hub: HubDep) -> KbAgent:
+    """Sign out of an agent in SKAZ's own folder only, then check it again: Codex (``account/logout``
+    in SKAZ's ``CODEX_HOME``) and OpenCode (``opencode auth logout`` per provider in SKAZ's folder).
+    Claude Code uses this Mac's own sign-in and Hermes signs in per provider: 409 with the reason.
     """
     try:
-        view = await hub.registry.logout("codex")
+        view = await hub.registry.logout(engine)
     except EngineUnavailable as error:
         raise _http(error) from error
     return agent_view(hub, view, await read_prefs(hub))

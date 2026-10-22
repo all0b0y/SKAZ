@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { NewCardsRow } from '../study/StudySettingsRow';
 import { Banner, Button, Icon, Modal, PathText, Segmented } from '../ui';
-import { useAgents, usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
+import { usePrefs, useLibrary, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import type { TextSize, ThemePref } from '../state/prefs';
 import { useProblems } from '../shell/problems';
@@ -10,16 +10,18 @@ import {
   Licenses, LocalDecisionsRow, LocalWhisperRow, NotYet, PrivacyRow, SkillEngineRow, SkillSwitchRow, SonioxConsentRow,
   SpeechLanguagesRow, SpeechModelRow,
   TranslationRow, VersionRow,
-  WikiLanguageRow, WikiModelRow, WikiSwitchRow,
+  WikiLanguageRow, WikiModelNote, WikiModelRow, WikiSwitchRow,
 } from './LiveRows';
 import { EngineBadge } from '../ui/EngineBadge';
 import { ActivityLogRow } from './ActivityLog';
 import { MicRow, SystemAudioRow } from './SoundRows';
 import { RecognitionCheckRow } from './RecognitionCheckRow';
+import { WikiBudgetRow } from './WikiBudgetRow';
 import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
 import { UpdatesRow } from './UpdatesRow';
 import { HermesProviders } from './HermesProviders';
+import { WikiTermsShowButton } from '../wiki/WikiTermsButton';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
@@ -38,6 +40,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'agent-codex': return <AgentRow engine="codex" />;
     case 'agent-claude': return <AgentRow engine="claude_code" />;
     case 'agent-hermes': return <AgentRow engine="hermes" />;
+    case 'agent-opencode': return <AgentRow engine="opencode" />;
     case 'key-openrouter': return <KeyRow provider="openrouter" />;
     case 'key-soniox': return <KeyRow provider="soniox" />;
     case 'local-whisper': return <LocalWhisperRow />;
@@ -46,6 +49,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'chat-model': return <ChatModelRow />;
     case 'picker-models': return <PickerModelsRow />;
     case 'wiki-model': return <WikiModelRow label={row.label} />;
+    case 'wiki-budget': return <WikiBudgetRow label={row.label} />;
     case 'decisions': return <DecisionsRow label={row.label} />;
     case 'recognition-check': return <RecognitionCheckRow label={row.label} />;
     case 'mic': return <MicRow />;
@@ -62,10 +66,12 @@ function RowControl({ row }: { row: RowDef }) {
     case 'bg-links': return <BackgroundLinksRow label={row.label} />;
     case 'links-now': return <FindLinksNowRow />;
     case 'study-new': return <NewCardsRow label={row.label} />;
+    case 'wiki-terms': return <WikiTermsShowButton />;
     case 'humanizer': return <SkillSwitchRow skillId="humanizer" label={row.label} />;
     case 'skill-codex': return <SkillEngineRow skillId="humanizer" engine="codex" />;
     case 'skill-claude': return <SkillEngineRow skillId="humanizer" engine="claude_code" />;
     case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
+    case 'skill-opencode': return <SkillEngineRow skillId="humanizer" engine="opencode" />;
     case 'lib-folder':
       if (library?.state === 'ready' || library?.state === 'unavailable') {
         return (
@@ -122,24 +128,16 @@ function RowControl({ row }: { row: RowDef }) {
   }
 }
 
-/** Settings → Models → "Models in the picker" (0.3.1 K4): how many are shown, and "Edit models…". */
+/** Settings → Models → "Models in the picker" (0.3.1 K4; models screen v2): one "Edit models…" button on
+ *  the label's line, like the mock-up — no count beside it. */
 function PickerModelsRow() {
-  const agents = useAgents((s) => s.agents);
   const openEditModels = useUi((s) => s.openEditModels);
-  const shown = agents?.agents.reduce((n, a) => n + a.models.filter((m) => m.visible).length, 0) ?? 0;
-  const total = agents?.agents.reduce((n, a) => n + a.models.length, 0) ?? 0;
-  const favorites = agents?.favorites.length ?? 0;
-  return (
-    <>
-      {agents && <span className="kb-muted">{shown} of {total} shown{favorites ? ` · ${favorites} favourite${favorites === 1 ? '' : 's'}` : ''}</span>}
-      <Button size="sm" icon="editModels" onClick={() => openEditModels()}>Edit models…</Button>
-    </>
-  );
+  return <Button size="sm" icon="editModels" onClick={() => openEditModels()}>Edit models…</Button>;
 }
 
 const ENGINE_OF_ROW: Record<string, EngineId | undefined> = {
-  'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes',
-  'skill-codex': 'codex', 'skill-claude': 'claude_code', 'skill-hermes': 'hermes',
+  'agent-codex': 'codex', 'agent-claude': 'claude_code', 'agent-hermes': 'hermes', 'agent-opencode': 'opencode',
+  'skill-codex': 'codex', 'skill-claude': 'claude_code', 'skill-hermes': 'hermes', 'skill-opencode': 'opencode',
 };
 
 function Row({ row }: { row: RowDef }) {
@@ -149,6 +147,7 @@ function Row({ row }: { row: RowDef }) {
       <div className="kb-srow__text">
         <div id={labelId} className="kb-srow__label">{ENGINE_OF_ROW[row.id] && <EngineBadge engine={ENGINE_OF_ROW[row.id]!} />}{row.label}</div>
         {row.hint && <div className="kb-srow__hint">{row.hint}</div>}
+        {row.id === 'wiki-model' && <WikiModelNote />}
       </div>
       <div className="kb-srow__control"><RowControl row={row} /></div>
       {row.id === 'agent-hermes' && <HermesProviders />}

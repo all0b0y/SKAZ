@@ -10,9 +10,7 @@
 .kb-select--grow select { width: 100%; text-overflow: ellipsis; }
 
 .kb-amt { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--t-base); }
-.kb-amt__c-sel { width: 34px; }
 .kb-amt__c-type { width: 30px; }
-.kb-amt__sel .kb-selbox { display: block; }
 .kb-amt__c-name { width: 42%; }
 .kb-amt__c-folder { width: 24%; }
 .kb-amt__c-added { width: 96px; }

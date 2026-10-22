@@ -15,11 +15,13 @@ Material ``.skaz/`` files written here:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
 import shutil
 import threading
+import weakref
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +41,8 @@ from ..logsafe import error_note
 from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
-from .fetch import MAX_PAGE_BYTES, SafeFetcher, check_url
+from . import web_page
+from .fetch import MAX_PAGE_BYTES, FetchFailed, LinkRejected, SafeFetcher, check_url
 from .fragments import sanitize_title
 from .guard import Detection, Finding, detect_instruction
 from .guard.exclusions import (
@@ -62,8 +65,9 @@ from .intake import (
     prepare_text_file,
 )
 from .links import LinkInfo, VideoProbe, classify_link, classify_offline, domain_of
-from .material_info import INTAKE_FILE
+from .material_info import INTAKE_FILE, wiki_states
 from .paths import given_path, resolved_file
+from .web_page import WebPageUnavailable, page_key, prepare_web_page
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +114,20 @@ class IntakeResult:
     excluded_count: int
     hidden_count: int
     failure: str | None
+
+
+@dataclass(frozen=True)
+class WebPageSaved:
+    """W-3: the page's material; ``existing`` = this URL was already in the folder (nothing fetched)."""
+
+    material_id: str
+    existing: bool
+    #: The new material's intake; ``None`` when ``existing``.
+    result: IntakeResult | None
+
+
+#: Wiki states after which "Add to wiki" on an already saved page starts ingest again.
+_NOT_ADDED = frozenset({"not_in_wiki", "failed"})
 
 
 @dataclass(frozen=True)
@@ -171,6 +189,10 @@ class SourceService:
         self.video_probe = video_probe
         self._listeners: list[Listener] = []
         self._lock = _GUARD_LOCK
+        #: One save at a time per (folder, page): a double click makes one material, one request.
+        self._web_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     # -- events ---------------------------------------------------------------
 
@@ -257,6 +279,51 @@ class SourceService:
         else:
             raise SourceRejected(f"SKAZ can't read this kind of page ({content_type or 'unknown type'}).")
         return await self._publish_async(prepared, folder_id, title, to_wiki)
+
+    async def add_web_page(self, url: str, folder_id: str, *, to_wiki: bool = True) -> WebPageSaved:
+        """W-3 "Add to wiki": one request to ``url`` (and its redirects), the whole page as text.
+
+        The same page already in ``folder_id`` is returned as it is, without a
+        request; if it isn't in the wiki, ``to_wiki`` asks for ingest again.
+        """
+        self.kb.require()  # refuse before any request when no library is connected
+        if self.kb.folder_repo.get(folder_id) is None:
+            raise NotFound("Folder not found.")
+        try:
+            address = self.fetcher.check(url)
+        except LinkRejected as error:
+            raise WebPageUnavailable(error.message) from error
+        key = page_key(address) or address
+        lock = self._web_locks.get((folder_id, key))
+        if lock is None:
+            lock = self._web_locks[(folder_id, key)] = asyncio.Lock()
+        async with lock:
+            existing = await disk_call(self._saved_page, folder_id, key)
+            if existing is not None:
+                if to_wiki and await disk_call(self._not_in_wiki, existing):
+                    self._emit(SourceEvent("material_ready", existing, to_wiki=True))
+                return WebPageSaved(existing, True, None)
+            try:
+                fetched = await self.fetcher.fetch(
+                    address, max_bytes=web_page.MAX_PAGE_BYTES, accept=web_page.ACCEPT,
+                    total_seconds=web_page.TOTAL_SECONDS, pin_address=True,
+                )
+            except (FetchFailed, LinkRejected) as error:
+                raise WebPageUnavailable(error.message) from error
+            prepared = prepare_web_page(fetched, address, fetched_at=utc_now())
+            result = await self._publish_async(prepared, folder_id, None, to_wiki)
+        return WebPageSaved(result.material_id, False, result)
+
+    def _saved_page(self, folder_id: str, key: str) -> str | None:
+        for record in self.kb.materials(folder_id=folder_id, kind="web"):
+            origin = record.origin or {}
+            if key in (page_key(origin.get("url")), page_key(origin.get("final_url"))):
+                return record.id
+        return None
+
+    def _not_in_wiki(self, material_id: str) -> bool:
+        state = wiki_states(self.kb.db, [material_id]).get(material_id)
+        return state is None or state.state in _NOT_ADDED
 
     async def _publish_async(self, prepared: Prepared, folder_id: str, title: str | None,
                              to_wiki: bool | None = None) -> IntakeResult:

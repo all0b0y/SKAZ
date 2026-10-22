@@ -8,6 +8,9 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
   no administrator rights. Re-running it installs the latest version (update).
 * Codex CLI — https://github.com/openai/codex (README) and
   https://developers.openai.com/codex/cli: ``curl -fsSL https://chatgpt.com/codex/install.sh | sh``.
+* OpenCode — https://opencode.ai/docs/ ("Install"): ``curl -fsSL https://opencode.ai/install | bash``
+  (installs to ``~/.opencode/bin/opencode``, checked on 2026-10-21 against the installed 1.17.18);
+  update: ``opencode upgrade`` (``opencode --help``).
 * Hermes Agent — https://hermes-agent.nousresearch.com/docs/getting-started/installation:
   ``curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash`` with
   ``--non-interactive`` (skips the stages that need input; setup is done later
@@ -75,6 +78,7 @@ def _shell(command: str) -> tuple[str, ...]:
 
 CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash"
 CODEX_INSTALL = "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+OPENCODE_INSTALL = "curl -fsSL https://opencode.ai/install | bash"
 HERMES_INSTALL = "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive"
 HERMES_ACP_EXTRA = ("{install_dir}/scripts/run-in-hermes-env", "python", "-c",
                     "import pm; pm.sync_venv(['acp'], explicit=True)")
@@ -86,6 +90,12 @@ def _claude(action: Action) -> tuple[Step, ...]:
 
 def _codex(action: Action) -> tuple[Step, ...]:
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
+
+
+def _opencode(action: Action) -> tuple[Step, ...]:
+    if action == "update":  # OpenCode's own upgrade of the install it made (``opencode upgrade``)
+        return (Step("Update OpenCode", ("{binary}", "upgrade")),)
+    return (Step("Run the official OpenCode installer", _shell(OPENCODE_INSTALL)),)
 
 
 #: SKAZ's own Hermes folder and policy on the user's own tool store (review C1,
@@ -124,4 +134,6 @@ RECIPES: dict[EngineId, Recipe] = {
                      "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
                      "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash", _hermes,
                      first_check=True, repair=True),
+    "opencode": Recipe("opencode", "OpenCode", "opencode", "https://opencode.ai/docs/", OPENCODE_INSTALL,
+                       _opencode, checked_on="2026-10-21"),
 }

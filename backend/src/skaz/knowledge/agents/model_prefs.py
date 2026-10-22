@@ -131,6 +131,13 @@ def hermes_provider(model_id: str) -> tuple[str, str]:
 
 def display(engine: EngineId, option: ModelOption, agent_name: str) -> ModelDisplay:
     """How the picker names a model: provider section and a human name (decision Q10)."""
+    if engine == "opencode":
+        # OpenCode's ``provider/model`` ids and its own model names (W-1); a name that repeats
+        # across providers carries `` · <provider>`` in the label, which the section already says.
+        provider = option.id.split("/", 1)[0] if "/" in option.id else "opencode"
+        name = option.label.removesuffix(f" · {provider}") or option.id
+        label = pool_name(provider) if provider != "opencode" else agent_name
+        return ModelDisplay(provider, label, name, None)
     if engine != "hermes":
         # Codex and Claude Code give their own display names; the agent is the one provider.
         return ModelDisplay(engine, agent_name, option.label or option.id, None)

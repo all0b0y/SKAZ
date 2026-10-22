@@ -2,7 +2,24 @@
    Mockups: .dev/ui-redesign/study/lib-v1 (table, variant A) and lib-v2 (side lists, compact bar).
    Only transform/opacity animate; selection is shown by a tick and a tint, not by colour alone. */
 
-/* The row's box: hidden until the row is hovered, focused or the list is selecting. */
+/* The row's box (F7-a): no box and no room for it until the list is selecting; then it opens on
+   every row of that list at once, pushing the row's content aside (the one width animation here:
+   the slot is 16px and the row clips, so nothing else reflows). Reduced motion: it just appears. */
+.kb-row, .kb-deck__row { --kb-sel-gap: 8px; }
+.kb-allchats__row { --kb-sel-gap: 10px; }
+.kb-selslot {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  width: 0;
+  height: 16px;
+  margin-inline-end: calc(-1 * var(--kb-sel-gap, 0px));
+  overflow: hidden;
+  opacity: 0;
+  cursor: default;
+  transition: width 160ms cubic-bezier(0.2, 0, 0, 1), margin 160ms cubic-bezier(0.2, 0, 0, 1), opacity 120ms ease;
+}
+[data-selecting] .kb-selslot { width: 16px; margin-inline-end: 0; opacity: 1; }
 .kb-selbox {
   width: 16px;
   height: 16px;
@@ -13,22 +30,23 @@
   place-items: center;
   flex: none;
   color: var(--kb-on-fill);
-  opacity: 0;
-  transition: opacity 120ms ease;
   cursor: default;
 }
-.kb-selbox.is-on { background: var(--kb-fill); border-color: var(--kb-fill); opacity: 1; }
+.kb-selbox.is-on { background: var(--kb-fill); border-color: var(--kb-fill); }
 .kb-selbox.is-off-limits { border-style: dashed; opacity: 0.35; }
-[data-sel-id]:hover .kb-selbox,
-[data-sel-id]:focus-within .kb-selbox,
-[data-selecting] .kb-selbox:not(.is-off-limits),
-.kb-selbox--all { opacity: 1; }
-[data-selecting] .kb-selbox.is-off-limits,
-[data-sel-id]:hover .kb-selbox.is-off-limits { opacity: 0.35; }
 .kb-selbox--all { padding: 0; }
 .kb-selbox__dash { width: 8px; height: 1.5px; background: currentColor; border-radius: 1px; }
 .kb-selbox--all.is-on { color: var(--kb-on-fill); }
 .kb-selbox--all:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 2px; }
+
+/* All materials: the box column takes no room either; "Select all" in its header opens it when
+   it gets the keyboard focus. */
+.kb-amt th.kb-amt__sel, .kb-amt td.kb-amt__sel { padding-inline: 0; }
+.kb-amt__sel .kb-selslot, .kb-amt__sel .kb-selbox--all { margin-inline: 6px 0; }
+.kb-amt__sel .kb-selbox--all { display: grid; }
+.kb-amt col.kb-amt__c-sel { width: 0; transition: width 160ms cubic-bezier(0.2, 0, 0, 1); }
+[data-selecting] .kb-amt col.kb-amt__c-sel,
+.kb-amt:has(.kb-selbox--all:focus-visible) col.kb-amt__c-sel { width: 34px; }
 
 /* Selected rows: a tint plus the ticked box. */
 [data-sel-id] { user-select: none; }
@@ -192,7 +210,7 @@ tr[data-sel-id]:focus-within > td:first-child { box-shadow: inset 2px 0 0 var(--
 .kb-batchdel__result { margin-top: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .kb-selbox { transition: none; }
+  .kb-selslot, .kb-amt col.kb-amt__c-sel { transition: none; }
 }
 .kb-moveto { padding: 5px; }
 .kb-moveto__head { margin: 2px 8px 4px; font-size: var(--t-xs); color: var(--kb-muted); }

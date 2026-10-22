@@ -121,7 +121,7 @@ class Recheck:
             ]
         )
         answer = await caller.ask_json(
-            instructions_for(RECHECK_INSTRUCTIONS, language, skills=self.ctx.skills()),
+            instructions_for(RECHECK_INSTRUCTIONS, language),
             prompt, RECHECK_SCHEMA, RecheckOut,
         )
         if answer is None:

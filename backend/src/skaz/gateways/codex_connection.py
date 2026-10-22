@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from .codex_locate import CodexLocation, locate_codex
@@ -126,12 +126,17 @@ class CodexConnection:
             "TMPDIR": str(self.root / "tmp"), "LANG": "en_US.UTF-8", "PATH": path,
         }
 
-    def rpc(self, *, max_message_bytes: int = 1024 * 1024) -> CodexRpc:
+    def rpc(self, *, max_message_bytes: int = 1024 * 1024,
+            web_search: Literal["disabled", "live"] = "disabled") -> CodexRpc:
+        """``web_search="live"`` only for W-3b's clean search run (``knowledge/agents/web_runner.py``):
+        a process of its own whose one thread holds nothing but the approved query."""
         if self.binary is None:
             raise ValueError("Check the Codex connection first")
+        if web_search not in ("disabled", "live"):
+            raise ValueError("Unknown Codex web search mode")
         command = [self.binary, "app-server", "--listen", "stdio://",
                    "-c", 'cli_auth_credentials_store="file"',
-                   "-c", 'forced_login_method="chatgpt"', "-c", 'web_search="disabled"']
+                   "-c", 'forced_login_method="chatgpt"', "-c", f'web_search="{web_search}"']
         for feature in DISABLED_FEATURES:
             command.extend(("-c", f"features.{feature}=false"))
         env = self.environment()

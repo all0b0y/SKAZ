@@ -62,6 +62,11 @@ def forget_page(db: KnowledgeDatabase, page_id: str) -> None:
     with db.write() as connection:
         connection.execute("DELETE FROM pages WHERE id = ?", (page_id,))
         connection.execute("DELETE FROM wiki_checked WHERE page_id = ?", (page_id,))
+        # C1-a: what was checked about a page that is gone is never reused (rows of a page whose
+        # index row is removed otherwise are pruned before the next connection run).
+        connection.execute("DELETE FROM wiki_connection_checks WHERE page_a = ? OR page_b = ?",
+                           (page_id, page_id))
+        connection.execute("DELETE FROM wiki_connection_pending WHERE page_id = ?", (page_id,))
 
 
 def forget_material(db: KnowledgeDatabase, material_id: str) -> None:

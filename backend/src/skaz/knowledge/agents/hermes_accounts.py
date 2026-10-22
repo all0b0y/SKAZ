@@ -23,6 +23,7 @@ from .hermes_providers import (
     ProviderPool,
     TerminalCommand,
     add_command,
+    add_key_command,
     catalog_entry,
     order_command,
     ordered,
@@ -41,10 +42,28 @@ COMMAND_FAILED = "Hermes didn't do it: {detail}"
 TERMINAL_FAILED = "SKAZ couldn't open Terminal for Hermes."
 UNKNOWN_PROVIDER = "SKAZ doesn't know this provider. Use “Other provider…” to add it in Hermes."
 NO_CREDENTIAL = "This credential is no longer in Hermes. The list was read again."
+NO_PROVIDER = "This provider is no longer in Hermes. The list was read again."
+NO_KEYS = "Hermes adds keys only to providers that use API keys. Use “Other provider…” for anything else."
+KEY_NAME = "Give the key a name of up to {limit} characters, on one line."
+KEY_NAME_TAKEN = "{provider} already has a key named “{label}”. Choose another name."
+#: Longest key name SKAZ passes to ``hermes auth add --label`` (Hermes itself has no limit).
+KEY_NAME_MAX = 40
 
 
 class AccountsError(KnowledgeError):
     status_code = 409
+
+
+class KeyNameError(AccountsError):
+    status_code = 422
+
+
+def key_name(label: str) -> str:
+    """A key's name as Hermes stores it (``--label``): one printable line, trimmed, ≤ KEY_NAME_MAX."""
+    name = label.strip()
+    if not name or len(name) > KEY_NAME_MAX or any(not char.isprintable() for char in name):
+        raise KeyNameError(KEY_NAME.format(limit=KEY_NAME_MAX))
+    return name
 
 
 @dataclass(frozen=True)
@@ -127,7 +146,9 @@ class HermesAccounts:
 
     async def _open(self, command: TerminalCommand) -> AccountsView:
         try:
-            await self.engine.open_terminal(command.name, command.title, command.commands)
+            await self.engine.open_terminal(command.name, command.title, command.commands,
+                                            close_on_success=command.close_on_success,
+                                            done_note=command.done_note)
         except FileNotFoundError as error:
             raise AccountsError(NOT_INSTALLED) from error
         except LauncherTampered as error:
@@ -143,6 +164,23 @@ class HermesAccounts:
         if entry is None:
             raise NotFound(UNKNOWN_PROVIDER)
         return await self._open(add_command(entry))
+
+    async def add_key(self, provider: str, label: str) -> AccountsView:
+        """Another named API key for a provider: Hermes asks for the key in Terminal; SKAZ passes
+        only the name (``hermes auth add <provider> --type api-key --label <name>``)."""
+        name = key_name(label)
+        if not SAFE_ID.fullmatch(provider):
+            raise NotFound(NO_KEYS)
+        entry = catalog_entry(provider, "api_key")
+        current = await self.view()
+        pool = next((item for item in current.providers if item.id == provider), None)
+        has_keys = pool is not None and any(c.auth_type == "api_key" for c in pool.credentials)
+        if entry is None and not has_keys:
+            raise NotFound(NO_KEYS)
+        if pool is not None and any(c.label == name for c in pool.credentials):
+            raise AccountsError(KEY_NAME_TAKEN.format(provider=pool.name, label=name))
+        shown = pool.name if pool is not None else entry.name if entry is not None else provider
+        return await self._open(add_key_command(provider, shown, name))
 
     async def add_other(self) -> AccountsView:
         return await self._open(other_command())
@@ -181,6 +219,19 @@ class HermesAccounts:
         await self._credential(provider, credential_id)
         await self._run("auth", "remove", provider, credential_id)
         log.info("Removed a %s credential from SKAZ's Hermes folder", provider)
+        return await self.view()
+
+    async def remove_provider(self, provider: str) -> AccountsView:
+        """Every credential the user added for a provider, each with ``hermes auth remove`` (no secret)."""
+        if not SAFE_ID.fullmatch(provider):
+            raise NotFound(NO_PROVIDER)
+        current = await self.view()
+        pool = next((item for item in current.providers if item.id == provider), None)
+        if pool is None or not pool.credentials:
+            raise NotFound(NO_PROVIDER)
+        for credential in pool.credentials:
+            await self._run("auth", "remove", provider, credential.id)
+        log.info("Removed %d %s credentials from SKAZ's Hermes folder", len(pool.credentials), provider)
         return await self.view()
 
     async def move(self, provider: str, credential_id: str, priority: int) -> AccountsView:

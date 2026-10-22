@@ -30,7 +30,7 @@ ProviderGroup = Literal["subscription", "api_key", "cloud"]
 CredentialState = Literal["ready", "limited", "signed_out", "error"]
 
 #: When this catalog was last checked against Hermes' provider registry, and against what.
-CATALOG_CHECKED = "2026-10-18 · Hermes v0.22.2 and main a2ad0d5"
+CATALOG_CHECKED = "Hermes v0.22.2 (2026-10-18)"
 
 
 @dataclass(frozen=True)
@@ -108,7 +108,7 @@ for _item in CATALOG:
     _NAMES.setdefault(_item.id, _item.name)
 #: How the credential list names a provider (an API-key row of a sign-in provider keeps one name).
 POOL_NAMES: dict[str, str] = {
-    **_NAMES, "openai-codex": "ChatGPT or Codex subscription", "anthropic": "Anthropic",
+    **_NAMES, "openai-codex": "ChatGPT", "anthropic": "Anthropic",
     "nous": "Nous Portal", "xai-oauth": "xAI Grok", "qwen-oauth": "Qwen Code", "minimax-oauth": "MiniMax",
 }
 
@@ -274,7 +274,15 @@ class TerminalCommand:
     commands: tuple[tuple[str, ...], ...]
     provider: str | None = None
     extra: dict[str, str] = field(default_factory=dict)
+    #: The window closes itself after success; a window that only shows something waits for Return.
+    close_on_success: bool = True
+    #: Its English line after success.
+    done_note: str = "Hermes finished. SKAZ is checking it now."
 
+
+#: English lines a Hermes window prints after success (then it closes itself).
+SIGNED_IN_NOTE = "Sign-in finished. SKAZ is checking it now."
+KEY_ADDED_NOTE = "Key added. SKAZ is checking it now."
 
 SAFE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
 SAFE_CREDENTIAL = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -289,7 +297,17 @@ def add_command(provider: CatalogProvider) -> TerminalCommand:
     what = "Finish signing in in your browser" if kind == "oauth" else "Paste the key when Hermes asks"
     return TerminalCommand(f"hermes-provider-add-{provider.id}",
                            f"SKAZ opened Hermes to add {provider.name}. {what}; SKAZ never sees it.",
-                           (("auth", "add", provider.id, "--type", kind),), provider.id)
+                           (("auth", "add", provider.id, "--type", kind),), provider.id,
+                           done_note=SIGNED_IN_NOTE if kind == "oauth" else KEY_ADDED_NOTE)
+
+
+def add_key_command(provider: str, name: str, label: str) -> TerminalCommand:
+    """Another named API key for a provider: Hermes asks for the key itself (``--label`` only names it)."""
+    return TerminalCommand(f"hermes-provider-key-{provider}",
+                           f"SKAZ opened Hermes to add the {name} key “{label}”. Paste the key when Hermes "
+                           "asks; SKAZ never sees it.",
+                           (("auth", "add", provider, "--type", "api-key", "--label", label),), provider,
+                           done_note=KEY_ADDED_NOTE)
 
 
 def sign_in_again_command(pool: ProviderPool, credential: Credential) -> TerminalCommand:
@@ -302,7 +320,8 @@ def sign_in_again_command(pool: ProviderPool, credential: Credential) -> Termina
     return TerminalCommand(f"hermes-provider-signin-{pool.id}",
                            f"SKAZ opened Hermes to sign in to {pool.name} again. The old sign-in is "
                            "removed only after the new one works; SKAZ never sees either.",
-                           (add, ("auth", "remove", pool.id, credential.id)), pool.id)
+                           (add, ("auth", "remove", pool.id, credential.id)), pool.id,
+                           done_note=SIGNED_IN_NOTE if kind == "oauth" else KEY_ADDED_NOTE)
 
 
 def other_command() -> TerminalCommand:
@@ -312,4 +331,5 @@ def other_command() -> TerminalCommand:
 
 def order_command() -> TerminalCommand:
     return TerminalCommand("hermes-provider-order", "SKAZ opened Hermes' fallback providers: the order "
-                           "Hermes tries providers in when the main one fails.", (("fallback",),))
+                           "Hermes tries providers in when the main one fails.", (("fallback",),),
+                           close_on_success=False)

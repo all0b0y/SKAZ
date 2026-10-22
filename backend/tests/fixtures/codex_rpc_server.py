@@ -39,6 +39,13 @@ for line in sys.stdin:
             send({"id": request["id"], "error": {
                 "code": -32000, "message": "PRIVATE ERROR PAYLOAD",
             }})
+    elif method == "fixture/burst":
+        # A long answer streamed fast: many deltas written at once, then the reply.
+        out = "".join(json.dumps({"method": "item/agentMessage/delta", "params": {"delta": "x"}}) + "\n"
+                      for _ in range(request["params"]["count"]))
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        send({"id": request["id"], "result": "done"})
     elif method == "fixture/reverse":
         pending.append(request["id"])
         if len(pending) == 2:

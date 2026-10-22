@@ -64,6 +64,7 @@ async def test_humanizer_is_on_by_default_with_a_status_per_agent(api: httpx.Asy
             {"engine": "claude_code", "state": "loaded", "reason": None},
             {"engine": "hermes", "state": "not_loaded",
              "reason": "Too old."},
+            {"engine": "opencode", "state": "not_loaded", "reason": "OpenCode is not installed."},
         ],
     }]}
 
@@ -75,7 +76,8 @@ async def test_turning_humanizer_off_is_stored_and_every_agent_reads_off(api: ht
     skill = response.json()["skills"][0]
     assert skill["enabled"] is False
     assert [(e["engine"], e["state"], e["reason"]) for e in skill["engines"]] == [
-        ("codex", "off", None), ("claude_code", "off", None), ("hermes", "off", None)]
+        ("codex", "off", None), ("claude_code", "off", None), ("hermes", "off", None),
+        ("opencode", "off", None)]
     kb = app.state.runtime.kb
     assert kb.settings.get("humanizer_enabled") is False
     assert enabled_skills(kb.settings) == ()

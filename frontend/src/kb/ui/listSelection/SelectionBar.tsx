@@ -9,13 +9,15 @@ import type { RefObject } from 'react';
 /**
  * The row's box. Visual only (`aria-hidden`): the row itself carries `aria-selected`, and Space
  * toggles it from the keyboard. Checked shows a tick, not just a colour; a row that can't be
- * selected gets a dashed box with the reason as its title.
+ * selected gets a dashed box with the reason as its title. The slot takes no room until the list
+ * is selecting (F7-a); then it opens on every row of that list (styles/selection.css).
  */
 export function SelectionCheckbox({ checked, reason = null, label }: { checked: boolean; reason?: string | null; label?: string }) {
   return (
-    <span className={`kb-selbox${checked ? ' is-on' : ''}${reason ? ' is-off-limits' : ''}`} data-sel-box=""
-      aria-hidden="true" title={reason ?? label ?? (checked ? 'Deselect' : 'Select')}>
-      {checked && <Icon name="check" size={12} />}
+    <span className="kb-selslot" data-sel-box="" aria-hidden="true" title={reason ?? label ?? (checked ? 'Deselect' : 'Select')}>
+      <span className={`kb-selbox${checked ? ' is-on' : ''}${reason ? ' is-off-limits' : ''}`}>
+        {checked && <Icon name="check" size={12} />}
+      </span>
     </span>
   );
 }
@@ -23,7 +25,7 @@ export function SelectionCheckbox({ checked, reason = null, label }: { checked: 
 /** "Select all" in a table header: a real checkbox for assistive tech. */
 export function SelectAllBox({ state, onChange }: { state: 'none' | 'some' | 'all'; onChange: (all: boolean) => void }) {
   return (
-    <button type="button" role="checkbox" aria-checked={state === 'all' ? true : state === 'some' ? 'mixed' : false}
+    <button type="button" role="checkbox" data-sel-keep="" aria-checked={state === 'all' ? true : state === 'some' ? 'mixed' : false}
       aria-label="Select all" className={`kb-selbox kb-selbox--all${state !== 'none' ? ' is-on' : ''}`}
       onClick={(e) => { e.stopPropagation(); onChange(state !== 'all'); }}>
       {state === 'all' && <Icon name="check" size={12} />}
@@ -145,7 +147,8 @@ export function ShortcutsPopover({ open, onClose, anchorRef, has }: {
           </div>
         ))}
       </dl>
-      <p className="kb-shortcuts__note">Work in the focused list only. In a text field ⌘A and ⌘⌫ keep their usual meaning.</p>
+      <p className="kb-shortcuts__note">⌘A over a list — select all in it.</p>
+      <p className="kb-shortcuts__note">Other keys work in the focused list. In a text field ⌘A and ⌘⌫ keep their usual meaning.</p>
     </Popover>
   );
 }

@@ -15,6 +15,7 @@ import type {
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
   KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
+  KbWebSearchPart,
 } from '../../api/kb/types.gen';
 import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
@@ -63,6 +64,8 @@ export interface FakeWorld {
   agents: KbAgents;
   /** Hermes' providers in SKAZ's folder (0.3.1 K1/K3). */
   hermesProviders: KbHermesProviders;
+  /** Accounts & keys v3: how each sign-in started here ends (default: it goes through). */
+  signIns?: Partial<Record<string, 'waiting' | 'done' | 'failed'>>;
   installTasks: Record<string, KbInstallTask>;
   keys: KbKeys;
   speech: KbSpeechSettings;
@@ -106,6 +109,10 @@ export interface FakeWorld {
   answerCite?: KbCitation;
   /** 0.3.1 P: kinds allowed without a question per chat («Allow in this chat»). */
   permissionGrants?: Record<string, string[]>;
+  /** W-2: chats whose web search is allowed without a question → since when (ISO). */
+  webGrants?: Record<string, string>;
+  /** D (decision 9): what «Save to wiki» left out, by answer id (one answer) or chat id (whole chat). */
+  saveWarnings?: Record<string, string>;
   /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
   undoRefusals?: Record<string, string>;
   /** 0.3.1 H: SKAZ skills switched off (absent = every skill on, as the backend's default). */
@@ -210,7 +217,7 @@ function newJob(world: FakeWorld, kind: KbJob['kind'], materialId: string | null
   const job: KbJob = {
     id: `j${++world.seq}`, kind, material_id: materialId, state, step: state === 'done' ? 'done' : 'reading', label, error: null, error_code: null, can_retry: false,
     progress: { parts_total: 1, parts_done: state === 'done' ? 1 : 0, concepts_found: 0, blocks_written: 0, blocks_dropped: 0, blocks_blocked: 0, concepts_created: 0, concepts_updated: 0 },
-    journal: [], created_at: stamp(world), updated_at: stamp(world),
+    execution: null, journal: [], created_at: stamp(world), updated_at: stamp(world),
   };
   world.jobs.push(job);
   return job;
@@ -622,6 +629,40 @@ function deckView(w: FakeWorld, pageId: string): KbDeckView {
 
 const normalized = (t: string) => t.trim().toLowerCase().replace(/[.!?]+$/, '');
 
+/** W-2: an agent's web search waits for the user; «Allow in this chat» is kept per chat, like the backend. */
+function findWebSearch(w: FakeWorld, id: string): FakeWaiting<KbWebSearchPart> {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = partsOf(message).find((p) => p.type === 'web_search' && p.id === id);
+      if (part) return { chat, message, part: part as KbWebSearchPart };
+    }
+  }
+  return fail(404, 'Web search not found.');
+}
+
+const webGrant = (w: FakeWorld, chatId: string) => {
+  if (!w.chats.some((c) => c.id === chatId)) fail(404, 'Chat not found.');
+  const at = w.webGrants?.[chatId] ?? null;
+  return { allowed: at !== null, granted_at: at };
+};
+
+const WEB_ROUTES: FakeRoutes = {
+  'POST /kb/web-searches/{search_id}/decide': [200, (w, { path, body }) => {
+    const found = findWebSearch(w, path.search_id);
+    if (found.part.status !== 'pending') fail(409, 'This request was already answered.');
+    found.part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    if (body.decision === 'allow_chat') (w.webGrants ??= {})[found.chat.id] = new Date().toISOString();
+    updated(w, found);
+    return structuredClone(found.part);
+  }],
+  'GET /kb/chats/{chat_id}/web-search': [200, (w, { path }) => webGrant(w, path.chat_id)],
+  'DELETE /kb/chats/{chat_id}/web-search': [200, (w, { path }) => {
+    webGrant(w, path.chat_id);
+    if (w.webGrants) delete w.webGrants[path.chat_id];
+    return webGrant(w, path.chat_id);
+  }],
+};
+
 const STUDY_ROUTES: FakeRoutes = {
   'GET /kb/study/settings': [200, (w) => ({ new_per_day: w.studyNewPerDay ?? 20 })],
   'PATCH /kb/study/settings': [200, (w, { body }) => {
@@ -783,6 +824,25 @@ const STUDY_ROUTES: FakeRoutes = {
     }
     return studyChanged(w, found);
   }],
+  // U3: like the backend — the page file name drops characters a file can't hold; a saved block's page follows.
+  'POST /kb/study/{block_id}/rename': [200, (w, { path, body }) => {
+    const found = findStudy(w, path.block_id);
+    const { part } = found;
+    if (part.origin !== 'agent') fail(409, 'Rename this deck from its wiki page.');
+    const title = body.title.trim();
+    if (!title) fail(422, 'The name is empty. Choose another name.');
+    const fileName = title.replace(/[/\\:*?"<>|#^[\]]/g, ' ').split(/\s+/).filter(Boolean).join(' ');
+    const dir = part.kind === 'deck' ? 'Wiki/Decks' : 'Wiki/Tests';
+    if (part.save.status === 'saved') {
+      part.title = fileName;
+      const page = w.pages.find((p) => p.id === part.save.page_id);
+      if (page) page.title = fileName;
+    } else {
+      part.title = title;
+    }
+    part.save = { ...part.save, path: `${dir}/${fileName}.md` };
+    return studyChanged(w, found);
+  }],
 };
 
 // ---- The typed route table ------------------------------------------------------------------
@@ -893,6 +953,12 @@ const ROUTES: FakeRoutes = {
     const video = info.kind === 'video' && body.mode !== 'text';
     return added(w, newMaterial(w, body.title ?? info.title ?? info.domain, video ? 'video_link' : 'web', body.folder_id, 'processing', []));
   }],
+  // W-3: like sources/web_page.py — the whole page, or 422 with the Save-as-PDF advice.
+  'POST /kb/materials/web': [201, (w, { body }) => {
+    if (/signin/.test(body.url)) fail(422, 'This page asks you to sign in before it shows its text. Save the page as PDF and import it.');
+    const info = classifyFake(body.url);
+    return structuredClone(newMaterial(w, info.domain, 'web', body.folder_id ?? 'inbox', 'ready', ['The whole page as text.']));
+  }],
   'POST /kb/links/classify': [200, (_w, { body }) => classifyFake(body.url)],
   'POST /kb/imports': [201, (w, { body }) => {
     const name = body.title ?? (body.url ? classifyFake(body.url).title ?? 'Video' : (body.path ?? '').split('/').pop()!.replace(/\.[^.]+$/, ''));
@@ -974,7 +1040,10 @@ const ROUTES: FakeRoutes = {
   'DELETE /kb/wiki/pages/{page_id}/blocks/{block_id}': [200, (w, { path }) => {
     const page = findPage(w, path.page_id);
     const b = page.blocks.find((x) => x.id === path.block_id) ?? fail(404, 'Block not found.');
-    if (b.owner !== 'user') fail(409, 'Only your own notes can be deleted.');
+    // Like wiki/edit.py delete_note: own notes and connections SKAZ wrote (`c-link-*`) only.
+    if (b.owner !== 'user' && !(b.kind === 'connection' && b.id.startsWith('c-link-'))) {
+      fail(409, 'Only your own notes and connections can be deleted. Edit the statement or ask the agent to recheck it.');
+    }
     page.blocks = page.blocks.filter((x) => x !== b);
     return page;
   }],
@@ -1054,7 +1123,18 @@ const ROUTES: FakeRoutes = {
     w.chats.push(c);
     w.chatEvents[c.id] = [];
     touchList(w, c);
+    if (body?.model) a!.last_choice = { model: body.model, effort: body.effort ?? null };
     return structuredClone(c);
+  }],
+  // Models screen v2: a choice made in New chat, before the chat exists; checked like a chat's.
+  'PUT /kb/chats/last-choice': [204, (w, { body }) => {
+    const a = w.agents.agents.find((x) => x.id === body.engine);
+    if (!a) fail(422, 'Unknown agent.');
+    const m = body.model ? a!.models.find((x) => x.id === body.model) : undefined;
+    if (body.model && !m) fail(422, `${a!.name} has no model ${body.model}.`);
+    if (body.effort && !m?.efforts.includes(body.effort)) fail(422, 'This model has no such reasoning.');
+    a!.last_choice = { model: body.model ?? null, effort: body.effort ?? null };
+    return undefined;
   }],
   'GET /kb/chats/{chat_id}': [200, (w, { path }) => structuredClone(findChat(w, path.chat_id))],
   'PATCH /kb/chats/{chat_id}': [200, (w, { path, body }) => {
@@ -1069,8 +1149,19 @@ const ROUTES: FakeRoutes = {
       const sys = chatMessage(`${c.id}-s${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [{ type: 'text', text: `Switched to ${a!.name}` }], { engine: a!.id });
       c.messages.push(sys);
       pushEvent(w, c.id, { type: 'message', message_id: sys.id, message: structuredClone(sys) });
-    } else if (typeof body.model === 'string') c.model = body.model;
+    } else if (typeof body.model === 'string' && body.model !== c.model) {
+      // As the backend (chats/service.py `_switch_note`): a model change is recorded; an effort change is not.
+      c.model = body.model;
+      const label = w.agents.agents.find((x) => x.id === c.engine)?.models.find((x) => x.id === body.model)?.label ?? body.model;
+      const sys = chatMessage(`${c.id}-s${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [{ type: 'text', text: `Model changed to ${label}` }], { engine: c.engine });
+      c.messages.push(sys);
+      pushEvent(w, c.id, { type: 'message', message_id: sys.id, message: structuredClone(sys) });
+    }
     if (typeof body.effort === 'string') c.effort = body.effort;
+    if (body.engine || body.model !== undefined || body.effort !== undefined) {
+      const a = w.agents.agents.find((x) => x.id === c.engine);
+      if (a) a.last_choice = { model: c.model, effort: c.effort };
+    }
     touchList(w, c);
     return chatSummary(c);
   }],
@@ -1109,6 +1200,21 @@ const ROUTES: FakeRoutes = {
     return structuredClone(msg);
   }],
   'POST /kb/chats/{chat_id}/messages/{message_id}/regenerate': [202, (w, { path }) => answerAgain(w, path.chat_id, path.message_id, false)],
+  // As chats/service.py `edit`: the question changes in place, everything after it goes, a new answer starts.
+  'POST /kb/chats/{chat_id}/messages/{message_id}/edit': [202, (w, { path, body }) => {
+    const c = findChat(w, path.chat_id);
+    if (c.state === 'answering') fail(409, 'The agent is still answering in this chat. Stop it or wait for the answer.');
+    const msg = findMessage(c, path.message_id);
+    if (msg.role !== 'user') fail(422, 'Only your own question can be edited.');
+    for (const gone of c.messages.filter((m) => m.seq > msg.seq)) pushEvent(w, c.id, { type: 'removed', message_id: gone.id });
+    c.messages = c.messages.filter((m) => m.seq <= msg.seq);
+    msg.parts = [{ type: 'text', text: body.text }];
+    msg.input = { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] };
+    pushEvent(w, c.id, { type: 'message', message_id: msg.id, message: structuredClone(msg) });
+    const assistant = startAnswer(w, c, body.text);
+    touchList(w, c);
+    return { user: structuredClone(msg), assistant: structuredClone(c.messages.find((x) => x.id === assistant.id)!) };
+  }],
   'POST /kb/chats/{chat_id}/messages/{message_id}/resume': [202, (w, { path }) => answerAgain(w, path.chat_id, path.message_id, true)],
   'POST /kb/chats/{chat_id}/messages/{message_id}/save': [200, (w, { path }) => {
     const c = findChat(w, path.chat_id);
@@ -1116,11 +1222,11 @@ const ROUTES: FakeRoutes = {
     if (msg.saved_page_id) fail(409, 'This answer is already saved to the wiki.');
     msg.saved_page_id = `p-${msg.id}`;
     emit(w, c, [{ type: 'message', message_id: msg.id, message: structuredClone(msg) }]);
-    return { id: msg.saved_page_id, kind: 'analysis', title: c.title };
+    return { id: msg.saved_page_id, kind: 'analysis', title: c.title, warning: w.saveWarnings?.[msg.id] ?? null };
   }],
   'POST /kb/chats/{chat_id}/save': [200, (w, { path }) => {
     const c = findChat(w, path.chat_id);
-    return { id: `p-${c.id}`, kind: 'analysis', title: c.title };
+    return { id: `p-${c.id}`, kind: 'analysis', title: c.title, warning: w.saveWarnings?.[c.id] ?? null };
   }],
   'GET /kb/chats/{chat_id}/export': [200, (w, { path }) => {
     const c = findChat(w, path.chat_id);
@@ -1290,9 +1396,25 @@ const ROUTES: FakeRoutes = {
   }],
   'GET /kb/settings/wiki': [200, (w) => structuredClone(w.wiki)],
   'PUT /kb/settings/wiki': [200, (w, { body }) => {
+    // Like ingest/settings.py update_settings (models screen v2): another agent without a model in
+    // the request gets its last model and reasoning back.
+    const remembered = w.wiki.wiki_remembered ?? {};
+    if ('wiki_engine' in body && (body.wiki_engine ?? null) !== w.wiki.wiki_engine) {
+      const back = body.wiki_engine && !('wiki_model' in body) ? remembered[body.wiki_engine] : undefined;
+      w.wiki.wiki_model = back?.model ?? null;
+      w.wiki.wiki_effort = back?.effort ?? null;
+    }
+    if ('wiki_model' in body && body.wiki_model !== w.wiki.wiki_model && !('wiki_effort' in body)) w.wiki.wiki_effort = null;
     for (const [k, v] of Object.entries(body)) if (v !== undefined && k !== 'wiki_engine') (w.wiki as unknown as Record<string, unknown>)[k] = v;
     if ('wiki_engine' in body) w.wiki.wiki_engine = body.wiki_engine ?? null;
     if (body.wiki_language) w.wiki.wiki_language_chosen = true;
+    const engine = w.wiki.wiki_engine;
+    if (engine) {
+      const next = { ...remembered };
+      if (w.wiki.wiki_model) next[engine] = { model: w.wiki.wiki_model, effort: w.wiki.wiki_effort };
+      else if ('wiki_model' in body) delete next[engine];
+      w.wiki.wiki_remembered = next;
+    }
     return structuredClone(w.wiki);
   }],
   'GET /kb/decisions': [200, (w) => structuredClone(w.decisions)],
@@ -1326,8 +1448,19 @@ const ROUTES: FakeRoutes = {
   'POST /kb/agents/{engine}/login': [200, (w, { path, body }) => {
     const a = findAgent(w, path.engine);
     if (a.id === 'codex' && body?.consent !== true) fail(409, 'Confirm the ChatGPT privacy notice first.');
-    Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
-    return { engine: a.id, method: 'terminal', url: null, message: `${a.name} sign-in opened in Terminal. Come back when it says you’re signed in.` };
+    // Accounts & keys v3: the sign-in is followed until it ends (GET …/sign-in); a test may hold or fail it.
+    w.signIns = { ...w.signIns, [a.id]: w.signIns?.[a.id] ?? 'done' };
+    if (w.signIns[a.id] === 'done') Object.assign(a, { state: 'ready', signed_in: true, reason: null, action: null });
+    if (a.id === 'codex') {
+      return { engine: a.id, method: 'browser', url: 'https://auth.openai.com/authorize?fake=1',
+        message: 'Finish signing in in your browser. SKAZ checks as soon as it’s done.' };
+    }
+    return { engine: a.id, method: 'terminal', url: null, message: 'Finish in Terminal: sign in there. SKAZ checks as soon as Terminal finishes.' };
+  }],
+  'GET /kb/agents/{engine}/sign-in': [200, (w, { path }) => {
+    const a = findAgent(w, path.engine);
+    const state = w.signIns?.[a.id];
+    return { engine: a.id, method: state ? (a.id === 'codex' ? 'browser' : 'terminal') : null, state: state ?? 'idle' };
   }],
   // 0.3.1 K2/K4: what the picker shows (the real backend keeps it in SKAZ's settings).
   'PATCH /kb/agents/models': [200, (w, { body }) => {
@@ -1388,15 +1521,33 @@ const ROUTES: FakeRoutes = {
     pool.credentials = rest.map((c, i) => ({ ...c, index: i + 1, priority: i }));
     return structuredClone(w.hermesProviders);
   }],
+  'POST /kb/agents/hermes/providers/{provider}/keys': [200, (w, { path, body }) => {
+    const label = body.label.trim();
+    if (!label || label.length > 40 || /[\u0000-\u001f]/.test(label)) fail(422, 'Give the key a name of up to 40 characters, on one line.');
+    const pool = w.hermesProviders.providers.find((p) => p.id === path.provider);
+    if (pool?.credentials.some((c) => c.label === label)) fail(409, `${pool.name} already has a key named “${label}”. Choose another name.`);
+    w.hermesProviders.terminal = { provider: path.provider, title: `SKAZ opened Hermes to add the key “${label}”.`, state: 'running', started_at: stamp(w) };
+    return structuredClone(w.hermesProviders);
+  }],
+  'DELETE /kb/agents/hermes/providers/{provider}': [200, (w, { path }) => {
+    const pool = w.hermesProviders.providers.find((p) => p.id === path.provider && p.credentials.length > 0)
+      ?? fail(404, 'This provider is no longer in Hermes. The list was read again.');
+    w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
+    return structuredClone(w.hermesProviders);
+  }],
   'DELETE /kb/agents/hermes/providers/{provider}/credentials/{credential_id}': [200, (w, { path }) => {
     const { pool, credential } = hermesCredential(w, path.provider, path.credential_id);
     pool.credentials = pool.credentials.filter((c) => c.id !== credential.id).map((c, i) => ({ ...c, index: i + 1, priority: i }));
     if (pool.credentials.length === 0 && !pool.free_tier) w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
     return structuredClone(w.hermesProviders);
   }],
-  'POST /kb/agents/codex/logout': [200, (w) => {
-    const a = findAgent(w, 'codex');
-    Object.assign(a, { state: 'signed_out', signed_in: false, reason: 'Sign in with ChatGPT to use Codex.', action: 'login', models: [], current_model: null });
+  // Accounts & keys v3: Codex and OpenCode sign out of SKAZ's own folders; Claude Code and Hermes refuse.
+  'POST /kb/agents/{engine}/logout': [200, (w, { path }) => {
+    const a = findAgent(w, path.engine);
+    if (a.id === 'claude_code') fail(409, 'Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn’t sign it out.');
+    if (a.id === 'hermes') fail(409, 'Hermes signs in per provider. Open a provider under Hermes Agent and choose Remove… to sign Hermes out of it.');
+    const reason = a.id === 'codex' ? 'Sign in with ChatGPT to use Codex.' : 'Sign in to a model provider to use OpenCode.';
+    Object.assign(a, { state: 'signed_out', signed_in: false, reason, action: 'login', models: [], current_model: null });
     return structuredClone(a);
   }],
   'POST /kb/agents/{engine}/install': [202, (w, { path, body }) => {
@@ -1487,7 +1638,17 @@ function answerAgain(w: FakeWorld, chatId: string, messageId: string, resume: bo
   if (resume && msg.state !== 'interrupted') fail(409, 'This answer wasn’t interrupted.');
   const idx = c.messages.indexOf(msg);
   const question = [...c.messages.slice(0, idx)].reverse().find((x) => x.role === 'user');
+  if (resume) {  // like the backend (2026-10-21): the interrupted answer gives its place to the new one
+    c.messages.splice(idx, 1);
+    pushEvent(w, c.id, { type: 'removed', message_id: msg.id });
+  }
   const answer = startAnswer(w, c, resume ? '' : (question?.input?.text ?? ''));
+  if (resume) {
+    const at = c.messages.findIndex((x) => x.id === answer.id);
+    const [moved] = c.messages.splice(at, 1);
+    moved!.seq = msg.seq;
+    c.messages.splice(idx, 0, moved!);
+  }
   touchList(w, c);
   return { user: structuredClone(question ?? msg), assistant: structuredClone(c.messages.find((x) => x.id === answer.id)!) };
 }
@@ -1525,7 +1686,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1536,7 +1697,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;

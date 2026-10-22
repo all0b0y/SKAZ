@@ -385,7 +385,8 @@ async def test_two_materials_run_in_parallel(ready: KnowledgeService) -> None:
     ingest = service_for(ready, wiki)
     jobs = [await ingest.request_ingest(first), await ingest.request_ingest(second)]
     await settle(lambda: len(wiki.engine.active_runs()) == 2)
-    assert all(ingest.job(job.id).label == "Writing notes" for job in jobs)
+    # C1-f: the label says which part is being written.
+    assert all(ingest.job(job.id).label == "Writing notes · part 1 of 1" for job in jobs)
     with pytest.raises(IngestBusy):
         await ingest.request_ingest(first)
     gate.set()

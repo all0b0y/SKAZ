@@ -272,6 +272,14 @@ def execute_delete(kb: KnowledgeService, plan: DeletePlan) -> None:
             "DELETE FROM wiki_discrepancies WHERE block_a LIKE ? OR block_b LIKE ?",
             (f"c-{plan.material_id.removeprefix('mat-')}-%",) * 2,
         )
+        # C1-a: concept pages left with fewer statements wait for the next connection run (after any
+        # ingest, the background run or "Find connections"); their old checks no longer match anyway.
+        now = utc_now()
+        connection.executemany(
+            "INSERT OR IGNORE INTO wiki_connection_pending(page_id, added_at) VALUES (?, ?)",
+            [(page.ref.id, now) for page in plan.pages
+             if page.text is not None and page.ref.kind == "concept"],
+        )
 
 
 def append_page_log(library: Library, language: str, title: str, *, renamed: bool = False) -> None:

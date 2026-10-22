@@ -4,6 +4,7 @@ import { Button, IconButton, Menu, Modal } from '../ui';
 import { Popover } from '../ui/Popover';
 import { useServices } from '../state/context';
 import { useOpenDocument } from '../state/document';
+import { savedText } from './saved';
 
 /**
  * Chat ⋯ menu (v3): pin, rename, export .md, save to wiki as an analysis, delete. Every action
@@ -11,7 +12,7 @@ import { useOpenDocument } from '../state/document';
  */
 export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
   chat: KbChatSummary;
-  onNotice: (text: string) => void;
+  onNotice: (text: string, ms?: number) => void;
   /** Inline rename (chat header); without it a small rename field opens here. */
   onRename?: () => void;
   size?: 'sm' | 'md';
@@ -34,7 +35,7 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
   const saveToWiki = async () => {
     const res = await chats.getState().saveChat(chat.id);
     if (!res.ok) { onNotice(`Couldn’t save to the wiki: ${res.error}`); return; }
-    onNotice(`Saved to the wiki as “${res.value.title}”.`);
+    onNotice(savedText(res.value), res.value.warning ? 10000 : undefined);
     open({ type: 'page', id: res.value.id });
   };
 
@@ -81,7 +82,9 @@ export function ChatMenu({ chat, onNotice, onRename, size = 'md' }: {
   );
 }
 
-export function RenameForm({ title, onSave, onCancel }: { title: string; onSave: (title: string) => Promise<string | null>; onCancel: () => void }) {
+export function RenameForm({ title, onSave, onCancel, label = 'Chat name' }: {
+  title: string; onSave: (title: string) => Promise<string | null>; onCancel: () => void; label?: string;
+}) {
   const [value, setValue] = useState(title);
   const [error, setError] = useState<string | null>(null);
   const id = useId();
@@ -100,7 +103,7 @@ export function RenameForm({ title, onSave, onCancel }: { title: string; onSave:
   };
   return (
     <form className="kb-rename" onSubmit={(e) => { e.preventDefault(); void commit(false); }}>
-      <label htmlFor={id} className="kb-visually-hidden">Chat name</label>
+      <label htmlFor={id} className="kb-visually-hidden">{label}</label>
       <input id={id} className="kb-rename__input" value={value} autoFocus onChange={(e) => { setValue(e.target.value); setError(null); }}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); settled.current = true; onCancel(); } }}
         onBlur={() => void commit(true)}

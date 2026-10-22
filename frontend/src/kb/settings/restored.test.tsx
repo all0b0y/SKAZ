@@ -70,20 +70,25 @@ describe('Settings → Privacy → Activity log', () => {
 });
 
 describe('Settings → Accounts & keys → Codex: sign out (SKAZ’s own Codex sign-in)', () => {
-  it('a signed-in Codex offers Sign out; it signs out through /kb/agents/codex/logout and says what it removed', async () => {
+  // Accounts & keys v3: Sign out… lives in ⋯ next to Check and asks first (accountsAgents.test.tsx).
+  const signOut = async (user: ReturnType<typeof userEvent.setup>, codex: HTMLElement) => {
+    await user.click(await within(codex).findByRole('button', { name: 'More for Codex' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Sign out…' }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Sign out of Codex?' })).getByRole('button', { name: 'Sign out' }));
+  };
+
+  it('a signed-in Codex offers Sign out in ⋯; it signs out through /kb/agents/codex/logout and says what it removed', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
     const dialog = await openSettings();
     await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
     const codex = row(dialog, 'Codex');
     expect(await within(codex).findByText(/Connected/)).toBeInTheDocument();
-    // Only Codex: Claude Code and Hermes keep their sign-in in their own apps.
-    expect(within(row(dialog, 'Claude Code')).queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
-    await user.click(within(codex).getByRole('button', { name: 'Sign out' }));
+    await signOut(user, codex);
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/codex/logout' })));
     expect(await within(codex).findByText('Not signed in')).toBeInTheDocument();
     expect(within(codex).getByRole('status')).toHaveTextContent('Signed out of Codex in SKAZ. Codex in other apps stays signed in.');
-    expect(within(codex).queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    expect(within(codex).queryByRole('button', { name: 'More for Codex' })).not.toBeInTheDocument();
     expect(within(codex).getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 
@@ -95,7 +100,7 @@ describe('Settings → Accounts & keys → Codex: sign out (SKAZ’s own Codex s
     const dialog = await openSettings();
     await user.click(within(dialog).getByRole('button', { name: /Accounts & keys/ }));
     const codex = row(dialog, 'Codex');
-    await user.click(await within(codex).findByRole('button', { name: 'Sign out' }));
+    await signOut(user, codex);
     expect(await within(codex).findByRole('alert')).toHaveTextContent('Check the Codex connection first');
     expect(within(codex).getByText(/Connected/)).toBeInTheDocument();
   });

@@ -3,7 +3,9 @@
 * Wiki state comes from the ingest jobs of the material (W1) and the pages
   that name it as a source: a running job → ``processing``; a note or concept
   page from it → ``in_wiki``; the last job failed and no page exists →
-  ``failed``; otherwise ``not_in_wiki``.
+  ``failed``; otherwise ``not_in_wiki``. The latest job paused at the wiki budget, or
+  follow-up work (overview, connections) of the latest finished job paused there →
+  ``paused`` (C1-d: "Paused · budget reached" + Continue).
 * The translation is the provider's own text in ``.skaz/translation.md``
   (speech area S2). Soniox translations carry no segment ids
   (SONIOX-TRANSLATION-STORAGE), so every paragraph has ``seg = None`` and
@@ -18,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from ..ingest.budget import paused_follow_ups
 from ..library.fsio import read_json
 from ..library.layout import MATERIAL_MANIFEST, SERVICE_DIR
 from ..markdown.frontmatter import FrontmatterError, split_frontmatter
@@ -26,7 +29,7 @@ from .guard.visibility import ExclusionsUnreadable, read_excluded
 
 log = logging.getLogger(__name__)
 
-WikiState = Literal["not_in_wiki", "queued", "processing", "in_wiki", "failed"]
+WikiState = Literal["not_in_wiki", "queued", "processing", "in_wiki", "failed", "paused"]
 TRANSLATION_FILE = "translation.md"
 #: Jobs that (re)build a material's pages (W1 ingest; W2 refresh).
 _WIKI_JOB_KINDS = ("ingest", "refresh")
@@ -76,6 +79,7 @@ def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str,
     notes: dict[str, str] = {}
     concepts: dict[str, int] = {}
     with db.read() as connection:
+        follow_ups = paused_follow_ups(connection, ids)
         for chunk in _chunks(ids):
             marks = ",".join("?" * len(chunk))
             kinds = ",".join("?" * len(_WIKI_JOB_KINDS))
@@ -106,10 +110,15 @@ def wiki_states(db: KnowledgeDatabase, material_ids: Iterable[str]) -> dict[str,
         job_id, job_state, job_error, job_code = job if job else (None, None, None, None)
         error = job_error if job_state in _FAILED else None
         code = job_code if job_state in _FAILED else None
+        paused = follow_ups.get(material_id)
         if job_state == "running":
             state: WikiState = "processing"
         elif job_state == "queued":
             state = "queued"
+        elif job_state == "paused":
+            state, error, code = "paused", job_error, job_code
+        elif paused:
+            state, error, code = "paused", paused[0]["error"], paused[0]["error_code"]
         elif note is not None or count:
             state = "in_wiki"
         elif job_state in _FAILED:

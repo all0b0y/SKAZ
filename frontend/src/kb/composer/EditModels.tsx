@@ -71,6 +71,7 @@ export function EditModelsModal() {
 
   return (
     <Modal open={open} onClose={close} title="Edit models" className="kb-editmodels" testId="edit-models" initialFocusRef={search}>
+      <div className="kb-modal__body kb-editmodels__frame">
       <p className="kb-muted kb-editmodels__intro">
         What the model picker shows. Search there still finds hidden models, and a chat on a hidden model keeps working.
       </p>
@@ -127,11 +128,18 @@ export function EditModelsModal() {
           ) : agent && section ? (
             <>
               <div className="kb-editmodels__mainhead">
-                {ownProvider(agent) ? <EngineBadge engine={agent.id} /> : <ProviderIcon provider={section.provider.id} name={section.provider.label} size={18} />}
-                <h4 className="kb-sgroup__title kb-editmodels__title">{ownProvider(agent) ? agent.name : `${agent.name} · ${section.provider.label}`}</h4>
-                <span className="kb-head__spacer" />
-                <Button size="sm" variant="quiet" onClick={() => void change([{ kind: 'defaults', engine: agent.id, provider: section.provider.id }])}>Show defaults</Button>
-                <Button size="sm" variant="quiet" onClick={() => void change([{ kind: 'hide_all', engine: agent.id, provider: section.provider.id }])}>Hide all</Button>
+                <span className="kb-editmodels__heading">
+                  {ownProvider(agent) ? <EngineBadge engine={agent.id} /> : <ProviderIcon provider={section.provider.id} name={section.provider.label} size={18} />}
+                  {/* U1: a long agent/provider name is cut, never pushed under the actions. */}
+                  <h4 className="kb-sgroup__title kb-editmodels__title"
+                    title={ownProvider(agent) ? agent.name : `${agent.name} · ${section.provider.label}`}>
+                    {ownProvider(agent) ? agent.name : `${agent.name} · ${section.provider.label}`}
+                  </h4>
+                </span>
+                <span className="kb-editmodels__actions">
+                  <Button size="sm" variant="quiet" onClick={() => void change([{ kind: 'defaults', engine: agent.id, provider: section.provider.id }])}>Show defaults</Button>
+                  <Button size="sm" variant="quiet" onClick={() => void change([{ kind: 'hide_all', engine: agent.id, provider: section.provider.id }])}>Hide all</Button>
+                </span>
               </div>
               <p className="kb-muted kb-editmodels__note">
                 By default the first 50 of a provider are shown. New models follow that rule; your choices stay.
@@ -143,6 +151,7 @@ export function EditModelsModal() {
           )}
           {error && <p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p>}
         </div>
+      </div>
       </div>
     </Modal>
   );

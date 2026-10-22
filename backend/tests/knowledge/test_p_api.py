@@ -217,4 +217,4 @@ async def test_skaz_ask_user_is_the_question_tool_and_the_agent_card_says_so(env
 
     agents = (await env.client.get("/kb/agents")).json()["agents"]
     assert {agent["id"]: agent["questions"] for agent in agents} == {
-        "codex": "skaz", "claude_code": "skaz", "hermes": "skaz"}
+        "codex": "skaz", "claude_code": "skaz", "hermes": "skaz", "opencode": "skaz"}

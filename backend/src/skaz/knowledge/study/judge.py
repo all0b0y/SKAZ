@@ -1,7 +1,7 @@
 """The agent's check of an open answer (S4, Q6): the chat's agent and model, no tools, a JSON verdict.
 
 It is a separate run, not a message of the chat: the block shows the verdict as "Agent's opinion · not
-a fact". Source text enters only as untrusted data (layer 6); Humanizer shapes the comment (H1).
+a fact". Source text enters only as untrusted data (layer 6); chat-only writing skills stay out.
 """
 
 from __future__ import annotations
@@ -19,8 +19,6 @@ from ..agents.registry import EngineRegistry
 from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
 from ..service import KnowledgeService
-from ..skills.prompting import with_skills
-from ..skills.settings import enabled_skills
 from .format import Question
 from .service import JUDGE_RULES, JUDGE_SCHEMA, judge_prompt
 from .store import StudyBlock
@@ -48,7 +46,6 @@ def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> 
             raise KnowledgeError("The chat of this test is gone.")
         engine = await registry().require(chat.engine)
         quotes = [cite.quote for cite in question.cites if cite.quote]
-        skills = await disk_call(enabled_skills, kb.settings)
         turn = AgentTurn(
             run_id=f"judge-{uuid.uuid4().hex[:12]}",
             messages=(
@@ -57,7 +54,7 @@ def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> 
                     untrusted_block("question, source and answer", judge_prompt(question, text, quotes)),
                 ),
             ),
-            instructions=with_skills(JUDGE_RULES, skills),
+            instructions=JUDGE_RULES,
             tools=None,
             model=chat.model,
             effort=chat.effort,

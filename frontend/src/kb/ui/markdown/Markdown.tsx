@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from 'react';
 import { MathView } from './MathView';
+import { DiagramView, fenceCode, isMermaidFence } from './Diagram';
 import { markdownParser, mathSource, type SyntaxNode } from './parser';
 
 /**
@@ -143,6 +144,8 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
     case 'HardBreak': return <br key={key} />;
     case 'Escape': return slice.slice(1);
     case 'FencedCode': case 'CodeBlock': {
+      // D: a closed ```mermaid fence is drawn (Pele); one still streaming stays code.
+      if (isMermaidFence(node, ctx.src)) return <DiagramView key={key} source={fenceCode(node, ctx.src)} />;
       const code = node.getChildren('CodeText').map((c) => ctx.src.slice(c.from, c.to)).join('\n');
       return <pre key={key} className="md__code"><code>{code}</code></pre>;
     }

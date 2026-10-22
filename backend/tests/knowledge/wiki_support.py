@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from skaz.knowledge.agents.engine import AgentTurn
 from skaz.knowledge.decisions.protocol import Answer, Question
 from skaz.knowledge.ingest.service import IngestService
 from skaz.knowledge.markdown.source import FragmentInput
@@ -36,6 +38,70 @@ CONNECTIONS = "skaz_connections"
 OVERVIEW = "skaz_folder_overview"
 RECHECK = "skaz_recheck"
 ENTROPY_TITLE = "Энтропия (entropy)"
+
+
+# -- connection batches (C1-a): read the prompt the way an authored agent does -----------------
+
+
+@dataclass
+class Batch:
+    prompt: str
+    pages: dict[int, str] = field(default_factory=dict)
+    #: pair number → (first page title, second page title)
+    pairs: dict[int, tuple[str, str]] = field(default_factory=dict)
+    #: statement number → (page title, statement line)
+    statements: dict[int, tuple[str, str]] = field(default_factory=dict)
+
+    @classmethod
+    def read(cls, prompt: str) -> Batch:
+        batch = cls(prompt)
+        page: str | None = None
+        for line in prompt.splitlines():
+            if header := re.match(r"^Page (\d+): (.+)$", line):
+                batch.pages[int(header[1])] = header[2]
+                page = header[2]
+            elif pair := re.match(r"^Pair (\d+): page (\d+) — page (\d+)$", line):
+                batch.pairs[int(pair[1])] = (batch.pages[int(pair[2])], batch.pages[int(pair[3])])
+            elif (statement := re.match(r"^\[(\d+)\] (.*)$", line)) and page is not None:
+                batch.statements[int(statement[1])] = (page, statement[2])
+        return batch
+
+    def unordered(self) -> set[frozenset[str]]:
+        return {frozenset(pair) for pair in self.pairs.values()}
+
+    def number(self, title: str, words: str) -> int:
+        return next(n for n, (page, line) in self.statements.items() if page == title and words in line)
+
+    def connect(self, a: str, b: str, words_a: str, words_b: str, text: str) -> dict[str, Any] | None:
+        for number, (first, second) in self.pairs.items():
+            if {first, second} == {a, b}:
+                ours = {a: words_a, b: words_b}
+                return {"pair": number, "text": text,
+                        "first_side": [self.number(first, ours[first])],
+                        "second_side": [self.number(second, ours[second])]}
+        return None
+
+
+def forget_connection_checks(kb: KnowledgeService) -> None:
+    """As in a library from before C1-a: no pair remembered as checked, so the next run asks again.
+
+    The connection run after ingest already checked every pair (its answer was the scripted empty
+    list); a test of what one explicit run writes starts from here.
+    """
+    with kb.db.write() as connection:
+        connection.execute("DELETE FROM wiki_connection_checks")
+
+
+def connecting(*wanted: tuple[str, str, str, str, str]) -> Callable[[AgentTurn], str]:
+    """A queued connection answer authored from the batch it gets: ``(page a, page b, words of a's
+    statement, words of b's statement, text)`` for every pair of the batch it should connect."""
+
+    def answer(turn: AgentTurn) -> str:
+        batch = Batch.read(turn.messages[0].content)
+        found = [item for args in wanted if (item := batch.connect(*args)) is not None]
+        return json.dumps({"connections": found}, ensure_ascii=False)
+
+    return answer
 
 
 def wired(

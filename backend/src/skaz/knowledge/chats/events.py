@@ -17,7 +17,8 @@ from typing import Literal
 from .model import Message, Part
 
 #: ``part_update``: a part of the message changed (a permission or question card), sent whole.
-EventType = Literal["message", "delta", "part", "state", "title", "part_update"]
+#: ``removed``: the message is gone from the chat (a question was edited: what followed it went).
+EventType = Literal["message", "delta", "part", "state", "title", "part_update", "removed"]
 #: Cursors start at the wall clock in milliseconds: after a restart they continue above
 #: anything the previous process handed out (one event per millisecond is far above any rate).
 CHAT_CAPACITY = 4_000

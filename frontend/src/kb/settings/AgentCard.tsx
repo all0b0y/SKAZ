@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KbAgent } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
-import { Button, Icon } from '../ui';
+import { Button, Icon, IconButton, Menu, Modal, type MenuItem } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { useAgents, useServices } from '../state/context';
+import { WebSearchNote } from '../chat/webSearch';
 
 const ACCOUNT: Record<EngineId, string> = {
   codex: 'ChatGPT subscription',
   claude_code: 'Claude subscription or Anthropic key',
   hermes: 'Models and keys from Hermes settings',
+  opencode: 'Providers you sign in to through OpenCode',
 };
 
 const STATE_TEXT: Record<KbAgent['state'], string> = {
@@ -26,6 +28,20 @@ function tone(state: KbAgent['state']): 'ok' | 'warn' | 'err' {
   return 'warn';
 }
 
+/** Accounts & keys v3: what signing out stops, per agent SKAZ signs out in its own folder. */
+const SIGN_OUT: Partial<Record<EngineId, { body: string; done: string }>> = {
+  codex: {
+    body: 'SKAZ forgets its own Codex sign-in. Chats and wiki updates on Codex stop until you sign in again. '
+      + 'Nothing in your library is deleted. Codex in other apps stays signed in.',
+    done: 'Signed out of Codex in SKAZ. Codex in other apps stays signed in.',
+  },
+  opencode: {
+    body: 'SKAZ’s own OpenCode forgets the providers you signed in to. Chats and wiki updates on OpenCode stop until '
+      + 'you sign in again. Nothing in your library is deleted. OpenCode outside SKAZ is not changed.',
+    done: 'Signed out of OpenCode in SKAZ. OpenCode outside SKAZ is not changed.',
+  },
+};
+
 /**
  * One agent with its real state (v21): Connected / Not installed / Not signed in / Needs an
  * update, the action that fixes it, and the install log while a task runs. Hermes says that SKAZ
@@ -36,9 +52,13 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   const { agents: store } = useServices();
   const install = useAgents((s) => s.installs[agent.id]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ text: string; error: boolean; url?: string | null } | null>(null);
+  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [consent, setConsent] = useState(false);
   const [checkedHere, setCheckedHere] = useState(false);
+  const signIn = useAgents((s) => s.signIns[agent.id]);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
 
   const running = install?.task.state === 'running';
   const taskId = install?.task.id ?? agent.install_task;
@@ -61,12 +81,15 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       const r = await s.cancelInstall(agent.id);
       if (!r.ok) setMessage({ text: r.error, error: true });
     } else if (what === 'logout') {
-      const r = await s.logoutCodex();
-      setMessage(r.ok ? { text: 'Signed out of Codex in SKAZ. Codex in other apps stays signed in.', error: false } : { text: r.error, error: true });
+      setConfirmOut(false);
+      const r = await s.logout(agent.id);
+      setMessage(r.ok ? { text: SIGN_OUT[agent.id]?.done ?? `Signed out of ${agent.name} in SKAZ.`, error: false } : { text: r.error, error: true });
     } else if (what === 'login') {
       const r = await s.login(agent.id, consent || undefined);
       if (!r.ok) setMessage({ text: r.error, error: true });
-      else setMessage({ text: r.value.message, error: false, url: r.value.url });
+      // Codex: the sign-in page this sign-in returned opens at once (the window's own external-link
+      // rule hands only http(s) links to the browser); SKAZ then waits for Codex to say it is done.
+      else if (r.value.method === 'browser' && r.value.url) window.open(r.value.url, '_blank', 'noopener');
     } else {
       setCheckedHere(true);
       const r = await s.check(agent.id);
@@ -102,15 +125,35 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {action !== 'check' && action !== 'first_check' && (
         <Button size="sm" variant="quiet" busy={busy === 'check'} onClick={() => void act('check')}>Check</Button>
       )}
-      {/* Only Codex signs in inside SKAZ (its own Codex profile); the others sign out in their own apps. */}
-      {agent.id === 'codex' && agent.signed_in && (
-        <Button size="sm" variant="quiet" busy={busy === 'logout'} onClick={() => void act('logout')}>Sign out</Button>
+      {/* Accounts & keys v3: Sign out… (or why not) and Check again live in ⋯ next to Check. */}
+      {agent.signed_in && (
+        <>
+          <IconButton ref={moreRef} icon="more" size="sm" label={`More for ${agent.name}`} aria-haspopup="menu"
+            aria-expanded={menuOpen} disabled={busy === 'logout'} onClick={() => setMenuOpen((v) => !v)} />
+          <Menu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={moreRef} label={`${agent.name} account`}
+            items={moreItems(agent).map((item) => ({ ...item, onSelect: () => {
+              setMenuOpen(false);
+              if (item.id === 'signout') setConfirmOut(true);
+              else void act('check');
+            } }))} />
+        </>
       )}
     </>
+  );
+  const signOut = SIGN_OUT[agent.id];
+  const confirm = signOut && (
+    <Modal open={confirmOut} onClose={() => setConfirmOut(false)} title={`Sign out of ${agent.name}?`} className="kb-confirm" testId="confirm-sign-out">
+      <div className="kb-confirm__body"><p>{signOut.body}</p></div>
+      <footer className="kb-confirm__foot">
+        <Button onClick={() => setConfirmOut(false)}>Cancel</Button>
+        <Button variant="danger" busy={busy === 'logout'} onClick={() => void act('logout')}>Sign out</Button>
+      </footer>
+    </Modal>
   );
   const details = (
     <>
       {agent.reason && agent.state !== 'ready' && agent.state !== 'not_installed' && variant === 'card' && <p className="kb-agentcard__reason">{agent.reason}</p>}
+      {variant === 'card' && agent.installed && <WebSearchNote agent={agent} />}
       {firstCheck && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
           <Icon name="shield" size={13} />
@@ -143,7 +186,18 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {message && (
         <p className={message.error ? 'kb-inline-error kb-inline-error--flat' : 'kb-agentcard__msg'} role={message.error ? 'alert' : 'status'}>
           {message.text}
-          {message.url && <> <a className="kb-md__link" href={message.url} target="_blank" rel="noreferrer noopener">Open the sign-in page</a></>}
+        </p>
+      )}
+      {!message && signIn && (
+        <p className={`kb-agentcard__msg kb-signin kb-signin--${signIn.state}`} role="status">
+          {signIn.state === 'waiting' && <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />}
+          {signIn.state === 'signed_in' && <Icon name="check" size={13} />}
+          <span>
+            {signIn.message}
+            {signIn.state === 'waiting' && signIn.url && (
+              <> <a className="kb-md__link" href={signIn.url} target="_blank" rel="noreferrer noopener">Open the sign-in page again</a></>
+            )}
+          </span>
         </p>
       )}
       {action === 'login' && agent.id === 'codex' && (
@@ -162,6 +216,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
         <div className="kb-agentrow__line">{status}{buttons}</div>
         <div className="kb-agentrow__when">{when}</div>
         {details}
+        {confirm}
       </div>
     );
   }
@@ -176,8 +231,19 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
         <span className="kb-agentcard__acts">{buttons}</span>
       </div>
       {details}
+      {confirm}
     </li>
   );
+}
+
+/** ⋯ next to Check: Sign out… where SKAZ signs the agent out in its own folder; why not for Claude Code
+ *  (this Mac's own sign-in); Hermes signs out per provider, so only Check again. */
+function moreItems(agent: KbAgent): MenuItem[] {
+  if (agent.id === 'hermes') return [{ id: 'check', label: 'Check again', icon: 'retry', onSelect: () => {} }];
+  if (agent.id === 'claude_code') {
+    return [{ id: 'signout', label: 'Sign out…', disabled: true, note: 'in Claude Code itself', onSelect: () => {} }];
+  }
+  return [{ id: 'signout', label: 'Sign out…', danger: true, onSelect: () => {} }];
 }
 
 /** "Checked just now" / "Checked 4 min ago" / "Checking…" (minutes tick only while the window is visible). */

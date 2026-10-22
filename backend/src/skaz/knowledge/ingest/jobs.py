@@ -10,12 +10,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from ..agents.engine import FailureKind
 from ..ids import new_id, utc_now
 from ..store.database import KnowledgeDatabase
+from .budget import PAUSED_LABEL
+from .execution import ExecutionView, ProcessingProfile, execution_view, new_execution
+
+#: Counter key: epoch milliseconds when the running step began (C1-f).
+STEP_STARTED = "step_started_ms"
 
 JOB_KIND = "ingest"
 JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export"]
@@ -25,11 +32,12 @@ JOB_KINDS: tuple[JobKind, ...] = (
 )
 #: Kinds about one material (``target_id`` is the material id).
 MATERIAL_JOB_KINDS: tuple[JobKind, ...] = ("ingest", "refresh", "corrections")
-JobState = Literal["queued", "running", "done", "failed", "cancelled", "interrupted"]
+#: ``paused``: stopped at the material's wiki budget (C1-d); Continue resumes from its checkpoint.
+JobState = Literal["queued", "running", "done", "failed", "cancelled", "interrupted", "paused"]
 JobStep = Literal["reading", "checking_recognition", "writing_notes", "concepts", "saving", "done",
                   "checking_discrepancies", "finding_connections", "rechecking", "writing_overview",
                   "exporting"]
-FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted")
+FINISHED: tuple[JobState, ...] = ("done", "failed", "cancelled", "interrupted", "paused")
 INTERRUPTED_REASON = "SKAZ was closed while this material was being added to the wiki. Retry to start again."
 WIKI_INTERRUPTED_REASON = "SKAZ was closed while this wiki job was running. Start it again when needed."
 #: Kinds that wait in the ingest queue and continue after a restart.
@@ -76,10 +84,19 @@ class JobRecord:
     target_id: str | None = None
     #: ``AGENT_UNAVAILABLE`` when the failure is fixed in Settings, not by a retry; else ``None``.
     error_code: str | None = None
+    execution: ExecutionView | None = None
 
     @property
     def finished(self) -> bool:
         return self.state in FINISHED
+
+    @property
+    def step_started_at(self) -> str | None:
+        """When the current step began (UTC, ISO 8601), while the job runs; ``None`` otherwise."""
+        started = self.counters.get(STEP_STARTED)
+        if self.state != "running" or not started:
+            return None
+        return datetime.fromtimestamp(started / 1000, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @property
     def can_retry(self) -> bool:
@@ -92,7 +109,15 @@ class JobRecord:
             return "Queued"
         if self.state == "running":
             if self.step == "concepts":
-                return f"Concepts {self.counters.get('concepts_found', 0)}"
+                found = max(self.counters.get("concepts_found", 0), self.counters.get("concepts_streamed", 0))
+                return f"Concepts {found}"
+            if self.step == "writing_notes" and self.counters.get("parts_total"):
+                total = self.counters["parts_total"]
+                line = f"Writing notes · part {min(self.counters.get('parts_done', 0) + 1, total)} of {total}"
+                written = self.counters.get("notes_sections", 0)
+                if written:
+                    line += f" · {written} section{'' if written == 1 else 's'}"
+                return line
             return {"reading": "Reading", "checking_recognition": "Checking recognition",
                     "writing_notes": "Writing notes", "saving": "Saving pages", "done": "Done",
                     "checking_discrepancies": "Checking for disagreements",
@@ -100,7 +125,7 @@ class JobRecord:
                     "writing_overview": "Writing the folder overview",
                     "exporting": "Exporting"}.get(self.step or "reading", "Reading")
         return {"done": "Done", "failed": "Failed", "cancelled": "Cancelled",
-                "interrupted": "Interrupted"}[self.state]
+                "interrupted": "Interrupted", "paused": PAUSED_LABEL}[self.state]
 
 
 def _record(row: sqlite3.Row) -> JobRecord:
@@ -112,14 +137,16 @@ def _record(row: sqlite3.Row) -> JobRecord:
         created_at=row["created_at"], updated_at=row["updated_at"],
         counters={key: int(value) for key, value in json.loads(row["counters"] or "{}").items()},
         journal=journal, kind=kind, target_id=row["target_id"], error_code=row["error_code"],
+        execution=execution_view(row["execution"]),
     )
 
 
 _KINDS_IN = "(" + ", ".join(f"'{kind}'" for kind in JOB_KINDS) + ")"
 _SELECT = (
     "SELECT j.*, COALESCE(d.counters, '{}') AS counters, COALESCE(d.journal, '[]') AS journal, "
-    "d.error_code AS error_code "
-    f"FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id WHERE j.kind IN {_KINDS_IN}"
+    "d.error_code AS error_code, e.data AS execution "
+    "FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id "
+    f"LEFT JOIN wiki_execution e ON e.job_id = j.id WHERE j.kind IN {_KINDS_IN}"
 )
 
 
@@ -128,7 +155,9 @@ class JobRepository:
         self.db = db
 
     def create(self, material_id: str | None, *, kind: JobKind = "ingest",
-               step: JobStep = "reading", state: Literal["running", "queued"] = "running") -> JobRecord:
+               step: JobStep = "reading", state: Literal["running", "queued"] = "running",
+               profile: ProcessingProfile | None = None, root_job_id: str | None = None,
+               budget: int | None = None, budget_material: str | None = None) -> JobRecord:
         """A new job; ``material_id`` is the target (a page for ``recheck``, a folder for overviews)."""
         job_id = new_id("job")
         now = utc_now()
@@ -139,6 +168,10 @@ class JobRepository:
                 (job_id, kind, material_id, state, step, now, now),
             )
             connection.execute("INSERT INTO ingest_jobs(job_id) VALUES (?)", (job_id,))
+            if profile is not None:
+                connection.execute("INSERT INTO wiki_execution(job_id, data) VALUES (?, ?)",
+                                   (job_id, new_execution(profile, job_id, root_job_id, budget=budget,
+                                                          material_id=budget_material)))
         record = self.get(job_id)
         assert record is not None
         return record
@@ -207,8 +240,17 @@ class JobRepository:
 
     def set_step(self, job_id: str, step: JobStep) -> None:
         with self.db.write() as connection:
-            connection.execute("UPDATE jobs SET step = ?, updated_at = ? WHERE id = ? AND state = 'running'",
-                               (step, utc_now(), job_id))
+            moved = connection.execute(
+                "UPDATE jobs SET step = ?, updated_at = ? WHERE id = ? AND state = 'running'",
+                (step, utc_now(), job_id)).rowcount
+            row = connection.execute("SELECT counters FROM ingest_jobs WHERE job_id = ?",
+                                     (job_id,)).fetchone()
+            if moved and row is not None:
+                # When the step began, for the live "3:20" on the material (C1-f).
+                counters: dict[str, Any] = json.loads(row["counters"] or "{}")
+                counters[STEP_STARTED] = int(time.time() * 1000)
+                connection.execute("UPDATE ingest_jobs SET counters = ? WHERE job_id = ?",
+                                   (json.dumps(counters), job_id))
 
     def finish(self, job_id: str, state: JobState, *, error: str | None = None,
                error_code: str | None = None) -> None:

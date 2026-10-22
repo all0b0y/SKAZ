@@ -212,8 +212,10 @@ async def test_parallel_runs_use_separate_processes_with_an_explicit_cap(connect
     third = await collect(engine.run(ask("case:stream", run_id="c", registry=registry)))
     assert isinstance(third.terminal, Failed) and third.terminal.kind == "other"
     assert "Too many Codex answers" in third.terminal.message and connection.spawned == 2
+    assert third.terminal.transient and third.terminal.unsent  # refused before anything was sent
     duplicate = await collect(engine.run(ask("case:stream", run_id="a", registry=registry)))
     assert duplicate.terminal == Failed("a", "other", "This answer is already running.")
+    assert isinstance(duplicate.terminal, Failed) and duplicate.terminal.unsent
 
     await asyncio.gather(engine.interrupt("a"), engine.interrupt("b"))
     endings: list[list[AgentEvent]] = [[e async for e in first], [e async for e in second]]
@@ -227,6 +229,7 @@ async def test_process_crash_and_not_ready_states(connection: FakeConnection, re
     engine = CodexEngine(connection, registry, run_timeout_s=10)
     crashed = await collect(engine.run(ask("case:crash", registry=registry)))
     assert crashed.terminal == Failed("run-1", "other", "Codex stopped unexpectedly.")
+    assert isinstance(crashed.terminal, Failed) and not crashed.terminal.unsent  # may have been sent
 
     connection.view = {"status": "signed_out", "version": "codex-cli 0.160.0", "path": "/x"}
     signed_out = CodexEngine(connection, registry)

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,7 +18,7 @@ const ROWS = [
 type Handlers = Pick<ListSelectionOptions, 'onOpen' | 'onAttach' | 'onDelete' | 'onMove' | 'onExport'>;
 
 /** A list the way the app wires it: a button per row that opens, the hook on top. */
-function List(props: Handlers & { resetKey?: string }) {
+function List(props: Handlers & { resetKey?: string; label?: string }) {
   const sel = useListSelection({
     ids: ROWS.map((r) => r.id),
     reasonNotSelectable: (id) => (id === 'c' ? 'Being recorded — can’t be selected yet' : null),
@@ -27,7 +28,7 @@ function List(props: Handlers & { resetKey?: string }) {
   return (
     <MotionProvider>
       <div {...sel.listProps}>
-        <ul {...sel.gridProps} aria-label="Things">
+        <ul {...sel.gridProps} aria-label={props.label ?? 'Things'}>
           {ROWS.map((r) => (
             <li key={r.id} {...sel.rowProps(r.id)}>
               <div role="gridcell">
@@ -49,7 +50,7 @@ function List(props: Handlers & { resetKey?: string }) {
   );
 }
 
-const row = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]')!;
+const row = (name: string): Element => screen.getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]')!;
 const selectedIds = () => screen.getAllByRole('row').filter((r) => r.getAttribute('aria-selected') === 'true').map((r) => r.getAttribute('data-sel-id'));
 
 describe('useListSelection (0.3.1 F2/F5)', () => {
@@ -190,6 +191,140 @@ describe('useListSelection (0.3.1 F2/F5)', () => {
     expect(onExport).toHaveBeenCalledWith(['a']);
     await user.click(within(bar).getByRole('button', { name: 'Clear selection' }));
     expect(selectedIds()).toEqual([]);
+  });
+});
+
+/** Two lists side by side, a plain button and a text field outside them (0.3.1 F7). */
+function TwoLists() {
+  return (
+    <>
+      <button type="button">Outside</button>
+      <input aria-label="Field" />
+      <List label="Things" />
+      <OtherList />
+    </>
+  );
+}
+
+function OtherList() {
+  const sel = useListSelection({ ids: ['x', 'y'] });
+  return (
+    <div {...sel.listProps} data-testid="other">
+      <ul {...sel.gridProps} aria-label="Others">
+        {['x', 'y'].map((id) => (
+          <li key={id} {...sel.rowProps(id)}>
+            <div role="gridcell"><button type="button"><SelectionCheckbox checked={sel.selected.has(id)} />{id === 'x' ? 'Xray' : 'Yankee'}</button></div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+const selectedIn = (grid: string) => within(screen.getByRole('grid', { name: grid })).getAllByRole('row')
+  .filter((r) => r.getAttribute('aria-selected') === 'true').map((r) => r.getAttribute('data-sel-id'));
+const selectingList = (grid: string) => screen.getByRole('grid', { name: grid }).closest('[data-selecting]');
+
+describe('Finder-like selection (0.3.1 F7, F7-a)', () => {
+  it('⌘A over the list under the pointer selects all of it, even with the focus in another list', async () => {
+    const user = userEvent.setup();
+    render(<TwoLists />);
+    // The keyboard is in "Others", the pointer rests over "Things".
+    act(() => screen.getByRole('button', { name: /^Xray/ }).focus());
+    await user.hover(screen.getByRole('button', { name: /^Bravo/ }));
+    await user.keyboard('{Meta>}a{/Meta}');
+    expect(selectedIn('Things')).toEqual(['a', 'b', 'd']);
+    expect(selectedIn('Others')).toEqual([]);
+    expect(selectingList('Things')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /^Xray/ })).toHaveFocus();
+  });
+
+  it('⌘A over a list with the focus on the page selects it; Esc then clears it', async () => {
+    const user = userEvent.setup();
+    render(<TwoLists />);
+    await user.hover(screen.getByRole('button', { name: /^Yankee/ }));
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    await user.keyboard('{Meta>}a{/Meta}');
+    expect(selectedIn('Others')).toEqual(['x', 'y']);
+    await user.keyboard('{Escape}');
+    expect(selectedIn('Others')).toEqual([]);
+  });
+
+  it('pointer outside every list: ⌘A stays with the focused list; in a text field it is the text’s', async () => {
+    const user = userEvent.setup();
+    render(<TwoLists />);
+    await user.hover(screen.getByRole('button', { name: 'Outside' }));
+    act(() => screen.getByRole('button', { name: /^Xray/ }).focus());
+    await user.keyboard('{Meta>}a{/Meta}');
+    expect(selectedIn('Others')).toEqual(['x', 'y']);
+    expect(selectedIn('Things')).toEqual([]);
+    await user.keyboard('{Escape}');
+    // Typing in a field, even with the pointer resting over a list: the field keeps ⌘A.
+    await user.click(screen.getByRole('textbox', { name: 'Field' }));
+    await user.hover(screen.getByRole('button', { name: /^Alpha/ }));
+    await user.keyboard('{Meta>}a{/Meta}');
+    expect(selectedIn('Things')).toEqual([]);
+  });
+
+  it('a click on empty space of the list or anywhere outside clears it at once', async () => {
+    const user = userEvent.setup();
+    render(<TwoLists />);
+    await user.keyboard('{Meta>}');
+    await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+    await user.click(screen.getByRole('button', { name: /^Bravo/ }));
+    await user.keyboard('{/Meta}');
+    expect(selectedIn('Things')).toEqual(['a', 'b']);
+    await user.click(screen.getByRole('button', { name: 'Outside' }));
+    expect(selectedIn('Things')).toEqual([]);
+    expect(selectingList('Things')).toBeNull();
+
+    await user.click(row('Alpha').querySelector('[data-sel-box]')!);
+    expect(selectedIn('Things')).toEqual(['a']);
+    // Empty space inside the list (not a row): clears too.
+    await user.click(screen.getByRole('grid', { name: 'Things' }));
+    expect(selectedIn('Things')).toEqual([]);
+
+    // A row of another list starts over there.
+    await user.click(row('Alpha').querySelector('[data-sel-box]')!);
+    await user.keyboard('{Meta>}');
+    await user.click(screen.getByRole('button', { name: /^Xray/ }));
+    await user.keyboard('{/Meta}');
+    expect(selectedIn('Things')).toEqual([]);
+    expect(selectedIn('Others')).toEqual(['x']);
+  });
+
+  it('clicks on the selection bar, its menu and a confirmation window do not count as outside', async () => {
+    const user = userEvent.setup();
+    const onExport = vi.fn();
+    function WithDialog() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <List onExport={onExport} onMove={() => setOpen(true)} />
+          {open && createPortal(<div role="dialog" aria-label="Move 2 things?"><button type="button" onClick={() => setOpen(false)}>Cancel</button></div>, document.body)}
+        </>
+      );
+    }
+    render(<WithDialog />);
+    await user.click(row('Alpha').querySelector('[data-sel-box]')!);
+    await user.click(row('Bravo').querySelector('[data-sel-box]')!);
+    const bar = screen.getByRole('toolbar', { name: '2 selected' });
+    await user.click(within(bar).getByRole('button', { name: 'More actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Export \.md/ }));
+    expect(onExport).toHaveBeenCalledWith(['a', 'b']);
+    expect(selectedIds()).toEqual(['a', 'b']);
+    await user.click(within(bar).getByRole('button', { name: 'Move to…' }));
+    await user.click(within(screen.getByRole('dialog', { name: 'Move 2 things?' })).getByRole('button', { name: 'Cancel' }));
+    expect(selectedIds()).toEqual(['a', 'b']);
+  });
+
+  it('the ⌘/ list names ⌘A over a list', async () => {
+    const user = userEvent.setup();
+    render(<List />);
+    act(() => screen.getByRole('button', { name: /^Alpha/ }).focus());
+    await user.keyboard('{Meta>}/{/Meta}');
+    const pop = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(pop).toHaveTextContent('⌘A over a list — select all in it');
   });
 });
 

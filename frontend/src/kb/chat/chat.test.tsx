@@ -37,6 +37,30 @@ describe('Chats in the side panel', () => {
     expect(panel.querySelector('.kb-chatmark--answering')?.className).not.toMatch(/pulse|blink/);
   });
 
+  it('U2: the sources under an answer start folded to one line; opening them is kept after a restart', async () => {
+    const user = userEvent.setup();
+    const first = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    let answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
+    const toggle = within(answer).getByRole('button', { name: 'Sources · 3' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(answer).queryByRole('group', { name: 'Sources' })).toBeNull();
+    // The footnote numbers in the text stay usable while the list is folded.
+    expect(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' }).length).toBeGreaterThan(0);
+    const before = first.fake.calls.length;
+    await user.click(toggle);
+    expect(within(answer).getByRole('group', { name: 'Sources' })).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(first.fake.calls.slice(before)).toEqual([]); // folding asks nothing of the backend
+    first.unmount();
+
+    renderKb({ world: chatWorld(), keepStorage: true });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
+    expect(within(answer).getByRole('button', { name: 'Sources · 3' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(answer).getByRole('group', { name: 'Sources' })).toBeInTheDocument();
+  });
+
   it('opens a chat: the answer with page and source chips, the connection folded, the tool trail folded', async () => {
     const user = userEvent.setup();
     const { services } = renderKb({ world: chatWorld() });
@@ -56,6 +80,7 @@ describe('Chats in the side panel', () => {
     await user.click(within(pop).getByRole('button', { name: /^Open at fragment/ }));
     expect(openTarget(services.ui.getState())).toMatchObject({ type: 'material', id: 'm5', seg: 3 });
     // The answer ends with its sources, each once, numbered in order of appearance (connection included).
+    await user.click(within(answer).getByRole('button', { name: 'Sources · 3' }));
     const sources = within(answer).getByRole('group', { name: 'Sources' });
     expect(within(sources).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
       'Source 1: Lecture 5', 'Source 2: Lecture 8', 'Source 3: Textbook: Information theory, ch. 2']);
@@ -101,6 +126,9 @@ describe('Chats in the side panel', () => {
     expect(card).toHaveTextContent(/The limit resets/);
     await user.click(within(card).getByRole('button', { name: 'Resume' }));
     await waitFor(() => expect(fake.calls.some((c) => /\/resume$/.test(c.path))).toBe(true));
+    // 2026-10-21: the new answer takes the interrupted one's place — no second card piles up.
+    await waitFor(() => expect(screen.queryByText('Answer interrupted: subscription limit')).not.toBeInTheDocument());
+    expect(screen.getAllByRole('article', { name: 'Answer' })).toHaveLength(1);
   });
 
   it('⋯ menu: export goes through the native save dialog; save to wiki opens the analysis page; delete asks first', async () => {
@@ -189,6 +217,7 @@ describe('Chats in the side panel', () => {
     const answer = await within(screen.getByRole('region', { name: 'Chat' })).findByRole('article', { name: 'Answer' });
     expect(within(answer).getAllByRole('button', { name: 'Source 1: Lecture 5' }).length).toBeGreaterThan(0);
     await act(async () => { await services.library.getState().forgetMaterial('m5'); });
+    await user.click(within(answer).getByRole('button', { name: /^Sources · / }));
     const sources = within(answer).getByRole('group', { name: 'Sources' });
     expect(within(sources).getByRole('button', { name: 'Source 1: Lecture 5 (no longer available)' })).toBeInTheDocument();
     await user.click(within(sources).getByRole('button', { name: /Source 1/ }));
@@ -379,8 +408,11 @@ describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
     await waitFor(() => expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/kb/chats/c3/read')).toBe(true));
     await tick('Transformer paper review', 'Compare regularisation');
     await user.click(within(within(panel).getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'More actions' }));
+    // Decision 9: a chat saved without its uncited diagrams is counted in the toast.
+    fake.world.saveWarnings = { c3: 'Saved without 1 diagram: it has no quotes from your materials.' };
     await user.click(await screen.findByRole('menuitem', { name: /Save to wiki as analyses/ }));
-    expect(await screen.findByTestId('toast')).toHaveTextContent('Saved 2 chats to the wiki as analyses');
+    expect(await screen.findByTestId('toast')).toHaveTextContent(
+      'Saved 2 chats to the wiki as analyses. 1 saved without diagrams: they have no quotes from your materials.');
     await tick('Transformer paper review', 'Compare regularisation');
     await user.click(within(within(panel).getByRole('toolbar', { name: '2 selected' })).getByRole('button', { name: 'Pin' }));
     expect(await screen.findByTestId('toast')).toHaveTextContent('Pinned 2 chats');

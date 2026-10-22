@@ -1,5 +1,5 @@
 import type { KbJob, KbMaterial, KbMaterialWiki } from '../../api/kb/types.gen';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { errorText } from '../api/client';
 import { Button, Icon, type IconName } from '../ui';
 import { plural } from '../document/text';
@@ -14,18 +14,47 @@ const STEP_LABEL: Record<string, string> = {
   saving: 'Saving to the wiki',
 };
 
+/** Steps whose backend label carries live progress ("part 3 of 4 · 14 sections", C1-f). */
+const LIVE_STEPS = new Set(['writing_notes', 'concepts']);
+
 /** What a running job is doing now, in words; unknown steps fall back to the job's own label. */
 export function stepLabel(job: KbJob): string {
+  if (job.step && LIVE_STEPS.has(job.step) && job.label) return job.label;
   const known = job.step ? STEP_LABEL[job.step] : undefined;
   if (known) return known;
   return job.label || 'Processing';
+}
+
+/** "3:20" since `startedAt`, ticking every second; null without a start time. */
+function useElapsed(startedAt: string | null | undefined): string | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!startedAt) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  if (!startedAt) return null;
+  const seconds = Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = String(seconds % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+/** The running step with live progress and the time it has taken so far (C1-f): a sign of life. */
+function RunningPill({ job }: { job: KbJob }) {
+  const elapsed = useElapsed(job.step_started_at);
+  return <Pill tone="run" spin>{elapsed ? `${stepLabel(job)} · ${elapsed}` : stepLabel(job)}</Pill>;
 }
 
 const SPEECH: ReadonlyArray<KbMaterial['kind']> = ['recording', 'audio', 'video', 'video_link'];
 /** `KbMaterialWiki.error_code`: the agent can't work until it is fixed in Settings → Accounts & keys. */
 const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
 
-function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
+/** The pill of a material whose wiki budget is used up (also explained in the wiki legend). */
+export const BUDGET_PAUSED_LABEL = 'Paused · budget reached';
+
+export function Pill({ tone, icon, spin, children, onClick, label, wrap }: {
   tone: 'done' | 'run' | 'todo' | 'error' | 'warn';
   icon?: IconName;
   spin?: boolean;
@@ -101,7 +130,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
       {material.translation && material.translation.fragments.length > 0 && <Pill tone="done" icon="check">Translated</Pill>}
       {speech && counts.applied > 0 && <Pill tone="done" icon="check">{plural(counts.applied, 'correction')}</Pill>}
       {speech && counts.doubtful > 0 && <Pill tone="warn" icon="warning">{`${counts.doubtful} doubtful`}</Pill>}
-      {running && <Pill tone="run" spin>{stepLabel(running)}</Pill>}
+      {running && <RunningPill job={running} />}
       {!running && wiki?.state === 'processing' && <Pill tone="run" spin>Adding to the wiki</Pill>}
       {!running && wiki?.state === 'queued' && <Pill tone="run" spin>Queued for the wiki</Pill>}
       {wiki?.state === 'in_wiki' && wiki.note_page_id && (
@@ -124,6 +153,15 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
           ) : (
             <Button size="sm" variant="quiet" icon="plus" busy={adding} onClick={onAddToWiki}>Add to wiki</Button>
           )}
+        </>
+      )}
+      {wiki?.state === 'paused' && (
+        <>
+          {/* C1-d: the material's wiki budget is used up. Finished work is kept and nothing
+              unfinished is shown as done; Continue picks up from the checkpoint. */}
+          <Pill tone="warn" icon="warning">{BUDGET_PAUSED_LABEL}</Pill>
+          {wiki.error && <span className="kb-muted kb-pipe__why">{wiki.error}</span>}
+          <Button size="sm" variant="outline" icon="play" busy={adding} onClick={onAddToWiki}>Continue</Button>
         </>
       )}
       {wiki?.state === 'failed' && (

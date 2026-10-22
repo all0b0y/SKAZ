@@ -9,6 +9,10 @@ The answer keeps its Markdown shape (QA D1): a paragraph, a whole list, a
 quote, a table or a fenced code block is one block, answer headings stay
 headings one level below the question, and each citation link stays in the
 sentence (list item, table row) it was given for.
+A ```mermaid diagram (decision D-10) is always an agent ``explanation``: its
+links to the cited passages stand under the fence. A diagram with none is left out — never
+put in the wiki unsourced — and the rest is saved with a warning naming what was left out and
+why (decision 9, 2026-10-21); an answer that is nothing but such diagrams is refused.
 A name that is taken is refused (no date or "(2)" appended, FILESYSTEM-
 LIBRARY-SPEC 14–15): the page is named after the question, else the chat.
 Model text is made inert for the page format, and a page that reads like
@@ -54,6 +58,17 @@ INSTRUCTION_REFUSAL = ("This answer contains text that reads like instructions t
                        "so SKAZ won't put it in the wiki.")
 NOTHING_TO_SAVE = "There is nothing to save from this chat yet."
 BAD_NAME = "SKAZ can't name a wiki page after this chat. Rename the chat, then save again."
+ONLY_UNCITED_DIAGRAMS = ("Nothing was saved: the diagram has no quotes from your materials. "
+                         "Ask the agent to cite the sources of the diagram, then save again.")
+
+
+def uncited_diagrams_warning(count: int) -> str | None:
+    """What the user is told when diagrams without material citations were left out of the page."""
+    if count <= 0:
+        return None
+    if count == 1:
+        return "Saved without 1 diagram: it has no quotes from your materials."
+    return f"Saved without {count} diagrams: they have no quotes from your materials."
 
 ChunkKind = Literal["heading", "paragraph", "list", "quote", "table", "code"]
 Chip = CitePart | PagePart
@@ -276,6 +291,23 @@ def _inert(line: str, *, keep_indent: bool) -> str:
     return indent + stripped
 
 
+def _is_mermaid(chunk: Chunk) -> bool:
+    fence = _FENCE.match(chunk.lines[0]) if chunk.kind == "code" and chunk.lines else None
+    return bool(fence and fence.group(2).strip().lower() == "mermaid")
+
+
+def _inert_mermaid(line: str) -> str | None:
+    """A diagram line made inert for the page format and still valid Mermaid: a ``%%`` comment
+    goes (a spaced "% %" breaks Mermaid's parser), a ``[[subroutine]]`` box becomes a plain box."""
+    value = _visible(line).replace("\t", "    ").rstrip()
+    if value.lstrip().startswith("%%"):
+        return None
+    for token, plain in (("[[", "["), ("]]", "]"), ("%%", "%")):
+        while token in value:
+            value = value.replace(token, plain)
+    return value
+
+
 def _inert_code(line: str) -> str:
     """A code line stays as written; only what the page format would read as its own syntax
     is broken apart (a marker line, a wikilink)."""
@@ -293,6 +325,13 @@ class AnalysisWriter:
         self.language = language
         self._sources: dict[str, SourceRef | None] = {}
         self.cited: dict[str, None] = {}
+        #: Diagrams left out of the page because they cite no material passage (decision 9).
+        self.left_out_diagrams = 0
+
+    @property
+    def warning(self) -> str | None:
+        """What the saved page is missing, and why — ``None`` when nothing was left out."""
+        return uncited_diagrams_warning(self.left_out_diagrams)
 
     # -- references -----------------------------------------------------------------
 
@@ -369,6 +408,8 @@ class AnalysisWriter:
         _refuse_instructions(" ".join(_visible(chunk.bare()).split()))
         cites: list[Cite] = []
         seen: set[str] = set()
+        if chunk.kind == "code" and _is_mermaid(chunk):
+            return self._diagram_block(chunk)
         if chunk.kind == "code":
             code: list[str] = []
             links: list[str] = []
@@ -403,6 +444,39 @@ class AnalysisWriter:
             return None
         kind: BlockKind = "from_source" if cites else "explanation"
         return Block.create(new_id("c"), kind, body, cites=tuple(cites))
+
+    def _diagram_block(self, chunk: Chunk) -> Block | None:
+        """A Mermaid diagram: the fence kept as Mermaid, the links to its cited passages under it.
+        Only a link to a material fragment counts as a citation (a wiki page is not a passage);
+        a diagram without one is left out and counted for the warning."""
+        if not self._cites_a_passage(chunk):
+            self.left_out_diagrams += 1
+            return None
+        code: list[str] = []
+        links: list[str] = []
+        seen: set[str] = set()
+        last = len(chunk.lines) - 1
+        for number, line in enumerate(chunk.lines):
+            for match in _SLOT.finditer(line):
+                link = self._chip_link(chunk.chips[int(match.group(1))], [])
+                if link is not None and link not in seen:
+                    seen.add(link)
+                    links.append(link)
+            bare = _SLOT.sub("", line)
+            kept = _inert_code(bare) if number in (0, last) else _inert_mermaid(bare)
+            if kept is not None:
+                code.append(kept)
+        return Block.create(new_id("c"), "explanation", "\n".join([*code, " ".join(links)]))
+
+    def _cites_a_passage(self, chunk: Chunk) -> bool:
+        """Whether a diagram's chips include a material fragment that still exists — checked before
+        any link is made, so a left-out diagram adds nothing to the page's sources."""
+        for slot in chunk.slots():
+            chip = chunk.chips[slot]
+            if isinstance(chip, CitePart) and self._source(chip.material_id) is not None \
+                    and self.reader.fragment(chip.material_id, chip.seg) is not None:
+                return True
+        return False
 
     def _connection_block(self, part: ConnectionPart) -> Block | None:
         pieces: list[str] = []
@@ -453,7 +527,7 @@ class AnalysisWriter:
     def save(self, titles: Sequence[str], sections: Sequence[Section], chat_id: str) -> PageRecord:
         parts = self.blocks(sections)
         if not any(isinstance(part, Block) for part in parts):
-            raise AnalysisRefused(NOTHING_TO_SAVE)
+            raise AnalysisRefused(ONLY_UNCITED_DIAGRAMS if self.left_out_diagrams else NOTHING_TO_SAVE)
         sources = tuple(self.cited)
         folders: dict[str, None] = {}
         for material_id in sources:

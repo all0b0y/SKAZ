@@ -22,27 +22,31 @@ async function openMaterial(id: string, world = docWorld()) {
 }
 
 describe('Settings → Models → Recognition check (B20)', () => {
-  it('same as wiki pages by default; an agent with its own model and effort; Off', async () => {
+  it('same as wiki model by default; an agent with its own model and reasoning; Off', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: docWorld() });
     const row = await openModels();
-    expect(await within(row).findByRole('radio', { name: 'Same as wiki pages' })).toHaveAttribute('aria-checked', 'true');
-    expect(within(row).queryByRole('combobox')).not.toBeInTheDocument();
-
-    await user.click(within(row).getByRole('radio', { name: 'Codex' }));
-    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'PUT', path: '/kb/settings/recognition', body: { engine: 'codex', model: null, effort: null } })));
-    const model = await within(row).findByRole('combobox', { name: 'Model for the recognition check' });
-    await user.selectOptions(model, 'gpt-5.6-luna-mini');
-    await waitFor(() => expect(fake.world.recognition).toEqual({ engine: 'codex', model: 'gpt-5.6-luna-mini', effort: null }));
-    await user.selectOptions(await within(row).findByRole('combobox', { name: 'Effort for the recognition check' }), 'high');
+    const open = async () => {
+      await user.click(await within(row).findByRole('button', { name: /^Recognition check:/ }));
+      return screen.findByRole('menu', { name: 'Recognition check' });
+    };
+    let menu = await open();
+    expect(within(menu).getByRole('menuitemradio', { name: 'Same as wiki model' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(within(within(menu).getByRole('group', { name: 'Codex' })).getByRole('menuitemradio', { name: 'GPT-5.6-luna-mini' }));
+    await waitFor(() => expect(fake.world.recognition).toEqual({ engine: 'codex', model: 'gpt-5.6-luna-mini', effort: 'medium' }));
+    menu = await open();
+    await user.click(within(menu).getByRole('radio', { name: 'High' }));
     await waitFor(() => expect(fake.world.recognition).toEqual({ engine: 'codex', model: 'gpt-5.6-luna-mini', effort: 'high' }));
 
-    // An agent that isn't connected is refused here, never saved.
-    await user.click(within(row).getByRole('radio', { name: 'Hermes' }));
-    expect(await within(row).findByRole('alert')).toHaveTextContent('Hermes Agent isn’t connected');
+    // An agent that isn't connected can't be chosen: its item says why and nothing is saved.
+    const hermes = within(menu).getByRole('group', { name: 'Hermes Agent' });
+    expect(hermes).toHaveTextContent(/not (installed|signed in)|unavailable/);
+    const item = within(hermes).getByRole('menuitemradio');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    await user.click(item);
     expect(fake.world.recognition?.engine).toBe('codex');
 
-    await user.click(within(row).getByRole('radio', { name: 'Off' }));
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'Off' }));
     await waitFor(() => expect(fake.world.recognition).toEqual({ engine: 'off', model: null, effort: null }));
     expect(within(row).getByText('Recordings go to the wiki as recognised.')).toBeInTheDocument();
   });

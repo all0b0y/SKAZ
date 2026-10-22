@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import unicodedata
 from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -23,12 +24,13 @@ from typing import Any, Literal
 
 from ...native_io import disk_call
 from ..chats.resolve import MaterialReader
-from ..errors import KnowledgeError, NotFound
+from ..errors import KnowledgeError, NameRejected, NotFound
 from ..ids import new_id
 from ..ids import utc_now as _now
+from ..ingest.drafts import file_name
 from ..ingest.pages import spaced
 from ..ingest.protocols import IdentityTextLayer, TextLayer
-from ..library.names import validate_name
+from ..library.names import MAX_NAME_BYTES, numbered_name, validate_name
 from ..markdown.page import Cite, PageDocument, PageMeta, parse_page
 from ..markdown.text import name_key
 from ..permissions.store import RunRef
@@ -41,6 +43,7 @@ from .checks import (
     CheckedQuestion,
     Dropped,
     QuestionIn,
+    Refused,
     check_all,
     check_card,
     check_question,
@@ -86,6 +89,15 @@ SCORES = {"right": 1.0, "partly": 0.5, "wrong": 0.0}
 
 class StudyError(KnowledgeError):
     status_code = 409
+
+
+def page_file_name(title: str, kind: BlockKind) -> str:
+    """The page's file name for a deck/test title (U3): characters a file can't hold become spaces and
+    a long title is cut to fit, as concept pages do; the agent's title is never refused for its name."""
+    name = file_name(title)
+    while name and len(unicodedata.normalize("NFD", name).encode("utf-8")) > MAX_NAME_BYTES:
+        name = name[:-1].rstrip()
+    return name or ("Deck" if kind == "deck" else "Test")
 
 
 @dataclass(frozen=True)
@@ -912,9 +924,36 @@ class StudyService:
                     for entry in block.state.get("reviews") or []
                 ]
             )
-        updated = self.store.update_block(block.id, save_status="saved", page_id=page_id, updated_at=_now())
+        record = self.kb.page_repo.get(page_id)
+        # The block now shows the page: its title is the page's name (U3), not the agent's raw one.
+        title = Path(record.rel_path).stem if record is not None else block.title
+        updated = self.store.update_block(block.id, save_status="saved", page_id=page_id, title=title,
+                                          updated_at=_now())
         assert updated is not None
         log.info("Study block %s saved to the wiki (%s)", block.id, block.kind)
+        self._notify(updated)
+        return updated
+
+    def rename(self, block_id: str, title: str) -> StudyBlock:
+        """Rename a deck or test without a new agent run (U3-a); a saved one renames its page too."""
+        block = self.get(block_id)
+        if block.origin != "agent":
+            raise StudyError("Rename this deck from its wiki page.")
+        try:
+            cleaned = clean_study_title(title)
+        except Refused as error:
+            raise NameRejected(f"{error} Choose another name.") from error
+        if not cleaned:
+            raise NameRejected("The name is empty. Choose another name.")
+        if block.page_id is not None:
+            if self.wiki is None:
+                raise StudyError("Renaming a wiki page isn't available here.")
+            self.wiki.rename_page(block.page_id, page_file_name(cleaned, block.kind))
+            record = self.kb.page_repo.get(block.page_id)
+            cleaned = Path(record.rel_path).stem if record is not None else cleaned
+        updated = self.store.update_block(block.id, title=cleaned, updated_at=_now())
+        assert updated is not None
+        log.info("Study block %s renamed", block.id)
         self._notify(updated)
         return updated
 
@@ -924,7 +963,7 @@ class StudyService:
             if record is not None:
                 return record.rel_path
         directory = "Wiki/Decks" if block.kind == "deck" else "Wiki/Tests"
-        return f"{directory}/{block.title}.md"
+        return f"{directory}/{page_file_name(block.title, block.kind)}.md"
 
     def _free_title(self, kind: BlockKind, title: str) -> str:
         library = self.kb.require()
@@ -934,10 +973,11 @@ class StudyService:
             for page in self.kb.page_repo.list_all()
             if Path(page.rel_path).parent == Path(library.relative(directory))
         }
-        candidate, number = title, 1
+        base = page_file_name(title, kind)
+        candidate, number = base, 1
         while name_key(candidate) in taken or (directory / f"{candidate}.md").exists():
             number += 1
-            candidate = f"{title} ({number})"
+            candidate = numbered_name(base, number)
         return validate_name(candidate)
 
     def _write_page(self, block: StudyBlock) -> str:

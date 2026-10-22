@@ -11,6 +11,9 @@ export const CLAIM_LABEL: Record<ClaimKind, string> = {
   user_note: 'My note',
 };
 
+/** The label of an agent statement the user changed (it is theirs now). */
+export const EDITED_LABEL = 'Edited by you';
+
 export const CLAIM_ICON: Record<ClaimKind, IconName> = {
   from_source: 'quote',
   connection: 'graph',
@@ -71,6 +74,14 @@ export function groupSections(blocks: readonly KbBlock[]): PageSection[] {
 export function canEdit(block: KbBlock): boolean {
   if (isNavigation(block)) return false;
   return block.kind !== 'from_source' || block.owner !== 'agent';
+}
+
+/**
+ * A connection SKAZ wrote between two concepts (`c-link-*`, edited or not): the backend lets it be
+ * deleted and never suggests the pair again (wiki/edit.py `is_connection`). Other agent blocks stay.
+ */
+export function isSkazConnection(block: Pick<KbBlock, 'id' | 'kind'>): boolean {
+  return block.kind === 'connection' && block.id.startsWith('c-link-');
 }
 
 export function isEditedByUser(block: KbBlock): boolean {

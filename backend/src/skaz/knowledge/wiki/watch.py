@@ -3,7 +3,9 @@
 No new dependency (no FSEvents/watchfiles): one ``scandir`` of the four page
 folders per tick, comparing ``(mtime_ns, size)``. A new or changed page is
 re-read (an edited agent block becomes ``user_edited`` — the scanner's rule)
-and re-indexed; a page that disappeared leaves the index. The first tick only
+and re-indexed — an edit of a known page is a manual edit for connections (a
+connection it deleted is remembered, the page waits for a connection run); a
+page that disappeared leaves the index. The first tick only
 takes the snapshot.
 """
 
@@ -18,6 +20,7 @@ from ..index.scanner import read_page
 from ..library.layout import WIKI_SUBDIRS
 from ..markdown.page import PageFormatError
 from ..service import KnowledgeService
+from .connections import after_user_edit, linked_pages
 from .pages_io import forget_page
 
 INTERVAL_S = 2.0
@@ -77,7 +80,12 @@ class WikiWatcher:
             known = self.kb.page_repo.get(page.meta.skaz_id)
             if known is not None and known.file_sha256 == page.file_sha256 and known.rel_path == rel_path:
                 continue  # SKAZ wrote it itself and indexed it already
+            before = linked_pages(self.kb.db, known.id) if known is not None else None
             indexer.put_page(self.kb.db, page)
+            if before is not None and known is not None:
+                # A manual edit outside SKAZ: a connection it deleted is never suggested again, and
+                # the page waits for the next connection run (C1-a, user decisions 2026-10-21, 4–5).
+                after_user_edit(self.kb.db, known.id, before)
             changed += 1
         for rel_path in previous.keys() - current.keys():
             for record in self.kb.pages():

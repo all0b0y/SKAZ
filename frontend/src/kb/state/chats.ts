@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbPageRef } from '../../api/kb/types.gen';
+import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbSavedAnalysis } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
@@ -48,9 +48,12 @@ export interface ChatsActions {
   send: (input: KbMessageInput, context: KbOpenContext, options?: { newChat?: boolean }) => Promise<ActionResult<string>>;
   stop: (chatId: string, messageId: string) => Promise<ActionResult>;
   regenerate: (chatId: string, messageId: string) => Promise<ActionResult>;
+  /** Your question changed in place: the messages after it go and it is answered again (409 while answering). */
+  edit: (chatId: string, messageId: string, input: KbMessageInput) => Promise<ActionResult>;
   resume: (chatId: string, messageId: string) => Promise<ActionResult>;
-  saveMessage: (chatId: string, messageId: string) => Promise<ActionResult<KbPageRef>>;
-  saveChat: (chatId: string) => Promise<ActionResult<KbPageRef>>;
+  /** The page written; `warning` names what was left out (a diagram without material quotes). */
+  saveMessage: (chatId: string, messageId: string) => Promise<ActionResult<KbSavedAnalysis>>;
+  saveChat: (chatId: string) => Promise<ActionResult<KbSavedAnalysis>>;
   exportChat: (chatId: string) => Promise<ActionResult<{ file_name: string; markdown: string }>>;
   rename: (chatId: string, title: string) => Promise<ActionResult>;
   setPinned: (chatId: string, pinned: boolean) => Promise<ActionResult>;
@@ -166,6 +169,10 @@ export function applyEvents(chat: KbChat, events: KbChatEvent[]): KbChat {
     const e = event as KbChatEventP;
     if (e.type === 'part_update') {
       if (e.part) messages = replacePart(messages, e.part, e.message_id) ?? messages;
+      continue;
+    }
+    if (e.type === 'removed') {
+      messages = messages.filter((m) => m.id !== e.message_id);
       continue;
     }
     if (e.type === 'title') {
@@ -358,12 +365,31 @@ export function createChatsStore(client: KbClient): ChatsStore {
         const m = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/stop', { path: { chat_id: chatId, message_id: messageId } });
         merge(chatId, [m]);
       }),
+      edit: (chatId, messageId, input) => act(async () => {
+        const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/edit', {
+          path: { chat_id: chatId, message_id: messageId },
+          body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments },
+        });
+        const open = get().chats[chatId];
+        if (open?.chat) {
+          // What followed the question is gone (the `removed` events say the same to other windows).
+          const kept = open.chat.messages.filter((m) => m.seq <= res.user.seq);
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat: { ...open.chat!, messages: kept } } } }));
+        }
+        merge(chatId, [res.user, res.assistant]);
+      }),
       regenerate: (chatId, messageId) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/regenerate', { path: { chat_id: chatId, message_id: messageId } });
         merge(chatId, [res.assistant]);
       }),
       resume: (chatId, messageId) => act(async () => {
         const res = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/resume', { path: { chat_id: chatId, message_id: messageId } });
+        // The new answer takes the interrupted one's place (2026-10-21; `removed` tells other windows).
+        const open = get().chats[chatId];
+        if (open?.chat) {
+          const kept = open.chat.messages.filter((m) => m.id !== messageId);
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat: { ...open.chat!, messages: kept } } } }));
+        }
         merge(chatId, [res.assistant]);
       }),
       saveMessage: (chatId, messageId) => act(async () => {
@@ -403,7 +429,10 @@ export function createChatsStore(client: KbClient): ChatsStore {
       setAgent: async (chatId, choice) => {
         if (!chatId) {
           set({ draftAgent: choice });
-          return { ok: true, value: undefined };
+          // The next new chat starts from it too, after a restart (models screen v2).
+          return act(async () => {
+            await client.call('PUT /kb/chats/last-choice', { body: { engine: choice.engine, model: choice.model, effort: choice.effort } });
+          });
         }
         return act(async () => {
           const s = await client.call('PATCH /kb/chats/{chat_id}', {

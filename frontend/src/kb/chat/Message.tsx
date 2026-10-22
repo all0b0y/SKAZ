@@ -1,21 +1,24 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
 import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
-import { quoteLabel } from '../composer/editor';
+import { inputPieces, quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
 import { useServices } from '../state/context';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
-import { SourcesProvider, SourcesRow } from '../cite/SourceMarks';
+import { FoldedSourcesRow, SourcesProvider } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 import type { AnyMessagePart, KbPermissionPart, KbQuestionPart } from '../api/permissions';
 import { PermissionCard } from './permission';
 import { QuestionBlock } from './QuestionBlock';
 import { StudyInChat } from '../study/StudyBlock';
 import type { KbStudyPart } from '../study/api';
+import type { KbWebSearchPart } from '../api/webSearch';
+import { WebSearchCard } from './webSearch';
+import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -27,7 +30,8 @@ type Block =
   | { kind: 'connection'; part: Extract<KbMessagePart, { type: 'connection' }> }
   | { kind: 'permission'; part: KbPermissionPart }
   | { kind: 'question'; part: KbQuestionPart }
-  | { kind: 'study'; part: KbStudyPart };
+  | { kind: 'study'; part: KbStudyPart }
+  | { kind: 'web'; part: KbWebSearchPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -49,6 +53,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
   };
   for (const part of parts) {
     if (part.type === 'tool') continue;
+    if (part.type === 'web_search') {
+      // W-2: an agent's web search is its own block, apart from the material citations.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'web', part });
+      continue;
+    }
     if (part.type === 'connection' || part.type === 'permission' || part.type === 'question' || part.type === 'study') {
       // A connection, a permission request, an agent question (0.3.1 P) and a deck or test (S) are
       // blocks of their own.
@@ -122,15 +133,20 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         }
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
   );
 }
 
+/** SKAZ's web search tool (backend `permissions/web_tool.py` WEB_TOOL). */
+const WEB_TOOL = 'skaz_web_search';
+
 /** What the agent looked at ("Read page Entropy"), folded. */
 function Tools({ parts }: { parts: KbMessagePart[] }) {
-  const tools = parts.filter((p): p is Extract<KbMessagePart, { type: 'tool' }> => p.type === 'tool');
+  // W-3b: the skaz_web_search call has its own «Searched the web» line — not repeated here.
+  const tools = parts.filter((p): p is Extract<KbMessagePart, { type: 'tool' }> => p.type === 'tool' && !p.name.endsWith(WEB_TOOL));
   const [open, setOpen] = useState(false);
   if (!tools.length) return null;
   return (
@@ -188,7 +204,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
           <Parts chatId={chatId} parts={message.parts} />
         </SourcesProvider>
       </div>
-      <SourcesRow index={sources} />
+      <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
       {interrupted && message.failure && (
         <div className="kb-interrupt" role="alert">
           <Icon name="clock" size={16} className="kb-interrupt__icon" />
@@ -220,49 +236,58 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   );
 }
 
-/** The question as typed: mentions and quotes stay tokens (decision 23). */
-export function UserMessage({ message }: { message: KbMessage }) {
-  const input: KbMessageInput = message.input ?? {
+/** What the user typed: the stored input, or (older messages) the text of its parts. */
+export function questionInput(message: KbMessage): KbMessageInput {
+  return message.input ?? {
     text: message.parts.map((p) => (p.type === 'text' ? p.text : '')).join(''), mentions: [], quotes: [], attachments: [],
   };
+}
+
+/**
+ * The question as typed: mentions and quotes stay tokens (decision 23). With `actions`: Copy · Edit ·
+ * Resend under it (2026-10-21); Edit turns the bubble into a field in place.
+ */
+export function UserMessage({ message, actions }: { message: KbMessage; actions?: QuestionActions }) {
+  const input = questionInput(message);
+  const [editing, setEditing] = useState(false);
+  const articleRef = useRef<HTMLElement | null>(null);
+  const refocus = useRef(false);
+  // Cancel: the focus goes back to Edit, where the user started.
+  useEffect(() => {
+    if (editing || !refocus.current) return;
+    refocus.current = false;
+    articleRef.current?.querySelector<HTMLElement>('[aria-label="Edit"]')?.focus();
+  }, [editing]);
+  const close = () => { refocus.current = true; setEditing(false); };
   return (
-    <article className="kb-msg kb-msg--user" aria-label="Your question">
-      <div className="kb-msg__bubble">{renderInput(input)}</div>
+    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef}>
+      {editing && actions ? (
+        <QuestionEditor input={input} onCancel={close} onSend={async (next) => {
+          const failed = await actions.onEdit(next);
+          if (!failed) close();
+          return failed;
+        }} />
+      ) : (
+        <div className="kb-msg__bubble">{renderInput(input)}</div>
+      )}
       {input.attachments.length > 0 && (
         <p className="kb-msg__attach"><Icon name="attach" size={12} />{input.attachments.length} {input.attachments.length === 1 ? 'attachment' : 'attachments'}</p>
       )}
+      {actions && !editing && <QuestionActionsRow text={input.text} actions={actions} onEdit={() => setEditing(true)} />}
+      {actions?.error && !editing && <p className="kb-inline-error kb-inline-error--flat kb-msg__error" role="alert">{actions.error}</p>}
     </article>
   );
 }
 
 export function renderInput(input: KbMessageInput): ReactNode {
-  const marks: Array<{ at: number; len: number; node: ReactNode }> = [];
-  const used = new Set<number>();
-  const find = (needle: string, node: ReactNode) => {
-    let from = 0;
-    for (;;) {
-      const at = input.text.indexOf(needle, from);
-      if (at < 0) return;
-      if (![...used].some((u) => u >= at && u < at + needle.length)) {
-        for (let i = at; i < at + needle.length; i += 1) used.add(i);
-        marks.push({ at, len: needle.length, node });
-        return;
-      }
-      from = at + 1;
+  return inputPieces(input).map((piece, i) => {
+    if (typeof piece === 'string') return piece;
+    if (piece.kind === 'mention') {
+      const { ref } = piece;
+      return <span key={`m${i}`} className="kb-token kb-token--mention" data-icon={ref.type === 'chat' ? 'chat' : ref.type === 'material' ? 'material' : 'page'}>{ref.title}</span>;
     }
-  };
-  input.mentions.forEach((ref, i) => find(`@${ref.title}`, <span key={`m${i}`} className="kb-token kb-token--mention" data-icon={ref.type === 'chat' ? 'chat' : ref.type === 'material' ? 'material' : 'page'}>{ref.title}</span>));
-  input.quotes.forEach((q, i) => find(`“${quoteLabel(q.text)}”`, <span key={`q${i}`} className="kb-token kb-token--quote" data-icon="quote" title={q.text}>{quoteLabel(q.text)}</span>));
-  marks.sort((a, b) => a.at - b.at);
-  const out: ReactNode[] = [];
-  let pos = 0;
-  for (const mk of marks) {
-    if (mk.at > pos) out.push(input.text.slice(pos, mk.at));
-    out.push(mk.node);
-    pos = mk.at + mk.len;
-  }
-  if (pos < input.text.length) out.push(input.text.slice(pos));
-  return out;
+    return <span key={`q${i}`} className="kb-token kb-token--quote" data-icon="quote" title={piece.quote.text}>{quoteLabel(piece.quote.text)}</span>;
+  });
 }
 
 /** "Switched to Claude Code" and similar records in the conversation; "Study" from a deck page (S12). */

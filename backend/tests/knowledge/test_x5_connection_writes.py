@@ -11,7 +11,6 @@ The writing agent is ``ScriptedWiki`` (a fake at the model seam); no model runs.
 from __future__ import annotations
 
 import asyncio
-import json
 import threading
 import time
 from typing import Any
@@ -22,10 +21,17 @@ from skaz.knowledge.markdown.page import parse_page
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiki import connections as connections_module
 from skaz.knowledge.wiki import pages_io
-from skaz.knowledge.wiki.statements import page_statements
 
 from .ingest_support import ScriptedWiki, add_material, block, cite, concept, concepts
-from .wiki_support import CONNECTIONS, LECTURE_NOTES, ingest_done, settle_wiki, wired
+from .wiki_support import (
+    CONNECTIONS,
+    LECTURE_NOTES,
+    connecting,
+    forget_connection_checks,
+    ingest_done,
+    settle_wiki,
+    wired,
+)
 
 ENTROPY = "Энтропия"
 #: The lecture's concepts plus a third one, so "Энтропия" has two candidates to connect to.
@@ -60,12 +66,14 @@ async def two_connections_queued(ready: KnowledgeService) -> tuple[Any, Any, str
     assert record is not None and links(ready, entropy) == []
     candidates = service.connections.candidates(record)
     assert len(candidates) == 2, [item.title for item in candidates]
-    own = page_statements(ready, entropy, limit=10)
-    answer = {"connections": [
-        {"page": 1, "text": "Первая связь.", "this_side": [1], "other_side": [len(own) + 1]},
-        {"page": 2, "text": "Вторая связь.", "this_side": [2], "other_side": [len(own) + 2]},
-    ]}
-    wiki.queues.setdefault(CONNECTIONS, []).append(json.dumps(answer, ensure_ascii=False))
+    # The run after ingest checked the pairs already (no connection): as before C1-a, ask again.
+    forget_connection_checks(ready)
+    first, second = candidates
+    words = {"Температура": "энергию частиц", "Частицы": "кинетическая энергия"}
+    wiki.queues.setdefault(CONNECTIONS, []).append(connecting(
+        (ENTROPY, first.title, "Мера беспорядка", words[first.title], "Первая связь."),
+        (ENTROPY, second.title, "газа растёт", words[second.title], "Вторая связь."),
+    ))
     return service, wiki, entropy, [item.title for item in candidates]
 
 

@@ -22,7 +22,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal, Protocol, runtime_checkable
 
-EngineId = Literal["codex", "claude_code", "hermes"]
+from .web import WebSearchGate
+
+EngineId = Literal["codex", "claude_code", "hermes", "opencode"]
 FailureKind = Literal["limit", "auth", "incompatible", "network", "cancelled", "other"]
 Role = Literal["user", "assistant"]
 
@@ -84,6 +86,9 @@ class AgentTurn:
     effort: str | None = None
     #: Optional JSON schema the final answer must satisfy (structured ingest output).
     response_schema: Mapping[str, Any] | None = None
+    #: W-2: chat turns of an agent whose web search SKAZ can hold; each query waits here first.
+    #: ``None`` = no web search at all (wiki jobs, other agents).
+    web: WebSearchGate | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +135,10 @@ class Failed:
     retry_at: datetime | None = None
     #: The engine was only busy (all its parallel slots taken): the same turn can run a bit later.
     transient: bool = False
+    #: The request certainly never reached the model (refused or failed before it was sent), so a
+    #: retry costs nothing. ``False`` = it may have been sent and paid for: adapters set this only
+    #: where they know. Not part of equality (the same failure, with or without this knowledge).
+    unsent: bool = field(default=False, compare=False)
 
 
 AgentEvent = TextDelta | ToolCall | ToolResult | Completed | Failed
