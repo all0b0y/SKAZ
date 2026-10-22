@@ -132,6 +132,11 @@ const api: BridgeApi = {
     ipcRenderer.on(CHANNELS.studyClosed, handler);
     return () => ipcRenderer.removeListener(CHANNELS.studyClosed, handler);
   },
+  onFullScreen(listener: (fullScreen: boolean) => void): () => void {
+    const handler = (_event: unknown, on: unknown): void => listener(on === true);
+    ipcRenderer.on(CHANNELS.fullScreen, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.fullScreen, handler);
+  },
   // Which block this window shows, when it is a block's own window (main set the fragment).
   studyWindow: parseStudyHash((globalThis as { location?: { hash?: string } }).location?.hash ?? ''),
 };

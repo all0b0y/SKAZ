@@ -52,18 +52,11 @@ describe('Window shell', () => {
     expect(within(rail).queryByTestId('rail-label')).not.toBeInTheDocument();
   });
 
-  it('the rail carries a vertical SKAZ wordmark above Search (v44 A): decorative, not a control', async () => {
+  it('the rail has no SKAZ wordmark any more (the empty chat shows SKAZ): only sections, search and settings', async () => {
     renderKb();
     const rail = await screen.findByRole('navigation', { name: 'Sections' });
-    const mark = rail.querySelector('.kb-rail__wordmark');
-    expect(mark).not.toBeNull();
-    expect(mark).toHaveTextContent('SKAZ');
-    expect(mark).toHaveAttribute('aria-hidden', 'true');
-    expect(mark!.closest('button, a, [tabindex]')).toBeNull();
-    // Between the sections and Search, in the flexible space.
-    const search = within(rail).getByRole('button', { name: 'Search' });
-    expect(mark!.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(mark!.parentElement).toHaveClass('kb-rail__spacer');
+    expect(rail.querySelector('.kb-rail__wordmark')).toBeNull();
+    expect(rail).not.toHaveTextContent('SKAZ');
   });
 
   it('keyboard focus shows the rail name at once; search and settings carry their shortcut, muted', async () => {

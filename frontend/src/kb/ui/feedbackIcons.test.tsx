@@ -129,6 +129,19 @@ describe('Feedback motion of the six buttons', () => {
     expect(iconPlays).toEqual(['send']);
   });
 
+  it('side-panel toggle: a static glyph that shows the state (close while open, open while hidden), never animated', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const hide = await screen.findByRole('button', { name: 'Hide side panel' });
+    expect(hide.querySelector('[data-icon]')).toHaveAttribute('data-icon', 'sidebarClose');
+    expect(hide.querySelector('[data-icon]')).toHaveAttribute('data-set', 'lucide');
+    await user.click(hide);
+    const show = await screen.findByRole('button', { name: 'Show side panel' });
+    expect(show.querySelector('[data-icon]')).toHaveAttribute('data-icon', 'sidebarOpen');
+    expect(show.querySelector('svg[data-set="lucide"]')).not.toBeNull();
+    expect(iconPlays).toEqual([]);
+  });
+
   it('new chat: the pen plays once per click on the list entry, not on hover', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });

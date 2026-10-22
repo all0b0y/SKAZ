@@ -38,4 +38,6 @@ export const CHANNELS = {
   studyOpen: 'study:open-window',
   studyClose: 'study:close-window',
   studyClosed: 'study:window-closed',
+  // macOS full screen hides the traffic lights: the title bar drops the room it keeps for them.
+  fullScreen: 'app:full-screen',
 } as const;

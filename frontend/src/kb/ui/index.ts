@@ -10,3 +10,4 @@ export { Popover, Menu, type MenuItem } from './Popover';
 export { Tooltip } from './Tooltip';
 export { MotionProvider, SPRING_SMALL, SPRING_LARGE, EXIT } from './motion';
 export { PathText } from './PathText';
+export { useCopied, COPIED_MS } from './useCopied';

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { copyToClipboard } from '../../../lib/clipboard';
 import { Button, IconButton } from '../Button';
 import { Modal } from '../Modal';
+import { useCopied } from '../useCopied';
 
 /**
  * A diagram at full size over the window (2026-10-21, chat-actions mock «Open full-size viewer»).
@@ -86,7 +87,7 @@ function ViewerBody({ svg, source, onClose, canvas }: {
   viewRef.current = view;
   const fitted = useRef(true);
   const [used, setUsed] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied();
   const drag = useRef<{ id: number; x: number; y: number; vx: number; vy: number } | null>(null);
 
   const rect = () => canvas.current?.getBoundingClientRect() ?? null;

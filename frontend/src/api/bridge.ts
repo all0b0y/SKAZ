@@ -184,6 +184,8 @@ export interface BridgeApi {
   closeStudyWindow?(): Promise<boolean>;
   /** The user closed the block's window: the main window brings the block back into the chat. */
   onStudyWindowClosed?(listener: (target: StudyWindowTarget) => void): () => void;
+  /** The window entered or left macOS full screen (sent once on load, then on every change). Either window. */
+  onFullScreen?(listener: (fullScreen: boolean) => void): () => void;
   /** Set in the block's own window: which block and chat it shows (from its URL, checked by main). */
   readonly studyWindow?: StudyWindowTarget | null;
 }

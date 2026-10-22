@@ -151,8 +151,8 @@ function RailButton({ id, label, hint, icon, iconPlay, active = false, open = fa
 
 /**
  * Icon rail (summary v39): narrow, icons only — names slide out on hover/focus (v43 B) and are the
- * accessible names; the SKAZ wordmark (v44 A) in the free space above search ⌘K and settings at the
- * bottom. Never moves: fixed width, fixed item
+ * accessible names; search ⌘K and settings at the bottom (the SKAZ wordmark of v44 A was removed:
+ * the empty chat already shows SKAZ). Never moves: fixed width, fixed item
  * heights, nothing appears or disappears when sections or panels change. The graph lives in the
  * Wiki section (v39).
  */
@@ -197,10 +197,7 @@ export function Rail() {
           );
         })}
       </ul>
-      <div className="kb-rail__spacer">
-        {/* Wordmark (v44 A): decorative, reads bottom-to-top; hidden when the rail has no room for it. */}
-        <span className="kb-rail__wordmark" aria-hidden="true">SKAZ</span>
-      </div>
+      <div className="kb-rail__spacer" />
       <RailButton id="search" label="Search" hint="⌘K" icon="search" open={searchOpen} labels={labels} ariaLabel="Search"
         attrs={{ 'aria-keyshortcuts': 'Meta+K', 'aria-haspopup': 'dialog' }} onClick={() => setSearchOpen(true)} />
       <RailButton

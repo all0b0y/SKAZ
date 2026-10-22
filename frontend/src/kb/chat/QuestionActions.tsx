@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { KbMessageInput } from '../../api/kb/types.gen';
 import { copyToClipboard } from '../../lib/clipboard';
-import { Button, IconButton, useIconPlay, useIconPlayHold, type IconName } from '../ui';
+import { Button, IconButton, useCopied, useIconPlay, useIconPlayHold, type IconName } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { caretToEnd, fillEditor, insertText, serialize } from '../composer/editor';
 
@@ -40,7 +40,7 @@ function WaitingButton({ icon, iconPlay, label, reason, onClick }: {
 }
 
 export function QuestionActionsRow({ text, actions, onEdit }: { text: string; actions: QuestionActions; onEdit: () => void }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied();
   // Feedback motion (animated-icons spec): the ✓ draws itself after a copy, the arrow turns on Resend.
   const [copyPlay, replayCopy] = useIconPlay();
   const [resendPlay, replayResend] = useIconPlay();

@@ -17,7 +17,8 @@ export function TitleBar() {
     <header className="kb-titlebar" data-testid="titlebar">
       <div className="kb-titlebar__group">
         <IconButton
-          icon="sidebar"
+          // Static glyph that shows the state (close ⇤ while open, open ⇥ while hidden); it does not animate.
+          icon={sideOpen ? 'sidebarClose' : 'sidebarOpen'}
           label={sideOpen ? 'Hide side panel' : 'Show side panel'}
           aria-pressed={sideOpen}
           aria-controls="kb-side"

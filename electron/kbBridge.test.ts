@@ -127,4 +127,30 @@ describe('Electron preload — the three new methods use their own channels', ()
     ]);
     vi.doUnmock('electron');
   });
+
+  it('passes the window full-screen state to the page as a boolean, and unsubscribes', async () => {
+    vi.resetModules();
+    const handlers: Record<string, (event: unknown, ...args: unknown[]) => void> = {};
+    const removeListener = vi.fn();
+    let exposed: Record<string, (...args: unknown[]) => unknown> = {};
+    vi.doMock('electron', () => ({
+      contextBridge: { exposeInMainWorld: (_: string, api: Record<string, (...args: unknown[]) => unknown>) => { exposed = api; } },
+      ipcRenderer: { invoke: vi.fn(), on: (ch: string, h: (event: unknown, ...args: unknown[]) => void) => { handlers[ch] = h; }, removeListener, send: vi.fn() },
+      webUtils: { getPathForFile: () => '' },
+    }));
+    const proc = process as unknown as { getSystemVersion?: () => string };
+    const had = proc.getSystemVersion;
+    proc.getSystemVersion = () => '15.0.0';
+    await import('./preload');
+    proc.getSystemVersion = had;
+    const seen: boolean[] = [];
+    const off = exposed.onFullScreen!((on: boolean) => seen.push(on)) as () => void;
+    handlers['app:full-screen']!({}, true);
+    handlers['app:full-screen']!({}, 'yes');
+    handlers['app:full-screen']!({}, false);
+    expect(seen).toEqual([true, false, false]);
+    off();
+    expect(removeListener).toHaveBeenCalledWith('app:full-screen', handlers['app:full-screen']);
+    vi.doUnmock('electron');
+  });
 });

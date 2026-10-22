@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
 import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
-import { Button, Icon, IconButton, useIconPlay } from '../ui';
+import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
 import { inputPieces, quoteLabel } from '../composer/editor';
@@ -191,7 +191,7 @@ export interface AnswerActions {
 
 /** One assistant answer: parts, the interruption card, and the actions under it. */
 export function AssistantMessage({ chatId, message, actions }: { chatId: string; message: KbMessage; actions: AnswerActions }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useCopied();
   // Feedback motion (animated-icons spec): the ✓ draws itself after a copy, the arrow turns on Regenerate.
   const [copyPlay, replayCopy] = useIconPlay();
   const [regenPlay, replayRegen] = useIconPlay();

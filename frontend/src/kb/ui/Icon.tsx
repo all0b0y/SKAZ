@@ -25,7 +25,7 @@ import {
   AtSign, AudioWaveform, BookOpenText, Bot, ChevronLeft, ChevronRight, CircleAlert,
   CircleDot, Command, Download, ExternalLink, FileMusic, FileText, FileVideoCamera, Folder, FolderPlus,
   Inbox, Info, Languages, Link, Minimize2, Maximize2, Monitor, Moon,
-  PanelLeft, Paperclip, Pin, Play, Plus, ShieldCheck,
+  PanelLeftClose, PanelLeftOpen, Paperclip, Pin, Play, Plus, ShieldCheck,
   Sun, Trash2, Pause, LayoutList, LayoutGrid, TriangleAlert, Type, Upload, Waypoints, Palette, HardDrive, Sparkles,
   ArrowUpDown, BookPlus, ChevronUp, Clock, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
@@ -45,6 +45,9 @@ import {
  * Licences of `@animateicons/react` and the shapes under it: `frontend/public/licenses/AnimateIcons-MIT.txt`.
  */
 const ICONS = {
+  // The side-panel toggle shows the panel's state, static (close it while open, open it while hidden).
+  sidebarClose: PanelLeftClose,
+  sidebarOpen: PanelLeftOpen,
   // 33 concepts (icons38.py)
   wiki: BookOpenText,
   upload: Upload,
@@ -58,7 +61,6 @@ const ICONS = {
   folder: Folder,
   inbox: Inbox,
   export: Download,
-  sidebar: PanelLeft,
   warning: TriangleAlert,
   agent: Bot,
   translate: Languages,
@@ -163,7 +165,9 @@ const HUGE = {
   stop: StopIcon,
 } satisfies Record<string, LibraryIcon>;
 
-/** Lucide shapes that move as feedback (spec §3): the ↑ of Send, the pen of New chat, the ✓ after Copy. */
+/**
+ * Lucide shapes that move as feedback (spec §3): the ↑ of Send, the pen of New chat, the ✓ after Copy.
+ */
 const LUCIDE_ANIMATED = {
   send: ArrowUpIcon,
   newChat: SquarePenIcon,

@@ -217,6 +217,7 @@ function openStudyWindow(target: StudyWindowTarget): void {
   });
   studyWindow = win;
   win.once('ready-to-show', () => win.show());
+  reportFullScreen(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) void shell.openExternal(url);
     return { action: 'deny' };
@@ -245,6 +246,14 @@ function closeStudyWindow(): void {
   }
 }
 
+/** Tell the page whether its window is in full screen (no traffic lights then), now and on every change. */
+function reportFullScreen(win: BrowserWindow): void {
+  const send = (): void => { if (!win.webContents.isDestroyed()) win.webContents.send(CHANNELS.fullScreen, win.isFullScreen()); };
+  win.on('enter-full-screen', send);
+  win.on('leave-full-screen', send);
+  win.webContents.on('did-finish-load', send);
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -266,6 +275,7 @@ function createWindow(): void {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  reportFullScreen(mainWindow);
 
   // Block navigation away from the app and any new windows. Only hand safe
   // http/https links to the OS browser; never local/custom schemes from content.
