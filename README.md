@@ -17,9 +17,9 @@ Record or add a source · ask with exact citations · a wiki that keeps itself u
 
 <br>
 
-<img src="docs/images/skaz-tour.webp" alt="A tour of SKAZ: recording a lecture into a folder, asking about it, opening the cited moment, the wiki page, search and the dark theme" width="880">
+<img src="docs/images/skaz-tour.webp" alt="A tour of SKAZ: recording a lecture, asking about it with a footnote, allowing an agent edit, studying cards made from the lecture" width="880">
 
-<sub>Product tour · demo profile with authored data · <a href="docs/images/skaz-tour.mp4">Full HD video (MP4, 23 s)</a></sub>
+<sub>Product tour · demo profile with authored data · <a href="docs/images/skaz-tour.mp4">The whole tour in Full HD (MP4, 80 s)</a></sub>
 
 <br><br>
 
@@ -52,20 +52,26 @@ AI can be wrong. Citations help you check an answer; they don't guarantee it is 
 <table>
 <tr>
 <td width="50%"><img src="docs/images/tour-record.webp" alt="Recording a lecture into a folder"><br><b>Record into a folder</b><br>Pick the folder, press Record, and the transcript appears as people speak, by speaker and time.</td>
-<td width="50%"><img src="docs/images/tour-ask.webp" alt="An answer with footnotes"><br><b>Ask with citations</b><br>Every claim has a footnote. Open it and SKAZ jumps to the quote in the source.</td>
+<td width="50%"><img src="docs/images/tour-ask.webp" alt="An answer with footnotes, opened at the quoted moment"><br><b>Ask with citations</b><br>Every claim has a footnote. Open it and SKAZ jumps to the quote in the source.</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/images/tour-wiki.webp" alt="A wiki concept page"><br><b>A wiki that writes itself</b><br>Concept pages and notes built from your sources, marked with what is quoted and what the agent inferred.</td>
-<td width="50%"><img src="docs/images/tour-search.webp" alt="Searching everything with ⌘K"><br><b>Search everything</b><br>⌘K finds wiki pages, materials and chats, or hands the question to the agent.</td>
+<td width="50%"><img src="docs/images/tour-edit.webp" alt="An agent asks before editing a wiki page"><br><b>Agents ask first</b><br>An agent changes the wiki only through SKAZ, and you see the change before it happens: Allow or Deny.</td>
+<td width="50%"><img src="docs/images/tour-cards.webp" alt="Flashcards and a test made from a lecture"><br><b>Cards and tests</b><br>Ask for cards or a test on a lecture. Every answer is backed by a checked quote; cards come back with spaced repetition.</td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="docs/images/tour-theme.webp" alt="Switching to the dark theme" width="50%"><br><b>Light and dark</b><br>Follows your Mac, or pick a theme in <b>Settings → Appearance</b>.</td>
+<td width="50%"><img src="docs/images/tour-web.webp" alt="Approving a web search, then adding a found page to the library"><br><b>Web search, with your OK</b><br>You see the exact query before it is sent. A found page goes into the library with one click.</td>
+<td width="50%"><img src="docs/images/tour-diagram.webp" alt="A diagram in an answer, opened full size"><br><b>Diagrams</b><br>Answers can draw a diagram, rendered on your Mac. Open it full size and zoom in.</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/images/tour-wiki.webp" alt="A wiki concept page and its connections"><br><b>A wiki that writes itself</b><br>Concept pages from all your sources, connected to each other, marked with what is quoted and what the agent inferred.</td>
+<td width="50%"><img src="docs/images/tour-theme.webp" alt="Switching to the dark theme"><br><b>Light and dark</b><br>Follows your Mac, or pick a theme in <b>Settings → Appearance</b>.</td>
 </tr>
 </table>
 
 <sub>Built from SKAZ 0.3.1's own interface (its HTML and CSS) with <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
-The lecture, the answer and the wiki pages are authored demonstration data, not real speech
-recognition or AI output.</sub>
+
+The lecture, the slides, the answers, the cards and the web results are authored demonstration data,
+not real speech recognition, AI output or search.</sub>
 
 ## ✨ Features
 
@@ -74,8 +80,10 @@ recognition or AI output.</sub>
 | 🎙️ **Live recording** | Microphone, optionally with your Mac's sound (Zoom, videos; macOS 14.2+ and OS permission). Recognition with **Soniox** (cloud streaming, speaker separation, translation) or **Whisper on this computer** (works offline). SKAZ never silently switches services. |
 | 📚 **Any source** | PDF, documents, text and Markdown files, audio and video files, web articles (cleaned up), pasted text of any length, and video links from YouTube, VK Video, RuTube and Vimeo. Use only material you are allowed to process. |
 | 🧠 **A living wiki** | Notes for every source, one page per concept across all folders, and saved analyses. Each statement is marked: quoted from a source, a connection the agent inferred, or an agent's explanation. When sources disagree, both versions are shown and you decide. |
-| 💬 **Chats with footnotes** | Ask about the whole library; the agent knows what is open and whether a recording is running. Footnotes open the exact moment of a recording or the page of a document. Point at a page, a material or a chat with **@**. |
-| 🤖 **Your agent** | **Codex**, **Claude Code** or **Hermes Agent**, with your own subscription or key; SKAZ can install them for you. Agents read the library through read-only SKAZ tools. Small filing decisions can run on a local model or through OpenRouter. |
+| 💬 **Chats with footnotes** | Ask about the whole library; the agent knows what is open and whether a recording is running. Footnotes open the exact moment of a recording or the page of a document. Point at a page, a material or a chat with **@**. Answers can include diagrams with a full-size viewer. |
+| 🃏 **Cards and tests** | Ask for flashcards or a test on a page, a material or a chat. Every correct answer is backed by a checked quote. Cards are reviewed with FSRS spaced repetition; decks and tests can be saved to the wiki. |
+| 🌐 **Web search, with your OK** | Before anything leaves your Mac you see the exact query and choose Allow once, Allow in this chat or Deny. Only the query is sent. A found page can be added to the library with one click. |
+| 🤖 **Your agent** | **Codex**, **Claude Code**, **Hermes Agent** or **OpenCode**, with your own subscription or key; SKAZ can install them for you. Agents read the library through SKAZ's tools and change wiki pages only after you allow it, with Undo; your own notes are never touched. Pick a model per chat and star favorites. Small filing decisions can run on a local model or through OpenRouter. |
 | ✍️ **Recognition fixes** | An optional check finds likely recognition errors, fixes the confident ones and only highlights the doubtful ones. Every fix can be undone. |
 | 🗂️ **Plain files** | The library is a folder of `.md` files. Open it in **Obsidian**, or export everything as plain Markdown with sources as footnotes. Your own edits to wiki pages are protected from the agent. |
 | 🔄 **Updates** | SKAZ checks GitHub releases at start and once a day and installs a verified update from **Settings → About**. |
@@ -110,7 +118,7 @@ Want to run the current code instead? See the [development setup](CONTRIBUTING.m
 
 ### 🚀 First launch
 
-1. **Agent.** Choose Codex, Claude Code or Hermes Agent and sign in with your own account.
+1. **Agent.** Choose Codex, Claude Code, Hermes Agent or OpenCode and sign in with your own account.
    SKAZ can install the agent for you. Provider eligibility, limits and charges apply.
 2. **Speech.** Add a Soniox key and allow sending audio to Soniox — or pick **Whisper on this
    computer** and download a speech model (its size is shown first; no key needed).
@@ -133,6 +141,7 @@ Every choice can be changed later in **Settings**.
 | Live audio | Not kept as an archive for playback. Temporary audio may be used for processing or recovery. |
 | Speech recognition | **Soniox:** audio is sent after your consent, which you can take back at any time. **Whisper on this computer:** audio never leaves your Mac. |
 | Agent | Your question and the parts of the library it reads go to the agent you chose; its retention and training policies apply. |
+| Web search | Only a query you approved, sent to the search of the agent named on the card — no chat history, no library text. Adding a found page makes one request to that address. |
 | Keys | An encrypted local file in SKAZ's app folder, with its encryption key beside it. File permissions are the main boundary — not protection from processes running as your user. |
 | Activity log | Kept without conversation text or keys. |
 | Backend | Python, loopback-only, with a fresh token on every launch. |
@@ -148,8 +157,8 @@ See the [security policy](SECURITY.md) for limitations and the reporting channel
 Microphone / system audio / files / links → Electron → Python ── Soniox | Whisper on this Mac
                                               ↓          ↓
                                           React UI   Library: Materials/*.md, Wiki/*.md
-                                                         ↕  read-only SKAZ tools
-                                              Codex | Claude Code | Hermes Agent
+                                                         ↕  SKAZ tools (changes only with your OK)
+                                              Codex | Claude Code | Hermes Agent | OpenCode
 ```
 
 | Layer | Stack |

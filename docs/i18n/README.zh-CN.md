@@ -17,9 +17,9 @@
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="SKAZ 导览：把一堂课录进文件夹、就内容提问、打开被引用的那一刻、wiki 页面、搜索和深色主题" width="880">
+<img src="../images/skaz-tour.webp" alt="SKAZ 导览：录下一堂课、带脚注地就内容提问、允许智能体修改、学习由课程生成的卡片" width="880">
 
-<sub>产品导览 · 使用预先编写数据的演示配置 · <a href="../images/skaz-tour.mp4">全高清视频（MP4，23 秒）</a></sub>
+<sub>产品导览 · 使用预先编写数据的演示配置 · <a href="../images/skaz-tour.mp4">完整导览，全高清（MP4，80 秒）</a></sub>
 
 <br><br>
 
@@ -53,16 +53,21 @@ AI 可能出错。引用能帮你核实答案，但不能保证答案正确。
 <td width="50%"><img src="../images/tour-ask.webp" alt="带脚注的回答"><br><b>带引用的回答</b><br>每个论断都有脚注。打开它，SKAZ 就会跳到来源中的那段引文。</td>
 </tr>
 <tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="wiki 中的概念页面"><br><b>自动编写的 wiki</b><br>根据你的来源生成概念页面和笔记，并标明哪些是引文、哪些是智能体的推断。</td>
-<td width="50%"><img src="../images/tour-search.webp" alt="用 ⌘K 搜索一切"><br><b>搜索一切</b><br>⌘K 可以找到 wiki 页面、资料和聊天，或把问题交给智能体。</td>
+<td width="50%"><img src="../images/tour-edit.webp" alt="智能体在修改 wiki 页面前先征求同意"><br><b>智能体先征求同意</b><br>智能体只能通过 SKAZ 修改 wiki，并且你会在修改发生前看到它：Allow 或 Deny。</td>
+<td width="50%"><img src="../images/tour-cards.webp" alt="根据一堂课生成的卡片和测验"><br><b>卡片和测验</b><br>让智能体根据一堂课生成卡片或测验。每个答案都有经过核对的引文支撑；卡片按间隔重复回来复习。</td>
 </tr>
 <tr>
-<td colspan="2" align="center"><img src="../images/tour-theme.webp" alt="切换到深色主题" width="50%"><br><b>浅色与深色</b><br>跟随系统，或在 <b>Settings → Appearance</b> 中选择主题。</td>
+<td width="50%"><img src="../images/tour-web.webp" alt="批准一次网络搜索，并把找到的页面加入资料库"><br><b>网络搜索，须经你同意</b><br>发送前你会看到确切的搜索词。找到的页面一键加入资料库。</td>
+<td width="50%"><img src="../images/tour-diagram.webp" alt="回答中的图表，全尺寸打开"><br><b>图表</b><br>回答可以绘制图表，在你的 Mac 上渲染。可全尺寸打开并放大。</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/tour-wiki.webp" alt="wiki 概念页面及其关联"><br><b>自己写成的 wiki</b><br>来自所有来源的概念页面，彼此关联，并标明哪些是引文、哪些是智能体的推断。</td>
+<td width="50%"><img src="../images/tour-theme.webp" alt="切换到深色主题"><br><b>浅色与深色</b><br>跟随系统，或在 <b>Settings → Appearance</b> 中选择主题。</td>
 </tr>
 </table>
 
-<sub>使用 <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a> 由 SKAZ 0.3.0 自身的界面（其 HTML 和 CSS）制作。
-课程、回答和 wiki 页面均为预先编写的演示数据，并非真实的语音识别或 AI 输出。</sub>
+<sub>使用 <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a> 由 SKAZ 0.3.1 自身的界面（其 HTML 和 CSS）制作。
+课程、幻灯片、回答、卡片和网络结果均为预先编写的演示数据，并非真实的语音识别、AI 输出或搜索。</sub>
 
 ## ✨ 功能
 
@@ -71,8 +76,10 @@ AI 可能出错。引用能帮你核实答案，但不能保证答案正确。
 | 🎙️ **实时录制** | 麦克风，也可同时录制 Mac 的声音（Zoom、视频；需要 macOS 14.2+ 和系统授权）。识别可选 **Soniox**（云端流式、说话人分离、翻译）或 **本机 Whisper**（离线可用）。SKAZ 从不悄悄切换服务。 |
 | 📚 **任何来源** | PDF、文档、文本和 Markdown 文件、音频和视频文件、网页文章（已清理）、任意长度的粘贴文本，以及 YouTube、VK Video、RuTube 和 Vimeo 的视频链接。请仅使用你有权处理的资料。 |
 | 🧠 **活的 wiki** | 每个来源都有笔记，每个概念在所有文件夹中只有一页，还可以保存分析。每条陈述都有标记：来源引文、智能体推断的关联，或智能体的解释。来源之间有矛盾时，两种说法都会列出，由你决定。 |
-| 💬 **带脚注的聊天** | 就整个资料库提问；智能体知道当前打开了什么、是否正在录制。脚注会打开录音中的确切时刻或文档的对应页。用 **@** 指向某个页面、资料或聊天。 |
-| 🤖 **你的智能体** | **Codex**、**Claude Code** 或 **Hermes Agent**，使用你自己的订阅或密钥；SKAZ 可以替你安装。智能体通过只读的 SKAZ 工具读取资料库。归档之类的小决定可以交给本地模型或 OpenRouter。 |
+| 💬 **带脚注的聊天** | 就整个资料库提问；智能体知道当前打开了什么、是否正在录制。脚注会打开录音中的确切时刻或文档的对应页。用 **@** 指向某个页面、资料或聊天。回答可以包含图表，并可全尺寸查看。 |
+| 🃏 **卡片和测验** | 让智能体根据页面、资料或聊天生成卡片或测验。每个正确答案都有经过核对的引文支撑。卡片按 FSRS 间隔重复复习；卡组和测验可以保存到 wiki。 |
+| 🌐 **网络搜索，须经你同意** | 在任何内容离开你的 Mac 之前，你会看到确切的搜索词，并选择 Allow once、Allow in this chat 或 Deny。只发送搜索词。找到的页面可一键加入资料库。 |
+| 🤖 **你的智能体** | **Codex**、**Claude Code**、**Hermes Agent** 或 **OpenCode**，使用你自己的订阅或密钥；SKAZ 可以替你安装。智能体通过 SKAZ 工具读取资料库，只有在你允许后才会修改 wiki 页面，并可撤销（Undo）；你自己的笔记不会被改动。每个聊天可以单独选择模型，常用模型可加星标收藏。归档之类的小决定可以交给本地模型或 OpenRouter。 |
 | ✍️ **识别纠错** | 可选的检查会找出可能的识别错误，修正有把握的部分，只高亮存疑之处。每处修正都可撤销。 |
 | 🗂️ **普通文件** | 资料库就是一个 `.md` 文件夹。可以用 **Obsidian** 打开，或把所有内容导出为普通 Markdown，来源以脚注形式保留。你对 wiki 页面的修改受到保护，智能体不会覆盖。 |
 | 🔄 **更新** | SKAZ 在启动时和每天一次检查 GitHub 发布，并可在 **Settings → About** 中安装经过校验的更新。 |
@@ -104,7 +111,7 @@ curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
 
 ### 🚀 首次启动
 
-1. **智能体。** 选择 Codex、Claude Code 或 Hermes Agent，并用你自己的账号登录。SKAZ 可以替你
+1. **智能体。** 选择 Codex、Claude Code、Hermes Agent 或 OpenCode，并用你自己的账号登录。SKAZ 可以替你
    安装智能体。服务商的资格条件、额度和费用均适用。
 2. **语音。** 添加 Soniox 密钥并允许向 Soniox 发送音频，或者选择 **Whisper on this computer**
    并下载语音模型（会先显示大小；无需密钥）。
@@ -126,6 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
 | 实时音频 | 不会作为可回放的存档保存。可能会使用临时音频进行处理或恢复。 |
 | 语音识别 | **Soniox：** 在你同意后发送音频，你可以随时撤回同意。**本机 Whisper：** 音频不会离开你的 Mac。 |
 | 智能体 | 你的问题以及它读取的资料库内容会发送给你选择的智能体；其数据保留和训练政策适用。 |
+| 网络搜索 | 只发送你批准的搜索词，交给卡片上注明的智能体的搜索——不含聊天记录和资料库文本。添加找到的页面只会向该地址发送一次请求。 |
 | 密钥 | SKAZ 应用文件夹中的加密本地文件，加密密钥就放在旁边。文件权限是主要的边界，无法防护以你的用户身份运行的进程。 |
 | 活动日志 | 不包含对话文本和密钥。 |
 | 后端 | Python，仅限 loopback，每次启动使用新的令牌。 |
@@ -140,8 +148,8 @@ curl -fsSL https://raw.githubusercontent.com/all0b0y/SKAZ/main/install.sh | bash
 麦克风 / 系统音频 / 文件 / 链接 → Electron → Python ── Soniox | 本机 Whisper
                                    ↓          ↓
                                React UI   资料库：Materials/*.md, Wiki/*.md
-                                              ↕  只读的 SKAZ 工具
-                                   Codex | Claude Code | Hermes Agent
+                                              ↕  SKAZ 工具（修改须经你同意）
+                                   Codex | Claude Code | Hermes Agent | OpenCode
 ```
 
 | 层 | 技术栈 |
