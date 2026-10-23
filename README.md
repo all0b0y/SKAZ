@@ -69,6 +69,7 @@ AI can be wrong. Citations help you check an answer; they don't guarantee it is 
 </table>
 
 <sub>Built from SKAZ 0.3.1's own interface (its HTML and CSS) with <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
+
 The lecture, the slides, the answers, the cards and the web results are authored demonstration data,
 not real speech recognition, AI output or search.</sub>
 
