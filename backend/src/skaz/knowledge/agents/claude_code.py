@@ -84,10 +84,10 @@ from .engine import (
     TextDelta,
     ToolCall,
     ToolResult,
-    Usage,
 )
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .transcript import render_prompt
+from .usage import claude_usage
 from .web import CLAUDE_BLOCKED, WebLink, WebQuery, WebSearchGate, WebVerdict, clean_query, query_problem
 
 log = logging.getLogger(__name__)
@@ -638,7 +638,7 @@ class ClaudeCodeEngine:
                 events.append(TextDelta(run_id, text))
         raw_usage = result.get("usage")
         usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
-        events.append(Completed(run_id, Usage(usage.get("input_tokens"), usage.get("output_tokens"))))
+        events.append(Completed(run_id, claude_usage(usage)))
         return events
 
 

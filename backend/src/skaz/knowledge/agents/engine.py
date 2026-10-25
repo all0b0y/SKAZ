@@ -93,8 +93,16 @@ class AgentTurn:
 
 @dataclass(frozen=True)
 class Usage:
+    """Tokens of one run, in the one meaning of ``usage.py``; ``None`` = the engine didn't say."""
+
     input_tokens: int | None = None
     output_tokens: int | None = None
+    #: Part of ``input_tokens`` read from the provider's prompt cache.
+    cached_input_tokens: int | None = None
+    #: Part of ``input_tokens`` written to the provider's prompt cache.
+    cache_write_tokens: int | None = None
+    #: Part of ``output_tokens`` spent on reasoning.
+    reasoning_tokens: int | None = None
 
 
 @dataclass(frozen=True)

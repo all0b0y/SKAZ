@@ -294,7 +294,7 @@ async def test_run_streams_over_acp_with_only_skaz_mcp_and_refuses_permissions(t
         ToolCall("run-1", "call-1", "search", {"q": "entropy"}),
         ToolResult("run-1", "call-1", "[seg-3] dS ≥ 0", False),
         TextDelta("run-1", "растёт."),
-        Completed("run-1", Usage(12, 5)),
+        Completed("run-1", Usage(12, 5, cached_input_tokens=0, cache_write_tokens=0, reasoning_tokens=0)),
     ]
     initialize = fake.received("initialize")[0]["params"]
     assert initialize["clientCapabilities"] == {"fs": {"readTextFile": False, "writeTextFile": False},

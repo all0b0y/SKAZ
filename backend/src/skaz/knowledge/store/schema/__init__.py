@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from . import (
+    agent_usage,
     chats,
     core,
     decisions,
@@ -44,7 +45,7 @@ class SchemaError(RuntimeError):
 #: Registry order is application order. Append new area modules at the end.
 MODULES: tuple[SchemaModule, ...] = (
     core, service, ingest, decisions, speech, wiki2, chats, study, wiki_execution, wiki_connections,
-    web_search,
+    web_search, agent_usage,
 )
 
 _VERSIONS_SQL = """

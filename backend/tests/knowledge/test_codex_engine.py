@@ -28,6 +28,7 @@ from skaz.knowledge.agents.engine import (
     ToolCall,
     ToolResult,
     TurnMessage,
+    Usage,
     collect,
 )
 from skaz.knowledge.agents.prompting import UNTRUSTED_HEADER
@@ -104,7 +105,8 @@ async def test_streams_answer_text_only_and_reports_usage(engine: CodexEngine, c
     assert "Thinking" not in result.text and "PRIVATE" not in result.text
     assert result.terminal == Completed("run-1", result.terminal.usage)  # type: ignore[union-attr]
     assert isinstance(result.terminal, Completed) and result.terminal.usage is not None
-    assert (result.terminal.usage.input_tokens, result.terminal.usage.output_tokens) == (120, 30)
+    assert result.terminal.usage == Usage(120, 30, cached_input_tokens=0, cache_write_tokens=0,
+                                          reasoning_tokens=5)
 
     started = connection.received("thread/start")[0]["params"]
     assert started["ephemeral"] is True and started["environments"] == []

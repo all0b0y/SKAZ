@@ -99,10 +99,10 @@ from .engine import (
     TextDelta,
     ToolCall,
     ToolResult,
-    Usage,
 )
 from .mcp_access import MCP_SERVER_NAME, NO_TOOL_ACCESS, McpAccessProvider
 from .transcript import render_prompt
+from .usage import opencode_usage
 
 logger = logging.getLogger(__name__)
 
@@ -886,7 +886,7 @@ class OpenCodeEngine:
             else:
                 raw_usage = reply.get("usage")
                 usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
-                yield Completed(run_id, Usage(usage.get("inputTokens"), usage.get("outputTokens")))
+                yield Completed(run_id, opencode_usage(usage))
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)

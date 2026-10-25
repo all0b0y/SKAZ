@@ -40,6 +40,7 @@ from ..agents.engine import (
 from ..agents.last_choice import LastChoice
 from ..agents.registry import ENGINE_NAMES, EngineRegistry, EngineUnavailable
 from ..agents.tools import ToolRegistry
+from ..agents.usage_log import RunUsage, UsageLog
 from ..agents.web import NATIVE_WEB, web_instructions, web_support
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
@@ -149,6 +150,10 @@ class _Run:
     closing: bool = False
     deleted: bool = False
     saved_at: float = 0.0
+    #: Counters for ``agent_usage`` (never text): when it began, what was sent, tools it called.
+    started_at: float = 0.0
+    prompt_characters: int = 0
+    tool_calls: int = 0
 
 
 class ChatService:
@@ -161,6 +166,7 @@ class ChatService:
                  web: WebSearchBroker | None = None) -> None:
         self.kb = kb
         self.repo = ChatRepository(kb.db)
+        self.usage_log = UsageLog(kb.db)
         self._agents = agents
         self.tools = tools
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
@@ -644,7 +650,8 @@ class ChatService:
 
     def _start(self, chat: Chat, engine: AgentEngine, answer: Message, question: Message,
                prior: Sequence[Message]) -> None:
-        run = _Run(chat.id, answer.id, engine, answer, saved_at=time.monotonic())
+        now = time.monotonic()
+        run = _Run(chat.id, answer.id, engine, answer, saved_at=now, started_at=now)
         self._runs[chat.id] = run
         self._reserved.discard(chat.id)
         run.task = asyncio.create_task(self._drive(run, chat, question, list(prior)),
@@ -688,11 +695,13 @@ class ChatService:
             turn = AgentTurn(run_id=run.run_id, messages=(*history(prior), TurnMessage("user", request)),
                              instructions=told, tools=self._tools_for(chat), web=gate,
                              model=chat.model, effort=chat.effort)
+            run.prompt_characters = len(turn.instructions) + sum(len(item.content) for item in turn.messages)
             stream = run.engine.run(turn)
             async for event in stream:
                 if isinstance(event, TextDelta):
                     await self._apply(run, parser.feed(event.text), resolver)
                 elif isinstance(event, ToolCall):
+                    run.tool_calls += 1
                     self._add_part(run, await disk_call(resolver.tool, event.name, event.arguments))
                 elif isinstance(event, Completed | Failed):
                     terminal = event
@@ -767,6 +776,7 @@ class ChatService:
             state, failure = "failed", Failure("other", EMPTY_ANSWER)
         message = replace(run.message, state=state, failure=failure)
         run.message = message
+        await self._log_usage(run, state, terminal)
         try:
             if not run.deleted:
                 chat = await disk_call(self.repo.get, run.chat_id)
@@ -788,6 +798,19 @@ class ChatService:
         if not run.deleted:
             self._feed(run.chat_id).emit("state", message.id, message=message)
             self._list.touch(run.chat_id)
+
+    async def _log_usage(self, run: _Run, state: str, terminal: Completed | Failed | None) -> None:
+        """One ``agent_usage`` row per answer; a failure to write it never touches the answer."""
+        record = RunUsage(
+            kind="chat", engine=run.engine.id, model=run.message.model, effort=run.message.effort,
+            outcome=state, usage=terminal.usage if isinstance(terminal, Completed) else None,
+            tool_calls=run.tool_calls, prompt_characters=run.prompt_characters,
+            duration_ms=round((time.monotonic() - run.started_at) * 1000),
+            chat_id=run.chat_id, message_id=run.message.id)
+        try:
+            await disk_call(self.usage_log.record, record)
+        except Exception as error:
+            log.error("Saving the usage of chat answer %s failed: %s", run.run_id, error_note(error))
 
     def _answer_folders(self, parts: Sequence[Part]) -> list[str]:
         folders: list[str] = []

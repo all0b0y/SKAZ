@@ -130,13 +130,13 @@ from .engine import (
     TextDelta,
     ToolCall,
     ToolResult,
-    Usage,
 )
 from .hermes_gateway import GatewayDaemon, find_gateway
 from .hermes_launchers import LauncherTampered, LauncherWatch, launcher_files, user_store
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .registry import FirstRun
 from .transcript import render_prompt
+from .usage import hermes_usage
 
 logger = logging.getLogger(__name__)
 
@@ -1062,7 +1062,7 @@ class HermesEngine:
             else:
                 raw_usage = reply.get("usage")
                 usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
-                yield Completed(run_id, Usage(usage.get("inputTokens"), usage.get("outputTokens")))
+                yield Completed(run_id, hermes_usage(usage))
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)

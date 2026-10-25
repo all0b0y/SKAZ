@@ -57,6 +57,7 @@ from .engine import (
 from .prompting import untrusted_block
 from .registry import codex_login_progress
 from .tools import ToolContext, ToolRegistry
+from .usage import codex_usage
 
 MAX_PARALLEL_RUNS = 6
 #: The whole answer's deadline; time spent waiting for the user (permissions, questions) is not counted.
@@ -457,7 +458,7 @@ class CodexEngine:
         if method == "thread/tokenUsage/updated":
             total = (params.get("tokenUsage") or {}).get("total")
             if isinstance(total, dict):
-                run.usage = Usage(_int(total.get("inputTokens")), _int(total.get("outputTokens")))
+                run.usage = codex_usage(total)
             return []
         if method == "error":
             error = params.get("error")
@@ -584,10 +585,6 @@ def reset_time(snapshots: Sequence[dict[str, Any]]) -> datetime | None:
             if isinstance(used, int | float) and used >= 100 and isinstance(at, int | float) and at > 0:
                 resets.append(at / 1000 if at > 100_000_000_000 else at)  # seconds; tolerate milliseconds
     return datetime.fromtimestamp(max(resets), tz=UTC) if resets else None
-
-
-def _int(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _status_from(view: dict[str, Any]) -> EngineStatus:
