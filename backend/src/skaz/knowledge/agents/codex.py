@@ -54,6 +54,7 @@ from .engine import (
     TurnMessage,
     Usage,
 )
+from .history import omitted_note, window
 from .prompting import untrusted_block
 from .registry import codex_login_progress
 from .tools import ToolContext, ToolRegistry
@@ -66,8 +67,6 @@ RUN_TIMEOUT_S = 900.0
 WAIT_POLL_S = 1.0
 #: Per-frame cap of the run's transport (the legacy default is 1 MiB; ingest chunks can be larger).
 MAX_MESSAGE_BYTES = 4 * 1024 * 1024
-HISTORY_BUDGET_CHARS = 60_000
-HISTORY_MESSAGE_CHARS = 12_000
 STATUS_MAX_AGE_S = 60.0
 #: Tool-surfacing features that are on by default in Codex 0.160 and not in the legacy
 #: ``DISABLED_FEATURES``; off for every SKAZ knowledge run (not yet verified on a live turn).
@@ -639,28 +638,16 @@ def turn_input(messages: Sequence[TurnMessage]) -> str:
 
 
 def _history(messages: Sequence[TurnMessage]) -> str:
-    budget = HISTORY_BUDGET_CHARS
-    kept: list[str] = []
-    for message in reversed(messages):  # newest first: recent context matters most
+    """The shared bounded window (``agents.history``), one JSON object per message."""
+    kept = window(messages)
+    lines = [json.dumps({"note": omitted_note(kept.omitted)})] if kept.omitted else []
+    for message in kept.messages:
         entry: dict[str, str] = {"role": message.role}
         if message.role == "assistant":
             entry["agent"] = ENGINE_LABELS.get(message.engine or "", "unknown")
-        entry["content"] = _shorten(message.content, HISTORY_MESSAGE_CHARS)
-        line = json.dumps(entry, ensure_ascii=False)
-        if len(line) > budget:
-            break
-        budget -= len(line) + 1
-        kept.append(line)
-    if not kept:
+        entry["content"] = message.content
+        lines.append(json.dumps(entry, ensure_ascii=False))
+    if not kept.messages:
         return ""
-    omitted = len(messages) - len(kept)
-    lines = ([json.dumps({"note": f"{omitted} earlier messages omitted"})] if omitted else []) + kept[::-1]
     return ("Earlier messages of this chat, oldest first, one JSON object per line:\n"
             + untrusted_block("chat history", "\n".join(lines)))
-
-
-def _shorten(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    head, tail = limit * 2 // 3, limit // 3
-    return f"{text[:head]}\n…[middle of this message omitted]…\n{text[-tail:]}"

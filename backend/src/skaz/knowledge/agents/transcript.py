@@ -2,7 +2,8 @@
 
 Claude Code (``-p``) and Hermes (ACP ``session/prompt``) take one user message
 per run, so earlier messages of the chat — possibly written by another engine
-after a switch — travel as context. Assistant text is model output, so the
+after a switch — travel as context, in the same bounded window as Codex
+(``agents.history``). Assistant text is model output, so the
 whole earlier conversation enters only as an untrusted block (poisoning layer
 6); the latest user message is the request.
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 import json
 
 from .engine import AgentTurn, TurnMessage
+from .history import omitted_note, window
 from .prompting import untrusted_block
 
 _ENGINE_LABELS = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
@@ -38,10 +40,11 @@ def render_prompt(turn: AgentTurn, *, include_instructions: bool, include_schema
     parts: list[str] = []
     if include_instructions and turn.instructions.strip():
         parts.append(f"Instructions from SKAZ:\n{turn.instructions.strip()}")
-    earlier = turn.messages[:-1]
-    if earlier:
-        parts.append("Earlier messages of this chat (context only):\n"
-                     + untrusted_block("chat-history", render_history(earlier)))
+    earlier = window(turn.messages[:-1])
+    if earlier.messages:
+        note = f"{omitted_note(earlier.omitted)}\n" if earlier.omitted else ""
+        parts.append(f"Earlier messages of this chat (context only, oldest first):\n{note}"
+                     + untrusted_block("chat-history", render_history(earlier.messages)))
     if include_schema and turn.response_schema is not None:
         parts.append("Reply with a single JSON value that matches this JSON Schema, and nothing else:\n"
                      + json.dumps(turn.response_schema, ensure_ascii=False, sort_keys=True))

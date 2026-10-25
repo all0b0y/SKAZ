@@ -285,7 +285,8 @@ def test_history_is_bounded_untrusted_and_keeps_the_newest() -> None:
               for n in range(20)), TurnMessage("user", "now"))
     bounded = turn_input(many)
     assert len(bounded) < 70_000 and "m19 " in bounded and "m0 " not in bounded
-    assert "earlier messages omitted" in bounded and "[middle of this message omitted]" in bounded
+    assert "earlier messages of this chat were left out" in bounded
+    assert "[middle of this message omitted]" in bounded
     assert turn_input((TurnMessage("user", "only"),)) == "only"
     with pytest.raises(ValueError, match="must end with the user's message"):
         turn_input((TurnMessage("assistant", "hi", engine="codex"),))
