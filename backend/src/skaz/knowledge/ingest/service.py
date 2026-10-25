@@ -129,6 +129,8 @@ class IngestService:
         #: The one lock for writing wiki files; W2 page edits take it too, so writes never interleave.
         self.write_lock = self._writer.lock
         self._active: dict[str, _Active] = {}
+        #: Materials whose job finished "done" while its finished listeners are being told.
+        self._telling: set[str] = set()
         self._closing = False
         self._pump_task: asyncio.Task[None] | None = None
         self._pump_again = False
@@ -341,6 +343,12 @@ class IngestService:
     def active_jobs(self) -> set[str]:
         return {job_id for job_id, active in self._active.items() if active.task is not None}
 
+    def active_materials(self) -> set[str]:
+        """Materials whose job is running, or finished with its "finished" listeners not yet told."""
+        running = {active.material_id for active in self._active.values()
+                   if active.task is not None and active.material_id}
+        return running | self._telling
+
     # -- one job ------------------------------------------------------------
 
     async def _run(self, job_id: str, active: _Active) -> None:
@@ -401,6 +409,8 @@ class IngestService:
         except Exception as failure:  # ids and types only: a message can carry a title (logsafe)
             logger.error("ingest job %s failed: %s", job_id, error_note(failure))
         finally:
+            if state == "done":
+                self._telling.add(active.material_id)  # finished, its listeners not told yet
             try:
                 # L2: off the event loop; disk_call still finishes the write when the job is cancelled.
                 if state == "queued":
@@ -413,7 +423,10 @@ class IngestService:
             finally:
                 self._active.pop(job_id, None)
             if state == "done":
-                self._tell_finished(await disk_call(self.jobs.get, job_id), active.material_id)
+                try:
+                    self._tell_finished(await disk_call(self.jobs.get, job_id), active.material_id)
+                finally:
+                    self._telling.discard(active.material_id)
 
     def _tell_finished(self, record: JobRecord | None, material_id: str) -> None:
         """On the event loop: listeners start their own follow-up tasks (W2 overview, connections)."""

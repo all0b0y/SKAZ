@@ -161,6 +161,8 @@ class WikiService:
         self._post_tasks: set[asyncio.Task[None]] = set()
         #: Folders whose overview waits for the rest of a batch import (one waiter each).
         self._overview_waiting: set[str] = set()
+        #: Post-ingest follow-ups that haven't looked up their material's folder yet.
+        self._post_starting = 0
         self.overview_poll_s = OVERVIEW_POLL_S
         self._connections_start = asyncio.Lock()
         self._writer = WikiWriter(kb, ingest.write_lock)
@@ -264,6 +266,7 @@ class WikiService:
 
     def _after_ingest(self, material_id: str, _job: JobRecord) -> None:
         self._touch()
+        self._post_starting += 1  # until its folder is known: a waiting overview waits for it too
         task = asyncio.get_running_loop().create_task(self._post_ingest(material_id))
         self._post_tasks.add(task)
         task.add_done_callback(self._post_tasks.discard)
@@ -271,15 +274,18 @@ class WikiService:
 
     async def _post_ingest(self, material_id: str) -> None:
         """Around the new source: its folder's overview and connections of its concept pages (decision 5)."""
-        record = await disk_call(self.kb.material_repo.get, material_id)
-        if record is None:
-            return
-        pages = [
-            page.id
-            for page in await disk_call(lambda: self.kb.pages(kind="concept"))
-            if material_id in page.sources
-        ]
-        self._overview_after_batch(record.folder_id)
+        try:
+            record = await disk_call(self.kb.material_repo.get, material_id)
+            if record is None:
+                return
+            pages = [
+                page.id
+                for page in await disk_call(lambda: self.kb.pages(kind="concept"))
+                if material_id in page.sources
+            ]
+            self._overview_after_batch(record.folder_id)
+        finally:
+            self._post_starting -= 1
         if pages:
             await self._connections_when_free(pages)
 
@@ -300,13 +306,24 @@ class WikiService:
 
     async def _overview_when_settled(self, folder_id: str) -> None:
         try:
-            while (self.jobs.running("folder_overview", folder_id)
-                   or await disk_call(self.ingest.jobs.pending_in_folder, folder_id)):
+            while True:
+                pending = await disk_call(self._ingest_pending_in, folder_id)
+                # Read after the await: a material finishing meanwhile has counted itself in by now.
+                writing = self.jobs.running("folder_overview", folder_id)
+                if not (pending or writing or self._post_starting > 0):
+                    break
                 await asyncio.sleep(self.overview_poll_s)
         finally:
             self._overview_waiting.discard(folder_id)
         with contextlib.suppress(KnowledgeError):
             await self.write_overview(folder_id)
+
+    def _ingest_pending_in(self, folder_id: str) -> bool:
+        """A material of the folder is queued, running, or just finished with its follow-ups not yet told."""
+        if self.ingest.jobs.pending_in_folder(folder_id):
+            return True
+        return any(record is not None and record.folder_id == folder_id
+                   for record in map(self.kb.material_repo.get, self.ingest.active_materials()))
 
     async def _connections_when_free(self, pages: Sequence[str]) -> None:
         """Connections of a new source's pages: after a connection run already going, never skipped (C1-a).
