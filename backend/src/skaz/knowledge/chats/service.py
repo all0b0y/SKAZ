@@ -83,6 +83,7 @@ from .model import (
 from .parsing import CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
 from .resolve import MaterialReader, Resolver
 from .store import RESTART_REASON, ChatRepository
+from .summary import ChatSummaries
 from .text import DEFAULT_TITLE, auto_title, preview, utc_now
 
 if TYPE_CHECKING:  # the study service imports chats (C-17); only annotations name it here
@@ -167,6 +168,7 @@ class ChatService:
         self.kb = kb
         self.repo = ChatRepository(kb.db)
         self.usage_log = UsageLog(kb.db)
+        self.summaries = ChatSummaries(kb.db, self.usage_log)
         self._agents = agents
         self.tools = tools
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
@@ -692,9 +694,12 @@ class ChatService:
             told = instructions(language, skills)
             if self.web is not None:
                 told = f"{told}\n\n{web_instructions(web, tool=not native)}"
-            turn = AgentTurn(run_id=run.run_id, messages=(*history(prior), TurnMessage("user", request)),
+            earlier = history(prior)
+            # A long chat: what left the history window, retold by this chat's own agent (slice 5).
+            summary = await self.summaries.for_turn(chat.id, earlier, run.engine, chat.model, chat.effort)
+            turn = AgentTurn(run_id=run.run_id, messages=(*earlier, TurnMessage("user", request)),
                              instructions=told, tools=self._tools_for(chat), web=gate,
-                             model=chat.model, effort=chat.effort)
+                             model=chat.model, effort=chat.effort, history_summary=summary)
             run.prompt_characters = len(turn.instructions) + sum(len(item.content) for item in turn.messages)
             stream = run.engine.run(turn)
             async for event in stream:

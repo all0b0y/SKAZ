@@ -54,7 +54,7 @@ from .engine import (
     TurnMessage,
     Usage,
 )
-from .history import omitted_note, window
+from .history import SUMMARY_NOTE, omitted_note, window
 from .prompting import untrusted_block
 from .registry import codex_login_progress
 from .tools import ToolContext, ToolRegistry
@@ -377,7 +377,7 @@ class CodexEngine:
             return Failed(run_id, "auth", status.reason or "Sign in to Codex to continue.")
         try:
             definitions = self.dynamic_tools(turn.tools)
-            text = turn_input(turn.messages)
+            text = turn_input(turn.messages, summary=turn.history_summary)
         except ValueError as error:
             return Failed(run_id, "other", str(error), unsent=True, permanent=True)
         names = [definition["name"] for definition in definitions]
@@ -626,21 +626,24 @@ def _model_page(reply: object) -> tuple[list[ModelOption], str | None]:
 # -- turn input ----------------------------------------------------------------
 
 
-def turn_input(messages: Sequence[TurnMessage]) -> str:
+def turn_input(messages: Sequence[TurnMessage], *, summary: str | None = None) -> str:
     """The text of ``turn/start``: bounded earlier history as untrusted data, then the current message."""
     if not messages or messages[-1].role != "user" or not messages[-1].content.strip():
         raise ValueError("The conversation must end with the user's message.")
     current = messages[-1].content
-    history = _history(messages[:-1])
+    history = _history(messages[:-1], summary)
     if not history:
         return current
     return f"{history}\n\nCurrent user message:\n{current}"
 
 
-def _history(messages: Sequence[TurnMessage]) -> str:
-    """The shared bounded window (``agents.history``), one JSON object per message."""
+def _history(messages: Sequence[TurnMessage], summary: str | None = None) -> str:
+    """The shared bounded window (``agents.history``), one JSON object per message; a long chat's
+    summary of the messages left out goes first."""
     kept = window(messages)
-    lines = [json.dumps({"note": omitted_note(kept.omitted)})] if kept.omitted else []
+    told = summary if kept.omitted else None
+    head = (f"{SUMMARY_NOTE}\n" + untrusted_block("chat summary", told) + "\n\n") if told else ""
+    lines = [json.dumps({"note": omitted_note(kept.omitted, bool(told))})] if kept.omitted else []
     for message in kept.messages:
         entry: dict[str, str] = {"role": message.role}
         if message.role == "assistant":
@@ -649,5 +652,5 @@ def _history(messages: Sequence[TurnMessage]) -> str:
         lines.append(json.dumps(entry, ensure_ascii=False))
     if not kept.messages:
         return ""
-    return ("Earlier messages of this chat, oldest first, one JSON object per line:\n"
+    return (head + "Earlier messages of this chat, oldest first, one JSON object per line:\n"
             + untrusted_block("chat history", "\n".join(lines)))

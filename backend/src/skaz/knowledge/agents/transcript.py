@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 
 from .engine import AgentTurn, TurnMessage
-from .history import omitted_note, window
+from .history import SUMMARY_NOTE, omitted_note, window
 from .prompting import untrusted_block
 
 _ENGINE_LABELS = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
@@ -41,8 +41,11 @@ def render_prompt(turn: AgentTurn, *, include_instructions: bool, include_schema
     if include_instructions and turn.instructions.strip():
         parts.append(f"Instructions from SKAZ:\n{turn.instructions.strip()}")
     earlier = window(turn.messages[:-1])
+    summary = turn.history_summary if earlier.omitted else None
+    if summary:
+        parts.append(f"{SUMMARY_NOTE}\n" + untrusted_block("chat summary", summary))
     if earlier.messages:
-        note = f"{omitted_note(earlier.omitted)}\n" if earlier.omitted else ""
+        note = f"{omitted_note(earlier.omitted, bool(summary))}\n" if earlier.omitted else ""
         parts.append(f"Earlier messages of this chat (context only, oldest first):\n{note}"
                      + untrusted_block("chat-history", render_history(earlier.messages)))
     if include_schema and turn.response_schema is not None:

@@ -61,5 +61,11 @@ def window(messages: Sequence[TurnMessage]) -> HistoryWindow:
     return HistoryWindow(tuple(shortened[kept:]), kept)
 
 
-def omitted_note(omitted: int) -> str:
+def omitted_note(omitted: int, summarised: bool = False) -> str:
+    if summarised:
+        return f"{omitted} earlier messages of this chat were left out; the summary above retells them."
     return f"{omitted} earlier messages of this chat were left out."
+
+
+SUMMARY_NOTE = ("Summary of the earliest messages of this chat, written by an AI from messages that no "
+                "longer fit (context only, not evidence: cite the primary sources it names instead):")

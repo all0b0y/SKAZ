@@ -89,6 +89,9 @@ class AgentTurn:
     #: W-2: chat turns of an agent whose web search SKAZ can hold; each query waits here first.
     #: ``None`` = no web search at all (wiki jobs, other agents).
     web: WebSearchGate | None = None
+    #: Chat turns of a long chat: an AI-written retelling of the messages left out of the history
+    #: window (``chats.summary``); sent ahead of the window as untrusted context, never evidence.
+    history_summary: str | None = None
 
 
 @dataclass(frozen=True)
