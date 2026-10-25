@@ -77,6 +77,8 @@ EXPORT_FAILED = "export_failed"
 AGENT_CHECK_S = 30.0
 #: Background "Find connections": only after this long without wiki work, and only when the wiki changed.
 IDLE_AFTER_S = 300.0
+#: How often a waiting folder overview looks whether the folder's imports have finished.
+OVERVIEW_POLL_S = 1.0
 
 
 class AgentNotReady(KnowledgeError):
@@ -157,6 +159,9 @@ class WikiService:
         self._background_signature: str | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._post_tasks: set[asyncio.Task[None]] = set()
+        #: Folders whose overview waits for the rest of a batch import (one waiter each).
+        self._overview_waiting: set[str] = set()
+        self.overview_poll_s = OVERVIEW_POLL_S
         self._connections_start = asyncio.Lock()
         self._writer = WikiWriter(kb, ingest.write_lock)
         self.gone = GoneMaterials(kb, self.graph, language=lambda: ingest.settings().language,
@@ -274,10 +279,34 @@ class WikiService:
             for page in await disk_call(lambda: self.kb.pages(kind="concept"))
             if material_id in page.sources
         ]
-        with contextlib.suppress(KnowledgeError):
-            await self.write_overview(record.folder_id)
+        self._overview_after_batch(record.folder_id)
         if pages:
             await self._connections_when_free(pages)
+
+    def _overview_after_batch(self, folder_id: str) -> None:
+        """One overview of the folder once the materials still being added to it are finished.
+
+        A batch import used to write the overview after every material (and skip a material that
+        finished while one was being written); now the first finished material waits for the rest of
+        the folder's queue — however those jobs end — and one overview covers them all.
+        """
+        if folder_id in self._overview_waiting:
+            return  # the waiting overview will include this material too
+        self._overview_waiting.add(folder_id)
+        task = asyncio.get_running_loop().create_task(self._overview_when_settled(folder_id))
+        self._post_tasks.add(task)
+        task.add_done_callback(self._post_tasks.discard)
+        task.add_done_callback(_log_failure)
+
+    async def _overview_when_settled(self, folder_id: str) -> None:
+        try:
+            while (self.jobs.running("folder_overview", folder_id)
+                   or await disk_call(self.ingest.jobs.pending_in_folder, folder_id)):
+                await asyncio.sleep(self.overview_poll_s)
+        finally:
+            self._overview_waiting.discard(folder_id)
+        with contextlib.suppress(KnowledgeError):
+            await self.write_overview(folder_id)
 
     async def _connections_when_free(self, pages: Sequence[str]) -> None:
         """Connections of a new source's pages: after a connection run already going, never skipped (C1-a).

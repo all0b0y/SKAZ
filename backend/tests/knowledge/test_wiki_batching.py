@@ -7,6 +7,7 @@ prove SKAZ's batching and fallback, not a real model's decisions.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -25,6 +26,7 @@ from tests.knowledge.ingest_support import (
     concepts,
     match_answer,
     notes,
+    wait_finished,
 )
 from tests.knowledge.test_ingest_pipeline import CONCEPTS_OK, NOTES_OK, run_ingest, service_for
 from tests.knowledge.wiki_support import (
@@ -160,3 +162,29 @@ async def test_an_unusable_disagreement_batch_is_checked_again_page_by_page(read
     asked = wiki.turns(DISCREPANCIES)
     assert [len(_pages(turn)) for turn in asked] == [2, 2, 1, 1]
     assert _disagreeing_pages(ready) == ["Температура"]
+
+
+# -- one folder overview after a batch of imports ----------------------------------------------
+
+OVERVIEW = "skaz_folder_overview"
+
+
+async def test_a_batch_imported_into_one_folder_gets_one_overview_written_after_it(
+        ready: KnowledgeService) -> None:
+    queued = asyncio.Event()  # both materials are queued before the agent answers anything
+    wiki = ScriptedWiki(notes=[NOTES_OK, NOTES_OK], concepts=[CONCEPTS_OK, SECOND],
+                        answers={prompts.MATCH_SCHEMA_TITLE: [match_answer(0)]}, gate=queued)
+    ingest, service = wired(ready, wiki)
+    ingest.slots = lambda: 1  # type: ignore[method-assign]  # one after the other, as a long queue runs
+    service.overview_poll_s = 0.01
+    first = add_material(ready, "Физика", "Лекция 8")
+    second = add_material(ready, "Физика", "Лекция 9")
+    jobs = [await ingest.request_ingest(first), await ingest.request_ingest(second)]
+    queued.set()
+    for job in jobs:
+        assert (await wait_finished(ingest, job.id)).state == "done"
+    await settle_wiki(service, ingest)
+    asked = wiki.turns(OVERVIEW)
+    assert len(asked) == 1  # not one per material
+    assert "Лекция 8" in asked[0].messages[0].content and "Лекция 9" in asked[0].messages[0].content
+    await ingest.close()
