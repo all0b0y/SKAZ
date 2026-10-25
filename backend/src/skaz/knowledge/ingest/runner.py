@@ -39,7 +39,16 @@ from .execution import (
     run_wiki_turn,
 )
 from .jobs import JobRepository, JobStep, agent_failure_code, agent_failure_text
-from .matching import decide, find_candidates
+from .matching import (
+    AgentNeeded,
+    Candidate,
+    MatchDecision,
+    agent_choices,
+    agent_decision,
+    concept_state,
+    decide_locally,
+    find_candidates,
+)
 from .model import (
     AnswerInvalid,
     BlockOut,
@@ -529,26 +538,48 @@ class IngestRun:
             await self._count(concepts_answers=operation.answers)
         return drafts
 
-    async def _ask_agent_choice(self, state: str, candidates: Sequence[str]) -> int | None:
+    async def _ask_match_batch(self, items: Sequence[tuple[str, Sequence[str]]]) -> dict[int, int] | None:
         text = await self._ask(prompts.MATCH_INSTRUCTIONS,
-                               [TurnMessage("user", prompts.match_prompt(state, candidates))],
+                               [TurnMessage("user", prompts.match_prompt(items))],
                                prompts.MATCH_SCHEMA)
         try:
-            return parse_answer(text, MatchOut).choice
+            answer = parse_answer(text, MatchOut)
         except AnswerInvalid:
             return None
+        choices: dict[int, int] = {}
+        for entry in answer.choices:
+            if 1 <= entry.item <= len(items):
+                choices.setdefault(entry.item, entry.choice)
+        return choices
 
     async def _match(self, drafts: Sequence[ConceptDraft]) -> list[ConceptTarget]:
-        targets = []
+        """The decision layer per concept first; the undecided ones go to the agent together."""
+        decided: list[tuple[ConceptDraft, MatchDecision | None]] = []
+        waiting: list[tuple[int, list[Candidate], str]] = []
         for draft in drafts:
             if not any(block.kind == "from_source" for block in draft.blocks):
                 self.report.stats.dropped["concept_without_source"] += 1
                 continue
             candidates = await disk_call(find_candidates, self.kb, draft)
-            decision = await decide(draft, candidates, self.decisions, self._ask_agent_choice)
-            if decision.note:
-                await self._log(f"Concept match: {decision.note}")
-            targets.append(ConceptTarget(draft, decision.page_id))
+            decision = await decide_locally(draft, candidates, self.decisions)
+            if isinstance(decision, AgentNeeded):
+                waiting.append((len(decided), candidates, decision.reason))
+                decided.append((draft, None))
+            else:
+                decided.append((draft, decision))
+        if waiting:
+            items = [(concept_state(decided[index][0]), [candidate.describe() for candidate in candidates])
+                     for index, candidates, _reason in waiting]
+            choices = await agent_choices(items, self._ask_match_batch)
+            for (index, candidates, reason), choice in zip(waiting, choices, strict=True):
+                draft = decided[index][0]
+                decided[index] = (draft, agent_decision(draft, candidates, reason, choice))
+        targets = []
+        for draft, made in decided:
+            assert made is not None
+            if made.note:
+                await self._log(f"Concept match: {made.note}")
+            targets.append(ConceptTarget(draft, made.page_id))
         return targets
 
     # -- the job ------------------------------------------------------------
@@ -642,16 +673,16 @@ class IngestRun:
     async def _run_hooks(self, result: WriteResult) -> None:
         if self.hook is None:
             return
-        for page_id, block_ids in result.new_blocks.items():
-            try:
-                await self.hook.on_concept_updated(page_id, block_ids)
-            except asyncio.CancelledError:
-                raise
-            except BudgetReached:
-                # The pages are written; the connections job of this material checks disagreements
-                # of its pages again and pauses for Continue at the same budget (C1-d).
-                await self._log("The wiki budget was reached before every disagreement check ran; "
-                                "Continue checks the rest.")
-                return
-            except Exception:  # pages are written; a failed check is reported, not fatal
-                await self._log("The discrepancy check could not run for one updated concept page.")
+        if not result.new_blocks:
+            return
+        try:
+            await self.hook.on_concepts_updated(dict(result.new_blocks))
+        except asyncio.CancelledError:
+            raise
+        except BudgetReached:
+            # The pages are written; the connections job of this material checks disagreements
+            # of its pages again and pauses for Continue at the same budget (C1-d).
+            await self._log("The wiki budget was reached before every disagreement check ran; "
+                            "Continue checks the rest.")
+        except Exception:  # pages are written; a failed check is reported, not fatal
+            await self._log("The discrepancy check could not run for the updated concept pages.")

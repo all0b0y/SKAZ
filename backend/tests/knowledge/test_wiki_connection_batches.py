@@ -29,7 +29,7 @@ from skaz.knowledge.store.database import KnowledgeDatabase
 from skaz.knowledge.store.schema import MODULES
 from skaz.knowledge.wiki import connections as connections_module
 
-from .ingest_support import ScriptedWiki, add_material, block, cite, concept, concepts, notes
+from .ingest_support import ScriptedWiki, add_material, block, cite, concept, concepts, match_answer, notes
 from .wiki_support import CONNECTIONS, LECTURE_NOTES, Batch, ingest_done, settle_wiki, wired
 
 ENTROPY, TEMPERATURE, PARTICLES, GAS = "Энтропия", "Температура", "Частицы", "Газ"
@@ -269,7 +269,7 @@ async def test_deleting_a_source_takes_its_connections_down_and_its_checks_are_r
                                           cite(1, "Газ состоит из движущихся молекул."))]),
         )
     )
-    wiki.queues.setdefault(prompts.MATCH_SCHEMA_TITLE, []).append(json.dumps({"choice": 1}))
+    wiki.queues.setdefault(prompts.MATCH_SCHEMA_TITLE, []).append(match_answer(1))
     wiki.author = lambda batch: [found] if (found := batch.connect(
         GAS, ENTROPY, "состоит из молекул", "Мера беспорядка",
         "Беспорядок газа — это беспорядок молекул.")) else []

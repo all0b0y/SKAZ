@@ -13,7 +13,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -246,15 +246,16 @@ class WikiService:
 
     # -- ingest seams ---------------------------------------------------------
 
-    async def on_concept_updated(self, page_id: str, new_block_ids: Sequence[str]) -> None:
-        """W1 ``ConceptUpdateHook``: compare the new statements with other sources on the page."""
+    async def on_concepts_updated(self, updates: Mapping[str, Sequence[str]]) -> None:
+        """W1 ``ConceptUpdateHook``: compare the new statements with other sources, pages in batches."""
         self._touch()
 
         async def log(_message: str) -> None:
-            # The message names pages and materials: the log gets the page id only.
-            logger.info("discrepancy check on page %s: one step logged", page_id)
+            # The message names pages and materials: the log gets the page count only.
+            logger.info("discrepancy check on %d page(s): one step logged", len(updates))
 
-        await self.discrepancies.check_page(page_id, list(new_block_ids), self._caller("disc"), log)
+        await self.discrepancies.check_pages(
+            [(page_id, list(block_ids)) for page_id, block_ids in updates.items()], self._caller("disc"), log)
 
     def _after_ingest(self, material_id: str, _job: JobRecord) -> None:
         self._touch()
@@ -364,11 +365,16 @@ class WikiService:
                     else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
                 )
                 await job.count(parts_total=len(pages), parts_done=0)
-                found = 0
-                for done, page_id in enumerate(pages, start=1):
-                    await job.step("checking_discrepancies")
-                    found += await self.discrepancies.check_page(page_id, None, caller, job.log)
-                    await job.count(parts_done=done)
+                await job.step("checking_discrepancies")
+                finished = 0
+
+                async def page_done() -> None:
+                    nonlocal finished
+                    finished += 1
+                    await job.count(parts_done=finished)
+
+                found = await self.discrepancies.check_pages([(page_id, None) for page_id in pages], caller,
+                                                             job.log, page_done)
                 await job.step("finding_connections")
 
                 async def count(values: dict[str, int]) -> None:

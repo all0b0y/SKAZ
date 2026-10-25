@@ -55,10 +55,11 @@ DISCREPANCY_SCHEMA = _object(
     {
         "conflicts": _items(
             {
-                "new": {"type": "integer", "description": "Number N of a new statement [N]."},
+                "page": {"type": "integer", "description": "Number P of the concept page [Concept page P]."},
+                "new": {"type": "integer", "description": "Number N of a new statement [N] of that page."},
                 "existing": {
                     "type": "integer",
-                    "description": "Number of an existing statement it contradicts.",
+                    "description": "Number of an existing statement of the same page it contradicts.",
                 },
                 "explanation": {
                     "type": "string",
@@ -122,12 +123,14 @@ OVERVIEW_SCHEMA = _object(
 )
 
 DISCREPANCY_INSTRUCTIONS = f"""\
-You compare statements from different sources on one wiki page about one concept. Report only real
+You compare statements from different sources on wiki pages about concepts, one numbered concept page
+at a time: statements of different pages are never compared with each other. Report only real
 contradictions: two statements about the same thing that cannot both be true. These are NOT
 contradictions: more or less detail, different emphasis, the viewpoints or conventions of different
 disciplines, different names or notations for the same thing, statements about different conditions,
-a source that corrects itself (its final version counts). Compare each new statement with the
-existing ones only. In "explanation" ({{language}}) say neutrally what differs; you may add which
+a source that corrects itself (its final version counts). On each page compare each new statement
+with that page's existing ones only; statement numbers start again on every page, so every conflict
+names its page. In "explanation" ({{language}}) say neutrally what differs; you may add which
 version seems more likely right and why. An empty list is a good answer. {_DATA_RULE}"""
 
 CONNECTIONS_INSTRUCTIONS = f"""\
@@ -158,6 +161,8 @@ class _Model(BaseModel):
 
 
 class ConflictOut(_Model):
+    #: A one-page answer may leave it out.
+    page: int = 1
     new: int
     existing: int
     explanation: str = ""
@@ -198,18 +203,21 @@ class OverviewOut(_Model):
     blocks: list[OverviewBlockOut]
 
 
-def discrepancy_prompt(title: str, new: Sequence[Statement], existing: Sequence[Statement]) -> str:
-    new_lines = "\n".join(item.line(number) for number, item in enumerate(new, start=1))
-    old_lines = "\n".join(item.line(number) for number, item in enumerate(existing, start=len(new) + 1))
-    return "\n\n".join(
-        [
-            f"Concept page: {title[:200]}",
-            "New statements:",
-            untrusted_block("new statements", new_lines),
-            "Existing statements from other sources:",
-            untrusted_block("existing statements", old_lines),
+def discrepancy_prompt(pages: Sequence[tuple[str, Sequence[Statement], Sequence[Statement]]]) -> str:
+    """One batch: ``(title, new, existing)`` per page; on each page new statements are numbered from 1,
+    then its existing ones."""
+    lines: list[str] = []
+    for page, (title, new, existing) in enumerate(pages, start=1):
+        new_lines = "\n".join(item.line(number) for number, item in enumerate(new, start=1))
+        old_lines = "\n".join(item.line(number) for number, item in enumerate(existing, start=len(new) + 1))
+        lines += [
+            f"Concept page {page}: {title[:200]}",
+            f"New statements of page {page}:",
+            untrusted_block(f"page {page} new statements", new_lines),
+            f"Existing statements of page {page} from other sources:",
+            untrusted_block(f"page {page} existing statements", old_lines),
         ]
-    )
+    return "\n\n".join(lines)
 
 
 def connections_prompt(

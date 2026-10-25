@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from uuid import uuid4
 
 from ...native_io import disk_call
@@ -52,12 +52,47 @@ LABELS = {
 _CITATION_LINK = re.compile(r"\s*\[\[[^\]|\n]*#\^seg-\d+(?:\|[^\]\n]*)?\]\]")
 MAX_NEW = 12
 MAX_EXISTING = 24
+#: Pages asked together in one call: at most this many, and about this much statement text.
+MAX_BATCH_PAGES = 8
+MAX_BATCH_CHARS = 16_000
 
 Log = Callable[[str], Awaitable[None]]
 
 
 class SideGone(KnowledgeError):
     status_code = 409
+
+
+@dataclass(frozen=True)
+class _Check:
+    """One page's part of a disagreement check: what is new and what other sources said before."""
+
+    page_id: str
+    title: str
+    language: str
+    new: list[Statement]
+    existing: list[Statement]
+
+    def size(self) -> int:
+        return 200 + sum(len(item.line(0)) for item in (*self.new, *self.existing))
+
+
+def _batches(checks: Sequence[_Check]) -> list[list[_Check]]:
+    """Pages of one language together (the instructions name it), in order, within the batch limits."""
+    batches: list[list[_Check]] = []
+    open_batch: dict[str, tuple[list[_Check], int]] = {}
+    for check in checks:
+        current = open_batch.get(check.language)
+        fits = current is not None and len(current[0]) < MAX_BATCH_PAGES and (
+            current[1] + check.size() <= MAX_BATCH_CHARS)
+        if current is not None and fits:
+            current[0].append(check)
+            open_batch[check.language] = (current[0], current[1] + check.size())
+            continue
+        batch = [check]
+        batches.append(batch)
+        open_batch[check.language] = (batch, check.size())
+    return batches
 
 
 def _labels(language: str) -> dict[str, str]:
@@ -102,13 +137,47 @@ class Discrepancies:
     async def check_page(
         self, page_id: str, new_block_ids: Sequence[str] | None, caller: AgentCaller, log: Log
     ) -> int:
-        """Compare new statements with those of other sources on the page; returns how many were reported.
+        """One page: see ``check_pages``."""
+        return await self.check_pages([(page_id, new_block_ids)], caller, log)
 
-        ``new_block_ids=None``: every statement not compared before ("Find connections").
+    async def check_pages(
+        self, requests: Sequence[tuple[str, Sequence[str] | None]], caller: AgentCaller, log: Log,
+        done: Callable[[], Awaitable[None]] | None = None,
+    ) -> int:
+        """Compare new statements with those of other sources, page by page; returns how many were reported.
+
+        ``new_block_ids=None``: every statement not compared before ("Find connections"). Pages are
+        asked together in batches (one agent call each); when a batch answer is not usable, each of its
+        pages is asked on its own, so no page is skipped because another one was in its batch.
+        ``done`` is awaited once per requested page when it is finished.
         """
+        checks: list[_Check] = []
+        for page_id, new_block_ids in requests:
+            check = await self._prepare(page_id, new_block_ids)
+            if check is not None:
+                checks.append(check)
+            elif done is not None:
+                await done()
+        found = 0
+        for batch in _batches(checks):
+            answer = await self._ask(batch, caller)
+            if answer is None and len(batch) > 1:
+                for check in batch:
+                    found += await self._apply(check, await self._ask([check], caller), 1, log)
+                    if done is not None:
+                        await done()
+                continue
+            for number, check in enumerate(batch, start=1):
+                found += await self._apply(check, answer, number, log)
+                if done is not None:
+                    await done()
+        return found
+
+    async def _prepare(self, page_id: str, new_block_ids: Sequence[str] | None) -> _Check | None:
+        """What one page compares; ``None`` (its new statements marked checked) when there is nothing."""
         record = await disk_call(self.ctx.kb.page_repo.get, page_id)
         if record is None or record.kind != "concept":
-            return 0
+            return None
         statements = await disk_call(page_statements, self.ctx.kb, page_id)
         checked = await disk_call(self._checked, page_id)
         wanted = set(new_block_ids) if new_block_ids is not None else None
@@ -123,20 +192,27 @@ class Discrepancies:
         ]
         if not new or not existing:
             await disk_call(self._mark_checked, page_id, [item.block_id for item in new])
-            return 0
-        language = record.language or self.ctx.settings().language
-        instructions = instructions_for(DISCREPANCY_INSTRUCTIONS, language)
-        answer = await caller.ask_json(
-            instructions,
-            discrepancy_prompt(record.title, new, existing),
+            return None
+        return _Check(page_id, record.title, record.language or self.ctx.settings().language, new, existing)
+
+    async def _ask(self, batch: Sequence[_Check], caller: AgentCaller) -> DiscrepanciesOut | None:
+        return await caller.ask_json(
+            instructions_for(DISCREPANCY_INSTRUCTIONS, batch[0].language),
+            discrepancy_prompt([(check.title, check.new, check.existing) for check in batch]),
             DISCREPANCY_SCHEMA,
             DiscrepanciesOut,
         )
+
+    async def _apply(self, check: _Check, answer: DiscrepanciesOut | None, number: int, log: Log) -> int:
+        """The conflicts of page ``number`` of the answer; an unusable answer leaves the page unchecked."""
+        page_id, new, existing = check.page_id, check.new, check.existing
         if answer is None:
-            await log(f"The disagreement check of “{record.title}” was not in the expected format; skipped.")
+            await log(f"The disagreement check of “{check.title}” was not in the expected format; skipped.")
             return 0
         found = 0
         for conflict in answer.conflicts:
+            if conflict.page != number:
+                continue
             if not 1 <= conflict.new <= len(new) or not len(new) < conflict.existing <= len(new) + len(
                 existing
             ):
@@ -156,21 +232,21 @@ class Discrepancies:
                 QUESTION,
             )
             if verdict.answer is False:
-                await log(f"“{record.title}”: the decision layer found no real disagreement in one pair.")
+                await log(f"“{check.title}”: the decision layer found no real disagreement in one pair.")
                 continue
             if verdict.answer is None:
                 await log(
-                    f"“{record.title}”: {verdict.reason}; the writing agent's finding of a disagreement "
+                    f"“{check.title}”: {verdict.reason}; the writing agent's finding of a disagreement "
                     "was kept."
                 )
             explanation = clean_text(conflict.explanation)
             if explanation and self.ctx.flagged(explanation):
                 explanation = ""
-            await disk_call(self._report, page_id, side_old, side_new, explanation, language)
+            await disk_call(self._report, page_id, side_old, side_new, explanation, check.language)
             found += 1
         await disk_call(self._mark_checked, page_id, [item.block_id for item in new])
         if found:
-            await log(f"“{record.title}”: {found} disagreement(s) between sources were marked.")
+            await log(f"“{check.title}”: {found} disagreement(s) between sources were marked.")
         return found
 
     def _report(self, page_id: str, old: Statement, new: Statement, explanation: str, language: str) -> None:
