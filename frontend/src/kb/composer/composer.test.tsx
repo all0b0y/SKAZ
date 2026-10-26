@@ -103,6 +103,21 @@ describe('Message field', () => {
     expect(notes().filter((t) => /effort/i.test(t))).toEqual([]);
   });
 
+  it('a chat on the agent’s own model shows that model and offers its effort (bug 5)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    Object.assign(w.chats.find((c) => c.id === 'c1')!, { engine: 'codex', model: null, effort: null });
+    const { fake } = renderKb({ world: w });
+    await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
+    const picker = await screen.findByTestId('agent-picker');
+    await waitFor(() => expect(picker).toHaveTextContent('Codex · GPT-5.6-luna'));
+    await user.click(screen.getByRole('button', { name: 'Effort: Medium' }));
+    await user.click(within(await screen.findByRole('menu', { name: 'Effort' })).getByRole('menuitemradio', { name: 'High' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
+      method: 'PATCH', path: '/kb/chats/c1', body: { engine: 'codex', model: null, effort: 'high' } })));
+    expect(await screen.findByRole('button', { name: 'Effort: High' })).toBeInTheDocument();
+  });
+
   it('an agent that can’t answer is refused with its reason; nothing is swapped silently', async () => {
     const user = userEvent.setup();
     const state = chatWorld();

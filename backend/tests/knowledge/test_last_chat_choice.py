@@ -61,3 +61,28 @@ async def test_the_memory_is_in_the_profile_and_survives_a_restart(env: Env) -> 
 
     fresh = LastChoice(env.runtime.kb.settings)  # a new reader over the same profile database
     assert fresh.get("codex") == ("fast", "high")
+
+
+async def test_a_chat_made_without_a_choice_starts_from_the_last_one(env: Env) -> None:  # noqa: F811
+    """Bug 5 (2026-10-26): a chat SKAZ makes itself (a recording's chat, ``POST /kb/chats {}``) starts
+    from the agent's last choice like New chat does, so its model and effort show and can be changed."""
+    with_models(env, "codex", ModelOption("fast", "Fast", ("low", "high"), "low"))
+    await env.client.put("/kb/chats/last-choice", json={"engine": "codex", "model": "fast", "effort": "high"})
+    made = await env.client.post("/kb/chats", json={})
+    assert made.status_code in (200, 201), made.text
+    assert (made.json()["engine"], made.json()["model"], made.json()["effort"]) == ("codex", "fast", "high")
+    # "As set in the agent" stays that choice; an explicit choice is never overridden.
+    await env.client.put("/kb/chats/last-choice", json={"engine": "codex", "model": None, "effort": None})
+    assert (await env.client.post("/kb/chats", json={})).json()["model"] is None
+    explicit = await env.chat(engine="codex", model="fast", effort="low")
+    assert explicit["effort"] == "low"
+
+
+async def test_a_remembered_model_that_is_gone_leaves_a_made_chat_on_the_agent_default(env: Env) -> None:  # noqa: F811
+    with_models(env, "codex", ModelOption("fast", "Fast", ("low", "high"), "low"))
+    await env.client.put("/kb/chats/last-choice", json={"engine": "codex", "model": "fast", "effort": "high"})
+    with_models(env, "codex", ModelOption("other", "Other", ("low",), "low"))
+    env.runtime.kb_agents.registry.forget("codex")
+    made = await env.client.post("/kb/chats", json={})
+    assert made.status_code in (200, 201), made.text
+    assert made.json()["model"] is None and made.json()["effort"] is None

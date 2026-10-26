@@ -4,7 +4,7 @@ import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
-import { agentOf, startingChoice } from '../state/agents';
+import { agentOf, answeringModel, startingChoice } from '../state/agents';
 import { isAnswering, type AgentChoice } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
@@ -88,7 +88,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const recTitle = useRecording((s) => s.title);
 
   const agent = choice ? agentOf(agents, choice.engine) : undefined;
-  const model = agent?.models.find((m) => m.id === choice?.model);
+  // Bug 5: "as set in the agent" (no model) still offers effort — the levels of the model that answers.
+  const model = answeringModel(agent, choice?.model);
   const agentReady = agent?.state === 'ready';
   const unavailable = `${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`;
   /** The error is the agent's (not installed, signed out…): it comes with the way to fix it (QA D6). */
@@ -466,7 +467,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               else services.agents.getState().noteLastChoice(next.engine, next.model, next.effort);
             }} />
           {choice && model && (
-            <EffortPicker efforts={model.efforts} value={choice.effort}
+            <EffortPicker efforts={model.efforts} value={choice.effort ?? model.default_effort}
               onChange={async (effort) => {
                 const res = await chats.getState().setAgent(chatId, { ...choice, effort });
                 if (!res.ok) setError(res.error);

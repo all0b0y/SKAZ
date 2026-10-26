@@ -94,6 +94,16 @@ export function agentOf(agents: KbAgents | null, engine: EngineId): KbAgent | un
 }
 
 /**
+ * The model that answers for `model` (bug 5): the chosen one, or — for "as set in the agent"
+ * (`null`) — the agent's own current model, else the first it lists (the backend's same rule).
+ */
+export function answeringModel(agent: KbAgent | undefined, model: string | null | undefined) {
+  if (!agent) return undefined;
+  if (model) return agent.models.find((m) => m.id === model);
+  return agent.models.find((m) => m.id === agent.current_model) ?? agent.models[0];
+}
+
+/**
  * Where the message field starts for `engine` (models screen v2): the model and reasoning last
  * chosen for it, while the agent still lists that model; else the agent's own current model.
  */

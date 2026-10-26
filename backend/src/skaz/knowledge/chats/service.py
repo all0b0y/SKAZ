@@ -377,6 +377,17 @@ class ChatService:
                      model: str | None = None, effort: str | None = None,
                      recording_material_id: str | None = None) -> ChatView:
         chosen: EngineId = engine if engine is not None else await disk_call(self.registry.default)
+        if engine is None and model is None and effort is None:
+            # Bug 5: a chat SKAZ makes itself (a recording's chat) starts from the agent's last choice,
+            # as New chat does — its model and effort show in the field and can be changed. A remembered
+            # model the agent no longer offers leaves the chat on the agent's own default.
+            last = await disk_call(LastChoice(self.registry.settings).get, chosen)
+            if last is not None:
+                try:
+                    await self._check_model(chosen, *last)
+                    model, effort = last
+                except ChatInvalid:
+                    pass
         await self._check_model(chosen, model, effort)
         folder_ids: tuple[str, ...] = ()
         title_auto = True
