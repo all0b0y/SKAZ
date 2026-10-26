@@ -13,20 +13,22 @@ const cite = (seg: number, start_ms: number): KbCitation => ({
 export const LECTURE = { type: 'cite' as const, citation: cite(1, 2_600_000) };
 export const PAGE = { type: 'page' as const, page: { id: 'p-entropy', kind: 'concept' as const, title: 'Entropy' }, block_id: 'c-e1', available: true };
 
-export const steps: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-st', state: 'ready', hidden: 0, error: null, raw: null, sources: [LECTURE, PAGE],
-  block: { kind: 'steps', title: 'Leader election', steps: [
+/**
+ * A ready answer-block part with the fields every block part has. One helper on purpose: when the
+ * part gains fields (P1b: beside, link, markdown), only this function changes.
+ */
+export function blockPart(id: string, sources: KbAnswerBlockPart['sources'], block: KbAnswerBlockPart['block']): KbAnswerBlockPart {
+  return { type: 'answer_block', id, state: 'ready', hidden: 0, error: null, raw: null, sources, block };
+}
+
+export const steps: KbAnswerBlockPart = blockPart('blk-st', [LECTURE, PAGE], { kind: 'steps', title: 'Leader election', steps: [
     { id: 's1', src: [0], agent: false, title: 'Count the microstates', text: 'W' },
     { id: 's2', src: [1], agent: false, title: 'Take the logarithm', text: null },
     { id: 's3', src: [], agent: true, title: 'Multiply by k', text: null },
-  ] },
-};
-export const timeline: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-tl', state: 'ready', hidden: 0, error: null, raw: null, sources: [LECTURE],
-  block: { kind: 'timeline', title: null, events: [
-    { id: 'e1', src: [0], agent: false, when: null, title: 'Why a logarithm', text: null },
-  ] },
-};
+  ] });
+export const timeline: KbAnswerBlockPart = blockPart('blk-tl', [LECTURE], { kind: 'timeline', title: null, events: [
+  { id: 'e1', src: [0], agent: false, when: null, title: 'Why a logarithm', text: null },
+] });
 export const FLOW = 'flowchart LR\n  A[Timeout] --> B(Candidate)\n  B -->|votes| C{Majority?}\n  C -- yes --> D[Leader]';
 
 export async function openAnswer(parts: KbMessagePart[]) {

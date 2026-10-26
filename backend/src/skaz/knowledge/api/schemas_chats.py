@@ -15,6 +15,7 @@ from .schemas_agents import KbEngineId
 from .schemas_blocks import KbAnswerBlockPart
 from .schemas_study import KbStudyPart
 from .schemas_web import KbWebSearchPart
+from .schemas_wiki_fix import KbWikiFixPart
 
 KbChatState = Literal["idle", "answering"]
 KbChatFilter = Literal["all", "pinned", "recording"]
@@ -197,7 +198,7 @@ class KbQuestionPart(BaseModel):
 
 class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
-                                        | KbWebSearchPart | KbAnswerBlockPart,
+                                        | KbWebSearchPart | KbAnswerBlockPart | KbWikiFixPart,
                                         Field(discriminator="type")]]):
     pass
 

@@ -35,6 +35,9 @@ export function useSelection(): { selection: Selection | null; clear: () => void
 
 interface AnswerScope { messageId: string; store: SelectionStore }
 const AnswerContext = createContext<AnswerScope | null>(null);
+/** The answer a part is drawn in (the «Fix in wiki» card needs it for its route). */
+const AnswerIdContext = createContext<string | null>(null);
+export const useAnswerId = (): string | null => useContext(AnswerIdContext);
 
 /**
  * Wraps one answer's parts: its blocks and diagrams become selectable, addressed by this message's
@@ -53,11 +56,13 @@ export function AnswerSelectScope({ messageId, children }: { messageId: string; 
       scope.store);
     return () => { detach(); host.removeAttribute('data-block-id'); };
   } : null), [scope]);
-  if (!scope) return <>{children}</>;
+  if (!scope) return <AnswerIdContext.Provider value={messageId}>{children}</AnswerIdContext.Provider>;
   return (
-    <AnswerContext.Provider value={scope}>
-      <DiagramSelectProvider value={diagram}>{children}</DiagramSelectProvider>
-    </AnswerContext.Provider>
+    <AnswerIdContext.Provider value={messageId}>
+      <AnswerContext.Provider value={scope}>
+        <DiagramSelectProvider value={diagram}>{children}</DiagramSelectProvider>
+      </AnswerContext.Provider>
+    </AnswerIdContext.Provider>
   );
 }
 

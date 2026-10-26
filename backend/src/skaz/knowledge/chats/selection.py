@@ -203,8 +203,11 @@ _NOTES = {
                 "unless the user wrote their own words in another language."),
     "wrong": ("The user selected these items in your earlier answer and says they are wrong. Recheck each "
               "selected item against its sources — read them with the tools; the earlier answer is not "
-              "evidence. Say plainly which items hold and which don't, citing the sources. Answer in the "
-              "language of that answer unless the user wrote their own words in another language."),
+              "evidence. Say plainly which items hold and which don't, citing the sources. If an item rests "
+              "on a wiki page (a p: source) and that page is itself wrong, you may propose the corrected "
+              "paragraph with skaz_wiki_propose_fix: the user sees it and decides — never change the wiki "
+              "otherwise. Answer in the language of that answer unless the user wrote their own words in "
+              "another language."),
 }
 
 
@@ -217,6 +220,35 @@ def selection_context(messages: Sequence[Message], selection: Selection) -> tupl
     if body is None:
         return None
     return f"{_NOTES[selection.intent]} The selected items:", "selected items", body
+
+
+def selected_sources(messages: Sequence[Message], selection: Selection) -> list[BlockSource]:
+    """The sources the picked items of an answer block rest on (a diagram's items have none)."""
+    message = next((m for m in messages if m.id == selection.message_id and m.role == "assistant"), None)
+    part = (block_part(message, selection.block_id) if message is not None and selection.kind == "block"
+            else None)
+    if part is None:
+        return []
+    data = json.loads(part.data or "{}")
+    found: list[int] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for child in node:
+                walk(child)
+        elif isinstance(node, dict):
+            for index in node.get("src") or []:
+                if isinstance(index, int) and index not in found:
+                    found.append(index)
+            for key, value in node.items():
+                if key != "src":
+                    walk(value)
+
+    for item in selection.items:
+        hit = _find(data, item.id)
+        if hit is not None:
+            walk(hit[0])
+    return [part.sources[index] for index in found if 0 <= index < len(part.sources)]
 
 
 def history_note(selection: Selection) -> str:

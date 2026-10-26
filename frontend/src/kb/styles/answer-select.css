@@ -140,3 +140,22 @@ button.kb-where__src:hover { background: var(--kb-accent-soft); border-color: va
 .kb-where__src.is-gone, .kb-where__src--agent { border-style: dashed; color: var(--kb-muted); cursor: default; }
 .kb-where__none, .kb-where__note { margin: 0; color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-where__note { margin-top: 4px; }
+
+/* ---- «Fix in wiki»: before → after, changed only on the user's click ---- */
+.kb-wikifix { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--kb-line); border-radius: var(--kb-r-lg); background: var(--kb-pane); }
+.kb-wikifix__head { display: flex; align-items: center; gap: 8px; color: var(--kb-muted); font-size: var(--t-sm); }
+.kb-wikifix__head svg { flex: none; }
+.kb-wikifix__page { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.kb-wikifix__page:hover { color: var(--kb-text); }
+.kb-wikifix__page:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; border-radius: var(--kb-r-xs); }
+.kb-wikifix__why { margin: 6px 0 0; font-size: var(--t-sm); }
+.kb-wikifix__diff { margin: 10px 0; overflow: hidden; border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); font-size: var(--t-sm); }
+.kb-wikifix__diff > div { display: flex; gap: 8px; padding: 6px 10px; }
+.kb-wikifix__was { background: var(--kb-danger-soft); }
+.kb-wikifix__now { background: var(--kb-ok-soft); }
+.kb-wikifix__diff del { text-decoration-color: color-mix(in srgb, var(--kb-text) 50%, transparent); }
+.kb-wikifix__diff ins { text-decoration: none; }
+.kb-wikifix__tag { flex: none; width: 42px; color: var(--kb-muted); font-size: 11px; font-weight: 600; }
+.kb-wikifix__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.kb-wikifix__note, .kb-wikifix__done { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-muted); font-size: var(--t-xs); }
+.kb-wikifix__done { color: var(--kb-ok); font-weight: 600; }

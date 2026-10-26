@@ -13,6 +13,7 @@ from typing import Any, Literal, cast
 
 from ..agents.engine import EngineId, FailureKind
 from ..answer_blocks.part import BlockPart, block_from_json, block_to_json
+from .fix_part import WikiFixPart, fix_from_json, fix_to_json
 
 Role = Literal["user", "assistant", "system"]
 MessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
@@ -101,7 +102,7 @@ class WebSearchPart:
 
 
 Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
-        | WebSearchPart | BlockPart)
+        | WebSearchPart | BlockPart | WikiFixPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -126,6 +127,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "web_search", "id": part.search_id}
     if isinstance(part, BlockPart):
         return block_to_json(part)  # P1: an answer block (``answer_blocks.part``)
+    if isinstance(part, WikiFixPart):
+        return fix_to_json(part)  # P2: «Fix in wiki» (``chats.fix_part``)
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -155,6 +158,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return WebSearchPart(str(data["id"]))
     if kind == "answer_block":
         return block_from_json(data)
+    if kind == "wiki_fix":
+        return fix_from_json(data)
     return None
 
 

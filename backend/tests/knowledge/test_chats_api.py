@@ -432,10 +432,12 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
                      ("skaz_read_material", "Read Лекция 8")]
     turn = env.agents.engines["codex"].turns[-1]
     # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool;
-    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first).
+    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first);
+    # P2: the «Fix in wiki» proposal (shown to the user, written only on their click).
     assert turn.tools is not None
     assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *STUDY_TOOL_NAMES,
-                                                             "skaz_ask_user", "skaz_web_search")
+                                                             "skaz_ask_user", "skaz_web_search",
+                                                             "skaz_wiki_propose_fix")
     assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
     assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions

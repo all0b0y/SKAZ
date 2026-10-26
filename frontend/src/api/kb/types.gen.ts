@@ -926,7 +926,7 @@ export interface KbMessageInput {
   selection?: KbSelection | null;
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbAnswerBlockPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbAnswerBlockPart | KbWikiFixPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -1601,6 +1601,19 @@ export interface KbWikiFile {
   links: KbBlockLink[];
 }
 
+/** The agent's proposed correction of a wiki block after «That’s wrong»: before → after; the wiki changes only when the user presses «Fix in wiki» (``POST …/wiki-fixes/{id}/apply``), as their edit. */
+export interface KbWikiFixPart {
+  type: "wiki_fix";
+  id: string;
+  page: KbPageRef;
+  block_id: string;
+  before: string;
+  after: string;
+  reason: string;
+  status: "proposed" | "applied" | "stale";
+  available: boolean;
+}
+
 export interface KbWikiProcessingProfile {
   engine: "codex" | "claude_code" | "hermes" | "opencode" | null;
   model: string | null;
@@ -1892,6 +1905,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbMessage;
+    status: 200;
+  };
+  "POST /kb/chats/{chat_id}/messages/{message_id}/wiki-fixes/{fix_id}/apply": {
+    path: { chat_id: string; message_id: string; fix_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbWikiFixPart;
     status: 200;
   };
   "POST /kb/chats/{chat_id}/read": {

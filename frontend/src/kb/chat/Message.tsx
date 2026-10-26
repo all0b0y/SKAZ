@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbAnswerBlockPart, KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
+import type { KbAnswerBlockPart, KbCitation, KbMessage, KbMessageInput, KbMessagePart, KbWikiFixPart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
@@ -23,6 +23,7 @@ import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { AnswerBlock } from './blocks/AnswerBlock';
 import { AnswerSelectScope } from './select/context';
 import { SelectionChip } from './select/SelectionChip';
+import { WikiFixCard } from './select/WikiFixCard';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -36,7 +37,8 @@ type Block =
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
   | { kind: 'web'; part: KbWebSearchPart }
-  | { kind: 'answer'; part: KbAnswerBlockPart };
+  | { kind: 'answer'; part: KbAnswerBlockPart }
+  | { kind: 'fix'; part: KbWikiFixPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -63,6 +65,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
       flushSpace();
       run = null;
       out.push({ kind: 'answer', part });
+      continue;
+    }
+    if (part.type === 'wiki_fix') {
+      // P2: «Fix in wiki» (kb/chat/select) is a block of its own.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'fix', part });
       continue;
     }
     if (part.type === 'web_search') {
@@ -147,6 +156,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
+        if (b.kind === 'fix') return <WikiFixCard key={b.part.id} chatId={chatId} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>

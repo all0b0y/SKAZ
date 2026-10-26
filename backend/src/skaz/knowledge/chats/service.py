@@ -288,6 +288,10 @@ class ChatService:
             self._feed(chat_id).emit("part_update", message_id, part=part)
         self._list.touch(chat_id)
 
+    def show_part(self, chat_id: str, message_id: str, part: Part) -> None:
+        """A part another service made for an answer (P2's «Fix in wiki» card), new or changed."""
+        self._on_part(chat_id, message_id, part)
+
     def _on_permission(self, record: PermissionRecord) -> None:
         self._on_part(record.chat_id, record.message_id, PermissionPart(record.id))
 
