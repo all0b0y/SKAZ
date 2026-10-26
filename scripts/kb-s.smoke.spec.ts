@@ -139,10 +139,11 @@ for (const theme of THEMES) {
     await expect(beside).toBeVisible();
     await expect(page.getByRole('group', { name: 'Flashcards: Lecture 8' })).toContainText('Open beside the chat');
     await expect(page.getByRole('note', { name: /Agent sees: Flashcards, card 1 of 3/ })).toBeVisible();
-    // One size button (⤡), no × of the panel's own.
-    await expect(beside.locator('.kb-st-route').getByRole('button')).toHaveCount(1);
+    // ⤡ (this chat is in the centre) and × (always beside the chat, bug 1); no header of the panel's own.
+    await expect(beside.locator('.kb-st-route').getByRole('button')).toHaveCount(2);
     await expect(beside.getByRole('button', { name: 'Smaller — back into the chat' })).toBeVisible();
-    await expect(panel.getByRole('button', { name: /Close/ })).toHaveCount(0);
+    await expect(beside.getByRole('button', { name: 'Close' })).toBeVisible();
+    await expect(panel.locator('.kb-head')).toHaveCount(0);
     const panelWidth = (await panel.boundingBox())!.width;
     expect(panelWidth).toBeGreaterThan(360);
     expect(panelWidth).toBeLessThan(480);
