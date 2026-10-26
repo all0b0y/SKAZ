@@ -28,7 +28,7 @@ export function AgentUpdateOffer({ engine }: { engine: EngineId }) {
   };
   const failure = update.phase === 'idle' ? update.failure : null;
   const offer = update.available && update.phase === 'idle';
-  if (!offer && !failure && update.phase !== 'queued') return null;
+  if (!offer && !failure && update.phase === 'idle') return null;
   return (
     <div className="kb-agentupdate" data-testid={`agent-update-${engine}`}>
       {update.phase === 'queued' && (
@@ -36,6 +36,13 @@ export function AgentUpdateOffer({ engine }: { engine: EngineId }) {
           <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
           Updates after current work. New answers from {update.name} wait meanwhile.{' '}
           <Button size="sm" variant="quiet" busy={pending === 'cancel'} onClick={() => void run('cancel')}>Cancel</Button>
+        </p>
+      )}
+      {update.phase === 'updating' && (
+        // Until the card's own install log takes over (it follows the task once the backend started it).
+        <p className="kb-agentcard__msg" role="status">
+          <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
+          {update.action === 'rollback' ? 'Rolling back…' : 'Updating…'} New answers from {update.name} wait meanwhile.
         </p>
       )}
       {failure && (
@@ -89,7 +96,11 @@ export function AgentUpdatesRow({ label }: { label: string }) {
   const view = useAgentUpdates((s) => s.view);
   const checking = useAgentUpdates((s) => s.checking || !!s.view?.checking);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
-  useEffect(() => agentUpdates.getState().start(), [agentUpdates]);
+  useEffect(() => {
+    const stop = agentUpdates.getState().start();
+    void agentUpdates.getState().load(); // fresh offers and "busy" each time the section opens
+    return stop;
+  }, [agentUpdates]);
   useEffect(() => { if (view?.unseen) void agentUpdates.getState().markSeen(); }, [agentUpdates, view?.unseen]);
   if (!view) return <span className="kb-muted" role="status">Reading…</span>;
   const check = async () => {
