@@ -344,6 +344,8 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 }
 .kb-dot--error { background: var(--kb-danger); }
 .kb-dot--warning { background: var(--kb-warn); }
+/* U1: an agent update not seen yet (not a problem: accent, not warning). */
+.kb-dot--update { background: var(--kb-accent); }
 
 /* ---- Overlays ---- */
 .kb-modal-layer {

@@ -320,3 +320,25 @@ describe('Electron IPC policy — flashcards and tests (0.3.1 S)', () => {
     }
   });
 });
+
+describe('Electron IPC policy — agent updates (U1)', () => {
+  it('lets the update offer, its switch, Check for updates and the per-agent buttons through — nothing wider', () => {
+    const allowed: Array<[string, string]> = [
+      ['GET', '/kb/agents/updates'], ['PUT', '/kb/agents/updates/settings'],
+      ['POST', '/kb/agents/updates/check-now'], ['POST', '/kb/agents/updates/seen'],
+      ['POST', '/kb/agents/codex/update'], ['POST', '/kb/agents/claude_code/update/cancel'],
+      ['POST', '/kb/agents/hermes/update/skip'], ['POST', '/kb/agents/opencode/update/rollback'],
+    ];
+    for (const [method, path] of allowed) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
+    }
+    const refused: Array<[string, string]> = [
+      ['POST', '/kb/agents/gemini/update'], ['GET', '/kb/agents/codex/update'], ['POST', '/kb/agents/codex/update/run'],
+      ['POST', '/kb/agents/updates'], ['DELETE', '/kb/agents/updates'], ['GET', '/kb/agents/updates/settings'],
+      ['POST', '/kb/agents/updates/check'], ['POST', '/kb/agents/codex/update/../install'],
+    ];
+    for (const [method, path] of refused) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});

@@ -5,6 +5,7 @@ import { useChats, useNotifications, usePrefs, useServices, useUi } from '../sta
 import { isWaitingForUser } from '../api/permissions';
 import type { Section } from '../state/prefs';
 import { useProblems } from './problems';
+import { useAgentUpdatesDot } from '../settings/AgentUpdates';
 
 const ITEMS: ReadonlyArray<{ id: Section; label: string; icon: IconName }> = [
   { id: 'chats', label: 'Chats', icon: 'chats' },
@@ -168,6 +169,8 @@ export function Rail() {
   const center = useUi((s) => s.center);
   const setSearchOpen = useUi((s) => s.setSearchOpen);
   const problems = useProblems();
+  // U1: an agent update not seen yet — a dot only (no popup), and Settings opens on Accounts & keys.
+  const agentUpdate = useAgentUpdatesDot();
   const labels = useRailLabels();
   // 0.3.1 P4: a chat other than the one in front of you waits for an answer — a dot, nothing pops up.
   const waiting = useChats((s) => {
@@ -202,12 +205,15 @@ export function Rail() {
         attrs={{ 'aria-keyshortcuts': 'Meta+K', 'aria-haspopup': 'dialog' }} onClick={() => setSearchOpen(true)} />
       <RailButton
         id="settings" label="Settings" hint={problems.length ? problems[0]!.short : '⌘,'} icon="settings" open={settingsOpen}
-        labels={labels} ariaLabel={problems.length ? 'Settings, needs attention' : 'Settings'}
+        labels={labels} ariaLabel={problems.length ? 'Settings, needs attention' : agentUpdate ? 'Settings, agent update available' : 'Settings'}
         attrs={{ 'aria-keyshortcuts': 'Meta+Comma', 'aria-haspopup': 'dialog' }}
-        onClick={() => openSettings(problems[0]?.section)}
+        onClick={() => openSettings(problems[0]?.section ?? (agentUpdate ? 'conn' : undefined))}
       >
         {problems.length > 0 && (
           <span className={`kb-dot kb-dot--${problems[0]!.tone}`} aria-hidden="true" data-testid="settings-dot" />
+        )}
+        {problems.length === 0 && agentUpdate && (
+          <span className="kb-dot kb-dot--update" aria-hidden="true" data-testid="settings-update-dot" />
         )}
       </RailButton>
     </nav>

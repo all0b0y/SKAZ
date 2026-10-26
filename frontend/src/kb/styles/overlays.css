@@ -106,6 +106,13 @@
 .kb-agentcard__consent { display: flex; align-items: flex-start; gap: 6px; font-size: var(--t-sm); color: var(--kb-muted); }
 .kb-agentcard__consent input { margin-top: 3px; accent-color: var(--kb-fill); }
 .kb-agentcard__manual { font-size: var(--t-sm); color: var(--kb-muted); }
+/* U1: an agent's update offer / failure on its card. */
+.kb-agentupdate { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; text-align: left; }
+.kb-agentupdate__offer { display: flex; align-items: center; gap: 6px; font-size: var(--t-sm); font-weight: 600; }
+.kb-agentupdate__offer .kb-icon { color: var(--kb-accent); }
+.kb-agentupdate__acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.kb-agentupdate__failure { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.kb-agentupdates { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .kb-agentcard__manual code { font-family: var(--kb-font-mono); background: var(--kb-accent-soft); padding: 0 4px; border-radius: 4px; color: var(--kb-text); }
 .kb-agentcard__foot { display: flex; gap: 6px; justify-content: flex-end; }
 .kb-installlog { display: flex; flex-direction: column; gap: 4px; }
