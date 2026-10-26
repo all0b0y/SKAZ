@@ -3,7 +3,7 @@
 A block is validated in two steps, so one bad item never breaks the whole block:
 
 1. the *envelope* (the block's own fields, item lists as plain lists) — any error here breaks
-   the block ("This block couldn't be drawn" + Ask agent to fix);
+   the block ("This block couldn't be drawn" + Ask the agent to fix);
 2. each item on its own against its strict model, and its sources against the library —
    an invalid item, or one whose sources don't exist, is hidden and counted.
 
@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from .md import Refs
 
 #: Item ids the agent may choose (P2 addresses items by id); SKAZ numbers the others.
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,40}$"
@@ -38,11 +40,28 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
+LINK_CHARS = 60
+
+
 class BlockIn(Strict):
-    """Fields every block has; each block adds ``type: Literal["<name>"]`` and its own fields."""
+    """Fields every block has; each block adds ``type: Literal["<name>"]`` and its own fields.
+
+    ``beside`` and ``link`` place the block among the blocks of the same answer (decision 2): next to
+    the block right before it, or under it with a labelled arrow from it.
+    """
 
     title: str | None = Field(default=None, min_length=1, max_length=TITLE_CHARS,
                               description="Optional short heading over the block, in the answer's language.")
+    beside: bool = Field(
+        default=False, strict=True,
+        description=("true to put this block beside the block right before it (side by side, up to 3 in a "
+                     "row) — only for short blocks that are read together, and only when the user asks for "
+                     "a layout or the blocks are clearly parallel."))
+    link: str | None = Field(
+        default=None, min_length=1, max_length=LINK_CHARS,
+        description=("A short label for an arrow from the block right before this one to this block "
+                     "(\"why it happened\"), in the answer's language. Only between two blocks with no text "
+                     "between them."))
 
 
 class ItemIn(Strict):
@@ -170,6 +189,17 @@ class Items:
         self.shown += 1
         return Checked(self._unique(item.id or default_id), src, agent), item
 
+    def many(self, model: type[ItemT], raws: list[Any], prefix: str,
+             accept: Callable[[ItemT, list[int]], list[int] | None] | None = None,
+             ) -> list[tuple[Checked, ItemT]]:
+        """Each of ``raws`` checked on its own (ids ``<prefix>N``), the hidden ones left out."""
+        out: list[tuple[Checked, ItemT]] = []
+        for n, raw in enumerate(raws, start=1):
+            checked = self.item(model, raw, f"{prefix}{n}", accept)
+            if checked is not None:
+                out.append(checked)
+        return out
+
     def ident(self, wanted: str) -> str:
         """A unique id for a non-item part of the block (a compare row)."""
         return self._unique(wanted)
@@ -180,6 +210,14 @@ class Items:
             candidate, n = f"{wanted}-{n}", n + 1
         self._ids.add(candidate)
         return candidate
+
+
+def required(checked: tuple[Checked, ItemT] | None, what: str) -> tuple[Checked, ItemT]:
+    """A part the block means nothing without (a definition, a verdict): hidden, it breaks the block."""
+    if checked is None:
+        raise BlockError(f"{what} couldn't be shown: it needs valid data and a source that exists (cite) "
+                         "or basis \"agent\".")
+    return checked
 
 
 def envelope(model: type[BlockIn], data: dict[str, Any]) -> Any:
@@ -212,3 +250,5 @@ class BlockSpec:
     example: dict[str, Any]
     #: The validated block from the agent's data; raises ``BlockError`` when it can't be drawn.
     build: Callable[[dict[str, Any], Items], BaseModel]
+    #: The drawn block as plain Markdown lines (decision 11): Copy, chat export, saved analysis pages.
+    markdown: Callable[[Any, Refs], list[str]]

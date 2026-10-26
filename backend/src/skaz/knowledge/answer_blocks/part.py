@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 BlockState = Literal["drawing", "ready", "broken"]
-#: The raw data kept with a broken block (shown under "Show the data", sent with "Ask agent to fix").
+#: The raw data kept with a broken block (shown under "Show the data", sent with "Ask the agent to fix").
 MAX_RAW_CHARS = 20_000
 #: The answer ended (stopped, failed, restarted) before the block's closing fence arrived.
 UNFINISHED = "The answer stopped before this block was finished."
@@ -64,6 +64,10 @@ class BlockPart:
     error: str | None = None
     #: The agent's data of a broken block, clipped.
     raw: str | None = None
+    #: Composition (decision 2): drawn beside the block right before it…
+    beside: bool = False
+    #: …or under it, with an arrow labelled so.
+    link: str | None = None
 
 
 def source_to_json(source: BlockSource) -> dict[str, Any]:
@@ -92,7 +96,8 @@ def source_from_json(data: Mapping[str, Any]) -> BlockSource | None:
 def block_to_json(part: BlockPart) -> dict[str, Any]:
     return {"type": "answer_block", "id": part.block_id, "state": part.state, "kind": part.kind,
             "data": part.data, "sources": [source_to_json(source) for source in part.sources],
-            "hidden": part.hidden, "error": part.error, "raw": part.raw}
+            "hidden": part.hidden, "error": part.error, "raw": part.raw, "beside": part.beside,
+            "link": part.link}
 
 
 def block_from_json(data: Mapping[str, Any]) -> BlockPart:
@@ -104,7 +109,7 @@ def block_from_json(data: Mapping[str, Any]) -> BlockPart:
         state=state if state in ("drawing", "ready", "broken") else "broken",
         kind=_optional(data.get("kind")), data=_optional(data.get("data")), sources=sources,
         hidden=int(data.get("hidden") or 0), error=_optional(data.get("error")),
-        raw=_optional(data.get("raw")),
+        raw=_optional(data.get("raw")), beside=data.get("beside") is True, link=_optional(data.get("link")),
     )
 
 

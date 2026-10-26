@@ -12,20 +12,60 @@ from typing import Annotated
 
 from pydantic import Field
 
-from . import compare, steps, timeline
+from . import (
+    action_items,
+    cause_chain,
+    chart,
+    compare,
+    concept_cards,
+    definition,
+    disagreement,
+    glossary,
+    hierarchy,
+    key_numbers,
+    pros_cons,
+    quote,
+    steps,
+    timeline,
+    verdict,
+)
 from .base import BlockError, BlockSpec, Checker, Items, clean
 
 BLOCKS: dict[str, BlockSpec] = {spec.name: spec for spec in (
     compare.SPEC,
+    pros_cons.SPEC,
+    verdict.SPEC,
     timeline.SPEC,
     steps.SPEC,
+    cause_chain.SPEC,
+    definition.SPEC,
+    concept_cards.SPEC,
+    hierarchy.SPEC,
+    glossary.SPEC,
+    key_numbers.SPEC,
+    chart.SPEC,
+    quote.SPEC,
+    disagreement.SPEC,
+    action_items.SPEC,
 )}
 
 #: A validated block as stored and drawn (the API part's ``block``).
 KbAnswerBlock = Annotated[
     compare.KbCompareBlock
+    | pros_cons.KbProsConsBlock
+    | verdict.KbVerdictBlock
     | timeline.KbTimelineBlock
-    | steps.KbStepsBlock,
+    | steps.KbStepsBlock
+    | cause_chain.KbCauseChainBlock
+    | definition.KbDefinitionBlock
+    | concept_cards.KbConceptCardsBlock
+    | hierarchy.KbHierarchyBlock
+    | glossary.KbGlossaryBlock
+    | key_numbers.KbKeyNumbersBlock
+    | chart.KbChartBlock
+    | quote.KbQuoteBlock
+    | disagreement.KbDisagreementBlock
+    | action_items.KbActionItemsBlock,
     Field(discriminator="kind"),
 ]
 
@@ -40,6 +80,9 @@ class Built:
     #: The output model as canonical JSON.
     data: str
     hidden: int
+    #: Composition (decision 2): beside the block before it, or under it with a labelled arrow.
+    beside: bool = False
+    link: str | None = None
 
 
 class Broken(Exception):
@@ -72,8 +115,9 @@ def build_block(payload: str, checker: Checker) -> Built:
     if items.shown == 0:
         raise Broken("None of the block's items could be shown: each needs a source that exists "
                      "(cite) or basis \"agent\".", spec.name)
+    link = clean(data["link"]) if isinstance(data.get("link"), str) else ""  # the envelope checked its type
     return Built(spec.name, json.dumps(block.model_dump(mode="json"), ensure_ascii=False, sort_keys=True),
-                 items.hidden)
+                 items.hidden, beside=data.get("beside") is True, link=link or None)
 
 
 def block_index() -> str:

@@ -27,6 +27,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ..answer_blocks.md import Refs
+from ..answer_blocks.part import BlockPart, MaterialSource, PageSource
+from ..answer_blocks.text import block_markdown
 from ..errors import KnowledgeError, NameRejected, NameTaken
 from ..ids import new_id
 from ..ingest.checks import clean_text, clean_title
@@ -243,7 +246,8 @@ def _settle(chunks: list[Chunk]) -> list[Chunk]:
 
 
 def paragraphs(parts: Sequence[Part]) -> list[Chunk | ConnectionPart]:
-    """The answer in reading order: Markdown blocks with their chips in place, and connections."""
+    """The answer in reading order: Markdown blocks with their chips in place, and connections.
+    An answer block (P1) comes as its Markdown (tables, lists, paragraphs) with its sources as chips."""
     out: list[Chunk | ConnectionPart] = []
     chips: list[Chip] = []
     stream: list[str] = []
@@ -264,6 +268,26 @@ def paragraphs(parts: Sequence[Part]) -> list[Chunk | ConnectionPart]:
             flush()
             chips = []
             out.append(part)
+        elif isinstance(part, BlockPart):
+            # P1: a drawn answer block, through the serializer Copy and the export use; its sources
+            # become chips, so they turn into wiki links like the answer's own citations.
+            flush()
+            chips = []
+            labels: list[str] = []
+            for source in part.sources:
+                if isinstance(source, MaterialSource):
+                    chips.append(CitePart(source.material_id, source.seg, source.quote))
+                elif isinstance(source, PageSource):
+                    chips.append(PagePart(source.page_id, source.block_id, source.title, source.kind))
+                else:  # a web result: its link, as the copied block has it
+                    labels.append(f"[{_SLOT.sub('', source.title or source.url)}]({source.url})")
+                    continue
+                labels.append(f"{_SLOT_OPEN}{len(chips) - 1}{_SLOT_CLOSE}")
+            markdown = block_markdown(part, Refs(labels, agent="", cells=False))
+            if markdown:
+                stream.append(f"\n\n{markdown}\n\n")
+            flush()
+            chips = []
     flush()
     return out
 

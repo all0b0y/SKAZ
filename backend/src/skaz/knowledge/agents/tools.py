@@ -628,6 +628,10 @@ BLOCK_RULES = (
     "unknown fields or broken JSON is not drawn at all.",
     "Plain text only inside blocks: no Markdown, no HTML, no citation tokens in the text.",
     "Explain the block in a sentence of text around it; don't repeat its items in the text.",
+    "Layout, only when the user asks for one or the blocks are clearly parallel: \"beside\": true puts a "
+    "short block beside the block right before it (up to 3 in a row); \"link\": \"<short label>\" draws a "
+    "labelled arrow from the block right before it. Both need the two blocks to follow each other with no "
+    "text between them.",
 )
 
 

@@ -10,6 +10,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..agents.registry import ENGINE_NAMES
+from ..answer_blocks.md import Refs
+from ..answer_blocks.part import BlockPart, MaterialSource, PageSource
+from ..answer_blocks.text import block_markdown
 from ..markdown.text import format_timestamp
 from ..service import KnowledgeService
 from .model import Chat, CitePart, ConnectionPart, Message, PagePart, Part, TextPart
@@ -48,6 +51,27 @@ class _Labels:
                 where = f" · p. {fragment.page}"
         return f"[{record.title}{where}]"
 
+    def time(self, material_id: str, seg: int) -> str | None:
+        found = self.kb.material_repo.fragment_map({(material_id, seg)}).get((material_id, seg))
+        start = found[0].start_ms if found is not None else None
+        return format_timestamp(start) if start is not None else None
+
+    def block(self, part: BlockPart) -> str:
+        """An answer block as Markdown (the serializer the in-app Copy uses), its sources as labels."""
+        labels: list[str] = []
+        times: list[str | None] = []
+        for source in part.sources:
+            if isinstance(source, MaterialSource):
+                labels.append(self.cite(source.material_id, source.seg))
+                times.append(self.time(source.material_id, source.seg))
+            elif isinstance(source, PageSource):
+                labels.append(self.page(PagePart(source.page_id, source.block_id, source.title, source.kind)))
+                times.append(None)
+            else:
+                labels.append(f"[{source.title or source.url}]({source.url})")
+                times.append(None)
+        return block_markdown(part, Refs(labels, times))
+
     def page(self, part: PagePart) -> str:
         record = self.kb.page_repo.get(part.page_id)
         return f"[{record.title if record else part.title}]"
@@ -71,6 +95,10 @@ def _render_parts(parts: Sequence[Part], labels: _Labels) -> str:
             chip(labels.cite(part.material_id, part.seg))
         elif isinstance(part, PagePart):
             chip(labels.page(part))
+        elif isinstance(part, BlockPart):
+            markdown = labels.block(part)  # a broken or unfinished block has none: left out
+            if markdown:
+                out.append(f"\n\n{markdown}\n\n")
         elif isinstance(part, ConnectionPart):
             lines = [f"\n\n> **Connection · {len({side.folder_id for side in part.sides})} folders**"]
             for side in part.sides:

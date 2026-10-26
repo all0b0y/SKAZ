@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
+from . import md
 from .base import BlockError, BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, Strict, envelope
 
 MAX_COLUMNS = 6
@@ -80,6 +81,20 @@ def build(data: dict[str, Any], items: Items) -> KbCompareBlock:
     return KbCompareBlock(kind="compare", title=block.title, columns=columns, rows=rows)
 
 
+def markdown(block: KbCompareBlock, refs: md.Refs) -> list[str]:
+    """A table; a hidden cell is “—”. References sit in the cells, or after the row for wiki links."""
+    rows: list[str] = []
+    for row in block.rows:
+        if refs.cells:
+            rows.append(md.row([md.cell(row.label), *(md.cell(cell.text + refs.of(cell)) if cell else "—"
+                                                      for cell in row.cells)]))
+        else:
+            after = "".join(refs.of(cell) for cell in row.cells if cell)
+            rows.append(md.row([md.cell(row.label), *(md.cell(cell.text) if cell else "—"
+                                                      for cell in row.cells)], after))
+    return [*md.title(block.title), *md.table(["", *(md.cell(column) for column in block.columns)], rows)]
+
+
 SPEC = BlockSpec(
     name="compare",
     when="two to six things side by side on the same criteria (a comparison table)",
@@ -97,4 +112,5 @@ SPEC = BlockSpec(
         ],
     },
     build=build,
+    markdown=markdown,
 )

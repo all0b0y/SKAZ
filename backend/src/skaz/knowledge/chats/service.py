@@ -51,7 +51,7 @@ from ..agents.tools import ToolRegistry
 from ..agents.usage_log import RunUsage, UsageLog
 from ..agents.web import NATIVE_WEB, web_instructions, web_support
 from ..answer_blocks import usage as block_usage
-from ..answer_blocks.part import BlockPart, drawing
+from ..answer_blocks.part import BlockPart, MaterialSource, drawing
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
@@ -1138,6 +1138,12 @@ class ChatService:
                     folders.append(record.folder_id)
             elif isinstance(part, ConnectionPart):
                 folders.extend(side.folder_id for side in part.sides)
+            elif isinstance(part, BlockPart):  # P1: materials cited only in an answer block count too
+                for source in part.sources:
+                    if isinstance(source, MaterialSource):
+                        record = self.kb.material_repo.get(source.material_id)
+                        if record is not None:
+                            folders.append(record.folder_id)
         return folders
 
     # -- stopping ---------------------------------------------------------------------

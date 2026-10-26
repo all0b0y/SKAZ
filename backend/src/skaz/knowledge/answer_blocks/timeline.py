@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from . import md
 from .base import BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, envelope
 
 MAX_EVENTS = 30
@@ -63,6 +64,15 @@ def build(data: dict[str, Any], items: Items) -> KbTimelineBlock:
     return KbTimelineBlock(kind="timeline", title=block.title, events=events)
 
 
+def markdown(block: KbTimelineBlock, refs: md.Refs) -> list[str]:
+    lines = md.title(block.title)
+    for event in block.events:
+        when = event.when or refs.time(event)
+        body = f"**{md.text(event.title)}**" + (f": {md.text(event.text)}" if event.text else "")
+        lines.append(f"- {md.text(when)} — {body}{refs.of(event)}" if when else f"- {body}{refs.of(event)}")
+    return lines
+
+
 SPEC = BlockSpec(
     name="timeline",
     when="events in time order: dates, or moments of a recording with their timecodes",
@@ -77,4 +87,5 @@ SPEC = BlockSpec(
         ],
     },
     build=build,
+    markdown=markdown,
 )

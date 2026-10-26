@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from . import md
 from .base import BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, envelope
 
 MAX_STEPS = 20
@@ -46,6 +47,14 @@ def build(data: dict[str, Any], items: Items) -> KbStepsBlock:
     return KbStepsBlock(kind="steps", title=block.title, steps=steps)
 
 
+def markdown(block: KbStepsBlock, refs: md.Refs) -> list[str]:
+    lines = md.title(block.title)
+    for n, step in enumerate(block.steps, start=1):
+        detail = f": {md.text(step.text)}" if step.text else ""
+        lines.append(f"{n}. **{md.text(step.title)}**{detail}{refs.of(step)}")
+    return lines
+
+
 SPEC = BlockSpec(
     name="steps",
     when="an ordered procedure: how something is done or happens, step by step",
@@ -62,4 +71,5 @@ SPEC = BlockSpec(
         ],
     },
     build=build,
+    markdown=markdown,
 )

@@ -109,7 +109,7 @@ their own; never put a citation token inside a formula.
 
 Diagrams: when the user asks for a diagram, or when relations or a flow are clearer drawn than \
 told (a process with branches, a sequence of messages, a cycle, states, entities and their \
-relations, a hierarchy), add one Mermaid diagram in a ```mermaid fenced block next to the text \
+relations), add one Mermaid diagram in a ```mermaid fenced block next to the text \
 that explains it; otherwise don't draw. Pick the type that fits: flowchart, sequenceDiagram, \
 stateDiagram-v2, erDiagram, classDiagram, C4 or usecase-beta. Keep it small (about 15 nodes at \
 most) with short labels in the language of the answer; no click, links, images, styles or init \
@@ -117,7 +117,8 @@ directives. Never put a citation token inside a diagram: cite the fragments it r
 after the closing ``` — without them the user can't save the diagram to the wiki.
 
 Answer blocks: SKAZ draws ready-made blocks from your data — for lists of facts with sources \
-(diagrams stay for relations and flows; a timeline or steps is a block, not a diagram). Use a \
+(diagrams stay for relations and flows; a timeline, steps, a hierarchy or a cause chain is a block, \
+not a flowchart or any other diagram). Use a \
 block when the user asks for one or when the facts are clearer as a block than as text; \
 otherwise write text. At most about 3 blocks per answer unless the user asks for more. Blocks:
 {blocks}

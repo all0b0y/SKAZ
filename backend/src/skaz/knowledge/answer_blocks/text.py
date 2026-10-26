@@ -4,10 +4,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
+from .md import Refs
 from .part import BlockPart, BlockSource, MaterialSource, PageSource
-from .registry import FENCE
+from .registry import BLOCKS, FENCE, KbAnswerBlock
 
 _ITEM_KEYS = frozenset({"id", "src", "agent"})
+#: Output-only fields the agent never writes (a chart bar's shown value, a tree node's depth).
+_DERIVED = frozenset({"display", "depth"})
 
 
 def _strings(node: Any, skip: frozenset[str] = frozenset({"id", "kind"})) -> list[str]:
@@ -53,7 +58,7 @@ def _as_input(node: Any, sources: tuple[BlockSource, ...]) -> Any:
     for key, value in node.items():
         if key == "kind":
             out["type"] = value
-        elif key not in _ITEM_KEYS and value is not None:
+        elif key not in _ITEM_KEYS and key not in _DERIVED and value is not None:
             out[key] = _as_input(value, sources)
     if set(node) >= _ITEM_KEYS:
         cites = [_cite(sources[index]) for index in node["src"] if 0 <= index < len(sources)]
@@ -64,6 +69,38 @@ def _as_input(node: Any, sources: tuple[BlockSource, ...]) -> Any:
     return out
 
 
+_BLOCK: TypeAdapter[KbAnswerBlock] = TypeAdapter(KbAnswerBlock)
+
+
+def block_markdown(part: BlockPart, refs: Refs) -> str:
+    """The drawn block as plain Markdown (decision 11; '' for a broken, drawing or unreadable one)."""
+    data = _data(part)
+    if data is None:
+        return ""
+    try:
+        block = _BLOCK.validate_python(data)
+    except ValidationError:
+        return ""
+    return markdown_of(block, refs)
+
+
+def markdown_of(block: KbAnswerBlock, refs: Refs) -> str:
+    return "\n".join(BLOCKS[block.kind].markdown(block, refs)).strip()
+
+
+def _nested(nodes: list[Any], sources: tuple[BlockSource, ...]) -> list[Any]:
+    """A hierarchy's nodes (stored flat, in reading order with their depth) as the agent's tree."""
+    roots: list[Any] = []
+    path: list[dict[str, Any]] = []
+    for node in nodes:
+        depth = int(node.get("depth") or 0)
+        shown = _as_input(node, sources)
+        del path[depth:]
+        (path[-1].setdefault("children", []) if path else roots).append(shown)
+        path.append(shown)
+    return roots
+
+
 def block_agent_text(part: BlockPart) -> str:
     """What the agent sees of its own block in the history (only checked ids survive)."""
     if part.state == "broken":
@@ -71,5 +108,12 @@ def block_agent_text(part: BlockPart) -> str:
     data = _data(part)
     if data is None:
         return ""
-    body = json.dumps(_as_input(data, part.sources), ensure_ascii=False)
+    shown = _as_input(data, part.sources)
+    if data.get("kind") == "hierarchy":
+        shown["nodes"] = _nested(data.get("nodes") or [], part.sources)
+    if part.beside:
+        shown["beside"] = True
+    if part.link:
+        shown["link"] = part.link
+    body = json.dumps(shown, ensure_ascii=False)
     return f"\n```{FENCE}\n{body}\n```\n"

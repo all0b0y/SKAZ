@@ -17,10 +17,12 @@ const cite = (material_id: string, title: string, seg: number, at: { start_ms?: 
 const LECTURE = { type: 'cite' as const, citation: cite('m1', 'Lecture 8', 1, { start_ms: 2_600_000 }) };
 const LECTURE_2 = { type: 'cite' as const, citation: cite('m1', 'Lecture 8', 2, { start_ms: 2_620_000 }) };
 const BOOK = { type: 'cite' as const, citation: cite('m2', 'Textbook', 9, { page: 31 }) };
+/** Not composed, nothing to copy (P1b fields). */
+const PLACE = { beside: false, link: null, markdown: null };
 const PAGE = { type: 'page' as const, page: { id: 'p-entropy', kind: 'concept' as const, title: 'Entropy' }, block_id: null, available: true };
 
 const compare: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-cmp', state: 'ready', hidden: 1, error: null, raw: null,
+  type: 'answer_block', id: 'blk-cmp', state: 'ready', hidden: 1, error: null, raw: null, ...PLACE,
   sources: [LECTURE, BOOK, PAGE],
   block: {
     kind: 'compare', title: null, columns: ['Boltzmann', 'Shannon'],
@@ -36,7 +38,7 @@ const compare: KbAnswerBlockPart = {
   },
 };
 const timeline: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-tl', state: 'ready', hidden: 0, error: null, raw: null,
+  type: 'answer_block', id: 'blk-tl', state: 'ready', hidden: 0, error: null, raw: null, ...PLACE,
   sources: [BOOK, LECTURE_2],
   block: { kind: 'timeline', title: 'History', events: [
     { id: 'e1', src: [0], agent: false, when: '1948', title: 'Shannon’s paper', text: null },
@@ -44,18 +46,18 @@ const timeline: KbAnswerBlockPart = {
   ] },
 };
 const steps: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-st', state: 'ready', hidden: 0, error: null, raw: null, sources: [LECTURE],
+  type: 'answer_block', id: 'blk-st', state: 'ready', hidden: 0, error: null, raw: null, ...PLACE, sources: [LECTURE],
   block: { kind: 'steps', title: null, steps: [
     { id: 's1', src: [0], agent: false, title: 'Count the microstates', text: 'W' },
     { id: 's2', src: [0], agent: false, title: 'Take the logarithm', text: null },
   ] },
 };
 const broken: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-bad', state: 'broken', block: null, sources: [], hidden: 0,
+  type: 'answer_block', id: 'blk-bad', state: 'broken', block: null, sources: [], hidden: 0, ...PLACE,
   error: 'Unknown block type “mindmap”. Use one of: compare, timeline, steps.', raw: '{"type": "mindmap"}',
 };
 const drawing: KbAnswerBlockPart = {
-  type: 'answer_block', id: 'blk-wait', state: 'drawing', block: null, sources: [], hidden: 0, error: null, raw: null,
+  type: 'answer_block', id: 'blk-wait', state: 'drawing', block: null, sources: [], hidden: 0, error: null, raw: null, ...PLACE,
 };
 
 async function openAnswer(parts: KbAnswerBlockPart[]) {
@@ -138,7 +140,7 @@ describe('P1: answer blocks in a chat answer', () => {
     expect(bad).toHaveTextContent('Unknown block type “mindmap”');
     const sent = () => fake.calls.filter((c) => c.method === 'POST' && c.path === '/kb/chats/c1/messages');
     expect(sent()).toHaveLength(0);
-    await user.click(within(bad).getByRole('button', { name: 'Ask agent to fix' }));
+    await user.click(within(bad).getByRole('button', { name: 'Ask the agent to fix' }));
     await waitFor(() => expect(sent()).toHaveLength(1));
     const text = (sent()[0]!.body as { text: string }).text;
     expect(text).toContain('```skaz-block');

@@ -132,7 +132,7 @@ class AnswerBlocks:
         data, sources = _used_only(json.loads(built.data), checker.sources)
         return BlockPart(block_id, "ready", kind=built.kind,
                          data=json.dumps(data, ensure_ascii=False, sort_keys=True),
-                         sources=tuple(sources), hidden=built.hidden)
+                         sources=tuple(sources), hidden=built.hidden, beside=built.beside, link=built.link)
 
 
 def _used_only(data: Any, sources: Sequence[BlockSource]) -> tuple[Any, list[BlockSource]]:

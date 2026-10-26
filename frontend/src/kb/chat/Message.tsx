@@ -112,6 +112,7 @@ export function answerCitations(parts: KbMessagePart[]): KbCitation[] {
   return parts.flatMap((p) => {
     if (p.type === 'cite') return [p.citation];
     if (p.type === 'connection') return p.folders.map((f) => f.citation);
+    if (p.type === 'answer_block') return p.sources.flatMap((s) => (s.type === 'cite' ? [s.citation] : [])); // P1
     return [];
   });
 }
@@ -123,6 +124,7 @@ export function plainText(parts: KbMessagePart[]): string {
     if (p.type === 'cite') return p.citation.material_title ?? '';
     if (p.type === 'page') return p.page.title;
     if (p.type === 'connection') return `\n${p.folders.map((f) => `${f.folder_name}: ${f.text}`).join('\n')}\n${p.inference}\n`;
+    if (p.type === 'answer_block') return p.markdown ? `\n\n${p.markdown}\n\n` : ''; // P1: the block's Markdown
     return '';
   }).join('').trim();
 }

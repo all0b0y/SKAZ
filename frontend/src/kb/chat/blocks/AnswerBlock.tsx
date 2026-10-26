@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
+import { copyToClipboard } from '../../../lib/clipboard';
 import type { KbAnswerBlockPart } from '../../../api/kb/types.gen';
-import { Button, Icon, IconButton, Tooltip } from '../../ui';
+import { Button, Icon, IconButton, Tooltip, useCopied, useIconPlay } from '../../ui';
 import { safeUrl } from '../../ui/markdown/Markdown';
 import { citationRef, pageRef, useOpenDocument } from '../../state/document';
 import { useBlockFix } from './blockFix';
@@ -41,6 +42,7 @@ function ReadyBlock({ part, block }: { part: KbAnswerBlockPart; block: BlockData
           ))}
           <span className="kb-blk__sp" />
           {part.hidden > 0 && <HiddenBadge count={part.hidden} />}
+          {part.markdown && <CopyBlock markdown={part.markdown} />}
         </div>
       </BlockScopeProvider>
     </section>
@@ -91,6 +93,21 @@ function openSource(source: BlockSource, open: ReturnType<typeof useOpenDocument
   }
 }
 
+/** R1, decisions 11–12: Copy as Markdown, bottom right, shown on hover/focus of the block. */
+function CopyBlock({ markdown }: { markdown: string }) {
+  const [copied, setCopied] = useCopied();
+  const [play, replay] = useIconPlay();
+  return (
+    <IconButton className="kb-blk__copy" icon={copied ? 'check' : 'copy'} iconPlay={play} size="sm"
+      label={copied ? 'Copied' : 'Copy as Markdown'} tooltipPlacement="top"
+      onClick={async () => {
+        const ok = await copyToClipboard(markdown);
+        setCopied(ok);
+        if (ok) replay();
+      }} />
+  );
+}
+
 function HiddenBadge({ count }: { count: number }) {
   const text = `${count} ${count === 1 ? 'item' : 'items'} hidden: invalid data, or the source wasn’t found`;
   return (
@@ -136,7 +153,7 @@ function BrokenBlock({ part }: { part: KbAnswerBlockPart }) {
           onClick={() => setShown((v) => !v)} />
         {part.raw && (
           <Button size="sm" busy={asked.status === 'sending'} disabled={asked.status === 'sent'} onClick={() => void ask()}>
-            {asked.status === 'sent' ? 'Asked the agent' : 'Ask agent to fix'}
+            {asked.status === 'sent' ? 'Asked the agent' : 'Ask the agent to fix'}
           </Button>
         )}
       </div>
