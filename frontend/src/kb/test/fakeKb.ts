@@ -122,7 +122,7 @@ export interface FakeWorld {
   /** 0.3.1 S: new cards per day and folder (absent = 20, the backend's default). */
   studyNewPerDay?: number;
   /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
-  judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean };
+  judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean; checked_by?: string };
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -302,6 +302,9 @@ function pushEvent(world: FakeWorld, chatId: string, event: Omit<KbChatEvent, 's
   if (c) c.cursor = seq;
   list.push({ ...event, seq });
 }
+
+/** SKAZ's own thread of the blocks opened from the wiki (bug 1): the backend's `WIKI_STUDY_CHAT_ID`. */
+export const WIKI_STUDY_CHAT = 'chat-wiki-study';
 
 function touchList(world: FakeWorld, c: KbChat): void {
   world.listCursor += 1;
@@ -676,23 +679,30 @@ const STUDY_ROUTES: FakeRoutes = {
     return deckView(w, path.page_id);
   }],
   'POST /kb/study/decks/{page_id}/study': [200, (w, { path, body }) => {
+    // Bug 1 (2026-10-26), as the backend: the block belongs to SKAZ's own wiki-study thread (never
+    // listed), not to the open chat; opened again, an unfinished one goes on where it stopped.
     const deck = deckView(w, path.page_id);
     const mode = body.mode ?? 'due';
     const live = deck.cards.filter((c) => !c.suspended && (!body.card_ids || body.card_ids.includes(c.id)));
     const cards = mode === 'hard' ? live.filter((c) => c.group === 'hard') : mode === 'new' ? live.filter((c) => c.group === 'new') : live;
-    let chat: KbChat;
-    if (body.chat_id) chat = findChat(w, body.chat_id);
-    else {
+    let chat = w.chats.find((c) => c.id === WIKI_STUDY_CHAT);
+    if (!chat) {
       chat = {
-        id: `c-study-${++w.seq}`, title: `Study · ${deck.title}`, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+        id: WIKI_STUDY_CHAT, title: 'Studied from the wiki', pinned: false, engine: 'codex', model: null, effort: null,
         created_at: clock(w), updated_at: clock(w), last_preview: '', recording_material_id: null, folder_ids: [], state: 'idle', unread: false,
         messages: [], cursor: 0,
       };
-      w.chats.unshift(chat);
+      w.chats.push(chat);
       w.chatEvents[chat.id] = [];
     }
     for (const other of w.chats.flatMap((c) => c.messages.flatMap((m) => partsOf(m).filter((p) => p.type === 'study')))) {
       if ((other as KbStudyPart).place !== 'chat') (other as KbStudyPart).place = 'chat';
+    }
+    const again = chat.messages.flatMap((m) => partsOf(m)).map((p) => p as unknown as KbStudyPart)
+      .find((p) => p.type === 'study' && p.save.page_id === path.page_id && p.mode === mode && !body.card_ids && p.position < p.total);
+    if (again) {
+      again.place = 'panel';
+      return { chat_id: chat.id, study: structuredClone(again) };
     }
     const id = `st-${++w.seq}`;
     const messageId = `${chat.id}-s${w.seq}`;
@@ -704,7 +714,6 @@ const STUDY_ROUTES: FakeRoutes = {
     const message = chatMessage(messageId, (chat.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [part as unknown as KbMessage['parts'][number]]);
     chat.messages.push(message);
     pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) });
-    touchList(w, chat);
     return { chat_id: chat.id, study: structuredClone(part) };
   }],
   'GET /kb/study/{block_id}': [200, (w, { path }) => structuredClone(findStudy(w, path.block_id).part)],
@@ -779,7 +788,7 @@ const STUDY_ROUTES: FakeRoutes = {
     if (!judge.hold) {
       // The verdict arrives later, as an update of the block: the request never waits for it.
       q.response = { choices: [], text, checked: true, score: { right: 1, partly: 0.5, wrong: 0 }[judge.verdict], verdict: judge.verdict,
-        missing: judge.missing || null, comment: judge.comment || null, checking: false, error: null };
+        missing: judge.missing || null, comment: judge.comment || null, checked_by: judge.checked_by ?? null, checking: false, error: null };
       studyChanged(w, found);
     }
     return answered;
@@ -1099,7 +1108,8 @@ const ROUTES: FakeRoutes = {
   // -- chats --
   'GET /kb/chats': [200, (w, { query }) => {
     const text = typeof query.q === 'string' ? query.q.trim() : '';
-    let list = (text ? w.chats.filter((c) => chatMatches(c, text)) : w.chats).map(chatSummary);
+    const chats = w.chats.filter((c) => c.id !== WIKI_STUDY_CHAT); // never listed (bug 1)
+    let list = (text ? chats.filter((c) => chatMatches(c, text)) : chats).map(chatSummary);
     if (query.filter === 'pinned') list = list.filter((c) => c.pinned);
     if (query.filter === 'recording') list = list.filter((c) => c.recording_material_id);
     if (query.folder_id) list = list.filter((c) => c.folder_ids.includes(query.folder_id!));

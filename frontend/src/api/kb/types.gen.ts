@@ -1385,6 +1385,7 @@ export interface KbStudyResponse {
   verdict: string | null;
   missing: string | null;
   comment: string | null;
+  checked_by?: string | null;
   checking: boolean;
   error: string | null;
 }

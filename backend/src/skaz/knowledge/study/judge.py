@@ -41,10 +41,17 @@ def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> 
     repo = ChatRepository(kb.db)
 
     async def judge(block: StudyBlock, question: Question, text: str) -> Mapping[str, Any]:
-        chat = await disk_call(repo.get, block.chat_id)
-        if chat is None:
-            raise KnowledgeError("The chat of this test is gone.")
-        engine = await registry().require(chat.engine)
+        # A test opened from the wiki carries the agent fixed when it was opened (bug 1); one made in a
+        # chat is checked by that chat's agent, model and effort.
+        fixed = block.payload.get("agent")
+        if isinstance(fixed, Mapping) and fixed.get("engine"):
+            engine_id, model, effort = fixed["engine"], fixed.get("model"), fixed.get("effort")
+        else:
+            chat = await disk_call(repo.get, block.chat_id)
+            if chat is None:
+                raise KnowledgeError("The chat of this test is gone.")
+            engine_id, model, effort = chat.engine, chat.model, chat.effort
+        engine = await registry().require_known(engine_id)
         quotes = [cite.quote for cite in question.cites if cite.quote]
         turn = AgentTurn(
             run_id=f"judge-{uuid.uuid4().hex[:12]}",
@@ -56,13 +63,28 @@ def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> 
             ),
             instructions=JUDGE_RULES,
             tools=None,
-            model=chat.model,
-            effort=chat.effort,
+            model=model,
+            effort=effort,
             response_schema=JUDGE_SCHEMA,
         )
         result = await collect(engine.run(turn))
         if isinstance(result.terminal, Failed):
             raise KnowledgeError(result.terminal.message)
-        return parse_verdict(result.text)
+        verdict = parse_verdict(result.text)
+        # Who checked it (bug 1, R5): the verdict says it — «Codex · gpt-…» — as the agent's opinion.
+        verdict["checked_by"] = await _who(registry(), engine_id, model)
+        return verdict
 
     return judge
+
+
+async def _who(registry: EngineRegistry, engine: str, model: str | None) -> str:
+    from ..agents.registry import ENGINE_NAMES
+
+    name = ENGINE_NAMES.get(engine, engine)  # type: ignore[call-overload]
+    view = registry.last_view(engine)  # type: ignore[arg-type]
+    chosen = model or (view.current_model if view is not None else None)
+    if view is not None and chosen is None and view.models:
+        chosen = view.models[0].id
+    label = next((option.label for option in (view.models if view else ()) if option.id == chosen), chosen)
+    return f"{name} · {label}" if label else name

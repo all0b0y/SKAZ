@@ -23,7 +23,7 @@ describe('Fake backend: the /kb/study routes of the phase-S contract', () => {
     expect(w.chatEvents.c12!.filter((e) => (e.type as string) === 'part_update')).toHaveLength(2);
   });
 
-  it('one block away from the chat at a time (A-4); saving adds the page; a deck page studies in a new chat', () => {
+  it('one block away from the chat at a time (A-4); saving adds the page; a deck page studies beside the chat only (bug 1)', () => {
     const w = studyWorld();
     call(w, 'PATCH', '/kb/study/st-deck', { place: 'panel' });
     call(w, 'PATCH', '/kb/study/st-test', { place: 'window' });
@@ -32,7 +32,8 @@ describe('Fake backend: the /kb/study routes of the phase-S contract', () => {
     expect(call(w, 'POST', '/kb/study/st-deck/save', { decision: 'allow' })).toMatchObject({ ok: false, status: 409 });
     const studied = call(w, 'POST', '/kb/study/decks/p-deck/study', { mode: 'hard' }) as { data: { chat_id: string; study: KbStudyPart } };
     expect(studied.data.study).toMatchObject({ place: 'panel', origin: 'show', mode: 'hard', total: 1 });
-    expect(w.chats[0]!.title).toBe('Study · Thermodynamics');
+    expect(studied.data.chat_id).toBe('chat-wiki-study');
+    expect((call(w, 'GET', '/kb/chats') as { data: Array<{ id: string }> }).data.map((c) => c.id)).not.toContain('chat-wiki-study');
     expect(block(w, 'st-test').place).toBe('chat');
   });
 });
@@ -239,7 +240,7 @@ describe('Flashcards in the chat (variant C)', () => {
     expect(fake.world.chats.find((c) => c.id === 'c12')!.messages[1]!.parts.find((p) => p.type === 'study')).toMatchObject({ place: 'chat' });
   });
 
-  it('one size button, two states: ⤢ in the chat, ⤡ beside it; the panel has no header or × of its own', async () => {
+  it('one size button, two states: ⤢ in the chat, ⤡ beside it; beside it × too, and no header of its own', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     const route = deck.querySelector('.kb-st-route')!;
@@ -250,11 +251,11 @@ describe('Flashcards in the chat (variant C)', () => {
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const beside = within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' });
     const sized = beside.querySelector('.kb-st-route')!;
-    expect(within(sized as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Smaller — back into the chat']);
+    // Bug 1 (2026-10-26): × is always there beside the chat; ⤡ because this chat is open in the centre.
+    expect(within(sized as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Smaller — back into the chat', 'Close']);
     expect(sized.querySelector('[data-icon="shrink"]')).not.toBeNull();
     expect(within(beside).getByText('Flashcards ·')).toBeInTheDocument(); // the full «Kind · Title» beside the chat too
     expect(within(beside).getByRole('button', { name: 'Rename: Lecture 8' })).toBeInTheDocument();
-    expect(within(panel).queryByRole('button', { name: /Close/ })).toBeNull();
     expect(panel.querySelector('.kb-head')).toBeNull();
     expect(within(panel).queryByRole('button', { name: 'Bigger — beside the chat' })).toBeNull();
 
@@ -263,6 +264,31 @@ describe('Flashcards in the chat (variant C)', () => {
     const back = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(within(back).getByRole('button', { name: 'Bigger — beside the chat' })).toBeInTheDocument();
     await waitFor(() => expect(back).toHaveFocus());
+    await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('chat'));
+  });
+
+  it('× beside the chat hides the panel; the block of the open chat goes back into it (bug 1)', async () => {
+    const { user, fake } = await openChat(/Lecture 8 — cards/);
+    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    await user.click(within(panel).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    expect(await within(centre).findByRole('region', { name: 'Flashcards: Lecture 8' })).toBeInTheDocument();
+    await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('chat'));
+  });
+
+  it('a block of a chat that is not in the centre: × only, it goes back into its own chat quietly (bug 1)', async () => {
+    const { user, fake, services } = await openChat(/Lecture 8 — cards/);
+    const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    await user.click(within(deck).getByRole('button', { name: 'Bigger — beside the chat' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    act(() => services.ui.getState().showCenter('materials'));
+    const route = within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' }).querySelector('.kb-st-route')!;
+    await waitFor(() => expect(within(route as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Close']));
+    await user.click(within(panel).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
     await waitFor(() => expect(block(fake.world, 'st-deck').place).toBe('chat'));
   });
 
@@ -406,6 +432,18 @@ describe('A test in the chat', () => {
     expect(within(test).getByRole('radio', { name: /S = k·ln W/ }).closest('.kb-st-opt')).toHaveClass('is-ok');
   });
 
+  it('the verdict names who checked it — the agent and its model (bug 1)', async () => {
+    const world = studyWorld();
+    world.judge = { verdict: 'right', missing: '', comment: '', checked_by: 'Codex · GPT-5.6-luna' };
+    const { user } = await openChat(/Lecture 8 — test/, { world });
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Logs add.');
+    await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
+    expect(await within(test).findByText('Opinion of Codex · GPT-5.6-luna · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
   it('the chat stays free while the agent checks an open answer', async () => {
     const world = studyWorld();
     world.judge = { verdict: 'right', missing: '', comment: '', hold: true };
@@ -425,7 +463,7 @@ describe('A test in the chat', () => {
 // ---- the deck page, @ decks, "Make cards from these", the daily limit ----------------------------
 
 describe('The deck page (S12)', () => {
-  it('shows groups and cards; marks go to FSRS; Study opens the block beside the chat in a new chat', async () => {
+  it('shows groups and cards; marks go to FSRS; Study opens the block beside the chat only (bug 1)', async () => {
     const user = userEvent.setup();
     const { fake, services } = renderKb({ world: studyWorld() });
     await screen.findByRole('region', { name: 'Chats' });
@@ -443,8 +481,39 @@ describe('The deck page (S12)', () => {
     const deck = within(panel).getByRole('region', { name: 'Flashcards: Thermodynamics' });
     expect(within(deck).getByText('1 / 1')).toBeInTheDocument();
     expect(within(deck).getByText(/Practice: doesn’t change your schedule/)).toBeInTheDocument();
-    expect(fake.calls.find((c) => c.path === '/kb/study/decks/p-deck/study')?.body).toEqual({ mode: 'hard', card_ids: null, chat_id: null });
-    expect(await screen.findByRole('heading', { name: 'Study · Thermodynamics' })).toBeInTheDocument();
+    expect(fake.calls.find((c) => c.path === '/kb/study/decks/p-deck/study')?.body).toEqual({ mode: 'hard', card_ids: null });
+    // No chat is made or opened for it, and there is no chat to take it back into: × only.
+    expect(services.chats.getState().currentId).toBeNull();
+    expect(services.chats.getState().list.map((c) => c.title)).not.toContain('Studied from the wiki');
+    expect(within(deck.querySelector('.kb-st-route') as HTMLElement).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Close']);
+    await user.click(within(panel).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
+  });
+
+  it('a deck opened from the wiki while a chat is open stays out of that chat, and goes on where it stopped (bug 1)', async () => {
+    const { user, fake, services } = await openChat(/Lecture 8 — cards/);
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    await within(centre).findByRole('region', { name: 'Flashcards: Lecture 8' });
+    const openChatId = services.chats.getState().currentId;
+    act(() => services.ui.getState().openDocument({ type: 'page', id: 'p-deck' }));
+    await user.click(await screen.findByRole('button', { name: 'Study' }));
+    const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    const deck = within(panel).getByRole('region', { name: 'Flashcards: Thermodynamics' });
+    expect(services.chats.getState().currentId).toBe(openChatId);
+    expect(within(centre).queryByRole('region', { name: 'Flashcards: Thermodynamics' })).toBeNull();
+    expect(within(centre).queryByRole('group', { name: 'Flashcards: Thermodynamics' })).toBeNull();
+    expect(within(deck).queryByRole('button', { name: 'Smaller — back into the chat' })).toBeNull();
+    const first = fake.calls.filter((c) => c.path === '/kb/study/decks/p-deck/study').length;
+    await user.click(within(panel).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Flashcards and tests' })).toBeNull());
+    expect(within(centre).queryByRole('region', { name: 'Flashcards: Thermodynamics' })).toBeNull();
+
+    act(() => services.ui.getState().openDocument({ type: 'page', id: 'p-deck' }));
+    await user.click(await screen.findByRole('button', { name: 'Study' }));
+    await screen.findByRole('complementary', { name: 'Flashcards and tests' });
+    expect(fake.calls.filter((c) => c.path === '/kb/study/decks/p-deck/study')).toHaveLength(first + 1);
+    const thread = fake.world.chats.find((c) => c.id === 'chat-wiki-study')!;
+    expect(thread.messages).toHaveLength(1); // the same block again, not a new one
   });
 
   it('decks come first in the @ list, as their own group', async () => {

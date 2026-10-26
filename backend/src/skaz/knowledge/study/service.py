@@ -856,6 +856,7 @@ class StudyService:
                 "verdict": str(verdict.get("verdict")),
                 "missing": str(verdict.get("missing") or "") or None,
                 "comment": str(verdict.get("comment") or "") or None,
+                "checked_by": str(verdict.get("checked_by") or "") or None,
             }
         try:
             await disk_call(self._put_answer, await disk_call(self.get, block.id), question.id, entry)

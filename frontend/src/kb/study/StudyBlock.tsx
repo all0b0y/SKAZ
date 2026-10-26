@@ -6,7 +6,7 @@ import { PathText } from '../ui/PathText';
 import { SourcesProvider } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
 import { useOpenDocument } from '../state/document';
-import { useFold, useServices } from '../state/context';
+import { useChats, useFold, useServices, useUi } from '../state/context';
 import { agentName } from '../chat/permission';
 import { RenameForm } from '../chat/ChatMenu';
 import type { KbPermissionPart } from '../api/permissions';
@@ -68,6 +68,9 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
   const sources = useMemo(() => indexSources(deck ? part.cards.flatMap((c) => c.citations) : part.questions.flatMap((q) => q.citations)),
     [deck, part.cards, part.questions]);
   const size = SIZE[where];
+  const ownChatOpen = useChats((s) => s.currentId === chatId);
+  const chatInCentre = useUi((s) => s.center === 'chat');
+  const backHere = ownChatOpen && chatInCentre;
   const question = !deck && !part.result ? part.questions[Math.min(part.position, total - 1)] : undefined;
   const subtitle = part.origin === 'show' && deck ? MODE_LABEL[part.mode] : null;
   const canRename = part.origin === 'agent';
@@ -128,7 +131,14 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
           </>
         )}
         <span className="kb-st-route">
-          <IconButton icon={size.icon} label={size.label} size="sm" onClick={() => void move(size.to)} />
+          {/* Bug 1: ⤡ only takes a block back into the chat open in the centre that it belongs to. */}
+          {(where === 'chat' || backHere) && (
+            <IconButton icon={size.icon} label={size.label} size="sm" onClick={() => void move(size.to)} />
+          )}
+          {/* × beside the chat is always there: it hides the panel; a block of a chat goes back into it quietly. */}
+          {where === 'panel' && (
+            <IconButton icon="close" label="Close" size="sm" onClick={() => ui.getState().closeDoc()} />
+          )}
         </span>
       </header>
       {!folded && (

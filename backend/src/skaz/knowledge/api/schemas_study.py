@@ -71,6 +71,8 @@ class KbStudyResponse(BaseModel):
     verdict: str | None
     missing: str | None
     comment: str | None
+    #: Open answers: who gave the verdict, «Codex · gpt-…» (bug 1, 2026-10-26); ``null`` before.
+    checked_by: str | None = None
     #: The agent is checking it now.
     checking: bool
     error: str | None

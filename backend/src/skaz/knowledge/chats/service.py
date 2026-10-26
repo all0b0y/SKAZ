@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sqlite3
 import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -82,7 +83,7 @@ from .model import (
 )
 from .parsing import CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
 from .resolve import MaterialReader, Resolver
-from .store import RESTART_REASON, ChatRepository
+from .store import RESTART_REASON, WIKI_STUDY_CHAT_ID, ChatRepository
 from .summary import ChatSummaries
 from .text import DEFAULT_TITLE, auto_title, preview, utc_now
 
@@ -256,26 +257,64 @@ class ChatService:
 
     async def study_from_deck(self, study: StudyService, page_id: str, mode: Mode,
                               card_ids: Sequence[str] | None,
-                              chat_id: str | None) -> tuple[str, StudyBlock]:
-        """"Study" on a deck page (S12): the cards as a block of the chat (a new one if none is open),
-        in a message of their own, so the route chat ⇄ beside ⇄ window and the agent's context hold."""
+                              chat_id: str | None = None) -> tuple[str, StudyBlock]:
+        """"Study" / "Take the test" on a deck or test page (S12; bug 1, 2026-10-26).
+
+        The block lives beside the chat only: it belongs to SKAZ's own wiki-study thread
+        (:data:`WIKI_STUDY_CHAT_ID`, never listed), not to the chat that happens to be open — so it
+        never joins that chat's thread. ``chat_id`` is accepted for older callers and ignored.
+        Opening it again goes on where it stopped: an unfinished pass (the same page, mode and cards)
+        or the test with its answers and result (Retake starts a new attempt). Open answers are
+        checked by the agent a new chat would get now — the default agent with its last model and
+        effort — fixed for the block when it is made.
+        """
+        del chat_id
         record = await disk_call(self.kb.page_repo.get, page_id)
         if record is None or record.kind not in ("deck", "test"):
             raise NotFound("This page is not a deck.")
-        if chat_id is not None:
-            chat = await self._chat(chat_id)
-        else:
-            chat = (await self.create(title=f"Study · {record.title}")).chat
+        chat = await self._wiki_study_chat()
+        for block in reversed(await disk_call(study.store.blocks_of_chat, chat.id)):
+            if block.page_id != page_id or block.origin != "show":
+                continue
+            if record.kind == "test" or (block.mode == mode and card_ids is None
+                                         and block.position < len(block.payload.get("order") or ())):
+                return chat.id, block
+            break
+        engine = await disk_call(self.registry.default)
+        last = await disk_call(LastChoice(self.registry.settings).get, engine)
+        model, effort = last if last is not None else (None, None)
+        try:
+            await self._check_model(engine, model, effort)
+        except ChatInvalid:
+            model, effort = None, None  # a remembered model the agent no longer offers: its own default
         message_id = new_id("msg")
-        ref = RunRef(run_id="", chat_id=chat.id, message_id=message_id, engine=chat.engine)
+        ref = RunRef(run_id="", chat_id=chat.id, message_id=message_id, engine=engine)
         block = await disk_call(study.show_saved, ref, [page_id], mode, card_ids, notify=False)
+        payload = {**block.payload, "agent": {"engine": engine, "model": model, "effort": effort}}
+        fixed = await disk_call(study.store.update_block, block.id, payload=payload)
+        block = fixed if fixed is not None else block
         now = utc_now()
         message = Message(id=message_id, chat_id=chat.id, seq=0, role="system", state="done", created_at=now,
-                          parts=(StudyPart(block.id, block.kind, block.title),), engine=chat.engine)
+                          parts=(StudyPart(block.id, block.kind, block.title),), engine=engine)
         (added,) = await disk_call(self.repo.add_messages, [message], {"updated_at": now})
         self._feed(chat.id).emit("message", added.id, message=added)
-        self._list.touch(chat.id)
         return chat.id, block
+
+    async def _wiki_study_chat(self) -> Chat:
+        """SKAZ's own thread of the blocks opened from the wiki (made once; never in the chat list)."""
+        chat = await disk_call(self.repo.get, WIKI_STUDY_CHAT_ID)
+        if chat is not None:
+            return chat
+        now = utc_now()
+        chat = Chat(id=WIKI_STUDY_CHAT_ID, title="Studied from the wiki", title_auto=False, pinned=False,
+                    engine=await disk_call(self.registry.default), model=None, effort=None,
+                    recording_material_id=None, folder_ids=(), unread=False, last_preview="",
+                    created_at=now, updated_at=now)
+        with contextlib.suppress(sqlite3.IntegrityError):  # made meanwhile by another request
+            await disk_call(self.repo.create, chat)
+        made = await disk_call(self.repo.get, WIKI_STUDY_CHAT_ID)
+        assert made is not None
+        return made
 
     async def _late_answer(self, chat_id: str, text: str) -> None:
         """An option picked after the agent stopped waiting: a new question in the chat (Q-A2)."""

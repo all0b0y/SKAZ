@@ -23,6 +23,7 @@ import pytest
 from skaz.knowledge.agents.engine import TextDelta
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.tools import ToolContext
+from skaz.knowledge.chats.store import WIKI_STUDY_CHAT_ID
 from skaz.knowledge.errors import KnowledgeError
 from skaz.knowledge.markdown.page import parse_page
 from skaz.knowledge.permissions.store import RunRef
@@ -459,10 +460,13 @@ async def test_deck_page_groups_marks_and_study_from_the_page(
     assert response.status_code == 200, response.text
     started = response.json()
     assert started["study"]["place"] == "panel" and [c["id"] for c in started["study"]["cards"]] == [one]
+    # Bug 1 (2026-10-26): beside the chat only, in SKAZ's own wiki-study thread — never a listed chat.
+    assert started["chat_id"] == WIKI_STUDY_CHAT_ID
     chat = (await kb_client.get(f"/kb/chats/{started['chat_id']}")).json()
-    assert chat["title"].startswith("Study · ")
     (part,) = [p for m in chat["messages"] for p in m["parts"] if p["type"] == "study"]
     assert part["id"] == started["study"]["id"] and part["mode"] == "hard"
+    listed = (await kb_client.get("/kb/chats")).json()
+    assert WIKI_STUDY_CHAT_ID not in {c["id"] for c in listed}
     hidden = await kb_client.post(f"/kb/study/decks/{page_id}/study", json={"mode": "all"})
     assert [c["id"] for c in hidden.json()["study"]["cards"]] == [one, two]  # "don't show" is left out
 

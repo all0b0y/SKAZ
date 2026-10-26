@@ -99,7 +99,8 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
                 choices=list(given.get("choices") or []), text=given.get("text"),
                 checked=bool(given.get("checked")),
                 score=given.get("score"), verdict=given.get("verdict"), missing=given.get("missing"),
-                comment=given.get("comment"), checking=bool(given.get("checking")), error=given.get("error"),
+                comment=given.get("comment"), checked_by=given.get("checked_by"),
+                checking=bool(given.get("checking")), error=given.get("error"),
             ) if given else None
             questions.append(KbStudyQuestion(
                 id=question.id, type=question.type, question=question.question,
@@ -172,7 +173,8 @@ async def mark_deck_cards(page_id: str, body: KbStudyMarkIn, study: StudyDep, re
 @router.post("/decks/{page_id}/study")
 async def study_deck(page_id: str, body: KbDeckStudy, study: StudyDep, chats: ChatsDep,
                      request: Request) -> KbDeckStudyResult:
-    """"Study" on the deck page (S12, W1): a block in the chat (or a new chat) opened beside the chat."""
+    """"Study" / "Take the test" on a deck or test page: the block beside the chat only, never in the
+    open chat's thread; opened again, it goes on where it stopped (bug 1, 2026-10-26)."""
     try:
         chat_id, block = await chats.study_from_deck(study, page_id, body.mode, body.card_ids, body.chat_id)
         block = await disk_call(study.move, block.id, place="panel")

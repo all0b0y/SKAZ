@@ -186,7 +186,10 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
       {question.type === 'open' && response?.error && <p className="kb-inline-error" role="alert">{response.error}</p>}
       {question.type === 'open' && checked && response?.verdict && (
         <div className="kb-st-op" role="status">
-          <div className="kb-st-opl"><Icon name="agent" size={13} />{agent}’s opinion · not a fact</div>
+          <div className="kb-st-opl"><Icon name="agent" size={13} />
+            {/* Bug 1 (R5): who checked it — the agent and its model — when the backend says so. */}
+            {response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`} · not a fact
+          </div>
           <b>{VERDICT[response.verdict] ?? response.verdict}</b>
           {response.missing && <> Missing: {response.missing}</>}
           {response.comment && <> {response.comment}</>}

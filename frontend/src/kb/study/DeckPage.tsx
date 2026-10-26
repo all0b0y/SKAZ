@@ -13,17 +13,17 @@ const GROUPS: Array<{ key: keyof KbDeckView['groups']; label: string }> = [
 ];
 
 /**
- * "Study" from a deck or test page (S12, W1): the cards as a block of the open chat (a new chat
- * "Study · <deck>" when none is open), shown beside the chat.
+ * "Study" / "Take the test" from a deck or test page (S12; bug 1, 2026-10-26): the block opens beside
+ * the chat only — never in the open chat's thread, and the open chat stays as it is. It belongs to
+ * SKAZ's own wiki-study thread, which is loaded (not opened) so the panel can show it; opened again,
+ * it goes on where it stopped.
  */
 export function useStudyFromPage(): (pageId: string, mode: StudyMode, cardIds?: string[]) => Promise<string | null> {
   const { client, chats, ui } = useServices();
   return useCallback(async (pageId, mode, cardIds) => {
     try {
-      const started = await studyApi.studyDeck(client, pageId, { mode, card_ids: cardIds ?? null, chat_id: chats.getState().currentId });
+      const started = await studyApi.studyDeck(client, pageId, { mode, card_ids: cardIds ?? null });
       await chats.getState().load(started.chat_id);
-      chats.getState().open(started.chat_id);
-      if (ui.getState().center !== 'chat') ui.getState().showCenter('chat');
       ui.getState().openStudy(started.chat_id, started.study.id);
       return null;
     } catch (error) {

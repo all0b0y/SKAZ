@@ -32,6 +32,9 @@ _CHAT_COLUMNS = frozenset({
     "updated_at",
 })
 RESTART_REASON = "SKAZ was closed before the answer finished."
+#: Bug 1 (2026-10-26): tests and decks opened from the wiki live beside the chat only. Their blocks
+#: belong to this one SKAZ-owned thread, which is never listed, counted or found as a chat.
+WIKI_STUDY_CHAT_ID = "chat-wiki-study"
 
 
 def _chat(row: sqlite3.Row) -> Chat:
@@ -91,8 +94,8 @@ class ChatRepository:
     def list_all(self, *, pinned_only: bool = False, recording_only: bool = False,
                  folder_id: str | None = None, ids: Iterable[str] | None = None,
                  limit: int | None = None) -> list[Chat]:
-        clauses: list[str] = []
-        args: list[Any] = []
+        clauses: list[str] = ["id != ?"]
+        args: list[Any] = [WIKI_STUDY_CHAT_ID]
         if pinned_only:
             clauses.append("pinned = 1")
         if recording_only:
@@ -106,7 +109,7 @@ class ChatRepository:
                 return []
             clauses.append(f"id IN ({','.join('?' * len(wanted))})")
             args.extend(wanted)
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f" WHERE {' AND '.join(clauses)}"
         sql = f"SELECT * FROM chat_threads{where} ORDER BY updated_at DESC, rowid DESC"
         if limit is not None:
             sql += " LIMIT ?"
@@ -116,7 +119,8 @@ class ChatRepository:
 
     def count(self) -> int:
         with self.db.read() as connection:
-            return int(connection.execute("SELECT COUNT(*) FROM chat_threads").fetchone()[0])
+            return int(connection.execute("SELECT COUNT(*) FROM chat_threads WHERE id != ?",
+                                          (WIKI_STUDY_CHAT_ID,)).fetchone()[0])
 
     def search(self, query: str) -> set[str]:
         """Chats whose title or messages contain every word of ``query`` (prefix match)."""
@@ -130,7 +134,7 @@ class ChatRepository:
             except sqlite3.OperationalError as error:
                 log.warning("Chat search failed: %s", error_note(error))
                 return set()
-        return {row[0] for row in rows}
+        return {row[0] for row in rows} - {WIKI_STUDY_CHAT_ID}
 
     def update(self, chat_id: str, **values: Any) -> None:
         if not values:
