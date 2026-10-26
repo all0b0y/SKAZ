@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
+import signal
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
@@ -17,6 +19,12 @@ from typing import Any
 
 from ..knowledge.processes import CHILDREN
 from .codex_tools import CodexTools, tool_failure
+
+#: How long a closed connection waits for Codex to exit on its own (stdin EOF) before signals. A clean
+#: exit releases the thread for the next answer's ``thread/resume`` (N6, decision 19).
+CLOSE_GRACE_S = 3.0
+#: After SIGTERM to the group, before SIGKILL.
+TERMINATE_GRACE_S = 2.0
 
 
 class CodexRpcError(RuntimeError):
@@ -67,10 +75,12 @@ class CodexRpc:
                 *self._command, cwd=self._cwd, env=self._env,
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, limit=self._max_message_bytes,
+                start_new_session=True,
             )
-            # Quitting SKAZ SIGTERMs it with the other agents (``_Server.handle_exit``); Codex stays
-            # in SKAZ's process group, so it is signalled as one process.
-            CHILDREN.add(self._process, group=False)
+            # Its own process group: the npm ``codex`` shim runs the native binary as a child, and a
+            # native process outliving its shim keeps a live thread locked ("already has an active
+            # writer"). Quitting SKAZ (``_Server.handle_exit``) and ``close`` signal the whole group.
+            CHILDREN.add(self._process, group=True)
             self._reader = asyncio.create_task(self._receive())
             await self.request("initialize", {
                 "clientInfo": {"name": "skaz", "version": "0.1.0"},
@@ -269,12 +279,33 @@ class CodexRpc:
             self._reader.cancel()
             await asyncio.gather(self._reader, return_exceptions=True)
         if self._process is not None and self._process.returncode is None:
-            with suppress(ProcessLookupError):
-                self._process.terminate()
+            process = self._process
+            # Close the pipe first: Codex exits on EOF and releases its thread cleanly.
+            if process.stdin is not None:
+                with suppress(OSError, RuntimeError):
+                    process.stdin.close()
             try:
-                await asyncio.wait_for(self._process.wait(), timeout=2)
+                await asyncio.wait_for(process.wait(), timeout=CLOSE_GRACE_S)
             except TimeoutError:
-                with suppress(ProcessLookupError):
-                    self._process.kill()
-                await self._process.wait()
+                _signal_group(process, signal.SIGTERM)
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=TERMINATE_GRACE_S)
+                except TimeoutError:
+                    _signal_group(process, signal.SIGKILL)
+                    await process.wait()
+        if self._process is not None:
+            # The shim may be gone (or have crashed) while its native child still runs: end the rest
+            # of the group too.
+            _signal_group(self._process, signal.SIGKILL)
         CHILDREN.discard(self._process)
+
+
+def _signal_group(process: asyncio.subprocess.Process, sig: int) -> None:
+    """Signal the process's own group (``start_new_session``); the process alone if that fails."""
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        with suppress(ProcessLookupError):
+            process.send_signal(sig)
