@@ -22,6 +22,27 @@ const sentBody = (calls: Array<{ method: string; path: string; body?: unknown }>
 describe('Message field', () => {
   beforeEach(() => { capture.stop.mockClear(); capture.cancel.mockClear(); });
 
+  it('↑/↓ in the @ list keep the highlighted reference on screen (bug 8, 2026-10-26)', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) { scrolled.push(this.id); };
+    try {
+      const user = userEvent.setup();
+      renderKb({ world: chatWorld() });
+      const input = await ready();
+      await user.click(input);
+      await user.keyboard('Explain @e');
+      const popup = await screen.findByTestId('mention-popup');
+      await waitFor(() => expect(within(popup).getAllByRole('option').length).toBeGreaterThan(1));
+      await user.keyboard('{ArrowDown}');
+      const active = within(popup).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+      expect(active.id).toMatch(/-1$/);
+      await waitFor(() => expect(scrolled).toContain(active.id));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('@ suggests Wiki · Materials · Chats; the choice becomes a token and is sent as a mention', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
