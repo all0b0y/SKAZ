@@ -21,6 +21,7 @@ import type { KbChat } from '../../api/kb/types.gen';
 import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
 import { DitherStage } from '../fx/dither/DitherStage';
 import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
+import { SelectionProvider } from './select/context';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -195,6 +196,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
 
   return (
     <section className="kb-center" data-pane="center" aria-label="Chat" hidden={hidden}>
+      <SelectionProvider chatId={currentId}>
       <header className="kb-head kb-head--chat">
         {renaming && chat ? (
           <RenameForm title={chat.title} onCancel={() => setRenaming(false)} onSave={async (next) => {
@@ -259,6 +261,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
       )}
       <Composer chatId={currentId}
         placeholder={waitingHint(chat) ?? (recording ? 'Ask about the lecture · @ to reference' : 'Ask about your materials · @ to reference')} />
+      </SelectionProvider>
     </section>
   );
 }

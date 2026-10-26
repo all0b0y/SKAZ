@@ -20,6 +20,8 @@ import { ingestWhenReady } from '../materials/ingestWhenReady';
 import { AgentFix } from '../chat/AgentFix';
 import { useOpenStudy } from '../study/useStudy';
 import { StudyContextChip } from '../study/StudyBlock';
+import { useSelection } from '../chat/select/context';
+import { SelectionBar } from '../chat/select/SelectionBar';
 
 const NEW_CHAT = 'new';
 
@@ -86,6 +88,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const recPhase = useRecording((s) => s.phase);
   const recId = useRecording((s) => s.materialId);
   const recTitle = useRecording((s) => s.title);
+  // P2: items picked in an answer (chat/select): the field asks about them.
+  const { selection, clear: clearSelection } = useSelection();
 
   const agent = choice ? agentOf(agents, choice.engine) : undefined;
   // Bug 5: "as set in the agent" (no model) still offers effort — the levels of the model that answers.
@@ -332,6 +336,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
     }
     if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
+    if (selection && event.key === 'Escape') { event.preventDefault(); clearSelection(); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void submit();
@@ -405,6 +410,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   const mentionDrop = useMentionDrop();
   const placeholderShown = empty && dictation.phase === 'idle';
+  const hint = selection ? 'Ask about the selection…' : placeholder;
   // A query of several words stays a mention only while something matches; otherwise it is just text.
   const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
@@ -417,6 +423,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       {study && chatId && <StudyContextChip chatId={chatId} part={study} />}
       <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
         {mentionDrop.overlay}
+        {selection && <SelectionBar selection={selection} onClear={clearSelection} />}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
             onPick={pickMention} onHover={setActive} />
@@ -426,7 +433,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
           onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
           renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
         <div className="kb-editor-wrap">
-          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{placeholder}</span>}
+          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{hint}</span>}
           <div
             ref={editorRef}
             className="kb-editor"
@@ -435,7 +442,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
             role="textbox"
             aria-multiline="true"
             aria-label="Message"
-            aria-placeholder={placeholder}
+            aria-placeholder={hint}
             aria-controls={popupOpen ? listId : undefined}
             aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"

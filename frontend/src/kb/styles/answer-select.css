@@ -1,0 +1,88 @@
+/*
+ * P2: picking items of answer blocks and Mermaid diagrams, asking about them (kb/chat/select).
+ * Reference: .dev/ui-blocks/answer-blocks-v3.html (selection mode, the bar over the field, the chip on
+ * the question, «Fix in wiki»). R4: a picked item is drawn in the accent (--kb-fx-accent) — frame,
+ * tone, a filled number / check — never the neutral grey of a source hover, so the two never merge.
+ * Picked is never colour alone: the check mark and the filled number carry it too.
+ */
+.kb-blk, .kb-diagram, .kb-selbar, .kb-selchip, .kb-wikifix, .kb-where {
+  --kb-sel: var(--kb-fx-accent);
+  --kb-sel-soft: color-mix(in srgb, var(--kb-fx-accent) 11%, var(--kb-pane));
+  --kb-sel-line: color-mix(in srgb, var(--kb-fx-accent) 45%, var(--kb-pane));
+}
+
+/* ---- block items ---- */
+.kb-blk [data-selectable] { cursor: pointer; }
+.kb-blk [data-selectable]:hover { background: color-mix(in srgb, var(--kb-text) 5%, transparent); }
+.kb-blk [data-selectable]:focus-visible { outline: 2px solid var(--kb-sel); outline-offset: 1px; border-radius: var(--kb-r-xs); }
+.kb-blk [data-selected='true'],
+.kb-blk [data-selected='true']:hover,
+.kb-blk tr[data-selected='true'] > * {
+  background: var(--kb-sel-soft);
+  box-shadow: inset 0 0 0 1.5px var(--kb-sel);
+}
+.kb-blk li[data-selected='true'] { border-radius: var(--kb-r-md); }
+/* A check in the corner (shape, not only colour). */
+.kb-blk .kb-blk__item[data-selected='true']::after {
+  content: '';
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--kb-sel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.2l2.6 2.6L12 5.4' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+/* A picked step: its number filled with the accent. */
+.kb-blk-steps > li[data-selected='true']::before { background: var(--kb-sel); border-color: var(--kb-sel); color: var(--kb-pane); }
+/* The chip of an earlier question was clicked: its items light up for a moment. */
+.kb-blk [data-flash='true'] { box-shadow: inset 0 0 0 2px var(--kb-sel); background: var(--kb-sel-soft); }
+
+/* ---- diagram nodes and edges (only those mapped to the diagram's source) ---- */
+.kb-diagram [data-selectable] { cursor: pointer; }
+.kb-diagram g[data-selectable]:focus { outline: none; }
+.kb-diagram g.pele-node[data-selectable]:focus-visible > :is(rect, polygon, circle, ellipse, path) { stroke: var(--kb-sel); stroke-dasharray: 4 3; }
+.kb-diagram g.pele-node:is([data-selected='true'], [data-flash='true']) > :is(rect, polygon, circle, ellipse, path) {
+  stroke: var(--kb-sel);
+  stroke-width: 2.5px;
+  fill: var(--kb-sel-soft);
+}
+.kb-diagram g.pele-edge:is([data-selected='true'], [data-flash='true']) > path { stroke: var(--kb-sel); stroke-width: 2.5px; }
+.kb-diagram g.pele-edge:is([data-selected='true'], [data-flash='true']) > path.pele-marker { fill: var(--kb-sel); stroke: none; }
+.kb-diagram g.pele-edge-label[data-selected='true'] > rect { stroke: var(--kb-sel); }
+/* A thin edge is hard to hit: a wide invisible copy of its line takes the click. */
+.kb-diagram path.kb-sel-hit { stroke: transparent !important; stroke-width: 12px; fill: none; pointer-events: stroke; }
+.kb-diagram g.pele-edge[data-selectable]:focus-visible > path:not(.kb-sel-hit) { stroke: var(--kb-sel); }
+
+/* ---- the bar over the message field ---- */
+.kb-selbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -2px -4px 2px;
+  padding: 2px 2px 8px 4px;
+  border-bottom: 1px solid var(--kb-line);
+}
+.kb-selbar__what { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-right: 4px; font-size: var(--t-xs); font-weight: 600; }
+.kb-selbar__what svg { flex: none; color: var(--kb-sel); }
+.kb-selbar__where { color: var(--kb-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.kb-selbar__x { margin-left: auto; }
+.kb-qbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  background: none;
+  color: var(--kb-text);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.kb-qbtn:hover, .kb-qbtn[aria-expanded='true'] { background: var(--kb-accent-soft); }
+.kb-qbtn[aria-disabled='true'] { color: var(--kb-muted); cursor: default; background: none; }
+.kb-qbtn:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; }
+.kb-qbtn svg { flex: none; color: var(--kb-muted); }

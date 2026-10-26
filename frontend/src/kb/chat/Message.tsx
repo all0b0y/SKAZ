@@ -21,6 +21,7 @@ import { WebSearchCard } from './webSearch';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { AnswerBlock } from './blocks/AnswerBlock';
+import { AnswerSelectScope } from './select/context';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -210,7 +211,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
   return (
-    <article className="kb-msg kb-msg--assistant" data-state={message.state} aria-label="Answer">
+    <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
       <Tools parts={message.parts} />
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
         {empty && message.state === 'streaming' && (
@@ -218,7 +219,9 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
           <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />Writing an answer…</p>
         )}
         <SourcesProvider index={sources}>
-          <Parts chatId={chatId} parts={message.parts} />
+          <AnswerSelectScope messageId={message.id}>
+            <Parts chatId={chatId} parts={message.parts} />
+          </AnswerSelectScope>
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />

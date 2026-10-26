@@ -19,6 +19,14 @@ const DiagramFixContext = createContext<DiagramFix | null>(null);
 /** Where an answer's diagrams can ask the agent for a fix (a chat); elsewhere there is no button. */
 export const DiagramFixProvider = DiagramFixContext.Provider;
 
+/**
+ * P2: makes a drawn diagram's nodes/edges selectable (`chat/select`); returns how to undo it. Only
+ * chat answers provide it — a wiki page's diagram is not selectable.
+ */
+export type DiagramSelect = (host: HTMLElement, source: string) => () => void;
+const DiagramSelectContext = createContext<DiagramSelect | null>(null);
+export const DiagramSelectProvider = DiagramSelectContext.Provider;
+
 /** Pele's own limits for untrusted diagrams (its defaults, stated here so they stay ours). */
 const SOURCE_LIMIT = 50_000;
 const EDGE_LIMIT = 5_000;
@@ -116,6 +124,7 @@ type FixState = { status: 'idle' | 'sending' | 'sent' } | { status: 'failed'; er
 /** One diagram. `preview` is the editor's live preview: no source repeated, no fix button. */
 export function DiagramView({ source, preview = false }: { source: string; preview?: boolean }) {
   const fix = useContext(DiagramFixContext);
+  const select = useContext(DiagramSelectContext);
   const canvas = useRef<HTMLDivElement>(null);
   const prefix = `skaz-d${useId().replace(/[^a-zA-Z0-9]/g, '')}-`;
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +142,7 @@ export function DiagramView({ source, preview = false }: { source: string; previ
 
   useEffect(() => {
     let live = true;
+    let unselect: (() => void) | null = null;
     const host = canvas.current;
     void drawDiagram(source, prefix, fontOf(host)).then((out) => {
       if (!live || !host) return;
@@ -143,11 +153,12 @@ export function DiagramView({ source, preview = false }: { source: string; previ
         return;
       }
       host.replaceChildren(out.svg);
+      unselect = select?.(host, source) ?? null;
       setDrawn(true);
       setError(null);
     });
-    return () => { live = false; };
-  }, [source, prefix]);
+    return () => { live = false; unselect?.(); };
+  }, [source, prefix, select]);
 
   useEffect(() => { setAsked({ status: 'idle' }); }, [source]);
 
