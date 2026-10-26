@@ -111,6 +111,26 @@ describe('Agent updates (U1)', () => {
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/opencode/update/rollback' })));
   });
 
+  it('Roll back for Claude Code says it may update itself again; OpenCode’s does not', async () => {
+    const world = withUpdate({ channel: 'native', installed: '2.1.310', latest: '2.1.310', failure: {
+      reason: 'This Claude Code version can’t be used.', command: 'claude install 2.1.281', output: [], previous: '2.1.281',
+      rollback: 'skaz', docs_url: 'https://code.claude.com/docs/en/setup',
+    } }, 'claude_code');
+    const opencode = world.agentUpdates!.agents.find((a) => a.engine === 'opencode')!;
+    Object.assign(opencode, { channel: 'curl', installed: '1.19.4', latest: '1.19.4', failure: {
+      reason: 'This OpenCode version can’t be used.', command: 'opencode upgrade', output: [], previous: '1.17.18',
+      rollback: 'skaz', docs_url: 'https://opencode.ai/docs/' } });
+    Object.assign(world.agents.agents.find((a) => a.id === 'opencode')!, { installed: true });
+    renderKb({ world });
+    const dialog = await openAccounts();
+    const claude = row(dialog, 'Claude Code');
+    expect(await within(claude).findByRole('button', { name: 'Roll back to 2.1.281' })).toBeInTheDocument();
+    expect(within(claude).getByText('Claude Code may update itself again.')).toBeInTheDocument();
+    const open = row(dialog, 'OpenCode');
+    expect(within(open).getByRole('button', { name: 'Roll back to 1.17.18' })).toBeInTheDocument();
+    expect(within(open).queryByText(/may update itself again/)).not.toBeInTheDocument();
+  });
+
   it('one switch for automatic checks, "Last checked" and Check for updates', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: withUpdate({}) });

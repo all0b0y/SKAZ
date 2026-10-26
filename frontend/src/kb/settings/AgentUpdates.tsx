@@ -55,7 +55,10 @@ export function AgentUpdateOffer({ engine }: { engine: EngineId }) {
             <p className="kb-agentcard__manual">Run it yourself in Terminal: <code>{failure.command}</code></p>
           )}
           {failure.rollback === 'skaz' && failure.previous && (
-            <Button size="sm" busy={pending === 'rollback'} onClick={() => void run('rollback')}>Roll back to {failure.previous}</Button>
+            <span className="kb-agentupdate__acts">
+              <Button size="sm" busy={pending === 'rollback'} onClick={() => void run('rollback')}>Roll back to {failure.previous}</Button>
+              {engine === 'claude_code' && <span className="kb-agentcard__note">Claude Code may update itself again.</span>}
+            </span>
           )}
           {failure.rollback === 'manual' && (
             <p className="kb-agentcard__manual">
