@@ -38,6 +38,8 @@ export interface FakeExcluded {
 export interface FakeWorld {
   /** The backend's full-text index fails (L1): search answers `degraded`. */
   searchDegraded?: boolean;
+  /** P2: the wiki block changed since a fix was proposed — «Fix in wiki» turns it stale. */
+  wikiFixStale?: boolean;
   library: KbLibrary;
   folders: KbFolder[];
   materials: KbMaterial[];
@@ -1194,7 +1196,8 @@ const ROUTES: FakeRoutes = {
     supersedeQuestions(w, c);
     if (c.state === 'answering') fail(409, 'The agent is still answering in this chat.');
     const user = chatMessage(`${c.id}-u${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: body.text }], {
-      input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] },
+      input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [],
+        ...(body.selection ? { selection: body.selection } : {}) },
     });
     c.messages.push(user);
     pushEvent(w, c.id, { type: 'message', message_id: user.id, message: structuredClone(user) });
@@ -1216,6 +1219,17 @@ const ROUTES: FakeRoutes = {
     return structuredClone(msg);
   }],
   'POST /kb/chats/{chat_id}/messages/{message_id}/regenerate': [202, (w, { path }) => answerAgain(w, path.chat_id, path.message_id, false)],
+  // P2 «Fix in wiki» (chats/wiki_fix.py): written only on this click, while the card still waits.
+  'POST /kb/chats/{chat_id}/messages/{message_id}/wiki-fixes/{fix_id}/apply': [200, (w, { path }) => {
+    const c = findChat(w, path.chat_id);
+    const part = findMessage(c, path.message_id).parts.find((p) => p.type === 'wiki_fix' && p.id === path.fix_id);
+    if (!part || part.type !== 'wiki_fix') return fail(404, 'This fix is no longer in the answer.');
+    if (part.status === 'proposed') {
+      part.status = w.wikiFixStale ? 'stale' : 'applied';
+      pushEvent(w, c.id, { type: 'part_update', message_id: path.message_id, part: structuredClone(part) });
+    }
+    return structuredClone(part);
+  }],
   // As chats/service.py `edit`: the question changes in place, everything after it goes, a new answer starts.
   'POST /kb/chats/{chat_id}/messages/{message_id}/edit': [202, (w, { path, body }) => {
     const c = findChat(w, path.chat_id);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { copyToClipboard } from '../../../lib/clipboard';
 import type { KbAnswerBlockPart } from '../../../api/kb/types.gen';
 import { Button, Icon, IconButton, Tooltip, useCopied, useIconPlay } from '../../ui';
@@ -7,6 +7,7 @@ import { citationRef, pageRef, useOpenDocument } from '../../state/document';
 import { useBlockFix } from './blockFix';
 import { BlockScopeProvider, type BlockHover } from './hover';
 import { rendererOf } from './registry';
+import { useSelectableBlock } from '../select/context';
 import { AGENT_KEY, blockChips, type BlockChip, type BlockData, type BlockSource } from './sources';
 
 /**
@@ -27,10 +28,12 @@ function ReadyBlock({ part, block }: { part: KbAnswerBlockPart; block: BlockData
   const chips = useMemo(() => blockChips(part.sources, renderer.items(block)), [part.sources, renderer, block]);
   const scope = useMemo(() => ({ sources: part.sources, hover, setHover }), [part.sources, hover]);
   const { View } = renderer;
+  const root = useRef<HTMLElement | null>(null);
+  useSelectableBlock(root, part.id, block.title); // P2: its items can be picked (chat/select)
   const lit = (chip: BlockChip) => (hover?.from === 'item' ? hover.keys.includes(chip.key)
     : hover?.from === 'chip' && hover.key === chip.key);
   return (
-    <section className="kb-blk" aria-label={block.title ? `${renderer.name}: ${block.title}` : renderer.name}
+    <section ref={root} className="kb-blk" aria-label={block.title ? `${renderer.name}: ${block.title}` : renderer.name}
       data-block-id={part.id} data-kind={block.kind}>
       <BlockScopeProvider value={scope}>
         {block.title && <div className="kb-blk__title">{block.title}</div>}

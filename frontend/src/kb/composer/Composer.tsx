@@ -20,6 +20,9 @@ import { ingestWhenReady } from '../materials/ingestWhenReady';
 import { AgentFix } from '../chat/AgentFix';
 import { useOpenStudy } from '../study/useStudy';
 import { StudyContextChip } from '../study/StudyBlock';
+import { useSelection } from '../chat/select/context';
+import { QUICK_TEXT, type QuickAsk } from '../chat/select/SelectionBar';
+import { SelectionPanel } from '../chat/select/WhereFrom';
 
 const NEW_CHAT = 'new';
 
@@ -86,6 +89,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const recPhase = useRecording((s) => s.phase);
   const recId = useRecording((s) => s.materialId);
   const recTitle = useRecording((s) => s.title);
+  // P2: items picked in an answer (chat/select): the field asks about them.
+  const { selection, clear: clearSelection } = useSelection();
 
   const agent = choice ? agentOf(agents, choice.engine) : undefined;
   // Bug 5: "as set in the agent" (no model) still offers effort — the levels of the model that answers.
@@ -242,13 +247,15 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     refresh();
   };
 
-  const submit = async () => {
+  /** `quick`: a quick ask of the selection bar (P2) — its words, then what was typed, if anything. */
+  const submit = async (quick?: QuickAsk) => {
     const root = editorRef.current;
     if (!root || sending) return;
     const value = serialize(root);
+    const text = quick ? (value.text.trim() ? `${QUICK_TEXT[quick]}: ${value.text.trim()}` : QUICK_TEXT[quick]) : value.text;
     // Long pastes are cards until now: they become pasted-text materials only with the message.
     const unsaved = attachments.filter((a) => a.text !== undefined && !a.materialId);
-    if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
+    if (!text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
       && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
     if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
     const deleted = [...markGone(root, gone), ...attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
@@ -279,7 +286,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       if (failed) { setSending(false); setError(`The pasted text couldn’t be saved: ${failed.error}`); return; }
     }
     const ready = list.filter((a) => a.state === 'ready' && a.materialId);
-    const input: KbMessageInput = { text: value.text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!) };
+    const input: KbMessageInput = { text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!),
+      ...(selection ? { selection: { ...selection, intent: quick ?? 'ask' } } : {}) };
     sendingFrom.current = draftKey.current;
     // The arrow moves as the message goes (it is replaced by Stop once the answer starts, so not after the reply).
     replaySend();
@@ -288,7 +296,8 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     const result = await chats.getState().send(input, openContext());
     sendingFrom.current = null;
     setSending(false);
-    if (!result.ok) { fillEditor(root, input); setError(result.error); return; }
+    if (!result.ok) { fillEditor(root, { ...input, text: value.text }); setError(result.error); return; }
+    if (input.selection) clearSelection(); // asked: the next question starts with nothing picked
     // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
     for (const a of ready) {
       if (a.source !== 'existing' && a.inWiki) {
@@ -332,6 +341,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
     }
     if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
+    if (selection && event.key === 'Escape') { event.preventDefault(); clearSelection(); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void submit();
@@ -405,6 +415,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   const mentionDrop = useMentionDrop();
   const placeholderShown = empty && dictation.phase === 'idle';
+  const hint = selection ? 'Ask about the selection…' : placeholder;
   // A query of several words stays a mention only while something matches; otherwise it is just text.
   const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
@@ -417,6 +428,10 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       {study && chatId && <StudyContextChip chatId={chatId} part={study} />}
       <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
         {mentionDrop.overlay}
+        {selection && (
+          <SelectionPanel selection={selection} onClear={clearSelection} onQuick={(ask) => void submit(ask)}
+            disabledReason={!agentReady ? unavailable : blocked ? 'The agent is still answering' : sending ? 'Sending…' : null} />
+        )}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
             onPick={pickMention} onHover={setActive} />
@@ -426,7 +441,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
           onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
           renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
         <div className="kb-editor-wrap">
-          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{placeholder}</span>}
+          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{hint}</span>}
           <div
             ref={editorRef}
             className="kb-editor"
@@ -435,7 +450,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
             role="textbox"
             aria-multiline="true"
             aria-label="Message"
-            aria-placeholder={placeholder}
+            aria-placeholder={hint}
             aria-controls={popupOpen ? listId : undefined}
             aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"

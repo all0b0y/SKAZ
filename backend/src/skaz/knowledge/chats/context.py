@@ -22,6 +22,7 @@ from ..skills.prompting import with_skills
 from ..store.records import MaterialRecord
 from .model import Chat, Message, MessageInput, Quote, Ref
 from .resolve import MaterialReader
+from .selection import history_note, selection_context
 from .text import agent_text
 
 ITEM_CHARS = 8_000
@@ -149,6 +150,8 @@ def user_turn_text(given: MessageInput) -> str:
     if given.quotes:
         quoted = "; ".join(f"“{_clip(quote.text, HISTORY_QUOTE_CHARS)}”" for quote in given.quotes)
         text += f"\n(The user quoted: {quoted})"
+    if given.selection is not None:
+        text += f"\n{history_note(given.selection)}"  # P2
     return text
 
 
@@ -235,6 +238,11 @@ class ContextBuilder:
                                 + untrusted_block("attached material", body))
         for quote in given.quotes:
             add(*self._quote(quote))
+        if given.selection is not None:  # P2: the items picked in an earlier answer of this chat
+            own = chats(chat.id)
+            picked = selection_context(own[1], given.selection) if own is not None else None
+            if picked is not None:
+                add(*picked)
         if not sections:
             return given.text
         return "\n\n".join([*sections, f"The user's message:\n{given.text}"])

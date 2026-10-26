@@ -386,3 +386,16 @@ describe('Electron IPC policy — agent updates (U1)', () => {
     }
   });
 });
+
+describe('Electron IPC policy — «Fix in wiki» (P2)', () => {
+  it('lets the user apply one proposed fix of one answer — one id segment each, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/chats/c1/messages/m1/wiki-fixes/fix-1/apply' })).toBeNull();
+    for (const [method, path] of [
+      ['GET', '/kb/chats/c1/messages/m1/wiki-fixes/fix-1/apply'], ['POST', '/kb/chats/c1/messages/m1/wiki-fixes/fix-1'],
+      ['POST', '/kb/chats/c1/messages/m1/wiki-fixes/a/b/apply'], ['POST', '/kb/chats/c1/messages/m1/wiki-fixes/../apply/x'],
+      ['DELETE', '/kb/chats/c1/messages/m1/wiki-fixes/fix-1/apply'], ['POST', '/kb/chats/c1/wiki-fixes/fix-1/apply'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});

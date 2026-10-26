@@ -69,6 +69,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/events$/ },
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/(?:stop|regenerate|resume|save|edit)$/ },
+  // P2: «Fix in wiki» under an answer — the agent's checked proposal, written as the user's edit.
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/wiki-fixes\/[^/]+\/apply$/ },
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/(?:save|read)$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/export$/ },
   { method: 'GET', pattern: /^\/kb\/mentions$/ },

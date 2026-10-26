@@ -17,6 +17,7 @@ from ..agents.registry import EngineUnavailable
 from ..agents.web import site_of
 from ..answer_blocks.part import BlockPart
 from ..chats.events import ChatEvent
+from ..chats.fix_part import WikiFixPart
 from ..chats.model import (
     CitePart,
     ConnectionPart,
@@ -30,6 +31,8 @@ from ..chats.model import (
     QuestionPart,
     Quote,
     Ref,
+    SelectedItem,
+    Selection,
     StudyPart,
     TextPart,
     WebSearchPart,
@@ -75,12 +78,15 @@ from .schemas_chats import (
     KbQuote,
     KbRef,
     KbSavedAnalysis,
+    KbSelectedItem,
+    KbSelection,
     KbSend,
     KbSendResult,
     KbTextPart,
     KbToolPart,
 )
 from .schemas_web import KbWebLink, KbWebSearchPart
+from .schemas_wiki_fix import KbWikiFixPart, wiki_fix_part
 from .study import study_part
 
 MAX_WAIT_S = 25.0
@@ -181,6 +187,9 @@ class Presenter:
         if isinstance(part, BlockPart):
             exists = lambda page_id: self.kb.page_repo.get(page_id) is not None  # noqa: E731
             return KbMessagePart(answer_block_part(part, self.citation, self.page_ref, exists))
+        if isinstance(part, WikiFixPart):  # P2: «Fix in wiki»
+            exists = lambda page_id: self.kb.page_repo.get(page_id) is not None  # noqa: E731
+            return KbMessagePart(wiki_fix_part(part, self.page_ref, exists))
         if isinstance(part, TextPart):
             return KbMessagePart(KbTextPart(type="text", text=part.text))
         if isinstance(part, CitePart):
@@ -223,6 +232,7 @@ class Presenter:
                 quotes=[KbQuote(source=quote.source, id=quote.id, block_id=quote.block_id, seg=quote.seg,
                                 message_id=quote.message_id, text=quote.text) for quote in given.quotes],
                 attachments=list(given.attachments),
+                selection=_selection_out(given.selection),
             ) if given is not None else None,
         )
 
@@ -297,6 +307,22 @@ def _send_result(kb: KnowledgeService, pair: tuple[Message, Message]) -> KbSendR
     return KbSendResult(user=user, assistant=assistant)
 
 
+def _selection_out(selection: Selection | None) -> KbSelection | None:
+    if selection is None:
+        return None
+    return KbSelection(message_id=selection.message_id, block_id=selection.block_id, kind=selection.kind,
+                       title=selection.title, intent=selection.intent,
+                       items=[KbSelectedItem(id=item.id, label=item.label) for item in selection.items])
+
+
+def _selection_in(body: KbSend | KbMessageEdit) -> Selection | None:
+    picked = body.selection if isinstance(body, KbSend) else None
+    if picked is None:
+        return None
+    return Selection(picked.message_id, picked.block_id, picked.kind, None,
+                     tuple(SelectedItem(item.id, item.label) for item in picked.items), picked.intent)
+
+
 def to_input(body: KbSend | KbMessageEdit) -> MessageInput:
     """What the composer sent; an edit carries no context (the question keeps its own)."""
     context = body.context if isinstance(body, KbSend) else KbOpenContext()
@@ -307,6 +333,7 @@ def to_input(body: KbSend | KbMessageEdit) -> MessageInput:
                      for quote in body.quotes),
         attachments=tuple(body.attachments),
         context=OpenContext(context.open_page_id, context.open_material_id, context.open_study_id),
+        selection=_selection_in(body),
     )
 
 
@@ -428,3 +455,14 @@ async def save_chat(chat_id: str, chats: ChatsDep) -> KbSavedAnalysis:
 async def export_chat(chat_id: str, chats: ChatsDep) -> KbChatExport:
     exported = await chats.export(chat_id)
     return KbChatExport(file_name=exported.file_name, markdown=exported.markdown)
+
+
+@router.post("/{chat_id}/messages/{message_id}/wiki-fixes/{fix_id}/apply")
+async def apply_wiki_fix(chat_id: str, message_id: str, fix_id: str, request: Request,
+                         chats: ChatsDep) -> KbWikiFixPart:
+    """P2 «Fix in wiki»: the agent's proposal written as the user's edit — only if the block is still
+    exactly as the card shows; otherwise the card turns ``stale`` and nothing is written."""
+    fixes = request.app.state.runtime.kb_wiki_fixes
+    part = await fixes.apply(chat_id, message_id, fix_id)
+    exists = lambda page_id: chats.kb.page_repo.get(page_id) is not None  # noqa: E731
+    return await kb_call(wiki_fix_part, part, Presenter(chats.kb).page_ref, exists)

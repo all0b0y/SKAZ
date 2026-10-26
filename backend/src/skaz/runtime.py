@@ -21,6 +21,7 @@ from .knowledge.agents.hub import build_agents_hub
 from .knowledge.agents.tools import ToolRegistry
 from .knowledge.agents.web_runner import CodexSearch, EngineSearch, WebSearchRunner
 from .knowledge.chats import ChatService
+from .knowledge.chats.wiki_fix import WikiFixes
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
@@ -143,6 +144,10 @@ class Runtime:
                                              {"codex": CodexSearch(self.codex_connection),
                                               "claude_code": EngineSearch()})
         self.kb_tools.add((web_search_tool(self.kb_web, self.kb_chats.run_ref, self.kb_web_search),))
+        #: P2: «Fix in wiki» — the agent's checked proposal after «That’s wrong», written only on the
+        #: user's click, as the user's own edit.
+        self.kb_wiki_fixes = WikiFixes(self.kb, self.kb_chats, lambda: self.kb_wiki)
+        self.kb_tools.add(self.kb_wiki_fixes.tools())
         self.settings_store = SettingsStore(self.db)
         self.catalogs = ProviderCatalogs(self.http, self.secrets, config.data_dir)
         #: File imports. Resumption is started by the app lifespan, not here: a
