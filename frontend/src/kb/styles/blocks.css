@@ -1,0 +1,211 @@
+/*
+ * P1 answer blocks (kb/chat/blocks). Reference: .dev/ui-blocks/answer-blocks-v3.html (approved, R1–R5).
+ * R1: no type captions. R2: one row of source chips under each block; a hovered item shows its source
+ * above it and lights its chip; a hovered chip lights its items (neutral grey — R4 keeps the accent
+ * for P2's selection). R3: the accent (--kb-fx-accent: cocoa light, purple dark) only where it carries
+ * structure: step numbers, the timeline line/dots/timecodes, the compare headers' underline.
+ * Meaning never by colour alone: numbers, dots, dashed borders and words carry it too.
+ */
+.kb-blk, .kb-blk-broken, .kb-blk-ghost {
+  --kb-blk-acc: var(--kb-fx-accent);
+  --kb-blk-acc-line: color-mix(in srgb, var(--kb-fx-accent) 45%, var(--kb-pane));
+  --kb-blk-hl: color-mix(in srgb, var(--kb-text) 7%, transparent);
+}
+
+/* ---- shell ---- */
+.kb-blk {
+  margin: 12px 0;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-lg);
+  background: var(--kb-pane);
+  min-width: 0;
+}
+.kb-blk__title { padding: 12px 14px 0; font-weight: 600; font-size: var(--t-md); line-height: 1.35; }
+.kb-blk__body { padding: 12px 14px 14px; min-width: 0; }
+.kb-blk__title + .kb-blk__body { padding-top: 6px; }
+.kb-blk__sp { flex: 1; }
+
+/* ---- the sources row (R2) ---- */
+.kb-blk__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px 7px 14px;
+  border-top: 1px solid var(--kb-line);
+  font-size: var(--t-xs);
+  color: var(--kb-muted);
+}
+.kb-blk__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  max-width: 240px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  background: none;
+  color: var(--kb-text);
+  font: inherit;
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+.kb-blk__chip svg { flex: none; color: var(--kb-muted); }
+.kb-blk__chip-label { overflow: hidden; text-overflow: ellipsis; }
+.kb-blk__chip:hover, .kb-blk__chip.is-hl { background: var(--kb-accent-soft); border-color: var(--kb-text); }
+.kb-blk__chip:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; }
+/* The agent's own knowledge: dashed, quiet (decision 7, R2). */
+.kb-blk__chip--agent { border-style: dashed; color: var(--kb-muted); cursor: help; }
+.kb-blk__chip--agent:hover, .kb-blk__chip--agent.is-hl { color: var(--kb-text); }
+/* A source that is gone: dashed and muted, and its label says so. */
+.kb-blk__chip.is-gone { border-style: dashed; color: var(--kb-muted); cursor: default; }
+.kb-blk__hidden {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--kb-r-pill);
+  color: var(--kb-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.kb-blk__hidden:hover, .kb-blk__hidden:focus-visible { background: var(--kb-accent-soft); color: var(--kb-text); outline: none; }
+
+/* ---- items: hover label + highlight ---- */
+.kb-blk__item { position: relative; transition: background-color 0.12s, box-shadow 0.12s; }
+.kb-blk__item.is-hl { border-radius: var(--kb-r-xs); background: var(--kb-blk-hl); box-shadow: 0 0 0 3px var(--kb-blk-hl); }
+.kb-blk__tag {
+  position: absolute;
+  z-index: 5;
+  right: 4px;
+  top: -11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  max-width: 260px;
+  padding: 0 7px;
+  overflow: hidden;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  background: var(--kb-pane);
+  color: var(--kb-text);
+  font: 500 11px/1 var(--kb-font);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0; /* not visibility: screen readers still read the item's source */
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+.kb-blk__tag svg { flex: none; color: var(--kb-muted); }
+.kb-blk__tag--agent { border-style: dashed; color: var(--kb-muted); }
+.kb-blk__item:hover > .kb-blk__tag { opacity: 1; }
+
+/* ---- compare ---- */
+.kb-blk-cmp__wrap { overflow-x: auto; }
+table.kb-blk-cmp { width: 100%; border-collapse: collapse; font-size: var(--t-base); }
+.kb-blk-cmp th, .kb-blk-cmp td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--kb-line); }
+.kb-blk-cmp thead th, .kb-blk-cmp thead td { color: var(--kb-text); font-weight: 600; border-bottom: 1px solid var(--kb-text); }
+.kb-blk-cmp thead th { border-bottom-color: var(--kb-blk-acc); }
+.kb-blk-cmp tbody th { font-weight: 500; color: var(--kb-muted); width: 28%; }
+.kb-blk-cmp tbody tr:last-child > * { border-bottom: 0; }
+.kb-blk-cmp__none { color: var(--kb-muted); }
+
+/* ---- timeline ---- */
+.kb-blk-tl { list-style: none; margin: 4px 0 0; padding: 0; position: relative; }
+/* The line runs through the dots: 56px time column + 10px gap + half of the 16px dot column. */
+.kb-blk-tl::before { content: ''; position: absolute; left: 73px; top: 8px; bottom: 8px; width: 1px; background: var(--kb-blk-acc-line); }
+.kb-blk-tl > li { display: grid; grid-template-columns: 56px 16px minmax(0, 1fr); gap: 0 10px; padding: 6px 0; }
+.kb-blk-tl__when {
+  text-align: right;
+  font: 600 12px/1.6 var(--kb-font-mono);
+  color: var(--kb-muted);
+  padding: 1px 0 0;
+  overflow-wrap: anywhere;
+}
+button.kb-blk-tl__when { border: 0; background: none; cursor: pointer; }
+/* A recording moment: underlined (shape, not only colour) and opens the recording there. */
+.kb-blk-tl__when--tc { color: var(--kb-blk-acc); text-decoration: underline dotted; text-underline-offset: 3px; }
+.kb-blk-tl__when--tc:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; border-radius: var(--kb-r-xs); }
+.kb-blk-tl__dot {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin: 7px auto 0;
+  border: 2px solid var(--kb-blk-acc);
+  border-radius: 50%;
+  background: var(--kb-pane);
+}
+.kb-blk-tl__main { min-width: 0; }
+.kb-blk-tl__title { font-weight: 600; }
+.kb-blk-tl__text { color: var(--kb-muted); font-size: var(--t-sm); }
+
+/* ---- steps ---- */
+.kb-blk-steps { list-style: none; margin: 0; padding: 0; counter-reset: kb-step; display: flex; flex-direction: column; gap: 4px; }
+.kb-blk-steps > li {
+  counter-increment: kb-step;
+  display: flex;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 1.5px solid transparent;
+  border-radius: var(--kb-r-md);
+}
+.kb-blk-steps > li::before {
+  content: counter(kb-step);
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border: 1.5px solid var(--kb-blk-acc);
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--kb-blk-acc);
+  font-size: 12px;
+  font-weight: 700;
+}
+.kb-blk-steps__body { min-width: 0; }
+.kb-blk-steps b { font-weight: 600; }
+.kb-blk-steps__text { display: block; color: var(--kb-muted); font-size: var(--t-sm); }
+
+/* ---- broken (decision 6) ---- */
+.kb-blk-broken {
+  margin: 12px 0;
+  padding: 8px 10px 8px 12px;
+  border: 1px dashed var(--kb-muted);
+  border-radius: var(--kb-r-lg);
+  color: var(--kb-muted);
+  font-size: var(--t-sm);
+}
+.kb-blk-broken__row { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.kb-blk-broken__data { margin-top: 8px; }
+.kb-blk-broken__why { margin: 0 0 6px; color: var(--kb-text); }
+.kb-blk-broken__raw {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--kb-r-md);
+  background: var(--kb-bg);
+  color: var(--kb-text);
+  font: 12px/1.5 var(--kb-font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---- streaming placeholder ---- */
+.kb-blk-ghost { margin: 12px 0; padding: 14px; border: 1px solid var(--kb-line); border-radius: var(--kb-r-lg); }
+.kb-blk-ghost__cap { display: flex; align-items: center; gap: 8px; color: var(--kb-muted); font-size: var(--t-xs); }
+.kb-blk-ghost__line { height: 10px; margin: 8px 0; border-radius: 5px; background: color-mix(in srgb, var(--kb-text) 9%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .kb-blk-ghost__line { animation: kb-blk-pulse 1.4s ease-in-out infinite; }
+}
+@keyframes kb-blk-pulse { 50% { opacity: 0.45; } }

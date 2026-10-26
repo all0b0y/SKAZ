@@ -20,6 +20,7 @@ import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
+import { AnswerBlock } from './blocks/AnswerBlock';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -143,7 +144,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
-        if (b.kind === 'answer') return null; // drawn by kb/chat/blocks (next step)
+        if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
