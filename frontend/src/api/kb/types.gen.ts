@@ -124,6 +124,51 @@ export interface KbAgentSignIn {
   state: "idle" | "waiting" | "done" | "failed";
 }
 
+export interface KbAgentUpdate {
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  name: string;
+  channel: "npm" | "brew" | "native" | "curl" | "git" | "unknown";
+  installed: string | null;
+  latest: string | null;
+  available: boolean;
+  unseen: boolean;
+  skipped: string | null;
+  busy: boolean;
+  phase: "idle" | "queued" | "updating";
+  action: "upgrade" | "rollback" | null;
+  task_id: string | null;
+  note: string;
+  services_note: string | null;
+  failure: KbAgentUpdateFailure | null;
+  checked_at: string | null;
+}
+
+export interface KbAgentUpdateFailure {
+  reason: string;
+  command: string;
+  output: string[];
+  previous: string | null;
+  rollback: "skaz" | "manual" | "none";
+  docs_url: string;
+}
+
+export interface KbAgentUpdateSettings {
+  auto: boolean;
+}
+
+export interface KbAgentUpdateSkip {
+  version: string;
+}
+
+export interface KbAgentUpdates {
+  auto: boolean;
+  checking: boolean;
+  checked_at: string | null;
+  next_check_at: string | null;
+  unseen: boolean;
+  agents: KbAgentUpdate[];
+}
+
 /** W-2: whether this agent can search the web with the user's approval of each query; why not, in plain words. W-3b: Codex, Hermes and OpenCode search through SKAZ's ``skaz_web_search``, run by ``through``'s own search in a separate query-only run (available while a searcher is connected). */
 export interface KbAgentWebSearch {
   available: boolean;
@@ -621,7 +666,7 @@ export interface KbInstallStart {
 export interface KbInstallTask {
   id: string;
   engine: "codex" | "claude_code" | "hermes" | "opencode";
-  action: "install" | "update" | "first_check" | "repair";
+  action: "install" | "update" | "first_check" | "repair" | "upgrade" | "rollback";
   state: "running" | "succeeded" | "failed" | "cancelled";
   lines: KbInstallLine[];
   cursor: number;
@@ -1656,6 +1701,34 @@ export interface KbEndpoints {
     response: KbAgents;
     status: 200;
   };
+  "GET /kb/agents/updates": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbAgentUpdates;
+    status: 200;
+  };
+  "POST /kb/agents/updates/check-now": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbAgentUpdates;
+    status: 200;
+  };
+  "POST /kb/agents/updates/seen": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbAgentUpdates;
+    status: 200;
+  };
+  "PUT /kb/agents/updates/settings": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbAgentUpdateSettings;
+    response: KbAgentUpdates;
+    status: 200;
+  };
   "POST /kb/agents/{engine}/check": {
     path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
     query: Record<string, never>;
@@ -1689,6 +1762,34 @@ export interface KbEndpoints {
     query: { wait?: number };
     body: never;
     response: KbAgentSignIn;
+    status: 200;
+  };
+  "POST /kb/agents/{engine}/update": {
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
+    query: Record<string, never>;
+    body: never;
+    response: KbAgentUpdates;
+    status: 202;
+  };
+  "POST /kb/agents/{engine}/update/cancel": {
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
+    query: Record<string, never>;
+    body: never;
+    response: KbAgentUpdates;
+    status: 200;
+  };
+  "POST /kb/agents/{engine}/update/rollback": {
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
+    query: Record<string, never>;
+    body: never;
+    response: KbAgentUpdates;
+    status: 202;
+  };
+  "POST /kb/agents/{engine}/update/skip": {
+    path: { engine: "codex" | "claude_code" | "hermes" | "opencode" };
+    query: Record<string, never>;
+    body: KbAgentUpdateSkip;
+    response: KbAgentUpdates;
     status: 200;
   };
   "GET /kb/chats": {
