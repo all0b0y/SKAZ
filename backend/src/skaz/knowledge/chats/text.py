@@ -7,6 +7,8 @@ import unicodedata
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from ..answer_blocks.part import BlockPart
+from ..answer_blocks.text import block_agent_text, block_plain
 from .model import CitePart, ConnectionPart, PagePart, Part, StudyPart, TextPart, ToolPart
 
 PREVIEW_CHARS = 140
@@ -37,6 +39,8 @@ def plain_text(parts: Sequence[Part]) -> str:
             pieces.append("\n" + "\n".join(side.text for side in part.sides) + "\n" + part.inference + "\n")
         elif isinstance(part, StudyPart):
             pieces.append(f" {'Flashcards' if part.kind == 'deck' else 'Test'} · {part.title} ")
+        elif isinstance(part, BlockPart):
+            pieces.append(block_plain(part))
     return "".join(pieces)
 
 
@@ -67,6 +71,8 @@ def agent_text(parts: Sequence[Part]) -> str:
             # The agent's own block in the history: what it showed, not the cards (they are in SKAZ).
             what = "flashcards" if part.kind == "deck" else "a test"
             pieces.append(f"\n[You showed the user {what} “{part.title}” (study block {part.study_id}).]\n")
+        elif isinstance(part, BlockPart):
+            pieces.append(block_agent_text(part))
         elif isinstance(part, ToolPart):
             continue
     return "".join(pieces).strip()

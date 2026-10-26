@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal, cast
 
 from ..agents.engine import EngineId, FailureKind
+from ..answer_blocks.part import BlockPart, block_from_json, block_to_json
 
 Role = Literal["user", "assistant", "system"]
 MessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
@@ -100,7 +101,7 @@ class WebSearchPart:
 
 
 Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
-        | WebSearchPart)
+        | WebSearchPart | BlockPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -123,6 +124,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
     if isinstance(part, WebSearchPart):
         return {"type": "web_search", "id": part.search_id}
+    if isinstance(part, BlockPart):
+        return block_to_json(part)  # P1: an answer block (``answer_blocks.part``)
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -150,6 +153,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
     if kind == "web_search":
         return WebSearchPart(str(data["id"]))
+    if kind == "answer_block":
+        return block_from_json(data)
     return None
 
 

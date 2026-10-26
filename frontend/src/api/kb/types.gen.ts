@@ -137,6 +137,18 @@ export interface KbAgents {
   favorites: KbFavoriteModel[];
 }
 
+/** A ready-made block of an answer, drawn by SKAZ from the agent's checked data (never HTML). ``drawing``: its data is still streaming (a placeholder); ``ready``: ``block`` is set, its items point at ``sources`` by index; ``broken``: it couldn't be drawn — ``error`` says why and ``raw`` holds the agent's data (for "Show the data" and "Ask agent to fix"). */
+export interface KbAnswerBlockPart {
+  type: "answer_block";
+  id: string;
+  state: "drawing" | "ready" | "broken";
+  block: KbCompareBlock | KbTimelineBlock | KbStepsBlock | null;
+  sources: (KbBlockCiteSource | KbBlockPageSource | KbBlockWebSource)[];
+  hidden: number;
+  error: string | null;
+  raw: string | null;
+}
+
 export interface KbBlock {
   id: string;
   kind: "from_source" | "connection" | "explanation" | "user_note";
@@ -147,6 +159,11 @@ export interface KbBlock {
   hash: string;
   citations: KbCitation[];
   links?: KbBlockLink[];
+}
+
+export interface KbBlockCiteSource {
+  type: "cite";
+  citation: KbCitation;
 }
 
 export interface KbBlockCreate {
@@ -172,8 +189,23 @@ export interface KbBlockLink {
   material_id?: string | null;
 }
 
+export interface KbBlockPageSource {
+  type: "page";
+  page: KbPageRef;
+  block_id: string | null;
+  available: boolean;
+}
+
 export interface KbBlockUpdate {
   text: string;
+}
+
+/** A result link of a web search in this chat. */
+export interface KbBlockWebSource {
+  type: "web";
+  url: string;
+  title: string;
+  site: string;
 }
 
 export interface KbChat {
@@ -287,6 +319,26 @@ export interface KbCitePart {
 export interface KbClassifyLink {
   url: string;
   probe?: boolean;
+}
+
+export interface KbCompareBlock {
+  kind: "compare";
+  title: string | null;
+  columns: string[];
+  rows: KbCompareRow[];
+}
+
+export interface KbCompareCell {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+}
+
+export interface KbCompareRow {
+  id: string;
+  label: string;
+  cells: (KbCompareCell | null)[];
 }
 
 export interface KbConnectionFolder {
@@ -873,7 +925,7 @@ export interface KbMessageInput {
   attachments: string[];
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbAnswerBlockPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -1279,6 +1331,20 @@ export interface KbSpeechSettingsUpdate {
   cloud_consent?: boolean | null;
 }
 
+export interface KbStep {
+  id: string;
+  src: number[];
+  agent: boolean;
+  title: string;
+  text: string | null;
+}
+
+export interface KbStepsBlock {
+  kind: "steps";
+  title: string | null;
+  steps: KbStep[];
+}
+
 export interface KbStudyAnswerIn {
   item_id: string;
   choices?: string[] | null;
@@ -1437,6 +1503,21 @@ export interface KbSubjectRef {
 export interface KbTextPart {
   type: "text";
   text: string;
+}
+
+export interface KbTimelineBlock {
+  kind: "timeline";
+  title: string | null;
+  events: KbTimelineEvent[];
+}
+
+export interface KbTimelineEvent {
+  id: string;
+  src: number[];
+  agent: boolean;
+  when: string | null;
+  title: string;
+  text: string | null;
 }
 
 export interface KbToolPart {

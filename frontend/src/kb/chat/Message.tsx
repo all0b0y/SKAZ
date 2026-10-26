@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
+import type { KbAnswerBlockPart, KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
@@ -32,7 +32,8 @@ type Block =
   | { kind: 'permission'; part: KbPermissionPart }
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
-  | { kind: 'web'; part: KbWebSearchPart };
+  | { kind: 'web'; part: KbWebSearchPart }
+  | { kind: 'answer'; part: KbAnswerBlockPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -54,6 +55,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
   };
   for (const part of parts) {
     if (part.type === 'tool') continue;
+    if (part.type === 'answer_block') {
+      // P1: a ready-made answer block (kb/chat/blocks) is a block of its own.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'answer', part });
+      continue;
+    }
     if (part.type === 'web_search') {
       // W-2: an agent's web search is its own block, apart from the material citations.
       flushSpace();
@@ -135,6 +143,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'answer') return null; // drawn by kb/chat/blocks (next step)
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
