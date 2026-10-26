@@ -20,6 +20,9 @@ import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
+import { isMemoryPart } from '../me/api';
+import type { KbMemoryPart } from '../../api/kb/types.gen';
+import { MemoryChip } from '../me/MemoryChip';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -32,7 +35,8 @@ type Block =
   | { kind: 'permission'; part: KbPermissionPart }
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
-  | { kind: 'web'; part: KbWebSearchPart };
+  | { kind: 'web'; part: KbWebSearchPart }
+  | { kind: 'memory'; part: KbMemoryPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -54,6 +58,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
   };
   for (const part of parts) {
     if (part.type === 'tool') continue;
+    if (isMemoryPart(part)) {
+      // N6 decision 7: an agent's edit of «Я» is its own compact line with Undo.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'memory', part });
+      continue;
+    }
     if (part.type === 'web_search') {
       // W-2: an agent's web search is its own block, apart from the material citations.
       flushSpace();
@@ -135,6 +146,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'memory') return <MemoryChip key={b.part.edit_id} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
@@ -302,6 +314,9 @@ export function renderInput(input: KbMessageInput): ReactNode {
   });
 }
 
+/** The backend's compaction notice (`chats/live.py` COMPACTED_NOTE, N6-CONTRACT §6). */
+export const COMPACTED_NOTE = 'History compressed';
+
 /** "Switched to Claude Code" and similar records in the conversation; "Study" from a deck page (S12). */
 export function SystemMessage({ chatId, message }: { chatId: string; message: KbMessage }) {
   const studies = message.parts.filter((p): p is KbStudyPart => p.type === 'study');
@@ -313,6 +328,14 @@ export function SystemMessage({ chatId, message }: { chatId: string; message: Kb
     );
   }
   const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
+  if (text === COMPACTED_NOTE) {
+    // N6 decision 13: the agent compacted its session — a thin divider line across the chat.
+    return (
+      <div className="kb-msg kb-msg--divider" role="separator" aria-label={text}>
+        <span>{text}</span>
+      </div>
+    );
+  }
   return (
     <p className="kb-msg kb-msg--system" role="note">
       {message.engine && <EngineBadge engine={message.engine} size={16} />}

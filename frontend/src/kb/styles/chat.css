@@ -130,6 +130,37 @@
   color: var(--kb-muted);
   font-size: var(--t-sm);
 }
+/* N6 decision 13: "History compressed" — the agent compacted its session; a thin rule across the chat. */
+.kb-msg--divider {
+  flex-direction: row;
+  align-items: center;
+  align-self: stretch;
+  gap: 10px;
+  color: var(--kb-muted);
+  font-size: var(--t-xs);
+  line-height: 1.2;
+}
+.kb-msg--divider::before,
+.kb-msg--divider::after { content: ''; flex: 1; height: 1px; background: var(--kb-line); }
+.kb-msg--divider span { flex: none; white-space: nowrap; }
+
+/* N6 decision 7: an agent's edit of «Я» — one compact line with Undo. */
+.kb-memory {
+  margin-top: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-md);
+  background: var(--kb-pane);
+  font-size: var(--t-sm);
+  color: var(--kb-muted);
+}
+.kb-memory__row { display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; min-height: 32px; min-width: 0; }
+.kb-memory__icon { flex: none; color: var(--kb-text); }
+.kb-memory__line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--kb-text); }
+.kb-memory[data-undone] .kb-memory__line { color: var(--kb-muted); text-decoration: line-through; }
+.kb-memory__undone { display: inline-flex; align-items: center; gap: 4px; flex: none; padding-right: 6px; }
+.kb-memory__error { margin: 0 10px 6px; }
 
 /* Answer Markdown (streamed as it comes — no animation, decision 36). */
 .kb-md > * + * { margin-top: 8px; }

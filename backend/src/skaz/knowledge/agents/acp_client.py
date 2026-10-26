@@ -63,6 +63,14 @@ class AcpConnection:
         finally:
             self._pending.pop(request_id, None)
 
+    def discard_notifications(self) -> None:
+        """Drop the notifications that arrived so far (e.g. the history an agent replays before it
+        answers ``session/load``: ACP streams it ahead of the reply); the end-of-stream mark stays."""
+        while not self.notifications.empty():
+            if self.notifications.get_nowait() is None:
+                self.notifications.put_nowait(None)
+                return
+
     async def notify(self, method: str, params: Mapping[str, Any]) -> None:
         await self._send({"jsonrpc": "2.0", "method": method, "params": dict(params)})
 

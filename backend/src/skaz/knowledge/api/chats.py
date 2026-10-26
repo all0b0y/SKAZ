@@ -19,6 +19,7 @@ from ..chats.events import ChatEvent
 from ..chats.model import (
     CitePart,
     ConnectionPart,
+    MemoryPart,
     Message,
     MessageInput,
     OpenContext,
@@ -57,6 +58,7 @@ from .schemas_chats import (
     KbConnectionFolder,
     KbConnectionPart,
     KbFailure,
+    KbMemoryPart,
     KbMessage,
     KbMessageEdit,
     KbMessageInput,
@@ -80,6 +82,7 @@ from .schemas_web import KbWebLink, KbWebSearchPart
 from .study import study_part
 
 MAX_WAIT_S = 25.0
+MEMORY_ACTIONS = frozenset({"create", "append", "replace", "delete"})
 MAX_LIST = 500
 
 
@@ -193,6 +196,11 @@ class Presenter:
                 type="connection", inference=part.inference, folders=folders,
                 page=self.page_ref(part.page_id) if linked and part.page_id else None,
             ))
+        if isinstance(part, MemoryPart):
+            return KbMessagePart(KbMemoryPart(
+                type="memory", edit_id=part.edit_id, skill_id=part.skill_id, skill_title=part.skill_title,
+                action=cast(Any, part.action if part.action in MEMORY_ACTIONS else "append"),
+                summary=part.summary, undone=part.undone))
         return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label))
 
     def message(self, message: Message) -> KbMessage:

@@ -22,6 +22,7 @@ from skaz.knowledge.agents.tools import TOOL_NAMES
 from skaz.knowledge.chats.model import Message, TextPart
 from skaz.knowledge.chats.service import ChatService
 from skaz.knowledge.markdown.page import Heading, parse_page, render_page
+from skaz.knowledge.me.prompt import ME_TOOL_NAMES
 from skaz.knowledge.permissions.wiki_tools import WIKI_TOOL_NAMES
 from skaz.knowledge.study.tools import STUDY_TOOL_NAMES
 from tests.knowledge.chat_support import (
@@ -432,10 +433,13 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
                      ("skaz_read_material", "Read Лекция 8")]
     turn = env.agents.engines["codex"].turns[-1]
     # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool;
-    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first).
+    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first);
+    # N6 «Я»: the Me tools are in every chat turn (refused at call time when Me is off). Since batch B5 the
+    # runtime registers them right after the chat service is built (no lazy attach on the first turn), so
+    # they come before the study, ask and web tools.
     assert turn.tools is not None
-    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *STUDY_TOOL_NAMES,
-                                                             "skaz_ask_user", "skaz_web_search")
+    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *ME_TOOL_NAMES,
+                                                       *STUDY_TOOL_NAMES, "skaz_ask_user", "skaz_web_search")
     assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
     assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions

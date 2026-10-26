@@ -26,10 +26,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from ..agents.engine import SessionPlan, SessionSupport, TurnMessage
+from ..me.prompt import ME_RULES, MeMarks, MeSnapshot, me_notes, needs_reseed
 from ..skills import SkazSkill
 from ..skills.prompting import skills_block
 from ..store.database import KnowledgeDatabase
-from .context import user_turn_text
+from .context import INSTRUCTIONS, user_turn_text
 from .model import CitePart, ConnectionPart, Message
 from .text import agent_text
 
@@ -39,6 +40,9 @@ COMPACTED_NOTE = "History compressed"
 MAX_DELETE_ATTEMPTS = 5
 #: Prefix of every line SKAZ adds to a live turn about what changed on its side.
 CONTEXT_MARK = "[context]"
+#: Hash of the fixed instruction texts that change only between SKAZ versions (the chat rules, the «Я»
+#: rules): a session started with other ones is reseeded once (``SessionContext.base``).
+BASE_INSTRUCTIONS = hashlib.sha256(f"{INSTRUCTIONS}\0{ME_RULES}".encode()).hexdigest()[:16]
 
 
 # -- what the session holds ------------------------------------------------------
@@ -62,10 +66,21 @@ class SessionContext:
     web: str = ""
     #: Materials this chat cited that are deleted from the library.
     gone: tuple[str, ...] = ()
+    #: «Я» as the session has it — hashes only, never its text (``None``: a session from before «Я»).
+    me: MeMarks | None = None
+    #: The «Я» of the turn being built (for the notes); never stored.
+    me_view: MeSnapshot | None = field(default=None, compare=False)
+    #: Sorted names of the SKAZ tools the session was started with (fixed for its life: Codex
+    #: ``thread/resume`` takes no ``dynamicTools``); ``None`` = unknown (a session from before the record).
+    tools: tuple[str, ...] | None = None
+    #: :data:`BASE_INSTRUCTIONS` the session was started with; ``None`` = unknown.
+    base: str | None = None
 
     def to_json(self) -> str:
         return json.dumps({"language": self.language, "skills": list(self.skills), "web": self.web,
-                           "gone": list(self.gone)}, ensure_ascii=False)
+                           "gone": list(self.gone), "me": self.me.to_json() if self.me is not None else None,
+                           "tools": list(self.tools) if self.tools is not None else None, "base": self.base},
+                          ensure_ascii=False)
 
     @classmethod
     def from_json(cls, raw: str | None) -> SessionContext | None:
@@ -75,10 +90,12 @@ class SessionContext:
             return None
         if not isinstance(data, dict) or "web" not in data:
             return None
-        language = data.get("language")
+        language, tools, base = data.get("language"), data.get("tools"), data.get("base")
         return cls(language if isinstance(language, str) else None,
                    tuple(str(item) for item in data.get("skills") or ()), str(data.get("web") or ""),
-                   tuple(str(item) for item in data.get("gone") or ()))
+                   tuple(str(item) for item in data.get("gone") or ()), MeMarks.from_json(data.get("me")),
+                   tools=tuple(str(item) for item in tools) if isinstance(tools, list) else None,
+                   base=base if isinstance(base, str) else None)
 
 
 @dataclass(frozen=True)
@@ -135,13 +152,22 @@ START = SessionPlan("start")
 
 
 def plan_session(session: LiveSession | None, engine: str, support: SessionSupport,
-                 history: Sequence[tuple[str, str]]) -> SessionDecision | None:
-    """The plan for the next answer; ``None`` when the engine has no live sessions."""
+                 history: Sequence[tuple[str, str]],
+                 now: SessionContext | None = None) -> SessionDecision | None:
+    """The plan for the next answer; ``None`` when the engine has no live sessions.
+
+    ``now`` (the context this turn is built with) replaces the session by a new seeded one (once) when
+    the session can't have what the turn needs: its tool set or fixed instructions differ (a SKAZ update
+    added a tool — a session's tools are fixed at its start; a session without that record counts as
+    different), or it holds the profile after the profile (or «Я») was switched off or cleared
+    (decision 6)."""
     if not support.live:
         return None
     if session is None:
         return SessionDecision(START)
     if session.engine != engine:
+        return SessionDecision(START, replace=True)
+    if now is not None and stale(session.context, now):
         return SessionDecision(START, replace=True)
     held = [(item.message_id, item.digest) for item in session.items]
     same = 0
@@ -161,6 +187,15 @@ def plan_session(session: LiveSession | None, engine: str, support: SessionSuppo
     if support.revert and first > 0 and first == len(history):
         return SessionDecision(SessionPlan("revert", session.session_id, turn))
     return SessionDecision(START, replace=True)
+
+
+def stale(held: SessionContext | None, now: SessionContext) -> bool:
+    """The session was started with other tools / fixed instructions, or still holds a removed profile."""
+    if now.tools is not None and (held is None or held.tools != now.tools):
+        return True
+    if now.base is not None and (held is None or held.base != now.base):
+        return True
+    return held is not None and now.me is not None and needs_reseed(held.me, now.me)
 
 
 # -- context notes (decisions 10, 12) ---------------------------------------------------
@@ -193,6 +228,8 @@ def context_note(before: SessionContext | None, now: SessionContext,
         if material_id not in before.gone:
             lines.append(f"{CONTEXT_MARK} Material {material_id} was deleted from the library: don't cite it "
                          "and don't search for it.")
+    if now.me_view is not None:  # «Я» changed since the session started (decision 6)
+        lines += me_notes(before.me, now.me_view)
     return "\n".join(lines)
 
 

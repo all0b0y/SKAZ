@@ -21,6 +21,7 @@ import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
   type KbPermissionPart, type KbQuestionPart,
 } from '../api/permissions';
+import { meRoutes, type FakeMe } from './fakeMe';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -123,6 +124,8 @@ export interface FakeWorld {
   studyNewPerDay?: number;
   /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
   judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean; checked_by?: string };
+  /** N6 «Я» (Me): skills, versions and agent edits (absent = the three built-ins, empty, on). */
+  me?: FakeMe;
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -1551,12 +1554,13 @@ const ROUTES: FakeRoutes = {
     if (pool.credentials.length === 0 && !pool.free_tier) w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
     return structuredClone(w.hermesProviders);
   }],
-  // Accounts & keys v3: Codex and OpenCode sign out of SKAZ's own folders; Claude Code and Hermes refuse.
+  // Accounts & keys v3: Codex, OpenCode and (N6 decision 14) Claude Code sign out of SKAZ's own folders;
+  // Hermes refuses (it signs in per provider).
   'POST /kb/agents/{engine}/logout': [200, (w, { path }) => {
     const a = findAgent(w, path.engine);
-    if (a.id === 'claude_code') fail(409, 'Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn’t sign it out.');
     if (a.id === 'hermes') fail(409, 'Hermes signs in per provider. Open a provider under Hermes Agent and choose Remove… to sign Hermes out of it.');
-    const reason = a.id === 'codex' ? 'Sign in with ChatGPT to use Codex.' : 'Sign in to a model provider to use OpenCode.';
+    const reason = a.id === 'codex' ? 'Sign in with ChatGPT to use Codex.'
+      : a.id === 'claude_code' ? 'Sign in to Claude Code in SKAZ.' : 'Sign in to a model provider to use OpenCode.';
     Object.assign(a, { state: 'signed_out', signed_in: false, reason, action: 'login', models: [], current_model: null });
     return structuredClone(a);
   }],
@@ -1696,7 +1700,25 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+/**
+ * N6 «Я» routes (fakeMe.ts, typed by types.gen.ts). Undo marks the chat's memory
+ * part `undone` and sends the whole message again, as the backend does (`message` feed event).
+ */
+const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = (message.parts as ReadonlyArray<{ type: string; edit_id?: string; undone?: boolean }>)
+        .find((p) => p.type === 'memory' && p.edit_id === editId);
+      if (!part) continue;
+      part.undone = true;
+      pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) } as Omit<KbChatEvent, 'seq'>);
+      touchList(w, chat);
+      return;
+    }
+  }
+});
+
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1707,7 +1729,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;

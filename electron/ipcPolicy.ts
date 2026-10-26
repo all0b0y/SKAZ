@@ -132,9 +132,9 @@ const ROUTES: readonly Route[] = [
   // G: the live panel's text after the material (open monologue + words still being recognised).
   { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+\/live$/ },
   // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
-  // Accounts & keys v3: OpenCode signs out of SKAZ's own OpenCode folder too (Claude Code uses this
-  // Mac's own sign-in and Hermes signs out per provider, so neither has a sign-out here).
-  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|opencode)\/logout$/ },
+  // Accounts & keys v3: OpenCode signs out of SKAZ's own OpenCode folder too, and (N6 decision 14) Claude
+  // Code of SKAZ's own CLAUDE_CONFIG_DIR. Hermes signs out per provider, so it has no sign-out here.
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|opencode|claude_code)\/logout$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
   // B20: "Check recognition again" of a recording (a backend job on the chosen agent).
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/recognition-check$/ },
@@ -175,6 +175,18 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
   { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|mark|answer|check-open|finish|retake|save|rename)$/ },
+  // N6 «Я» (Me, N6-ME-API.md): the master switch; one skill read / edited / deleted / created; its
+  // versions and a restore; Undo of an agent's edit from its chat chip. Skill ids are one lowercase
+  // segment, a version is digits, an edit id `[a-z0-9_-]{1,64}`. No route here lists «Я» for an agent.
+  { method: 'GET', pattern: /^\/kb\/me$/ },
+  { method: 'PUT', pattern: /^\/kb\/me$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/skills$/ },
+  { method: 'GET', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}$/ },
+  { method: 'PUT', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}$/ },
+  { method: 'DELETE', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}$/ },
+  { method: 'GET', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}\/versions$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}\/versions\/\d{1,9}\/restore$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/edits\/[a-z0-9_-]{1,64}\/undo$/ },
 ];
 
 /**

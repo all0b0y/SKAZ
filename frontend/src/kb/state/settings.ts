@@ -6,6 +6,8 @@ import type { HealthSectionId, KeyProviderId } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult } from './library';
 import type { SettingsSection } from './ui';
+import type { KbMe } from '../../api/kb/types.gen';
+import { readMe, switchMe } from '../me/api';
 
 /** One backend-backed piece of settings: its value, or the reason it could not be read. */
 export interface Remote<T> {
@@ -24,6 +26,8 @@ export interface SettingsData {
   privacy: Remote<KbPrivacy>;
   about: Remote<KbAbout>;
   skills: Remote<KbSkills>;
+  /** N6 «Я» (Me): the master switch and the list of skills (texts are read when one is opened). */
+  me: Remote<KbMe>;
 }
 
 export interface SettingsActions {
@@ -48,6 +52,9 @@ export interface SettingsActions {
   loadSkills: () => Promise<void>;
   /** Switch one skill; the answer is the whole list with the new status per agent (no reopening). */
   setSkillEnabled: (skillId: string, enabled: boolean) => Promise<ActionResult>;
+  /** N6: «Я» — read it, or switch all of it on/off for every agent. */
+  loadMe: () => Promise<void>;
+  setMeEnabled: (enabled: boolean) => Promise<ActionResult>;
 }
 
 export type SettingsStore = StoreApi<SettingsData & SettingsActions>;
@@ -90,7 +97,7 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       ]);
     };
     return {
-      health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(), skills: empty(),
+      health: empty(), keys: empty(), speech: empty(), wiki: empty(), decisions: empty(), privacy: empty(), about: empty(), skills: empty(), me: empty(),
 
       loadHealth: () => read('health', () => client.call('GET /kb/settings/health')),
       healthAction: (problemId, actionId) => write('health', () =>
@@ -131,6 +138,8 @@ export function createSettingsStore(client: KbClient): SettingsStore {
       loadSkills: () => read('skills', () => client.call('GET /kb/settings/skills')),
       setSkillEnabled: (skillId, enabled) => write('skills', () =>
         client.call('PUT /kb/settings/skills/{skill_id}', { path: { skill_id: skillId }, body: { enabled } })),
+      loadMe: () => read('me', () => readMe(client)),
+      setMeEnabled: (enabled) => write('me', () => switchMe(client, enabled)),
     };
   });
 }

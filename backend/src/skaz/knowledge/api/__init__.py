@@ -14,6 +14,7 @@ from . import (
     ingest,
     library,
     materials,
+    me,
     mentions,
     notifications,
     permissions,
@@ -50,4 +51,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     permissions.router,
     study.router,
     web_search.router,
+    me.router,
 )

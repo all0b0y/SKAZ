@@ -99,8 +99,22 @@ class WebSearchPart:
     search_id: str
 
 
+@dataclass(frozen=True)
+class MemoryPart:
+    """An agent's change of «Я» in this answer (N6 decision 7): a chip with Undo. Never sent to an agent,
+    never in exports or previews; for the profile the summary carries no content (decision 3)."""
+
+    edit_id: str
+    skill_id: str
+    skill_title: str
+    #: ``create`` / ``append`` / ``replace`` / ``delete``.
+    action: str
+    summary: str
+    undone: bool = False
+
+
 Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
-        | WebSearchPart)
+        | WebSearchPart | MemoryPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -123,6 +137,10 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
     if isinstance(part, WebSearchPart):
         return {"type": "web_search", "id": part.search_id}
+    if isinstance(part, MemoryPart):
+        return {"type": "memory", "edit_id": part.edit_id, "skill_id": part.skill_id,
+                "skill_title": part.skill_title, "action": part.action, "summary": part.summary,
+                "undone": part.undone}
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -150,6 +168,11 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
     if kind == "web_search":
         return WebSearchPart(str(data["id"]))
+    if kind == "memory":
+        return MemoryPart(str(data["edit_id"]), str(data.get("skill_id", "")),
+                          str(data.get("skill_title", "")), str(data.get("action", "append")),
+                          str(data.get("summary", "")),
+                          bool(data.get("undone", False)))
     return None
 
 

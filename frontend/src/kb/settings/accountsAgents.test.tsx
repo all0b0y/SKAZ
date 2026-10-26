@@ -56,16 +56,25 @@ describe('Settings → Accounts & keys → agents: Sign out from ⋯', () => {
     expect(await within(opencode).findByText('Not signed in')).toBeInTheDocument();
   });
 
-  it('Claude Code’s ⋯ says why SKAZ doesn’t sign it out; Hermes’ ⋯ only checks again (its providers sign out one by one)', async () => {
+  it('Claude Code signs out of SKAZ’s own Claude Code (N6); Hermes’ ⋯ only checks again (its providers sign out one by one)', async () => {
+    // Migrated (N6 batch B5): Claude Code’s Sign out… was disabled ("in Claude Code itself") because SKAZ
+    // used this Mac’s own sign-in. Since decision 14 it has its own sign-in in SKAZ and signs out normally.
     const user = userEvent.setup();
     const { fake } = renderKb({ world: accountsWorld() });
     const dialog = await openAccounts();
-    await user.click(await within(row(dialog, 'Claude Code')).findByRole('button', { name: 'More for Claude Code' }));
-    const claudeItem = await screen.findByRole('menuitem', { name: /Sign out/ });
-    expect(claudeItem).toHaveAttribute('aria-disabled', 'true');
-    expect(claudeItem).toHaveTextContent('in Claude Code itself');
-    fireEvent.keyDown(claudeItem, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    const claude = row(dialog, 'Claude Code');
+    await user.click(await within(claude).findByRole('button', { name: 'More for Claude Code' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Sign out…' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Sign out of Claude Code?' });
+    expect(confirm).toHaveTextContent('SKAZ’s own Claude Code signs out.');
+    expect(confirm).toHaveTextContent('Nothing in your library is deleted.');
+    expect(confirm).toHaveTextContent('Claude Code in Terminal and other apps stays signed in.');
+    await user.click(within(confirm).getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/claude_code/logout' })));
+    expect(await within(claude).findByText('Not signed in')).toBeInTheDocument();
+    expect(within(claude).getByRole('status')).toHaveTextContent('Signed out of Claude Code in SKAZ. Claude Code in other apps stays signed in.');
+    expect(within(claude).getByRole('note')).toHaveTextContent(
+      'Claude Code in SKAZ has its own sign-in, separate from Claude Code in Terminal and other apps.');
 
     await user.click(within(row(dialog, 'Hermes Agent')).getByRole('button', { name: 'More for Hermes Agent' }));
     const menu = await screen.findByRole('menu');

@@ -838,6 +838,81 @@ export interface KbMaterialWiki {
   error_code: string | null;
 }
 
+export interface KbMe {
+  enabled: boolean;
+  skills: KbMeSkill[];
+}
+
+export interface KbMeCreate {
+  title: string;
+  description: string;
+  text: string;
+}
+
+export interface KbMeSkill {
+  id: string;
+  kind: "profile" | "how_to_work" | "search" | "skill";
+  builtin: boolean;
+  title: string;
+  description: string;
+  enabled: boolean;
+  always_on: boolean;
+  chars: number;
+  limit: number | null;
+  version: number;
+  updated_at: string | null;
+}
+
+export interface KbMeSkillDetail {
+  id: string;
+  kind: "profile" | "how_to_work" | "search" | "skill";
+  builtin: boolean;
+  title: string;
+  description: string;
+  enabled: boolean;
+  always_on: boolean;
+  chars: number;
+  limit: number | null;
+  version: number;
+  updated_at: string | null;
+  text: string;
+}
+
+export interface KbMeSwitch {
+  enabled: boolean;
+}
+
+export interface KbMeUpdate {
+  enabled?: boolean | null;
+  title?: string | null;
+  description?: string | null;
+  text?: string | null;
+}
+
+export interface KbMeVersion {
+  version: number;
+  created_at: string;
+  source: "agent" | "user" | "restore";
+  chat_id: string | null;
+  summary: string;
+  chars: number;
+}
+
+export interface KbMeVersions {
+  versions: KbMeVersion[];
+}
+
+/** An agent's change of «Я» (N6): «Remembered: …» / «Updated skill "…"» with Undo (``POST /kb/me/edits/{edit_id}/undo``); ``undone`` once it was undone. */
+export interface KbMemoryPart {
+  type: "memory";
+  edit_id: string;
+  skill_id: string;
+  skill_title: string;
+  action: "create" | "append" | "replace" | "delete";
+  summary: string;
+  undone: boolean;
+}
+
 export interface KbMentions {
   pages: KbPageRef[];
   materials: KbRef[];
@@ -873,7 +948,7 @@ export interface KbMessageInput {
   attachments: string[];
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -2152,6 +2227,69 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/me": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbMe;
+    status: 200;
+  };
+  "PUT /kb/me": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbMeSwitch;
+    response: KbMe;
+    status: 200;
+  };
+  "POST /kb/me/edits/{edit_id}/undo": {
+    path: { edit_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMeSkillDetail;
+    status: 200;
+  };
+  "POST /kb/me/skills": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbMeCreate;
+    response: KbMeSkillDetail;
+    status: 201;
+  };
+  "GET /kb/me/skills/{skill_id}": {
+    path: { skill_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMeSkillDetail;
+    status: 200;
+  };
+  "PUT /kb/me/skills/{skill_id}": {
+    path: { skill_id: string };
+    query: Record<string, never>;
+    body: KbMeUpdate;
+    response: KbMeSkillDetail;
+    status: 200;
+  };
+  "DELETE /kb/me/skills/{skill_id}": {
+    path: { skill_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: void;
+    status: 204;
+  };
+  "GET /kb/me/skills/{skill_id}/versions": {
+    path: { skill_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMeVersions;
+    status: 200;
+  };
+  "POST /kb/me/skills/{skill_id}/versions/{version}/restore": {
+    path: { skill_id: string; version: number };
+    query: Record<string, never>;
+    body: never;
+    response: KbMeSkillDetail;
+    status: 200;
   };
   "GET /kb/mentions": {
     path: Record<string, never>;

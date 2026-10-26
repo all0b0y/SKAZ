@@ -24,6 +24,7 @@ from .knowledge.chats import ChatService
 from .knowledge.decisions.service import DecisionService
 from .knowledge.ingest.service import IngestService
 from .knowledge.mcp import McpServer
+from .knowledge.me.tools import attach as attach_me_tools
 from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
 from .knowledge.permissions.questions import QuestionBroker
@@ -128,6 +129,8 @@ class Runtime:
                                     text_layer=lambda: self.kb_ingest.text_layer,
                                     permissions=self.kb_permissions, questions=self.kb_questions,
                                     study=self.kb_study, web=self.kb_web)
+        #: N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill``, chat answers only (they act for this chat service).
+        attach_me_tools(self.kb_chats)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
         self.kb_study_tools = StudyTools(self.kb_study, self.kb_chats.run_ref)
         self.kb_tools.add(self.kb_study_tools.tools())

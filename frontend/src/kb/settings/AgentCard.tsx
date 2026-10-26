@@ -40,7 +40,16 @@ const SIGN_OUT: Partial<Record<EngineId, { body: string; done: string }>> = {
       + 'you sign in again. Nothing in your library is deleted. OpenCode outside SKAZ is not changed.',
     done: 'Signed out of OpenCode in SKAZ. OpenCode outside SKAZ is not changed.',
   },
+  // N6 decision 14: Claude Code in SKAZ has its own sign-in (SKAZ's own Claude Code folder).
+  claude_code: {
+    body: 'SKAZ’s own Claude Code signs out. Chats and wiki updates on Claude Code stop until you sign in again. '
+      + 'Nothing in your library is deleted. Claude Code in Terminal and other apps stays signed in.',
+    done: 'Signed out of Claude Code in SKAZ. Claude Code in other apps stays signed in.',
+  },
 };
+
+/** The signed-out Claude Code card: its sign-in in SKAZ is separate (N6 decision 14). */
+const CLAUDE_OWN_SIGN_IN = 'Claude Code in SKAZ has its own sign-in, separate from Claude Code in Terminal and other apps.';
 
 /**
  * One agent with its real state (v21): Connected / Not installed / Not signed in / Needs an
@@ -154,6 +163,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     <>
       {agent.reason && agent.state !== 'ready' && agent.state !== 'not_installed' && variant === 'card' && <p className="kb-agentcard__reason">{agent.reason}</p>}
       {variant === 'card' && agent.installed && <WebSearchNote agent={agent} />}
+      {agent.id === 'claude_code' && agent.state === 'signed_out' && <p className="kb-agentcard__note" role="note">{CLAUDE_OWN_SIGN_IN}</p>}
       {firstCheck && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
           <Icon name="shield" size={13} />
@@ -236,13 +246,10 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   );
 }
 
-/** ⋯ next to Check: Sign out… where SKAZ signs the agent out in its own folder; why not for Claude Code
- *  (this Mac's own sign-in); Hermes signs out per provider, so only Check again. */
+/** ⋯ next to Check: Sign out… where SKAZ signs the agent out in its own folder (Codex, OpenCode, Claude
+ *  Code); Hermes signs out per provider, so only Check again. */
 function moreItems(agent: KbAgent): MenuItem[] {
   if (agent.id === 'hermes') return [{ id: 'check', label: 'Check again', icon: 'retry', onSelect: () => {} }];
-  if (agent.id === 'claude_code') {
-    return [{ id: 'signout', label: 'Sign out…', disabled: true, note: 'in Claude Code itself', onSelect: () => {} }];
-  }
   return [{ id: 'signout', label: 'Sign out…', danger: true, onSelect: () => {} }];
 }
 

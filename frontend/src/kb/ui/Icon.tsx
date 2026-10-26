@@ -30,7 +30,7 @@ import {
   ArrowUpDown, BookPlus, ChevronUp, Clock, CornerDownLeft, Eye, FileCheck, KeyRound, Lightbulb, LoaderCircle,
   LogIn, MessageSquare, NotebookText, PinOff, ShieldAlert, Terminal, WandSparkles, ArrowRightToLine,
   CircleCheck, CircleX, CircleSlash, Undo2, PenLine, Star, Eye as EyeOn, EyeOff, SlidersHorizontal,
-  Layers, ListChecks, RotateCcw, Flame, CircleQuestionMark, Minus, Scan,
+  Layers, ListChecks, RotateCcw, Flame, CircleQuestionMark, Minus, Scan, UserRound,
 } from 'lucide-react';
 
 /**
@@ -122,6 +122,8 @@ const ICONS = {
   undo: Undo2,
   // 0.3.1 H: Settings → Skills
   skills: PenLine,
+  // N6: Settings → Me («Я») and an agent's edit of it in a chat
+  me: UserRound,
   // 0.3.1 K: favourites and visibility of models
   star: Star,
   shown: EyeOn,

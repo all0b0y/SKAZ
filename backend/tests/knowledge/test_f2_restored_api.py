@@ -16,8 +16,9 @@ import pytest
 from skaz import asr_providers
 from skaz.gateways.asr import LocalModelBusy
 from skaz.knowledge.agents.codex import CodexEngine
-from skaz.knowledge.agents.engine import EngineId
-from skaz.knowledge.agents.registry import CodexStatusEngine, EngineUnavailable
+from skaz.knowledge.agents.engine import EngineId, EngineStatus
+from skaz.knowledge.agents.fake import FakeEngine
+from skaz.knowledge.agents.registry import CodexStatusEngine
 from skaz.knowledge.service import KnowledgeService
 from skaz.local_models import LOCAL_MODEL_SIZES, CacheSafetyError, DeleteResult, delete_local_model_cache
 from tests.knowledge.test_agent_registry_api import FakeCodexConnection, hub_for, statuses
@@ -56,12 +57,31 @@ async def test_codex_sign_out_goes_through_the_connection_and_the_view_follows(
         assert view.state == "signed_out" and view.action == "login" and not view.status.signed_in
 
 
-async def test_claude_code_is_never_signed_out_from_skaz(service: KnowledgeService, tmp_path: Path) -> None:
-    registry = hub_for(service, tmp_path).registry
-    with pytest.raises(EngineUnavailable) as refused:
-        await registry.logout("claude_code")
-    # SKAZ's Claude Code uses this Mac's own sign-in: signing it out would reach the user's other apps.
-    assert refused.value.status_code == 409 and "this Mac" in refused.value.message
+class ClaudeSignOutEngine(FakeEngine):
+    """Claude Code in SKAZ (N6 decision 14): its own sign-in in SKAZ's ``CLAUDE_CONFIG_DIR``; ``logout`` is
+    ``claude auth logout`` there (the real command is covered by ``test_n6_claude_sessions.py``)."""
+
+    def __init__(self) -> None:
+        super().__init__("claude_code", status=EngineStatus("claude_code", installed=True, version="2.1.281",
+                                                            signed_in=True))
+        self.logouts = 0
+
+    async def logout(self) -> None:
+        self.logouts += 1
+        self._status = EngineStatus("claude_code", installed=True, version="2.1.281",
+                                    reason="Sign in to Claude Code in SKAZ.")
+
+
+async def test_claude_code_signs_out_of_skaz_own_folder(service: KnowledgeService, tmp_path: Path) -> None:
+    # Migrated (N6 batch B5): Claude Code used this Mac's own sign-in and SKAZ refused to sign it out
+    # (NO_SIGN_OUT). Since decision 14 it has its own sign-in inside SKAZ, so SKAZ signs it out like Codex.
+    claude = ClaudeSignOutEngine()
+    engines: dict[EngineId, Any] = {**statuses(), "claude_code": claude}
+    registry = hub_for(service, tmp_path, engines=engines).registry
+    assert (await registry.view("claude_code")).state == "ready"
+    view = await registry.logout("claude_code")
+    assert claude.logouts == 1
+    assert view.state == "signed_out" and not view.status.signed_in
 
 
 async def test_codex_logout_route(kb_app: Any, kb_client: httpx.AsyncClient, tmp_path: Path) -> None:
@@ -72,8 +92,19 @@ async def test_codex_logout_route(kb_app: Any, kb_client: httpx.AsyncClient, tmp
     assert response.status_code == 200, response.text
     assert response.json()["id"] == "codex" and response.json()["state"] == "signed_out"
     assert response.json()["signed_in"] is False and connection.logouts == 1
-    # Claude Code keeps this Mac's own sign-in: the route refuses with the reason (Accounts & keys v3).
-    assert (await kb_client.post("/kb/agents/claude_code/logout")).status_code == 409
+    # Hermes signs in per provider: the route refuses with the reason (Accounts & keys v3).
+    assert (await kb_client.post("/kb/agents/hermes/logout")).status_code == 409
+
+
+async def test_claude_code_logout_route(kb_app: Any, kb_client: httpx.AsyncClient, tmp_path: Path) -> None:
+    # Migrated (N6 batch B5): was a 409 ("this Mac's own sign-in"); Claude Code in SKAZ now signs out.
+    claude = ClaudeSignOutEngine()
+    engines: dict[EngineId, Any] = {**statuses(), "claude_code": claude}
+    kb_app.state.runtime.kb_agents = hub_for(kb_app.state.runtime.kb, tmp_path, engines=engines)
+    response = await kb_client.post("/kb/agents/claude_code/logout")
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == "claude_code" and response.json()["state"] == "signed_out"
+    assert response.json()["signed_in"] is False and claude.logouts == 1
 
 
 async def test_codex_logout_failure_is_said_plainly(

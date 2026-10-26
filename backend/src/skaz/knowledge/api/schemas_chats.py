@@ -169,9 +169,22 @@ class KbQuestionPart(BaseModel):
     answer: str | None
 
 
+class KbMemoryPart(BaseModel):
+    """An agent's change of «Я» (N6): «Remembered: …» / «Updated skill "…"» with Undo
+    (``POST /kb/me/edits/{edit_id}/undo``); ``undone`` once it was undone."""
+
+    type: Literal["memory"]
+    edit_id: str
+    skill_id: str
+    skill_title: str
+    action: Literal["create", "append", "replace", "delete"]
+    summary: str
+    undone: bool
+
+
 class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
-                                        | KbWebSearchPart,
+                                        | KbWebSearchPart | KbMemoryPart,
                                         Field(discriminator="type")]]):
     pass
 

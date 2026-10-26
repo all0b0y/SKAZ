@@ -40,11 +40,9 @@ LoginMethod = Literal["terminal", "browser"]
 #: A sign-in started in this SKAZ: ``waiting`` (browser page or Terminal window still open), ``done``
 #: (finished: check the agent now) or ``failed``; ``idle`` when none was started.
 SignInState = Literal["idle", "waiting", "done", "failed"]
-#: Agents SKAZ doesn't sign out: why, in the user's words.
+#: Agents SKAZ doesn't sign out: why, in the user's words. (Claude Code has its own sign-in in SKAZ's
+#: ``CLAUDE_CONFIG_DIR`` since N6 decision 14, so SKAZ signs it out like Codex and OpenCode.)
 NO_SIGN_OUT: dict[EngineId, str] = {
-    "claude_code": ("Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn't sign "
-                    "it out: that would sign Claude Code out in your other apps too. Sign out in Claude "
-                    "Code itself."),
     "hermes": ("Hermes signs in per provider. Open a provider under Hermes Agent and choose Remove… to sign "
                "Hermes out of it."),
 }
@@ -345,8 +343,10 @@ class EngineRegistry:
         """Sign out of an engine whose sign-in SKAZ owns (Codex: SKAZ's ``CODEX_HOME``), then re-check.
 
         Codex: ``account/logout`` in SKAZ's ``CODEX_HOME``; OpenCode: ``opencode auth logout`` for each
-        provider of SKAZ's OpenCode folder. Claude Code uses this Mac's own sign-in and Hermes signs in
-        per provider (:data:`NO_SIGN_OUT`): SKAZ never signs them out here.
+        provider of SKAZ's OpenCode folder; Claude Code: ``claude auth logout`` in SKAZ's own
+        ``CLAUDE_CONFIG_DIR`` (N6 decision 14 — Claude Code in Terminal and other apps stays signed in; in
+        the ``claude_code.OWN_FOLDER = False`` fallback it refuses with the reason). Hermes signs in per
+        provider (:data:`NO_SIGN_OUT`): SKAZ never signs it out here.
         """
         target: Any = self.engines[engine]
         name = ENGINE_NAMES[engine]

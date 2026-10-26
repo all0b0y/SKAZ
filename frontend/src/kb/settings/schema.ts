@@ -18,6 +18,8 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'rec', label: 'Recording & speech', icon: 'mic' },
       { id: 'wiki', label: 'Wiki', icon: 'wiki' },
       { id: 'skills', label: 'Skills', icon: 'skills' },
+      // N6 decision 1: «Я» — one place for what agents know about you and how to work with you.
+      { id: 'me', label: 'Me', icon: 'me' },
     ],
   },
   {
@@ -92,6 +94,8 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'skill-claude', section: 'skills', group: 'Applies to', label: 'Claude Code', keywords: 'humanizer skills loaded status' },
   { id: 'skill-hermes', section: 'skills', group: 'Applies to', label: 'Hermes Agent', keywords: 'humanizer skills loaded status' },
   { id: 'skill-opencode', section: 'skills', group: 'Applies to', label: 'OpenCode', keywords: 'humanizer skills loaded status' },
+  // Me (N6 «Я»): the master switch; the skills are listed below it (MeSkills), found by these words too.
+  { id: 'me-enabled', section: 'me', group: '', label: 'Use Me in chats', hint: 'Off: nothing of Me goes to any agent, and agents can’t change it', keywords: 'me profile memory remember remembered personal about me how to work with me search preferences skills undo versions' },
   // Storage
   { id: 'lib-folder', section: 'storage', group: 'Library', label: 'Folder', hint: 'Materials and wiki are plain .md files', keywords: 'library path location documents' },
   { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The library folder opens as an Obsidian vault; SKAZ adds it to Obsidian’s vaults the first time.', keywords: 'vault obsidian markdown' },
@@ -101,6 +105,8 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'p-agent', section: 'privacy', group: 'Where data goes', label: 'Your agent', hint: 'Codex, Claude Code or Hermes Agent', keywords: 'privacy data cloud' },
   { id: 'p-openrouter', section: 'privacy', group: 'Where data goes', label: 'OpenRouter', keywords: 'privacy data cloud' },
   { id: 'p-local', section: 'privacy', group: 'Where data goes', label: 'On this computer', keywords: 'privacy local' },
+  // N6 decision 9: an agent's session of a chat lives as long as the chat.
+  { id: 'p-sessions', section: 'privacy', group: 'Chats', label: 'Agent conversations', hint: 'Each agent keeps a copy of a chat’s conversation in SKAZ’s folder while the chat exists; deleting the chat deletes it.', keywords: 'privacy session sessions history chat delete codex claude hermes opencode copy' },
   { id: 'log', section: 'privacy', group: '', label: 'Activity log', hint: 'Without conversation text or keys', keywords: 'logs' },
   // Appearance
   { id: 'theme', section: 'look', group: '', label: 'Theme', keywords: 'dark light mode colour color appearance' },

@@ -97,7 +97,7 @@ describe('No placeholder rows are left (B20)', () => {
     await screen.findByRole('navigation', { name: 'Sections' });
     fireEvent.keyDown(window, { key: ',', metaKey: true });
     const dialog = await screen.findByRole('dialog', { name: 'Settings' });
-    for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Storage', 'Privacy', 'Appearance', 'About']) {
+    for (const section of ['Accounts & keys', 'Models', 'Recording & speech', 'Wiki', 'Me', 'Storage', 'Privacy', 'Appearance', 'About']) {
       fireEvent.click(within(dialog).getByRole('button', { name: new RegExp(`^${section}`) }));
       await within(dialog).findByRole('heading', { level: 3, name: section });
       expect(within(dialog).queryAllByText('Not connected yet'), section).toHaveLength(0);

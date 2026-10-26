@@ -132,6 +132,41 @@
 .kb-sintro { margin-bottom: 8px; }
 .kb-shint { margin-top: 8px; }
 
+/* Settings → Me (N6 «Я»): skills with a fill bar, an opened skill with its versions. */
+.kb-me__listhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kb-me__off { opacity: 0.6; }
+.kb-me__tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-sm);
+  font-size: var(--t-xs);
+  line-height: 1.4;
+}
+.kb-me__fill { display: flex; align-items: center; gap: 8px; margin-top: 6px; max-width: 320px; }
+.kb-me__bar { flex: 1; height: 4px; border-radius: 2px; background: var(--kb-line); overflow: hidden; }
+.kb-me__bar i { display: block; height: 100%; border-radius: inherit; background: var(--kb-text); }
+.kb-me__fill[data-tone='near'] .kb-me__bar i { background: var(--kb-warn); }
+.kb-me__fill[data-tone='full'] .kb-me__bar i { background: var(--kb-danger); }
+.kb-me__count { flex: none; font-size: var(--t-xs); color: var(--kb-muted); font-variant-numeric: tabular-nums; }
+.kb-me__count.is-over { color: var(--kb-danger); }
+.kb-me__editor { display: flex; flex-direction: column; gap: 8px; flex: none; min-width: 0; }
+.kb-me__edhead { display: flex; align-items: center; gap: 6px; }
+.kb-me__edhead .kb-sgroup__title { padding: 0; }
+.kb-me__fields { display: flex; flex-direction: column; gap: 8px; }
+.kb-me__text { min-height: 160px; font-size: var(--t-base); }
+.kb-me__foot { display: flex; align-items: center; gap: 8px; }
+.kb-me__spacer { flex: 1; }
+.kb-me__versions { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.kb-me__version { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--kb-line); font-size: var(--t-sm); min-width: 0; }
+.kb-me__version:last-child { border-bottom: 0; }
+.kb-me__vtext { flex: 1; min-width: 0; }
+.kb-me__vsum { color: var(--kb-muted); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-me__current { flex: none; font-size: var(--t-xs); }
+.kb-me__empty { margin: 0; font-size: var(--t-sm); }
+.kb-me__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--t-sm); }
+
 /* Settings → Privacy → Activity log (F2): read-only list of GET /logs, newest first. */
 .kb-confirm.kb-activity { width: min(620px, calc(100vw - 48px)); }
 .kb-activity__body { max-height: min(60vh, 520px); overflow: hidden; }

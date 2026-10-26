@@ -25,6 +25,7 @@ import { WikiTermsShowButton } from '../wiki/WikiTermsButton';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
+import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
 
 /**
  * The control of one settings row: live backend data where the route exists (S3/W2/B7 via
@@ -72,6 +73,9 @@ function RowControl({ row }: { row: RowDef }) {
     case 'skill-claude': return <SkillEngineRow skillId="humanizer" engine="claude_code" />;
     case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
     case 'skill-opencode': return <SkillEngineRow skillId="humanizer" engine="opencode" />;
+    case 'me-enabled': return <MeSwitchRow label={row.label} />;
+    // N6 decision 9: a statement, nothing to switch (no "one-off sessions" option).
+    case 'p-sessions': return null;
     case 'lib-folder':
       if (library?.state === 'ready' || library?.state === 'unavailable') {
         return (
@@ -223,6 +227,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
     <>
       {section === 'storage' && <StorageBanner />}
       <HealthPlates section={section} />
+      {section === 'me' && <MeIntro />}
       {section === 'skills' && (
         <p className="kb-sintro">Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.</p>
       )}
@@ -237,6 +242,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       )}
       {section === 'about' && <Licenses />}
       {section === 'skills' && <SkillsNote />}
+      {section === 'me' && <MeSkills />}
+      {section === 'me' && <MeStorageNote />}
     </>
   );
 }
@@ -262,6 +269,7 @@ export function SettingsModal() {
     void s.loadPrivacy();
     void s.loadAbout();
     void s.loadSkills();
+    void s.loadMe();
     // Agents: checked by themselves on open (at most every 30 s each; Check forces it).
     agents.getState().autoCheck('open');
   }, [open, settings, agents]);

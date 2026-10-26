@@ -57,6 +57,8 @@ from ..ingest.settings import read_settings
 from ..keyed_locks import KeyedLocks
 from ..logsafe import error_note
 from ..markdown.text import name_key
+from ..me.access import me_store
+from ..me.prompt import marks, snapshot, with_me
 from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
@@ -73,6 +75,7 @@ from .context import ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
 from .export import ChatExport, export_chat
 from .live import (
+    BASE_INSTRUCTIONS,
     COMPACTED_NOTE,
     MAX_DELETE_ATTEMPTS,
     START,
@@ -92,6 +95,7 @@ from .model import (
     CitePart,
     ConnectionPart,
     Failure,
+    MemoryPart,
     Message,
     MessageInput,
     MessageState,
@@ -219,6 +223,8 @@ class ChatService:
         self._close_stop_s = close_stop_s
         #: One "Save to wiki" per answer at a time: a double click must not write two analysis pages.
         self._saving = KeyedLocks()
+        #: One part change of a saved answer at a time (read-modify-write of its parts).
+        self._parts = KeyedLocks()
         #: Answers that were streaming when SKAZ stopped are "interrupted" (resumable) from now on.
         self.recovered = self.repo.interrupt_streaming()
         #: Agents' wiki changes wait here for the user (phase P); nothing waits across a restart.
@@ -295,6 +301,47 @@ class ChatService:
 
     def _on_study(self, block: StudyBlock) -> None:
         self._on_part(block.chat_id, block.message_id, StudyPart(block.id, block.kind, block.title))
+
+    # -- parts that SKAZ tools add to or change in an answer (N6 «Я») -------------------------
+
+    async def add_part(self, chat_id: str, message_id: str, part: Part) -> None:
+        """Add ``part`` to an answer: the streaming one gets it in memory (``part`` event; its final save
+        keeps it); an answer that ended meanwhile gets it saved (``message`` event)."""
+        async with self._parts.hold(message_id):
+            run = self._runs.get(chat_id)
+            if run is not None and run.message.id == message_id:
+                self._add_part(run, part)
+                self._list.touch(chat_id)
+                return
+            stored = await disk_call(self.repo.message, chat_id, message_id)
+            if stored is None:
+                return  # the chat or the answer is gone
+            message = stored.with_parts([*stored.parts, part])
+            await disk_call(self.repo.save_message, message)
+        self._feed(chat_id).emit("message", message.id, message=message)
+        self._list.touch(chat_id)
+
+    async def update_part(self, chat_id: str, message_id: str, part: Part) -> Message | None:
+        """Replace the answer's part with the same identity as ``part`` (``_same_part``) and send the whole
+        message again (``message`` event). Returns the message, or ``None`` when it is gone.
+
+        Safe against the final save of an answer that is still streaming: while its run exists the change
+        goes into the run's message, and ``_finish`` saves the run's latest message (again if a change
+        landed during its own save) before the run is dropped. After that the stored message is changed."""
+        async with self._parts.hold(message_id):
+            run = self._runs.get(chat_id)
+            if run is not None and run.message.id == message_id:
+                run.message = run.message.with_parts(_swap_part(run.message.parts, part))
+                message = run.message
+            else:
+                stored = await disk_call(self.repo.message, chat_id, message_id)
+                if stored is None:
+                    return None
+                message = stored.with_parts(_swap_part(stored.parts, part))
+                await disk_call(self.repo.save_message, message)
+        self._feed(chat_id).emit("message", message.id, message=message)
+        self._list.touch(chat_id)
+        return message
 
     async def study_from_deck(self, study: StudyService, page_id: str, mode: Mode,
                               card_ids: Sequence[str] | None,
@@ -759,6 +806,9 @@ class ChatService:
     def _tools_for(self, chat: Chat) -> tuple[ToolSpec, ...]:
         """The turn's SKAZ tools: ``skaz_ask_user`` only where the agent's own question tool can't work;
         ``skaz_web_search`` (W-3b) only where the agent's own search isn't held (and SKAZ holds searches)."""
+        # N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill`` (registered by the runtime, ``me.tools.attach``) are in
+        # every chat turn's tools (a live session's tools never change); a switched-off «Я» is refused when
+        # called. Never outside chats.
         dropped: set[str] = set()
         if chat.engine in NATIVE_QUESTIONS:
             dropped.add(ASK_TOOL)
@@ -780,6 +830,8 @@ class ChatService:
             language = await disk_call(self._wiki_language)
             # Read when the turn is built: switching a skill applies from the next answer (H3).
             skills = await disk_call(enabled_skills, self.kb.settings)
+            # N6 «Я»: read when the turn is built too; chats are the only turns that carry it (decision 15).
+            me = await disk_call(snapshot, me_store(self.kb))
             # W-2: the agent's own web search, only where SKAZ can hold each query before it is sent;
             # W-3b: the other agents search only through ``skaz_web_search`` (their own search stays off).
             native = run.engine.id in NATIVE_WEB
@@ -790,11 +842,19 @@ class ChatService:
             web_text = web_instructions(web, tool=not native) if self.web is not None else ""
             if web_text:
                 told = f"{told}\n\n{web_text}"
-            # N6: continue / revert the chat's live session, or start a new seeded one.
-            entries = await self._plan_session(run, chat, prior)
-            if run.decision is not None:
+            told = with_me(told, me)  # after every SKAZ rule; a live session gets later changes as notes
+            # N6: continue / revert the chat's live session, or start a new seeded one. The context also
+            # records the tool set and fixed instructions a session starts with (a change reseeds once).
+            context: SessionContext | None = None
+            if session_support(run.engine).live:
                 gone = await disk_call(self._gone_materials, prior)
-                run.context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone)
+                context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone,
+                                         marks(me), me, tools=tuple(sorted(spec.name for spec in
+                                                                           self._tools_for(chat))),
+                                         base=BASE_INSTRUCTIONS)
+            entries = await self._plan_session(run, chat, prior, context)
+            if run.decision is not None:
+                run.context = context
             reseeded = False
             while True:
                 turn = await self._turn(run, chat, prior, entries, request, told, gate, skills)
@@ -855,8 +915,8 @@ class ChatService:
 
     # -- the live agent session (N6) ---------------------------------------------------
 
-    async def _plan_session(self, run: _Run, chat: Chat,
-                            prior: Sequence[Message]) -> list[tuple[str, TurnMessage]]:
+    async def _plan_session(self, run: _Run, chat: Chat, prior: Sequence[Message],
+                            now: SessionContext | None = None) -> list[tuple[str, TurnMessage]]:
         """Decide how this answer uses the chat's agent session (``chats.live.plan_session``); an old
         session that can't be used is dropped here and queued for deletion. Returns the history a live
         session must hold (with message ids)."""
@@ -868,7 +928,7 @@ class ChatService:
             return []
         entries = live_entries(prior)
         history_keys = keys(entries)
-        decision = plan_session(session, run.engine.id, support, history_keys)
+        decision = plan_session(session, run.engine.id, support, history_keys, now)
         assert decision is not None
         if decision.replace and await disk_call(self.sessions.drop, chat.id):
             self._kick_deletions()
@@ -1081,6 +1141,12 @@ class ChatService:
                     if message.parts:
                         updates["last_preview"] = preview(message.parts)
                 await disk_call(self.repo.save_message, message, updates)
+                # A part changed during the awaits above (e.g. Undo of a «Я» edit, ``update_part``): save
+                # the run's latest message — no await between the last check and dropping the run.
+                while run.message is not message:
+                    message = replace(run.message, state=state, failure=failure)
+                    run.message = message
+                    await disk_call(self.repo.save_message, message)
         except Exception as error:
             log.error("Saving the end of chat answer %s failed: %s", run.run_id, error_note(error))
         finally:
@@ -1261,6 +1327,22 @@ class ChatService:
         materials = [(record.id, record.title) for record in self.kb.materials() if hit(record.title)][:limit]
         chats = [(chat.id, chat.title) for chat in self.repo.list_all() if hit(chat.title)][:limit]
         return MentionResults(tuple(pages), tuple(materials), tuple(chats))
+
+
+#: The id field of each part kind that can be changed in place (``ChatService.update_part``).
+_PART_IDS: dict[type, str] = {MemoryPart: "edit_id", PermissionPart: "permission_id",
+                              QuestionPart: "question_id", StudyPart: "study_id", WebSearchPart: "search_id"}
+
+
+def _same_part(a: Part, b: Part) -> bool:
+    field = _PART_IDS.get(type(a))
+    return field is not None and type(a) is type(b) and getattr(a, field) == getattr(b, field)
+
+
+def _swap_part(parts: Sequence[Part], part: Part) -> tuple[Part, ...]:
+    if type(part) not in _PART_IDS:
+        raise ValueError(f"A {type(part).__name__} can't be changed in place.")
+    return tuple(part if _same_part(old, part) else old for old in parts)
 
 
 def _outcome(terminal: Completed | Failed | None) -> tuple[MessageState, Failure | None]:
