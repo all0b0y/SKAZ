@@ -298,6 +298,17 @@ button.kb-blk-tl__when { border: 0; background: none; cursor: pointer; }
   border: 1px solid var(--kb-blk-acc);
 }
 .kb-blk-chart__value { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+/* The hover source label sits on the bar's own track (an absolute grid child takes its grid area), so it
+   never covers the value of the bar above or its own value (M1 follow-up). */
+.kb-blk-chart__bar > .kb-blk__tag {
+  grid-column: 2;
+  grid-row: 1;
+  top: 50%;
+  left: 4px;
+  right: auto;
+  max-width: calc(100% - 8px);
+  transform: translateY(-50%);
+}
 .kb-blk-chart__note { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--kb-muted); font-size: 11.5px; }
 .kb-blk-chart__swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; }
 
