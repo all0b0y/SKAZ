@@ -21,7 +21,8 @@ import { AgentFix } from '../chat/AgentFix';
 import { useOpenStudy } from '../study/useStudy';
 import { StudyContextChip } from '../study/StudyBlock';
 import { useSelection } from '../chat/select/context';
-import { QUICK_TEXT, SelectionBar, type QuickAsk } from '../chat/select/SelectionBar';
+import { QUICK_TEXT, type QuickAsk } from '../chat/select/SelectionBar';
+import { SelectionPanel } from '../chat/select/WhereFrom';
 
 const NEW_CHAT = 'new';
 
@@ -428,7 +429,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
         {mentionDrop.overlay}
         {selection && (
-          <SelectionBar selection={selection} onClear={clearSelection} onQuick={(ask) => void submit(ask)}
+          <SelectionPanel selection={selection} onClear={clearSelection} onQuick={(ask) => void submit(ask)}
             disabledReason={!agentReady ? unavailable : blocked ? 'The agent is still answering' : sending ? 'Sending…' : null} />
         )}
         {popupOpen && (

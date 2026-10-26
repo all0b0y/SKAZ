@@ -109,3 +109,34 @@
 .kb-selchip:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; }
 .kb-selchip svg { flex: none; color: var(--kb-sel); }
 .kb-selchip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- «Where is this from?»: SKAZ shows the sources itself ---- */
+.kb-where { margin: 0 -4px 2px; padding: 6px 4px 8px; border-bottom: 1px solid var(--kb-line); font-size: var(--t-sm); max-height: 220px; overflow-y: auto; }
+.kb-where__head { display: flex; align-items: center; justify-content: space-between; color: var(--kb-muted); font-size: var(--t-xs); font-weight: 600; }
+.kb-where__row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); gap: 4px 10px; padding: 5px 0; }
+.kb-where__row + .kb-where__row { border-top: 1px dashed var(--kb-line); }
+.kb-where__item { min-width: 0; overflow-wrap: anywhere; }
+.kb-where__srcs { display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start; min-width: 0; }
+.kb-where__src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  background: none;
+  color: var(--kb-text);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+button.kb-where__src:hover { background: var(--kb-accent-soft); border-color: var(--kb-text); }
+.kb-where__src:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; }
+.kb-where__src svg { flex: none; color: var(--kb-muted); }
+.kb-where__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-where__meta { color: var(--kb-muted); font-variant-numeric: tabular-nums; }
+.kb-where__src.is-gone, .kb-where__src--agent { border-style: dashed; color: var(--kb-muted); cursor: default; }
+.kb-where__none, .kb-where__note { margin: 0; color: var(--kb-muted); font-size: var(--t-xs); }
+.kb-where__note { margin-top: 4px; }
