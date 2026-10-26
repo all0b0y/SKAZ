@@ -27,11 +27,11 @@ export function SelectionBar({ selection, onClear, onQuick, onWhere, whereOpen =
   const what = `${itemsLabel(selection.items)} selected`;
   const full = selection.items.map((i) => i.label).join('; ');
   return (
-    <div className="kb-selbar" role="group" aria-label="Selection">
-      <span className="kb-selbar__what" title={full}>
+    <div className="kb-pickbar" role="group" aria-label="Selection">
+      <span className="kb-pickbar__what" title={full}>
         <Icon name="pin" size={13} />
         <span role="status">{what}</span>
-        {selection.title && <span className="kb-selbar__where">· {selection.title}</span>}
+        {selection.title && <span className="kb-pickbar__where">· {selection.title}</span>}
       </span>
       {onQuick && (
         <button type="button" className="kb-qbtn" aria-disabled={!!disabledReason || undefined} title={disabledReason ?? undefined}
@@ -50,7 +50,7 @@ export function SelectionBar({ selection, onClear, onQuick, onWhere, whereOpen =
           <Icon name="warning" size={13} />{QUICK_TEXT.wrong}
         </button>
       )}
-      <IconButton icon="close" size="sm" label="Clear selection" className="kb-selbar__x" tooltipPlacement="top" onClick={onClear} />
+      <IconButton icon="close" size="sm" label="Clear selection" className="kb-pickbar__x" tooltipPlacement="top" onClick={onClear} />
     </div>
   );
 }

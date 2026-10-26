@@ -5,7 +5,7 @@
  * tone, a filled number / check — never the neutral grey of a source hover, so the two never merge.
  * Picked is never colour alone: the check mark and the filled number carry it too.
  */
-.kb-blk, .kb-diagram, .kb-selbar, .kb-selchip, .kb-wikifix, .kb-where {
+.kb-blk, .kb-diagram, .kb-pickbar, .kb-selchip, .kb-wikifix, .kb-where {
   --kb-sel: var(--kb-fx-accent);
   --kb-sel-soft: color-mix(in srgb, var(--kb-fx-accent) 11%, var(--kb-pane));
   --kb-sel-line: color-mix(in srgb, var(--kb-fx-accent) 45%, var(--kb-pane));
@@ -55,7 +55,7 @@
 .kb-diagram g.pele-edge[data-selectable]:focus-visible > path:not(.kb-sel-hit) { stroke: var(--kb-sel); }
 
 /* ---- the bar over the message field ---- */
-.kb-selbar {
+.kb-pickbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -64,10 +64,10 @@
   padding: 2px 2px 8px 4px;
   border-bottom: 1px solid var(--kb-line);
 }
-.kb-selbar__what { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-right: 4px; font-size: var(--t-xs); font-weight: 600; }
-.kb-selbar__what svg { flex: none; color: var(--kb-sel); }
-.kb-selbar__where { color: var(--kb-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
-.kb-selbar__x { margin-left: auto; }
+.kb-pickbar__what { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-right: 4px; font-size: var(--t-xs); font-weight: 600; }
+.kb-pickbar__what svg { flex: none; color: var(--kb-sel); }
+.kb-pickbar__where { color: var(--kb-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.kb-pickbar__x { margin-left: auto; }
 .kb-qbtn {
   display: inline-flex;
   align-items: center;
