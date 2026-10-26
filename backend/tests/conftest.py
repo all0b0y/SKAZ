@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import os
 import struct
 import wave
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -25,6 +26,9 @@ from skaz.config import AppConfig
 from skaz.secrets import MemorySecretStore
 
 TOKEN = "test-token"
+#: U1: an app started by a test (TestClient runs its lifespan) never checks agents' channels in the
+#: background; the tests of that schedule start it themselves.
+os.environ.setdefault("SKAZ_UPDATE_CHECK", "0")
 
 
 def make_wav(

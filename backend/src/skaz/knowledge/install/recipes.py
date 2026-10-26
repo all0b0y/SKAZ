@@ -40,7 +40,9 @@ from typing import Literal
 
 from ..agents.engine import EngineId
 
-Action = Literal["install", "update", "first_check", "repair"]
+#: ``upgrade``: an offered newer version with the agent's own update command (U1 decision 2);
+#: ``rollback``: back to ``{version}`` where the agent's own command can (decision 6).
+Action = Literal["install", "update", "first_check", "repair", "upgrade", "rollback"]
 CHECKED_ON = "2026-10-15"
 
 
@@ -85,16 +87,24 @@ HERMES_ACP_EXTRA = ("{install_dir}/scripts/run-in-hermes-env", "python", "-c",
 
 
 def _claude(action: Action) -> tuple[Step, ...]:
+    if action == "upgrade":  # ``claude update|upgrade``: "Check for updates and install if available"
+        return (Step("Update Claude Code", ("{binary}", "update")),)
+    if action == "rollback":  # ``claude install [stable|latest|<version>]``
+        return (Step("Install the earlier Claude Code", ("{binary}", "install", "{version}")),)
     return (Step("Run the official Claude Code installer", _shell(CLAUDE_INSTALL)),)
 
 
 def _codex(action: Action) -> tuple[Step, ...]:
+    if action == "upgrade":  # ``codex update``: "Update Codex to the latest version" (npm, brew, installer)
+        return (Step("Update Codex", ("{binary}", "update")),)
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
 
 
 def _opencode(action: Action) -> tuple[Step, ...]:
-    if action == "update":  # OpenCode's own upgrade of the install it made (``opencode upgrade``)
+    if action in ("update", "upgrade"):  # OpenCode's own upgrade of its install (``opencode upgrade``)
         return (Step("Update OpenCode", ("{binary}", "upgrade")),)
+    if action == "rollback":  # ``opencode upgrade [target]``: "… to the latest or a specific version"
+        return (Step("Install the earlier OpenCode", ("{binary}", "upgrade", "{version}")),)
     return (Step("Run the official OpenCode installer", _shell(OPENCODE_INSTALL)),)
 
 
@@ -116,8 +126,14 @@ def _hermes(action: Action) -> tuple[Step, ...]:
         return (HERMES_FIRST_CHECK,)
     if action == "repair":
         return (HERMES_REPAIR, Step("Check ACP support", ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV))
-    first = (Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL)) if action == "install"
-             else Step("Update Hermes Agent", ("{binary}", "update")))
+    if action == "install":
+        first = Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL))
+    elif action == "upgrade":
+        # U1 decision 8: Hermes' own gateways keep running (``--no-gateway-restart`` "stops nothing; you
+        # manage the gateways", /docs/getting-started/updating); they keep the old code until restarted.
+        first = Step("Update Hermes Agent", ("{binary}", "update", "--no-gateway-restart"))
+    else:
+        first = Step("Update Hermes Agent", ("{binary}", "update"))
     return (
         first,
         Step("Add ACP support to Hermes Agent", HERMES_ACP_EXTRA, cwd="{install_dir}"),
