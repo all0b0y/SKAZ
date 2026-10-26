@@ -57,6 +57,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'agent-claude', section: 'conn', group: 'Agent', label: 'Claude Code', hint: 'Claude subscription or Anthropic key', keywords: 'anthropic login sign in' },
   { id: 'agent-hermes', section: 'conn', group: 'Agent', label: 'Hermes Agent', hint: 'Subscriptions and API keys, added through Hermes', keywords: 'nous provider providers subscription api key sign in openrouter anthropic gemini deepseek fallback order' },
   { id: 'agent-opencode', section: 'conn', group: 'Agent', label: 'OpenCode', hint: 'Model providers you sign in to through OpenCode', keywords: 'opencode provider providers subscription api key sign in anthropic openai copilot zen' },
+  { id: 'agent-updates', section: 'conn', group: 'Agent', label: 'Check for agent updates automatically', hint: 'Once a day while SKAZ is open; only version numbers are asked for', keywords: 'update updates upgrade new version codex claude hermes opencode skip' },
   { id: 'key-openrouter', section: 'conn', group: 'API keys', label: 'OpenRouter', hint: 'Other models with an API key', keywords: 'key token jev' },
   { id: 'key-soniox', section: 'conn', group: 'API keys', label: 'Soniox', hint: 'Live recording and translation', keywords: 'key speech asr' },
   { id: 'local-whisper', section: 'conn', group: 'On this computer', label: 'Whisper on this computer', hint: 'Works without internet', keywords: 'local offline speech asr download' },

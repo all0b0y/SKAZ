@@ -5,6 +5,7 @@ import { Button, Icon, IconButton, Menu, Modal, type MenuItem } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { useAgents, useServices } from '../state/context';
 import { WebSearchNote } from '../chat/webSearch';
+import { AgentUpdateOffer } from './AgentUpdates';
 
 const ACCOUNT: Record<EngineId, string> = {
   codex: 'ChatGPT subscription',
@@ -164,6 +165,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {agent.reason && agent.state !== 'ready' && agent.state !== 'not_installed' && variant === 'card' && <p className="kb-agentcard__reason">{agent.reason}</p>}
       {variant === 'card' && agent.installed && <WebSearchNote agent={agent} />}
       {agent.id === 'claude_code' && agent.state === 'signed_out' && <p className="kb-agentcard__note" role="note">{CLAUDE_OWN_SIGN_IN}</p>}
+      {agent.installed && !running && <AgentUpdateOffer engine={agent.id} />}
       {firstCheck && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
           <Icon name="shield" size={13} />
@@ -175,7 +177,8 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
           <div className="kb-installlog__head">
             {running ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" /> : <Icon name={finished?.state === 'succeeded' ? 'check' : 'error'} size={13} />}
             <span role="status">
-              {running ? (install.task.action === 'update' ? 'Updating…' : install.task.action === 'first_check' ? 'Checking…'
+              {running ? (install.task.action === 'update' || install.task.action === 'upgrade' ? 'Updating…'
+                : install.task.action === 'rollback' ? 'Rolling back…' : install.task.action === 'first_check' ? 'Checking…'
                 : install.task.action === 'repair' ? 'Repairing…' : 'Installing…')
                 : finished?.state === 'succeeded' ? `Done${finished.version ? ` · ${finished.version}` : ''}`
                   : finished?.state === 'cancelled' ? 'Cancelled' : `Failed${finished?.reason ? `: ${finished.reason}` : ''}`}
@@ -185,7 +188,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
             {install.task.dropped > 0 && `… ${install.task.dropped} earlier lines\n`}
             {install.lines.map((l) => l.text).join('\n')}
           </pre>
-          {finished?.state === 'failed' && (
+          {finished?.state === 'failed' && finished.action !== 'upgrade' && finished.action !== 'rollback' && (
             <p className="kb-agentcard__manual">
               Install it yourself: <code>{finished.install.manual_command}</code>{' '}
               <a className="kb-md__link" href={finished.install.docs_url} target="_blank" rel="noreferrer noopener">instructions</a>

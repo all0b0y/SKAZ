@@ -1,0 +1,10 @@
+{
+ "tag_name": "rust-v0.164.0",
+ "assets": [
+  {
+   "name": "argument-comment-lint",
+   "digest": "sha256:f49b54459df32978b2e118aa5c4f2463dc6d9b850e038e9a2c470dcee19f639c",
+   "browser_download_url": "https://releases.openai.com/codex/releases/0.164.0/argument-comment-lint"
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "name": "opencode",
+ "tap": "homebrew/core",
+ "homepage": "https://opencode.ai",
+ "versions": {
+  "stable": "2.1.4",
+  "head": null,
+  "bottle": true
+ }
+}

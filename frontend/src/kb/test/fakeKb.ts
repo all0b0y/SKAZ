@@ -10,13 +10,14 @@
 import type { BridgeRequest, JsonResponse } from '../../api/bridge';
 import type { NativeAudioMeta, NativeOpened, NativeSaved, NativeStopped } from '../../api/nativeLive';
 import type {
-  KbAbout, KbAgents, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
+  KbAbout, KbAgents, KbAgentUpdates, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
   KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
   KbWebSearchPart,
 } from '../../api/kb/types.gen';
+import { agentUpdateRoutes } from './fakeAgentUpdates';
 import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
   type KbPermissionPart, type KbQuestionPart,
@@ -96,6 +97,8 @@ export interface FakeWorld {
   missing?: string[];
   /** Every request served, for assertions. */
   log: Array<{ method: string; path: string; body?: unknown }>;
+  /** U1: what SKAZ's agent update checks found (absent = nothing yet). */
+  agentUpdates?: KbAgentUpdates;
   seq: number;
   /** Wiki/index.md and Wiki/log.md (absent = just their headings). */
   wikiFiles?: Partial<Record<'index' | 'log', { text: string; links: KbBlockLink[] }>>;
@@ -1700,6 +1703,8 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
+const AGENT_UPDATE_ROUTES = agentUpdateRoutes(fail);
+
 /**
  * N6 «Я» routes (fakeMe.ts, typed by types.gen.ts). Undo marks the chat's memory
  * part `undone` and sends the whole message again, as the backend does (`message` feed event).
@@ -1718,7 +1723,7 @@ const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
   }
 });
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1729,7 +1734,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;

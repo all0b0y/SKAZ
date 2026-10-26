@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,8 @@ from .hermes_accounts import HermesAccounts
 from .mcp_access import McpAccessProvider
 from .opencode import OpenCodeEngine, locate_opencode
 from .registry import AgentAction, AgentState, AgentView, CodexStatusEngine, EngineRegistry, SettingsStore
+from .update_gate import UpdateGate, guard
+from .updates import AgentUpdates, background_checks_enabled
 
 
 @dataclass
@@ -28,6 +31,8 @@ class AgentsHub:
     installs: InstallManager
     #: Hermes' providers in SKAZ's folder (K1/K3); ``None`` when Hermes is a test double.
     hermes_accounts: HermesAccounts | None = None
+    #: U1: checks for newer agent versions, offers and runs their updates.
+    updates: AgentUpdates | None = None
 
     def state(self, view: AgentView) -> tuple[AgentState, AgentAction | None]:
         """The view's state, or ``preparing`` while the agent's first check runs (B10)."""
@@ -48,10 +53,14 @@ class AgentsHub:
         opencode = self.registry.engines.get("opencode")
         if isinstance(opencode, OpenCodeEngine):
             opencode.sweep_at_start()  # sessions earlier runs left in SKAZ's OpenCode folder
+        if self.updates is not None and background_checks_enabled(os.environ):
+            self.updates.start()  # U1: the first check ~1 min from now, then every 24 h
 
     async def aclose(self) -> None:
         hermes = self.registry.engines.get("hermes")
         closing = [self.installs.aclose()]
+        if self.updates is not None:
+            closing.append(self.updates.aclose())
         if isinstance(hermes, HermesEngine):
             closing.append(hermes.aclose())  # Hermes 0.22's gateway of SKAZ's folder (B18)
         await asyncio.gather(*closing)
@@ -120,4 +129,11 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
                               after_steps=after_steps, watch_step=watch_step)
     hermes = registry.engine("hermes")
     accounts = HermesAccounts(hermes) if isinstance(hermes, HermesEngine) else None
-    return AgentsHub(registry, installs, accounts)
+    # U1 decision 5: an agent's work waits while it is updated (every run passes the gate).
+    gate = UpdateGate()
+    for target in registry.engines.values():
+        guard(target, gate)
+    updates = AgentUpdates(registry, installs, gate, home=user_home,
+                           locate=lambda engine: (opencode_finder if engine == "opencode" else finder)(
+                               RECIPES[engine].binary))
+    return AgentsHub(registry, installs, accounts, updates)

@@ -56,6 +56,8 @@ class InstallTask:
     started_at: str = field(default_factory=_now)
     finished_at: str | None = None
     dropped: int = 0
+    #: Extra step values of this task (``{version}`` of a rollback).
+    values: Mapping[str, str] = field(default_factory=dict)
     _seq: int = 0
     _changed: asyncio.Event = field(default_factory=asyncio.Event)
 
@@ -129,7 +131,7 @@ class InstallManager:
         env.update({"NONINTERACTIVE": "1", "HOMEBREW_NO_AUTO_UPDATE": "1"})
         return env
 
-    def start(self, engine: EngineId, action: Action) -> InstallTask:
+    def start(self, engine: EngineId, action: Action, values: Mapping[str, str] | None = None) -> InstallTask:
         for task in self._tasks.values():
             if task.engine == engine and task.state == "running":
                 if task.action != action:
@@ -140,7 +142,7 @@ class InstallManager:
             raise InstallBusy(f"{recipe.name} has nothing to check first.")
         if action == "repair" and not recipe.repair:
             raise InstallBusy(f"{recipe.name} has no repair of its own. Reinstall it instead.")
-        task = InstallTask(uuid.uuid4().hex, engine, action, recipe)
+        task = InstallTask(uuid.uuid4().hex, engine, action, recipe, values=dict(values or {}))
         self._tasks[task.id] = task
         self._running[task.id] = asyncio.create_task(self._run(task))
         return task
@@ -153,6 +155,14 @@ class InstallManager:
 
     def running_for(self, engine: EngineId) -> InstallTask | None:
         return next((t for t in self._tasks.values() if t.engine == engine and t.state == "running"), None)
+
+    async def finished(self, task_id: str) -> InstallTask:
+        """Wait until the task has ended (any state) and return it."""
+        task = self.get(task_id)
+        runner = self._running.get(task_id)
+        if runner is not None:
+            await asyncio.gather(asyncio.shield(runner), return_exceptions=True)
+        return task
 
     async def cancel(self, task_id: str) -> InstallTask:
         task = self.get(task_id)
@@ -198,7 +208,7 @@ class InstallManager:
     async def _steps(self, task: InstallTask, step_handle: list[RunningStep]) -> bool:
         env = self.environment()
         for step in task.recipe.plan(task.action):
-            argv, cwd, extra = await self._fill(task.engine, step)
+            argv, cwd, extra = await self._fill(task.engine, step, task.values)
             refuse_sudo(argv)
             task.log(f"$ {' '.join(argv)}")
             watch = self._watch_step(task.engine, extra) if self._watch_step is not None else None
@@ -224,9 +234,10 @@ class InstallManager:
                 return False
         return True
 
-    async def _fill(self, engine: EngineId, step: Step) -> tuple[list[str], str | None, dict[str, str]]:
+    async def _fill(self, engine: EngineId, step: Step,
+                    own: Mapping[str, str] | None = None) -> tuple[list[str], str | None, dict[str, str]]:
         needs = any("{" in part for part in (*step.argv, step.cwd or "", *(value for _, value in step.env)))
-        values = dict(await self._resolve(engine)) if needs else {}
+        values = {**(await self._resolve(engine)), **(own or {})} if needs else {}
         try:
             argv = [part.format(**values) for part in step.argv]
             cwd = step.cwd.format(**values) if step.cwd else None

@@ -20,6 +20,7 @@ from typing import cast
 
 from ...native_io import disk_call
 from ..agents.registry import EngineUnavailable
+from ..agents.update_gate import holding
 from ..decisions.protocol import DecisionLayer
 from ..errors import KnowledgeError, NotFound
 from ..logsafe import error_note
@@ -387,7 +388,8 @@ class IngestService:
                 model=settings.model, effort=settings.effort,
             )
             active.run.cancel_requested = active.cancel_requested
-            await active.run.execute()
+            async with holding(engine):  # U1: an agent update waits for the whole build
+                await active.run.execute()
             state, error = "done", ""
         except IngestCancelled:
             # While SKAZ closes, a real engine's interrupt awaits its reply and the answer reports

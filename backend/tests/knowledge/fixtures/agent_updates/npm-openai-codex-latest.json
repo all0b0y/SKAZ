@@ -1,0 +1,5 @@
+{
+ "name": "@openai/codex",
+ "version": "0.164.0",
+ "description": "Codex CLI is a coding agent from OpenAI that runs locally on your computer."
+}

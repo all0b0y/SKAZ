@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import (
+    agent_updates,
     agents,
     chats,
     decisions,
@@ -52,4 +53,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     study.router,
     web_search.router,
     me.router,
+    agent_updates.router,
 )

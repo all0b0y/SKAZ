@@ -21,6 +21,7 @@ import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
 import { UpdatesRow } from './UpdatesRow';
 import { HermesProviders } from './HermesProviders';
+import { AgentUpdatesRow, useAgentUpdatesDot } from './AgentUpdates';
 import { WikiTermsShowButton } from '../wiki/WikiTermsButton';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
@@ -42,6 +43,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'agent-claude': return <AgentRow engine="claude_code" />;
     case 'agent-hermes': return <AgentRow engine="hermes" />;
     case 'agent-opencode': return <AgentRow engine="opencode" />;
+    case 'agent-updates': return <AgentUpdatesRow label={row.label} />;
     case 'key-openrouter': return <KeyRow provider="openrouter" />;
     case 'key-soniox': return <KeyRow provider="soniox" />;
     case 'local-whisper': return <LocalWhisperRow />;
@@ -277,6 +279,7 @@ export function SettingsModal() {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const results = query.trim() ? searchRows(query) : null;
   const flagged = new Map(problems.map((p) => [p.section, p.tone] as const));
+  const updateSeen = !useAgentUpdatesDot();
 
   return (
     <Modal open={open} onClose={() => { setQuery(''); close(); }} title="Settings" className="kb-settings" testId="settings" pane="settings"
@@ -317,6 +320,7 @@ export function SettingsModal() {
                         <Icon name={item.icon} size={16} className="kb-row__icon" />
                         <span className="kb-row__text">{item.label}</span>
                         {tone && <span className={`kb-dot kb-dot--${tone}`} aria-label="Needs attention" role="img" />}
+                        {!tone && !updateSeen && item.id === 'conn' && <span className="kb-dot kb-dot--update" aria-label="Agent update available" role="img" />}
                       </button>
                     </li>
                   );

@@ -95,6 +95,12 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes|opencode)\/(?:check|install|login)$/ },
   { method: 'GET', pattern: /^\/kb\/agents\/install\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/install\/[^/]+\/cancel$/ },
+  // U1: agent updates — what SKAZ's own checks found, the switch, Check for updates, the seen dot;
+  // per agent (fixed list): Update (after current work if busy), its Cancel, Skip this version, Roll back.
+  { method: 'GET', pattern: /^\/kb\/agents\/updates$/ },
+  { method: 'PUT', pattern: /^\/kb\/agents\/updates\/settings$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/updates\/(?:check-now|seen)$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes|opencode)\/update(?:\/(?:cancel|skip|rollback))?$/ },
   { method: 'GET', pattern: /^\/kb\/decisions$/ },
   { method: 'PUT', pattern: /^\/kb\/decisions\/provider$/ },
   { method: 'POST', pattern: /^\/kb\/decisions\/local\/(?:download|cancel)$/ },
