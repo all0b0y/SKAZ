@@ -37,11 +37,16 @@
 }
 .kb-diagram__canvas { overflow-x: auto; min-width: 0; }
 .kb-diagram__canvas:has(> svg) { cursor: zoom-in; }
-/* ⤢ Open full size (chat-actions v1): a small tool in the corner, on every drawn diagram. */
+/* ⤢ Open full size (chat-actions v1): a small tool in the corner of every drawn diagram, shown on hover
+   or keyboard focus only (bug 6, 2026-10-26); always shown where there is no hover (touch). */
 .kb-diagram__tools {
   position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; padding: 1px;
   background: var(--kb-pane); border: 1px solid var(--kb-line); border-radius: var(--kb-r-sm); color: var(--kb-muted);
+  opacity: 0;
 }
+.kb-diagram:hover .kb-diagram__tools, .kb-diagram:focus-within .kb-diagram__tools { opacity: 1; }
+@media (hover: none) { .kb-diagram__tools { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .kb-diagram__tools { transition: opacity 120ms ease; } }
 
 /* The viewer: the whole window but the title bar strip, a bar on top, the drawing on the canvas. */
 .kb-modal.kb-dviewer {
