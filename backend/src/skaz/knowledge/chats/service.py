@@ -425,7 +425,7 @@ class ChatService:
             return
         name = ENGINE_NAMES[engine]
         try:
-            view = await self.registry.view(engine)
+            view = await self.registry.known_view(engine)
         except Exception as error:
             log.warning("Checking the models of %s failed (%s)", engine, type(error).__name__)
             raise EngineUnavailable(engine, f"SKAZ couldn't check {name}'s models. Try again.",
@@ -507,7 +507,7 @@ class ChatService:
         if model is None:
             return None
         with contextlib.suppress(Exception):
-            view = await self.registry.view(engine)
+            view = await self.registry.known_view(engine)
             for option in view.models:
                 if option.id == model:
                     return option.label
@@ -539,7 +539,7 @@ class ChatService:
             return await self._answer_question(chat, run, given)
         self._reserve(chat_id)
         try:
-            engine = await self.registry.require(chat.engine)
+            engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             prior = await disk_call(self.repo.messages, chat_id)
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
@@ -585,7 +585,7 @@ class ChatService:
             question = await disk_call(self.repo.message, chat_id, target.reply_to or "")
             if question is None or question.input is None:
                 raise ChatConflict("The question of this answer is no longer in the chat.", "NO_QUESTION")
-            engine = await self.registry.require(chat.engine)
+            engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             messages = await disk_call(self.repo.messages, chat_id)
             prior = [message for message in messages if message.seq < question.seq]
             now = utc_now()
@@ -614,7 +614,7 @@ class ChatService:
             target = await self._message(chat_id, message_id)
             if target.role != "user":
                 raise ChatInvalid("Only your own question can be edited.")
-            engine = await self.registry.require(chat.engine)
+            engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             messages = await disk_call(self.repo.messages, chat_id)
             prior = [message for message in messages if message.seq < target.seq]
             context = target.input.context if target.input is not None else given.context

@@ -97,6 +97,56 @@ describe('Chats in the side panel', () => {
     expect(within(answer).getByRole('button', { name: /Looked at 1 thing/ })).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('a question shows the moment it is sent, before the backend answers; no copy is left after (bug 7)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    await within(centre).findByRole('article', { name: 'Answer' });
+    const real = fake.requestMock.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    fake.requestMock.mockImplementation(async (req) => {
+      if (req.method === 'POST' && /\/messages$/.test(req.path)) await held;
+      return real(req);
+    });
+    const input = screen.getByTestId('message-input');
+    await user.click(input);
+    await user.keyboard('Is it the same as KL?');
+    const before = within(centre).getAllByRole('article', { name: 'Your question' }).length;
+    await user.keyboard('{Enter}');
+    // Shown while the request is still held: your message, and an answer that is starting.
+    const mine = within(centre).getAllByRole('article', { name: 'Your question' });
+    expect(mine).toHaveLength(before + 1);
+    expect(mine.at(-1)).toHaveTextContent('Is it the same as KL?');
+    expect(input).toHaveTextContent('');
+    release();
+    await waitFor(() => expect(within(centre).getAllByRole('article', { name: 'Your question' })).toHaveLength(before + 1));
+    await waitFor(() => expect(fake.calls.some((c) => c.method === 'POST' && /\/messages$/.test(c.path))).toBe(true));
+    // No copy is left behind once the backend's own arrives.
+    await waitFor(() => expect(within(centre).getAllByRole('article', { name: 'Your question' }).filter((a) => a.textContent?.includes('Is it the same as KL?'))).toHaveLength(1));
+  });
+
+  it('a refused question leaves the chat and comes back into the field (bug 7)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    await within(centre).findByRole('article', { name: 'Answer' });
+    const real = fake.requestMock.getMockImplementation()!;
+    fake.requestMock.mockImplementation(async (req) => {
+      if (req.method === 'POST' && /\/messages$/.test(req.path)) throw new Error('Codex is signed out.');
+      return real(req);
+    });
+    const before = within(centre).getAllByRole('article', { name: 'Your question' }).length;
+    const input = screen.getByTestId('message-input');
+    await user.click(input);
+    await user.keyboard('Is it the same as KL?{Enter}');
+    await waitFor(() => expect(input).toHaveTextContent('Is it the same as KL?'));
+    expect(within(centre).getAllByRole('article', { name: 'Your question' })).toHaveLength(before);
+    expect(await screen.findByText(/signed out/)).toBeInTheDocument();
+  });
+
   it('sends a question in a new chat; the answer arrives and the list moves it to the top', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });

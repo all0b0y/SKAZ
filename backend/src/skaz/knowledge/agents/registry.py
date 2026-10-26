@@ -320,6 +320,27 @@ class EngineRegistry:
             raise EngineUnavailable(engine, message, view.action or "check")
         return self.engines[engine]
 
+    async def require_known(self, engine: EngineId) -> AgentEngine:
+        """:meth:`require` without waiting for a fresh check when the agent was last seen ready.
+
+        Bug 7 (2026-10-26): a message must be accepted at once; a stale check (Codex status + models
+        through its app-server, up to seconds) is not repeated before the answer starts. An agent that
+        stopped working since fails inside the answer with its own reason. An agent never seen ready, or
+        last seen not ready, is checked as before (and refused with its reason).
+        """
+        last = self.last_view(engine)
+        if last is not None and last.state == "ready":
+            return self.engines[engine]
+        return await self.require(engine)
+
+    async def known_view(self, engine: EngineId) -> AgentView:
+        """The last view while it lists models (a ready agent), else a check: for checks of a choice
+        that must not wait (bug 7). A model removed since fails in the answer, never silently swapped."""
+        last = self.last_view(engine)
+        if last is not None and last.state == "ready" and last.models:
+            return last
+        return await self.view(engine)
+
     async def logout(self, engine: EngineId) -> AgentView:
         """Sign out of an engine whose sign-in SKAZ owns (Codex: SKAZ's ``CODEX_HOME``), then re-check.
 

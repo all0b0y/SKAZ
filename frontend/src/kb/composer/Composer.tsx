@@ -5,13 +5,13 @@ import { errorText } from '../api/client';
 import { Icon, IconButton, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { agentOf, answeringModel, startingChoice } from '../state/agents';
-import { isAnswering, type AgentChoice } from '../state/chats';
+import { isAnswering, isLocal, type AgentChoice } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
-import { clearEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
+import { clearEditor, fillEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { QuickQuestions } from './QuickQuestions';
@@ -283,10 +283,12 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     sendingFrom.current = draftKey.current;
     // The arrow moves as the message goes (it is replaced by Stop once the answer starts, so not after the reply).
     replaySend();
+    // Bug 7: the message shows in the chat at once, so it leaves the field at once; a refusal puts it back.
+    clearEditor(root);
     const result = await chats.getState().send(input, openContext());
     sendingFrom.current = null;
     setSending(false);
-    if (!result.ok) { setError(result.error); return; }
+    if (!result.ok) { fillEditor(root, input); setError(result.error); return; }
     // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
     for (const a of ready) {
       if (a.source !== 'existing' && a.inWiki) {
@@ -484,7 +486,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               <button type="button" className="kb-iconbtn kb-iconbtn--md" aria-label="Dictate" aria-disabled="true"><Icon name="mic" size={16} /></button>
             </Tooltip>
           )}
-          {answering && streaming && chatId && !(questionWaits && canSend) ? (
+          {answering && streaming && chatId && !isLocal(streaming.id) && !(questionWaits && canSend) ? (
             <Tooltip text="Stop the answer" placement="top">
               <button type="button" className="kb-send is-stop" aria-label="Stop the answer"
                 onClick={async () => { const r = await chats.getState().stop(chatId, streaming.id); if (!r.ok) setError(r.error); }}>

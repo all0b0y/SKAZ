@@ -89,6 +89,28 @@ export function isAnswering(chat: Pick<KbChat, 'messages'> | null): boolean {
   return !!chat && chat.messages.some((m) => m.role === 'assistant' && m.state === 'streaming');
 }
 
+/**
+ * Bug 7 (2026-10-26): a question shows the moment it is sent — your message and an answer that is
+ * starting, under local ids — and gives way to the backend's copies when they come.
+ */
+export const LOCAL_ID = 'local-';
+export const isLocal = (id: string) => id.startsWith(LOCAL_ID);
+function withoutLocal(messages: KbMessage[]): KbMessage[] {
+  return messages.some((m) => isLocal(m.id)) ? messages.filter((m) => !isLocal(m.id)) : messages;
+}
+let localSeq = 0;
+function localPair(chat: KbChat, input: KbMessageInput): [KbMessage, KbMessage] {
+  const seq = chat.messages.reduce((top, m) => Math.max(top, m.seq), 0);
+  const now = new Date().toISOString();
+  localSeq += 1;
+  const base = { created_at: now, engine: chat.engine, model: chat.model, failure: null, saved_page_id: null };
+  return [
+    { ...base, id: `${LOCAL_ID}u${localSeq}`, seq: seq + 1, role: 'user', state: 'done',
+      parts: input.text ? [{ type: 'text', text: input.text }] : [], input },
+    { ...base, id: `${LOCAL_ID}a${localSeq}`, seq: seq + 2, role: 'assistant', state: 'streaming', parts: [], input: null },
+  ];
+}
+
 function upsertMessage(messages: KbMessage[], message: KbMessage): KbMessage[] {
   const i = messages.findIndex((m) => m.id === message.id);
   if (i < 0) return [...messages, message].sort((a, b) => a.seq - b.seq);
@@ -180,6 +202,8 @@ export function applyEvents(chat: KbChat, events: KbChatEvent[]): KbChat {
       continue;
     }
     if ((e.type === 'message' || e.type === 'state') && e.message) {
+      // The backend's copy of a question just sent replaces the one shown at once (bug 7).
+      if (e.message.role === 'user') messages = withoutLocal(messages);
       messages = upsertMessage(messages, e.message);
       continue;
     }
@@ -230,7 +254,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
     const merge = (id: string, messages: KbMessage[], created?: KbMessage) => {
       const open = get().chats[id];
       if (!open?.chat) return;
-      let next = open.chat.messages;
+      // The backend's copy of a question replaces the one shown at once in the same update (bug 7).
+      let next = messages.some((m) => m.role === 'user') ? withoutLocal(open.chat.messages) : open.chat.messages;
       for (const m of messages) next = upsertMessage(next, m);
       if (created && !next.some((m) => m.id === created.id)) next = upsertMessage(next, created);
       const chat = { ...open.chat, messages: next, state: isAnswering({ messages: next }) ? 'answering' as const : 'idle' as const };
@@ -351,11 +376,29 @@ export function createChatsStore(client: KbClient): ChatsStore {
           }
         }
         const chatId = id;
+        let settled = false;
+        // A microtask, not now: the click that sent it finishes its own render first (the Send arrow,
+        // Resend's turn), then the question shows — still before the next frame.
+        queueMicrotask(() => {
+          const shown = get().chats[chatId]?.chat;
+          if (settled || !shown) return;
+          const messages = [...withoutLocal(shown.messages), ...localPair(shown, input)];
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...s.chats[chatId]!, chat: { ...shown, messages, state: 'answering' } } } }));
+        });
+        const dropLocal = () => {
+          const open = get().chats[chatId];
+          if (!open?.chat) return;
+          const messages = withoutLocal(open.chat.messages);
+          if (messages === open.chat.messages) return;
+          const chat = { ...open.chat, messages, state: isAnswering({ messages }) ? 'answering' as const : 'idle' as const };
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat } } }));
+        };
         try {
           const res = await client.call('POST /kb/chats/{chat_id}/messages', {
             path: { chat_id: chatId },
             body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context },
           });
+          settled = true;
           // Q-A2: a message of your own closes a waiting question (its part_update confirms it).
           supersedeQuestions(chatId);
           merge(chatId, [res.user], res.assistant);
@@ -363,11 +406,14 @@ export function createChatsStore(client: KbClient): ChatsStore {
           set((s) => ({ list: [...s.list].sort(byUpdated) }));
           return { ok: true, value: chatId };
         } catch (error) {
+          settled = true;
+          dropLocal(); // the field gets the text back (Composer)
           return { ok: false, error: errorText(error) };
         }
       },
 
       stop: (chatId, messageId) => act(async () => {
+        if (isLocal(messageId)) return; // not started on the backend yet: nothing to stop there
         const m = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/stop', { path: { chat_id: chatId, message_id: messageId } });
         merge(chatId, [m]);
       }),
