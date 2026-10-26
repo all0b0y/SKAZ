@@ -21,6 +21,7 @@ import { WebSearchCard } from './webSearch';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { AnswerBlock } from './blocks/AnswerBlock';
+import { AnswerBlocks, composeBlocks } from './blocks/compose';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -134,7 +135,8 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
   const { ui } = useServices();
   return (
     <>
-      {toBlocks(parts).map((b, i) => {
+      {composeBlocks(toBlocks(parts)).map((b, i) => {
+        if (b.kind === 'answers') return <AnswerBlocks key={b.parts[0]!.id} parts={b.parts} />; // P1 decision 2
         if (b.kind === 'connection') return <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />;
         if (b.kind === 'permission') {
           const partId = b.part.id;

@@ -4,12 +4,12 @@
  * above it and lights its chip; a hovered chip lights its items (neutral grey — R4 keeps the accent
  * for P2's selection). R3: the accent (--kb-fx-accent: cocoa light, purple dark) only where it carries
  * structure: step numbers, the timeline line/dots/timecodes, the compare headers' underline, the cause
- * chain's arrows, the verdict bar, key numbers, chart bars, the quotation mark,
+ * chain's and the composition's arrows, the verdict bar, key numbers, chart bars, the quotation mark,
  * the defined term, the hierarchy's top nodes and lines, the concept cards' top line, «You» in action
  * items, the disagreement's check.
  * Meaning never by colour alone: numbers, dots, dashed borders and words carry it too.
  */
-.kb-blk, .kb-blk-broken, .kb-blk-ghost {
+.kb-blk, .kb-blk-broken, .kb-blk-ghost, .kb-blk-run {
   --kb-blk-acc: var(--kb-fx-accent);
   --kb-blk-acc-line: color-mix(in srgb, var(--kb-fx-accent) 45%, var(--kb-pane));
   --kb-blk-hl: color-mix(in srgb, var(--kb-text) 7%, transparent);
@@ -347,6 +347,23 @@ button.kb-blk-tl__when { border: 0; background: none; cursor: pointer; }
 .kb-blk-ai__ava--you { background: var(--kb-blk-acc); }
 .kb-blk-ai__ava--none { background: transparent; border: 1px dashed var(--kb-muted); }
 .kb-blk-ai__none { font-style: italic; }
+
+/* ---- composition (decision 2): side by side, and labelled arrows between stacked blocks ---- */
+.kb-blk-run { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; min-width: 0; }
+.kb-blk-run > *, .kb-blk-row > * { margin: 0; }
+/* Narrow chats stack the row: each block keeps at least 240px. */
+.kb-blk-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; align-items: start; }
+.kb-blk-run > .kb-blk-link { margin: -6px 0; }
+.kb-blk-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--kb-muted);
+  font-size: var(--t-xs);
+}
+.kb-blk-link::before, .kb-blk-link::after { content: ''; width: 28px; height: 1px; background: var(--kb-line); }
+.kb-blk-link svg { flex: none; color: var(--kb-blk-acc); }
 
 /* ---- broken (decision 6) ---- */
 .kb-blk-broken {

@@ -7,11 +7,12 @@ import { chatWorld } from '../../test/fixtures';
 import { chatMessage } from '../../test/fakeKb';
 import { answerCitations, plainText } from '../Message';
 import { initials } from './ActionItems';
+import { blockRows, composeBlocks } from './compose';
 import { hierarchyTree } from './Hierarchy';
 import { rendererOf } from './registry';
 import type { BlockData } from './sources';
 
-// P1b: the other twelve blocks, Copy as Markdown, the answer's sources.
+// P1b: the other twelve blocks, Copy as Markdown, the answer's sources, and composition.
 
 const cite = (material_id: string, title: string, seg: number, at: { start_ms?: number; page?: number }): KbCitation => ({
   material_id, seg, available: true, material_title: title, start_ms: at.start_ms ?? null, end_ms: null,
@@ -147,5 +148,34 @@ describe('P1b: Copy as Markdown and the answer', () => {
     const { chat } = await openAnswer([part('blk-1', BLOCKS[1]!, { sources: [BOOK], block: { ...BLOCKS[1]!, verdict: { id: 'v', src: [0], agent: false, text: 'x', reason: null } } as BlockData })]);
     const article = within(chat).getAllByRole('article', { name: 'Answer' }).at(-1)!;
     expect(within(article).getByRole('button', { name: /^Sources · 1/ })).toBeInTheDocument();
+  });
+});
+
+describe('P1b: composition (decision 2)', () => {
+  const a = part('a', BLOCKS[0]!);
+  const b = part('b', BLOCKS[0]!, { beside: true });
+  const c = part('c', BLOCKS[2]!, { link: 'why it happened' });
+  const d = part('d', BLOCKS[1]!, { beside: true });
+
+  it('folds blocks that follow each other into rows and arrows; text between keeps them apart', () => {
+    const inline = (text: string) => ({ kind: 'inline' as const, pieces: [text], slots: [] });
+    const blocks = [inline('Intro'), { kind: 'answer' as const, part: a }, inline('\n'), { kind: 'answer' as const, part: b },
+      { kind: 'answer' as const, part: c }, inline('Between.'), { kind: 'answer' as const, part: d }];
+    const out = composeBlocks(blocks);
+    expect(out.map((x) => (x.kind === 'answers' ? x.parts.map((p) => p.id).join('+') : x.kind))).toEqual([
+      'inline', 'a+b+c', 'inline', 'answer']);
+    expect(blockRows([a, b, c, d, part('e', BLOCKS[0]!, { beside: true }), part('f', BLOCKS[0]!, { beside: true })])
+      .map((row) => row.map((p) => p.id).join(''))).toEqual(['ab', 'cdef'.slice(0, 3), 'f']);
+  });
+
+  it('draws a row side by side and a labelled arrow between stacked blocks', async () => {
+    const { chat } = await openAnswer([a, { type: 'text', text: '\n' }, b, c]);
+    const row = chat.querySelector('.kb-blk-row')!;
+    expect(Array.from(row.children).map((el) => el.getAttribute('data-block-id'))).toEqual(['a', 'b']);
+    const arrow = chat.querySelector('.kb-blk-link')!;
+    expect(arrow).toHaveTextContent('why it happened');
+    expect(arrow).toHaveAttribute('data-from', 'b');
+    expect(arrow).toHaveAttribute('data-to', 'c');
+    expect(arrow.nextElementSibling).toHaveAttribute('data-block-id', 'c');
   });
 });
