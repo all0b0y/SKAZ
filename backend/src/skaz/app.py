@@ -71,6 +71,8 @@ def create_app(
             await runtime.kb_speech.start()
             # Agents' housekeeping in the background (Hermes' leftover sessions, once prepared).
             runtime.kb_agents.start()
+            # N6: agent sessions of deleted chats that an earlier run could not delete yet.
+            runtime.kb_chats.start()
             yield
         finally:
             # Agents and llama-server first, then the wiki services, within Electron's grace.

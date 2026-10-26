@@ -12,6 +12,10 @@
   "Resume" asks the same question again from the start.
 * Ids in answers are checked before they become chips (``chats.resolve``).
 * Nothing reaches the wiki unless the user saves it (``chats.analysis``).
+* N6: with an agent that keeps live sessions (Codex) a chat is one agent session: SKAZ sends only the
+  new message (plus ``[context]`` notes), reverts the session in place for edit / regenerate / resume,
+  or starts a new one seeded with the history (``chats.live``). Old sessions are deleted with the
+  chat, on an engine switch and on sign-out (a durable, retried list).
 """
 from __future__ import annotations
 
@@ -23,20 +27,23 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ...native_io import disk_call
 from ..agents.engine import (
     AgentEngine,
     AgentEvent,
     AgentTurn,
+    Compacted,
     Completed,
     EngineId,
     Failed,
+    SessionBound,
     TextDelta,
     ToolCall,
     ToolSpec,
     TurnMessage,
+    session_support,
 )
 from ..agents.last_choice import LastChoice
 from ..agents.registry import ENGINE_NAMES, EngineRegistry, EngineUnavailable
@@ -65,6 +72,20 @@ from .analysis import AnalysisWriter, Section
 from .context import ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
 from .export import ChatExport, export_chat
+from .live import (
+    COMPACTED_NOTE,
+    MAX_DELETE_ATTEMPTS,
+    START,
+    LiveSession,
+    SessionContext,
+    SessionDecision,
+    SessionStore,
+    cited_materials,
+    context_note,
+    keys,
+    live_entries,
+    plan_session,
+)
 from .model import (
     FINISHED,
     Chat,
@@ -104,6 +125,8 @@ STOP_TIMEOUT_S = 10.0
 #: App shutdown: an answer gets this long to stop after the interrupt, then what it streamed so far is
 #: saved as interrupted and it is cancelled (the knowledge shutdown deadline is 2.5 s in total).
 CLOSE_STOP_S = 1.0
+#: Sign-out waits this long for the engine's sessions to be deleted; the rest stays queued (N6).
+END_SESSIONS_WAIT_S = 20.0
 MENTION_LIMIT = 8
 #: Failure kinds that leave the question open for "Resume" (decision on limits).
 _INTERRUPTING = frozenset({"limit", "network", "auth", "incompatible"})
@@ -156,6 +179,19 @@ class _Run:
     started_at: float = 0.0
     prompt_characters: int = 0
     tool_calls: int = 0
+    #: The user (or shutdown) stopped this answer: no reseed starts after it.
+    stopping: bool = False
+    #: N6: the question, the live-session plan and what to record once the answer is ``done``.
+    question: Message | None = None
+    decision: SessionDecision | None = None
+    session: LiveSession | None = None
+    context: SessionContext | None = None
+    #: (message id, digest) of the history a ``start`` seeds the new session with.
+    seeded: tuple[tuple[str, str], ...] = ()
+    bound: SessionBound | None = None
+    compacted: bool = False
+    #: Text or a tool call reached the user: the run can't be retried silently.
+    produced: bool = False
 
 
 class ChatService:
@@ -170,6 +206,11 @@ class ChatService:
         self.repo = ChatRepository(kb.db)
         self.usage_log = UsageLog(kb.db)
         self.summaries = ChatSummaries(kb.db, self.usage_log)
+        #: N6: each chat's live agent session and the agent sessions waiting to be deleted.
+        self.sessions = SessionStore(kb.db)
+        self._deleting: asyncio.Task[None] | None = None
+        self._delete_again = False
+        self._delete_lock = asyncio.Lock()
         self._agents = agents
         self.tools = tools
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
@@ -530,6 +571,8 @@ class ChatService:
             feed.emit("message", message.id, message=message)
         if "title" in updates:
             feed.emit("title", None, text=updates["title"])
+        if engine_changed and await disk_call(self.sessions.drop, chat_id):
+            self._kick_deletions()  # the old agent's session goes; the new agent starts seeded
         self._list.touch(chat_id)
         return await self.summary(chat_id)
 
@@ -558,9 +601,10 @@ class ChatService:
         if run is not None:
             run.deleted = True
             await self._stop_run(run)
-        await disk_call(self.repo.delete, chat_id)
+        await disk_call(self.repo.delete, chat_id)  # its live session is queued for deletion (cascade)
         self._feeds.pop(chat_id, None)
         self._list.touch(chat_id)
+        self._kick_deletions()
 
     async def mark_read(self, chat_id: str) -> None:
         chat = await self._chat(chat_id)
@@ -729,6 +773,7 @@ class ChatService:
         parser = StreamParser()
         stream: AsyncIterator[AgentEvent] | None = None
         terminal: Completed | Failed | None = None
+        run.question = question
         try:
             assert question.input is not None
             request = await disk_call(builder.request, chat, question.input, self._other_chat)
@@ -742,26 +787,57 @@ class ChatService:
             gate = (ChatWebGate(self.web, RunRef(run.run_id, run.chat_id, run.message.id, run.engine.id))
                     if self.web is not None and native and web.available else None)
             told = instructions(language, skills)
-            if self.web is not None:
-                told = f"{told}\n\n{web_instructions(web, tool=not native)}"
-            earlier = history(prior)
-            # A long chat: what left the history window, retold by this chat's own agent (slice 5).
-            summary = await self.summaries.for_turn(chat.id, earlier, run.engine, chat.model, chat.effort)
-            turn = AgentTurn(run_id=run.run_id, messages=(*earlier, TurnMessage("user", request)),
-                             instructions=told, tools=self._tools_for(chat), web=gate,
-                             model=chat.model, effort=chat.effort, history_summary=summary)
-            run.prompt_characters = len(turn.instructions) + sum(len(item.content) for item in turn.messages)
-            stream = run.engine.run(turn)
-            async for event in stream:
-                if isinstance(event, TextDelta):
-                    await self._apply(run, parser.feed(event.text), resolver)
-                elif isinstance(event, ToolCall):
-                    run.tool_calls += 1
-                    self._add_part(run, await disk_call(resolver.tool, event.name, event.arguments))
-                elif isinstance(event, Completed | Failed):
-                    terminal = event
+            web_text = web_instructions(web, tool=not native) if self.web is not None else ""
+            if web_text:
+                told = f"{told}\n\n{web_text}"
+            # N6: continue / revert the chat's live session, or start a new seeded one.
+            entries = await self._plan_session(run, chat, prior)
+            if run.decision is not None:
+                gone = await disk_call(self._gone_materials, prior)
+                run.context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone)
+            reseeded = False
+            while True:
+                turn = await self._turn(run, chat, prior, entries, request, told, gate, skills)
+                run.prompt_characters = len(turn.instructions) + sum(len(item.content)
+                                                                     for item in turn.messages)
+                stream = run.engine.run(turn)
+                lost = False
+                async for event in stream:
+                    if isinstance(event, TextDelta):
+                        run.produced = True
+                        await self._apply(run, parser.feed(event.text), resolver)
+                    elif isinstance(event, ToolCall):
+                        run.produced = True
+                        run.tool_calls += 1
+                        self._add_part(run, await disk_call(resolver.tool, event.name, event.arguments))
+                    elif isinstance(event, SessionBound):
+                        await self._bound(run, event)
+                    elif isinstance(event, Compacted):
+                        await self._compacted(run)
+                    elif isinstance(event, Completed | Failed):
+                        lost = (isinstance(event, Failed) and event.session_lost and not run.produced
+                                and run.decision is not None and run.decision.plan.mode != "start")
+                        if lost and (reseeded or run.stopping):
+                            lost = False  # at most one reseed per answer, none after a stop
+                            event = (Failed(run.run_id, "cancelled", STOPPED) if run.stopping else event)
+                        terminal = None if lost else event
+                        break
+                    await self._checkpoint(run)
+                if not lost:
                     break
-                await self._checkpoint(run)
+                # The live session can't be continued: one new session seeded with the history instead.
+                closer = getattr(stream, "aclose", None)
+                if callable(closer):
+                    with contextlib.suppress(Exception):
+                        await closer()
+                stream = None
+                reseeded = True
+                log.info("Chat answer %s: the agent session could not be continued; starting a new one",
+                         run.run_id)
+                if await disk_call(self.sessions.drop, chat.id):
+                    self._kick_deletions()
+                run.decision, run.session, run.bound = SessionDecision(START), None, None
+                run.seeded = tuple(keys(entries))
             await self._apply(run, parser.finish(), resolver)
         except asyncio.CancelledError:
             terminal = Failed(run.run_id, "cancelled", STOPPED)
@@ -776,6 +852,164 @@ class ChatService:
                 with contextlib.suppress(BaseException):
                     await closer()
             await self._finish(run, terminal)
+
+    # -- the live agent session (N6) ---------------------------------------------------
+
+    async def _plan_session(self, run: _Run, chat: Chat,
+                            prior: Sequence[Message]) -> list[tuple[str, TurnMessage]]:
+        """Decide how this answer uses the chat's agent session (``chats.live.plan_session``); an old
+        session that can't be used is dropped here and queued for deletion. Returns the history a live
+        session must hold (with message ids)."""
+        support = session_support(run.engine)
+        session = await disk_call(self.sessions.get, chat.id)
+        if not support.live:
+            if session is not None and await disk_call(self.sessions.drop, chat.id):
+                self._kick_deletions()  # another engine's session: this engine can't use it
+            return []
+        entries = live_entries(prior)
+        history_keys = keys(entries)
+        decision = plan_session(session, run.engine.id, support, history_keys)
+        assert decision is not None
+        if decision.replace and await disk_call(self.sessions.drop, chat.id):
+            self._kick_deletions()
+        run.decision = decision
+        run.session = None if decision.replace else session
+        run.seeded = tuple(history_keys) if decision.plan.mode == "start" else ()
+        return entries
+
+    def _gone_materials(self, prior: Sequence[Message]) -> tuple[str, ...]:
+        """Materials this chat cited that are no longer in the library (decision 10)."""
+        return tuple(sorted(material_id for material_id in cited_materials(prior)
+                            if self.kb.material_repo.get(material_id) is None))
+
+    async def _turn(self, run: _Run, chat: Chat, prior: Sequence[Message],
+                    entries: Sequence[tuple[str, TurnMessage]], request: str, told: str,
+                    gate: ChatWebGate | None, skills: Sequence[Any]) -> AgentTurn:
+        decision = run.decision
+        summary: str | None = None
+        if decision is None or decision.plan.mode == "start":
+            # Stateless engines get the history every time; a new live session gets it once as its seed.
+            earlier = history(prior) if decision is None else tuple(turn for _, turn in entries)
+            # A long chat: what left the history window, retold by this chat's own agent (slice 5);
+            # never on a live continue — the agent compacts its own conversation (decision 13).
+            summary = await self.summaries.for_turn(chat.id, earlier, run.engine, chat.model, chat.effort)
+            messages: tuple[TurnMessage, ...] = (*earlier, TurnMessage("user", request))
+        else:
+            before = run.session.context if run.session is not None else None
+            note = context_note(before, run.context, skills) if run.context is not None else ""
+            messages = (TurnMessage("user", f"{note}\n\n{request}" if note else request),)
+        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told, tools=self._tools_for(chat),
+                         web=gate, model=chat.model, effort=chat.effort, history_summary=summary,
+                         session=decision.plan if decision is not None else None)
+
+    async def _bound(self, run: _Run, event: SessionBound) -> None:
+        """The agent took this turn into a session: remember it at once (a crash mid-answer then still
+        knows the turn to revert, or the session to delete)."""
+        if run.decision is None or run.context is None:
+            return  # a stateless turn: nothing to keep
+        run.bound = event
+        await disk_call(self.sessions.bind, run.chat_id, run.engine.id, event.session_id, run.message.model,
+                        event.turn_id, run.decision.plan, run.context)
+
+    async def _compacted(self, run: _Run) -> None:
+        """The agent compacted the conversation: a thin "History compressed" line in the chat (once)."""
+        if run.compacted or run.deleted:
+            return
+        run.compacted = True
+        now = utc_now()
+        note = Message(id=new_id("msg"), chat_id=run.chat_id, seq=0, role="system", state="done",
+                       created_at=now, parts=(TextPart(COMPACTED_NOTE),), engine=run.engine.id)
+        try:
+            (added,) = await disk_call(self.repo.add_messages, [note], {})
+        except Exception as error:
+            log.error("Saving the compaction note of chat answer %s failed: %s", run.run_id,
+                      error_note(error))
+            return
+        self._feed(run.chat_id).emit("message", added.id, message=added)
+
+    async def _record(self, run: _Run, message: Message) -> None:
+        """A ``done`` answer of a live session: the session now holds its question and answer too."""
+        bound, decision, question = run.bound, run.decision, run.question
+        if bound is None or decision is None or question is None or run.context is None:
+            return
+        items = [*run.seeded] if decision.plan.mode == "start" else []
+        items += keys(live_entries([question, message]))
+        try:
+            if not await disk_call(self.sessions.record, run.chat_id, bound.session_id, bound.turn_id, items,
+                                   run.context):
+                run.bound = None  # this answer no longer holds it
+                self._kick_deletions()  # the session was dropped meanwhile (sign-out): delete it now
+        except Exception as error:
+            log.error("Recording the agent session of chat answer %s failed: %s", run.run_id,
+                      error_note(error))
+
+    def _kick_deletions(self) -> None:
+        """Delete queued agent sessions in the background (a pass is running: one more after it)."""
+        if self._closing:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._deleting is not None and not self._deleting.done():
+            self._delete_again = True
+            return
+        self._deleting = loop.create_task(self._deletion_loop(), name="kb-chat-session-deletions")
+
+    async def _deletion_loop(self) -> None:
+        while True:
+            self._delete_again = False
+            try:
+                await self.delete_sessions()
+            except Exception as error:
+                log.error("Deleting agent sessions failed: %s", error_note(error))
+            if not self._delete_again or self._closing:
+                return
+
+    def start(self) -> None:
+        """App start: delete the agent sessions left queued by an earlier run (failed or interrupted)."""
+        self._kick_deletions()
+
+    async def delete_sessions(self) -> int:
+        """One pass over the "agent sessions to delete" list; returns how many are still queued.
+
+        A failure counts an attempt; after ``MAX_DELETE_ATTEMPTS`` the session is given up (logged by
+        engine and id only). A session a running answer is bound to waits for the next pass; one whose
+        engine can't delete sessions now (not wired) stays queued."""
+        async with self._delete_lock:
+            pending = await disk_call(self.sessions.pending)
+            busy = {run.bound.session_id for run in self._runs.values() if run.bound is not None}
+            engines = cast(Mapping[str, AgentEngine], self.registry.engines)
+            for entry in pending:
+                deleter = getattr(engines.get(entry.engine), "delete_session", None)
+                if entry.session_id in busy or not callable(deleter):
+                    continue
+                try:
+                    await deleter(entry.session_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    attempts = await disk_call(self.sessions.failed, entry.engine, entry.session_id)
+                    if attempts >= MAX_DELETE_ATTEMPTS:
+                        log.warning("Giving up deleting %s session %s after %d attempts", entry.engine,
+                                    entry.session_id, attempts)
+                    else:
+                        log.info("Deleting %s session %s failed (%s); retried later", entry.engine,
+                                 entry.session_id, type(error).__name__)
+                    continue
+                await disk_call(self.sessions.deleted, entry.engine, entry.session_id)
+            return len(await disk_call(self.sessions.pending))
+
+    async def end_sessions(self, engine: EngineId, wait_s: float = END_SESSIONS_WAIT_S) -> None:
+        """Sign-out of an engine (decision 9): every chat's session with it is deleted (bounded wait;
+        what is left stays queued and is retried). Its chats start new seeded sessions later."""
+        dropped = await disk_call(self.sessions.drop_engine, engine)
+        if dropped == 0 and not await disk_call(self.sessions.pending):
+            return
+        try:
+            await asyncio.wait_for(self.delete_sessions(), wait_s)
+        except TimeoutError:
+            log.warning("Deleting the %s sessions took too long; the rest are retried later", engine)
 
     def _other_chat(self, chat_id: str) -> tuple[str, Sequence[Message]] | None:
         chat = self.repo.get(chat_id)
@@ -832,6 +1066,8 @@ class ChatService:
         message = replace(run.message, state=state, failure=failure)
         run.message = message
         await self._log_usage(run, state, terminal)
+        if state == "done" and not run.deleted:
+            await self._record(run, message)  # a failed/stopped answer records nothing (its turn is the tail)
         try:
             if not run.deleted:
                 chat = await disk_call(self.repo.get, run.chat_id)
@@ -908,6 +1144,7 @@ class ChatService:
         return None
 
     async def _stop_run(self, run: _Run) -> None:
+        run.stopping = True
         task = run.task
         await self._cancel_waits(run.run_id)
         with contextlib.suppress(Exception):
@@ -930,8 +1167,13 @@ class ChatService:
         for run in runs:
             run.closing = True
         await asyncio.gather(*(self._close_run(run) for run in runs), return_exceptions=True)
+        deleting = self._deleting
+        if deleting is not None and not deleting.done():  # what is left stays queued for the next start
+            deleting.cancel()
+            await asyncio.wait({deleting}, timeout=self._close_stop_s)
 
     async def _close_run(self, run: _Run) -> None:
+        run.stopping = True
         await self._cancel_waits(run.run_id, closing=True)
         with contextlib.suppress(Exception):
             await asyncio.wait_for(run.engine.interrupt(run.run_id), self._close_stop_s)

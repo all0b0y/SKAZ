@@ -15,7 +15,15 @@ plain reason — no hidden queue.
 
 Turn input: the chat history (bounded, newest kept) is serialised as untrusted
 data before the current user message, so switching agents mid-chat gives every
-engine the same context. Tools come from the shared ``ToolRegistry`` — the
+engine the same context (``agents.history.seed_prompt``, the one seed serializer).
+
+Live sessions (N6, decision 19): a chat turn with a ``SessionPlan`` keeps one persistent thread per
+chat. ``start`` opens it with ``ephemeral: false`` (the same isolated config) seeded with the history;
+``continue``/``revert`` start a new process, ``thread/resume`` the chat's thread with the same config,
+``thread/revert`` before the named turn when asked, and send only the new message. A thread that can't
+be resumed or reverted fails the run with ``session_lost`` (nothing sent). ``SessionBound`` names the
+thread and turn; a ``contextCompaction`` item is reported as ``Compacted``. Stateless runs (ingest,
+judge, W-3b, summaries) stay ephemeral. Tools come from the shared ``ToolRegistry`` — the
 same names and schemas the MCP server lists. ``turn.tools is None`` (ingest):
 empty ``dynamicTools``, no tool scope bound (any tool call is refused by the
 transport) and the extra tool-ish features below switched off too.
@@ -34,19 +42,27 @@ from typing import Any, Literal, Protocol
 
 from ...gateways.codex_connection import parse_codex_version
 from ...gateways.codex_rpc import CodexRpc, CodexRpcError
-from ...gateways.codex_session import DISABLED_FEATURES, dynamic_tool, thread_start_params
+from ...gateways.codex_session import (
+    DISABLED_FEATURES,
+    dynamic_tool,
+    thread_resume_params,
+    thread_start_params,
+)
 from ...gateways.codex_tools import CodexTools
 from ..permissions.refusals import OUTSIDE, refused
 from ..permissions.waits import RunWaits
 from .engine import (
     AgentEvent,
     AgentTurn,
+    Compacted,
     Completed,
     EngineId,
     EngineStatus,
     Failed,
     FailureKind,
     ModelOption,
+    SessionBound,
+    SessionSupport,
     TextDelta,
     ToolCall,
     ToolResult,
@@ -54,8 +70,8 @@ from .engine import (
     TurnMessage,
     Usage,
 )
-from .history import SUMMARY_NOTE, omitted_note, window
-from .prompting import untrusted_block
+from .history import ENGINE_LABELS as ENGINE_LABELS  # re-exported for web_runner / web_tool
+from .history import seed_prompt
 from .registry import codex_login_progress
 from .tools import ToolContext, ToolRegistry
 from .usage import codex_usage
@@ -79,12 +95,15 @@ BASE_INSTRUCTIONS = (
 )
 WITH_TOOLS = "Use only the registered SKAZ tools; cite what they return by its refs."
 WITHOUT_TOOLS = "You have no tools: work only with the text given in this conversation."
-ENGINE_LABELS: dict[str, str] = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
-                                 "opencode": "OpenCode"}
+#: N6: Codex keeps a live thread per chat and can drop its last turns in place (``thread/revert``).
+CODEX_SESSIONS = SessionSupport(live=True, revert=True)
 
 STOPPED = "The answer was stopped."
 TOO_LONG = "Codex took too long; the answer was stopped."
 CRASHED = "Codex stopped unexpectedly."
+SESSION_LOST = "Codex couldn't continue this chat's conversation."
+#: Seconds a ``thread/delete`` of a chat's thread may take (its own short-lived process).
+DELETE_TIMEOUT_S = 30.0
 
 
 class CodexProcesses(Protocol):
@@ -120,6 +139,8 @@ class _Run:
     phases: dict[str, str | None] = field(default_factory=dict)
     withheld: dict[str, str] = field(default_factory=dict)
     emitted: dict[str, str] = field(default_factory=dict)
+    #: ``contextCompaction`` items already reported as ``Compacted``.
+    compactions: set[str] = field(default_factory=set)
 
     def emit(self, item_id: str, text: str) -> list[AgentEvent]:
         if not text:
@@ -203,6 +224,17 @@ class CodexEngine:
 
     def active_runs(self) -> set[str]:
         return set(self._runs)
+
+    @property
+    def sessions(self) -> SessionSupport:
+        return CODEX_SESSIONS
+
+    async def delete_session(self, session_id: str) -> None:
+        """``thread/delete`` of a chat's live thread in its own short-lived process; raises on failure
+        (the caller retries). Measured on codex 0.160: thread rows and the rollout file are removed."""
+        rpc = self._connection.rpc()
+        async with asyncio.timeout(DELETE_TIMEOUT_S), rpc:
+            await rpc.request("thread/delete", {"threadId": session_id})
 
     # -- status and models ---------------------------------------------------
 
@@ -339,6 +371,8 @@ class CodexEngine:
         if failure is not None:
             yield failure
             return
+        if turn.session is not None and run.thread_id is not None and run.turn_id is not None:
+            yield SessionBound(run_id, run.thread_id, run.turn_id)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._run_timeout_s
         waits = self.waits
@@ -375,9 +409,13 @@ class CodexEngine:
             return Failed(run_id, "incompatible", status.reason or "Codex can't be used right now.")
         if not status.signed_in:
             return Failed(run_id, "auth", status.reason or "Sign in to Codex to continue.")
+        plan = turn.session
+        resume = plan is not None and plan.mode != "start"
         try:
             definitions = self.dynamic_tools(turn.tools)
-            text = turn_input(turn.messages, summary=turn.history_summary)
+            # A live thread already holds the conversation: only the new message goes in.
+            text = (turn_input(turn.messages[-1:]) if resume
+                    else turn_input(turn.messages, summary=turn.history_summary))
         except ValueError as error:
             return Failed(run_id, "other", str(error), unsent=True, permanent=True)
         names = [definition["name"] for definition in definitions]
@@ -386,15 +424,17 @@ class CodexEngine:
         ) if part)
         thread_params = thread_start_params(
             cwd=self._connection.cwd, model=turn.model, base_instructions=instructions,
-            dynamic_tools=definitions, disabled_features=KB_DISABLED_FEATURES,
+            dynamic_tools=definitions, disabled_features=KB_DISABLED_FEATURES, ephemeral=plan is None,
         )
+        opening = (thread_resume_params(thread_params, plan.session_id) if resume and plan is not None
+                   and plan.session_id else thread_params)
         turn_params: dict[str, Any] = {
             "input": [{"type": "text", "text": text, "text_elements": []}],
             **({"model": turn.model} if turn.model else {}),
             **({"effort": turn.effort} if turn.effort else {}),
             **({"outputSchema": dict(turn.response_schema)} if turn.response_schema is not None else {}),
         }
-        largest = max(len(json.dumps(thread_params)), len(json.dumps(turn_params)))
+        largest = max(len(json.dumps(opening)), len(json.dumps(turn_params)))
         if largest > MAX_MESSAGE_BYTES - 4096:
             return Failed(run_id, "other", "This request is too long for Codex. Send a shorter text.",
                           unsent=True, permanent=True)
@@ -421,13 +461,18 @@ class CodexEngine:
             if names and registry is not None and run.thread_id is not None:
                 rpc.bind_tools(_RunTools(run, registry, names, run.thread_id, turn_id))
 
+        if resume and plan is not None:
+            lost = await self._resume(run, rpc, opening, plan.before_turn_id)
+            if lost is not None:
+                return lost
         try:
-            started = await rpc.request("thread/start", thread_params)
-            thread_id = started["thread"]["id"]
-            if not isinstance(thread_id, str) or not thread_id:
-                raise TypeError("thread id")
-            run.thread_id = thread_id
-            await rpc.request("turn/start", {"threadId": thread_id, **turn_params}, on_result=bind)
+            if not resume:
+                started = await rpc.request("thread/start", thread_params)
+                thread_id = started["thread"]["id"]
+                if not isinstance(thread_id, str) or not thread_id:
+                    raise TypeError("thread id")
+                run.thread_id = thread_id
+            await rpc.request("turn/start", {"threadId": run.thread_id, **turn_params}, on_result=bind)
         except CodexRpcError:
             if run.cancelled:
                 return Failed(run_id, "cancelled", STOPPED)
@@ -435,6 +480,27 @@ class CodexEngine:
                           "Codex refused to start the answer. Check the selected model and settings.")
         except (KeyError, TypeError):
             return Failed(run_id, "incompatible", "Codex replied in an unexpected format.")
+        return None
+
+    async def _resume(self, run: _Run, rpc: CodexRpc, params: dict[str, Any],
+                      before_turn_id: str | None) -> Failed | None:
+        """``thread/resume`` (+ ``thread/revert``) of the chat's live thread; ``session_lost`` when Codex
+        can't (gone, "active writer", refused the revert, an unexpected reply) — nothing was sent."""
+        thread_id = str(params["threadId"])
+        try:
+            resumed = await rpc.request("thread/resume", params)
+            echoed = resumed["thread"]["id"] if isinstance(resumed, dict) else None
+            if echoed != thread_id:
+                raise TypeError("thread id")
+            run.thread_id = thread_id
+            if before_turn_id is not None:
+                await rpc.request("thread/revert", {"threadId": thread_id, "beforeTurnId": before_turn_id})
+        except CodexRpcError:
+            if run.cancelled:
+                return Failed(run.run_id, "cancelled", STOPPED)
+            return Failed(run.run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
+        except (KeyError, TypeError):
+            return Failed(run.run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
         return None
 
     async def _translate(self, run: _Run, message: dict[str, Any]) -> list[AgentEvent]:
@@ -447,6 +513,11 @@ class CodexEngine:
             return []
         if params.get("threadId") != run.thread_id:
             return []
+        if method == "thread/compacted":  # may never come (spike): the item below is what counts
+            if run.compactions:
+                return []
+            run.compactions.add("thread/compacted")
+            return [Compacted(run.run_id)]
         if method == "turn/completed":
             turn = params.get("turn")
             if not isinstance(turn, dict) or turn.get("id") != run.turn_id:
@@ -464,6 +535,13 @@ class CodexEngine:
             if isinstance(error, dict) and params.get("willRetry") is not True:
                 run.error_info = error.get("codexErrorInfo")
             return []
+        item = params.get("item")
+        if method == "item/completed" and isinstance(item, dict) and item.get("type") == "contextCompaction":
+            key = str(item.get("id") or len(run.compactions))
+            if key in run.compactions or "thread/compacted" in run.compactions:
+                return []
+            run.compactions.add(key)
+            return [Compacted(run.run_id)]
         return _text(run, method, params)
 
     async def _finish(self, run: _Run, turn: dict[str, Any]) -> Completed | Failed:
@@ -627,30 +705,6 @@ def _model_page(reply: object) -> tuple[list[ModelOption], str | None]:
 
 
 def turn_input(messages: Sequence[TurnMessage], *, summary: str | None = None) -> str:
-    """The text of ``turn/start``: bounded earlier history as untrusted data, then the current message."""
-    if not messages or messages[-1].role != "user" or not messages[-1].content.strip():
-        raise ValueError("The conversation must end with the user's message.")
-    current = messages[-1].content
-    history = _history(messages[:-1], summary)
-    if not history:
-        return current
-    return f"{history}\n\nCurrent user message:\n{current}"
-
-
-def _history(messages: Sequence[TurnMessage], summary: str | None = None) -> str:
-    """The shared bounded window (``agents.history``), one JSON object per message; a long chat's
-    summary of the messages left out goes first."""
-    kept = window(messages)
-    told = summary if kept.omitted else None
-    head = (f"{SUMMARY_NOTE}\n" + untrusted_block("chat summary", told) + "\n\n") if told else ""
-    lines = [json.dumps({"note": omitted_note(kept.omitted, bool(told))})] if kept.omitted else []
-    for message in kept.messages:
-        entry: dict[str, str] = {"role": message.role}
-        if message.role == "assistant":
-            entry["agent"] = ENGINE_LABELS.get(message.engine or "", "unknown")
-        entry["content"] = message.content
-        lines.append(json.dumps(entry, ensure_ascii=False))
-    if not kept.messages:
-        return ""
-    return (head + "Earlier messages of this chat, oldest first, one JSON object per line:\n"
-            + untrusted_block("chat history", "\n".join(lines)))
+    """The text of ``turn/start``: bounded earlier history as untrusted data, then the current message
+    (``agents.history.seed_prompt``, the one seed serializer, decision 13)."""
+    return seed_prompt(messages, summary)

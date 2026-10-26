@@ -30,15 +30,29 @@ def dynamic_tool(name: str, description: str, input_schema: Mapping[str, Any]) -
 
 def thread_start_params(
     *, cwd: Path, model: str | None, base_instructions: str, dynamic_tools: list[dict[str, Any]],
-    disabled_features: Iterable[str] = DISABLED_FEATURES,
+    disabled_features: Iterable[str] = DISABLED_FEATURES, ephemeral: bool = True,
 ) -> dict[str, Any]:
-    """Isolated ephemeral thread: no environments (files/shell), no approvals, no web, features off."""
+    """Isolated thread: no environments (files/shell), no approvals, no web, features off.
+
+    ``ephemeral=False`` (N6): the live thread of a chat, kept in SKAZ's ``CODEX_HOME`` until SKAZ
+    deletes it (``thread/delete``) with the chat, on an engine switch or a sign-out."""
     return {
-        "cwd": str(cwd), **({"model": model} if model else {}), "ephemeral": True,
+        "cwd": str(cwd), **({"model": model} if model else {}), "ephemeral": ephemeral,
         "environments": [], "approvalPolicy": "never",
         "config": {"web_search": "disabled", **{f"features.{name}": False for name in disabled_features}},
         "baseInstructions": base_instructions,
         "dynamicTools": dynamic_tools,
+    }
+
+
+def thread_resume_params(start: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
+    """N6: ``thread/resume`` of a chat's live thread in a new process, with the same isolated config it
+    was started with (codex 0.160, measured: the thread keeps its ``dynamicTools``; ``excludeTurns``
+    keeps the reply small). Instructions and tools are the thread's own and can't change here."""
+    return {
+        "threadId": thread_id, "cwd": start["cwd"],
+        **({"model": start["model"]} if start.get("model") else {}),
+        "approvalPolicy": start["approvalPolicy"], "config": deepcopy(start["config"]), "excludeTurns": True,
     }
 
 

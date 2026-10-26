@@ -15,7 +15,7 @@ from ..agents.hub import AgentsHub
 from ..agents.last_choice import LastChoice
 from ..agents.model_prefs import Change, ModelPrefs, PrefsError
 from ..agents.opencode import MIN_OPENCODE_VERSION
-from ..agents.registry import AgentView, EngineUnavailable
+from ..agents.registry import NO_SIGN_OUT, AgentView, EngineUnavailable
 from ..agents.web import TOOL_WEB, web_support
 from ..agents.web_runner import known_searcher
 from ..errors import KnowledgeError
@@ -226,11 +226,16 @@ async def sign_in_progress(engine: KbEngineId, hub: HubDep,
 
 
 @router.post("/{engine}/logout")
-async def logout_agent(engine: KbEngineId, hub: HubDep) -> KbAgent:
+async def logout_agent(engine: KbEngineId, hub: HubDep, request: Request) -> KbAgent:
     """Sign out of an agent in SKAZ's own folder only, then check it again: Codex (``account/logout``
     in SKAZ's ``CODEX_HOME``) and OpenCode (``opencode auth logout`` per provider in SKAZ's folder).
     Claude Code uses this Mac's own sign-in and Hermes signs in per provider: 409 with the reason.
+    N6 (decision 9): the chats' live sessions with the agent are deleted first (what can't be deleted
+    now stays queued and is retried).
     """
+    chats = getattr(request.app.state.runtime, "kb_chats", None)
+    if chats is not None and engine not in NO_SIGN_OUT:
+        await chats.end_sessions(engine)
     try:
         view = await hub.registry.logout(engine)
     except EngineUnavailable as error:

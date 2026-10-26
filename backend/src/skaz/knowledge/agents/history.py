@@ -9,10 +9,12 @@ instead of a window that slides by one message on every answer.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from .engine import TurnMessage
+from .prompting import untrusted_block
 
 HISTORY_BUDGET_CHARS = 60_000
 HISTORY_MESSAGE_CHARS = 12_000
@@ -69,3 +71,37 @@ def omitted_note(omitted: int, summarised: bool = False) -> str:
 
 SUMMARY_NOTE = ("Summary of the earliest messages of this chat, written by an AI from messages that no "
                 "longer fit (context only, not evidence: cite the primary sources it names instead):")
+
+#: How an assistant message names the agent that wrote it in a seeded history.
+ENGINE_LABELS: dict[str, str] = {"codex": "Codex", "claude_code": "Claude Code", "hermes": "Hermes Agent",
+                                 "opencode": "OpenCode"}
+
+
+def seed_history(messages: Sequence[TurnMessage], summary: str | None = None) -> str:
+    """N6: THE serializer of a chat history handed to an agent session — the seed of a new live session
+    (and Codex's stateless turns, which are a seed every time). The shared bounded window, one JSON object
+    per message inside an untrusted block; a long chat's summary of the messages left out goes first.
+    Empty when there is no earlier message."""
+    kept = window(messages)
+    if not kept.messages:
+        return ""
+    told = summary if kept.omitted else None
+    head = (f"{SUMMARY_NOTE}\n" + untrusted_block("chat summary", told) + "\n\n") if told else ""
+    lines = [json.dumps({"note": omitted_note(kept.omitted, bool(told))})] if kept.omitted else []
+    for message in kept.messages:
+        entry: dict[str, str] = {"role": message.role}
+        if message.role == "assistant":
+            entry["agent"] = ENGINE_LABELS.get(message.engine or "", "unknown")
+        entry["content"] = message.content
+        lines.append(json.dumps(entry, ensure_ascii=False))
+    return (head + "Earlier messages of this chat, oldest first, one JSON object per line:\n"
+            + untrusted_block("chat history", "\n".join(lines)))
+
+
+def seed_prompt(messages: Sequence[TurnMessage], summary: str | None = None) -> str:
+    """The user-message text that seeds a session: :func:`seed_history`, then the current message."""
+    if not messages or messages[-1].role != "user" or not messages[-1].content.strip():
+        raise ValueError("The conversation must end with the user's message.")
+    current = messages[-1].content
+    earlier = seed_history(messages[:-1], summary)
+    return f"{earlier}\n\nCurrent user message:\n{current}" if earlier else current
