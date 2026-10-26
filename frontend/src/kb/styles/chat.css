@@ -135,10 +135,14 @@
 .kb-md > * + * { margin-top: 8px; }
 .kb-md p { margin: 0; }
 .kb-md > * + p { margin-top: 8px; } /* `p { margin: 0 }` above must not undo the gap between blocks */
-.kb-md h3, .kb-md h4, .kb-md h5 { font-size: var(--t-md); font-weight: 700; margin: 14px 0 0; }
-/* Answer headings keep their order visible (QA D15): # > ## > ###…, all smaller than the chat title. */
-.kb-md h3 { font-size: var(--t-lg); }
-.kb-md h5 { font-size: var(--t-sm); }
+/* Answer headings (bug 3, 2026-10-26): # > ## > ### > ####…, every one at least the body size and
+   bold, set apart from the text above. They may be larger than the chat title (that is chrome). */
+.kb-md h3, .kb-md h4, .kb-md h5, .kb-md h6 { font-weight: 700; line-height: 1.3; margin: 18px 0 0; }
+.kb-md > :first-child { margin-top: 0; }
+.kb-md h3 { font-size: var(--t-h1); }
+.kb-md h4 { font-size: var(--t-h2); }
+.kb-md h5 { font-size: var(--t-h3); }
+.kb-md h6 { font-size: var(--t-md); }
 .kb-md ul + p, .kb-md ol + p, .kb-md pre + p, .kb-md blockquote + p { margin-top: 10px; }
 .kb-md ul, .kb-md ol { padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 .kb-md ul { list-style: disc; }

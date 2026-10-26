@@ -61,6 +61,10 @@ html[data-kb-ui] {
   --t-lg: 17px;
   --t-xl: 20px;
   --t-xxl: 26px;
+  /* Headings of generated text (answers, wiki pages): # ## ### — #### and deeper use --t-md (bug 3). */
+  --t-h1: 22px;
+  --t-h2: 19px;
+  --t-h3: 16.5px;
 
   /* Radii, spacing (4px rhythm), fixed chrome heights */
   --kb-r-xs: 5px;
@@ -90,6 +94,9 @@ html[data-kb-ui][data-text-size='s'] {
   --t-lg: 16px;
   --t-xl: 19px;
   --t-xxl: 24px;
+  --t-h1: 20px;
+  --t-h2: 17.5px;
+  --t-h3: 15.5px;
 }
 
 html[data-kb-ui][data-text-size='l'] {
@@ -100,6 +107,9 @@ html[data-kb-ui][data-text-size='l'] {
   --t-lg: 18px;
   --t-xl: 21px;
   --t-xxl: 27px;
+  --t-h1: 24px;
+  --t-h2: 20.5px;
+  --t-h3: 17.5px;
 }
 
 /* Dark — inversion of the pair (#1E1F21 / #F9F8F3). Declared twice: system and forced. */
