@@ -5,7 +5,8 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
 * Claude Code — https://code.claude.com/docs/en/setup ("Native Install
   (Recommended)", macOS/Linux/WSL): ``curl -fsSL https://claude.ai/install.sh | bash``.
   Installs to ``~/.local/bin/claude`` (launcher) and ``~/.local/share/claude``;
-  no administrator rights. Re-running it installs the latest version (update).
+  no administrator rights. Updates use the agent's own command (``claude update``), never the
+  installer again: it would put a second copy next to an npm/brew install (M1).
 * Codex CLI — https://github.com/openai/codex (README) and
   https://developers.openai.com/codex/cli: ``curl -fsSL https://chatgpt.com/codex/install.sh | sh``.
 * OpenCode — https://opencode.ai/docs/ ("Install"): ``curl -fsSL https://opencode.ai/install | bash``
@@ -87,7 +88,9 @@ HERMES_ACP_EXTRA = ("{install_dir}/scripts/run-in-hermes-env", "python", "-c",
 
 
 def _claude(action: Action) -> tuple[Step, ...]:
-    if action == "upgrade":  # ``claude update|upgrade``: "Check for updates and install if available"
+    # ``claude update|upgrade``: "Check for updates and install if available". "Needs an update" uses it
+    # too (M1): the official installer would put a second copy next to an npm/brew install.
+    if action in ("update", "upgrade"):
         return (Step("Update Claude Code", ("{binary}", "update")),)
     if action == "rollback":  # ``claude install [stable|latest|<version>]``
         return (Step("Install the earlier Claude Code", ("{binary}", "install", "{version}")),)
@@ -95,7 +98,9 @@ def _claude(action: Action) -> tuple[Step, ...]:
 
 
 def _codex(action: Action) -> tuple[Step, ...]:
-    if action == "upgrade":  # ``codex update``: "Update Codex to the latest version" (npm, brew, installer)
+    # ``codex update``: "Update Codex to the latest version" (npm, brew, installer) — for "Needs an update"
+    # too (M1), never the official installer next to an npm/brew install.
+    if action in ("update", "upgrade"):
         return (Step("Update Codex", ("{binary}", "update")),)
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
 

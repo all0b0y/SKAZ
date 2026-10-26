@@ -173,6 +173,24 @@ async def test_outdated_after_install_is_a_failure_with_update_reason(tmp_path: 
     assert task.state == "failed" and "can't find Claude Code" in (task.reason or "")
 
 
+@pytest.mark.parametrize(("engine", "argv"), [
+    ("codex", ["/Users/me/.local/bin/codex", "update"]),
+    ("claude_code", ["/Users/me/.local/bin/claude", "update"]),
+    ("opencode", ["/Users/me/.local/bin/opencode", "upgrade"]),
+])
+async def test_update_of_an_outdated_agent_runs_its_own_command_not_the_installer(
+        tmp_path: Path, engine: EngineId, argv: list[str]) -> None:
+    """M1 follow-up (U1): "Needs an update" uses the agent's own update command, like the offered
+    update — the official curl installer would put a second copy next to an npm/brew install."""
+    assert RECIPES[engine].plan("update") == RECIPES[engine].plan("upgrade")
+    executor = FakeExecutor([([], 0)])
+    installs, _ = manager(tmp_path, executor)
+    task = await finished(installs.start(engine, "update"))
+    assert task.state == "succeeded"
+    assert [step["argv"] for step in executor.started] == [argv]
+    assert not any("curl" in part for part in executor.started[0]["argv"])
+
+
 async def test_hermes_procedure_adds_the_acp_extra_and_checks_it(tmp_path: Path) -> None:
     executor = FakeExecutor([([], 0), ([], 0), (["Hermes ACP check OK"], 0)])
     installs, _ = manager(tmp_path, executor)
