@@ -35,6 +35,12 @@ const SPRING_LEN = 56;
 const SPRING_K = 0.045;
 const CENTER_K = 0.014;
 const DAMP = 0.82;
+/** A pair closer than this repels as if it were this far: two nodes on one spot don't fling apart. */
+const NEAR_D2 = 16;
+/** The farthest a node moves in one step (graph units): no step can throw it off the canvas. */
+const MAX_SPEED = 24;
+/** Up to this many links a spring has its full strength; a hub's springs share it (bug 2). */
+const FULL_SPRING_DEGREE = 6;
 export const ALPHA_MIN = 0.002;
 export const ZOOM_MIN = 0.3;
 export const ZOOM_MAX = 4;
@@ -62,7 +68,15 @@ export function createSim(graph: KbGraph, seed = 7): Sim {
   return { nodes, edges, byId, adj, alpha: 1 };
 }
 
-/** One step of the simulation at strength `alpha`. */
+/**
+ * One step of the simulation at strength `alpha`.
+ *
+ * Bug 2 (2026-10-26): with hundreds of links a hub summed hundreds of full-strength springs and the
+ * explicit step overshot further each frame — coordinates reached ~1e30 and the canvas drew grey
+ * wedges. Now a spring's strength is shared out by the smaller end's degree (as in d3-force), the
+ * better-linked end moves less, near pairs can't produce unbounded repulsion, a step has a speed limit,
+ * and a node that still ends up not finite goes back to the centre.
+ */
 export function tick(sim: Sim, alpha = sim.alpha): void {
   const N = sim.nodes;
   for (let i = 0; i < N.length; i += 1) {
@@ -71,8 +85,8 @@ export function tick(sim: Sim, alpha = sim.alpha): void {
       const q = N[j]!;
       let dx = q.x - p.x;
       let dy = q.y - p.y;
-      const d2 = dx * dx + dy * dy + 0.01;
-      const d = Math.sqrt(d2);
+      const d2 = Math.max(dx * dx + dy * dy, NEAR_D2);
+      const d = Math.sqrt(dx * dx + dy * dy) || 1;
       const f = (REPULSE / d2) * alpha;
       dx /= d; dy /= d;
       p.vx -= dx * f; p.vy -= dy * f;
@@ -83,16 +97,23 @@ export function tick(sim: Sim, alpha = sim.alpha): void {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const d = Math.sqrt(dx * dx + dy * dy) || 1;
-    const f = (d - SPRING_LEN) * SPRING_K * alpha;
-    a.vx += (dx / d) * f; a.vy += (dy / d) * f;
-    b.vx -= (dx / d) * f; b.vy -= (dy / d) * f;
+    const da = sim.adj.get(a.id)?.size ?? 1;
+    const db = sim.adj.get(b.id)?.size ?? 1;
+    const share = Math.min(1, FULL_SPRING_DEGREE / Math.max(1, Math.min(da, db)));
+    const f = (d - SPRING_LEN) * SPRING_K * alpha * share * 2;
+    const toA = db / (da + db); // the end with fewer links does more of the moving
+    a.vx += (dx / d) * f * toA; a.vy += (dy / d) * f * toA;
+    b.vx -= (dx / d) * f * (1 - toA); b.vy -= (dy / d) * f * (1 - toA);
   }
   for (const n of N) {
     if (n.fixed) { n.vx = 0; n.vy = 0; continue; }
     n.vx -= n.x * CENTER_K * alpha;
     n.vy -= n.y * CENTER_K * alpha;
     n.vx *= DAMP; n.vy *= DAMP;
+    const speed = Math.hypot(n.vx, n.vy);
+    if (speed > MAX_SPEED) { n.vx *= MAX_SPEED / speed; n.vy *= MAX_SPEED / speed; }
     n.x += n.vx; n.y += n.vy;
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) { n.x = 0; n.y = 0; n.vx = 0; n.vy = 0; }
   }
 }
 
