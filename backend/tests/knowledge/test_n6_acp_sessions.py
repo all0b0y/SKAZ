@@ -22,6 +22,7 @@ from skaz.knowledge.agents.engine import (
     Completed,
     Failed,
     SessionBound,
+    SessionDeleteDeferred,
     SessionPlan,
     TextDelta,
     TurnMessage,
@@ -192,18 +193,55 @@ async def test_hermes_delete_session_raises_when_hermes_keeps_it(tmp_path: Path)
     assert engine.chat_sessions() == [HERMES_ID]  # still SKAZ's: the chat store retries
 
 
-async def test_the_start_up_prune_never_runs_while_a_chat_session_is_kept(tmp_path: Path) -> None:
+async def test_the_start_up_prune_spares_the_chat_sessions_and_their_lineage(tmp_path: Path) -> None:
     """``prune --source acp`` deletes every ENDED ACP session and a chat's session is ended between
-    answers (Hermes 0.22 ``session_acp_lifecycle.end_idle_acp_session``)."""
-    engine, fake = h.engine_for(tmp_path, h.scenario(), mcp=RecordingMcp())
+    answers (Hermes 0.22 ``session_acp_lifecycle.end_idle_acp_session``). FIX-1: the chat sessions are
+    pinned first — Hermes' keep flag, which prune skips together with the continuations of a pinned
+    session (v0.22.1+179 ``hermes_state_maintenance._not_pinned_sql``) — so leftovers of stateless runs
+    are still pruned while chats keep their sessions."""
+    engine, fake = h.engine_for(tmp_path, h.scenario(missing_sessions=["sess-old"]), mcp=RecordingMcp())
+    await h.drain(engine, chat_turn(START))
+    engine._adopt("sess-old")  # a chat session Hermes no longer has: "No session" — nothing to protect
+    restarted = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home")
+    await restarted.sweep_history()
+    calls = [call["args"] for call in fake.records("sessions")]
+    assert calls[-2:] == [["pin", HERMES_ID, "sess-old"], ["prune", "--source", "acp", "--yes"]]
+    await restarted.delete_session(HERMES_ID)  # the chat was deleted: nothing of SKAZ's is kept
+    restarted._release_chat("sess-old")
+    again = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home")
+    await again.sweep_history()
+    assert [call["args"] for call in fake.records("sessions")][-1] == ["prune", "--source", "acp", "--yes"]
+
+
+async def test_without_pin_the_start_up_prune_never_runs_while_a_chat_session_is_kept(tmp_path: Path) -> None:
+    engine, fake = h.engine_for(tmp_path, h.scenario(no_pin=True), mcp=RecordingMcp())
     await h.drain(engine, chat_turn(START))
     restarted = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home")
     await restarted.sweep_history()
     assert ["prune", "--source", "acp", "--yes"] not in [call["args"] for call in fake.records("sessions")]
-    await restarted.delete_session(HERMES_ID)  # the chat was deleted: nothing of SKAZ's is kept
-    again = HermesEngine(tmp_path / "data", locate_cli=fake.locate, user_home=tmp_path / "home")
-    await again.sweep_history()
-    assert [call["args"] for call in fake.records("sessions")][-1] == ["prune", "--source", "acp", "--yes"]
+
+
+async def test_hermes_given_up_session_leaves_skazs_lists(tmp_path: Path) -> None:
+    engine, fake = h.engine_for(tmp_path, h.scenario(), mcp=RecordingMcp())
+    await h.drain(engine, chat_turn(START))
+    await engine.forget_session(HERMES_ID)
+    assert engine.chat_sessions() == [] and HERMES_ID not in engine.pending_history()
+    assert [call["args"] for call in fake.records("sessions")][-1] == ["unpin", HERMES_ID]
+
+
+async def test_hermes_missing_or_repairing_defers_the_deletion(tmp_path: Path) -> None:
+    engine, _fake = h.engine_for(tmp_path, h.scenario(), mcp=RecordingMcp())
+    await h.drain(engine, chat_turn(START))
+    marker = engine.home / "installs" / "x" / ".repair-incomplete"  # a repair stopped midway
+    marker.parent.mkdir(parents=True)
+    marker.write_text("")
+    assert engine.repair_unfinished()
+    with pytest.raises(SessionDeleteDeferred):
+        await engine.delete_session(HERMES_ID)
+    assert engine.chat_sessions() == [HERMES_ID]
+    missing = HermesEngine(tmp_path / "data", locate_cli=lambda _name: None, user_home=tmp_path / "home")
+    with pytest.raises(SessionDeleteDeferred):
+        await missing.delete_session(HERMES_ID)
 
 
 async def test_hermes_tools_changed_notice_is_never_an_answer_or_a_tools_listing(tmp_path: Path) -> None:
@@ -343,3 +381,38 @@ async def test_opencode_failure_before_the_handover_still_deletes_the_new_sessio
     assert isinstance(events[-1], Failed) and not any(isinstance(event, SessionBound) for event in events)
     assert [item["id"] for item in fake.records("session_delete")] == [OPENCODE_ID]
     assert not (engine.sessions_dir / f"{OPENCODE_ID}.json").exists()
+
+
+
+async def test_opencode_start_up_sweep_removes_only_kept_sessions_nothing_knows(tmp_path: Path) -> None:
+    import os
+    import time
+    engine, fake = o.engine_for(tmp_path, o.scenario(), mcp=RecordingMcp())
+    await o.drain(engine, chat_turn(START, model=o.SONNET))
+    kept = engine.sessions_dir / f"{OPENCODE_ID}.json"
+    orphan = engine.sessions_dir / "ses_orphan.json"  # SKAZ quit between the handover and the record
+    fresh = engine.sessions_dir / "ses_fresh.json"  # may be a session being handed over right now
+    for path in (orphan, fresh):
+        path.write_text(kept.read_text(encoding="utf-8"), encoding="utf-8")
+    old = time.time() - 3600
+    for path in (kept, orphan):
+        os.utime(path, (old, old))
+    await engine.sweep_sessions(lambda session_id: session_id == OPENCODE_ID)
+    await engine.settle_history()
+    assert kept.is_file() and fresh.is_file() and not orphan.exists()
+    assert [item["id"] for item in fake.records("session_delete")] == ["ses_orphan"]
+    assert engine.pending_history() == []
+
+
+async def test_opencode_given_up_session_drops_its_kept_instructions(tmp_path: Path) -> None:
+    engine, _fake = o.engine_for(tmp_path, o.scenario(), mcp=RecordingMcp())
+    await o.drain(engine, chat_turn(START, model=o.SONNET))
+    engine.forget_session(OPENCODE_ID)
+    assert not (engine.sessions_dir / f"{OPENCODE_ID}.json").exists()
+
+
+async def test_opencode_delete_without_the_cli_is_deferred(tmp_path: Path) -> None:
+    from skaz.knowledge.agents.opencode import OpenCodeEngine
+    engine = OpenCodeEngine(tmp_path / "data", locate_cli=lambda _name: None, user_home=tmp_path / "home")
+    with pytest.raises(SessionDeleteDeferred):
+        await engine.delete_session("ses_x")

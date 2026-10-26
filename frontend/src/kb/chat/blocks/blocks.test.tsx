@@ -142,10 +142,14 @@ describe('P1: answer blocks in a chat answer', () => {
     expect(sent()).toHaveLength(0);
     await user.click(within(bad).getByRole('button', { name: 'Ask the agent to fix' }));
     await waitFor(() => expect(sent()).toHaveLength(1));
-    const text = (sent()[0]!.body as { text: string }).text;
-    expect(text).toContain('```skaz-block');
-    expect(text).toContain('{"type": "mindmap"}');
-    expect(text).toContain('Reply in English.');
+    // FIX-1 F2.7 (migrated: the data and the error were part of the user's text): the request names the
+    // stored block; the backend reads its data from the answer and gives it to the agent as data.
+    const body = sent()[0]!.body as { text: string; quotes: unknown[] };
+    expect(body.text).toContain('```skaz-block');
+    expect(body.text).not.toContain('mindmap');
+    expect(body.text).toContain('Reply in English.');
+    expect(body.quotes).toEqual([{ source: 'chat', id: 'c1', message_id: 'c1-a2', block_id: 'blk-bad',
+      text: '{"type": "mindmap"}' }]);
     expect(within(bad).getByRole('button', { name: 'Asked the agent' })).toBeDisabled();
   });
 

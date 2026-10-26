@@ -43,7 +43,7 @@ def updates_view(view: UpdatesView) -> KbAgentUpdates:
             engine=agent.engine, name=agent.name, channel=agent.channel, installed=agent.installed,
             latest=agent.latest, available=agent.available, unseen=agent.unseen, skipped=agent.skipped,
             busy=agent.busy, phase=agent.phase, action=agent.action, task_id=agent.task_id, note=agent.note,
-            services_note=agent.services_note, checked_at=agent.checked_at,
+            services_note=agent.services_note, checked_at=agent.checked_at, waiting=list(agent.waiting),
             failure=KbAgentUpdateFailure(
                 reason=agent.failure.reason, command=agent.failure.command, output=list(agent.failure.output),
                 previous=agent.failure.previous, rollback=agent.failure.rollback,

@@ -298,6 +298,7 @@ async def test_a_session_claude_code_cant_resume_is_lost_before_anything_is_sent
     fake.set({"silent_resume_failure": silent})
     engine = engine_for(tmp_path, fake)
     gone = "0b7e3c1e-4c5f-4b0e-9d7a-1f2e3d4c5b6a"
+    engine.folder.save_prompt(gone, "Instructions at start.")  # SKAZ kept it; Claude Code lost the session
     events = await drain(engine, chat_turn("Вопрос", SessionPlan("continue", gone)))
     assert len(events) == 1 and isinstance(events[0], Failed)
     failed = events[0]
@@ -405,3 +406,55 @@ def test_the_user_folder_is_never_named(tmp_path: Path, fake: FakeClaude) -> Non
     engine = engine_for(tmp_path, fake)
     home_claude = Path(os.path.expanduser("~")) / ".claude"
     assert engine.config_dir is not None and not engine.config_dir.is_relative_to(home_claude)
+
+
+# -- FIX-1 (R1 audit) ----------------------------------------------------------------------------------
+
+
+async def test_a_session_without_its_saved_instructions_is_lost_without_starting_claude(
+        tmp_path: Path, fake: FakeClaude) -> None:
+    """A continue must run under the instructions the session started with; without them it is a new
+    session (``session_lost``), never a resume under today's instructions."""
+    engine = engine_for(tmp_path, fake)
+    session = await started(engine)
+    engine.folder.prompt_file(session).unlink()
+    runs = len(fake.runs())
+    (failed,) = await drain(engine, chat_turn("Вопрос", SessionPlan("continue", session), run_id="run-2"))
+    assert isinstance(failed, Failed) and failed.session_lost and failed.unsent
+    assert len(fake.runs()) == runs
+
+
+def _age(path: Path, seconds: float) -> None:
+    import os as _os
+    import time as _time
+    moment = _time.time() - seconds
+    _os.utime(path, (moment, moment))
+
+
+async def test_the_start_up_sweep_removes_only_sessions_nothing_knows(tmp_path: Path,
+                                                                      fake: FakeClaude) -> None:
+    engine = engine_for(tmp_path, fake)
+    kept = await started(engine)
+    queued = "1b7e3c1e-4c5f-4b0e-9d7a-1f2e3d4c5b6a"  # waits in SKAZ's deletion list
+    orphan = "2b7e3c1e-4c5f-4b0e-9d7a-1f2e3d4c5b6a"  # SKAZ quit between the start and the record
+    fresh = "3b7e3c1e-4c5f-4b0e-9d7a-1f2e3d4c5b6a"  # may be a session starting right now
+    for session_id in (queued, orphan, fresh):
+        engine.folder.open_session(session_id)
+        engine.folder.save_prompt(session_id, "Instructions.")
+    for session_id in (kept, queued, orphan):
+        _age(engine.folder.prompt_file(session_id), 3600)
+        _age(engine.folder.session_dir(session_id), 3600)
+    await engine.sweep_sessions(lambda session_id: session_id in {kept, queued})
+    assert engine.folder.prompt(kept) is not None and engine.folder.prompt(queued) is not None
+    assert engine.folder.prompt(fresh) is not None
+    assert engine.folder.prompt(orphan) is None and not engine.folder.session_dir(orphan).exists()
+    purged = [item["argv"] for item in fake.records("start") if item["argv"][:2] == ["project", "purge"]]
+    assert purged == [["project", "purge", str(engine.folder.session_dir(orphan)), "--yes"]]
+
+
+async def test_a_given_up_session_leaves_no_local_files(tmp_path: Path, fake: FakeClaude) -> None:
+    engine = engine_for(tmp_path, fake)
+    session = await started(engine)
+    engine.forget_session(session)
+    assert engine.folder.prompt(session) is None and not engine.folder.session_dir(session).exists()
+    engine.forget_session("not-a-session")  # never a path

@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from ..agents.web import site_of
+from ..answer_blocks import md
 from ..answer_blocks.md import Refs
 from ..answer_blocks.part import BlockPart, MaterialSource, PageSource
 from ..answer_blocks.registry import KbAnswerBlock
@@ -113,16 +114,11 @@ def copy_refs(sources: list[KbBlockCiteSource | KbBlockPageSource | KbBlockWebSo
             if cite.start_ms is not None:
                 time = format_timestamp(cite.start_ms)
             where = f" · {time}" if time else f" · p. {cite.page}" if cite.page is not None else ""
-            labels.append(f"[{_label(cite.material_title or 'Source')}{where}]" if cite.available
+            labels.append(f"[{md.label(cite.material_title or 'Source')}{where}]" if cite.available
                           else "[source no longer in the library]")
         elif isinstance(source, KbBlockPageSource):
-            labels.append(f"[{_label(source.page.title)}]")
+            labels.append(f"[{md.label(source.page.title)}]")
         else:
-            url = source.url.replace(")", "%29")
-            labels.append(f"[{_label(source.title or source.site or source.url)}]({url})")
+            labels.append(md.link(source.title or source.site or source.url, source.url))
         times.append(time)
     return Refs(labels, times)
-
-
-def _label(value: str) -> str:
-    return " ".join(value.replace("[", "(").replace("]", ")").split())

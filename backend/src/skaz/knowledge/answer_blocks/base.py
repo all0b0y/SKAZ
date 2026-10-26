@@ -160,8 +160,9 @@ class Items:
         except ValidationError:
             self.hide()
             return None
-        texts = {name: value for name, value in item.model_dump().items()
-                 if isinstance(value, str) and name not in ("id", "cite", "basis")}
+        # The item's own text fields only: no dump of nested data (a tree node's children may nest deep).
+        texts = {name: value for name in type(item).model_fields
+                 if isinstance(value := getattr(item, name), str) and name not in ("id", "cite", "basis")}
         if item.cite is not None:
             refs = [item.cite] if isinstance(item.cite, str) else list(item.cite)
         else:
@@ -221,11 +222,13 @@ def required(checked: tuple[Checked, ItemT] | None, what: str) -> tuple[Checked,
 
 
 def envelope(model: type[BlockIn], data: dict[str, Any]) -> Any:
-    """The block's own fields, strictly; an error breaks the block with a short reason."""
+    """The block's own fields, strictly; an error breaks the block with a short reason. Its title is
+    cleaned like an item's text (no reference tokens or invisible characters; empty → none)."""
     try:
-        return model.model_validate(data)
+        block = model.model_validate(data)
     except ValidationError as error:
         raise BlockError(describe(error)) from error
+    return block.model_copy(update={"title": clean(block.title) or None}) if block.title else block
 
 
 def describe(error: ValidationError) -> str:

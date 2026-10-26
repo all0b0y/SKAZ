@@ -25,11 +25,12 @@ import logging
 import sqlite3
 import time
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import UTC
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ...native_io import disk_call
+from ..agents import update_gate
 from ..agents.engine import (
     AgentEngine,
     AgentEvent,
@@ -39,6 +40,7 @@ from ..agents.engine import (
     EngineId,
     Failed,
     SessionBound,
+    SessionDeleteDeferred,
     TextDelta,
     ToolCall,
     ToolSpec,
@@ -59,8 +61,9 @@ from ..ingest.settings import read_settings
 from ..keyed_locks import KeyedLocks
 from ..logsafe import error_note
 from ..markdown.text import name_key
+from ..me import MeError
 from ..me.access import me_store
-from ..me.prompt import marks, snapshot, with_me
+from ..me.prompt import held_after_turn, marks, needs_reseed, snapshot, with_me
 from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
@@ -201,6 +204,9 @@ class _Run:
     compacted: bool = False
     #: Text or a tool call reached the user: the run can't be retried silently.
     produced: bool = False
+    #: The user's own messages that answered the agent's question during this run (the agent got them
+    #: inside its turn): recorded as held with the answer, in chat order.
+    absorbed: list[Message] = field(default_factory=list)
 
 
 class ChatService:
@@ -220,6 +226,13 @@ class ChatService:
         self._deleting: asyncio.Task[None] | None = None
         self._delete_again = False
         self._delete_lock = asyncio.Lock()
+        #: The next pass after a backoff (a failed deletion's retry time).
+        self._delete_timer: asyncio.TimerHandle | None = None
+        #: The start-up sweep of agents' local sessions nothing knows (``sweep_sessions``).
+        self._sweeping: asyncio.Task[None] | None = None
+        #: An engine SKAZ is installing / repairing now: its queued deletions wait (no attempt counted).
+        #: The runtime wires it to the install tasks; an update that holds the agent counts as well.
+        self.hold_deletions: Callable[[str], bool] = lambda _engine: False
         self._agents = agents
         self.tools = tools
         self._text_layer = text_layer or (lambda: IdentityTextLayer())
@@ -424,6 +437,10 @@ class ChatService:
         (user,) = await disk_call(self.repo.add_messages, [user],
                                   {"updated_at": now, "last_preview": preview(user.parts), "unread": False})
         self._feed(chat.id).emit("message", user.id, message=user)
+        # N6: the agent gets this message inside its running turn (the question's answer), so its live
+        # session holds it: recorded with the answer — the next question must not reseed over it.
+        if self._runs.get(chat.id) is run:
+            run.absorbed.append(user)
         assert self.questions is not None
         await self.questions.supersede(chat.id, given.text)
         return user, run.message
@@ -1001,17 +1018,33 @@ class ChatService:
         self._feed(run.chat_id).emit("message", added.id, message=added)
 
     async def _record(self, run: _Run, message: Message) -> None:
-        """A ``done`` answer of a live session: the session now holds its question and answer too."""
+        """A ``done`` answer of a live session: the session now holds its question and answer too —
+        and the user's own messages that answered the agent's question meanwhile (in chat order).
+
+        «Я»: the session's marks stay those of the turn's start, unless the agent changed «Я» in this
+        turn — then they are «Я» after the turn (it saw its own edits), and an always-on skill it wrote
+        counts as held even if it is empty or off by now; a session that so holds something switched off
+        or cleared is dropped at once (decision 6)."""
         bound, decision, question = run.bound, run.decision, run.question
         if bound is None or decision is None or question is None or run.context is None:
             return
         items = [*run.seeded] if decision.plan.mode == "start" else []
-        items += keys(live_entries([question, message]))
+        items += keys(live_entries([question, message, *run.absorbed]))
+        context = run.context
         try:
+            written = {part.skill_id for part in message.parts if isinstance(part, MemoryPart)}
+            now = marks(await disk_call(snapshot, me_store(self.kb))) if written else None
+            if now is not None:
+                context = replace(context, me=held_after_turn(context.me, now, written))
             if not await disk_call(self.sessions.record, run.chat_id, bound.session_id, bound.turn_id, items,
-                                   run.context):
+                                   context):
                 run.bound = None  # this answer no longer holds it
                 self._kick_deletions()  # the session was dropped meanwhile (sign-out): delete it now
+            elif now is not None and needs_reseed(context.me, now):
+                # E.g. Undo of the agent's profile line landed while the answer was finishing.
+                if await disk_call(self.sessions.drop, run.chat_id):
+                    run.bound = None
+                    self._kick_deletions()
         except Exception as error:
             log.error("Recording the agent session of chat answer %s failed: %s", run.run_id,
                       error_note(error))
@@ -1037,41 +1070,121 @@ class ChatService:
             except Exception as error:
                 log.error("Deleting agent sessions failed: %s", error_note(error))
             if not self._delete_again or self._closing:
-                return
+                break
+        try:
+            self._schedule_retry(await disk_call(self.sessions.next_due))
+        except Exception as error:
+            log.error("Scheduling the next agent session deletion failed: %s", error_note(error))
+
+    def _schedule_retry(self, due: datetime | None) -> None:
+        """One pass when the earliest backed-off deletion is due (while SKAZ runs)."""
+        if self._delete_timer is not None:
+            self._delete_timer.cancel()
+            self._delete_timer = None
+        if due is None or self._closing:
+            return
+        delay = max((due - self.sessions.clock()).total_seconds(), 1.0)
+        self._delete_timer = asyncio.get_running_loop().call_later(delay, self._kick_deletions)
 
     def start(self) -> None:
-        """App start: delete the agent sessions left queued by an earlier run (failed or interrupted)."""
+        """App start: every agent session left queued by an earlier run is tried once (whatever its
+        backoff), and the agents' local sessions that no chat and no deletion entry knows are swept."""
+        try:
+            self.sessions.due_now()
+        except Exception as error:
+            log.error("Reading the agent sessions to delete failed: %s", error_note(error))
         self._kick_deletions()
+        with contextlib.suppress(RuntimeError):  # no running loop: nothing to sweep in the background
+            self._sweeping = asyncio.get_running_loop().create_task(self.sweep_sessions(),
+                                                                    name="kb-chat-session-sweep")
+
+    async def sweep_sessions(self) -> None:
+        """Ask each engine that keeps local session files (``sweep_sessions``) to remove those of
+        sessions no chat holds and no deletion waits for (a crash between their start and the record)."""
+        engines = cast(Mapping[str, AgentEngine], self.registry.engines)
+        for engine_id, engine in engines.items():
+            sweep = getattr(engine, "sweep_sessions", None)
+            if not callable(sweep) or self._closing:
+                continue
+            try:
+                known = await disk_call(self.sessions.known, engine_id)
+                await sweep(lambda session_id, known=known: session_id in known)
+            except Exception as error:
+                log.warning("Sweeping the %s sessions failed: %s", engine_id, error_note(error))
+
+    def _deletions_held(self, engine_id: str, engine: object) -> bool:
+        """The agent is being installed, repaired or updated: its sessions wait (no attempt counted)."""
+        try:
+            return bool(self.hold_deletions(engine_id)) or bool(update_gate.blocked(engine))
+        except Exception:
+            return False
 
     async def delete_sessions(self) -> int:
-        """One pass over the "agent sessions to delete" list; returns how many are still queued.
+        """One pass over the due "agent sessions to delete"; returns how many are still queued.
 
-        A failure counts an attempt; after ``MAX_DELETE_ATTEMPTS`` the session is given up (logged by
-        engine and id only). A session a running answer is bound to waits for the next pass; one whose
-        engine can't delete sessions now (not wired) stays queued."""
+        A failure counts an attempt and the next one waits (``DELETE_BACKOFF``); after
+        ``MAX_DELETE_ATTEMPTS`` the session is given up (logged by engine and id only) and the engine
+        drops SKAZ's own local traces of it (``forget_session``). An agent that is missing (the engine
+        raises ``SessionDeleteDeferred``), being installed / repaired / updated costs no attempt. A
+        session a running answer is bound to waits for the next pass; one whose engine can't delete
+        sessions now (not wired) stays queued."""
         async with self._delete_lock:
-            pending = await disk_call(self.sessions.pending)
+            pending = await disk_call(self.sessions.pending, due=True)
             busy = {run.bound.session_id for run in self._runs.values() if run.bound is not None}
             engines = cast(Mapping[str, AgentEngine], self.registry.engines)
             for entry in pending:
-                deleter = getattr(engines.get(entry.engine), "delete_session", None)
-                if entry.session_id in busy or not callable(deleter):
+                engine = engines.get(entry.engine)
+                deleter = getattr(engine, "delete_session", None)
+                if entry.session_id in busy or not callable(deleter) or \
+                        self._deletions_held(entry.engine, engine):
                     continue
                 try:
                     await deleter(entry.session_id)
                 except asyncio.CancelledError:
                     raise
+                except SessionDeleteDeferred:
+                    continue  # the agent isn't there now: not an attempt
                 except Exception as error:
                     attempts = await disk_call(self.sessions.failed, entry.engine, entry.session_id)
                     if attempts >= MAX_DELETE_ATTEMPTS:
                         log.warning("Giving up deleting %s session %s after %d attempts", entry.engine,
                                     entry.session_id, attempts)
+                        await self._forget_session(engine, entry.engine, entry.session_id)
                     else:
                         log.info("Deleting %s session %s failed (%s); retried later", entry.engine,
                                  entry.session_id, type(error).__name__)
                     continue
                 await disk_call(self.sessions.deleted, entry.engine, entry.session_id)
             return len(await disk_call(self.sessions.pending))
+
+    @staticmethod
+    async def _forget_session(engine: object, engine_id: str, session_id: str) -> None:
+        """A given-up session: the engine drops SKAZ's own local traces of it (lists, kept prompts)."""
+        forget = getattr(engine, "forget_session", None)
+        if not callable(forget):
+            return
+        try:
+            result: Any = forget(session_id)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as error:
+            log.warning("Forgetting %s session %s failed: %s", engine_id, session_id, error_note(error))
+
+    async def drop_me_sessions(self) -> int:
+        """«Я» changed (decision 6): every chat's session that holds an always-on skill (Profile, How to
+        work with me) the user switched off or cleared — or holds them while «Я» is off now — is dropped
+        at once (queued for deletion; the next answer seeds a new one). Returns how many."""
+        now = marks(await disk_call(snapshot, me_store(self.kb)))
+        rows = await disk_call(self.sessions.contexts)
+        dropped = 0
+        for chat_id, held in rows:
+            if held is None or not needs_reseed(held.me, now):
+                continue
+            if await disk_call(self.sessions.drop, chat_id):
+                dropped += 1  # an answer running in it records nothing (``record`` finds no row)
+        if dropped:
+            self._kick_deletions()
+        return dropped
 
     async def end_sessions(self, engine: EngineId, wait_s: float = END_SESSIONS_WAIT_S) -> None:
         """Sign-out of an engine (decision 9): every chat's session with it is deleted (bounded wait;
@@ -1191,6 +1304,9 @@ class ChatService:
         if not run.deleted:
             self._feed(run.chat_id).emit("state", message.id, message=message)
             self._list.touch(run.chat_id)
+        elif run.bound is not None:
+            # A deleted chat's answer held its session until now: a pass may have skipped it as busy.
+            self._kick_deletions()
 
     async def _log_usage(self, run: _Run, state: str, terminal: Completed | Failed | None) -> None:
         """One ``agent_usage`` row per answer; a failure to write it never touches the answer."""
@@ -1275,10 +1391,13 @@ class ChatService:
         for run in runs:
             run.closing = True
         await asyncio.gather(*(self._close_run(run) for run in runs), return_exceptions=True)
-        deleting = self._deleting
-        if deleting is not None and not deleting.done():  # what is left stays queued for the next start
-            deleting.cancel()
-            await asyncio.wait({deleting}, timeout=self._close_stop_s)
+        if self._delete_timer is not None:
+            self._delete_timer.cancel()
+            self._delete_timer = None
+        for task in (self._deleting, self._sweeping):
+            if task is not None and not task.done():  # what is left stays queued for the next start
+                task.cancel()
+                await asyncio.wait({task}, timeout=self._close_stop_s)
 
     async def _close_run(self, run: _Run) -> None:
         run.stopping = True
@@ -1292,7 +1411,8 @@ class ChatService:
         if done:
             return
         # The engine ignored the interrupt: keep what was streamed, honestly marked, before cancelling.
-        interrupted = replace(run.message, state="interrupted", failure=Failure("other", RESTART_REASON))
+        interrupted = replace(run.message, state="interrupted", failure=Failure("other", RESTART_REASON),
+                              parts=tuple(finish_drawing(run.message.parts)))  # P1: no block left drawing
         try:
             await disk_call(self.repo.save_message, interrupted)
         except Exception as error:
@@ -1376,6 +1496,17 @@ _PART_IDS: dict[type, str] = {MemoryPart: "edit_id", PermissionPart: "permission
                               QuestionPart: "question_id", StudyPart: "study_id", WebSearchPart: "search_id",
                               WikiFixPart: "fix_id"}
 
+
+
+def memory_view(kb: KnowledgeService, part: MemoryPart) -> tuple[str, str]:
+    """(skill title, summary) of a «Я» chip as shown. The stored part holds a generic label only (the
+    chat database is plain SQLite); the edit's own words come from the «Я» vault — or the generic ones
+    once the vault no longer has the edit (trimmed, erased). Blocking: call it off the event loop."""
+    try:
+        edit = me_store(kb).edit(part.edit_id)
+    except MeError:
+        return part.skill_title, part.summary
+    return edit.skill_title or part.skill_title, edit.summary or part.summary
 
 def _same_part(a: Part, b: Part) -> bool:
     field = _PART_IDS.get(type(a))

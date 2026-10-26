@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from . import md
-from .base import BlockError, BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, Strict, envelope
+from .base import BlockError, BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, Strict, clean, envelope
 
 MAX_COLUMNS = 6
 MAX_ROWS = 30
@@ -57,7 +57,7 @@ class KbCompareBlock(BaseModel):
 
 def build(data: dict[str, Any], items: Items) -> KbCompareBlock:
     block = envelope(CompareEnvelope, data)
-    columns = [column.strip() for column in block.columns]
+    columns = [clean(column) for column in block.columns]
     if any(not column or len(column) > 80 for column in columns):
         raise BlockError("Invalid block data: columns: every column needs a short name (1–80 characters).")
     rows: list[KbCompareRow] = []
@@ -68,8 +68,9 @@ def build(data: dict[str, Any], items: Items) -> KbCompareBlock:
             given = raw.get("cells") if isinstance(raw, dict) else None
             items.hide(len(given) if isinstance(given, list) else 1)
             continue
-        if len(row.cells) != len(columns):
-            items.hide(len(row.cells))  # cells don't line up with the columns
+        label = clean(row.label)
+        if len(row.cells) != len(columns) or not label:
+            items.hide(len(row.cells))  # cells don't line up with the columns, or no criterion is left
             continue
         row_id = items.ident(f"r{r}")
         cells: list[KbCompareCell | None] = []
@@ -77,7 +78,7 @@ def build(data: dict[str, Any], items: Items) -> KbCompareBlock:
             checked = items.item(CompareCellIn, cell, f"{row_id}c{c}")
             cells.append(KbCompareCell(**checked[0].out(), text=checked[1].text) if checked else None)
         if any(cell is not None for cell in cells):
-            rows.append(KbCompareRow(id=row_id, label=row.label, cells=cells))
+            rows.append(KbCompareRow(id=row_id, label=label, cells=cells))
     return KbCompareBlock(kind="compare", title=block.title, columns=columns, rows=rows)
 
 

@@ -21,16 +21,16 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from ..agents.engine import SessionPlan, SessionSupport, TurnMessage
-from ..me.prompt import ME_RULES, MeMarks, MeSnapshot, me_notes, needs_reseed
+from ..me.prompt import MeMarks, MeSnapshot, me_notes, needs_reseed
 from ..skills import SkazSkill
 from ..skills.prompting import skills_block
 from ..store.database import KnowledgeDatabase
-from .context import INSTRUCTIONS, user_turn_text
+from .context import user_turn_text
 from .model import CitePart, ConnectionPart, Message
 from .text import agent_text
 
@@ -38,11 +38,25 @@ from .text import agent_text
 COMPACTED_NOTE = "History compressed"
 #: A session the agent refuses to delete this many times is given up (logged by id only).
 MAX_DELETE_ATTEMPTS = 5
+#: Wait after the n-th failed deletion before the next try (an app start tries everything once).
+DELETE_BACKOFF = (timedelta(minutes=1), timedelta(minutes=10), timedelta(hours=1), timedelta(hours=6))
 #: Prefix of every line SKAZ adds to a live turn about what changed on its side.
 CONTEXT_MARK = "[context]"
-#: Hash of the fixed instruction texts that change only between SKAZ versions (the chat rules, the «Я»
-#: rules): a session started with other ones is reseeded once (``SessionContext.base``).
-BASE_INSTRUCTIONS = hashlib.sha256(f"{INSTRUCTIONS}\0{ME_RULES}".encode()).hexdigest()[:16]
+
+
+def base_instructions() -> str:
+    """Hash of the fixed instruction texts that change only between SKAZ versions, as sent: the chat
+    rules with the answer-block index expanded, the «Я» rules and Codex's own base text. A session
+    started with other ones is reseeded once (``SessionContext.base``)."""
+    from ..agents import codex  # the engine's base text (a late import: codex is heavy)
+    from ..me import prompt as me_prompt
+    from . import context
+    fixed = (context.instructions(None), me_prompt.ME_RULES, codex.BASE_INSTRUCTIONS, codex.WITH_TOOLS,
+             codex.WITHOUT_TOOLS)
+    return hashlib.sha256("\0".join(fixed).encode()).hexdigest()[:16]
+
+
+BASE_INSTRUCTIONS = base_instructions()
 
 
 # -- what the session holds ------------------------------------------------------
@@ -254,15 +268,25 @@ class PendingDeletion:
     attempts: int
 
 
+def _utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return _stamp(_utc())
 
 
 class SessionStore:
     """``agent_sessions`` / ``agent_session_items`` / ``agent_session_deletions`` (schema module)."""
 
-    def __init__(self, db: KnowledgeDatabase) -> None:
+    def __init__(self, db: KnowledgeDatabase, *, clock: Callable[[], datetime] = _utc) -> None:
         self._db = db
+        #: Now (UTC) for the deletion backoff; tests move it.
+        self.clock = clock
 
     def get(self, chat_id: str) -> LiveSession | None:
         with self._db.read() as connection:
@@ -345,11 +369,48 @@ class SessionStore:
         with self._db.write() as connection:
             self._queue(connection, engine, session_id)
 
-    def pending(self) -> list[PendingDeletion]:
+    def pending(self, *, due: bool = False) -> list[PendingDeletion]:
+        """The queued sessions (``due``: only those whose backoff has passed)."""
+        query = "SELECT engine, session_id, attempts FROM agent_session_deletions"
+        params: tuple[str, ...] = ()
+        if due:
+            query += " WHERE next_attempt_at IS NULL OR next_attempt_at <= ?"
+            params = (_stamp(self.clock()),)
         with self._db.read() as connection:
-            rows = connection.execute("SELECT engine, session_id, attempts FROM agent_session_deletions "
-                                      "ORDER BY queued_at, rowid").fetchall()
+            rows = connection.execute(query + " ORDER BY queued_at, rowid", params).fetchall()
         return [PendingDeletion(row[0], row[1], int(row[2])) for row in rows]
+
+    def next_due(self) -> datetime | None:
+        """When the earliest backed-off entry is due (``None``: nothing waits for its time)."""
+        with self._db.read() as connection:
+            row = connection.execute("SELECT MIN(next_attempt_at) FROM agent_session_deletions "
+                                     "WHERE next_attempt_at IS NOT NULL").fetchone()
+        if row is None or row[0] is None:
+            return None
+        try:
+            return datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    def due_now(self) -> None:
+        """App start: every queued session is tried once, whatever its backoff."""
+        with self._db.write() as connection:
+            connection.execute("UPDATE agent_session_deletions SET next_attempt_at = NULL")
+
+    def known(self, engine: str) -> set[str]:
+        """Session ids of ``engine`` that a chat holds or that wait for deletion (the start-up sweep
+        leaves them alone)."""
+        with self._db.read() as connection:
+            held = connection.execute("SELECT session_id FROM agent_sessions WHERE engine = ?", (engine,))
+            queued = connection.execute("SELECT session_id FROM agent_session_deletions WHERE engine = ?",
+                                        (engine,))
+            return {row[0] for row in held} | {row[0] for row in queued}
+
+    def contexts(self) -> list[tuple[str, SessionContext | None]]:
+        """Every chat's session with the context it last saw (to drop those that hold removed «Я»)."""
+        with self._db.read() as connection:
+            rows = connection.execute("SELECT chat_id, context FROM agent_sessions").fetchall()
+        return [(row[0], SessionContext.from_json(row[1])) for row in rows]
 
     def deleted(self, engine: str, session_id: str) -> None:
         with self._db.write() as connection:
@@ -357,7 +418,8 @@ class SessionStore:
                                (engine, session_id))
 
     def failed(self, engine: str, session_id: str) -> int:
-        """One more failed attempt; the entry goes after ``MAX_DELETE_ATTEMPTS``. Returns the count."""
+        """One more failed attempt: the next waits (``DELETE_BACKOFF``); the entry goes after
+        ``MAX_DELETE_ATTEMPTS``. Returns the count."""
         with self._db.write() as connection:
             row = connection.execute(
                 "UPDATE agent_session_deletions SET attempts = attempts + 1 "
@@ -366,4 +428,9 @@ class SessionStore:
             if attempts >= MAX_DELETE_ATTEMPTS:
                 connection.execute("DELETE FROM agent_session_deletions WHERE engine = ? AND session_id = ?",
                                    (engine, session_id))
+            else:
+                wait = DELETE_BACKOFF[min(attempts, len(DELETE_BACKOFF)) - 1]
+                connection.execute("UPDATE agent_session_deletions SET next_attempt_at = ? "
+                                   "WHERE engine = ? AND session_id = ?",
+                                   (_stamp(self.clock() + wait), engine, session_id))
             return attempts

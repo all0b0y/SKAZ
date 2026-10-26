@@ -15,9 +15,11 @@ import unicodedata
 from collections.abc import Sequence
 from typing import Any
 
+from ..agents.prompting import untrusted_block
+from ..answer_blocks.base import clean
 from ..answer_blocks.part import BlockPart, BlockSource, MaterialSource, PageSource
 from ..errors import KnowledgeError
-from .model import Message, SelectedItem, Selection, TextPart
+from .model import CitePart, Message, PagePart, SelectedItem, Selection, TextPart
 
 MAX_ITEMS = 20
 LABEL_CHARS = 80
@@ -58,6 +60,35 @@ def diagrams(message: Message) -> dict[str, str]:
 def block_part(message: Message, block_id: str) -> BlockPart | None:
     return next((part for part in message.parts if isinstance(part, BlockPart) and part.block_id == block_id
                  and part.state == "ready" and part.data), None)
+
+
+def diagram_sources(message: Message, diagram: str) -> list[BlockSource]:
+    """The sources cited right after a diagram's closing fence (the agent is told to put them there) —
+    the same ones «Where is this from?» shows for the whole diagram (``WhereFrom.tsx``)."""
+    parts = message.parts
+    for index, part in enumerate(parts):
+        if not isinstance(part, TextPart):
+            continue
+        fence = next((match for match in _FENCE.finditer(part.text) if diagram_id(match.group(2)) == diagram),
+                     None)
+        if fence is None:
+            continue
+        if part.text[fence.end():].strip():
+            return []  # text follows the fence: nothing cited for the diagram
+        found: list[BlockSource] = []
+        for after in parts[index + 1:]:
+            if isinstance(after, CitePart):
+                source: BlockSource = MaterialSource(after.material_id, after.seg, after.quote)
+            elif isinstance(after, PagePart):
+                source = PageSource(after.page_id, after.block_id, after.title, after.kind)
+            elif isinstance(after, TextPart) and not after.text.strip():
+                continue
+            else:
+                break
+            if source not in found:
+                found.append(source)
+        return found
+    return []
 
 
 def _find(node: Any, wanted: str, trail: tuple[dict[str, Any], ...] = ()
@@ -109,7 +140,7 @@ def check_selection(messages: Sequence[Message], selection: Selection) -> Select
         if any(_find(data, item_id) is None for item_id in ids):
             raise SelectionInvalid("Some selected items are no longer in the block.")
         raw_title = data.get("title") if isinstance(data, dict) else None
-        title = raw_title if isinstance(raw_title, str) else None
+        title = (clean(raw_title) or None) if isinstance(raw_title, str) else None
     else:
         source = diagrams(message).get(selection.block_id)
         if source is None:
@@ -191,8 +222,11 @@ def _diagram_body(message: Message, selection: Selection) -> str | None:
     if source is None:
         return None
     picked = "\n".join(f"- {item.id}: {item.label}" for item in selection.items)
+    cited = [_ref(found) for found in diagram_sources(message, selection.block_id)]
+    sources = ("Sources cited for the whole diagram (its nodes have none of their own): "
+               + json.dumps(cited, ensure_ascii=False) if cited else "The diagram cites no sources.")
     return (f"Mermaid diagram {selection.block_id} of answer {message.id}. Selected (ids from its source):\n"
-            f"{picked}\nThe diagram's source:\n```mermaid\n{source}\n```")
+            f"{picked}\n{sources}\nThe diagram's source:\n```mermaid\n{source}\n```")
 
 
 _NOTES = {
@@ -223,10 +257,12 @@ def selection_context(messages: Sequence[Message], selection: Selection) -> tupl
 
 
 def selected_sources(messages: Sequence[Message], selection: Selection) -> list[BlockSource]:
-    """The sources the picked items of an answer block rest on (a diagram's items have none)."""
+    """The sources the picked items rest on: an answer block's items' own, or for a diagram the
+    sources cited right after it (what «Where is this from?» shows for it)."""
     message = next((m for m in messages if m.id == selection.message_id and m.role == "assistant"), None)
-    part = (block_part(message, selection.block_id) if message is not None and selection.kind == "block"
-            else None)
+    if message is not None and selection.kind == "diagram":
+        return diagram_sources(message, selection.block_id)
+    part = block_part(message, selection.block_id) if message is not None else None
     if part is None:
         return []
     data = json.loads(part.data or "{}")
@@ -252,6 +288,8 @@ def selected_sources(messages: Sequence[Message], selection: Selection) -> list[
 
 
 def history_note(selection: Selection) -> str:
-    """A past question's selection, short, for the conversation history."""
+    """A past question's selection, short, for the conversation history. The labels are words of an
+    earlier AI answer as the client showed them: data, never the user's own text."""
     labels = "; ".join(f"“{item.label}”" for item in selection.items)
-    return f"(The user selected in an earlier answer: {labels})"
+    return ("(The user selected items in an earlier answer; their labels:)\n"
+            + untrusted_block("selected items", labels))

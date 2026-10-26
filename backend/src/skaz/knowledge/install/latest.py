@@ -21,7 +21,8 @@ requested for real on 2026-10-26 (read-only) and its answer is recorded in
   ``Installation.latest`` reads exactly these).
 * Hermes Agent, git — ``hermes update --check`` (fetches, installs nothing): "Selected release
   available: stable v0.22.5 (…)". A branch channel (``main``) reports commits, not a version, and
-  "newer than the selected release" means ``hermes update`` would move back: no offer then.
+  "newer than the selected release" means ``hermes update`` would move back: no offer then. A
+  non-zero exit (offline, refused) raises like a failed request: the last result stays.
 
 A channel SKAZ can't read (unknown install, a pre-release tag, an unexpected answer) gives
 ``None``: no offer is shown rather than a guessed version.
@@ -49,6 +50,11 @@ class CheckOutput:
 
 #: Runs ``hermes update --check`` (the user's own Hermes, nothing installed) and returns its output.
 HermesCheck = Callable[[], Awaitable[CheckOutput]]
+
+
+class HermesCheckFailed(RuntimeError):
+    """``hermes update --check`` exited non-zero (offline: "Could not resolve the … source channel", or a
+    refusal): a failed check like an HTTP error — the caller keeps what it knew (FIX-1 F3.5)."""
 
 _RELEASE = re.compile(r"^(?:rust-)?v?(\d+)\.(\d+)\.(\d+)$")
 _HERMES_AVAILABLE = re.compile(r"Selected release available:.*?\bv(\d+\.\d+\.\d+)\b")
@@ -160,7 +166,10 @@ async def latest_version(info: ChannelInfo, *, fetch: Fetch,
     if info.engine == "hermes":
         if info.channel != "git" or hermes_check is None:
             return None
-        return hermes_latest(await hermes_check())
+        output = await hermes_check()
+        if output.returncode != 0:
+            raise HermesCheckFailed(f"hermes update --check exited with {output.returncode}")
+        return hermes_latest(output)
     asked = sources(info)
     error: Exception | None = None
     for url, parse in asked:

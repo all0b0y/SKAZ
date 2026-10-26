@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any, cast
 
 import httpx
 
@@ -132,6 +133,9 @@ class Runtime:
                                     study=self.kb_study, web=self.kb_web)
         #: N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill``, chat answers only (they act for this chat service).
         attach_me_tools(self.kb_chats)
+        #: N6: an agent being installed / repaired / updated keeps its queued session deletions (no attempt).
+        self.kb_chats.hold_deletions = lambda engine: (
+            self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
         self.kb_study_tools = StudyTools(self.kb_study, self.kb_chats.run_ref)
         self.kb_tools.add(self.kb_study_tools.tools())

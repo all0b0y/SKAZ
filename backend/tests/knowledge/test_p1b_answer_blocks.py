@@ -94,6 +94,56 @@ def test_verdict_and_quote_are_one_item_without_which_the_block_is_broken() -> N
         {"type": "quote", "quote": {"text": "x", "cite": "m:mat-none:1"}})
 
 
+def test_a_deeply_nested_block_is_drawn_capped_or_broken_never_an_error() -> None:
+    """FIX-1 F2.2: hierarchy depth/size are counted iteratively; JSON nested past Python's recursion
+    limit is a broken block, not an exception."""
+    deep: dict[str, Any] = {"text": "лист", "basis": "agent"}
+    for _ in range(1_500):
+        deep = {"text": "узел", "basis": "agent", "children": [deep]}
+    data, hidden = _build({"type": "hierarchy", "nodes": [deep]})
+    assert [node["depth"] for node in data["nodes"]] == [0, 1, 2, 3] and hidden > 0
+    with pytest.raises(Broken):
+        build_block("[" * 20_000 + "]" * 20_000, FakeChecker())
+
+
+def test_an_unexpected_error_while_building_a_block_breaks_only_that_block(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from skaz.knowledge.chats import blocks as chat_blocks
+
+    def explode(_payload: str, _checker: Any) -> Any:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(chat_blocks, "build_block", explode)
+    answer = chat_blocks.AnswerBlocks.__new__(chat_blocks.AnswerBlocks)
+    answer.resolver, answer.web = None, None  # type: ignore[assignment]
+    part = answer.resolve('{"type": "steps"}', "blk-1")
+    assert part.state == "broken" and part.error and part.raw == '{"type": "steps"}'
+
+
+def test_block_titles_columns_row_labels_and_chart_labels_are_cleaned_like_items() -> None:
+    """FIX-1 F2.5: the block's own text gets ``base.clean()`` too — no reference tokens, no invisible
+    format characters — and so does the selection's title read from a stored block."""
+    data, _hidden = _build({"type": "compare", "title": "⟦m:mat-rec:1⟧ Raft\u200b  vs ⟦x⟧ Paxos",
+                            "columns": ["Raft\u200b", "Paxos ⟦p:pg-real⟧"],
+                            "rows": [{"label": "Leader\u2066 ⟦m:mat-rec:1⟧", "cells": [
+                                {"text": "One", "cite": REC}, {"text": "None", "cite": DOC}]}]})
+    assert data["title"] == "Raft vs Paxos"
+    assert data["columns"] == ["Raft", "Paxos"] and data["rows"][0]["label"] == "Leader"
+    data, _hidden = _build({"type": "chart", "title": "⟦m:mat-rec:1⟧", "unit": "ms\u200b",
+                            "alt_label": "⟦m:mat-rec:1⟧ No\u200b leader",
+                            "bars": [{"label": "A", "value": 1, "alt": True, "cite": REC}]})
+    assert (data["title"], data["unit"], data["alt_label"]) == (None, "ms", "No leader")
+    from skaz.knowledge.chats.model import Message, SelectedItem, Selection
+    from skaz.knowledge.chats.selection import check_selection
+    stored = json.dumps({"kind": "steps", "title": "Шаги\u200b ⟦m:mat-rec:1⟧", "steps": [
+        {"id": "s1", "src": [], "agent": True, "title": "Шаг", "text": None}]})
+    answer = Message("msg-a", "chat-1", 2, "assistant", "done", "2026-10-27T00:00:00Z",
+                     parts=(BlockPart("blk-1", "ready", "steps", stored),))
+    picked = Selection("msg-a", "blk-1", "block", None, (SelectedItem("s1", "x"),))
+    checked = check_selection([answer], picked)
+    assert checked.title == "Шаги"
+
+
 def test_cause_chain_needs_two_links_and_keeps_their_roles() -> None:
     data, hidden = _build({"type": "cause_chain", "nodes": [
         {"label": "Cause", "text": "Hard to understand", "cite": DOC},
@@ -334,6 +384,25 @@ async def test_a_broken_block_has_no_markdown_and_is_left_out_of_the_export(env:
     assert "oops" not in exported and "До." in exported and "После." in exported
 
 
+def test_a_web_source_is_one_safe_markdown_link_in_copy_export_and_save() -> None:
+    """FIX-1 F2.6: one helper writes web links — the title can't close its brackets, the URL its
+    parentheses — for the in-app Copy, the chat export and Save to wiki alike."""
+    from skaz.knowledge.answer_blocks.part import WebSource
+    from skaz.knowledge.api.schemas_blocks import KbBlockWebSource, copy_refs
+    from skaz.knowledge.chats.analysis import paragraphs
+    from skaz.knowledge.chats.export import _Labels
+    url, title = "https://ex.org/wiki/Raft_(algorithm)", "Raft [consensus] ] (x"
+    expected = "[Raft (consensus) ) (x](https://ex.org/wiki/Raft_%28algorithm%29)"
+    data = json.dumps({"kind": "steps", "title": None, "steps": [
+        {"id": "s1", "src": [0], "agent": False, "title": "Сайт", "text": None}]})
+    part = BlockPart("blk-1", "ready", "steps", data, sources=(WebSource(url, title),))
+    copied = copy_refs([KbBlockWebSource(type="web", url=url, title=title, site="ex.org")]).labels
+    assert copied == [expected]
+    assert _Labels(None).block(part) == f"1. **Сайт** {expected}"  # type: ignore[arg-type]
+    (chunk,) = paragraphs([part])
+    assert expected in "\n".join(chunk.lines)  # type: ignore[union-attr]
+
+
 async def test_save_to_wiki_keeps_a_block_as_markdown_with_wiki_links(env: Env) -> None:
     lib = env.library
     table = {"type": "compare", "columns": ["Физика", "Химия"], "rows": [
@@ -342,7 +411,10 @@ async def test_save_to_wiki_keeps_a_block_as_markdown_with_wiki_links(env: Env) 
             {"text": "Направление реакций", "cite": f"m:{lib.textbook}:1"}]}]}
     steps = {"type": "steps", "steps": [{"title": "Страница", "cite": f"p:{lib.concept}"},
                                         {"title": "Своё", "basis": "agent"}]}
-    env.agents.scripts["codex"] = lambda _turn: text("Сравнение:\n", _fence(table), _fence(steps))
+    timeline = {"type": "timeline",
+                "events": [{"title": "Лектор о беспорядке", "cite": f"m:{lib.lecture}:2"}]}
+    env.agents.scripts["codex"] = lambda _turn: text("Сравнение:\n", _fence(table), _fence(steps),
+                                                     _fence(timeline))
     chat_id, message = await env.answered("Сравни энтропию")
     saved = await env.client.post(f"/kb/chats/{chat_id}/messages/{message['id']}/save")
     assert saved.status_code == 200, saved.text
@@ -359,4 +431,8 @@ async def test_save_to_wiki_keeps_a_block_as_markdown_with_wiki_links(env: Env) 
     assert "[[Materials/Физика/Лекция 8/Лекция 8#^seg-1|" in row and "Учебник химии#^seg-1|" in row
     steps_block = next(block for block in blocks if "**Страница**" in block.body)
     assert "1. **Страница** [[Wiki/Concepts/Энтропия|Энтропия]]" in steps_block.body
-    assert "2. **Своё**" in steps_block.body and "Agent" not in steps_block.body
+    # FIX-1 F2.4 (migrated: the mark was dropped): the agent's own item keeps a visible mark on the page,
+    # and a timeline moment without a date keeps its recording time.
+    assert "2. **Своё** (agent’s knowledge)" in steps_block.body
+    timeline_block = next(block for block in blocks if "Лектор о беспорядке" in block.body)
+    assert timeline_block.body.startswith("- 01:00 — **Лектор о беспорядке**")

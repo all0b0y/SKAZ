@@ -7,7 +7,7 @@ import { citationRef, pageRef, useOpenDocument } from '../../state/document';
 import { useBlockFix } from './blockFix';
 import { BlockScopeProvider, type BlockHover } from './hover';
 import { rendererOf } from './registry';
-import { useSelectableBlock } from '../select/context';
+import { useAnswerId, useSelectableBlock } from '../select/context';
 import { AGENT_KEY, blockChips, type BlockChip, type BlockData, type BlockSource } from './sources';
 
 /**
@@ -137,13 +137,14 @@ type FixState = { status: 'idle' | 'sending' | 'sent' } | { status: 'failed'; er
 
 function BrokenBlock({ part }: { part: KbAnswerBlockPart }) {
   const fix = useBlockFix();
+  const messageId = useAnswerId();
   const [shown, setShown] = useState(false);
   const [asked, setAsked] = useState<FixState>({ status: 'idle' });
   const error = part.error ?? 'The block data is invalid.';
   const ask = async () => {
     if (!part.raw || asked.status === 'sending' || asked.status === 'sent') return;
     setAsked({ status: 'sending' });
-    const failed = await fix(part.raw, error);
+    const failed = await fix({ messageId, blockId: part.id, raw: part.raw });
     setAsked(failed ? { status: 'failed', error: failed } : { status: 'sent' });
   };
   return (

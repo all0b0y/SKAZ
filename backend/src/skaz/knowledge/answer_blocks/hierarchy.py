@@ -65,10 +65,21 @@ class KbHierarchyBlock(BaseModel):
     nodes: list[KbHierarchyNode]
 
 
+#: Counting a hidden subtree stops here: the agent's data may nest past any sane depth (FIX-1 F2.2).
+MAX_COUNTED = 1_000
+
+
 def _size(raw: Any) -> int:
-    """How many nodes ``raw`` holds, itself included (all hidden when it is)."""
-    children = raw.get("children") if isinstance(raw, dict) else None
-    return 1 + (sum(_size(child) for child in children) if isinstance(children, list) else 0)
+    """How many nodes ``raw`` holds, itself included (all hidden when it is) — counted without
+    recursion and capped at ``MAX_COUNTED``, however deep the agent nested its data."""
+    count, stack = 0, [raw]
+    while stack and count < MAX_COUNTED:
+        node = stack.pop()
+        count += 1
+        children = node.get("children") if isinstance(node, dict) else None
+        if isinstance(children, list):
+            stack.extend(children)
+    return count
 
 
 def build(data: dict[str, Any], items: Items) -> KbHierarchyBlock:

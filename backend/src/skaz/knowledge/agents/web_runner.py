@@ -40,6 +40,7 @@ from ...gateways.codex_session import search_thread_params
 from .codex import ENGINE_LABELS, KB_DISABLED_FEATURES, classify
 from .engine import AgentEngine, AgentTurn, EngineId, Failed, TurnMessage, collect
 from .registry import EngineRegistry
+from .update_gate import holding
 from .web import SEARCHERS, WebLink, WebQuery, WebVerdict, clean_links
 
 log = logging.getLogger(__name__)
@@ -125,6 +126,12 @@ class CodexSearch:
         self._timeout_s = timeout_s
 
     async def search(self, engine: AgentEngine, query: str) -> SearchOutcome:
+        # Its own ``codex app-server``, not ``engine.run``: it passes the update gate here (U1, FIX-1 F3.3) —
+        # waits while Codex is updated; inside a Codex answer (its tool) it is that answer's own work.
+        async with holding(engine):
+            return await self._search(query)
+
+    async def _search(self, query: str) -> SearchOutcome:
         try:
             rpc = self._connection.rpc(max_message_bytes=SEARCH_MESSAGE_BYTES, web_search="live")
         except ValueError:

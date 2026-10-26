@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from ..agents.registry import ENGINE_NAMES
+from ..answer_blocks import md
 from ..answer_blocks.md import Refs
 from ..answer_blocks.part import BlockPart, MaterialSource, PageSource
 from ..answer_blocks.text import block_markdown
@@ -49,7 +50,7 @@ class _Labels:
                 where = f" · {format_timestamp(fragment.start_ms)}"
             elif fragment.page is not None:
                 where = f" · p. {fragment.page}"
-        return f"[{record.title}{where}]"
+        return f"[{md.label(record.title)}{where}]"
 
     def time(self, material_id: str, seg: int) -> str | None:
         found = self.kb.material_repo.fragment_map({(material_id, seg)}).get((material_id, seg))
@@ -68,13 +69,13 @@ class _Labels:
                 labels.append(self.page(PagePart(source.page_id, source.block_id, source.title, source.kind)))
                 times.append(None)
             else:
-                labels.append(f"[{source.title or source.url}]({source.url})")
+                labels.append(md.link(source.title or source.url, source.url))
                 times.append(None)
         return block_markdown(part, Refs(labels, times))
 
     def page(self, part: PagePart) -> str:
         record = self.kb.page_repo.get(part.page_id)
-        return f"[{record.title if record else part.title}]"
+        return f"[{md.label(record.title if record else part.title)}]"
 
     def folder(self, folder_id: str) -> str:
         folder = self.kb.folder_repo.get(folder_id)

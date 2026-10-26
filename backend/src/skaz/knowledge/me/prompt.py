@@ -5,24 +5,28 @@
 * A live session keeps the snapshot it started with; changes are appended as ``[context]`` lines
   (:func:`me_notes`, decision 6). The session records only :class:`MeMarks` — short hashes, never «Я»
   text (the ``agent_sessions`` table is plain SQLite).
-* Switching the profile off — or clearing it, or switching «Я» off — while a session holds it reseeds
-  the session without it (:func:`needs_reseed`): otherwise the profile would keep going to the provider
-  in the cached prefix of every turn.
+* Switching an always-on skill off (Profile, How to work with me) — or clearing it, or switching «Я»
+  off — while a session holds it drops that session (:func:`needs_reseed`; the chat service drops it
+  at once and the next answer seeds a new one without it): otherwise the text would keep going to the
+  provider in the cached prefix of every turn. What the agent wrote itself during a turn counts as
+  held (:func:`held_after_turn`), so an Undo of its edit reaches the session too.
 """
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from . import PROFILE, MeSkill, builtin
+from . import BUILTINS, MeSkill, builtin
 from .store import MeStore
 
 CONTEXT_MARK = "[context]"
 EDIT_TOOL = "skaz_me_edit"
 SKILL_TOOL = "skaz_me_skill"
 ME_TOOL_NAMES: tuple[str, ...] = (EDIT_TOOL, SKILL_TOOL)
+#: The always-on skills (Profile, How to work with me): a session holds their text in full.
+ALWAYS_IDS: tuple[str, ...] = tuple(item.id for item in BUILTINS if item.always_on)
 
 #: The write rules (decisions 2, 4, 7, 8). The malicious-transcript case rests on the second bullet.
 ME_RULES = f"""\
@@ -151,9 +155,31 @@ def marks(snap: MeSnapshot) -> MeMarks:
 
 
 def needs_reseed(before: MeMarks | None, now: MeMarks) -> bool:
-    """The session holds the profile and the user switched it (or «Я») off, or cleared it."""
-    held = before is not None and before.on and any(skill_id == PROFILE for skill_id, _ in before.always)
-    return held and not any(skill_id == PROFILE for skill_id, _ in now.always)
+    """The session holds an always-on skill (Profile, How to work with me) and the user switched it (or
+    «Я») off, or cleared it: the session goes, so its text stops going to the provider."""
+    if before is None or not before.on:
+        return False
+    current = {skill_id for skill_id, _ in now.always} if now.on else set()
+    return any(skill_id in ALWAYS_IDS and skill_id not in current for skill_id, _ in before.always)
+
+
+#: Hash standing for an always-on skill the agent itself wrote during a turn: the session holds that
+#: text, whatever «Я» says after the turn (an Undo, a switch-off) — so a later change reaches it.
+WRITTEN = "written-by-the-agent"
+
+
+def held_after_turn(start: MeMarks | None, now: MeMarks, written: set[str]) -> MeMarks | None:
+    """What a live session holds of «Я» once a turn ended: its marks from the turn's start, unless the
+    agent changed «Я» in that turn — then the marks of «Я» now (the session saw its own edits), with
+    every always-on skill it wrote counted as held even if it is empty or off by now."""
+    if not written:
+        return start
+    always = dict(now.always) if now.on else {}
+    for skill_id in written & set(ALWAYS_IDS):
+        always.setdefault(skill_id, WRITTEN)
+    if not now.on:
+        return MeMarks(bool(always), tuple(always.items()))
+    return replace(now, always=tuple(always.items()))
 
 
 def _title(skill_id: str) -> str:

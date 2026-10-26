@@ -80,9 +80,10 @@ import re
 import shutil
 import signal
 import subprocess
+import time
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -114,6 +115,7 @@ from .engine import (
     FailureKind,
     ModelOption,
     SessionBound,
+    SessionDeleteDeferred,
     SessionSupport,
     TextDelta,
     ToolCall,
@@ -196,6 +198,8 @@ OPENCODE_FLAGS: dict[str, str] = {
 SHOWN_ENV = ("PATH", "HOME", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
              "XDG_STATE_HOME", *OPENCODE_FLAGS, "OPENCODE_PERMISSION")
 HISTORY_FILE = "opencode-sessions.json"
+#: The start-up sweep leaves a kept session changed within this many seconds (it may be starting).
+SWEEP_MIN_AGE_S = 600.0
 MAX_DELETE_ATTEMPTS = 5
 #: N6: one OpenCode session per chat, continued with ``session/resume``; OpenCode ACP has no revert.
 OPENCODE_SESSIONS = SessionSupport(live=True, revert=False)
@@ -523,16 +527,49 @@ class OpenCodeEngine:
         kept it (the caller retries later)."""
         located = self._locate("opencode")
         if located is None:
-            raise FileNotFoundError(NOT_INSTALLED)
+            raise SessionDeleteDeferred(NOT_INSTALLED)  # not an attempt: tried again later
         code, out = await disk_call(self._delete_sync, located, session_id)
         if code != 0 and SESSION_NOT_FOUND not in out:
             raise RuntimeError(f"OpenCode did not delete the session (exit {code}).")
+        self.forget_session(session_id)
+
+    def forget_session(self, session_id: str) -> None:
+        """SKAZ's own traces of a chat session: its kept instructions and its post-run delete entry
+        (after a deletion, or when SKAZ gave the session up)."""
         kept = self._kept_config(session_id)
         if kept is not None:
             kept.unlink(missing_ok=True)
         history = self._read_history()
         if history.pop(session_id, None) is not None:
             self._write_history(history)
+
+    async def sweep_sessions(self, known: Callable[[str], bool]) -> None:
+        """App start: a kept chat session no chat holds and no deletion waits for (SKAZ quit between
+        the handover and the record) is deleted from OpenCode's store like a run's leftover (retried
+        with them) and its kept instructions go. One changed within ``SWEEP_MIN_AGE_S``, or one a run
+        holds now, is left for the next start."""
+        if not self.sessions_dir.is_dir():
+            return
+        active = {run.session_id for run in self._runs.values()}
+        cutoff = time.time() - SWEEP_MIN_AGE_S
+        orphans: list[str] = []
+        for entry in sorted(self.sessions_dir.glob("*.json")):
+            session_id = entry.stem
+            if not _SESSION_ID.fullmatch(session_id) or known(session_id) or session_id in active:
+                continue
+            try:
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+            except OSError:
+                continue
+            orphans.append(session_id)
+        for session_id in orphans:
+            self._remember(session_id)  # stays on the post-run delete list until OpenCode lets it go
+            kept = self._kept_config(session_id)
+            if kept is not None:
+                kept.unlink(missing_ok=True)
+        if orphans:
+            await self._forget(orphans)
 
     def _kept_config(self, session_id: str) -> Path | None:
         """Where a live chat session's run config is kept (``None`` for an id unfit as a file name)."""

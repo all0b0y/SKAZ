@@ -63,7 +63,7 @@ async def test_check_offer_seen_skip_and_settings(updates_app: Any, kb_client: h
         "engine": "codex", "name": "Codex", "channel": "npm", "installed": "0.160.0", "latest": "0.164.0",
         "available": True, "unseen": True, "skipped": None, "busy": False, "phase": "idle", "action": None,
         "task_id": None, "note": "Updates Codex for this whole Mac, including Terminal.",
-        "services_note": None, "failure": None, "checked_at": "-",
+        "services_note": None, "failure": None, "checked_at": "-", "waiting": [],
     }
     assert checked["unseen"] is True and asked == ["https://registry.npmjs.org/@openai/codex/latest"]
     seen = (await kb_client.post("/kb/agents/updates/seen")).json()

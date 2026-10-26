@@ -16,6 +16,7 @@ from fastapi.routing import APIRoute
 from ..agents.registry import EngineUnavailable
 from ..agents.web import site_of
 from ..answer_blocks.part import BlockPart
+from ..chats.blocks import finish_drawing
 from ..chats.events import ChatEvent
 from ..chats.fix_part import WikiFixPart
 from ..chats.model import (
@@ -37,7 +38,7 @@ from ..chats.model import (
     TextPart,
     WebSearchPart,
 )
-from ..chats.service import ChatConflict, ChatService, ChatView
+from ..chats.service import ChatConflict, ChatService, ChatView, memory_view
 from ..errors import KnowledgeError
 from ..permissions.broker import PermissionConflict
 from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
@@ -211,10 +212,12 @@ class Presenter:
                 page=self.page_ref(part.page_id) if linked and part.page_id else None,
             ))
         if isinstance(part, MemoryPart):
+            # N6 «Я»: the stored part holds a generic label only; the edit's own words come from the vault.
+            skill_title, summary = memory_view(self.kb, part)
             return KbMessagePart(KbMemoryPart(
-                type="memory", edit_id=part.edit_id, skill_id=part.skill_id, skill_title=part.skill_title,
+                type="memory", edit_id=part.edit_id, skill_id=part.skill_id, skill_title=skill_title,
                 action=cast(Any, part.action if part.action in MEMORY_ACTIONS else "append"),
-                summary=part.summary, undone=part.undone))
+                summary=summary, undone=part.undone))
         return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label))
 
     def message(self, message: Message) -> KbMessage:
@@ -222,7 +225,10 @@ class Presenter:
         return KbMessage(
             id=message.id, seq=message.seq, role=message.role, created_at=message.created_at,
             engine=message.engine, model=message.model, state=message.state,
-            parts=[self.part(part) for part in message.parts],
+            # P1: a block can only be drawing while its answer streams (one stored by a checkpoint
+            # and flipped to interrupted at startup shows as unfinished).
+            parts=[self.part(part) for part in (message.parts if message.state == "streaming"
+                                                else finish_drawing(message.parts))],
             failure=KbFailure(kind=message.failure.kind, message=message.failure.message,
                               retry_at=message.failure.retry_at) if message.failure else None,
             saved_page_id=message.saved_page_id,

@@ -10,8 +10,8 @@ page before the user sees anything:
 * the corrected paragraph must be a valid user paragraph and actually differ.
 
 The answer then shows a card: the block before → after and «Fix in wiki». Nothing is written until
-the user clicks; the click re-reads the block and writes only if it is still exactly what the card
-shows — through the wiki's user-edit path (``WikiService.update_block`` → ``wiki/edit.py``: the block
+the user clicks; the click writes only if the block is still exactly what the card shows — checked in
+the same library write (``WikiService.update_block(expected=…)`` → ``wiki/edit.py``: the block
 becomes ``user_edited``, its links and citations kept). A block that changed since is marked
 ``stale`` and left alone. Nothing else remembers that an item was wrong: no hidden signals.
 """
@@ -32,7 +32,7 @@ from ..ids import new_id
 from ..markdown.page import parse_page
 from ..permissions.store import RunRef
 from ..service import KnowledgeService
-from ..wiki.edit import clean_user_text, readable_text
+from ..wiki.edit import BlockChanged, clean_user_text, readable_text
 from ..wiki.pages_io import page_path
 from .fix_part import WikiFixPart
 from .selection import selected_sources
@@ -62,7 +62,8 @@ class FixArgs(_Args):
 
 
 class WikiEdits(Protocol):
-    def update_block(self, page_id: str, block_id: str, text: str) -> object: ...
+    def update_block(self, page_id: str, block_id: str, text: str, *,
+                     expected: str | None = None) -> object: ...
 
 
 def _same(a: str, b: str) -> bool:
@@ -160,16 +161,11 @@ class WikiFixes:
             return updated
 
     def _write(self, part: WikiFixPart) -> bool:
+        """The check and the write are one library write (``update_block(expected=…)`` compares the
+        block in the file being rewritten): an edit that lands in between is never overwritten."""
         try:
-            _library, path = page_path(self.kb, part.page_id)
-        except NotFound:
-            return False
-        block = parse_page(path.read_text(encoding="utf-8")).block(part.block_id)
-        if block is None or block.owner == "user" or not _same(readable_text(block.body), part.before):
-            return False
-        try:
-            self.wiki().update_block(part.page_id, part.block_id, part.after)
-        except NotFound:
+            self.wiki().update_block(part.page_id, part.block_id, part.after, expected=part.before)
+        except (NotFound, BlockChanged):
             return False
         return True
 

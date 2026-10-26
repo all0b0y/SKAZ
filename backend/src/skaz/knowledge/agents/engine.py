@@ -261,6 +261,16 @@ class LiveSessionEngine(Protocol):
     async def delete_session(self, session_id: str) -> None: ...
 
 
+class SessionDeleteDeferred(RuntimeError):
+    """``delete_session`` can't even try now (the agent is not installed, or SKAZ is repairing it): the
+    session stays queued and this is not counted as a failed attempt.
+
+    Optional engine hooks the chat service uses when present (``getattr``): ``forget_session(id)`` —
+    SKAZ gave the session up after its attempts: drop SKAZ's own local traces of it (kept prompts,
+    lists); ``sweep_sessions(known)`` — app start: remove local sessions no chat and no deletion entry
+    knows (``known(id) -> bool``)."""
+
+
 @dataclass(frozen=True)
 class RunResult:
     text: str

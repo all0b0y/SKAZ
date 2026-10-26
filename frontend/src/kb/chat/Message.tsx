@@ -6,7 +6,8 @@ import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
 import { inputPieces, quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
-import { useServices } from '../state/context';
+import { useAgentUpdates, useServices } from '../state/context';
+import { updateWait } from '../state/agentUpdates';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
 import { FoldedSourcesRow, SourcesProvider } from '../cite/SourceMarks';
@@ -235,6 +236,8 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
   const empty = message.parts.filter((p) => p.type !== 'tool').length === 0;
+  // U1: an answer that waits for its agent's update says so instead of «Writing an answer…».
+  const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
   return (
@@ -243,7 +246,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
         {empty && message.state === 'streaming' && (
           // FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
-          <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />Writing an answer…</p>
+          <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />{waitingFor ?? 'Writing an answer…'}</p>
         )}
         <SourcesProvider index={sources}>
           <AnswerSelectScope messageId={message.id}>

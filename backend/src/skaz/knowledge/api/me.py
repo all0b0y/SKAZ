@@ -6,6 +6,7 @@ Route contract: ``.dev/docs/backlog-2026-10-26/N6-ME-API.md``. Errors are the kn
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any, Literal, cast
 
@@ -17,10 +18,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from ...native_io import disk_call
 from ..chats.service import ChatService
 from ..errors import KnowledgeError
+from ..logsafe import error_note
 from ..me import DESCRIPTION_MAX, SKILL_CAP, TITLE_MAX, MeError, MeSkill, MeVersion
 from ..me.access import me_store
 from ..me.store import MeStore
 from ..me.tools import mark_undone
+
+log = logging.getLogger(__name__)
 
 KbMeKind = Literal["profile", "how_to_work", "search", "skill"]
 KbMeSource = Literal["agent", "user", "restore"]
@@ -140,6 +144,15 @@ def _version(item: MeVersion) -> KbMeVersion:
                        chat_id=item.chat_id, summary=item.summary, chars=item.chars)
 
 
+async def _sessions_follow(chats: ChatService) -> None:
+    """Live agent sessions that hold a Profile / How to work with me the user just switched off or
+    cleared (or «Я» itself) are dropped at once (decision 6); never fails the user's change."""
+    try:
+        await chats.drop_me_sessions()
+    except Exception as error:
+        log.error("Dropping the agent sessions that hold Me failed: %s", error_note(error))
+
+
 async def _me(store: MeStore) -> KbMe:
     def read() -> KbMe:
         return KbMe(enabled=store.enabled(), skills=[_skill(skill) for skill in store.skills()])
@@ -153,10 +166,11 @@ async def read_me(store: MeDep) -> KbMe:
 
 
 @router.put("")
-async def switch_me(body: KbMeSwitch, store: MeDep) -> KbMe:
-    """The master switch: applies from the next answer (a live session gets a note, or is reseeded when it
-    holds the profile)."""
+async def switch_me(body: KbMeSwitch, store: MeDep, chats: ChatsDep) -> KbMe:
+    """The master switch: applies from the next answer (a live session gets a note; one that holds the
+    profile or How to work with me is dropped at once and the next answer seeds a new one)."""
     await disk_call(store.set_enabled, body.enabled)
+    await _sessions_follow(chats)
     return await _me(store)
 
 
@@ -166,10 +180,12 @@ async def read_skill(skill_id: str, store: MeDep) -> KbMeSkillDetail:
 
 
 @router.put("/skills/{skill_id}")
-async def update_skill(skill_id: str, body: KbMeUpdate, store: MeDep) -> KbMeSkillDetail:
+async def update_skill(skill_id: str, body: KbMeUpdate, store: MeDep, chats: ChatsDep) -> KbMeSkillDetail:
     """A text change is a new version (source ``user``); built-ins keep their titles (409)."""
-    return _detail(await disk_call(store.update, skill_id, enabled=body.enabled, title=body.title,
-                                   description=body.description, text=body.text))
+    skill = await disk_call(store.update, skill_id, enabled=body.enabled, title=body.title,
+                            description=body.description, text=body.text)
+    await _sessions_follow(chats)
+    return _detail(skill)
 
 
 @router.post("/skills", status_code=201)
@@ -189,8 +205,10 @@ async def read_versions(skill_id: str, store: MeDep) -> KbMeVersions:
 
 
 @router.post("/skills/{skill_id}/versions/{version}/restore")
-async def restore_version(skill_id: str, version: int, store: MeDep) -> KbMeSkillDetail:
-    return _detail(await disk_call(store.restore, skill_id, version))
+async def restore_version(skill_id: str, version: int, store: MeDep, chats: ChatsDep) -> KbMeSkillDetail:
+    skill = await disk_call(store.restore, skill_id, version)
+    await _sessions_follow(chats)
+    return _detail(skill)
 
 
 @router.post("/edits/{edit_id}/undo")
@@ -198,4 +216,5 @@ async def undo_edit(edit_id: str, store: MeDep, chats: ChatsDep) -> KbMeSkillDet
     """Undo an agent's change: the skill goes back to the version before it; the chat chip says Undone."""
     skill, edit = await disk_call(store.undo, edit_id)
     await mark_undone(chats, edit)
+    await _sessions_follow(chats)  # the session holds what the agent wrote: a cleared profile drops it
     return _detail(skill)

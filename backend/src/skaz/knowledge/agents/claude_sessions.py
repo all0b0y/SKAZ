@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,8 @@ from pathlib import Path
 NOTHING_TO_PURGE = "No Claude Code project state found"
 #: Seconds one ``claude project purge`` may take.
 PURGE_TIMEOUT_S = 30.0
+#: The start-up sweep leaves a session whose files changed within this many seconds (it may be starting).
+SWEEP_MIN_AGE_S = 600.0
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
@@ -112,3 +115,22 @@ class ClaudeFolder:
                 shutil.rmtree(path)
             elif path.exists() or path.is_symlink():
                 path.unlink()
+
+    def local_sessions(self, older_than_s: float = SWEEP_MIN_AGE_S) -> list[str]:
+        """Ids of the sessions with SKAZ files here (``prompts/<id>.txt``, ``sessions/<id>``) none of
+        which changed within ``older_than_s`` (newer ones may belong to a session starting now)."""
+        newest: dict[str, float] = {}
+        for folder, suffix in ((self.root / "prompts", ".txt"), (self.root / "sessions", "")):
+            if not folder.is_dir():
+                continue
+            for entry in folder.iterdir():
+                name = entry.name[: -len(suffix)] if suffix and entry.name.endswith(suffix) else entry.name
+                if not is_session_id(name) or entry.is_symlink():
+                    continue
+                try:
+                    changed = entry.stat().st_mtime
+                except OSError:
+                    continue
+                newest[name] = max(newest.get(name, 0.0), changed)
+        cutoff = time.time() - older_than_s
+        return sorted(name for name, changed in newest.items() if changed < cutoff)

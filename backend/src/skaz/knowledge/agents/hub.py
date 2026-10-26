@@ -33,6 +33,14 @@ class AgentsHub:
     hermes_accounts: HermesAccounts | None = None
     #: U1: checks for newer agent versions, offers and runs their updates.
     updates: AgentUpdates | None = None
+    #: U1: every run of every engine passes it (an update makes the agent's new work wait).
+    gate: UpdateGate | None = None
+
+    def blocked(self, engine: EngineId) -> bool:
+        """An update holds ``engine`` now (queued or running): housekeeping that starts the agent outside
+        a run (deleting sessions) skips it and tries later. With an engine object, use
+        ``update_gate.blocked(engine)``."""
+        return self.gate is not None and self.gate.blocked(engine)
 
     def state(self, view: AgentView) -> tuple[AgentState, AgentAction | None]:
         """The view's state, or ``preparing`` while the agent's first check runs (B10)."""
@@ -133,7 +141,16 @@ def build_agents_hub(data_dir: Path, *, settings: SettingsStore, codex: CodexCon
     gate = UpdateGate()
     for target in registry.engines.values():
         guard(target, gate)
-    updates = AgentUpdates(registry, installs, gate, home=user_home,
+
+    async def after_update(engine: EngineId) -> None:
+        # U1 decision 8 / FIX-1 F3.8: ``hermes update --no-gateway-restart`` leaves running gateways on the
+        # old code — SKAZ's own one too. Stop it (the existing planned stop) so the next answer starts the
+        # new version; Hermes' gateways of the user's own folders are never touched.
+        target = registry.engine(engine)
+        if isinstance(target, HermesEngine):
+            await target.aclose()
+
+    updates = AgentUpdates(registry, installs, gate, home=user_home, after_update=after_update,
                            locate=lambda engine: (opencode_finder if engine == "opencode" else finder)(
                                RECIPES[engine].binary))
-    return AgentsHub(registry, installs, accounts, updates)
+    return AgentsHub(registry, installs, accounts, updates, gate)

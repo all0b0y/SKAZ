@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { accountsWorld } from '../test/fixtures';
+import { accountsWorld, chatWorld } from '../test/fixtures';
 import { agentUpdate, emptyAgentUpdates } from '../test/fakeAgentUpdates';
 import type { FakeWorld } from '../test/fakeKb';
 import type { KbAgentUpdate } from '../../api/kb/types.gen';
@@ -79,6 +79,46 @@ describe('Agent updates (U1)', () => {
     const hermes = row(dialog, 'Hermes Agent');
     expect(await within(hermes).findByText('Update available · 0.22.1 → 0.22.5')).toBeInTheDocument();
     expect(within(hermes).getByText(/Running Hermes services keep the old version until you restart them\./)).toBeInTheDocument();
+  });
+
+  it('Hermes’ “Needs an update” says the same: it also leaves running Hermes services alone', async () => {
+    const world = accountsWorld();
+    Object.assign(world.agents.agents.find((a) => a.id === 'hermes')!, {
+      installed: true, state: 'outdated', action: 'update', version: '0.20.0', reason: 'Hermes Agent 0.20.0 is outdated.' });
+    renderKb({ world });
+    const dialog = await openAccounts();
+    const hermes = row(dialog, 'Hermes Agent');
+    expect(await within(hermes).findByRole('button', { name: 'Update' })).toBeInTheDocument();
+    expect(within(hermes).getByRole('note')).toHaveTextContent('Running Hermes services keep the old version until you restart them.');
+  });
+
+  it('an answer waiting for its agent’s update says so; an answer of another agent does not', async () => {
+    const user = userEvent.setup();
+    const world = chatWorld();
+    world.hold = true;
+    world.agentUpdates = emptyAgentUpdates();
+    const { services, fake } = renderKb({ world });
+    const centre = () => screen.getByRole('region', { name: 'Chat' });
+    await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
+    await within(centre()).findByRole('article', { name: 'Answer' });
+    await user.click(screen.getByTestId('message-input'));
+    await user.keyboard('And the base of the logarithm?{Enter}');
+    await within(centre()).findByText('Writing an answer…');
+    const chat = fake.world.chats.find((c) => c.title.startsWith('Why is there a logarithm'))!;
+    const answerId = centre().querySelector('article[data-state="streaming"]')!.getAttribute('data-message-id')!;
+    const answer = { id: answerId };
+    const of = (engine: string) => fake.world.agentUpdates!.agents.find((a) => a.engine === engine)!;
+    // Another agent's update names this id: nothing changes here (the answer is Claude Code's).
+    Object.assign(of(chat.engine === 'codex' ? 'opencode' : 'codex'), { phase: 'updating', action: 'upgrade', waiting: [answer.id] });
+    await act(() => services.agentUpdates.getState().load());
+    expect(within(centre()).getByText('Writing an answer…')).toBeInTheDocument();
+    Object.assign(of(chat.engine), { phase: 'queued', action: 'upgrade', waiting: [answer.id] });
+    await act(() => services.agentUpdates.getState().load());
+    const name = of(chat.engine).name;
+    expect(await within(centre()).findByText(`Waiting for the ${name} update…`)).toBeInTheDocument();
+    Object.assign(of(chat.engine), { phase: 'idle', action: null, waiting: [] });
+    await act(() => services.agentUpdates.getState().load());
+    expect(await within(centre()).findByText('Writing an answer…')).toBeInTheDocument();
   });
 
   it('a refused update shows its output and the exact Terminal command; a failed one offers Roll back where possible', async () => {

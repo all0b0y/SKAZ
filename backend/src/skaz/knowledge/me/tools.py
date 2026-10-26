@@ -18,7 +18,7 @@ from pydantic import Field
 from ...native_io import disk_call
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, ToolRegistry, _Args
 from ..chats.model import MemoryPart
-from . import DESCRIPTION_MAX, ID_PATTERN, PROFILE, SKILL_CAP, TITLE_MAX, MeEdit, MeError
+from . import DESCRIPTION_MAX, ID_PATTERN, PROFILE, SKILL_CAP, TITLE_MAX, MeEdit, MeError, builtin
 from .access import me_store
 from .prompt import EDIT_TOOL, SKILL_TOOL
 
@@ -117,7 +117,24 @@ def me_tools(tools: ToolRegistry) -> tuple[SkazTool, SkazTool]:
 
 
 def memory_part(edit: MeEdit) -> MemoryPart:
-    return MemoryPart(edit.id, edit.skill_id, edit.skill_title, edit.action, edit.summary, edit.undone)
+    """The chat chip of an edit. The chat database is plain SQLite, so the part carries no «Я» text —
+    no line the agent wrote, no title of the user's own skill — only a generic label; the chip shows
+    the edit's own summary and title from the vault when shown (``chats.service.memory_view``)."""
+    item = builtin(edit.skill_id)
+    title = item.title if item is not None else SKILL_LABEL
+    return MemoryPart(edit.id, edit.skill_id, title, edit.action, _generic(edit, item is not None),
+                      edit.undone)
+
+
+SKILL_LABEL = "A Me skill"
+
+
+def _generic(edit: MeEdit, built_in: bool) -> str:
+    if edit.action == "create":
+        return "New skill"
+    if edit.action == "delete":
+        return "Cleared" if built_in else "Deleted the skill"
+    return "Rewrote it" if edit.action == "replace" else "Added a line"
 
 
 async def mark_undone(chats: ChatService, edit: MeEdit) -> None:

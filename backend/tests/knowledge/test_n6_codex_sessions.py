@@ -19,6 +19,7 @@ from skaz.knowledge.agents.engine import (
     Failed,
     LiveSessionEngine,
     SessionBound,
+    SessionDeleteDeferred,
     SessionPlan,
     TurnMessage,
     collect,
@@ -157,3 +158,39 @@ async def test_stateless_runs_stay_ephemeral_and_bind_nothing(codex: FakeConnect
     assert codex.received("thread/resume") == []
     assert not any(isinstance(event, SessionBound | Compacted) for event in result.events)
     assert AgentTurn(run_id="x", messages=(), instructions="", tools=None).session is None
+
+
+async def test_a_thread_whose_turn_never_started_is_deleted(codex: FakeConnection,
+                                                            tools: ToolRegistry) -> None:
+    """FIX-1: ``thread/start`` made a persistent thread, then ``turn/start`` was refused — no
+    ``SessionBound``, so SKAZ has no record of it: Codex deletes it itself (best effort)."""
+    engine = CodexEngine(codex, tools, run_timeout_s=10)
+    result = await collect(engine.run(chat_turn("case:refuse_turn", SessionPlan("start"), tools)))
+    await engine.settle()
+    assert isinstance(result.terminal, Failed) and not any(isinstance(e, SessionBound) for e in result.events)
+    thread = codex.received("thread/start")[0]
+    assert thread["params"]["ephemeral"] is False
+    deleted = [item["params"]["threadId"] for item in codex.received("thread/delete")]
+    assert len(deleted) == 1 and deleted[0].startswith("thread-")
+    # A stateless (ephemeral) run leaves nothing to delete.
+    await collect(engine.run(chat_turn("case:refuse_turn", None, tools, run_id="run-2")))
+    await engine.settle()
+    assert len(codex.received("thread/delete")) == 1
+
+
+async def test_delete_of_a_thread_codex_no_longer_has_is_done(codex: FakeConnection,
+                                                              tools: ToolRegistry) -> None:
+    engine = CodexEngine(codex, tools, run_timeout_s=10)
+    await engine.delete_session("thread-gone-1")  # refused, and ``thread/read`` doesn't know it either
+    assert codex.received("thread/read")[0]["params"]["threadId"] == "thread-gone-1"
+    with pytest.raises(Exception):  # noqa: B017 - it still exists: an attempt failed
+        await engine.delete_session("thread-locked-1")
+
+
+async def test_delete_without_codex_installed_is_deferred(codex: FakeConnection, tools: ToolRegistry) -> None:
+    codex.binary = None
+    codex.view = {"status": "missing"}
+    engine = CodexEngine(codex, tools, run_timeout_s=10)
+    with pytest.raises(SessionDeleteDeferred):
+        await engine.delete_session("thread-live-1")
+    assert codex.received("thread/delete") == []

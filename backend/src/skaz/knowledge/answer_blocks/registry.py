@@ -97,6 +97,8 @@ def build_block(payload: str, checker: Checker) -> Built:
     """The agent's fenced JSON as a validated block; raises ``Broken`` with a plain-English reason."""
     try:
         data = json.loads(payload)
+    except RecursionError as error:  # nested past Python's limit: not data SKAZ can draw
+        raise Broken("The block data is nested too deeply.") from error
     except ValueError as error:
         line = getattr(error, "lineno", None)
         raise Broken("The block data is not valid JSON" + (f" (line {line})." if line else ".")) from error

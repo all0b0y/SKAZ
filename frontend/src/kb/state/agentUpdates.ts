@@ -42,6 +42,16 @@ export function updateOf(view: KbAgentUpdates | null, engine: EngineId): KbAgent
   return view?.agents.find((a) => a.engine === engine);
 }
 
+/**
+ * An answer waiting at the gate for its agent's update (FIX-1 F3.11): the backend names the waiting runs
+ * (a chat answer's run id is its message id), so only that answer says so — not other agents' chats.
+ */
+export function updateWait(view: KbAgentUpdates | null, engine: EngineId | null, messageId: string): string | null {
+  if (!engine) return null;
+  const update = updateOf(view, engine);
+  return update && update.phase !== 'idle' && update.waiting.includes(messageId) ? `Waiting for the ${update.name} update…` : null;
+}
+
 const active = (view: KbAgentUpdates | null) => !!view && (view.checking || view.agents.some((a) => a.phase !== 'idle'));
 
 export function createAgentUpdatesStore(client: KbClient, agents?: AgentsStore,

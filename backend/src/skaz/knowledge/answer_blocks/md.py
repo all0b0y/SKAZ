@@ -61,6 +61,19 @@ def text(value: str) -> str:
     return " ".join(_PRIVATE.sub("", value).split())
 
 
+def label(value: str) -> str:
+    """Text inside a reference's ``[…]`` (a source label, a link title): it can't close the brackets."""
+    return text(value).replace("[", "(").replace("]", ")")
+
+
+def link(title: str, url: str) -> str:
+    """A web link as Markdown — the one writer for Copy, the chat export and saved pages: the title
+    can't close its brackets, the URL can't close its parentheses (or break on a space)."""
+    safe = (_PRIVATE.sub("", url).strip().replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+            .replace("<", "%3C").replace(">", "%3E"))
+    return f"[{label(title) or safe}]({safe})"
+
+
 def line(value: str) -> str:
     """Text that starts a line: what would open another block (a heading, a list) is escaped."""
     value = text(value)

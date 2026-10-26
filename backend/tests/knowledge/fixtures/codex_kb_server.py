@@ -6,7 +6,9 @@ user input text. Not a model: it proves protocol handling, not answer quality.
 
 N6 live threads: ``thread/resume`` answers with the given thread (a thread id containing ``gone``
 or ``locked`` is refused, like a deleted thread or one with an active writer), ``thread/revert``
-refuses ``beforeTurnId`` ``turn-missing``, ``thread/delete`` refuses ids containing ``locked``.
+refuses ``beforeTurnId`` ``turn-missing``, ``thread/delete`` refuses ids containing ``locked`` (held)
+or ``gone`` (unknown; ``thread/read`` of a ``gone`` id fails too). ``case:refuse_turn`` makes ``turn/start``
+fail after ``thread/start`` succeeded.
 A resumed thread's turn id is ``turn-r<pid>`` (a new turn of the same thread).
 """
 from __future__ import annotations
@@ -161,14 +163,24 @@ for line in sys.stdin:
         else:
             send({"id": identity, "result": {}})
     elif method == "thread/delete":
-        if "locked" in str(message["params"].get("threadId")):
-            send({"id": identity, "error": {"code": -32600, "message": "thread has an active writer"}})
+        wanted = str(message["params"].get("threadId"))
+        if "locked" in wanted or "gone" in wanted:
+            send({"id": identity, "error": {"code": -32600, "message": f"PRIVATE can't delete {wanted}"}})
         else:
             send({"id": identity, "result": {}})
+    elif method == "thread/read":
+        wanted = str(message["params"].get("threadId"))
+        if "gone" in wanted:
+            send({"id": identity, "error": {"code": -32600, "message": f"PRIVATE no thread {wanted}"}})
+        else:
+            send({"id": identity, "result": {"thread": {"id": wanted, "turns": []}}})
     elif method == "turn/start":
         text = message["params"]["input"][0]["text"]
         found = re.findall(r"case:([a-z_]+)", text)
         mode = found[-1] if found else "stream"
+        if mode == "refuse_turn":  # e.g. a model the account can't use: the thread exists, no turn
+            send({"id": identity, "error": {"code": -32600, "message": "PRIVATE model not allowed"}})
+            continue
         send({"id": identity, "result": {"turn": {"id": TURN, "status": "inProgress"}}})
         start_turn()
     elif method == "turn/interrupt":

@@ -7,6 +7,7 @@ web search *of this chat* returned. Runs in a worker thread, like the resolver.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -28,6 +29,9 @@ from .parsing import CiteToken, PageToken, parse_token
 from .resolve import Resolver
 
 _WEB_PREFIX = "w:"
+#: A block whose data made the check itself fail (FIX-1 F2.2): broken, never a failed answer.
+UNEXPECTED = "SKAZ couldn't check this block's data."
+log = logging.getLogger(__name__)
 
 
 def _url_key(url: str) -> str:
@@ -126,10 +130,13 @@ class AnswerBlocks:
         checker = BlockChecker(self.resolver, self.web)
         try:
             built = build_block(payload, checker)
+            data, sources = _used_only(json.loads(built.data), checker.sources)
         except Broken as error:
             return BlockPart(block_id, "broken", kind=error.kind, error=str(error),
                              raw=payload[:MAX_RAW_CHARS])
-        data, sources = _used_only(json.loads(built.data), checker.sources)
+        except Exception as error:  # one odd block never fails the whole answer
+            log.warning("Answer block %s couldn't be built: %s", block_id, type(error).__name__)
+            return BlockPart(block_id, "broken", error=UNEXPECTED, raw=payload[:MAX_RAW_CHARS])
         return BlockPart(block_id, "ready", kind=built.kind,
                          data=json.dumps(data, ensure_ascii=False, sort_keys=True),
                          sources=tuple(sources), hidden=built.hidden, beside=built.beside, link=built.link)

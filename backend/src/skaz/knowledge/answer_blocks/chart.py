@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from . import md
-from .base import BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, envelope
+from .base import BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, clean, envelope
 
 MAX_BARS = 20
 
@@ -61,8 +61,9 @@ def build(data: dict[str, Any], items: Items) -> KbChartBlock:
             for ids, bar in items.many(BarIn, block.bars, "b")]
     if block.order == "value":
         bars.sort(key=lambda bar: -bar.value)
-    alt_label = block.alt_label if any(bar.alt for bar in bars) else None
-    return KbChartBlock(kind="chart", title=block.title, unit=block.unit, alt_label=alt_label, bars=bars)
+    alt_label = (clean(block.alt_label) or None) if block.alt_label and any(bar.alt for bar in bars) else None
+    unit = (clean(block.unit) or None) if block.unit else None
+    return KbChartBlock(kind="chart", title=block.title, unit=unit, alt_label=alt_label, bars=bars)
 
 
 def markdown(block: KbChartBlock, refs: md.Refs) -> list[str]:

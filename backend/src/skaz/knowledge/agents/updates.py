@@ -39,7 +39,7 @@ from ..install.channels import (
 )
 from ..install.latest import CheckOutput, Fetch, latest_version, newer, parse_version
 from ..install.system import Located, base_env, run_capture
-from ..install.tasks import InstallManager, InstallTask
+from ..install.tasks import InstallBusy, InstallManager, InstallTask
 from .engine import EngineId
 from .registry import ENGINE_IDS, ENGINE_NAMES, EngineRegistry
 from .update_gate import UpdateGate
@@ -49,6 +49,8 @@ log = logging.getLogger(__name__)
 SETTINGS_KEY = "agents.updates"
 START_DELAY = timedelta(minutes=1)
 INTERVAL = timedelta(hours=24)
+#: After a background check that failed outright (nothing saved), the next try — not at once.
+RETRY_DELAY = timedelta(minutes=30)
 HTTP_TIMEOUT_S = 15.0
 HERMES_CHECK_TIMEOUT_S = 120.0
 MAX_OUTPUT_LINES = 20
@@ -61,6 +63,7 @@ RunAction = Literal["upgrade", "rollback"]
 Rollback = Literal["skaz", "manual", "none"]
 LocateAgent = Callable[[EngineId], Located | None]
 HermesRunner = Callable[[Located], Awaitable[CheckOutput]]
+AfterUpdate = Callable[[EngineId], Awaitable[None]]
 
 #: A package manager's command an agent tells the user to run ("Claude is managed by Homebrew …").
 _HINT = re.compile(r"\b((?:brew|npm|pnpm|bun|yarn|mise|asdf|winget|apk|vp)\s+(?:upgrade|install|update|add|i)"
@@ -107,6 +110,8 @@ class AgentUpdateView:
     services_note: str | None
     failure: UpdateFailure | None
     checked_at: str | None
+    #: Runs (a chat answer's run id is its message id) waiting at the gate for this update.
+    waiting: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -217,7 +222,8 @@ class AgentUpdates:
     def __init__(self, registry: EngineRegistry, installs: InstallManager, gate: UpdateGate, *,
                  locate: LocateAgent, home: Path | None = None, fetch: Fetch | None = None,
                  hermes_check: HermesRunner | None = None, now: Callable[[], datetime] | None = None,
-                 start_delay: timedelta = START_DELAY, interval: timedelta = INTERVAL) -> None:
+                 start_delay: timedelta = START_DELAY, interval: timedelta = INTERVAL,
+                 retry_delay: timedelta = RETRY_DELAY, after_update: AfterUpdate | None = None) -> None:
         self.registry = registry
         self.installs = installs
         self.gate = gate
@@ -228,6 +234,10 @@ class AgentUpdates:
         self._now = now or (lambda: datetime.now(UTC))
         self._start_delay = start_delay
         self._interval = interval
+        self._retry_delay = retry_delay
+        #: Called once an update/rollback command succeeded, while the agent's work still waits
+        #: (the hub stops SKAZ's own Hermes gateway so the next answer starts the new version).
+        self._after_update = after_update
         self._lock = asyncio.Lock()
         self._runs: dict[EngineId, _Run] = {}
         self._checking: asyncio.Task[None] | None = None
@@ -279,6 +289,7 @@ class AgentUpdates:
             note=f"Updates {name} for this whole Mac, including Terminal.",
             services_note=SERVICES_NOTE if engine == "hermes" else None,
             failure=_failure(record.get("failure")), checked_at=_text(record.get("checked_at")),
+            waiting=self.gate.waiting(engine),
         )
 
     def _view(self, state: _State) -> UpdatesView:
@@ -396,6 +407,11 @@ class AgentUpdates:
                 await self.check()
             except Exception as error:  # never let one bad check stop the schedule
                 log.warning("agent updates: background check failed (%s)", type(error).__name__)
+                # Nothing may have been saved (attempted_at): wait before the next try, don't spin.
+                self._wake.clear()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._wake.wait(),
+                                           min(self._retry_delay, self._interval).total_seconds())
 
     async def aclose(self) -> None:
         tasks = [task for task in (self._loop, self._checking) if task is not None]
@@ -413,6 +429,7 @@ class AgentUpdates:
             return self._view(state)
         if not agent.available or agent.latest is None:
             raise UpdateRefused(f"There is no newer {agent.name} to install.")
+        self._refuse_while_installing(engine)
         self._begin(engine, _Run("upgrade", agent.installed, {}))
         return self._view(state)
 
@@ -424,6 +441,7 @@ class AgentUpdates:
             return self._view(state)
         if failure is None or failure.rollback != "skaz" or parse_version(failure.previous or "") is None:
             raise UpdateRefused(f"SKAZ can't roll {agent.name} back. Roll it back by hand.")
+        self._refuse_while_installing(engine)
         self._begin(engine, _Run("rollback", failure.previous, {"version": str(failure.previous)}))
         return self._view(state)
 
@@ -437,6 +455,12 @@ class AgentUpdates:
             await asyncio.gather(run.job, return_exceptions=True)
         return await self.view()
 
+    def _refuse_while_installing(self, engine: EngineId) -> None:
+        """An install, update or repair of the agent already runs: no second command (the offer stays)."""
+        if self.installs.running_for(engine) is not None:
+            raise UpdateRefused(f"{ENGINE_NAMES[engine]} is already being installed or updated. "
+                                "Try again when that has finished.")
+
     def _begin(self, engine: EngineId, run: _Run) -> None:
         run.phase = "queued" if self.gate.busy(engine) else "updating"
         self._runs[engine] = run
@@ -448,12 +472,23 @@ class AgentUpdates:
                 run.phase = "updating"
                 try:
                     task = self.installs.start(engine, run.action, run.values)
+                except InstallBusy:
+                    # Another install/update of the agent started while this one waited: nothing ran,
+                    # nothing to roll back — the offer simply stays.
+                    log.info("agent updates: %s %s not started (another install runs)", engine, run.action)
+                    return
                 except KnowledgeError as error:
-                    await self._fail(engine, run, error.message, [])
+                    await self._fail(engine, run, error.message, [], rollback="none")
                     return
                 run.task_id = task.id
                 self.registry.forget(engine)
                 task = await self.installs.finished(task.id)
+                if task.state == "succeeded" and self._after_update is not None:
+                    try:  # still exclusive: no work of the agent runs while it is restarted
+                        await self._after_update(engine)
+                    except Exception as error:
+                        log.warning("agent updates: after the %s %s (%s)", engine, run.action,
+                                    type(error).__name__)
             await self._settle(engine, run, task)
         except asyncio.CancelledError:
             pass  # cancelled while it waited for work to finish (nothing ran) or while SKAZ closed

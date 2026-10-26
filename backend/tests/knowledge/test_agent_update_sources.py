@@ -18,6 +18,7 @@ from skaz.knowledge.install.channels import (
 )
 from skaz.knowledge.install.latest import (
     CheckOutput,
+    HermesCheckFailed,
     hermes_latest,
     latest_version,
     newer,
@@ -188,6 +189,16 @@ def test_hermes_offers_only_a_newer_release(text: str) -> None:
 
 def test_hermes_refusal_offers_nothing() -> None:
     assert hermes_latest(CheckOutput(2, "This install is updated by pulling a new image.")) is None
+
+
+async def test_a_failed_hermes_check_raises_so_the_caller_keeps_what_it_knew() -> None:
+    """FIX-1 F3.5: a non-zero ``hermes update --check`` (offline, refused) is a failed check, like an
+    HTTP error — not "no newer release"."""
+    async def offline() -> CheckOutput:
+        return CheckOutput(1, "→ Update channel: stable\n✗ Could not resolve the stable source channel: …")
+
+    with pytest.raises(HermesCheckFailed):
+        await latest_version(ChannelInfo("hermes", "git"), fetch=_never, hermes_check=offline)
 
 
 async def _never(target: str) -> str:

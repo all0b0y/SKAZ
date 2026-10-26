@@ -133,12 +133,12 @@ def _hermes(action: Action) -> tuple[Step, ...]:
         return (HERMES_REPAIR, Step("Check ACP support", ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV))
     if action == "install":
         first = Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL))
-    elif action == "upgrade":
-        # U1 decision 8: Hermes' own gateways keep running (``--no-gateway-restart`` "stops nothing; you
-        # manage the gateways", /docs/getting-started/updating); they keep the old code until restarted.
-        first = Step("Update Hermes Agent", ("{binary}", "update", "--no-gateway-restart"))
     else:
-        first = Step("Update Hermes Agent", ("{binary}", "update"))
+        # U1 decision 8 (and, by the user's decision, the legacy "Needs an update" too): Hermes' own
+        # gateways keep running (``--no-gateway-restart`` "stops nothing; you manage the gateways",
+        # /docs/getting-started/updating); they keep the old code until restarted. SKAZ's own Hermes
+        # gateway is stopped by SKAZ after a good offered update/rollback (``agents/hub.py``).
+        first = Step("Update Hermes Agent", ("{binary}", "update", "--no-gateway-restart"))
     return (
         first,
         Step("Add ACP support to Hermes Agent", HERMES_ACP_EXTRA, cwd="{install_dir}"),

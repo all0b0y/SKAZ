@@ -155,6 +155,18 @@ if args[:1] == ["sessions"]:  # documented session management: `hermes sessions 
         # sessions_cmd._not_found
         print("No session '" + args[2] + "'. Run: hermes sessions list to find the id.")
         sys.exit(1)
+    if args[1:2] == ["pin"]:  # sessions_cmd._cmd_pin (v0.22.1+179): one line per id, exit 1 if any unknown
+        if SCENARIO.get("no_pin"):  # an older Hermes: argparse refuses the subcommand
+            sys.stderr.write("hermes sessions: error: argument: invalid choice: 'pin'\n")
+            sys.exit(2)
+        failures = 0
+        for session_id in args[2:]:
+            if session_id in SCENARIO.get("missing_sessions", []):
+                print("No session '" + session_id + "'. Run: hermes sessions list to find the id.")
+                failures += 1
+            else:
+                print("Pinned session '" + session_id + "'.")
+        sys.exit(1 if failures else SCENARIO.get("sessions_exit", 0))
     sys.exit(SCENARIO.get("sessions_exit", 0))
 if args[:1] in (["auth"], ["config"], ["fallback"]):
     # Short commands answered from the scenario by their argv ("auth list", "config get model.provider

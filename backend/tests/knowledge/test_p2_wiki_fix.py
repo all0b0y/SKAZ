@@ -117,6 +117,48 @@ async def test_a_block_changed_since_the_proposal_is_left_alone(env: Env) -> Non
     assert env.page() == edited
 
 
+async def test_an_edit_that_lands_between_the_check_and_the_write_is_never_overwritten(env: Env) -> None:
+    """FIX-1 F2.1: the stale check runs inside the wiki's write lock, on the text being replaced."""
+    chat_id, answer = await _marked(env)
+    (card,) = [part for part in answer["parts"] if part["type"] == "wiki_fix"]
+    wiki = env.runtime.kb_wiki
+    real = wiki.update_block
+
+    def racing(page_id: str, block_id: str, text: str, **kwargs: Any) -> Any:
+        real(page_id, block_id, "Моя правка.")  # the user's own edit lands first (another window)
+        return real(page_id, block_id, text, **kwargs)
+
+    wiki.update_block = racing
+    try:
+        url = f"/kb/chats/{chat_id}/messages/{answer['id']}/wiki-fixes/{card['id']}/apply"
+        result = await env.client.post(url)
+    finally:
+        del wiki.update_block
+    assert result.status_code == 200, result.text
+    assert result.json()["status"] == "stale"
+    block = parse_page(env.page()).block("c-e1")
+    assert block is not None and block.body.strip().startswith("Моя правка.")
+
+
+async def test_that_is_wrong_on_a_diagram_uses_the_page_cited_after_it(env: Env) -> None:
+    """FIX-1 F2.8: a diagram's items rest on the sources cited right after it («Where is this from?»)."""
+    from skaz.knowledge.chats.selection import diagram_id
+    source = "flowchart LR\n  A[Энтропия] --> B[Беспорядок]"
+    drawn = f"Схема:\n```mermaid\n{source}\n```\n⟦p:pg-entropy#c-e1⟧\n"
+    env.engine.script = lambda _turn: [TextDelta("", drawn)]
+    chat_id = (await env.client.post("/kb/chats", json={"engine": "codex"})).json()["id"]
+    _user, first = await env.answered(chat_id, {"text": "Нарисуй"})
+    env.engine.script = lambda _turn: [_fix(), TextDelta("", "Проверил.")]
+    _user, answer = await env.answered(chat_id, {"text": "That’s wrong", "selection": {
+        "message_id": first["id"], "block_id": diagram_id(source), "kind": "diagram", "intent": "wrong",
+        "items": [{"id": "node:B", "label": "Беспорядок"}]}})
+    assert json.loads(env.engine.outcomes[-1])["status"] == "shown", env.engine.outcomes
+    (card,) = [part for part in answer["parts"] if part["type"] == "wiki_fix"]
+    assert card["block_id"] == "c-e1"
+    # The agent was told which sources the diagram rests on.
+    assert "p:pg-entropy#c-e1" in env.engine.turns[-1].messages[-1].content
+
+
 @pytest.mark.parametrize("intent, proposal, reason", [
     ("ask", [_fix()], "marked as wrong"),
     ("wrong", [_fix(page_id="pg-old-answer", block_id="c-a1", wrong="Разбор говорит")], "not a source"),

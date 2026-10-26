@@ -52,6 +52,8 @@ const SIGN_OUT: Partial<Record<EngineId, { body: string; done: string }>> = {
 /** The signed-out Claude Code card: its sign-in in SKAZ is separate (N6 decision 14). */
 const CLAUDE_OWN_SIGN_IN = 'Claude Code in SKAZ has its own sign-in, separate from Claude Code in Terminal and other apps.';
 
+const HERMES_SERVICES_NOTE = 'Running Hermes services keep the old version until you restart them.';
+
 /**
  * One agent with its real state (v21): Connected / Not installed / Not signed in / Needs an
  * update, the action that fixes it, and the install log while a task runs. Hermes says that SKAZ
@@ -166,6 +168,10 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       {variant === 'card' && agent.installed && <WebSearchNote agent={agent} />}
       {agent.id === 'claude_code' && agent.state === 'signed_out' && <p className="kb-agentcard__note" role="note">{CLAUDE_OWN_SIGN_IN}</p>}
       {agent.installed && !running && <AgentUpdateOffer engine={agent.id} />}
+      {/* User decision (FIX-1 F3.9): "Needs an update" of Hermes runs `hermes update --no-gateway-restart` too. */}
+      {agent.id === 'hermes' && action === 'update' && !running && (
+        <p className="kb-agentcard__note" role="note">{HERMES_SERVICES_NOTE}</p>
+      )}
       {firstCheck && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
           <Icon name="shield" size={13} />

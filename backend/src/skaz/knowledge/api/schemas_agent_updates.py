@@ -54,6 +54,9 @@ class KbAgentUpdate(BaseModel):
     services_note: str | None
     failure: KbAgentUpdateFailure | None
     checked_at: str | None
+    #: Runs waiting at the gate for this update; a chat answer's run id is its message id (the answer
+    #: reads "Waiting for the <Agent> update…").
+    waiting: list[str]
 
 
 class KbAgentUpdates(BaseModel):

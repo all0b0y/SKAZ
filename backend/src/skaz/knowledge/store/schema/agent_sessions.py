@@ -13,12 +13,13 @@ each answer (prefix sync).
 ``agent_session_deletions``: durable "delete this agent session" list. A deleted ``agent_sessions``
 row (chat deleted — through the cascade —, engine switched, session replaced, signed out) queues its
 session here in the same transaction (trigger). Retried; given up after a bounded number of attempts.
-Holds ids only, never text; not tied to a chat (the chat is usually gone).
+Holds ids only, never text; not tied to a chat (the chat is usually gone). v2: ``next_attempt_at`` — a
+failed deletion waits before the next try (backoff); an app start tries every entry once.
 """
 from __future__ import annotations
 
 NAME = "agent_sessions"
-VERSION = 1
+VERSION = 2
 
 SQL = """
 CREATE TABLE IF NOT EXISTS agent_sessions (
@@ -47,6 +48,8 @@ CREATE TABLE IF NOT EXISTS agent_session_deletions (
     session_id  TEXT NOT NULL,
     attempts    INTEGER NOT NULL DEFAULT 0,
     queued_at   TEXT NOT NULL,
+    -- Not tried before this time (after a failed attempt); NULL = due now.
+    next_attempt_at TEXT,
     PRIMARY KEY (engine, session_id)
 );
 
@@ -56,3 +59,5 @@ BEGIN
     VALUES (old.engine, old.session_id, 0, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));
 END;
 """
+
+UPGRADES = {2: "ALTER TABLE agent_session_deletions ADD COLUMN next_attempt_at TEXT;\n"}

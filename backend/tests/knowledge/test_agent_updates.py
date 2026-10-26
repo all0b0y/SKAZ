@@ -85,13 +85,13 @@ def status(engine: EngineId, version: str | None, installed: bool = True) -> Eng
 class World:
     def __init__(self, tmp_path: Path, *, versions: dict[EngineId, str | None] | None = None,
                  latest: dict[str, str] | None = None, settings: dict[str, Any] | None = None,
-                 now: datetime = T0) -> None:
+                 now: datetime = T0, retry_delay: timedelta | None = None, store: Any = None) -> None:
         versions = versions if versions is not None else {"codex": "0.160.0", "claude_code": None,
                                                           "hermes": None, "opencode": "1.17.18"}
         self.engines = {engine: FakeEngine(engine, status=status(engine, version, version is not None),
                                            script=[TextDelta("", "answer")])
                         for engine, version in versions.items()}
-        self.settings = Settings(settings)
+        self.settings = store if store is not None else Settings(settings)
         self.registry = EngineRegistry(self.engines, self.settings)
         self.executor = Executor()
         self.home = tmp_path
@@ -101,7 +101,9 @@ class World:
             return (await self.registry.view(engine, refresh=True)).status
 
         async def resolve(engine: EngineId) -> dict[str, str]:
-            return {"binary": str(self.bins[engine])}
+            folder = str(tmp_path / "hermes-folders")  # Hermes' later steps (ACP extra, check) need them
+            return {"binary": str(self.bins[engine]), "install_dir": folder, "hermes_home": folder,
+                    "hermes_policy": folder, "hermes_runtime": folder}
 
         self.installs = InstallManager(tmp_path / "install", verify=verify, resolve=resolve,
                                        executor=self.executor, env={"PATH": "/usr/bin:/bin"})
@@ -116,10 +118,16 @@ class World:
         self.offline = False
         self.clock = now
         self.hermes_output = CheckOutput(0, "→ Selected release available: stable v0.22.5 (bf0203a794a0)")
+        #: Engines whose update/rollback command succeeded, as told to the hub (SKAZ's Hermes gateway stop).
+        self.after: list[str] = []
+        extra: dict[str, Any] = {"retry_delay": retry_delay} if retry_delay is not None else {}
         self.updates = AgentUpdates(self.registry, self.installs, self.gate, home=tmp_path,
                                     locate=self.locate, fetch=self.fetch, hermes_check=self.hermes,
                                     now=lambda: self.clock, start_delay=timedelta(seconds=0.05),
-                                    interval=timedelta(hours=24))
+                                    interval=timedelta(hours=24), after_update=self.after_update, **extra)
+
+    async def after_update(self, engine: EngineId) -> None:
+        self.after.append(engine)
 
     @staticmethod
     def _binaries(home: Path) -> dict[EngineId, Path]:
@@ -498,7 +506,323 @@ def test_upgrade_recipes_are_the_agents_own_commands() -> None:
     assert RECIPES["claude_code"].plan("rollback")[0].argv == ("{binary}", "install", "{version}")
     assert RECIPES["opencode"].plan("rollback")[0].argv == ("{binary}", "upgrade", "{version}")
     assert RECIPES["hermes"].plan("upgrade")[0].argv == ("{binary}", "update", "--no-gateway-restart")
+    # User decision (FIX-1 F3.9): the legacy "Needs an update" leaves Hermes' running services alone too.
+    assert RECIPES["hermes"].plan("update")[0].argv == ("{binary}", "update", "--no-gateway-restart")
+
+
+# -- FIX-1 F3 (audit R3) ---------------------------------------------------------------------------
+
+
+async def test_a_run_inside_a_counted_run_of_the_same_agent_is_not_blocked_by_a_queued_update(
+        tmp_path: Path) -> None:
+    """F3.2: work started from inside a running answer (a Codex chat's own web search, a tool's task)
+    must not wait for an update that itself waits for that answer."""
+    world = World(tmp_path)
+    await world.updates.check()
+    release = asyncio.Event()
+    codex = world.engines["codex"]
+    codex._script = lambda t: ([TextDelta("", "a"), Gate(release), TextDelta("", "b")] if t.run_id == "chat-1"
+                               else [TextDelta("", "nested")])
+    world.executor.plan.append(Step([], 0, on_done=lambda: world.set_version("codex", "0.164.0")))
+    seen: dict[str, Any] = {}
+
+    async def outer() -> None:
+        stream = codex.run(turn("chat-1"))
+        async for event in stream:
+            if isinstance(event, TextDelta) and event.text == "a":
+                await world.updates.update("codex")
+                assert agent(await world.updates.view(), "codex").phase == "queued"
+                # Inline (a tool handler on the reader's path) and in a task spawned from here.
+                seen["inline"] = await asyncio.wait_for(_collect(codex.run(turn("nested-1"))), 1)
+                spawned = asyncio.create_task(_collect(codex.run(turn("nested-2"))))
+                seen["spawned"] = await asyncio.wait_for(spawned, 1)
+                release.set()
+
+    unrelated: list[Any] = []
+    await outer()
+    # Work from elsewhere still waits for the update; the update ran after the outer answer.
+    await until(lambda: "codex" not in world.updates._runs)
+    unrelated = await _collect(codex.run(turn("later")))
+    assert any(isinstance(event, TextDelta) for event in seen["inline"])
+    assert any(isinstance(event, TextDelta) for event in seen["spawned"])
+    assert world.executor.started == [[str(world.bins["codex"]), "update"]]
+    assert unrelated
+
+
+async def test_other_work_still_waits_for_a_queued_update(tmp_path: Path) -> None:
+    world = World(tmp_path)
+    await world.updates.check()
+    release = asyncio.Event()
+    codex = world.engines["codex"]
+    codex._script = [Gate(release), TextDelta("", "done")]
+    running = asyncio.create_task(_collect(codex.run(turn("r1"))))
+    await until(lambda: world.gate.busy("codex"))
+    world.executor.plan.append(Step([], 0, on_done=lambda: world.set_version("codex", "0.164.0")))
+    await world.updates.update("codex")
+    other = asyncio.create_task(_collect(codex.run(turn("r2"))))  # its own task: not nested
+    await asyncio.sleep(0.05)
+    assert not other.done()
+    release.set()
+    await running
+    await other
+
+
+async def test_a_run_waiting_at_the_gate_is_not_started_in_the_engine_and_is_reported(tmp_path: Path) -> None:
+    """F3.6 + F3.11: the engine's ``run`` is called only once the gate lets the run in (a run stopped while
+    it waits leaves nothing in the engine); while it waits, the update view names it (the chat label)."""
+    world = World(tmp_path)
+    await world.updates.check()
+    release = asyncio.Event()
+    codex = world.engines["codex"]
+    codex._script = [Gate(release)]
+    running = asyncio.create_task(_collect(codex.run(turn("r1"))))
+    await until(lambda: world.gate.busy("codex"))
+    await world.updates.update("codex")
+    waiting = asyncio.create_task(_collect(codex.run(turn("r2"))))
+    await until(lambda: agent_waiting(world) == ("r2",))
+    assert "r2" not in codex.active_runs()  # nothing registered in the engine while it waits
+    assert [len(t.messages) for t in codex.turns] == [1]  # only r1 reached the engine
+    await codex.interrupt("r2")
+    events = await waiting
+    assert isinstance(events[-1], Failed) and events[-1].kind == "cancelled" and events[-1].unsent
+    assert "r2" not in codex.active_runs() and agent_waiting(world) == ()
+    await world.updates.cancel("codex")
+    release.set()
+    await running
+
+
+async def test_a_run_stopped_before_it_is_read_never_reaches_the_engine(tmp_path: Path) -> None:
+    world = World(tmp_path)
+    codex = world.engines["codex"]
+    stream = codex.run(turn("r1"))
+    await codex.interrupt("r1")  # the Stop came before anything read the answer
+    events = await _collect(stream)
+    assert isinstance(events[-1], Failed) and events[-1].kind == "cancelled"
+    assert codex.turns == [] and not world.gate.busy("codex")
+
+
+def agent_waiting(world: World) -> tuple[str, ...]:
+    return tuple(world.gate.waiting("codex"))
+
+
+async def test_the_update_view_lists_answers_waiting_for_it(tmp_path: Path) -> None:
+    world = World(tmp_path)
+    await world.updates.check()
+    release = asyncio.Event()
+    codex = world.engines["codex"]
+    codex._script = [Gate(release), TextDelta("", "done")]
+    running = asyncio.create_task(_collect(codex.run(turn("r1"))))
+    await until(lambda: world.gate.busy("codex"))
+    world.executor.plan.append(Step([], 0, on_done=lambda: world.set_version("codex", "0.164.0")))
+    await world.updates.update("codex")
+    waiting = asyncio.create_task(_collect(codex.run(turn("message-7"))))
+    await until(lambda: agent_waiting(world) == ("message-7",))
+    view = await world.updates.view()
+    assert agent(view, "codex").waiting == ("message-7",) and agent(view, "opencode").waiting == ()
+    release.set()
+    await running
+    await waiting
+    assert agent(await world.updates.view(), "codex").waiting == ()
+
+
+async def test_an_install_already_running_refuses_the_update_and_keeps_the_offer(tmp_path: Path) -> None:
+    """F3.4: InstallBusy is no failed update (no pointless Roll back): refused at once, or — when it
+    appears while the update waited — the offer simply stays."""
+    world = World(tmp_path)
+    await world.updates.check()
+    hold = asyncio.Event()
+    world.executor.plan.append(Step(["installing"], 0, hold=hold))
+    legacy = world.installs.start("opencode", "update")  # "Needs an update" running for OpenCode
+    with pytest.raises(UpdateRefused):
+        await world.updates.update("opencode")
+    view = await world.updates.view()
+    assert agent(view, "opencode").failure is None and agent(view, "opencode").available
+    # Queued behind running work, then an install starts before the update could.
+    release = asyncio.Event()
+    codex = world.engines["codex"]
+    codex._script = [Gate(release)]
+    running = asyncio.create_task(_collect(codex.run(turn("r1"))))
+    await until(lambda: world.gate.busy("codex"))
+    await world.updates.update("codex")
+    other = asyncio.Event()
+    world.executor.plan.append(Step(["installing codex"], 0, hold=other))
+    codex_install = world.installs.start("codex", "update")
+    release.set()
+    await running
+    await until(lambda: "codex" not in world.updates._runs)
+    view = await world.updates.view()
+    codex_view = agent(view, "codex")
+    assert codex_view.failure is None and codex_view.available and codex_view.phase == "idle"
+    for task in (legacy, codex_install):
+        await world.installs.cancel(task.id)
+
+
+async def test_a_failed_hermes_check_keeps_the_last_result_and_last_checked(tmp_path: Path) -> None:
+    """F3.5: ``hermes update --check`` exiting non-zero (offline: "Could not resolve the stable source
+    channel") is a failed check like an HTTP error, not "no update"."""
+    world = World(tmp_path, versions=ONLY_HERMES)
+    await world.updates.check()
+    before = dict(world.settings.get(SETTINGS_KEY)["agents"]["hermes"])
+    world.hermes_output = CheckOutput(1, "→ Update channel: stable\n✗ Could not resolve the stable source "
+                                         "channel: fatal: unable to access 'https://github.com/…'")
+    world.clock = T0 + timedelta(days=1)
+    view = await world.updates.check()
+    saved = world.settings.get(SETTINGS_KEY)
+    assert saved["agents"]["hermes"] == before
+    assert saved["checked_at"] == T0.isoformat(timespec="seconds")
+    assert agent(view, "hermes").available and agent(view, "hermes").latest == "0.22.5"
+
+
+class BrokenSettings(Settings):
+    """Writes fail (a locked database): every check raises."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.writes = 0
+
+    def set(self, key: str, value: Any) -> None:
+        self.writes += 1
+        raise OSError("database is locked")
+
+
+async def test_a_failing_background_check_backs_off(tmp_path: Path) -> None:
+    """F3.7: a check that raises (nothing was saved) waits before the next try instead of spinning."""
+    store = BrokenSettings()
+    world = World(tmp_path, store=store, retry_delay=timedelta(hours=1))
+    world.updates.start()
+    await asyncio.sleep(0.3)
+    await world.updates.aclose()
+    assert store.writes == 1
+
+
+async def test_a_successful_update_or_rollback_is_told_to_the_hub_a_failed_one_is_not(tmp_path: Path) -> None:
+    """F3.8: after a Hermes update the hub stops SKAZ's own Hermes gateway (the next answer starts the new
+    version); a rollback the same; a failed command changes nothing to restart."""
+    world = World(tmp_path, versions=ONLY_HERMES)
+    await world.updates.check()
+    world.executor.plan.append(Step([], 0, on_done=lambda: world.set_version("hermes", "0.22.5")))
+    await world.updates.update("hermes")
+    await until(lambda: "hermes" not in world.updates._runs)
+    assert world.after == ["hermes"]
+    world2 = World(tmp_path / "second")
+    await world2.updates.check()
+    world2.executor.plan.append(Step(["npm error code EACCES"], 1))
+    await world2.updates.update("codex")
+    await until(lambda: "codex" not in world2.updates._runs)
+    assert world2.after == []
+    # OpenCode: the command ran but the recheck failed (no restart), then a rollback that worked.
+    broken = EngineStatus("opencode", installed=True, version="1.19.4", incompatible=True, reason="Bad.")
+    world2.executor.plan.append(Step([], 0, on_done=lambda: setattr(world2.engines["opencode"], "_status",
+                                                                   broken)))
+    await world2.updates.update("opencode")
+    await until(lambda: "opencode" not in world2.updates._runs)
+    assert world2.after == []
+    world2.executor.plan.append(Step([], 0, on_done=lambda: world2.set_version("opencode", "1.17.18")))
+    await world2.updates.rollback("opencode")
+    await until(lambda: "opencode" not in world2.updates._runs)
+    assert world2.after == ["opencode"]
+
+
+async def test_codex_web_search_waits_for_an_update_of_codex() -> None:
+    """F3.3: Codex's web search runs its own ``codex app-server``; it passes the gate like any run."""
+    from skaz.knowledge.agents.web_runner import CodexSearch
+
+    class Connection:
+        cwd = Path("/nonexistent")
+        spawned = 0
+
+        def rpc(self, **_: Any) -> Any:
+            Connection.spawned += 1
+            raise ValueError("no codex in this test")
+
+    gate = UpdateGate()
+    codex = FakeEngine("codex", script=[TextDelta("", "x")])
+    guard(codex, gate)
+    updating = asyncio.Event()
+    done = asyncio.Event()
+
+    async def update() -> None:
+        async with gate.exclusive("codex"):
+            updating.set()
+            await done.wait()
+
+    job = asyncio.create_task(update())
+    await updating.wait()
+    search = asyncio.create_task(CodexSearch(Connection()).search(codex, "entropy"))
+    await asyncio.sleep(0.05)
+    assert Connection.spawned == 0 and not search.done()
+    done.set()
+    await job
+    outcome = await search
+    assert Connection.spawned == 1 and outcome.error
+
+
+async def test_codex_engine_forgets_its_status_on_reset(tmp_path: Path) -> None:
+    """F3.1 (HIGH): after ``codex update`` the registry's refresh must read the new version, not the
+    real CodexEngine's 60 s status cache ("Codex wasn't updated" after a good update)."""
+    from skaz.knowledge.agents.codex import CodexEngine
+
+    class Connection:
+        cwd = tmp_path
+        binary: str | None = "/fixture/codex"
+
+        def __init__(self) -> None:
+            self.version = "codex-cli 0.160.0"
+
+        async def check(self) -> dict[str, Any]:
+            return {"status": "connected", "version": self.version, "path": self.binary}
+
+        def rpc(self, **_: Any) -> Any:
+            raise ValueError("not used")
+
+    connection = Connection()
+    codex = CodexEngine(connection, None)
+    engines = {engine: FakeEngine(engine, status=status(engine, None, False))
+               for engine in ("claude_code", "hermes", "opencode")}
+    registry = EngineRegistry({"codex": codex, **engines}, Settings())
+    assert (await registry.view("codex")).status.version == "0.160.0"
+    connection.version = "codex-cli 0.164.0"
+    assert (await registry.view("codex", refresh=True)).status.version == "0.164.0"
+
+
+async def test_hub_exposes_whether_an_agent_is_blocked_by_an_update() -> None:
+    """For F1's session deletions: ``update_gate.blocked(engine)`` on the engine object."""
+    from skaz.knowledge.agents.update_gate import blocked
+    gate = UpdateGate()
+    codex = FakeEngine("codex")
+    guard(codex, gate)
+    assert not blocked(codex) and not blocked(FakeEngine("hermes"))
+    async with gate.exclusive("codex"):
+        assert blocked(codex)
+    assert not blocked(codex)
 
 
 async def _collect(events: AsyncIterator[Any]) -> list[Any]:
     return [event async for event in events]
+
+
+async def test_the_hub_stops_skazs_own_hermes_gateway_after_a_hermes_update_only(tmp_path: Path) -> None:
+    """F3.8 wiring: the hub's hook calls the existing planned stop of SKAZ's Hermes gateway
+    (``HermesEngine.aclose``) for Hermes and nothing for other agents. No agent is started."""
+    from skaz.knowledge.agents.hermes import HermesEngine
+    from skaz.knowledge.agents.hub import build_agents_hub
+
+    hub = build_agents_hub(tmp_path / "data", settings=Settings(), codex=object(),  # type: ignore[arg-type]
+                           locate_cli=lambda _name: None, user_home=tmp_path)
+    hermes = hub.registry.engine("hermes")
+    assert isinstance(hermes, HermesEngine) and hub.updates is not None and hub.gate is not None
+    stops: list[str] = []
+
+    async def stop(**_: Any) -> None:
+        stops.append("hermes")
+
+    hermes.aclose = stop  # type: ignore[method-assign]
+    hook = hub.updates._after_update
+    assert hook is not None
+    await hook("codex")
+    assert stops == []
+    await hook("hermes")
+    assert stops == ["hermes"]
+    assert not hub.blocked("hermes")
+    async with hub.gate.exclusive("hermes"):
+        assert hub.blocked("hermes") and not hub.blocked("codex")

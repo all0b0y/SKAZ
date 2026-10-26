@@ -14,6 +14,7 @@ from .engine import (
     Failed,
     ModelOption,
     SessionBound,
+    SessionDeleteDeferred,
     SessionSupport,
 )
 
@@ -48,6 +49,12 @@ class FakeEngine:
         self.deleted_sessions: list[str] = []
         #: ``delete_session`` raises this many times before it succeeds (retry tests).
         self.delete_failures = 0
+        #: Every ``delete_session`` call (attempts, deferred ones included).
+        self.delete_calls: list[str] = []
+        #: ``delete_session`` can't try now (not installed / repairing): ``SessionDeleteDeferred``.
+        self.delete_deferred = False
+        #: Sessions SKAZ gave up on (``forget_session``: local traces dropped).
+        self.forgotten: list[str] = []
         self._sessions_started = 0
         self._turns_bound = 0
 
@@ -56,10 +63,16 @@ class FakeEngine:
         return self.session_support
 
     async def delete_session(self, session_id: str) -> None:
+        self.delete_calls.append(session_id)
+        if self.delete_deferred:
+            raise SessionDeleteDeferred("fake: not installed")
         if self.delete_failures > 0:
             self.delete_failures -= 1
             raise RuntimeError("fake: the session could not be deleted")
         self.deleted_sessions.append(session_id)
+
+    def forget_session(self, session_id: str) -> None:
+        self.forgotten.append(session_id)
 
     @property
     def id(self) -> EngineId:

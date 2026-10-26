@@ -31,7 +31,9 @@ transport) and the extra tool-ish features below switched off too.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import aclosing
@@ -62,6 +64,8 @@ from .engine import (
     FailureKind,
     ModelOption,
     SessionBound,
+    SessionDeleteDeferred,
+    SessionPlan,
     SessionSupport,
     TextDelta,
     ToolCall,
@@ -75,6 +79,8 @@ from .history import seed_prompt
 from .registry import codex_login_progress
 from .tools import ToolContext, ToolRegistry
 from .usage import codex_usage
+
+log = logging.getLogger(__name__)
 
 MAX_PARALLEL_RUNS = 6
 #: The whole answer's deadline; time spent waiting for the user (permissions, questions) is not counted.
@@ -215,6 +221,8 @@ class CodexEngine:
         self._status_at = 0.0
         self._status_lock = asyncio.Lock()
         self._runs: dict[str, _Run] = {}
+        #: Background deletions of threads whose turn never started (N6).
+        self._cleanups: set[asyncio.Task[None]] = set()
         #: Runs waiting for the user (a permission or a question): their deadline stands still (P3).
         self.waits = waits
 
@@ -231,10 +239,57 @@ class CodexEngine:
 
     async def delete_session(self, session_id: str) -> None:
         """``thread/delete`` of a chat's live thread in its own short-lived process; raises on failure
-        (the caller retries). Measured on codex 0.160: thread rows and the rollout file are removed."""
-        rpc = self._connection.rpc()
+        (the caller retries). Measured on codex 0.160: thread rows and the rollout file are removed.
+
+        A refused delete of a thread ``thread/read`` doesn't know either means Codex no longer has it:
+        done. Codex not installed: ``SessionDeleteDeferred`` (not an attempt)."""
+        if self._connection.binary is None:
+            with contextlib.suppress(Exception):
+                await self.status()
+            if self._connection.binary is None:
+                raise SessionDeleteDeferred("Codex is not installed.")
+        try:
+            rpc = self._connection.rpc()
+        except ValueError as error:
+            raise SessionDeleteDeferred("Codex is not available.") from error
         async with asyncio.timeout(DELETE_TIMEOUT_S), rpc:
-            await rpc.request("thread/delete", {"threadId": session_id})
+            try:
+                await rpc.request("thread/delete", {"threadId": session_id})
+            except CodexRpcError:
+                if rpc.closed:
+                    raise
+                try:  # the error is sanitized: ask whether the thread is still there
+                    await rpc.request("thread/read", {"threadId": session_id, "includeTurns": False})
+                except CodexRpcError:
+                    if rpc.closed:
+                        raise
+                    return  # Codex doesn't know the thread: already gone
+                raise
+
+    async def _discard_thread(self, thread_id: str, rpc: CodexRpc) -> None:
+        """A persistent thread whose turn never started (no ``SessionBound``: SKAZ has no record of it)
+        is deleted at once on the run's own process, else in a short-lived one in the background."""
+        if not rpc.closed:
+            try:
+                await asyncio.wait_for(rpc.request("thread/delete", {"threadId": thread_id}), 5)
+                return
+            except (CodexRpcError, TimeoutError):
+                pass
+
+        async def later() -> None:
+            try:
+                await self.delete_session(thread_id)
+            except Exception as error:  # best effort: nothing else knows this thread
+                log.info("Deleting an unused Codex thread failed (%s)", type(error).__name__)
+
+        task = asyncio.create_task(later(), name="codex-discard-thread")
+        self._cleanups.add(task)
+        task.add_done_callback(self._cleanups.discard)
+
+    async def settle(self) -> None:
+        """Wait for background thread deletions (tests; nothing in the app waits for them)."""
+        while self._cleanups:
+            await asyncio.gather(*list(self._cleanups), return_exceptions=True)
 
     # -- status and models ---------------------------------------------------
 
@@ -246,6 +301,12 @@ class CodexEngine:
                 self._status_at = time.monotonic()
             assert self._status is not None
             return self._status
+
+    def reset_cache(self) -> None:
+        """Forget the remembered status (``EngineRegistry.view(refresh=True)`` after an install or update):
+        the next check reads the installed version again (U1, FIX-1 F3.1)."""
+        self._status = None
+        self._status_at = 0.0
 
     async def login_url(self, consent: bool) -> str:
         """Codex's own ChatGPT sign-in (the existing flow); SKAZ never sees credentials."""
@@ -474,13 +535,21 @@ class CodexEngine:
                 run.thread_id = thread_id
             await rpc.request("turn/start", {"threadId": run.thread_id, **turn_params}, on_result=bind)
         except CodexRpcError:
+            await self._orphaned(plan, resume, run, rpc)
             if run.cancelled:
                 return Failed(run_id, "cancelled", STOPPED)
             return Failed(run_id, "incompatible",
                           "Codex refused to start the answer. Check the selected model and settings.")
         except (KeyError, TypeError):
+            await self._orphaned(plan, resume, run, rpc)
             return Failed(run_id, "incompatible", "Codex replied in an unexpected format.")
         return None
+
+    async def _orphaned(self, plan: SessionPlan | None, resume: bool, run: _Run, rpc: CodexRpc) -> None:
+        """``thread/start`` made a persistent chat thread but its turn never started: nothing reports it
+        to SKAZ (no ``SessionBound``), so it is deleted here (best effort)."""
+        if plan is not None and not resume and run.thread_id is not None and run.turn_id is None:
+            await self._discard_thread(run.thread_id, rpc)
 
     async def _resume(self, run: _Run, rpc: CodexRpc, params: dict[str, Any],
                       before_turn_id: str | None) -> Failed | None:

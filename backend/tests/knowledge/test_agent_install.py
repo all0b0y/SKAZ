@@ -197,7 +197,9 @@ async def test_hermes_procedure_adds_the_acp_extra_and_checks_it(tmp_path: Path)
     task = await finished(installs.start("hermes", "update"))
     assert task.state == "succeeded"
     assert [step["argv"] for step in executor.started] == [
-        ["/Users/me/.local/bin/hermes", "update"],
+        # User decision (FIX-1 F3.9, migrated from a plain `hermes update`): "Needs an update" leaves the
+        # user's running Hermes services alone too, like the offered update (U1 decision 8).
+        ["/Users/me/.local/bin/hermes", "update", "--no-gateway-restart"],
         [
             "/Users/me/.hermes/hermes-agent/scripts/run-in-hermes-env",
             "python",

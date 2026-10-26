@@ -12,7 +12,7 @@ export function agentUpdate(engine: KbAgentUpdate['engine'], patch: Partial<KbAg
     skipped: null, busy: false, phase: 'idle', action: null, task_id: null,
     note: `Updates ${NAMES[engine]} for this whole Mac, including Terminal.`,
     services_note: engine === 'hermes' ? 'Running Hermes services keep the old version until you restart them.' : null,
-    failure: null, checked_at: null, ...patch,
+    failure: null, checked_at: null, waiting: [], ...patch,
   };
 }
 

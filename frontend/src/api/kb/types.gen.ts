@@ -157,6 +157,7 @@ export interface KbAgentUpdate {
   services_note: string | null;
   failure: KbAgentUpdateFailure | null;
   checked_at: string | null;
+  waiting: string[];
 }
 
 export interface KbAgentUpdateFailure {

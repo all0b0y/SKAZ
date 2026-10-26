@@ -65,7 +65,7 @@ import shutil
 import signal
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,7 +86,14 @@ from ..install.system import (
 from ..install.terminal import TerminalLauncher, terminal_progress
 from ..permissions.refusals import CLAUDE_MCP_TIMEOUT_MS
 from ..processes import CHILDREN
-from .claude_sessions import NOTHING_TO_PURGE, PURGE_TIMEOUT_S, ClaudeFolder, is_session_id, new_session_id
+from .claude_sessions import (
+    NOTHING_TO_PURGE,
+    PURGE_TIMEOUT_S,
+    SWEEP_MIN_AGE_S,
+    ClaudeFolder,
+    is_session_id,
+    new_session_id,
+)
 from .engine import (
     NO_SESSIONS,
     AgentEvent,
@@ -387,6 +394,27 @@ class ClaudeCodeEngine:
         # Without the CLI (uninstalled) SKAZ still removes the transcript files it can see.
         await asyncio.to_thread(self.folder.remove_local, session_id)
 
+    def forget_session(self, session_id: str) -> None:
+        """SKAZ gave the session up (its deletion kept failing): at least SKAZ's own files of it go — its
+        working folder, its kept instructions and any transcript file SKAZ can see."""
+        if is_session_id(session_id):
+            with contextlib.suppress(OSError):
+                self.folder.remove_local(session_id)
+
+    async def sweep_sessions(self, known: Callable[[str], bool]) -> None:
+        """App start: sessions with files here that no chat holds and no deletion waits for (SKAZ quit
+        between their start and the record) are deleted like any other. A session touched within
+        ``SWEEP_MIN_AGE_S``, or one a run is starting now, is left for the next start."""
+        starting = {active.new_session for active in self._runs.values() if active.new_session}
+        found = await asyncio.to_thread(self.folder.local_sessions, SWEEP_MIN_AGE_S)
+        for session_id in found:
+            if known(session_id) or session_id in starting:
+                continue
+            try:
+                await self.delete_session(session_id)
+            except Exception as error:  # best effort: the next start tries again
+                log.info("Sweeping a Claude Code session failed (%s)", type(error).__name__)
+
     # -- run ------------------------------------------------------------------
 
     def command(self, binary: str, turn: AgentTurn, mcp_config: Path | None,
@@ -482,14 +510,15 @@ class ClaudeCodeEngine:
             else:
                 assert plan.session_id is not None  # SessionPlan checks it
                 session_id = plan.session_id
-                work = self.folder.open_session(session_id)
-                prompt = seed_prompt(turn.messages[-1:])  # only the new message: the session holds the rest
                 kept = self.folder.prompt(session_id)
                 if kept is None:
-                    system_prompt = run_dir / "system-prompt.txt"
-                    system_prompt.write_text(turn.instructions, encoding="utf-8")
-                else:
-                    system_prompt = kept
+                    # The instructions it started with are gone: resuming under today's would change the
+                    # session's system prompt mid-session (contract §2 rule 1) — a new session instead.
+                    yield Failed(run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
+                    return
+                work = self.folder.open_session(session_id)
+                prompt = seed_prompt(turn.messages[-1:])  # only the new message: the session holds the rest
+                system_prompt = kept
             mcp_config: Path | None = None
             if turn.tools:
                 assert self.mcp is not None

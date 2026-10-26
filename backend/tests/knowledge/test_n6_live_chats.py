@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -203,10 +204,14 @@ async def test_deleting_a_chat_deletes_its_session_and_a_failed_delete_survives_
     assert (await env.client.delete(f"/kb/chats/{chat['id']}")).status_code == 204
     await deletions_done(env)
     assert codex(env).deleted_sessions == [] and pending(env) == [("codex", "codex-session-1")]
-    # A restart: a new service over the same database finds the queued session and deletes it.
+    # A restart: a new service over the same database finds the queued session and deletes it — an app
+    # start tries every queued session once, whatever its backoff (FIX-1: a failure waits before a retry).
     restarted = ChatService(env.runtime.kb, agents=lambda: env.runtime.kb_agents.registry,
                             tools=env.chats.tools)
-    assert await restarted.delete_sessions() == 0
+    assert await restarted.delete_sessions() == 1  # backed off: not due yet
+    restarted.start()
+    assert restarted._deleting is not None
+    await asyncio.wait_for(asyncio.shield(restarted._deleting), 5)
     assert codex(env).deleted_sessions == ["codex-session-1"] and pending(env) == []
     await restarted.close()
 
@@ -217,7 +222,8 @@ async def test_a_session_that_never_deletes_is_given_up_after_the_attempt_limit(
     codex(env).delete_failures = MAX_DELETE_ATTEMPTS + 1
     assert (await env.client.delete(f"/kb/chats/{chat['id']}")).status_code == 204
     await deletions_done(env)
-    for _ in range(MAX_DELETE_ATTEMPTS - 1):
+    for day in range(1, MAX_DELETE_ATTEMPTS):  # FIX-1: each retry waits for its backoff
+        env.chats.sessions.clock = lambda day=day: datetime.now(UTC) + timedelta(days=day)
         await env.chats.delete_sessions()
     assert pending(env) == [] and codex(env).deleted_sessions == []
 

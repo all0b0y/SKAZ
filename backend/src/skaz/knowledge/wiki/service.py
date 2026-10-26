@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from ...native_io import disk_call
 from ..agents.engine import AgentEngine
+from ..agents.update_gate import holding
 from ..corrections.check import NotSpeech, RecognitionChecker, RecognitionOff
 from ..corrections.model import apply_to_text
 from ..corrections.service import CorrectionChange, CorrectionService
@@ -405,29 +406,30 @@ class WikiService:
 
             async def work(job: JobContext) -> None:
                 caller = self._caller("links")
-                pages = (
-                    scope
-                    if scope is not None
-                    else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
-                )
-                await job.count(parts_total=len(pages), parts_done=0)
-                await job.step("checking_discrepancies")
-                finished = 0
+                async with holding(caller.engine):  # U1: an agent update waits for the whole job
+                    pages = (
+                        scope
+                        if scope is not None
+                        else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
+                    )
+                    await job.count(parts_total=len(pages), parts_done=0)
+                    await job.step("checking_discrepancies")
+                    finished = 0
 
-                async def page_done() -> None:
-                    nonlocal finished
-                    finished += 1
-                    await job.count(parts_done=finished)
+                    async def page_done() -> None:
+                        nonlocal finished
+                        finished += 1
+                        await job.count(parts_done=finished)
 
-                found = await self.discrepancies.check_pages([(page_id, None) for page_id in pages], caller,
-                                                             job.log, page_done)
-                await job.step("finding_connections")
+                    found = await self.discrepancies.check_pages([(page_id, None) for page_id in pages],
+                                                                 caller, job.log, page_done)
+                    await job.step("finding_connections")
 
-                async def count(values: dict[str, int]) -> None:
-                    await job.count(**values)
+                    async def count(values: dict[str, int]) -> None:
+                        await job.count(**values)
 
-                outcome = await self.connections.find(scope, caller, job.log, count,
-                                                      profile=_profile_key(caller))
+                    outcome = await self.connections.find(scope, caller, job.log, count,
+                                                          profile=_profile_key(caller))
                 await job.count(blocks_written=outcome.written)
                 await disk_call(self.graph.refresh)
                 await job.log(
@@ -445,7 +447,9 @@ class WikiService:
             raise WikiBusy("The overview of this folder is already being written.")
 
         async def work(job: JobContext) -> None:
-            await self.overviews.write(folder_id, self._caller("overview"), job.log)
+            caller = self._caller("overview")
+            async with holding(caller.engine):  # U1: an agent update waits for the whole job
+                await self.overviews.write(folder_id, caller, job.log)
             await disk_call(self.graph.refresh)
             await disk_call(self._refresh_index)
 
@@ -458,7 +462,9 @@ class WikiService:
         self._touch()
 
         async def work(job: JobContext) -> None:
-            await self.rechecks.run(page_id, block_id, self._caller("recheck"), job.log)
+            caller = self._caller("recheck")
+            async with holding(caller.engine):  # U1: an agent update waits for the whole job
+                await self.rechecks.run(page_id, block_id, caller, job.log)
 
         return await self.jobs.start("recheck", page_id, "rechecking", work)
 
@@ -768,8 +774,11 @@ class WikiService:
             after_user_edit(self.kb.db, page_id, before)
         return self._edited(page_id)
 
-    def update_block(self, page_id: str, block_id: str, text: str) -> PageDetail:
-        return self._user_edit(page_id, lambda: update_block(self.kb, page_id, block_id, text))
+    def update_block(self, page_id: str, block_id: str, text: str, *,
+                     expected: str | None = None) -> PageDetail:
+        """``expected`` (P2 «Fix in wiki»): checked inside the write — ``BlockChanged`` when it differs."""
+        return self._user_edit(page_id, lambda: update_block(self.kb, page_id, block_id, text,
+                                                             expected=expected))
 
     def add_note(
         self, page_id: str, text: str, *, after_block_id: str | None, section: str | None

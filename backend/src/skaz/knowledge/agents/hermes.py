@@ -85,7 +85,10 @@ session's whole compression lineage (``hermes_state_sessions.py`` ``delete_sessi
 ``owned_lineage_ids``). The start-up ``prune --source acp --yes`` deletes EVERY ended ACP session
 (any filter drops the 90-day cutoff, ``sessions_cmd.py`` ``_cmd_prune_or_archive``) and a chat's
 session is ended between answers (the last viewer leaving ends it, ``gateway/session_acp_lifecycle.py``
-``end_idle_acp_session``), so the sweep skips ``prune`` while SKAZ keeps any chat session.
+``end_idle_acp_session``), so the sweep first pins the chat sessions (``hermes sessions pin``: Hermes'
+keep flag, set on the whole compression lineage; prune skips pinned sessions and their continuations)
+and prunes only when every chat session is pinned or gone — a Hermes without ``pin`` gets no prune.
+A session SKAZ gives up deleting is unpinned and leaves the list (``forget_session``).
 Hermes' own compression is not reported over ACP (the gateway projects no compaction event and
 ``usage_update`` carries only ``size``/``used``; the session counters' ``compression_count`` stays in
 the gateway), so Hermes never emits ``Compacted``. The prompt reply's usage is the gateway agent's
@@ -153,6 +156,7 @@ from .engine import (
     FailureKind,
     ModelOption,
     SessionBound,
+    SessionDeleteDeferred,
     SessionSupport,
     TextDelta,
     ToolCall,
@@ -566,12 +570,24 @@ class HermesEngine:
         turn, a lost turn to discard, Hermes missing): the caller retries later."""
         located = self._locate("hermes")
         if located is None:
-            raise FileNotFoundError(NOT_INSTALLED)
+            raise SessionDeleteDeferred(NOT_INSTALLED)
         if self.repair_unfinished():
-            raise RuntimeError(REPAIR_NOTE)  # any Hermes command would restart the repair
+            raise SessionDeleteDeferred(REPAIR_NOTE)  # any Hermes command would restart the repair
         code, out = await disk_call(self._cli, located, "sessions", "delete", session_id, "--yes")
         if code != 0 and f"No session '{session_id}'" not in out:
             raise RuntimeError(f"Hermes did not delete the session (exit {code}).")
+        self._release_chat(session_id)
+        if session_id in self.pending_history():
+            self._write_history([item for item in self.pending_history() if item != session_id])
+
+    async def forget_session(self, session_id: str) -> None:
+        """SKAZ gave the session up (its deletion kept failing): it leaves SKAZ's lists here and loses
+        the keep flag the start-up sweep gave it (best effort), so a later ``prune`` can take it once it
+        has ended."""
+        located = self._locate("hermes")
+        if located is not None and not self.repair_unfinished():
+            with contextlib.suppress(OSError, subprocess.SubprocessError, LauncherTampered):
+                await disk_call(self._cli, located, "sessions", "unpin", session_id)
         self._release_chat(session_id)
         if session_id in self.pending_history():
             self._write_history([item for item in self.pending_history() if item != session_id])
@@ -955,13 +971,33 @@ class HermesEngine:
         await self._forget([item for item in self.pending_history() if item not in running])
         if self._runs:
             return  # prune refuses while another Hermes process holds the store; next start
-        if self.chat_sessions():
+        if not await self._pin_chats(located):
             # N6: prune deletes every ENDED ACP session, and a chat's live session is ended between
-            # answers (its last viewer left): never while SKAZ keeps a chat session in this folder.
+            # answers (its last viewer left): without Hermes' keep flag on them, no prune.
             return
         with contextlib.suppress(OSError, subprocess.SubprocessError, LauncherTampered):
-            # Ended ACP sessions SKAZ does not know by id (e.g. a compressed continuation).
+            # Ended ACP sessions SKAZ does not know by id (e.g. a compressed continuation of a stateless
+            # run). Pinned sessions — the chats' — and their continuations are skipped by prune itself.
             await disk_call(self._cli, located, "sessions", "prune", "--source", "acp", "--yes")
+
+    async def _pin_chats(self, located: Located) -> bool:
+        """Hermes' durable keep flag on every chat session SKAZ keeps (``hermes sessions pin``; it
+        covers the session's compression lineage, and ``prune`` skips pinned sessions and their
+        continuations — v0.22.1+179 ``hermes_state_maintenance._not_pinned_sql``). ``True`` when every
+        chat session is pinned or Hermes no longer has it; ``False`` (no prune) otherwise — e.g. a
+        Hermes without ``pin``."""
+        chats = self.chat_sessions()
+        if not chats:
+            return True
+        try:
+            code, out = await disk_call(self._cli, located, "sessions", "pin", *chats)
+        except (OSError, subprocess.SubprocessError, LauncherTampered):
+            return False
+        if code == 0:
+            return True
+        settled = (f"Pinned session '{session_id}'" in out or f"No session '{session_id}'" in out
+                   for session_id in chats)
+        return code == 1 and all(settled)
 
     def _cli(self, located: Located, *args: str) -> tuple[int, str]:
         """A short Hermes command in SKAZ's folder, in a worker thread.
