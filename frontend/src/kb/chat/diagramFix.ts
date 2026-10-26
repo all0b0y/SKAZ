@@ -20,7 +20,7 @@ export function fixLanguage(wiki: KbWikiSettings | null, hasQuestion: boolean): 
   return { language: wiki?.wiki_language_chosen ? wiki.wiki_language : null, hasQuestion };
 }
 
-function replyIn({ language, hasQuestion }: FixLanguage): string {
+export function replyIn({ language, hasQuestion }: FixLanguage): string {
   if (language) return `Reply in ${languageName(language)}.`;
   return hasQuestion ? 'Reply in the language of my previous question.' : 'Reply in English.';
 }

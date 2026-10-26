@@ -15,6 +15,7 @@ from fastapi.routing import APIRoute
 
 from ..agents.registry import EngineUnavailable
 from ..agents.web import site_of
+from ..answer_blocks.part import BlockPart
 from ..chats.events import ChatEvent
 from ..chats.model import (
     CitePart,
@@ -43,6 +44,7 @@ from ..store.database import MAX_DB_INT
 from ..study.service import StudyService
 from .deps import kb_call
 from .schemas import KbCitation, KbPageRef
+from .schemas_blocks import answer_block_part
 from .schemas_chats import (
     KbChat,
     KbChatCreate,
@@ -176,6 +178,9 @@ class Presenter:
             block = self.study.store.block(part.study_id)
             return KbMessagePart(study_part(self.study, block, self.citation) if block is not None
                                  else KbTextPart(type="text", text=""))
+        if isinstance(part, BlockPart):
+            exists = lambda page_id: self.kb.page_repo.get(page_id) is not None  # noqa: E731
+            return KbMessagePart(answer_block_part(part, self.citation, self.page_ref, exists))
         if isinstance(part, TextPart):
             return KbMessagePart(KbTextPart(type="text", text=part.text))
         if isinstance(part, CitePart):

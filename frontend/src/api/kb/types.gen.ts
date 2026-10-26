@@ -7,6 +7,22 @@ export interface KbAbout {
   licenses: KbLicense[];
 }
 
+export interface KbActionItem {
+  id: string;
+  src: number[];
+  agent: boolean;
+  task: string;
+  owner: string | null;
+  owner_is_you: boolean;
+  due: string | null;
+}
+
+export interface KbActionItemsBlock {
+  kind: "action_items";
+  title: string | null;
+  tasks: KbActionItem[];
+}
+
 export interface KbAddFile {
   path: string;
   folder_id: string;
@@ -137,6 +153,21 @@ export interface KbAgents {
   favorites: KbFavoriteModel[];
 }
 
+/** A ready-made block of an answer, drawn by SKAZ from the agent's checked data (never HTML). ``drawing``: its data is still streaming (a placeholder); ``ready``: ``block`` is set, its items point at ``sources`` by index; ``broken``: it couldn't be drawn — ``error`` says why and ``raw`` holds the agent's data (for "Show the data" and "Ask the agent to fix"). */
+export interface KbAnswerBlockPart {
+  type: "answer_block";
+  id: string;
+  state: "drawing" | "ready" | "broken";
+  block: KbCompareBlock | KbProsConsBlock | KbVerdictBlock | KbTimelineBlock | KbStepsBlock | KbCauseChainBlock | KbDefinitionBlock | KbConceptCardsBlock | KbHierarchyBlock | KbGlossaryBlock | KbKeyNumbersBlock | KbChartBlock | KbQuoteBlock | KbDisagreementBlock | KbActionItemsBlock | null;
+  sources: (KbBlockCiteSource | KbBlockPageSource | KbBlockWebSource)[];
+  hidden: number;
+  error: string | null;
+  raw: string | null;
+  beside: boolean;
+  link: string | null;
+  markdown: string | null;
+}
+
 export interface KbBlock {
   id: string;
   kind: "from_source" | "connection" | "explanation" | "user_note";
@@ -147,6 +178,11 @@ export interface KbBlock {
   hash: string;
   citations: KbCitation[];
   links?: KbBlockLink[];
+}
+
+export interface KbBlockCiteSource {
+  type: "cite";
+  citation: KbCitation;
 }
 
 export interface KbBlockCreate {
@@ -172,8 +208,55 @@ export interface KbBlockLink {
   material_id?: string | null;
 }
 
+export interface KbBlockPageSource {
+  type: "page";
+  page: KbPageRef;
+  block_id: string | null;
+  available: boolean;
+}
+
 export interface KbBlockUpdate {
   text: string;
+}
+
+/** A result link of a web search in this chat. */
+export interface KbBlockWebSource {
+  type: "web";
+  url: string;
+  title: string;
+  site: string;
+}
+
+export interface KbCauseChainBlock {
+  kind: "cause_chain";
+  title: string | null;
+  nodes: KbChainNode[];
+}
+
+export interface KbChainNode {
+  id: string;
+  src: number[];
+  agent: boolean;
+  label: string | null;
+  text: string;
+}
+
+export interface KbChartBar {
+  id: string;
+  src: number[];
+  agent: boolean;
+  label: string;
+  value: number;
+  display: string;
+  alt: boolean;
+}
+
+export interface KbChartBlock {
+  kind: "chart";
+  title: string | null;
+  unit: string | null;
+  alt_label: string | null;
+  bars: KbChartBar[];
 }
 
 export interface KbChat {
@@ -289,6 +372,40 @@ export interface KbClassifyLink {
   probe?: boolean;
 }
 
+export interface KbCompareBlock {
+  kind: "compare";
+  title: string | null;
+  columns: string[];
+  rows: KbCompareRow[];
+}
+
+export interface KbCompareCell {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+}
+
+export interface KbCompareRow {
+  id: string;
+  label: string;
+  cells: (KbCompareCell | null)[];
+}
+
+export interface KbConceptCard {
+  id: string;
+  src: number[];
+  agent: boolean;
+  name: string;
+  text: string;
+}
+
+export interface KbConceptCardsBlock {
+  kind: "concept_cards";
+  title: string | null;
+  cards: KbConceptCard[];
+}
+
 export interface KbConnectionFolder {
   folder_id: string;
   folder_name: string;
@@ -375,6 +492,22 @@ export interface KbDeckView {
   due: number;
 }
 
+export interface KbDefinitionBlock {
+  kind: "definition";
+  title: string | null;
+  term: string;
+  also: string[];
+  definition: KbDefinitionText;
+  example: KbDefinitionText | null;
+}
+
+export interface KbDefinitionText {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+}
+
 export interface KbDeletePreview {
   material_id: string;
   title: string;
@@ -391,6 +524,20 @@ export interface KbDictation {
   text: string;
   language: string | null;
   provider: "soniox" | "local_whisper";
+}
+
+export interface KbDisagreementBlock {
+  kind: "disagreement";
+  title: string | null;
+  sides: KbDisagreementSide[];
+  agree: KbDisagreementSide | null;
+}
+
+export interface KbDisagreementSide {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
 }
 
 export interface KbExcludedFragment {
@@ -505,6 +652,20 @@ export interface KbFragmentLocation {
   label: string;
 }
 
+export interface KbGlossaryBlock {
+  kind: "glossary";
+  title: string | null;
+  terms: KbGlossaryTerm[];
+}
+
+export interface KbGlossaryTerm {
+  id: string;
+  src: number[];
+  agent: boolean;
+  term: string;
+  text: string;
+}
+
 export interface KbGraph {
   nodes: KbGraphNode[];
   edges: KbGraphEdge[];
@@ -597,6 +758,21 @@ export interface KbHiddenFinding {
   instruction: boolean;
 }
 
+export interface KbHierarchyBlock {
+  kind: "hierarchy";
+  title: string | null;
+  nodes: KbHierarchyNode[];
+}
+
+export interface KbHierarchyNode {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+  note: string | null;
+  depth: number;
+}
+
 export interface KbImportCreate {
   path?: string | null;
   url?: string | null;
@@ -666,6 +842,21 @@ export interface KbJobProgress {
   concepts_created: number;
   concepts_updated: number;
   notes_sections?: number;
+}
+
+export interface KbKeyNumber {
+  id: string;
+  src: number[];
+  agent: boolean;
+  value: string;
+  unit: string | null;
+  label: string;
+}
+
+export interface KbKeyNumbersBlock {
+  kind: "key_numbers";
+  title: string | null;
+  numbers: KbKeyNumber[];
 }
 
 export interface KbKeyStatus {
@@ -948,7 +1139,7 @@ export interface KbMessageInput {
   attachments: string[];
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart;
+export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -1121,6 +1312,13 @@ export interface KbPermissionSummary {
   user_notes_untouched: boolean;
 }
 
+export interface KbPoint {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+}
+
 export interface KbPrivacy {
   flows: KbPrivacyFlow[];
 }
@@ -1147,6 +1345,13 @@ export interface KbProblemAction {
   id: string;
   label: string;
   primary: boolean;
+}
+
+export interface KbProsConsBlock {
+  kind: "pros_cons";
+  title: string | null;
+  pros: KbPoint[];
+  cons: KbPoint[];
 }
 
 /** Exactly one: the index of an option, or the user's own answer. */
@@ -1181,6 +1386,20 @@ export interface KbQuote {
   seg?: number | null;
   message_id?: string | null;
   text: string;
+}
+
+export interface KbQuoteBlock {
+  kind: "quote";
+  title: string | null;
+  quote: KbQuoteItem;
+}
+
+export interface KbQuoteItem {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+  who: string | null;
 }
 
 /** Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it. */
@@ -1354,6 +1573,20 @@ export interface KbSpeechSettingsUpdate {
   cloud_consent?: boolean | null;
 }
 
+export interface KbStep {
+  id: string;
+  src: number[];
+  agent: boolean;
+  title: string;
+  text: string | null;
+}
+
+export interface KbStepsBlock {
+  kind: "steps";
+  title: string | null;
+  steps: KbStep[];
+}
+
 export interface KbStudyAnswerIn {
   item_id: string;
   choices?: string[] | null;
@@ -1514,6 +1747,21 @@ export interface KbTextPart {
   text: string;
 }
 
+export interface KbTimelineBlock {
+  kind: "timeline";
+  title: string | null;
+  events: KbTimelineEvent[];
+}
+
+export interface KbTimelineEvent {
+  id: string;
+  src: number[];
+  agent: boolean;
+  when: string | null;
+  title: string;
+  text: string | null;
+}
+
 export interface KbToolPart {
   type: "tool";
   name: string;
@@ -1529,6 +1777,20 @@ export interface KbTranslationFragment {
   seg: number | null;
   speaker: string | null;
   text: string;
+}
+
+export interface KbVerdict {
+  id: string;
+  src: number[];
+  agent: boolean;
+  text: string;
+  reason: string | null;
+}
+
+export interface KbVerdictBlock {
+  kind: "verdict";
+  title: string | null;
+  verdict: KbVerdict;
 }
 
 export interface KbWebLink {

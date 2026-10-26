@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
+from .schemas_blocks import KbAnswerBlockPart
 from .schemas_study import KbStudyPart
 from .schemas_web import KbWebSearchPart
 
@@ -184,7 +185,8 @@ class KbMemoryPart(BaseModel):
 
 class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
-                                        | KbWebSearchPart | KbMemoryPart,
+                                        | KbWebSearchPart | KbMemoryPart
+                                        | KbAnswerBlockPart,
                                         Field(discriminator="type")]]):
     pass
 

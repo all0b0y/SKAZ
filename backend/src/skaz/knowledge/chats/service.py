@@ -50,6 +50,8 @@ from ..agents.registry import ENGINE_NAMES, EngineRegistry, EngineUnavailable
 from ..agents.tools import ToolRegistry
 from ..agents.usage_log import RunUsage, UsageLog
 from ..agents.web import NATIVE_WEB, web_instructions, web_support
+from ..answer_blocks import usage as block_usage
+from ..answer_blocks.part import BlockPart, MaterialSource, drawing
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.protocols import IdentityTextLayer, TextLayer
@@ -71,6 +73,7 @@ from ..skills.settings import enabled_skills
 from ..study.scheduling import Mode
 from ..study.store import StudyBlock
 from .analysis import AnalysisWriter, Section
+from .blocks import AnswerBlocks, finish_drawing
 from .context import ContextBuilder, history, instructions
 from .events import ChatEvent, ChatFeed, ListFeed
 from .export import ChatExport, export_chat
@@ -106,7 +109,7 @@ from .model import (
     TextPart,
     WebSearchPart,
 )
-from .parsing import CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
+from .parsing import BlockData, BlockStart, CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
 from .resolve import MaterialReader, Resolver
 from .store import RESTART_REASON, WIKI_STUDY_CHAT_ID, ChatRepository
 from .summary import ChatSummaries
@@ -1093,6 +1096,28 @@ class ChatService:
                     self._append_text(run, connection.text)
                 else:
                     self._add_part(run, connection)
+            elif isinstance(output, BlockStart):
+                self._add_part(run, drawing(new_id("blk")))  # P1: a placeholder while the block streams
+            elif isinstance(output, BlockData):
+                await self._answer_block(run, output, resolver)
+
+    async def _answer_block(self, run: _Run, output: BlockData, resolver: Resolver) -> None:
+        """P1: the block's data arrived: checked, it replaces its placeholder (``part_update``)."""
+        pending = next((part for part in reversed(run.message.parts)
+                        if isinstance(part, BlockPart) and part.state == "drawing"), None)
+        block_id = pending.block_id if pending is not None else new_id("blk")
+        part = await disk_call(AnswerBlocks(self.kb, resolver, run.chat_id).resolve, output.payload, block_id,
+                               output.cut)
+        if pending is None:
+            self._add_part(run, part)
+        else:
+            run.message = run.message.with_parts([part if item is pending else item
+                                                  for item in run.message.parts])
+            self._feed(run.chat_id).emit("part_update", run.message.id, part=part)
+        try:
+            await disk_call(block_usage.record, self.kb.settings, part)
+        except Exception as error:  # the counter never touches the answer
+            log.error("Counting an answer block failed: %s", error_note(error))
 
     def _append_text(self, run: _Run, text: str) -> None:
         if not text:
@@ -1117,6 +1142,7 @@ class ChatService:
 
     async def _finish(self, run: _Run, terminal: Completed | Failed | None) -> None:
         await self._cancel_waits(run.run_id)
+        run.message = run.message.with_parts(finish_drawing(run.message.parts))  # P1: a block left unfinished
         state, failure = _outcome(terminal)
         if state == "cancelled" and run.closing:
             state, failure = "interrupted", Failure("other", RESTART_REASON)
@@ -1178,6 +1204,12 @@ class ChatService:
                     folders.append(record.folder_id)
             elif isinstance(part, ConnectionPart):
                 folders.extend(side.folder_id for side in part.sides)
+            elif isinstance(part, BlockPart):  # P1: materials cited only in an answer block count too
+                for source in part.sources:
+                    if isinstance(source, MaterialSource):
+                        record = self.kb.material_repo.get(source.material_id)
+                        if record is not None:
+                            folders.append(record.folder_id)
         return folders
 
     # -- stopping ---------------------------------------------------------------------

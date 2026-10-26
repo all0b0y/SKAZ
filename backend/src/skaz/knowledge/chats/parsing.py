@@ -5,7 +5,9 @@ The agent writes plain Markdown plus:
 * ``⟦m:<material_id>:<seg>⟧`` (``<seg>`` may be ``seg-12``), optionally with the
   verbatim words it relied on: ``⟦m:<material_id>:<seg>|<exact words>⟧``;
 * ``⟦p:<page_id>⟧`` or ``⟦p:<page_id>#<block_id>⟧``;
-* a fenced block ```` ```skaz-connection ```` holding JSON.
+* a fenced block ```` ```skaz-connection ```` holding JSON;
+* a fenced answer block ```` ```skaz-block ```` holding JSON (P1): its opening is reported at once
+  (``BlockStart``: the chat shows a placeholder while it streams), its data when it closes.
 
 Text arrives in arbitrary deltas, so the parser holds back only what could
 still become a token or a fence opener, and releases everything else at once.
@@ -15,13 +17,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 OPEN, CLOSE = "⟦", "⟧"
 FENCE_INFO = "skaz-connection"
-FENCE_OPENER = "```" + FENCE_INFO
+BLOCK_FENCE_INFO = "skaz-block"
+FENCE_OPENERS = ("```" + FENCE_INFO, "```" + BLOCK_FENCE_INFO)
 MAX_TOKEN_CHARS = 1200
 MAX_FENCE_CHARS = 20_000
-_FENCE_OPEN = re.compile(r"^[ \t]{0,3}```skaz-connection[ \t]*\n", re.MULTILINE)
+_FENCE_OPEN = re.compile(r"^[ \t]{0,3}```(skaz-connection|skaz-block)[ \t]*\n", re.MULTILINE)
 _FENCE_CLOSE = re.compile(r"^[ \t]{0,3}```[ \t]*$", re.MULTILINE)
 _MATERIAL = re.compile(r"(mat-[A-Za-z0-9-]{1,80}):(?:seg-)?([1-9]\d{0,8})(?:\|(.*))?", re.DOTALL)
 _PAGE = re.compile(r"(pg-[A-Za-z0-9-]{1,80})(?:#(c-[A-Za-z0-9-]{1,120}))?")
@@ -51,7 +55,23 @@ class ConnectionOut:
     payload: str
 
 
-Output = TextOut | CiteToken | PageToken | ConnectionOut
+@dataclass(frozen=True)
+class BlockStart:
+    """A ```` ```skaz-block ```` fence opened; its data follows when it closes."""
+
+
+Cut = Literal["", "unfinished", "too_long"]
+
+
+@dataclass(frozen=True)
+class BlockData:
+    """The JSON of an answer block; ``cut``: its fence never closed (``unfinished``) or ran too long."""
+
+    payload: str
+    cut: Cut = ""
+
+
+Output = TextOut | CiteToken | PageToken | ConnectionOut | BlockStart | BlockData
 
 
 def parse_token(body: str) -> CiteToken | PageToken | None:
@@ -84,6 +104,8 @@ class StreamParser:
         #: Whether ``_buffer`` starts at the beginning of a line (fences open only there).
         self._line_start = True
         self._in_fence = False
+        #: The info string of the open fence (``skaz-connection`` or ``skaz-block``).
+        self._fence = FENCE_INFO
 
     def feed(self, text: str) -> list[Output]:
         self._buffer += text
@@ -102,7 +124,7 @@ class StreamParser:
                 break
             out.extend(produced)
         if self._in_fence:
-            out.append(ConnectionOut(self._buffer))  # unterminated: resolved as a failed connection
+            out.append(self._fenced(self._buffer, "unfinished"))  # resolved as a failed connection / block
         elif self._buffer:
             out.append(TextOut(self._buffer.replace(OPEN, "")))
         self._buffer, self._in_fence = "", False
@@ -131,8 +153,10 @@ class StreamParser:
             before = self._consume(fence.start())
             self._consume(fence.end() - fence.start())
             self._in_fence = True
+            self._fence = fence.group(1)
             self._line_start = True
-            return self._emit_text(before) or [TextOut("")]
+            opened: list[Output] = [BlockStart()] if self._fence == BLOCK_FENCE_INFO else []
+            return (self._emit_text(before) + opened) or [TextOut("")]
         if token_at >= 0:
             if token_at > 0:
                 return self._emit_text(self._consume(token_at))
@@ -183,7 +207,7 @@ class StreamParser:
         stripped = tail.lstrip(" \t")
         if len(tail) - len(stripped) > 3:
             return 0
-        if FENCE_OPENER.startswith(stripped) or stripped.startswith(FENCE_OPENER):
+        if any(opener.startswith(stripped) or stripped.startswith(opener) for opener in FENCE_OPENERS):
             return len(tail)
         return 0
 
@@ -193,7 +217,7 @@ class StreamParser:
             if len(self._buffer) > MAX_FENCE_CHARS:
                 payload, self._buffer = self._buffer, ""
                 self._in_fence = False
-                return [ConnectionOut(payload)]  # far too long: resolved as a failed connection
+                return [self._fenced(payload, "too_long")]  # resolved as a failed connection / block
             return None  # wait for the closing fence; ``finish`` reports an unterminated block
         payload = self._consume(close.start())
         self._consume(close.end() - close.start())
@@ -201,4 +225,7 @@ class StreamParser:
             self._consume(1)
         self._in_fence = False
         self._line_start = True
-        return [ConnectionOut(payload)]
+        return [self._fenced(payload)]
+
+    def _fenced(self, payload: str, cut: Cut = "") -> ConnectionOut | BlockData:
+        return BlockData(payload, cut) if self._fence == BLOCK_FENCE_INFO else ConnectionOut(payload)

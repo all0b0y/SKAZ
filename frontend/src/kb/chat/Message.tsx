@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
+import type { KbAnswerBlockPart, KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
@@ -23,6 +23,8 @@ import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { isMemoryPart } from '../me/api';
 import type { KbMemoryPart } from '../../api/kb/types.gen';
 import { MemoryChip } from '../me/MemoryChip';
+import { AnswerBlock } from './blocks/AnswerBlock';
+import { AnswerBlocks, composeBlocks } from './blocks/compose';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -36,7 +38,8 @@ type Block =
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
   | { kind: 'web'; part: KbWebSearchPart }
-  | { kind: 'memory'; part: KbMemoryPart };
+  | { kind: 'memory'; part: KbMemoryPart }
+  | { kind: 'answer'; part: KbAnswerBlockPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -63,6 +66,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
       flushSpace();
       run = null;
       out.push({ kind: 'memory', part });
+      continue;
+    }
+    if (part.type === 'answer_block') {
+      // P1: a ready-made answer block (kb/chat/blocks) is a block of its own.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'answer', part });
       continue;
     }
     if (part.type === 'web_search') {
@@ -114,6 +124,7 @@ export function answerCitations(parts: KbMessagePart[]): KbCitation[] {
   return parts.flatMap((p) => {
     if (p.type === 'cite') return [p.citation];
     if (p.type === 'connection') return p.folders.map((f) => f.citation);
+    if (p.type === 'answer_block') return p.sources.flatMap((s) => (s.type === 'cite' ? [s.citation] : [])); // P1
     return [];
   });
 }
@@ -125,6 +136,7 @@ export function plainText(parts: KbMessagePart[]): string {
     if (p.type === 'cite') return p.citation.material_title ?? '';
     if (p.type === 'page') return p.page.title;
     if (p.type === 'connection') return `\n${p.folders.map((f) => `${f.folder_name}: ${f.text}`).join('\n')}\n${p.inference}\n`;
+    if (p.type === 'answer_block') return p.markdown ? `\n\n${p.markdown}\n\n` : ''; // P1: the block's Markdown
     return '';
   }).join('').trim();
 }
@@ -134,7 +146,8 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
   const { ui } = useServices();
   return (
     <>
-      {toBlocks(parts).map((b, i) => {
+      {composeBlocks(toBlocks(parts)).map((b, i) => {
+        if (b.kind === 'answers') return <AnswerBlocks key={b.parts[0]!.id} parts={b.parts} />; // P1 decision 2
         if (b.kind === 'connection') return <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />;
         if (b.kind === 'permission') {
           const partId = b.part.id;
@@ -147,6 +160,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'memory') return <MemoryChip key={b.part.edit_id} part={b.part} />;
+        if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>

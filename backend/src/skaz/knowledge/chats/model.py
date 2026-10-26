@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal, cast
 
 from ..agents.engine import EngineId, FailureKind
+from ..answer_blocks.part import BlockPart, block_from_json, block_to_json
 
 Role = Literal["user", "assistant", "system"]
 MessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
@@ -114,7 +115,7 @@ class MemoryPart:
 
 
 Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
-        | WebSearchPart | MemoryPart)
+        | WebSearchPart | MemoryPart | BlockPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -141,6 +142,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "memory", "edit_id": part.edit_id, "skill_id": part.skill_id,
                 "skill_title": part.skill_title, "action": part.action, "summary": part.summary,
                 "undone": part.undone}
+    if isinstance(part, BlockPart):
+        return block_to_json(part)  # P1: an answer block (``answer_blocks.part``)
     return {"type": "tool", "name": part.name, "label": part.label}
 
 
@@ -173,6 +176,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
                           str(data.get("skill_title", "")), str(data.get("action", "append")),
                           str(data.get("summary", "")),
                           bool(data.get("undone", False)))
+    if kind == "answer_block":
+        return block_from_json(data)
     return None
 
 

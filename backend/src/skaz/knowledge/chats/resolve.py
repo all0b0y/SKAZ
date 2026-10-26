@@ -185,4 +185,5 @@ _TOOL_LABELS: dict[str, Callable[[Resolver, Mapping[str, Any]], str]] = {
     "skaz_list_folders": lambda _r, _a: "Listed folders",
     "skaz_recent_speech": _recent_label,
     "skaz_get_fragment": lambda r, a: f"Read a passage of {r.material_title(a)}",
+    "skaz_answer_blocks": lambda _r, _a: "Looked up answer blocks",
 }
