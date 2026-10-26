@@ -86,3 +86,26 @@
 .kb-qbtn[aria-disabled='true'] { color: var(--kb-muted); cursor: default; background: none; }
 .kb-qbtn:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; }
 .kb-qbtn svg { flex: none; color: var(--kb-muted); }
+
+/* ---- the chip on a question asked about a selection ---- */
+.kb-msg--user .kb-selchip { align-self: flex-end; }
+.kb-selchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 24px;
+  margin-bottom: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--kb-sel-line);
+  border-radius: var(--kb-r-pill);
+  background: var(--kb-pane);
+  color: var(--kb-text);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: pointer;
+}
+.kb-selchip:hover { background: var(--kb-accent-soft); }
+.kb-selchip:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; }
+.kb-selchip svg { flex: none; color: var(--kb-sel); }
+.kb-selchip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

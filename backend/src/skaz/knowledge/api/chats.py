@@ -29,6 +29,8 @@ from ..chats.model import (
     QuestionPart,
     Quote,
     Ref,
+    SelectedItem,
+    Selection,
     StudyPart,
     TextPart,
     WebSearchPart,
@@ -73,6 +75,8 @@ from .schemas_chats import (
     KbQuote,
     KbRef,
     KbSavedAnalysis,
+    KbSelectedItem,
+    KbSelection,
     KbSend,
     KbSendResult,
     KbTextPart,
@@ -215,6 +219,7 @@ class Presenter:
                 quotes=[KbQuote(source=quote.source, id=quote.id, block_id=quote.block_id, seg=quote.seg,
                                 message_id=quote.message_id, text=quote.text) for quote in given.quotes],
                 attachments=list(given.attachments),
+                selection=_selection_out(given.selection),
             ) if given is not None else None,
         )
 
@@ -289,6 +294,22 @@ def _send_result(kb: KnowledgeService, pair: tuple[Message, Message]) -> KbSendR
     return KbSendResult(user=user, assistant=assistant)
 
 
+def _selection_out(selection: Selection | None) -> KbSelection | None:
+    if selection is None:
+        return None
+    return KbSelection(message_id=selection.message_id, block_id=selection.block_id, kind=selection.kind,
+                       title=selection.title, intent=selection.intent,
+                       items=[KbSelectedItem(id=item.id, label=item.label) for item in selection.items])
+
+
+def _selection_in(body: KbSend | KbMessageEdit) -> Selection | None:
+    picked = body.selection if isinstance(body, KbSend) else None
+    if picked is None:
+        return None
+    return Selection(picked.message_id, picked.block_id, picked.kind, None,
+                     tuple(SelectedItem(item.id, item.label) for item in picked.items), picked.intent)
+
+
 def to_input(body: KbSend | KbMessageEdit) -> MessageInput:
     """What the composer sent; an edit carries no context (the question keeps its own)."""
     context = body.context if isinstance(body, KbSend) else KbOpenContext()
@@ -299,6 +320,7 @@ def to_input(body: KbSend | KbMessageEdit) -> MessageInput:
                      for quote in body.quotes),
         attachments=tuple(body.attachments),
         context=OpenContext(context.open_page_id, context.open_material_id, context.open_study_id),
+        selection=_selection_in(body),
     )
 
 

@@ -396,7 +396,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
         try {
           const res = await client.call('POST /kb/chats/{chat_id}/messages', {
             path: { chat_id: chatId },
-            body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context },
+            body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context,
+              ...(input.selection ? { selection: input.selection } : {}) },
           });
           settled = true;
           // Q-A2: a message of your own closes a waiting question (its part_update confirms it).

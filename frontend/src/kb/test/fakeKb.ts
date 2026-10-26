@@ -1188,7 +1188,8 @@ const ROUTES: FakeRoutes = {
     supersedeQuestions(w, c);
     if (c.state === 'answering') fail(409, 'The agent is still answering in this chat.');
     const user = chatMessage(`${c.id}-u${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: body.text }], {
-      input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] },
+      input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [],
+        ...(body.selection ? { selection: body.selection } : {}) },
     });
     c.messages.push(user);
     pushEvent(w, c.id, { type: 'message', message_id: user.id, message: structuredClone(user) });

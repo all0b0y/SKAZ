@@ -47,8 +47,11 @@ export function AnswerSelectScope({ messageId, children }: { messageId: string; 
   const diagram = useMemo<DiagramSelect | null>(() => (scope ? (host, source) => {
     const svg = host.querySelector('svg');
     if (!svg || !markDiagram(svg, source)) return () => {};
-    return attachSelection(host, { message_id: scope.messageId, block_id: diagramId(source), kind: 'diagram', title: null },
-      scope.store).detach;
+    const blockId = diagramId(source);
+    host.setAttribute('data-block-id', blockId); // like every block root: the chip finds it
+    const { detach } = attachSelection(host, { message_id: scope.messageId, block_id: blockId, kind: 'diagram', title: null },
+      scope.store);
+    return () => { detach(); host.removeAttribute('data-block-id'); };
   } : null), [scope]);
   if (!scope) return <>{children}</>;
   return (

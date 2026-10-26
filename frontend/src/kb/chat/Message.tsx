@@ -22,6 +22,7 @@ import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './Ques
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { AnswerBlock } from './blocks/AnswerBlock';
 import { AnswerSelectScope } from './select/context';
+import { SelectionChip } from './select/SelectionChip';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -286,6 +287,7 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
   const close = () => { refocus.current = true; setEditing(false); };
   return (
     <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef}>
+      {input.selection && <SelectionChip selection={input.selection} />}
       {editing && actions ? (
         <QuestionEditor input={input} onCancel={close} onSend={async (next) => {
           const failed = await actions.onEdit(next);

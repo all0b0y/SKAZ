@@ -923,6 +923,7 @@ export interface KbMessageInput {
   mentions: KbRef[];
   quotes: KbQuote[];
   attachments: string[];
+  selection?: KbSelection | null;
 }
 
 export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbAnswerBlockPart;
@@ -1235,12 +1236,28 @@ export interface KbSearchResults {
   degraded: boolean;
 }
 
+export interface KbSelectedItem {
+  id: string;
+  label: string;
+}
+
+/** P2: items picked in an earlier answer of this chat — one block (an answer block, or a Mermaid diagram ``mmd-…``) of one message, items by id. Checked against the stored answer when sent. */
+export interface KbSelection {
+  message_id: string;
+  block_id: string;
+  kind: "block" | "diagram";
+  title?: string | null;
+  items: KbSelectedItem[];
+  intent?: "ask" | "explain" | "wrong";
+}
+
 export interface KbSend {
   text: string;
   mentions?: KbRef[];
   quotes?: KbQuote[];
   attachments?: string[];
   context?: KbOpenContext;
+  selection?: KbSelection | null;
 }
 
 export interface KbSendResult {

@@ -186,6 +186,47 @@ class Quote:
     message_id: str | None = None
 
 
+SelectionKind = Literal["block", "diagram"]
+#: What the user asked with the selection's quick buttons (P2): a plain question, «Explain more»,
+#: «That’s wrong» (the agent rechecks the items against their sources).
+SelectionIntent = Literal["ask", "explain", "wrong"]
+
+
+@dataclass(frozen=True)
+class SelectedItem:
+    id: str
+    #: A short label the user saw (shown in the chip; untrusted like the rest of the message).
+    label: str
+
+
+@dataclass(frozen=True)
+class Selection:
+    """P2: items the user picked in an earlier answer — a block (or a Mermaid diagram) of one message,
+    and items of it, by id. Checked when the question is sent (``chats.selection``)."""
+
+    message_id: str
+    block_id: str
+    kind: SelectionKind
+    title: str | None
+    items: tuple[SelectedItem, ...]
+    intent: SelectionIntent = "ask"
+
+    def to_json(self) -> dict[str, Any]:
+        return {"message_id": self.message_id, "block_id": self.block_id, "kind": self.kind,
+                "title": self.title, "intent": self.intent,
+                "items": [{"id": item.id, "label": item.label} for item in self.items]}
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> Selection:
+        kind = data.get("kind")
+        intent = data.get("intent")
+        return cls(str(data.get("message_id", "")), str(data.get("block_id", "")),
+                   "diagram" if kind == "diagram" else "block", _optional(data.get("title")),
+                   tuple(SelectedItem(str(item.get("id", "")), str(item.get("label", "")))
+                         for item in data.get("items") or [] if isinstance(item, Mapping)),
+                   intent if intent in ("explain", "wrong") else "ask")
+
+
 @dataclass(frozen=True)
 class OpenContext:
     """What the user had open next to the chat when sending (decision: the agent knows it)."""
@@ -204,8 +245,16 @@ class MessageInput:
     #: Material ids added through "+" (already created by ``/kb/materials/*`` or ``/kb/imports``).
     attachments: tuple[str, ...] = ()
     context: OpenContext = field(default_factory=OpenContext)
+    #: P2: what the user picked in an earlier answer, asked about with this message.
+    selection: Selection | None = None
 
     def to_json(self) -> dict[str, Any]:
+        data = self._json()
+        if self.selection is not None:
+            data["selection"] = self.selection.to_json()
+        return data
+
+    def _json(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "mentions": [{"type": ref.type, "id": ref.id, "title": ref.title} for ref in self.mentions],
@@ -232,6 +281,8 @@ class MessageInput:
             attachments=tuple(str(item) for item in data.get("attachments", [])),
             context=OpenContext(_optional(context.get("page_id")), _optional(context.get("material_id")),
                                 _optional(context.get("study_id"))),
+            selection=(Selection.from_json(data["selection"]) if isinstance(data.get("selection"), Mapping)
+                       else None),
         )
 
 

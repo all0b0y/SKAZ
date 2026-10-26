@@ -107,6 +107,7 @@ from .model import (
 )
 from .parsing import BlockData, BlockStart, CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
 from .resolve import MaterialReader, Resolver
+from .selection import check_selection
 from .store import RESTART_REASON, WIKI_STUDY_CHAT_ID, ChatRepository
 from .summary import ChatSummaries
 from .text import DEFAULT_TITLE, auto_title, preview, utc_now
@@ -366,6 +367,9 @@ class ChatService:
 
     async def _answer_question(self, chat: Chat, run: _Run, given: MessageInput) -> tuple[Message, Message]:
         """The user wrote their own message while the agent waits for an answer: it closes the question."""
+        if given.selection is not None:  # P2: checked like any question's selection
+            given = replace(given, selection=check_selection(await disk_call(self.repo.messages, chat.id),
+                                                             given.selection))
         now = utc_now()
         user = Message(id=new_id("msg"), chat_id=chat.id, seq=0, role="user", state="done", created_at=now,
                        parts=(TextPart(given.text),), input=given)
@@ -627,6 +631,8 @@ class ChatService:
         try:
             engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             prior = await disk_call(self.repo.messages, chat_id)
+            if given.selection is not None:  # P2: only ids that exist in the stored answer
+                given = replace(given, selection=check_selection(prior, given.selection))
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)
@@ -704,7 +710,10 @@ class ChatService:
             messages = await disk_call(self.repo.messages, chat_id)
             prior = [message for message in messages if message.seq < target.seq]
             context = target.input.context if target.input is not None else given.context
-            question = replace(target, parts=(TextPart(given.text),), input=replace(given, context=context))
+            # The question keeps its selection too (P2): the edit changes the words.
+            kept = target.input.selection if target.input is not None else None
+            question = replace(target, parts=(TextPart(given.text),),
+                               input=replace(given, context=context, selection=kept))
             now = utc_now()
             updates: dict[str, Any] = {"updated_at": now, "last_preview": preview(question.parts),
                                        "unread": False}

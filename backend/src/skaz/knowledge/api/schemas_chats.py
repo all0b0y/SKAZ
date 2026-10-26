@@ -55,6 +55,31 @@ class KbQuote(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class KbSelectedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: The item's id in its block (``node:<id>`` / ``edge:<from>-><to>`` in a Mermaid flowchart).
+    id: str = Field(min_length=1, max_length=200)
+    #: A short label the user saw (the chip shows it).
+    label: str = Field(max_length=300)
+
+
+class KbSelection(BaseModel):
+    """P2: items picked in an earlier answer of this chat — one block (an answer block, or a Mermaid
+    diagram ``mmd-…``) of one message, items by id. Checked against the stored answer when sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str = Field(min_length=1, max_length=200)
+    block_id: str = Field(min_length=1, max_length=200)
+    kind: Literal["block", "diagram"]
+    #: The block's own title (set by SKAZ from the stored block; ignored when sent).
+    title: str | None = Field(default=None, max_length=300)
+    items: list[KbSelectedItem] = Field(min_length=1, max_length=20)
+    #: ``explain`` / ``wrong``: the «Explain more» / «That’s wrong» buttons; ``ask``: a typed question.
+    intent: Literal["ask", "explain", "wrong"] = "ask"
+
+
 # -- message parts ---------------------------------------------------------------
 
 
@@ -194,6 +219,8 @@ class KbMessageInput(BaseModel):
     quotes: list[KbQuote]
     #: Material ids attached with "+" (created by /kb/materials/* or /kb/imports first).
     attachments: list[str]
+    #: P2: the items picked in an earlier answer this question is about (the chip «📍 …»).
+    selection: KbSelection | None = None
 
 
 class KbMessage(BaseModel):
@@ -282,6 +309,8 @@ class KbSend(_Request):
     attachments: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list,
                                                                                   max_length=MAX_ITEMS)
     context: KbOpenContext = Field(default_factory=KbOpenContext)
+    #: P2: the items picked in an earlier answer of this chat that the question is about.
+    selection: KbSelection | None = None
 
 
 class KbMessageEdit(_Request):
