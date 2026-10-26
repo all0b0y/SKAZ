@@ -14,8 +14,9 @@ from skaz.knowledge.service import KnowledgeService
 
 from .a1_library import INJECTION, Seeded, seed
 
+# P1 (answer blocks) adds skaz_answer_blocks: the block schemas, read-only, for every engine.
 EXPECTED = ("skaz_wiki_index", "skaz_read_page", "skaz_search", "skaz_read_material", "skaz_list_materials",
-            "skaz_list_folders", "skaz_recent_speech", "skaz_get_fragment")
+            "skaz_list_folders", "skaz_recent_speech", "skaz_get_fragment", "skaz_answer_blocks")
 
 
 def payload(outcome: ToolOutcome) -> dict[str, Any]:
@@ -243,6 +244,7 @@ async def test_tools_never_write_files_or_the_index(library: tuple[ToolRegistry,
         ("skaz_read_material", {"material_id": seeded.lecture_id}), ("skaz_list_materials", {}),
         ("skaz_list_folders", {}), ("skaz_recent_speech", {"material_id": seeded.lecture_id, "minutes": 1}),
         ("skaz_get_fragment", {"material_id": seeded.pdf_id, "seg": 2}),
+        ("skaz_answer_blocks", {"names": ["compare", "steps"]}),  # P1: the block catalog
     ]
     assert {name for name, _ in calls} == set(EXPECTED)
     for name, arguments in calls:

@@ -295,3 +295,42 @@ async def test_a_web_result_counts_only_when_this_chat_searched_it(env: Env) -> 
     assert block["hidden"] == 1 and [step["title"] for step in block["block"]["steps"]] == ["Сайт"]
     assert block["sources"] == [{"type": "web", "url": "https://raft.github.io/", "title": "Raft site",
                                  "site": "raft.github.io"}]
+
+
+# -- the agent's side: the block index, the tool, the rules ---------------------------------
+
+
+def test_instructions_list_the_blocks_and_leave_timelines_to_blocks_not_mermaid() -> None:
+    from skaz.knowledge.chats.context import instructions
+
+    text = instructions(None)
+    rules = text[text.index("Answer blocks:"):]
+    for spec in BLOCKS.values():
+        assert f"- {spec.name}: {spec.when}" in rules  # decision 3: name + one line, no schemas
+    assert "skaz_answer_blocks" in rules and "```skaz-block" in rules and "basis" in rules
+    assert "about 3 blocks" in rules and "otherwise write text" in rules  # decision 8
+    assert '"type"' not in rules  # the full schemas come from the tool only
+    mermaid = text[text.index("Diagrams:"):text.index("Answer blocks:")]
+    assert "mindmap" not in mermaid and "timeline" not in mermaid.split("Pick the type")[1]  # decision 9
+    allowed = "flowchart, sequenceDiagram, stateDiagram-v2, erDiagram, classDiagram, C4 or usecase-beta"
+    assert allowed in mermaid
+
+
+async def test_the_answer_blocks_tool_returns_full_schemas_and_one_example(ready: Any) -> None:
+    from skaz.knowledge.agents.tools import TOOL_NAMES, ToolRegistry
+
+    assert "skaz_answer_blocks" in TOOL_NAMES  # every engine gets it: MCP and Codex dynamicTools
+    tools = ToolRegistry(ready)
+    outcome = await tools.call("skaz_answer_blocks", {"names": ["timeline", "nope", "compare"]})
+    assert not outcome.is_error
+    data = json.loads(outcome.text)  # SKAZ's own catalog: plain JSON, not wrapped as library data
+    assert [block["name"] for block in data["blocks"]] == ["compare", "timeline"]
+    assert data["unknown"] == ["nope"] and "steps" in data["available"]
+    compare = data["blocks"][0]
+    assert compare["schema"]["properties"]["type"] == {"const": "compare", "type": "string"}
+    cell = compare["schema"]["properties"]["rows"]["items"]["properties"]["cells"]["items"]
+    assert {"cite", "basis", "text"} <= set(cell["properties"])
+    assert compare["example"].startswith("```skaz-block\n") and compare["example"].endswith("\n```")
+    assert "rules" in data and any("hidden" in rule for rule in data["rules"])
+    refused = await tools.call("skaz_answer_blocks", {"names": []})
+    assert refused.is_error
