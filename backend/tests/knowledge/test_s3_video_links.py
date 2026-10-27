@@ -172,12 +172,34 @@ async def test_video_links_from_all_four_hosts_become_video_link_materials(
     assert media.downloads == [video_source(url).url]
 
 
+async def test_the_same_video_link_again_is_the_material_already_there(
+    api: httpx.AsyncClient, media: FakeMedia,
+) -> None:
+    # N2 (Q1 n2 M1): no second material, no download, no transcription budget.
+    first = await api.post("/kb/materials/link", json={"url": "https://youtu.be/dQw4w9WgXcQ", "folder_id": INBOX_ID})
+    assert first.status_code == 201, first.text
+    assert first.json()["already_in_library"] is False
+    await until(api, first.json()["material"]["id"], status="ready")
+    folder = (await api.post("/kb/folders", json={"name": "Elsewhere"})).json()["id"]
+    again = await api.post("/kb/materials/link",
+                           json={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "folder_id": folder})
+    assert again.status_code == 200, again.text
+    assert again.json()["already_in_library"] is True
+    assert again.json()["material"]["id"] == first.json()["material"]["id"]
+    assert len((await api.get("/kb/materials")).json()) == 1
+    assert len(media.downloads) == 1
+
+
 async def test_imports_accept_the_four_hosts_too(api: httpx.AsyncClient) -> None:
     created = await api.post("/kb/imports", json={"url": "https://vimeo.com/76979871"})
     assert created.status_code == 201, created.text
     assert (created.json()["kind"], created.json()["title"]) == ("video_link", "Vimeo talk")
     duplicate = await api.post("/kb/imports", json={"url": "https://vimeo.com/76979871", "title": "Again"})
-    assert duplicate.status_code == 409 and "already has a session" in duplicate.json()["detail"]
+    # N2 (Q1 n2 M1): the same video already in the library is that material, not a second import.
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["already_in_library"] is True
+    assert duplicate.json()["material_id"] == created.json()["material_id"]
+    assert created.json()["already_in_library"] is False
 
 
 async def test_unacceptable_links_are_refused_with_the_reason_and_nothing_is_created(
@@ -244,7 +266,18 @@ async def test_article_with_an_embedded_video_text_video_or_both(app: Any, api: 
     again = await api.post(
         "/kb/materials/link", json={"url": "https://blog.example/heat", "folder_id": second, "mode": "video"}
     )
-    assert again.status_code == 409 and "already has a session" in again.json()["detail"]
+    # N2 (Q1 n2 M1): the embedded video is in the library already — that material, nothing imported.
+    assert again.status_code == 200, again.text
+    assert again.json()["already_in_library"] is True
+    assert again.json()["material"]["id"] == result["video"]["id"]
+    twice = await api.post(
+        "/kb/materials/link", json={"url": "https://blog.example/heat", "folder_id": second, "mode": "both"}
+    )
+    # Mode "both" tells each part's truth: the article and the video are both already there.
+    assert twice.status_code == 200, twice.text
+    assert twice.json()["already_in_library"] is True and twice.json()["video_already_in_library"] is True
+    assert twice.json()["video"]["id"] == result["video"]["id"] and twice.json()["video_failure_reason"] is None
+    assert result["video_already_in_library"] is False
     video = await api.post(
         "/kb/materials/link",
         json={

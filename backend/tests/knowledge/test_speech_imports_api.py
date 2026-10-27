@@ -102,9 +102,10 @@ async def api(speech_app: Any, soniox: AsyncSoniox) -> AsyncIterator[httpx.Async
         await client.aclose()
 
 
-def media(tmp_path: Path, name: str) -> str:
+def media(tmp_path: Path, name: str, content: bytes | None = None) -> str:
+    """A small media file; its bytes differ per name (the same bytes are the same file, N2)."""
     path = tmp_path / name
-    path.write_bytes(b"\x00\x01" * 2048)
+    path.write_bytes(content if content is not None else b"\x00\x01" * 2048 + name.encode("utf-8"))
     return str(path)
 
 
@@ -284,16 +285,39 @@ async def test_video_files_and_links_become_video_materials_and_duplicates_are_g
     assert material["languages"] == ["en"]
 
     duplicate = await api.post("/kb/imports", json={"url": "https://youtu.be/abcdefghijk", "title": "Again"})
-    assert duplicate.status_code == 409 and "already has a session" in duplicate.json()["detail"]
+    # N2 (Q1 n2 M1): the video is in the library already — that material answers, nothing is imported.
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["already_in_library"] is True
+    assert duplicate.json()["material_id"] == linked["material_id"]
     again = await api.post("/kb/imports", json={"url": "https://youtu.be/abcdefghijk", "title": "Again",
                                                 "allow_duplicate": True})
     assert again.status_code == 201, again.text
+    assert again.json()["already_in_library"] is False
 
     # Two simultaneous requests for one new video: one starts, the other is told it is a duplicate.
     racing = await asyncio.gather(*(
         api.post("/kb/imports", json={"url": "https://youtu.be/bcdefghijkl", "title": f"Race {index}"})
         for index in range(2)))
     assert sorted(response.status_code for response in racing) == [201, 409]
+
+
+async def test_the_same_audio_file_again_is_the_material_already_there(
+    api: httpx.AsyncClient, tmp_path: Path,
+) -> None:
+    # N2 (Q1 n2 M1): the same bytes under another name are not imported (or paid for) twice.
+    content = b"\x02\x03" * 4096
+    first = await api.post("/kb/imports", json={"path": media(tmp_path, "Talk.m4a", content)})
+    assert first.status_code == 201, first.text
+    assert first.json()["already_in_library"] is False
+    await until(api, first.json()["material_id"], status="ready")
+    again = await api.post("/kb/imports", json={"path": media(tmp_path, "Talk copy.m4a", content)})
+    assert again.status_code == 200, again.text
+    assert again.json()["already_in_library"] is True
+    assert again.json()["material_id"] == first.json()["material_id"]
+    other = await api.post("/kb/imports", json={"path": media(tmp_path, "Other.m4a", content + b"!")})
+    assert other.status_code == 201 and other.json()["already_in_library"] is False
+    await until(api, other.json()["material_id"], status="ready")
+    assert len((await api.get("/kb/materials")).json()) == 2
 
 
 async def test_a_failed_import_keeps_its_reason_and_retry_continues_the_same_material(

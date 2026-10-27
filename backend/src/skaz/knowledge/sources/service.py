@@ -193,8 +193,8 @@ class SourceService:
         self.video_probe = video_probe
         self._listeners: list[Listener] = []
         self._lock = _GUARD_LOCK
-        #: One save at a time per (folder, page): a double click makes one material, one request.
-        self._web_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = (
+        #: One save at a time per page: a double click makes one material, one request.
+        self._web_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
 
@@ -305,8 +305,9 @@ class SourceService:
     async def add_web_page(self, url: str, folder_id: str, *, to_wiki: bool = True) -> WebPageSaved:
         """W-3 "Add to wiki": one request to ``url`` (and its redirects), the whole page as text.
 
-        The same page already in ``folder_id`` is returned as it is, without a
-        request; if it isn't in the wiki, ``to_wiki`` asks for ingest again.
+        The same page already in the library — in ``folder_id`` or, by the N2 address/DOI rule,
+        anywhere else — is returned as it is, without a request; if it isn't in the wiki,
+        ``to_wiki`` asks for ingest again.
         """
         self.kb.require()  # refuse before any request when no library is connected
         if self.kb.folder_repo.get(folder_id) is None:
@@ -316,11 +317,15 @@ class SourceService:
         except LinkRejected as error:
             raise WebPageUnavailable(error.message) from error
         key = page_key(address) or address
-        lock = self._web_locks.get((folder_id, key))
+        # One lock per page, not per folder: the same page is one material in the whole library (N2).
+        lock = self._web_locks.get(key)
         if lock is None:
-            lock = self._web_locks[(folder_id, key)] = asyncio.Lock()
+            lock = self._web_locks[key] = asyncio.Lock()
         async with lock:
             existing = await disk_call(self._saved_page, folder_id, key)
+            if existing is None:
+                duplicate = await disk_call(find_duplicate, self.kb, urls=[address])
+                existing = duplicate.material_id if duplicate is not None else None
             if existing is not None:
                 if to_wiki and await disk_call(self._not_in_wiki, existing):
                     self._emit(SourceEvent("material_ready", existing, to_wiki=True))
