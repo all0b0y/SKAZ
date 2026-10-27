@@ -104,6 +104,7 @@ Mark = Literal["hard", "known", "hide", "unhide", "unhard", "unclear", "clear"]
 UNCLEAR_MARKS = ("unclear", "clear")
 NOT_FOUND = "This deck or test is no longer in the chat."
 EARLIER_ATTEMPT = "This answer belongs to an earlier attempt of the test."
+RULER_CHANGED = "The key ideas of this question were just set by another check. Ask the agent again."
 NOT_A_DECK = "This page is not a deck."
 NOTHING_LEFT = "Every card was dropped: none had an answer with a checked quote from a source."
 
@@ -996,17 +997,25 @@ class StudyService:
         return [dict(idea) for idea in row.ideas] if row is not None and row.ideas else None
 
     def _review(
-        self, block: StudyBlock, question: Question, given: str, raw: Mapping[str, Any]
+        self, block: StudyBlock, question: Question, given: str, raw: Mapping[str, Any],
+        ideas: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        """The judge's answer as stored: ideas built for an old test are kept on the question first."""
+        """The judge's answer as stored: ideas built for an old test are kept on the question first.
+
+        ``ideas``: the ones the judge was given (``None``: it built them). The judge's points are
+        numbered against those, so they are read against those — never a list stored meanwhile.
+        """
         reader = self._reader()
-        ideas = self.ideas(question.id)
         sources = sources_of(reader, question, ideas)
         if ideas is None:
-            ideas = built_ideas(raw, reader, sources)
-            if not ideas:
+            built = built_ideas(raw, reader, sources)
+            if not built:
                 raise StudyError(NO_IDEAS)
-            self.items.put_ideas(question.id, ideas, now=_now(), block_id=block.id, page_id=block.page_id)
+            stored = self.items.put_ideas_once(question.id, built, now=_now(), block_id=block.id,
+                                               page_id=block.page_id)
+            if [dict(idea) for idea in stored] != [dict(idea) for idea in built]:
+                raise StudyError(RULER_CHANGED)  # another check set the ideas first (Q1 p3 L2)
+            ideas = built
         review = read_review(raw, ideas, given, reader, sources)
         checked_by = str(raw.get("checked_by") or "") or None
         return scored({"text": given, "review": review, "checked_by": checked_by})
@@ -1018,7 +1027,7 @@ class StudyService:
             ideas = await disk_call(self.ideas, question.id)
             sources = await disk_call(sources_of, self._reader(), question, ideas)
             raw = await self.judge(check_call(block, question, given, ideas, sources))
-            entry = await disk_call(self._review, block, question, given, raw)
+            entry = await disk_call(self._review, block, question, given, raw, ideas)
         except StudyError as error:
             entry = {"text": given, "checked": False, "score": None, "error": error.message}
         except Exception as error:  # the block says it couldn't, the user can ask again

@@ -415,3 +415,32 @@ async def test_a_recheck_note_that_reads_like_instructions_is_not_shown(world: A
     await study.settle()
     idea = study.attempt(study.get(block.id)).answers["items"][item_id]["review"]["ideas"][2]
     assert idea["recheck"]["status"] == "missing" and idea["recheck"]["note"] is None
+
+
+async def test_ideas_built_by_two_checks_at_once_keep_the_first_ruler(world: Any) -> None:  # noqa: F811
+    """Q1 p3 L2: ideas built at a first check are stored only if none are; a lost race never overwrites."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    made = await _tool(runtime, "skaz_study_make_test", {"title": "Т", "questions": _questions(library)})
+    block = study.get(made["study_id"])
+    item_id = study.questions(block)[3].id
+    other = [{"id": "k1", "text": "Чужая линейка.", "cites": []}]
+    built = {"ideas": [{"text": "Мера беспорядка.", "source": 1, "quote": ENTROPY}],
+             "points": [_point(1, "covered")], "model_answer": [], "also_right": [], "comment": "Хорошо."}
+    inner = FakeJudge(built)
+
+    async def judge(call: JudgeCall) -> Mapping[str, Any]:
+        # another check of the same question stores its built ideas while this one waits for the agent
+        await asyncio.to_thread(study.items.put_ideas, item_id, other, now="t", block_id=block.id,
+                                page_id=None)
+        return await inner(call)
+
+    study.judge = judge
+    await study.check_open(block.id, item_id, "Беспорядок.")
+    await study.settle()
+    assert study.ideas(item_id) == other  # the first stored ruler stays
+    entry = study.attempt(study.get(block.id)).answers["items"][item_id]
+    # never scored on a ruler it didn't use
+    assert not entry["checked"] and "Ask the agent again" in entry["error"]
+    late = [{"id": "k1", "text": "Поздняя линейка.", "cites": []}]
+    assert list(study.items.put_ideas_once(item_id, late, now="t", block_id=None, page_id=None)) == other
