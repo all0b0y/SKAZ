@@ -130,7 +130,9 @@ class StudyTools:
                 "Read the cards and test questions the user marked «Unclear» (they want to talk them "
                 "through), in this chat's folders — or the whole library when the chat has none: each "
                 "with its text, type, options, right answer, the user's last answer, the source with its "
-                "quote and where it is. Read-only: you never change marks. Go through them one at a time; "
+                "quote and where it is. A test question the user has not answered yet comes without its "
+                "answer, which option is right or its source (answered: false): explain what it asks, "
+                "never the answer. Read-only: you never change marks. Go through them one at a time; "
                 "at the end tell the user they can clear the marks with «Clear now» under your answer.",
                 UnclearArgs,
                 run=self._run(self._unclear),

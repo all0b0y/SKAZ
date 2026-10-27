@@ -4,7 +4,9 @@ Decisions 8–10 of ``P3-OPEN-ANSWER-FEEDBACK.md``: a mark lives on the card or 
 attempt), survives retakes, is never cleared by a right answer and never touches FSRS; only the user
 clears it. The agent only reads them — every item with its text, type, options, right answer, the
 user's last answer, its source with the quote and where it is — in the scope of the chat: its folders,
-or the whole library when the chat has none («All»).
+or the whole library when the chat has none («All»). A test question the user has not answered yet
+(decision 12, Q1 p3 H2) goes without its right answer, which option is right, the explanation and the
+source quotes — only what the user sees before answering, and ``answered: false``.
 """
 
 from __future__ import annotations
@@ -60,19 +62,28 @@ def _resolve(study: StudyService, row: ItemRow) -> tuple[Card | Question, str, t
     return item, block.title, (block.folder_id,) if block.folder_id else (), where
 
 
-def _last_answer(study: StudyService, row: ItemRow, question: Question) -> str | None:
-    """What the user answered last time, in any attempt of a block showing this question."""
+def _newest_entry(study: StudyService, row: ItemRow, question: Question) -> dict[str, Any] | None:
+    """The user's answer in the newest attempt that asks this question; ``None``: not answered there.
+
+    Any block showing the question counts (the chat block, or a block of its saved page). A retake
+    asks it again, so until it is answered in that attempt the question is unanswered (decision 12).
+    """
     blocks = list(dict.fromkeys([*([row.block_id] if row.block_id else []),
                                  *(study.store.block_ids_of_page(row.page_id) if row.page_id else [])]))
-    newest: tuple[str, dict[str, Any]] | None = None
+    newest: tuple[str, dict[str, Any] | None] | None = None
     for block_id in blocks:
         for attempt in study.store.attempts(block_id):
+            order = attempt.answers.get("order") or []
             entry = (attempt.answers.get("items") or {}).get(question.id)
-            if entry and (newest is None or attempt.started_at >= newest[0]):
-                newest = (attempt.started_at, dict(entry))
-    if newest is None:
-        return None
-    entry = newest[1]
+            if order and question.id not in order and not entry:
+                continue  # a «tricky ones» retake without this question
+            if newest is None or attempt.started_at >= newest[0]:
+                newest = (attempt.started_at, dict(entry) if entry else None)
+    return newest[1] if newest is not None else None
+
+
+def _last_answer(entry: dict[str, Any], question: Question) -> str | None:
+    """What the user answered, and how it went."""
     if entry.get("choices"):
         texts = {f"r{n}": text for n, text in enumerate(question.answers)}
         texts.update({f"w{n}": text for n, text in enumerate(question.wrong)})
@@ -107,11 +118,24 @@ def unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: s
         entry: dict[str, Any] = {"item_id": row.item_id, "in": title, "where": where, "page_id": row.page_id}
         if isinstance(item, Question):
             entry.update({"kind": "test question", "type": item.type, "question": item.question})
+            given = _newest_entry(study, row, item)
+            if not (given and given.get("checked")):
+                # Not answered (or not checked) yet: only what the user sees before answering — the
+                # options' words in a neutral order, never which is right, the answer or its source
+                # (decision 12, in code, the same as «Ask the agent» in ``ask.py``).
+                if item.type in ("choice", "multi"):
+                    entry["options"] = [{"text": text} for text in sorted([*item.answers, *item.wrong])]
+                entry.update({"answered": False, "last_answer": None})
+                out.append(entry)
+                if len(out) >= MAX_ITEMS:
+                    break
+                continue
             if item.type in ("choice", "multi"):
                 entry["options"] = [{"text": text, "right": True} for text in item.answers] + [
                     {"text": text, "right": False, "made_up_by_agent": True} for text in item.wrong]
             entry["right_answer"] = list(item.answers)
-            entry["last_answer"] = _last_answer(study, row, item)
+            entry["last_answer"] = _last_answer(given, item)
+            entry["answered"] = True
         else:
             entry.update({"kind": "flashcard", "question": item.question, "right_answer": [item.answer]})
             rating = study.store.last_rating(item.id)

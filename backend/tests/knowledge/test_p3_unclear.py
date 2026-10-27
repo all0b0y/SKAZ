@@ -112,3 +112,33 @@ async def test_the_block_view_and_the_open_context_carry_the_mark(
                                   json={"item_ids": [first], "mark": "unclear"})
     assert marked.status_code == 200 and marked.json()["questions"][0]["unclear"] is True
     assert "marked it Unclear" in (study.open_context(block.id) or "")
+
+
+async def test_before_the_user_answers_the_agent_never_gets_the_answer_of_an_unclear_question(
+    world: Any,  # noqa: F811
+) -> None:
+    """Q1 p3 H2: decision 12 («not answered yet» → no right answer, in code) wins over decision 10's list."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")  # marked before answering
+
+    item = (await _tool(runtime, "skaz_study_unclear", {}))["items"][0]
+    assert item["answered"] is False and item["last_answer"] is None
+    for hidden in ("right_answer", "source", "agent_explanation"):
+        assert hidden not in item
+    assert sorted(o["text"] for o in item["options"]) == ["мера беспорядка", "мера массы", "мера температуры"]
+    assert all(set(o) == {"text"} for o in item["options"])  # never which one is right
+    assert "мера беспорядка" not in str({k: v for k, v in item.items() if k != "options"})
+
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, first, choices=[right])
+    item = (await _tool(runtime, "skaz_study_unclear", {}))["items"][0]
+    assert item["answered"] is True and item["right_answer"] == ["мера беспорядка"] and item["source"]
+
+    # A retake asks it again: until it is answered in the new attempt, the answer is withheld again.
+    await asyncio.to_thread(study.finish, block.id)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=False)
+    item = (await _tool(runtime, "skaz_study_unclear", {}))["items"][0]
+    assert item["answered"] is False and "right_answer" not in item and item["last_answer"] is None
