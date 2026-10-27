@@ -169,6 +169,8 @@ class SpeechService:
         self._live: dict[str, asyncio.Task[None]] = {}
         self._dirty: set[str] = set()
         self._locks = KeyedLocks()
+        #: Q1 n2 L3: one import at a time per media file content (duplicate check, then the material).
+        self._same_media = KeyedLocks()
         self._closing = False
         #: Called with a material id when speech settled finished (Stop or a completed import,
         #: not a Pause): the wiki may process it now.
@@ -545,6 +547,11 @@ class SpeechService:
     # -- imports --------------------------------------------------------------
 
     async def start_import(self, request: ImportInput) -> SpeechView:
+        # Q1 n2 L3: a file's duplicate check and its new material under one lock per content.
+        async with contextlib.AsyncExitStack() as held:
+            return await self._start_import(request, held)
+
+    async def _start_import(self, request: ImportInput, held: contextlib.AsyncExitStack) -> SpeechView:
         self._remember_loop()
         self.kb.require()
         if (request.path is None) == (request.url is None):
@@ -589,6 +596,7 @@ class SpeechService:
             url = None
             # N2: the same bytes under any name are the same recording; the hash is kept in the origin.
             digest = await disk_call(file_digest, path)
+            await held.enter_async_context(self._same_media.hold(digest))
             if not request.allow_duplicate:
                 known = await self._already_there(digest=digest)
                 if known is not None:

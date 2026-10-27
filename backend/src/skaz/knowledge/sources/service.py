@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ...native_io import disk_call
 from ..errors import KnowledgeError, NotFound
 from ..ids import utc_now
+from ..keyed_locks import KeyedLocks, KeyedThreadLocks
 from ..library.fsio import dump_json, fsync_dir, read_json, write_atomic
 from ..library.layout import SERVICE_DIR
 from ..library.library import MaterialFiles
@@ -42,7 +43,7 @@ from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
 from . import web_page
-from .duplicates import Duplicate, content_hash, find_duplicate
+from .duplicates import Duplicate, content_hash, find_duplicate, url_key
 from .fetch import MAX_PAGE_BYTES, FetchFailed, LinkRejected, SafeFetcher, check_url
 from .fragments import sanitize_title
 from .guard import Detection, Finding, detect_instruction
@@ -193,6 +194,9 @@ class SourceService:
         self.video_probe = video_probe
         self._listeners: list[Listener] = []
         self._lock = _GUARD_LOCK
+        #: Q1 n2 L3: one add at a time per file content / per address (duplicate check, then store).
+        self._same_file = KeyedThreadLocks()
+        self._same_link = KeyedLocks()
         #: One save at a time per page: a double click makes one material, one request.
         self._web_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
@@ -229,23 +233,25 @@ class SourceService:
         suffix = file_path.suffix.lower()
         self._typed_name(title)  # a typed name that can't be one is refused first, duplicate or not
         data = file_path.read_bytes()
-        duplicate = find_duplicate(self.kb, content=data)
-        if duplicate is not None:
-            return self._existing(duplicate)
-        origin = Origin.model_validate(
-            {"type": "file", "file_name": file_path.name, "sha256": content_hash(data)})
-        if suffix in PDF_EXTENSIONS:
-            prepared = prepare_pdf(
-                data,
-                origin=origin,
-                fallback=sanitize_title(file_path.stem) or "Document",
-                original=Original("original.pdf", path=file_path),
-            )
-        else:
-            prepared = prepare_text_file(data, file_path.name, origin=origin)
-            if prepared.failure:
-                raise SourceRejected("This file has no text.")
-        return self._publish(prepared, folder_id, title, to_wiki)
+        digest = content_hash(data)
+        # Q1 n2 L3: the check and the store under one lock per content — two adds at once make one.
+        with self._same_file.hold(digest):
+            duplicate = find_duplicate(self.kb, content=data)
+            if duplicate is not None:
+                return self._existing(duplicate)
+            origin = Origin.model_validate({"type": "file", "file_name": file_path.name, "sha256": digest})
+            if suffix in PDF_EXTENSIONS:
+                prepared = prepare_pdf(
+                    data,
+                    origin=origin,
+                    fallback=sanitize_title(file_path.stem) or "Document",
+                    original=Original("original.pdf", path=file_path),
+                )
+            else:
+                prepared = prepare_text_file(data, file_path.name, origin=origin)
+                if prepared.failure:
+                    raise SourceRejected("This file has no text.")
+            return self._publish(prepared, folder_id, title, to_wiki)
 
     async def add_link(self, url: str, folder_id: str, title: str | None = None, *,
                        to_wiki: bool | None = None) -> IntakeResult:
@@ -258,6 +264,12 @@ class SourceService:
             raise SourceRejected(MEDIA_FILE_LINK)
         address = check_url(url)
         self._typed_name(title)
+        # Q1 n2 L3: the checks and the store under one lock per address — two adds at once make one.
+        async with self._same_link.hold(url_key(address) or address):
+            return await self._add_link(address, offline, folder_id, title, to_wiki)
+
+    async def _add_link(self, address: str, offline: LinkInfo | None, folder_id: str, title: str | None,
+                        to_wiki: bool | None) -> IntakeResult:
         # N2: the same address or DOI already in the library is answered before any request.
         duplicate = await disk_call(find_duplicate, self.kb, urls=[address])
         if duplicate is not None:

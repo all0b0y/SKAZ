@@ -314,10 +314,17 @@ async def test_the_same_audio_file_again_is_the_material_already_there(
     assert again.status_code == 200, again.text
     assert again.json()["already_in_library"] is True
     assert again.json()["material_id"] == first.json()["material_id"]
+    # Two at once of one new file: one import starts, the other is that material (Q1 n2 L3).
+    fresh = content + b"?"
+    paths = [media(tmp_path, f"Race {index}.m4a", fresh) for index in range(2)]
+    racing = await asyncio.gather(*(api.post("/kb/imports", json={"path": path}) for path in paths))
+    assert sorted(response.status_code for response in racing) == [200, 201]
+    assert racing[0].json()["material_id"] == racing[1].json()["material_id"]
+    await until(api, racing[0].json()["material_id"], status="ready")
     other = await api.post("/kb/imports", json={"path": media(tmp_path, "Other.m4a", content + b"!")})
     assert other.status_code == 201 and other.json()["already_in_library"] is False
     await until(api, other.json()["material_id"], status="ready")
-    assert len((await api.get("/kb/materials")).json()) == 2
+    assert len((await api.get("/kb/materials")).json()) == 3
 
 
 async def test_a_failed_import_keeps_its_reason_and_retry_continues_the_same_material(
