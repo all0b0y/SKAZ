@@ -369,3 +369,29 @@ describe('Material (v9, v16–v18): statuses, fixes, translation, excluded fragm
     await waitFor(() => expect(screen.queryByRole('complementary', { name: 'Document' })).not.toBeInTheDocument());
   });
 });
+
+describe('Already in your wiki (N2): one quiet line at the material', () => {
+  it('says how much the wiki already had, links each page, names what is new', async () => {
+    const world = docWorld();
+    const page = world.pages.find((p) => p.kind === 'concept')!;
+    world.materials.find((m) => m.id === 'm-lec8')!.overlap = {
+      percent: 70, repeated: 7, total: 10, pages: [{ id: page.id, title: page.title, repeated: 7 }],
+      new_sections: ['Section 4'], repeated_sections: ['Section 1'],
+    };
+    const r = renderKb({ world });
+    await screen.findByRole('navigation', { name: 'Sections' });
+    act(() => r.services.ui.getState().openDocument({ type: 'material', id: 'm-lec8' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    const line = await within(doc).findByTestId('material-overlap');
+    expect(line).toHaveTextContent(`About 70% of this is already in your wiki: ${page.title} · what’s new: Section 4`);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument(); // quiet: not an alert, not a notification
+    const user = userEvent.setup();
+    await user.click(within(line).getByRole('button', { name: page.title }));
+    expect(await screen.findByRole('heading', { level: 2, name: page.title })).toBeInTheDocument();
+  });
+
+  it('shows nothing when nothing of it was already in the wiki', async () => {
+    const { doc } = await openMaterial('m-lec8');
+    expect(within(doc).queryByTestId('material-overlap')).not.toBeInTheDocument();
+  });
+});

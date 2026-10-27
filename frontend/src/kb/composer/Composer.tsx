@@ -204,7 +204,9 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
       const source = item.source as 'file' | 'link' | 'text';
       saveMaterial(source, item.value, inboxId).then(
-        (added) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready } : a))),
+        (added) => setAttachments((list) => list.map((a) => (a.key === key
+          ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { source: 'existing' as const } : {}) }
+          : a))),
         (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
       );
     }

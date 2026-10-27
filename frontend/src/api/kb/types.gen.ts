@@ -1019,6 +1019,7 @@ export interface KbMaterial {
   unreadable_pages?: number[];
   failure_reason?: string | null;
   can_retry?: boolean;
+  overlap?: KbMaterialOverlap | null;
 }
 
 export interface KbMaterialAdded {
@@ -1028,6 +1029,7 @@ export interface KbMaterialAdded {
   failure_reason: string | null;
   video: KbMaterialSummary | null;
   video_failure_reason: string | null;
+  already_in_library?: boolean;
 }
 
 export interface KbMaterialGuard {
@@ -1046,6 +1048,15 @@ export interface KbMaterialHit {
   folder_name: string;
   created_at: string;
   snippet: KbSnippetPart[];
+}
+
+export interface KbMaterialOverlap {
+  percent: number;
+  repeated: number;
+  total: number;
+  pages: KbOverlapPage[];
+  new_sections: string[];
+  repeated_sections: string[];
 }
 
 export interface KbMaterialSummary {
@@ -1245,6 +1256,13 @@ export interface KbOrigin {
   url: string | null;
   file_name: string | null;
   fetched_at?: string | null;
+}
+
+/** A concept page that already said some of the material (each repeat links to its page). */
+export interface KbOverlapPage {
+  id: string;
+  title: string;
+  repeated: number;
 }
 
 export interface KbPage {

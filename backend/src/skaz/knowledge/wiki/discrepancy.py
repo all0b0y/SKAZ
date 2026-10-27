@@ -37,6 +37,7 @@ from .prompts import (
     DiscrepanciesOut,
     discrepancy_prompt,
 )
+from .repeats import Repeats
 from .statements import Statement, page_statements
 
 KIND = "discrepancy"
@@ -102,6 +103,8 @@ def _labels(language: str) -> dict[str, str]:
 class Discrepancies:
     def __init__(self, ctx: WikiContext) -> None:
         self.ctx = ctx
+        #: N2: repeats ride the same answer (``DiscrepanciesOut.repeats``), confirmed the same way.
+        self.repeats = Repeats(ctx)
 
     # -- bookkeeping ----------------------------------------------------------
 
@@ -210,6 +213,7 @@ class Discrepancies:
             await log(f"The disagreement check of “{check.title}” was not in the expected format; skipped.")
             return 0
         found = 0
+        named = {conflict.new for conflict in answer.conflicts if conflict.page == number}
         for conflict in answer.conflicts:
             if conflict.page != number:
                 continue
@@ -244,6 +248,8 @@ class Discrepancies:
                 explanation = ""
             await disk_call(self._report, page_id, side_old, side_new, explanation, check.language)
             found += 1
+        # A statement named in a disagreement is never also merged away as a repeat.
+        await self.repeats.apply(page_id, check.title, new, existing, answer.repeats, number, log, skip=named)
         await disk_call(self._mark_checked, page_id, [item.block_id for item in new])
         if found:
             await log(f"“{check.title}”: {found} disagreement(s) between sources were marked.")

@@ -35,7 +35,7 @@ export function isSpeechFile(name: string): boolean {
 }
 
 /** Create the material for one attachment, kept out of the wiki until the message is sent. */
-export async function addMaterial(client: KbClient, source: 'file' | 'link' | 'text', value: string, folderId: string): Promise<{ id: string; ready: boolean }> {
+export async function addMaterial(client: KbClient, source: 'file' | 'link' | 'text', value: string, folderId: string): Promise<{ id: string; ready: boolean; existing?: boolean }> {
   const hold = { folder_id: folderId, to_wiki: false };
   if (source === 'file') {
     if (isSpeechFile(value)) {
@@ -43,11 +43,12 @@ export async function addMaterial(client: KbClient, source: 'file' | 'link' | 't
       return { id: res.material_id, ready: res.status === 'ready' };
     }
     const res = await client.call('POST /kb/materials/file', { body: { path: value, ...hold } });
-    return { id: res.material.id, ready: res.material.status === 'ready' };
+    // N2: the same file already in the library — that material, attached as an existing one (no second ingest).
+    return { id: res.material.id, ready: res.material.status === 'ready', existing: res.already_in_library === true };
   }
   if (source === 'link') {
     const res = await client.call('POST /kb/materials/link', { body: { url: value, ...hold } });
-    return { id: res.material.id, ready: res.material.status === 'ready' };
+    return { id: res.material.id, ready: res.material.status === 'ready', existing: res.already_in_library === true };
   }
   const res = await client.call('POST /kb/materials/text', { body: { text: value, ...hold } });
   return { id: res.material.id, ready: res.material.status === 'ready' };
