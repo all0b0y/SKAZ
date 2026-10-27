@@ -24,22 +24,15 @@ import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field, replace
 
-from ..ingest.pages import block_prefix
+from ..ingest.pages import block_prefix, confirms_alone, without_citation_links
 from ..markdown.page import Block, PageDocument, Part
 from ..markdown.text import quote_in_fragment
 from .graph import NAV_IDS
 
-#: Paragraphs of a folder overview ("What was covered") summarise several materials at once.
-OVERVIEW_PREFIX = "c-ov-"
 #: Code-written lists of links: an item to a removed page is taken out of the list.
 LIST_BLOCKS = frozenset({*NAV_IDS, "c-ov-concepts", "c-ov-materials"})
 _LINK = re.compile(r"\[\[([^\]|#\n]*)(?:#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]")
 _NUMBERED = re.compile(r"^\s*\d+\.\s+")
-
-
-def _confirms_alone(part: Block) -> bool:
-    """Whether what remains after dropping one source can stand as the same claim."""
-    return part.kind == "from_source" and not part.id.startswith(OVERVIEW_PREFIX)
 
 
 @dataclass
@@ -55,13 +48,6 @@ class Retraction:
 
 def _agent(part: Part) -> bool:
     return isinstance(part, Block) and part.owner == "agent" and part.hash_matches()
-
-
-def _without_links(body: str, rel_dir: str | None) -> str:
-    if not rel_dir:
-        return body
-    link = re.compile(r"[ \t]?\[\[" + re.escape(rel_dir) + r"/[^\]|#\n]*#\^seg-\d+\|[^\]\n]*\]\]")
-    return link.sub("", body).strip()
 
 
 def retract_material(
@@ -85,10 +71,10 @@ def retract_material(
         if len(others) == len(part.cites) and not part.id.startswith(prefix):
             parts.append(part)
             continue
-        if not others or not _confirms_alone(part):
+        if not others or not confirms_alone(part):
             result.removed.append(part.id)
             continue
-        body = _without_links(part.body, rel_dir)
+        body = without_citation_links(part.body, rel_dir)
         parts.append(Block.create(part.id, part.kind, body, cites=others, owner="agent"))
         result.kept.append(part.id)
     return replace(document, parts=parts), result

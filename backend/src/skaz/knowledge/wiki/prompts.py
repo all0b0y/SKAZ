@@ -66,7 +66,18 @@ DISCREPANCY_SCHEMA = _object(
                     "description": "What differs, neutrally; which seems right and why.",
                 },
             }
-        )
+        ),
+        # N2: the same call marks repeats — a new statement that says what an existing one already says.
+        "repeats": _items(
+            {
+                "page": {"type": "integer", "description": "Number P of the concept page [Concept page P]."},
+                "new": {"type": "integer", "description": "Number N of a new statement [N] of that page."},
+                "existing": {
+                    "type": "integer",
+                    "description": "Number of an existing statement of the same page that already says it.",
+                },
+            }
+        ),
     },
 )
 
@@ -131,7 +142,10 @@ disciplines, different names or notations for the same thing, statements about d
 a source that corrects itself (its final version counts). On each page compare each new statement
 with that page's existing ones only; statement numbers start again on every page, so every conflict
 names its page. In "explanation" ({{language}}) say neutrally what differs; you may add which
-version seems more likely right and why. An empty list is a good answer. {_DATA_RULE}"""
+version seems more likely right and why. In "repeats" list each new statement that only repeats an
+existing statement of its page: the same claim, perhaps in other words, adding nothing — no detail,
+number, condition or example the existing one lacks. A new statement that adds anything is not a
+repeat; name at most one existing statement per new one. Empty lists are good answers. {_DATA_RULE}"""
 
 CONNECTIONS_INSTRUCTIONS = f"""\
 You look for meaningful connections between concepts of a personal knowledge wiki, often from
@@ -168,8 +182,17 @@ class ConflictOut(_Model):
     explanation: str = ""
 
 
+class RepeatOut(_Model):
+    #: A one-page answer may leave it out.
+    page: int = 1
+    new: int
+    existing: int
+
+
 class DiscrepanciesOut(_Model):
     conflicts: list[ConflictOut]
+    #: N2: an answer without it (an older or terser one) has no repeats.
+    repeats: list[RepeatOut] = Field(default_factory=list)
 
 
 class ConnectionOut(_Model):

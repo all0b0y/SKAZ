@@ -340,17 +340,52 @@ class ConceptUpdate:
     related: list[PageRef]
 
 
-def strip_material(document: PageDocument, material_id: str) -> tuple[PageDocument, int]:
-    """Remove this material's agent blocks (re-ingest); returns the document and how many went."""
+#: Paragraphs of a folder overview ("What was covered") summarise several materials at once.
+OVERVIEW_PREFIX = "c-ov-"
+
+
+def confirms_alone(part: Block) -> bool:
+    """Whether what remains after dropping one source can stand as the same claim: a plain statement
+    from sources, not a synthesis over several (a folder overview paragraph, a connection, an
+    explanation — QA C18)."""
+    return part.kind == "from_source" and not part.id.startswith(OVERVIEW_PREFIX)
+
+
+def without_citation_links(body: str, rel_dir: str | None) -> str:
+    """``body`` without the citation wikilinks into the material folder ``rel_dir``."""
+    if not rel_dir:
+        return body
+    link = re.compile(r"[ \t]?\[\[" + re.escape(rel_dir) + r"/[^\]|#\n]*#\^seg-\d+\|[^\]\n]*\]\]")
+    return link.sub("", body).strip()
+
+
+def strip_material(document: PageDocument, material_id: str,
+                   rel_dir: str | None = None) -> tuple[PageDocument, int]:
+    """Remove this material's agent blocks (re-ingest); returns the document and how many changed.
+
+    N2 (a repeat strengthens): a plain statement that rests on other sources too — another source's
+    statement this material repeated, or this material's own that others repeated — stays on those
+    sources without this material's citation (marker and link). ``rel_dir`` names the material's
+    links; without it such a statement goes with the material, as before.
+    """
     prefix = block_prefix(material_id)
     parts: list[Part] = []
-    removed = 0
+    changed = 0
     for part in document.parts:
-        if _is_agent(part) and isinstance(part, Block) and part.id.startswith(prefix):
-            removed += 1
-            continue
+        if _is_agent(part) and isinstance(part, Block):
+            cites_it = any(cite.material_id == material_id for cite in part.cites)
+            others = tuple(cite for cite in part.cites if cite.material_id != material_id)
+            if cites_it and others and rel_dir and confirms_alone(part):
+                body = without_citation_links(part.body, rel_dir)
+                parts.append(Block.create(part.id, part.kind, body, cites=others, owner="agent",
+                                          attrs=part.attrs))
+                changed += 1
+                continue
+            if part.id.startswith(prefix) and (cites_it or not part.cites):
+                changed += 1
+                continue
         parts.append(_protect(part))
-    return replace(document, parts=parts), removed
+    return replace(document, parts=parts), changed
 
 
 def is_empty_orphan(document: PageDocument) -> bool:
@@ -374,13 +409,14 @@ def cites_material(document: PageDocument, material_id: str) -> bool:
 
 def merge_concept(document: PageDocument, update: ConceptUpdate | None, *, material_id: str,
                   folders_of: Callable[[Sequence[str]], tuple[str, ...]],
-                  folders_body: Callable[[PageMeta], str | None]) -> PageDocument:
+                  folders_body: Callable[[PageMeta], str | None],
+                  rel_dir: str | None = None) -> PageDocument:
     """Drop this material's previous agent blocks, add the new ones, refresh meta and navigation.
 
     ``folders`` of a concept page are derived from its sources (where the
     concept occurs, decision 10); ``aliases`` only grow.
     """
-    document, _removed = strip_material(document, material_id)
+    document, _removed = strip_material(document, material_id, rel_dir)
     meta = document.meta
     language = meta.language or "en"
     parts = list(document.parts)
