@@ -225,7 +225,7 @@
 .kb-st-sr:last-child { border-bottom: 0; }
 .kb-st-sr > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-st-sr--ok > .kb-icon { color: var(--kb-ok); }
-.kb-st-sr--bad > .kb-icon { color: var(--kb-danger); }
+.kb-st-sr--bad > .kb-icon { color: var(--kb-muted); } /* «not yet» is neutral, never red (P3-a) */
 .kb-st-sr--part > .kb-icon { color: var(--kb-warn); }
 
 /* the 560 px column (card A): the card, its nav row, the test sheet, its actions, the result */
@@ -263,3 +263,56 @@
 
 .kb-st-num { width: 84px; flex: none; }
 .kb-st-num.has-error { border-color: var(--kb-danger); }
+
+/* P3-a: an open answer's review, variant C «Answer first» (p3-v3): status, «N of M key ideas», what is
+   still missing, Full review; the report on demand. Colour only on the status glyph and word; «Not yet»
+   neutral. No fills, no capitals, no frames. */
+.kb-st-rv { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--kb-line); font-size: 13.5px; }
+.kb-st-rv__row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.kb-st-rv__st { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; white-space: nowrap; }
+.kb-st-rv__st--got { color: var(--kb-ok); }
+.kb-st-rv__st--almost { color: var(--kb-warn); }
+.kb-st-rv__st--not_yet { color: var(--kb-text); }
+.kb-st-rv__st--not_yet .kb-icon { color: var(--kb-muted); }
+.kb-st-rv__muted { color: var(--kb-muted); }
+.kb-st-rv__who { display: inline-flex; color: var(--kb-muted); }
+.kb-st-rv__link {
+  display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; font: inherit; font-size: 13px;
+  font-weight: 500; color: var(--kb-text); cursor: pointer; padding: 2px 4px; margin: -2px 0; border-radius: var(--kb-r-xs);
+  white-space: nowrap;
+}
+.kb-st-rv__link:hover, .kb-st-rv__link[aria-expanded='true'] { background: var(--kb-accent-soft); }
+.kb-st-rv__link:disabled { opacity: 0.5; cursor: default; }
+.kb-st-rv__miss { margin: 4px 0 0; font-size: 13px; color: var(--kb-muted); }
+.kb-st-rv__report { margin-top: 10px; font-size: 14px; isolation: isolate; }
+.kb-st-rv__by { font-size: var(--t-xs); color: var(--kb-muted); margin: 2px 0 0; }
+.kb-st-rv__h { font-size: 13px; font-weight: 600; margin: 18px 0 6px; }
+.kb-st-rv__p { margin: 8px 0 0; line-height: 1.65; overflow-wrap: anywhere; }
+.kb-st-rv__h + .kb-st-rv__p { margin-top: 0; }
+.kb-st-rv__yours { margin: 0; font-size: 13.5px; color: var(--kb-muted); line-height: 1.55; overflow-wrap: anywhere; }
+.kb-st-rv__yours[data-picking] { color: var(--kb-text); outline: 1px dashed var(--kb-line); outline-offset: 4px; border-radius: var(--kb-r-xs); }
+.kb-st-rv__add {
+  text-decoration: underline dotted; text-decoration-color: var(--kb-muted); text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px; border-radius: var(--kb-r-xs); transition: background 0.12s;
+}
+.kb-st-rv__add.is-hot { background: var(--kb-ok-soft); }
+.kb-st-rv__hint { font-size: var(--t-xs); color: var(--kb-muted); margin: 6px 0 0; }
+.kb-st-rv__also { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.kb-st-rv__also li { display: grid; grid-template-columns: 18px 1fr; gap: 0 8px; }
+.kb-st-rv__also .kb-icon { color: var(--kb-ok); margin-top: 3px; }
+.kb-st-rv__agent { color: var(--kb-muted); font-size: var(--t-xs); }
+.kb-st-rv__notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.kb-st-rv__notes li { display: grid; grid-template-columns: 18px 1fr; gap: 0 8px; transition: opacity 0.12s; }
+.kb-st-rv__notes.is-dim li:not(.is-hot) { opacity: 0.45; }
+.kb-st-rv__g { margin-top: 3px; display: inline-flex; }
+.kb-st-rv__g--covered { color: var(--kb-ok); }
+.kb-st-rv__g--partial { color: var(--kb-warn); }
+.kb-st-rv__g--missing { color: var(--kb-muted); }
+.kb-st-rv__nt { font-weight: 500; overflow-wrap: anywhere; }
+.kb-st-rv__nw { color: var(--kb-muted); font-size: 13.5px; margin: 2px 0 0; overflow-wrap: anywhere; }
+.kb-st-rv__recheck { color: var(--kb-text); }
+.kb-st-rv__acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: var(--t-xs); }
+.kb-st-rv__src { margin: 16px 0 0; font-size: var(--t-sm); color: var(--kb-muted); }
+@media (prefers-reduced-motion: reduce) {
+  .kb-st-rv__add, .kb-st-rv__notes li { transition: none; }
+}

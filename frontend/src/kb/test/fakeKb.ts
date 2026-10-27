@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard, KbStudyReview,
   KbWebSearchPart,
 } from '../../api/kb/types.gen';
 import { agentUpdateRoutes } from './fakeAgentUpdates';
@@ -23,6 +23,7 @@ import {
   type KbPermissionPart, type KbQuestionPart,
 } from '../api/permissions';
 import { meRoutes, type FakeMe } from './fakeMe';
+import { defaultReview, p3StudyRoutes, scoreOf } from './fakeStudyP3';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -129,6 +130,10 @@ export interface FakeWorld {
   studyNewPerDay?: number;
   /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
   judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean; checked_by?: string };
+  /** P3-a: the agent's review of an open answer (absent with `judge` absent = `defaultReview`). */
+  review?: KbStudyReview;
+  /** P3-a «I did say this»: what the agent says on a recheck (absent = it still misses the idea). */
+  recheck?: { status: 'covered' | 'partial' | 'missing'; note: string };
   /** N6 «Я» (Me): skills, versions and agent edits (absent = the three built-ins, empty, on). */
   me?: FakeMe;
 }
@@ -792,7 +797,15 @@ const STUDY_ROUTES: FakeRoutes = {
     if (!text) fail(409, 'Write an answer first.');
     q.response = { choices: [], text, checked: false, score: null, verdict: null, missing: null, comment: null, checking: true, error: null };
     const answered = studyChanged(w, found);
-    const judge = w.judge ?? { verdict: 'partly' as const, missing: 'It doesn’t say the entropies add up.', comment: 'Close: the idea of joining systems is there.' };
+    if (!w.judge) {
+      // P3-a: the review arrives later, as an update of the block (key ideas, model answer…).
+      const review = structuredClone(w.review ?? defaultReview(q));
+      q.response = { choices: [], text, checked: true, ...scoreOf(review), missing: null, comment: null,
+        checked_by: null, checking: false, error: null, review };
+      studyChanged(w, found);
+      return answered;
+    }
+    const judge = w.judge;
     if (!judge.hold) {
       // The verdict arrives later, as an update of the block: the request never waits for it.
       q.response = { choices: [], text, checked: true, score: { right: 1, partly: 0.5, wrong: 0 }[judge.verdict], verdict: judge.verdict,
@@ -803,10 +816,11 @@ const STUDY_ROUTES: FakeRoutes = {
   }],
   'POST /kb/study/{block_id}/finish': [200, (w, { path }) => {
     const found = findStudy(w, path.block_id);
-    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null }));
+    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null, status: q.response?.status ?? null }));
     found.part.result = {
       correct: rows.reduce((n, r) => n + (r.score ?? 0), 0), total: rows.length,
-      mistakes: rows.filter((r) => (r.score ?? 0) < 1).length, partly: rows.filter((r) => r.score === 0.5).length, rows,
+      mistakes: rows.filter((r) => (r.status ? r.status !== 'got' : (r.score ?? 0) < 1)).length,
+      partly: rows.filter((r) => r.status === 'almost' || (!r.status && r.score === 0.5)).length, rows,
     };
     return studyChanged(w, found);
   }],
@@ -1737,7 +1751,10 @@ const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
   }
 });
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+/** P3 study routes (fakeStudyP3.ts): «I did say this», «counted by you». */
+const P3_STUDY_ROUTES: FakeRoutes = p3StudyRoutes({ findStudy, studyChanged: studyChanged as never, fail });
+
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {

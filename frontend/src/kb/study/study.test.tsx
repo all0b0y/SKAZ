@@ -373,28 +373,35 @@ describe('A test in the chat', () => {
 
     await user.click(within(test).getByRole('radio', { name: 'S = k·W²' }));
     await user.click(within(test).getByRole('button', { name: 'Check' }));
-    expect(await within(test).findByText('Not quite.')).toBeInTheDocument();
+    expect(await within(test).findByText('Not yet.')).toBeInTheDocument();
     expect(within(test).getByRole('radio', { name: /S = k·ln W.*Correct · from source/ })).toBeInTheDocument();
+    expect(within(test).getByRole('radio', { name: /S = k·W².*Your pick · Codex made this one up/ })).toBeInTheDocument();
     expect(within(test).getByRole('radio', { name: /S = W \/ k.*made up by Codex/ })).toBeInTheDocument();
 
     await user.click(within(test).getByRole('button', { name: 'Next question' }));
     await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'w');
     await user.click(within(test).getByRole('button', { name: 'Check' }));
-    expect(await within(test).findByText('Correct.')).toBeInTheDocument();
+    expect(await within(test).findByText('Got it.')).toBeInTheDocument();
 
     await user.click(within(test).getByRole('button', { name: 'Next question' }));
     await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Because joined systems add up.');
     await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
     // The verdict comes as an update of the block (the chat's event feed), not in the answer to the click.
-    expect(await within(test).findByText('Codex’s opinion · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
-    expect(within(test).getByText('Partly right.')).toBeInTheDocument();
+    // P3-a: the compact result — soft status, SKAZ's count of the key ideas, what is still missing.
+    expect(await within(test).findByText('Almost there', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(within(test).getByLabelText('Codex’s opinion · not a fact')).toBeInTheDocument();
+    expect(within(test).getByText('· 1½ of 3 key ideas')).toBeInTheDocument();
+    expect(within(test).getByText(/Still to add: Joining two systems.*; A logarithm turns/)).toBeInTheDocument();
+    expect(within(test).queryByRole('heading', { name: 'How it could look' })).toBeNull(); // the report only on demand
     expect(within(test).getByText(/Think of what happens/)).toBeInTheDocument();
     expect(requests(fake).filter((r) => r.includes('check-open'))).toHaveLength(1);
 
     await user.click(within(test).getByRole('button', { name: 'See result' }));
     expect(await within(test).findByText('1.5 of 3')).toBeInTheDocument();
-    expect(within(test).getByText(/One open answer is half-right/)).toBeInTheDocument();
-    await user.click(within(test).getByRole('button', { name: 'Retake mistakes · 2' }));
+    expect(within(test).getByText(/One open answer is almost there, in the agent’s opinion/)).toBeInTheDocument();
+    expect(within(test).getByLabelText('almost there')).toBeInTheDocument();
+    expect(within(test).getByLabelText('not yet')).toBeInTheDocument();
+    await user.click(within(test).getByRole('button', { name: 'Practice the tricky ones · 2' }));
     await waitFor(() => expect(within(test).getByText('1 / 2')).toBeInTheDocument());
     expect(fake.calls.find((c) => c.path.endsWith('/retake'))?.body).toEqual({ mistakes_only: true });
   });
@@ -424,7 +431,7 @@ describe('A test in the chat', () => {
     expect(fake.calls.filter((c) => c.path.endsWith('/answer'))).toEqual([]); // picking sends nothing; Check does
 
     await user.click(within(test).getByRole('button', { name: 'Check' }));
-    expect(await within(test).findByText('Not quite.')).toBeInTheDocument();
+    expect(await within(test).findByText('Not yet.')).toBeInTheDocument();
     expect(fake.calls.find((c) => c.path.endsWith('/answer'))?.body).toEqual({ item_id: 'q-1', choices: ['w0'] });
     test.focus();
     await user.keyboard('b'); // checked: keys pick nothing any more
@@ -441,7 +448,52 @@ describe('A test in the chat', () => {
     await user.click(within(test).getByRole('button', { name: 'Next question' }));
     await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Logs add.');
     await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
-    expect(await within(test).findByText('Opinion of Codex · GPT-5.6-luna · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await within(test).findByLabelText('Opinion of Codex · GPT-5.6-luna · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
+    // Checked before key ideas existed: the old verdict word, softened.
+    expect(within(test).getByText('Got it')).toBeInTheDocument();
+  });
+
+  it('P3-a: Full review — also right, your answer, how it could look, why it matters; I did say this, Count it', async () => {
+    const { user, fake } = await openChat(/Lecture 8 — test/);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Because joined systems add up.');
+    await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
+    await user.click(await within(test).findByRole('button', { name: 'Full review' }, { timeout: 5000 }));
+    const report = within(test).getByLabelText('Full review');
+    const headings = within(report).getAllByRole('heading').map((h) => h.textContent);
+    expect(headings).toEqual(['Also right in your answer', 'Your answer', 'How it could look', 'Why it matters']);
+    expect(within(report).getByText('Codex’s opinion · not a fact')).toBeInTheDocument();
+    expect(within(report).getByText('their arrangements multiply,')).toHaveClass('kb-st-rv__add');
+    expect(within(report).getByText(/Underlined — what would round your answer out/)).toBeInTheDocument();
+    expect(within(report).getByText('You were close: «joined systems».')).toBeInTheDocument();
+    expect(within(report).getAllByText(/agent’s knowledge/).length).toBeGreaterThan(0);
+
+    // «I did say this» on the missing idea: select words of the answer, then Recheck.
+    const notes = within(report).getAllByRole('listitem').filter((li) => li.closest('ol'));
+    const missing = notes.find((li) => li.textContent?.includes('A logarithm turns the product'))!;
+    await user.click(within(missing).getByRole('button', { name: 'I did say this' }));
+    await user.click(within(missing).getByRole('button', { name: 'Recheck' }));
+    expect(within(missing).getByRole('alert')).toHaveTextContent('Select the words in your answer first.');
+    const yours = within(report).getByText('Because joined systems add up.');
+    const range = document.createRange();
+    range.setStart(yours.firstChild!, 8);
+    range.setEnd(yours.firstChild!, 29);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    await user.click(within(missing).getByRole('button', { name: 'Recheck' }));
+    await waitFor(() => expect(fake.calls.find((c) => c.path.endsWith('/recheck'))?.body)
+      .toEqual({ item_id: 'q-3', idea_id: 'k3', words: 'joined systems add up' }));
+    expect(await within(test).findByText(/what the logarithm does is still to add/)).toBeInTheDocument();
+
+    // The agent didn't agree: the user may count it themselves; SKAZ recounts (2½ of 3 → Got it).
+    const after = within(within(test).getByLabelText('Full review')).getAllByRole('listitem')
+      .find((li) => li.textContent?.includes('A logarithm turns the product'))!;
+    await user.click(within(after).getByRole('button', { name: 'Count it' }));
+    expect(await within(test).findByText('counted by you')).toBeInTheDocument();
+    expect(within(test).getAllByText('Got it').length).toBeGreaterThan(0);
+    expect(fake.calls.find((c) => c.path.endsWith('/count'))?.body).toEqual({ item_id: 'q-3', idea_id: 'k3', counted: true });
   });
 
   it('the chat stays free while the agent checks an open answer', async () => {

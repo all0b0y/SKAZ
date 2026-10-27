@@ -173,7 +173,7 @@ for (const theme of THEMES) {
     await fitsBeside(t);
     await check(`test-beside-${theme}`);
     await t.getByRole('button', { name: 'Check', exact: true }).click();
-    await expect(t.getByText('Not quite.')).toBeVisible();
+    await expect(t.getByText('Not yet.')).toBeVisible();
     await fitsBeside(t);
     await check(`test-beside-checked-${theme}`);
     await t.getByRole('button', { name: 'Smaller — back into the chat' }).click();
@@ -188,7 +188,7 @@ for (const theme of THEMES) {
     expect(Math.round(sheet.width)).toBe(560);
     await t.getByRole('radio', { name: 'S = k·W²' }).click();
     await t.getByRole('button', { name: 'Check', exact: true }).click();
-    await expect(t.getByText('Not quite.')).toBeVisible();
+    await expect(t.getByText('Not yet.')).toBeVisible();
     await check(`test-choice-${theme}`);
     await t.getByRole('button', { name: 'Next question' }).click();
     await t.getByRole('textbox', { name: 'Your answer' }).fill('W');
@@ -196,8 +196,14 @@ for (const theme of THEMES) {
     await t.getByRole('button', { name: 'Next question' }).click();
     await t.getByRole('textbox', { name: 'Your answer' }).fill('Because joined systems add up.');
     await t.getByRole('button', { name: 'Ask the agent to check' }).click();
-    await expect(t.getByText('Codex’s opinion · not a fact')).toBeVisible({ timeout: 10_000 });
+    // P3-a: the compact review (soft status, key ideas), the full report on demand.
+    await expect(t.getByText('Almost there')).toBeVisible({ timeout: 10_000 });
+    await expect(t.getByText('· 1½ of 3 key ideas')).toBeVisible();
     await check(`test-open-${theme}`);
+    await t.getByRole('button', { name: 'Full review' }).click();
+    await expect(t.getByRole('heading', { name: 'How it could look' })).toBeVisible();
+    await check(`test-open-review-${theme}`);
+    await t.getByRole('button', { name: 'Full review' }).click();
     await t.getByRole('button', { name: 'See result' }).click();
     await expect(t.getByText('1.5 of 3')).toBeVisible();
     await check(`test-result-${theme}`);
