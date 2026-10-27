@@ -87,7 +87,7 @@ export function TestRunner({ part, actions, onError, keys }: {
     <div className="kb-st-stage">
       <m.div key={question.id} className="kb-st-face kb-st-face--flat" initial={{ opacity: 0, x: 24 }}
         animate={{ opacity: 1, x: 0, transition: SPRING_SMALL }}>
-        <QuestionView key={question.id} part={part} question={question} busy={review !== null ? 'review' : busy} pick={pick}
+        <QuestionView key={question.id} part={part} question={question} busy={review !== null ? (busy ?? 'review') : busy} pick={pick}
           onAnswer={(body) => act('check', () => studyApi.answer(client, part.id, { item_id: question.id, ...body }))}
           onAskAgent={(text) => act('judge', () => studyApi.checkOpen(client, part.id, question.id, text))}
           onRecheck={(ideaId, words) => act('recheck', () => studyApi.recheck(client, part.id, question.id, ideaId, words))}
@@ -207,7 +207,7 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
           <OpenCompact response={response} who={response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`}
             open={reviewOpen} onToggle={() => setReviewOpen((v) => !v)} />
           {reviewOpen && response.review && (
-            <OpenReport review={response.review} response={response} busy={!!busy}
+            <OpenReport review={response.review} response={response} busy={!!busy && busy !== 'review'}
               who={response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`}
               source={<>Source: «{question.answers[0]}»<SourceMarks citations={question.citations} /></>}
               onRecheck={onRecheck} onCount={onCount}
