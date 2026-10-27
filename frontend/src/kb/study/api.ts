@@ -44,6 +44,12 @@ export const studyApi = {
   /** «Count it» / take it back: the user counts a key idea as said («counted by you»). */
   count: (c: KbClient, id: string, itemId: string, ideaId: string, counted: boolean) =>
     c.call('POST /kb/study/{block_id}/count', { path: { block_id: id }, body: { item_id: itemId, idea_id: ideaId, counted } }),
+  /** P3-b: what is marked «Unclear» in a chat's scope (its folders or the whole library), or on a page. */
+  unclear: (c: KbClient, where: { chatId?: string; pageId?: string }) =>
+    c.call('GET /kb/study/unclear', { query: { ...(where.chatId ? { chat_id: where.chatId } : {}), ...(where.pageId ? { page_id: where.pageId } : {}) } }),
+  /** «Clear now»: the user clears these marks (the agent never does). */
+  clearUnclear: (c: KbClient, itemIds: string[], chatId?: string) =>
+    c.call('POST /kb/study/unclear/clear', { body: { item_ids: itemIds }, ...(chatId ? { query: { chat_id: chatId } } : {}) }),
   finish: (c: KbClient, id: string) => c.call('POST /kb/study/{block_id}/finish', { path: { block_id: id } }),
   retake: (c: KbClient, id: string, mistakesOnly: boolean) =>
     c.call('POST /kb/study/{block_id}/retake', { path: { block_id: id }, body: { mistakes_only: mistakesOnly } }),

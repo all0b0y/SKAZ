@@ -15,7 +15,8 @@ KbStudyGroup = Literal["new", "learning", "known", "hard"]
 KbStudyMode = Literal["due", "new", "hard", "quick10", "all"]
 KbStudyPlace = Literal["chat", "panel", "window"]
 KbStudySide = Literal["question", "answer"]
-KbStudyMark = Literal["hard", "known", "hide", "unhide", "unhard"]
+#: ``unclear`` / ``clear``: the user's «Unclear» mark (P3-b) — on the item, never FSRS.
+KbStudyMark = Literal["hard", "known", "hide", "unhide", "unhard", "unclear", "clear"]
 
 
 class _Request(BaseModel):
@@ -50,6 +51,8 @@ class KbStudyCard(BaseModel):
     #: The grade given in this block.
     graded: KbStudyGrade | None
     due: str | None
+    #: P3-b: the user marked it «Unclear» (wants to talk it through); only the user clears it.
+    unclear: bool = False
 
 
 class KbStudyOption(BaseModel):
@@ -149,6 +152,8 @@ class KbStudyQuestion(BaseModel):
     citations: list[KbCitation]
     explanation: str | None
     response: KbStudyResponse | None
+    #: P3-b: the user marked it «Unclear»; it survives retakes and right answers.
+    unclear: bool = False
 
 
 class KbStudySave(BaseModel):
@@ -266,6 +271,8 @@ class KbDeckView(BaseModel):
     groups: KbStudyGroups
     #: Cards whose review date has come.
     due: int
+    #: P3-b: cards marked «Unclear».
+    unclear: int = 0
 
 
 class KbDeckStudy(_Request):
@@ -287,3 +294,26 @@ class KbStudySettings(BaseModel):
 
 class KbStudySettingsPatch(_Request):
     new_per_day: int = Field(ge=0, le=9999)
+
+
+class KbStudyUnclearItem(BaseModel):
+    """A card or test question marked «Unclear» (P3-b), as the «Clear now» row lists it."""
+
+    item_id: str
+    kind: Literal["card", "question"]
+    question: str
+    #: The deck or test it is in.
+    title: str
+    page_id: str | None
+
+
+class KbStudyUnclearList(BaseModel):
+    items: list[KbStudyUnclearItem]
+    #: ``folders``: the chat's folders; ``library``: the whole library (a chat with none, «All»).
+    scope: Literal["folders", "library", "page"]
+
+
+class KbStudyUnclearClear(_Request):
+    """«Clear now»: the user clears these marks (the agent never does)."""
+
+    item_ids: list[str] = Field(min_length=1, max_length=200)

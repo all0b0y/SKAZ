@@ -536,6 +536,7 @@ export interface KbDeckView {
   cards: KbStudyCard[];
   groups: KbStudyGroups;
   due: number;
+  unclear?: number;
 }
 
 export interface KbDefinitionBlock {
@@ -1677,6 +1678,7 @@ export interface KbStudyCard {
   intervals: KbStudyIntervals;
   graded: "again" | "hard" | "good" | "easy" | null;
   due: string | null;
+  unclear?: boolean;
 }
 
 /** «Count it»: the user counts a key idea as said («counted by you»), or takes that back. */
@@ -1730,7 +1732,7 @@ export interface KbStudyIntervals {
 
 export interface KbStudyMarkIn {
   item_ids: string[];
-  mark: "hard" | "known" | "hide" | "unhide" | "unhard";
+  mark: "hard" | "known" | "hide" | "unhide" | "unhard" | "unclear" | "clear";
 }
 
 /** A piece of the model answer: the user's own words, or an addition for a key idea (underlined). */
@@ -1784,6 +1786,7 @@ export interface KbStudyQuestion {
   citations: KbCitation[];
   explanation: string | null;
   response: KbStudyResponse | null;
+  unclear?: boolean;
 }
 
 /** «I did say this»: the words of the user's own answer that state the key idea. */
@@ -1856,6 +1859,25 @@ export interface KbStudySettings {
 
 export interface KbStudySettingsPatch {
   new_per_day: number;
+}
+
+/** «Clear now»: the user clears these marks (the agent never does). */
+export interface KbStudyUnclearClear {
+  item_ids: string[];
+}
+
+/** A card or test question marked «Unclear» (P3-b), as the «Clear now» row lists it. */
+export interface KbStudyUnclearItem {
+  item_id: string;
+  kind: "card" | "question";
+  question: string;
+  title: string;
+  page_id: string | null;
+}
+
+export interface KbStudyUnclearList {
+  items: KbStudyUnclearItem[];
+  scope: "folders" | "library" | "page";
 }
 
 /** What a click on a notification opens. */
@@ -3010,6 +3032,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbStudySettingsPatch;
     response: KbStudySettings;
+    status: 200;
+  };
+  "GET /kb/study/unclear": {
+    path: Record<string, never>;
+    query: { chat_id?: string | null; page_id?: string | null };
+    body: never;
+    response: KbStudyUnclearList;
+    status: 200;
+  };
+  "POST /kb/study/unclear/clear": {
+    path: Record<string, never>;
+    query: { chat_id?: string | null };
+    body: KbStudyUnclearClear;
+    response: KbStudyUnclearList;
     status: 200;
   };
   "GET /kb/study/{block_id}": {

@@ -5,6 +5,7 @@ import { SourceMarks } from '../cite/SourceMarks';
 import { GRADES, GRADE_LABEL, PRACTICE, studyApi, type KbStudyCard, type KbStudyPart, type StudyGrade } from './api';
 import { useServices } from '../state/context';
 import type { StudyActions } from './useStudy';
+import { UnclearMark } from './Unclear';
 
 const GROUP_LABEL: Record<KbStudyCard['group'], string> = { new: 'New', learning: 'Learning', known: 'Known', hard: 'Hard' };
 
@@ -104,7 +105,8 @@ export function CardStack({ part, actions, onError, keys }: {
           <div className="kb-st-scene">
             <AnimatePresence mode="popLayout" initial={false}>
               <m.div key={card!.id} className="kb-st-slot" initial={CARD_IN} animate={CARD_SHOWN} exit={CARD_OUT}>
-                <CardFaces card={card!} back={back} onFlip={flip} onHide={hide} busy={busy} />
+                <CardFaces card={card!} back={back} onFlip={flip} onHide={hide} busy={busy}
+                  onUnclear={() => void act(() => studyApi.mark(client, part.id, [card!.id], card!.unclear ? 'clear' : 'unclear'))} />
               </m.div>
             </AnimatePresence>
           </div>
@@ -139,8 +141,8 @@ export function CardStack({ part, actions, onError, keys }: {
   );
 }
 
-function CardFaces({ card, back, onFlip, onHide, busy }: {
-  card: KbStudyCard; back: boolean; onFlip: () => void; onHide: () => void; busy: boolean;
+function CardFaces({ card, back, onFlip, onHide, onUnclear, busy }: {
+  card: KbStudyCard; back: boolean; onFlip: () => void; onHide: () => void; onUnclear: () => void; busy: boolean;
 }) {
   // The flip is CSS (rotateX 0.42 s; reduced motion: a 0.16 s cross-fade). Keep the faces in the DOM
   // so the turn is visible; the hidden face is out of the accessibility tree.
@@ -158,12 +160,15 @@ function CardFaces({ card, back, onFlip, onHide, busy }: {
             title="Hide this card from reviews" onClick={onHide}>
             <Icon name="hidden" size={14} />I know this
           </button>
+          <UnclearMark on={!!card.unclear} what="card" disabled={busy} onToggle={onUnclear} tabIndex={turned ? -1 : 0} />
         </div>
         <p className="kb-st-q">{card.question}</p>
         <p className="kb-st-hint">Click or <span className="kb-kbd">Space</span> to show the answer</p>
       </section>
       <section className="kb-st-face kb-st-face--back" aria-hidden={!turned} aria-label="Answer">
-        <div className="kb-st-kind">Answer · from source</div>
+        <div className="kb-st-kind">Answer · from source
+          <UnclearMark on={!!card.unclear} what="card" disabled={busy} onToggle={onUnclear} tabIndex={turned ? 0 : -1} />
+        </div>
         <p className="kb-st-ans">{card.answer}<SourceMarks citations={card.citations} /></p>
         {card.explanation && (
           <p className="kb-st-ex"><Icon name="analysis" size={14} /><span><b>Agent explanation</b> · {card.explanation}</span></p>

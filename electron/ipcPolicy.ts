@@ -179,6 +179,8 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/study\/settings$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/settings$/ },
   { method: 'GET', pattern: /^\/kb\/study\/decks\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/study\/unclear$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/unclear\/clear$/ },
   { method: 'POST', pattern: /^\/kb\/study\/decks\/[^/]+\/(?:marks|study)$/ },
   { method: 'GET', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },

@@ -114,6 +114,6 @@ class StudyItems:
     def unclear(self) -> list[ItemRow]:
         with self.db.read() as connection:
             rows = connection.execute(
-                "SELECT * FROM study_items WHERE unclear = 1 ORDER BY unclear_at, item_id"
+                "SELECT * FROM study_items WHERE unclear = 1 ORDER BY unclear_at, rowid"
             ).fetchall()
         return [_row(row) for row in rows]

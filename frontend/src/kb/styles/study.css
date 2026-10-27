@@ -316,3 +316,29 @@
 @media (prefers-reduced-motion: reduce) {
   .kb-st-rv__add, .kb-st-rv__notes li { transition: none; }
 }
+
+/* P3-b: «Unclear» (p3d-v2): an icon; its words on hover, always when on; accent ink when marked. */
+.kb-st-unc {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px 0 6px;
+  border: 0; background: none; border-radius: var(--kb-r-pill); color: var(--kb-muted); font: inherit;
+  font-size: var(--t-xs); cursor: pointer; white-space: nowrap; flex: none;
+}
+.kb-st-unc:hover:not(:disabled) { background: var(--kb-accent-soft); color: var(--kb-text); }
+.kb-st-unc:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-st-unc__l { display: none; }
+.kb-st-unc:hover .kb-st-unc__l, .kb-st-unc:focus-visible .kb-st-unc__l, .kb-st-unc.is-on .kb-st-unc__l { display: inline; }
+.kb-st-unc.is-on { color: var(--kb-fx-accent); background: color-mix(in srgb, var(--kb-fx-accent) 11%, var(--kb-pane)); font-weight: 600; }
+.kb-st-qtop { display: flex; align-items: center; min-height: 26px; margin: -10px -10px 0 0; }
+.kb-deck__unc { display: inline-flex; color: var(--kb-fx-accent); flex: none; }
+/* «Clear now» under the agent's answer that went through the marks */
+.kb-st-uncrow {
+  margin-top: 8px; border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); background: var(--kb-pane);
+  padding: 8px 10px; font-size: var(--t-sm);
+}
+.kb-st-uncrow__head { display: flex; align-items: center; gap: 6px; color: var(--kb-muted); }
+.kb-st-uncrow__head > .kb-icon { color: var(--kb-fx-accent); }
+.kb-st-uncrow__list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.kb-st-uncrow__list li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kb-st-uncrow__q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-st-uncrow__done { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-muted); }
+.kb-st-uncrow__done > .kb-icon { color: var(--kb-ok); }

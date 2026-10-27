@@ -632,6 +632,7 @@ function markCards(cards: KbStudyCard[], ids: string[], mark: string): void {
     if (mark === 'hard') { c.marked_hard = true; c.group = 'hard'; }
     if (mark === 'unhard') { c.marked_hard = false; c.group = c.state === 'new' ? 'new' : 'learning'; }
     if (mark === 'known') { c.marked_hard = false; c.group = 'known'; c.state = 'review'; }
+    if (mark === 'unclear' || mark === 'clear') c.unclear = mark === 'unclear'; // P3-b: never FSRS
   }
 }
 
@@ -640,6 +641,7 @@ function deckView(w: FakeWorld, pageId: string): KbDeckView {
   const counts = { new: 0, learning: 0, known: 0, hard: 0 };
   for (const c of deck.cards) counts[c.group] += 1;
   deck.groups = counts;
+  deck.unclear = deck.cards.filter((c) => c.unclear).length;
   return structuredClone(deck);
 }
 
@@ -769,6 +771,9 @@ const STUDY_ROUTES: FakeRoutes = {
   'POST /kb/study/{block_id}/mark': [200, (w, { path, body }) => {
     const found = findStudy(w, path.block_id);
     markCards(found.part.cards, body.item_ids, body.mark);
+    if (body.mark === 'unclear' || body.mark === 'clear') {
+      for (const q of found.part.questions) if (body.item_ids.includes(q.id)) q.unclear = body.mark === 'unclear';
+    }
     return studyChanged(w, found);
   }],
   'POST /kb/study/{block_id}/answer': [200, (w, { path, body }) => {
@@ -1754,7 +1759,7 @@ const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
 /** P3 study routes (fakeStudyP3.ts): «I did say this», «counted by you». */
 const P3_STUDY_ROUTES: FakeRoutes = p3StudyRoutes({ findStudy, studyChanged: studyChanged as never, fail });
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {

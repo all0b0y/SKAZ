@@ -96,7 +96,9 @@ from .store import Attempt, BlockKind, Place, Review, Side, StudyBlock, StudySto
 log = logging.getLogger(__name__)
 
 NEW_PER_DAY_KEY = "study.new_per_day"
-Mark = Literal["hard", "known", "hide", "unhide", "unhard"]
+Mark = Literal["hard", "known", "hide", "unhide", "unhard", "unclear", "clear"]
+#: P3-b: the «Unclear» mark and its removal — on the item, never FSRS.
+UNCLEAR_MARKS = ("unclear", "clear")
 NOT_FOUND = "This deck or test is no longer in the chat."
 NOT_A_DECK = "This page is not a deck."
 NOTHING_LEFT = "Every card was dropped: none had an answer with a checked quote from a source."
@@ -550,6 +552,7 @@ class StudyService:
         mode: Mode = block.mode if block.mode in MODES else "due"
         moment = self._clock()
         grades = block.state.get("grades") or {}
+        marked = self.unclear_of([card.id for card, _page in cards])
         out = []
         for card, page_id in cards:
             state = states[card.id]
@@ -568,6 +571,7 @@ class StudyService:
                     "intervals": preview(state, mode=mode, at=moment),
                     "graded": grades.get(card.id),
                     "due": state.due.isoformat(timespec="seconds") if state.due else None,
+                    "unclear": card.id in marked,
                 }
             )
         return out
@@ -664,7 +668,13 @@ class StudyService:
     def mark(
         self, block_id: str | None, card_ids: Sequence[str], mark: Mark, *, page_id: str | None = None
     ) -> None:
-        """Hard / Known / Don't show from a block or the deck page (S8, S12): into FSRS, the file stays."""
+        """Hard / Known / Don't show from a block or the deck page (S8, S12): into FSRS, the file stays.
+
+        «Unclear» / clear (P3-b) go to the item instead and never touch FSRS.
+        """
+        if mark in UNCLEAR_MARKS:
+            self._set_unclear(block_id, card_ids, mark == "unclear", page_id=page_id)
+            return
         block = self.get(block_id) if block_id is not None else None
         moment = self._clock()
         if block is not None and block.page_id is None and block.origin == "agent":
@@ -729,6 +739,54 @@ class StudyService:
         for other in self.store.away_anywhere(""):
             if other.kind == "deck" and set(targets) & set(other.payload.get("order") or []):
                 self._notify(other)
+
+    # -- «Unclear» (P3-b) --------------------------------------------------------------------------------
+
+    def unclear_of(self, item_ids: Sequence[str]) -> set[str]:
+        return {item_id for item_id, row in self.items.get(list(item_ids)).items() if row.unclear}
+
+    def _set_unclear(
+        self, block_id: str | None, item_ids: Sequence[str], on: bool, *, page_id: str | None
+    ) -> None:
+        """Mark or clear items of a block (a card or a question) or of a deck/test page."""
+        block = self.get(block_id) if block_id is not None else None
+        pages: dict[str, str | None]
+        if block is not None:
+            if block.kind == "deck":
+                pages = {card.id: page for card, page in self.cards(block)}
+            else:
+                pages = {q.id: block.page_id for q in self.questions(block)}
+            kind: Literal["card", "question"] = "card" if block.kind == "deck" else "question"
+        else:
+            record = self.kb.page_repo.get(page_id) if page_id else None
+            if record is None or record.kind not in ("deck", "test"):
+                raise NotFound(NOT_A_DECK)
+            document = self._document(record.id)
+            ids = [c.id for c in read_cards(document)] if record.kind == "deck" else [
+                q.id for q in read_questions(document)]
+            pages = dict.fromkeys(ids, record.id)
+            kind = "card" if record.kind == "deck" else "question"
+        targets = [item_id for item_id in item_ids if item_id in pages]
+        if not targets:
+            raise NotFound("This card or question is not here.")
+        where = block.id if block else None
+        self.items.set_unclear(targets, kind, on, now=_now(), block_id=where, pages=pages)
+        log.info("Study items %s: %d", "marked unclear" if on else "cleared", len(targets))
+        if block is not None:
+            self._notify(self.get(block.id))
+
+    def clear_unclear(self, item_ids: Sequence[str]) -> int:
+        """«Clear now» after a talk with the agent: the user clears marks wherever the items are."""
+        rows = self.items.get(list(item_ids))
+        targets = [item_id for item_id, row in rows.items() if row.unclear]
+        for item_id in targets:
+            row = rows[item_id]
+            self.items.set_unclear([item_id], row.kind, False, now=_now(), block_id=None, pages={})
+        for block_id in {rows[item_id].block_id for item_id in targets if rows[item_id].block_id}:
+            block = self.store.block(str(block_id))
+            if block is not None:
+                self._notify(block)
+        return len(targets)
 
     def _marked(self, state: CardState, mark: Mark, moment: datetime) -> CardState:
         if mark == "hard":
@@ -1235,6 +1293,7 @@ class StudyService:
             raise NotFound(NOT_A_DECK)
         cards = read_cards(self._document(page_id))
         states = self.store.cards([card.id for card in cards])
+        marked = self.unclear_of([card.id for card in cards])
         moment = self._clock()
         rows = []
         for card in cards:
@@ -1254,6 +1313,7 @@ class StudyService:
                     "intervals": preview(state, mode="due", at=moment),
                     "graded": None,
                     "due": state.due.isoformat(timespec="seconds") if state.due else None,
+                    "unclear": card.id in marked,
                 }
             )
         due = sum(
@@ -1270,6 +1330,7 @@ class StudyService:
             "cards": rows,
             "groups": self.groups(rows),
             "due": due,
+            "unclear": len(marked),
         }
 
     def agent_summary(self, page_id: str) -> str:
@@ -1316,6 +1377,8 @@ class StudyService:
             index = min(block.position, len(cards) - 1)
             card, _page = cards[index]
             side = "answer side" if block.side == "answer" else "question side (the answer is not shown yet)"
+            if card.id in self.unclear_of([card.id]):
+                side += "; the user marked it Unclear"
             body = (
                 f"Flashcards “{block.title}” ({len(cards)} cards), open {where}. Card {index + 1} of "
                 f"{len(cards)} ({card.id}), {side}.\nQuestion: {card.question}"
@@ -1332,6 +1395,8 @@ class StudyService:
         question = next((q for q in questions if q.id == order[index]), questions[0])
         answered = bool(attempt and (attempt.answers.get("items") or {}).get(question.id, {}).get("checked"))
         state = "answered" if answered else "not answered yet — don't give the answer away unless asked"
+        if question.id in self.unclear_of([question.id]):
+            state += "; the user marked it Unclear"
         return (
             f"Test “{block.title}” ({len(order)} questions), open {where}. "
             f"Question {index + 1} of {len(order)} "

@@ -31,6 +31,7 @@ import { DiagramFixProvider } from '../ui/markdown/Diagram';
 import { useDiagramFix } from './diagramFix';
 import { SelectionChip } from './select/SelectionChip';
 import { WikiFixCard } from './select/WikiFixCard';
+import { UnclearClearRow, useLastUnclearAnswer } from '../study/Unclear';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -244,6 +245,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
   // D-12: a diagram of this answer that can't be drawn asks this chat's agent for a fix (diagramFix.ts).
   const fixDiagram = useDiagramFix(message.id);
+  const lastUnclear = useLastUnclearAnswer(chatId);
   return (
     <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
       <Tools parts={message.parts} />
@@ -261,6 +263,8 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
+      {/* P3-b: «Clear now» under the chat's last answer that read the «Unclear» marks. */}
+      {message.state === 'done' && lastUnclear === message.id && <UnclearClearRow chatId={chatId} />}
       {interrupted && message.failure && (
         <div className="kb-interrupt" role="alert">
           <Icon name="clock" size={16} className="kb-interrupt__icon" />

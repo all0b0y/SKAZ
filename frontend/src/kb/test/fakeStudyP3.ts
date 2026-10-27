@@ -55,7 +55,39 @@ export function p3StudyRoutes({ findStudy, studyChanged, fail }: Helpers): FakeR
     return { found, q, response: q.response!, review: q.response!.review! };
   };
   const rescore = (response: KbStudyResponse) => Object.assign(response, scoreOf(response.review!));
+  /** Every marked item the fake knows: blocks in chats, then deck pages (the fake has no folders: «All»). */
+  const marked = (w: FakeWorld) => {
+    const out: Array<{ item_id: string; kind: 'card' | 'question'; question: string; title: string; page_id: string | null;
+      clear: () => void }> = [];
+    const seen = new Set<string>();
+    const add = (item: { id: string; question: string; unclear?: boolean }, kind: 'card' | 'question', title: string, page: string | null) => {
+      if (!item.unclear || seen.has(item.id)) return;
+      seen.add(item.id);
+      out.push({ item_id: item.id, kind, question: item.question, title, page_id: page, clear: () => { item.unclear = false; } });
+    };
+    for (const chat of w.chats) {
+      for (const message of chat.messages) {
+        for (const part of message.parts as ReadonlyArray<{ type: string }>) {
+          if (part.type !== 'study') continue;
+          const study = part as KbStudyPart;
+          study.cards.forEach((c) => add(c, 'card', study.title, study.save.page_id));
+          study.questions.forEach((q) => add(q, 'question', study.title, study.save.page_id));
+        }
+      }
+    }
+    for (const [pageId, deck] of Object.entries(w.decks ?? {})) deck.cards.forEach((c) => add(c, 'card', deck.title, pageId));
+    return out;
+  };
+  const list = (w: FakeWorld, pageId?: string | null) => {
+    const items = marked(w).filter((i) => !pageId || i.page_id === pageId).map(({ clear: _clear, ...item }) => item);
+    return { items, scope: pageId ? 'page' as const : 'library' as const };
+  };
   return {
+    'GET /kb/study/unclear': [200, (w, { query }) => list(w, query?.page_id)],
+    'POST /kb/study/unclear/clear': [200, (w, { body }) => {
+      for (const item of marked(w)) if (body.item_ids.includes(item.item_id)) item.clear();
+      return list(w);
+    }],
     'POST /kb/study/{block_id}/recheck': [200, (w, { path, body }) => {
       const { found, response, review } = reviewed(w, path.block_id, body.item_id);
       const idea = review.ideas.find((i) => i.id === body.idea_id) ?? fail(404, 'This key idea is not in the review.');

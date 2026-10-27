@@ -9,6 +9,7 @@ import { formatScore, studyApi, type KbStudyPart, type KbStudyQuestion } from '.
 import type { StudyActions } from './useStudy';
 import type { KbPermissionPart } from '../api/permissions';
 import { OpenCompact, OpenReport, STATUS_WORD, statusOf } from './OpenReview';
+import { DiscussUnclear, UnclearMark } from './Unclear';
 
 export const QUESTION_LABEL: Record<KbStudyQuestion['type'], string> = {
   choice: 'Choose one', multi: 'Choose all that apply', short: 'Short answer', open: 'Open answer · checked by the agent',
@@ -88,7 +89,8 @@ export function TestRunner({ part, actions, onError, keys }: {
           onAnswer={(body) => act('check', () => studyApi.answer(client, part.id, { item_id: question.id, ...body }))}
           onAskAgent={(text) => act('judge', () => studyApi.checkOpen(client, part.id, question.id, text))}
           onRecheck={(ideaId, words) => act('recheck', () => studyApi.recheck(client, part.id, question.id, ideaId, words))}
-          onCount={(ideaId, counted) => void act('count', () => studyApi.count(client, part.id, question.id, ideaId, counted))} />
+          onCount={(ideaId, counted) => void act('count', () => studyApi.count(client, part.id, question.id, ideaId, counted))}
+          onUnclear={() => void act('unclear', () => studyApi.mark(client, part.id, [question.id], question.unclear ? 'clear' : 'unclear'))} />
       </m.div>
       <div className="kb-st-tact">
         <button type="button" className="kb-st-ib" aria-label="Previous question" disabled={index === 0 || !!busy} onClick={() => go(index - 1)}>
@@ -110,11 +112,12 @@ export function TestRunner({ part, actions, onError, keys }: {
 
 interface AnswerBody { choices?: string[]; text?: string }
 
-function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRecheck, onCount }: {
+function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRecheck, onCount, onUnclear }: {
   part: KbStudyPart; question: KbStudyQuestion; busy: string | null;
   pick: { current: ((index: number) => boolean) | null };
   onAnswer: (body: AnswerBody) => Promise<boolean>; onAskAgent: (text: string) => Promise<boolean>;
   onRecheck: (ideaId: string, words: string) => Promise<boolean>; onCount: (ideaId: string, counted: boolean) => void;
+  onUnclear: () => void;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const response = question.response;
@@ -139,6 +142,10 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
 
   return (
     <>
+      <div className="kb-st-qtop">
+        {/* P3-b: the mark lives on the question, also while looking back from the result. */}
+        <UnclearMark on={!!question.unclear} what="question" disabled={!!busy && busy !== 'review'} onToggle={onUnclear} />
+      </div>
       <p className="kb-st-tq" id={`q-${question.id}`}>{question.question}</p>
       {(question.type === 'choice' || multi) && (
         <div className="kb-st-opts" role={multi ? 'group' : 'radiogroup'} aria-labelledby={`q-${question.id}`}>
@@ -251,6 +258,9 @@ function TestResult({ part, busy, onRetake, onReview }: {
         })}
       </ul>
       <div className="kb-st-tact">
+        <DiscussUnclear count={part.questions.filter((q) => q.unclear).length} chatId={part.chat_id}
+          page={part.save.page_id ? { id: part.save.page_id, title: part.title } : null} />
+        <span className="kb-st-spacer" />
         <Button size="sm" icon="retry" busy={busy === 'retake'} disabled={!!busy} onClick={() => onRetake(false)}>Retake</Button>
         {result.mistakes > 0 && (
           <Button size="sm" variant="fill" busy={busy === 'mistakes'} disabled={!!busy} onClick={() => onRetake(true)}>

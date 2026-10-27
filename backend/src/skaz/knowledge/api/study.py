@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -12,6 +12,7 @@ from ..errors import KnowledgeError
 from ..markdown.page import Cite
 from ..study.service import StudyService
 from ..study.store import StudyBlock
+from ..study.unclear import unclear_items
 from .schemas import KbCitation
 from .schemas_study import (
     KbDeckStudy,
@@ -43,6 +44,9 @@ from .schemas_study import (
     KbStudySaveIn,
     KbStudySettings,
     KbStudySettingsPatch,
+    KbStudyUnclearClear,
+    KbStudyUnclearItem,
+    KbStudyUnclearList,
 )
 
 router = APIRouter(prefix="/kb/study", tags=["kb"])
@@ -75,7 +79,7 @@ def _card(row: dict[str, Any], citation: CitationFn) -> KbStudyCard:
                    for cite in cast(tuple[Cite, ...], row["cites"])],
         explanation=row["explanation"], group=row["group"], state=row["state"], suspended=row["suspended"],
         marked_hard=row["marked_hard"], intervals=KbStudyIntervals(**intervals), graded=row["graded"],
-        due=row["due"],
+        due=row["due"], unclear=bool(row.get("unclear")),
     )
 
 
@@ -129,6 +133,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         items = (attempt.answers.get("items") if attempt else None) or {}
         by_id = {q.id: q for q in study.questions(block)}
         order = [item_id for item_id in study._test_order(block) if item_id in by_id]
+        marked = study.unclear_of(order)
         for item_id in order:
             question = by_id[item_id]
             given = items.get(item_id)
@@ -145,7 +150,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
                 options=[_option(option) for option in study.options(block, question)],
                 answers=list(question.answers),
                 citations=[citation(c.material_id, c.seg, c.quote) for c in question.cites],
-                explanation=question.explanation, response=response))
+                explanation=question.explanation, response=response, unclear=question.id in marked))
         groups = {"new": 0, "learning": 0, "known": 0, "hard": 0}
         total = len(questions)
     result = study.result(block) if block.kind == "test" else None
@@ -187,6 +192,32 @@ async def change_study_settings(body: KbStudySettingsPatch, study: StudyDep) -> 
         raise _http(error) from error
 
 
+@router.get("/unclear")
+async def read_unclear(study: StudyDep, chats: ChatsDep, chat_id: str | None = None,
+                       page_id: str | None = None) -> KbStudyUnclearList:
+    """P3-b: what is marked «Unclear» in a chat's scope (its folders, or the whole library) or on a page."""
+    folders: tuple[str, ...] = ()
+    if chat_id is not None:
+        chat = await disk_call(chats.repo.get, chat_id)
+        folders = tuple(chat.folder_ids) if chat is not None else ()
+    found = await disk_call(unclear_items, study, folders, page_id)
+    scope: Literal["folders", "library", "page"] = (
+        "page" if page_id is not None else "folders" if folders else "library")
+    return KbStudyUnclearList(scope=scope, items=[
+        KbStudyUnclearItem(item_id=item["item_id"],
+                           kind="card" if item["kind"] == "flashcard" else "question",
+                           question=item["question"], title=item["in"], page_id=item["page_id"])
+        for item in found])
+
+
+@router.post("/unclear/clear")
+async def clear_unclear(body: KbStudyUnclearClear, study: StudyDep, chats: ChatsDep,
+                        chat_id: str | None = None) -> KbStudyUnclearList:
+    """«Clear now»: the user clears marks after talking them through (the agent never changes marks)."""
+    await disk_call(study.clear_unclear, body.item_ids)
+    return await read_unclear(study, chats, chat_id=chat_id)
+
+
 @router.get("/decks/{page_id}")
 async def read_deck(page_id: str, study: StudyDep, request: Request) -> KbDeckView:
     try:
@@ -196,7 +227,7 @@ async def read_deck(page_id: str, study: StudyDep, request: Request) -> KbDeckVi
     citation = _presenter(request)
     cards = await disk_call(lambda: [_card(row, citation) for row in deck["cards"]])
     return KbDeckView(page_id=deck["page_id"], title=deck["title"], cards=cards,
-                      groups=KbStudyGroups(**deck["groups"]), due=deck["due"])
+                      groups=KbStudyGroups(**deck["groups"]), due=deck["due"], unclear=deck["unclear"])
 
 
 @router.post("/decks/{page_id}/marks")
