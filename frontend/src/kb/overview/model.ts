@@ -2,7 +2,17 @@
 // that came up, the library items the agent cited or read, and what the chat created. Pure, so tests
 // check it without rendering.
 
-import type { KbMessage, KbWebSearchPart } from '../../api/kb/types.gen';
+import type { KbCitation, KbMessage, KbMessagePart, KbWebSearchPart } from '../../api/kb/types.gen';
+
+/** Every citation of an answer: its cite chips, a connection's sides and answer blocks' sources (as the Sources row). */
+export function citationsOf(parts: readonly KbMessagePart[]): KbCitation[] {
+  return parts.flatMap((p) => {
+    if (p.type === 'cite') return [p.citation];
+    if (p.type === 'connection') return p.folders.map((f) => f.citation);
+    if (p.type === 'answer_block') return p.sources.flatMap((s) => (s.type === 'cite' ? [s.citation] : []));
+    return [];
+  });
+}
 
 export interface OvLink {
   url: string;
@@ -150,10 +160,10 @@ export function chatOverview(messages: readonly KbMessage[]): ChatOverviewData {
   };
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
-    for (const part of message.parts) {
-      if (part.type === 'cite') bump('material', part.citation.material_id, part.citation.material_title ?? 'A material no longer in the library', message.id);
-      else if (part.type === 'page') bump('page', part.page.id, part.page.title, message.id);
+    for (const citation of citationsOf(message.parts)) {
+      bump('material', citation.material_id, citation.material_title ?? 'A material no longer in the library', message.id);
     }
+    for (const part of message.parts) if (part.type === 'page') bump('page', part.page.id, part.page.title, message.id);
   }
   for (const message of messages) {
     if (message.role === 'user' && message.input) {

@@ -50,6 +50,7 @@
 .kb-spanel__changed { font-size: var(--t-xs); font-weight: 500; color: var(--kb-fx-accent); }
 .kb-spanel__body { overflow: auto; padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 12px; }
 .kb-spanel__group { display: flex; flex-direction: column; gap: 6px; }
+.kb-spanel__group .kb-seg { align-self: flex-start; }
 .kb-spanel__title { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0; }
 .kb-spanel__title .kb-switch { margin-left: auto; }
 .kb-spanel__note { margin: 0; font-size: var(--t-xs); color: var(--kb-muted); line-height: 1.4; }

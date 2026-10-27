@@ -1,6 +1,7 @@
 import type { KbMessage } from '../../api/kb/types.gen';
 import { Icon } from '../ui';
 import { useChatSearchRules } from './ChatSearchPanel';
+import { citationsOf } from '../overview/model';
 
 /**
  * N7-4 citation check: with «Use only these sources», the answer's statements whose citation points
@@ -10,10 +11,8 @@ import { useChatSearchRules } from './ChatSearchPanel';
 export function notFromSources(message: KbMessage, sources: readonly string[], excluded: readonly string[]): number {
   const allowed = new Set(sources);
   const out = new Set(excluded);
-  return message.parts.filter((p) => {
-    const id = p.type === 'cite' ? p.citation.material_id : p.type === 'page' ? p.page.id : null;
-    return id !== null && (out.has(id) || !allowed.has(id));
-  }).length;
+  const ids = [...citationsOf(message.parts).map((c) => c.material_id), ...message.parts.flatMap((p) => (p.type === 'page' ? [p.page.id] : []))];
+  return ids.filter((id) => out.has(id) || !allowed.has(id)).length;
 }
 
 export function NotFromSources({ chatId, message }: { chatId: string; message: KbMessage }) {
