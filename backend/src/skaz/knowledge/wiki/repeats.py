@@ -3,8 +3,9 @@
 Who decides: the writing agent that already compares a page's new statements with the other
 sources' statements for disagreements marks, in the same answer, "new statement N repeats existing
 statement M" (``DISCREPANCY_SCHEMA.repeats`` — no extra agent call). The decision layer confirms
-each pair like a disagreement (threshold B9: a confident "no" drops it, undecided leaves the
-agent's word, logged). A confirmed repeat:
+each pair (threshold B9). Only a confident "yes" merges: a "no", an unsure answer, no layer or a
+failing one leave both statements as written (logged), because a merge deletes a paragraph and the
+agent's word alone is not a confirmation (Q1 n2 H3). A confirmed repeat:
 
 * adds the new material's citations (marker and wikilink) to the existing statement — it now has
   two sources ("2 sources");
@@ -111,8 +112,12 @@ class Repeats:
                 await log(f"“{title}”: the decision layer found one marked repeat to add something new; "
                           "both statements stay.")
                 continue
-            if verdict.answer is None:
-                await log(f"“{title}”: {verdict.reason}; the writing agent's finding of a repeat was kept.")
+            if verdict.answer is not True:
+                # Merging deletes the new paragraph, so the agent's word alone is not enough (spec N2-2:
+                # the decision layer confirms the pairs); unlike a disagreement note, nothing is merged.
+                await log(f"“{title}”: one marked repeat was not confirmed ({verdict.reason}); "
+                          "both statements stay.")
+                continue
             if await disk_call(self._strengthen, page_id, side_old.block_id, side_new.block_id):
                 merged.add(item.new)
         if merged:

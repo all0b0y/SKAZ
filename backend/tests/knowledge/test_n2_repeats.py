@@ -16,6 +16,7 @@ from skaz.knowledge.ingest.pages import strip_material
 from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta, parse_page
 from skaz.knowledge.markdown.source import FragmentInput
 from skaz.knowledge.service import KnowledgeService
+from skaz.knowledge.wiki.overlap import material_overlap
 from skaz.knowledge.wiki.prompts import DISCREPANCY_SCHEMA
 from skaz.knowledge.wiki.repeats import QUESTION, strengthen
 from tests.knowledge.ingest_support import ScriptedWiki, add_material, block, cite, concept, concepts, notes
@@ -121,11 +122,26 @@ async def test_a_confident_no_keeps_both_paragraphs(ready: KnowledgeService) -> 
     statements = case.statements()
     assert statements[DISORDER] == {case.lecture}
     assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert material_overlap(ready, case.textbook).repeated == 0  # type: ignore[union-attr]
 
 
 async def test_without_a_decision_layer_the_writing_agent_s_mark_stands(ready: KnowledgeService) -> None:
-    case = await _case(ready)  # no decision layer: undecided, logged, the agent's word kept (B9)
-    assert case.statements()[DISORDER] == {case.lecture, case.textbook}
+    # Q1 n2 H3: a repeat merges only on the decision layer's confident "yes" (spec N2-2: the layer
+    # confirms the pairs). No layer → the agent's mark alone deletes nothing: both paragraphs stay,
+    # and nothing counts in the overlap line.
+    case = await _case(ready)
+    statements = case.statements()
+    assert statements[DISORDER] == {case.lecture}
+    assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert material_overlap(ready, case.textbook).repeated == 0  # type: ignore[union-attr]
+
+
+async def test_an_unsure_decision_layer_merges_nothing(ready: KnowledgeService) -> None:
+    case = await _case(ready, p_yes=0.5)  # neither a confident yes nor a confident no
+    statements = case.statements()
+    assert statements[DISORDER] == {case.lecture}
+    assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert material_overlap(ready, case.textbook).repeated == 0  # type: ignore[union-attr]
 
 
 async def test_no_repeat_marked_writes_both_as_before(ready: KnowledgeService) -> None:
