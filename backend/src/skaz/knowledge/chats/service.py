@@ -43,6 +43,7 @@ from ..agents.engine import (
     SessionDeleteDeferred,
     TextDelta,
     ToolCall,
+    ToolResult,
     ToolSpec,
     TurnMessage,
     session_support,
@@ -114,6 +115,7 @@ from .model import (
     Selection,
     StudyPart,
     TextPart,
+    ToolPart,
     WebSearchPart,
 )
 from .parsing import BlockData, BlockStart, CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
@@ -210,6 +212,8 @@ class _Run:
     #: The user's own messages that answered the agent's question during this run (the agent got them
     #: inside its turn): recorded as held with the answer, in chat order.
     absorbed: list[Message] = field(default_factory=list)
+    #: N8 «Looked at» (Q1 n78 M-6): the call id of a read tool → its part's index (dropped on an error).
+    read_parts: dict[str, int] = field(default_factory=dict)
     #: Q1 n78 H-2: a hard search rule is in force, so this (Claude Code) chat searches through
     #: ``skaz_web_search`` — SKAZ screens the links first — and its own WebSearch is not offered.
     skaz_web: bool = False
@@ -934,7 +938,14 @@ class ChatService:
                     elif isinstance(event, ToolCall):
                         run.produced = True
                         run.tool_calls += 1
-                        self._add_part(run, await disk_call(resolver.tool, event.name, event.arguments))
+                        part = await disk_call(resolver.tool, event.name, event.arguments)
+                        if part.target is not None and scope is not None and not scope.allows(part.target[1]):
+                            part = replace(part, target=None)  # refused by the chat's sources (Q1 M-6)
+                        if part.target is not None:
+                            run.read_parts[event.call_id] = len(run.message.parts)
+                        self._add_part(run, part)
+                    elif isinstance(event, ToolResult):
+                        self._tool_failed(run, event)
                     elif isinstance(event, SessionBound):
                         await self._bound(run, event)
                     elif isinstance(event, Compacted):
@@ -1298,6 +1309,17 @@ class ChatService:
             self._feed(run.chat_id).emit("delta", run.message.id, text=text)
             return
         self._add_part(run, TextPart(text))
+
+    def _tool_failed(self, run: _Run, event: ToolResult) -> None:
+        """A read that came back as an error (refused, not found) was not looked at: its target goes."""
+        index = run.read_parts.pop(event.call_id, None) if event.is_error else None
+        parts = list(run.message.parts)
+        if index is None or index >= len(parts) or not isinstance(parts[index], ToolPart):
+            return
+        part = parts[index]
+        assert isinstance(part, ToolPart)
+        parts[index] = replace(part, target=None)
+        run.message = run.message.with_parts(parts)
 
     def _add_part(self, run: _Run, part: Part) -> None:
         run.message = run.message.with_parts([*run.message.parts, part])
