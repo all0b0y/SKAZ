@@ -34,7 +34,8 @@ def test_the_pass_moves_cards_as_decided() -> None:
     after, _ = apply(after, "back", None, ids)  # ← the last skipped comes back on top
     assert after.queue == ["a", "c"] and after.thrown == ["a", "c"]
     assert read_pass({}, ids, 1).queue == ["b", "c"]  # a block from before P3-d: from its position on
-    assert read_pass({"pass": Pass(["x", "b"]).to_json()}, ids, 0).queue == ["b"]  # deleted cards drop out
+    gone = {"pass": Pass(["x", "b"], [], ["a", "c"]).to_json()}
+    assert read_pass(gone, ids, 0).queue == ["b"]  # deleted cards drop out
     with pytest.raises(ValueError):
         apply(after, "know", "b", ids)  # known already: not on the pile
 
@@ -91,3 +92,13 @@ async def test_practice_writes_only_again_and_an_unsaved_deck_waits_for_save(
             "citations": [{"material_id": library.lecture, "seg": 2,
                            "quote": "запрещает вечный двигатель второго рода"}]}]})
         await asyncio.to_thread(study.study_pass, made["study_id"], "restart")
+
+
+def test_cards_added_to_the_deck_during_a_pass_join_the_pile() -> None:
+    """Q1 p3 L6: a card new on the page goes under the current pile instead of waiting for a new pass."""
+    stored = {"pass": Pass(["b"], ["b"], ["a"], ["b"]).to_json()}
+    after = read_pass(stored, ["a", "b", "c"], 0)
+    assert (after.queue, after.known, after.again) == (["b", "c"], ["a"], ["b"])
+    done = {"pass": Pass([], [], ["a", "b"], []).to_json()}
+    assert read_pass(done, ["a", "b", "c"], 0).queue == ["c"]  # «All done» becomes one card left
+    assert read_pass(done, ["a", "b"], 0).queue == []

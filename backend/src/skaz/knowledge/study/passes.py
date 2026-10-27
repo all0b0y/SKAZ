@@ -31,8 +31,8 @@ class Pass:
 
 
 def read_pass(state: Mapping[str, Any], ids: Sequence[str], position: int) -> Pass:
-    """The block's pass, its ids checked against the cards now there; a block from before P3-d starts
-    with the cards from its position on."""
+    """The block's pass, its ids checked against the cards now there; a card new in the block goes under
+    the pile; a block from before P3-d starts with the cards from its position on."""
     stored = state.get("pass")
     alive = set(ids)
     if not isinstance(stored, Mapping):
@@ -41,7 +41,10 @@ def read_pass(state: Mapping[str, Any], ids: Sequence[str], position: int) -> Pa
     def kept(key: str) -> list[str]:
         return [str(i) for i in stored.get(key) or [] if str(i) in alive]
 
-    return Pass(kept("queue"), kept("again"), kept("known"), kept("thrown"))
+    queue, known = kept("queue"), kept("known")
+    seen = {*queue, *known}
+    queue += [i for i in ids if i not in seen]  # cards added to the deck meanwhile join the pile (L6)
+    return Pass(queue, kept("again"), known, kept("thrown"))
 
 
 def fresh_pass(ids: Sequence[str]) -> Pass:
