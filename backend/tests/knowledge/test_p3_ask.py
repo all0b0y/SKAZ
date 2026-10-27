@@ -130,3 +130,21 @@ async def test_a_chip_for_a_test_that_is_gone_is_refused_and_a_wiki_test_puts_a_
     assert sent.status_code == 202, sent.text
     chat = (await env.client.get(f"/kb/chats/{fresh}")).json()
     assert env.library.physics in chat["folder_ids"]
+
+
+async def test_a_chip_for_another_chats_unsaved_test_is_refused(env: Env) -> None:
+    """Q1 p3 L9: a chat asks only about its own test, a saved one (the library), or a wiki test's block."""
+    from skaz.knowledge.chats.model import SelectedItem, Selection
+    from skaz.knowledge.chats.selection import SelectionInvalid
+    from skaz.knowledge.study.ask import check_study_selection
+
+    own = (await env.client.post("/kb/chats", json={})).json()["id"]
+    other = (await env.client.post("/kb/chats", json={})).json()["id"]
+    block = await _test_in(env, own)
+    item = env.study.questions(block)[0].id
+    chip = Selection(block.message_id, block.id, "study", "x", (SelectedItem(item, "x"),), "ask")
+    assert check_study_selection(env.study, chip, chat_id=own).block_id == block.id
+    with pytest.raises(SelectionInvalid, match="another chat"):
+        check_study_selection(env.study, chip, chat_id=other)
+    saved = await asyncio.to_thread(env.study.save, block.id, "allow")  # in the library now: any chat
+    assert check_study_selection(env.study, chip, chat_id=other).block_id == saved.id
