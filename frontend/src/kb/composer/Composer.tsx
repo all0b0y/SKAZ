@@ -208,7 +208,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       const source = item.source as 'file' | 'link' | 'text';
       saveMaterial(source, item.value, inboxId).then(
         (added) => setAttachments((list) => list.map((a) => (a.key === key
-          ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { source: 'existing' as const } : {}) }
+          ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { alreadyInLibrary: true } : {}) }
           : a))),
         (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
       );
@@ -305,7 +305,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (input.selection) clearSelection(); // asked: the next question starts with nothing picked
     // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
     for (const a of ready) {
-      if (a.source !== 'existing' && a.inWiki) {
+      if (a.source !== 'existing' && !a.alreadyInLibrary && a.inWiki) {
         ingestWhenReady(client, a.materialId!, a.materialReady, (text) => {
           setError(`“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${text} You can add it from Materials later.`);
         });
