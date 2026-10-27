@@ -60,6 +60,32 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
     expect(side().querySelector('.kb-chatrow.is-current')).toBeNull();
   });
 
+  it('one «open chat» condition (FIX1 R5): class, aria-current (New chat too) and the mark agree; an expanded document closes it', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: chatWorld() });
+    const newChat = await within(side()).findByRole('button', { name: 'New chat' });
+    expect(newChat).toHaveClass('is-current');
+    expect(newChat).toHaveAttribute('aria-current', 'page');
+    const working = within(side()).getByRole('button', { name: /What did I miss in lecture 8/ });
+    await user.click(working);
+    expect(newChat).not.toHaveClass('is-current');
+    expect(newChat).not.toHaveAttribute('aria-current');
+    expect(working).toHaveClass('is-current');
+    expect(working).toHaveAttribute('aria-current', 'page');
+    // The open chat shows no mark: the thread shows the work.
+    expect(within(working).queryByRole('img', { name: 'answering' })).toBeNull();
+    act(() => services.ui.getState().openDocument({ type: 'material', id: 'm3' }));
+    act(() => services.ui.getState().toggleDocExpanded());
+    // The document takes the centre: no chat is open, so no row claims it and the mark is back.
+    expect(tabOf()).toHaveAttribute('hidden');
+    expect(working).not.toHaveClass('is-current');
+    expect(working).not.toHaveAttribute('aria-current');
+    expect(within(working).getByRole('img', { name: 'answering' })).toBeInTheDocument();
+    act(() => services.ui.getState().toggleDocExpanded());
+    expect(working).toHaveClass('is-current');
+    expect(within(working).queryByRole('img', { name: 'answering' })).toBeNull();
+  });
+
   it('the thread follows the direction of the switch; the title crossfades; the same chat plays nothing', async () => {
     const user = userEvent.setup();
     const played: Array<{ el: Element; frames: Keyframe[] }> = [];

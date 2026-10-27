@@ -22,12 +22,24 @@ function useOpenChat() {
   };
 }
 
+/**
+ * The one «open chat» condition (FIX1 R5): the row key of the chat the centre shows — a chat id, or
+ * {@link NEW_CHAT_KEY} for a new one — or null with All chats / All materials or an expanded
+ * document in the centre. It drives the bridge, the row's `is-current` class, `aria-current` and
+ * the mark (the open chat shows none, ChatMark.tsx).
+ */
+export function useOpenChatKey(): string | null {
+  const currentId = useChats((s) => s.currentId);
+  const center = useUi((s) => s.center);
+  const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
+  return center === 'chat' && !docInCenter ? currentId ?? NEW_CHAT_KEY : null;
+}
+
 /** Left panel → Chats: new chat, pinned, by date (a few), "All chats · N" (decision v2/v16). */
 export function ChatList() {
   const list = useChats((s) => s.list);
   const load = useChats((s) => s.listLoad);
   const error = useChats((s) => s.listError);
-  const currentId = useChats((s) => s.currentId);
   const center = useUi((s) => s.center);
   const { chats } = useServices();
   const openChat = useOpenChat();
@@ -37,12 +49,12 @@ export function ChatList() {
   const { pinned, rest, groups } = sideChats(list);
   const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
   // The open chat's row runs into its window (decision 24 «Chats»): one tab for the whole list.
-  // With All chats / All materials (or an expanded document) in the centre no row is bridged.
-  const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
-  const openKey = center === 'chat' && !docInCenter ? currentId ?? NEW_CHAT_KEY : null;
+  // With All chats / All materials (or an expanded document) in the centre no row is open.
+  const openKey = useOpenChatKey();
+  const newOpen = openKey === NEW_CHAT_KEY;
 
   const row = (c: KbChatSummary) => {
-    const current = center === 'chat' && c.id === currentId;
+    const current = openKey === c.id;
     return (
       <li key={c.id} {...sel.rowProps(c.id)}>
         <div role="gridcell">
@@ -61,8 +73,8 @@ export function ChatList() {
   return (
     <div className="kb-side__scroll kb-tabhost" {...sel.listProps}>
       <ActiveTab host={sel.listRef} activeKey={openKey} variant="bridge" />
-      <button type="button" className={`kb-row kb-row--tabbed kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
-        data-tab-key={NEW_CHAT_KEY} onClick={() => { replayNew(); openChat(null); }}>
+      <button type="button" className={`kb-row kb-row--tabbed kb-row--action${newOpen ? ' is-current' : ''}`}
+        data-tab-key={NEW_CHAT_KEY} aria-current={newOpen ? 'page' : undefined} onClick={() => { replayNew(); openChat(null); }}>
         <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
         <span className="kb-row__text">New chat</span>
       </button>

@@ -22,6 +22,7 @@ export function WaitingMark() {
  */
 export type ChatMarkKind = 'waiting' | 'answering' | 'finishing' | 'new' | 'none';
 
+/** `current` = the chat is open in the centre — ChatList's one condition, `useOpenChatKey()` (FIX1 R5). */
 export function chatMarkKind(chat: KbChatSummary, current: boolean, finishing: boolean): ChatMarkKind {
   if (isWaitingForUser(chat)) return 'waiting';
   if (current) return 'none';
