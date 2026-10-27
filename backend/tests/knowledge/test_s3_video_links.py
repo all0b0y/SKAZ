@@ -176,7 +176,8 @@ async def test_the_same_video_link_again_is_the_material_already_there(
     api: httpx.AsyncClient, media: FakeMedia,
 ) -> None:
     # N2 (Q1 n2 M1): no second material, no download, no transcription budget.
-    first = await api.post("/kb/materials/link", json={"url": "https://youtu.be/dQw4w9WgXcQ", "folder_id": INBOX_ID})
+    first = await api.post("/kb/materials/link",
+                           json={"url": "https://youtu.be/dQw4w9WgXcQ", "folder_id": INBOX_ID})
     assert first.status_code == 201, first.text
     assert first.json()["already_in_library"] is False
     await until(api, first.json()["material"]["id"], status="ready")
@@ -276,7 +277,8 @@ async def test_article_with_an_embedded_video_text_video_or_both(app: Any, api: 
     # Mode "both" tells each part's truth: the article and the video are both already there.
     assert twice.status_code == 200, twice.text
     assert twice.json()["already_in_library"] is True and twice.json()["video_already_in_library"] is True
-    assert twice.json()["video"]["id"] == result["video"]["id"] and twice.json()["video_failure_reason"] is None
+    assert twice.json()["video"]["id"] == result["video"]["id"]
+    assert twice.json()["video_failure_reason"] is None
     assert result["video_already_in_library"] is False
     video = await api.post(
         "/kb/materials/link",
