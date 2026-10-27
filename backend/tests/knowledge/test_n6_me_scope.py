@@ -16,6 +16,7 @@ from skaz.knowledge.me.access import me_store
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.study.format import Question
 from skaz.knowledge.study.judge import make_judge
+from skaz.knowledge.study.review import Sources, check_call
 from tests.knowledge.ingest_support import ScriptedWiki, add_material
 from tests.knowledge.test_ingest_pipeline import CONCEPTS_OK, NOTES_OK, run_ingest, service_for
 
@@ -51,14 +52,16 @@ async def test_ingest_turns_never_carry_me(ready: KnowledgeService) -> None:
 async def test_the_judge_and_the_w3b_search_run_never_carry_me(ready: KnowledgeService) -> None:
     fill(ready)
     engine = FakeEngine("claude_code", script=lambda turn: [
-        TextDelta(turn.run_id, '{"verdict": "right", "score": 1, "feedback": "ok"}'), Completed(turn.run_id)])
+        TextDelta(turn.run_id, '{"status": "covered", "note": "ok"}'), Completed(turn.run_id)])
     engines: dict[EngineId, Any] = {"codex": FakeEngine("codex"), "hermes": FakeEngine("hermes"),
                                     "claude_code": engine}
     registry = EngineRegistry(engines, ready.settings, cache_s=0.0)
     judge = make_judge(ready, lambda: registry)
     block = SimpleNamespace(payload={"agent": {"engine": "claude_code"}}, chat_id="chat-x")
-    verdict = await judge(block, Question("q1", "open", "What is entropy?", ("Disorder",), ()), "Chaos")
-    assert verdict["verdict"] == "right"
+    question = Question("q1", "open", "What is entropy?", ("Disorder",), ())
+    call = check_call(block, question, "Chaos", None, Sources())  # type: ignore[arg-type]
+    verdict = await judge(call)
+    assert verdict["status"] == "covered"
     await EngineSearch().search(engine, "entropy lecture notes")
     assert len(engine.turns) == 2 and not any(carries_me(turn) for turn in engine.turns)
 

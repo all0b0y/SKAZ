@@ -165,6 +165,8 @@ export function SelectionPanel({ selection, onClear, onQuick, disabledReason }: 
   const [where, setWhere] = useState(false);
   const key = `${selection.message_id}/${selection.block_id}/${selection.items.map((i) => i.id).join(',')}`;
   useEffect(() => { setWhere(false); }, [selection.message_id, selection.block_id]);
+  // P3-c: a test question asks in the field below; its own quick asks and sources are for answer items.
+  if (selection.kind === 'study') return <SelectionBar selection={selection} onClear={onClear} />;
   return (
     <>
       <SelectionBar selection={selection} onClear={onClear} onQuick={onQuick} disabledReason={disabledReason}

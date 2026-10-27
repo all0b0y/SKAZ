@@ -8,12 +8,13 @@ import { agentName } from '../chat/permission';
 import { formatScore, studyApi, type KbStudyPart, type KbStudyQuestion } from './api';
 import type { StudyActions } from './useStudy';
 import type { KbPermissionPart } from '../api/permissions';
+import { OpenCompact, OpenReport, STATUS_WORD, statusOf } from './OpenReview';
+import { DiscussUnclear, UnclearMark } from './Unclear';
+import { useAskAgent } from './AskAgent';
 
 export const QUESTION_LABEL: Record<KbStudyQuestion['type'], string> = {
   choice: 'Choose one', multi: 'Choose all that apply', short: 'Short answer', open: 'Open answer · checked by the agent',
 };
-
-const VERDICT: Record<string, string> = { right: 'Right.', partly: 'Partly right.', wrong: 'Not right.' };
 
 /** The key badge of option `i`: A, B, C… (the same letter, or its number 1, 2, 3…, picks it). */
 export const optionKey = (i: number): string => String.fromCharCode(65 + i);
@@ -37,6 +38,7 @@ export function TestRunner({ part, actions, onError, keys }: {
   keys: { current: ((event: React.KeyboardEvent) => void) | null };
 }) {
   const { client } = useServices();
+  const askAgent = useAskAgent(part);
   /** Picks option `i` of the question on screen (set by it; null when there is nothing to pick). */
   const pick = useRef<((index: number) => boolean) | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -87,7 +89,11 @@ export function TestRunner({ part, actions, onError, keys }: {
         animate={{ opacity: 1, x: 0, transition: SPRING_SMALL }}>
         <QuestionView key={question.id} part={part} question={question} busy={review !== null ? 'review' : busy} pick={pick}
           onAnswer={(body) => act('check', () => studyApi.answer(client, part.id, { item_id: question.id, ...body }))}
-          onAskAgent={(text) => act('judge', () => studyApi.checkOpen(client, part.id, question.id, text))} />
+          onAskAgent={(text) => act('judge', () => studyApi.checkOpen(client, part.id, question.id, text))}
+          onRecheck={(ideaId, words) => act('recheck', () => studyApi.recheck(client, part.id, question.id, ideaId, words))}
+          onCount={(ideaId, counted) => void act('count', () => studyApi.count(client, part.id, question.id, ideaId, counted))}
+          onUnclear={() => void act('unclear', () => studyApi.mark(client, part.id, [question.id], question.unclear ? 'clear' : 'unclear'))}
+          onAsk={() => askAgent(question)} />
       </m.div>
       <div className="kb-st-tact">
         <button type="button" className="kb-st-ib" aria-label="Previous question" disabled={index === 0 || !!busy} onClick={() => go(index - 1)}>
@@ -109,11 +115,14 @@ export function TestRunner({ part, actions, onError, keys }: {
 
 interface AnswerBody { choices?: string[]; text?: string }
 
-function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
+function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRecheck, onCount, onUnclear, onAsk }: {
   part: KbStudyPart; question: KbStudyQuestion; busy: string | null;
   pick: { current: ((index: number) => boolean) | null };
   onAnswer: (body: AnswerBody) => Promise<boolean>; onAskAgent: (text: string) => Promise<boolean>;
+  onRecheck: (ideaId: string, words: string) => Promise<boolean>; onCount: (ideaId: string, counted: boolean) => void;
+  onUnclear: () => void; onAsk: () => void;
 }) {
+  const [reviewOpen, setReviewOpen] = useState(false);
   const response = question.response;
   const checked = !!response?.checked;
   const [picked, setPicked] = useState<string[]>(response?.choices ?? []);
@@ -136,6 +145,14 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
 
   return (
     <>
+      <div className="kb-st-qtop">
+        {/* P3-b: the mark lives on the question, also while looking back from the result. */}
+        <UnclearMark on={!!question.unclear} what="question" disabled={!!busy && busy !== 'review'} onToggle={onUnclear} />
+        {/* P3-c: on every question, always — before an answer the agent gets no answer to give away. */}
+        <button type="button" className="kb-st-ask" onClick={onAsk} title="Ask the agent about this question in the chat">
+          <Icon name="askAgent" size={14} />Ask the agent
+        </button>
+      </div>
       <p className="kb-st-tq" id={`q-${question.id}`}>{question.question}</p>
       {(question.type === 'choice' || multi) && (
         <div className="kb-st-opts" role={multi ? 'group' : 'radiogroup'} aria-labelledby={`q-${question.id}`}>
@@ -151,8 +168,8 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
                 <span className="kb-st-opt__text">{o.text}</span>
                 {checked && (
                   <span className="kb-st-tag">
-                    {right ? <><Icon name="allowed" size={13} />{sel || !multi ? 'Correct · from source' : 'Missed · from source'}</>
-                      : sel ? <><Icon name="denied" size={13} />Your answer · made up by {agent}</> : `made up by ${agent}`}
+                    {right ? <><Icon name="allowed" size={13} />{sel || !multi ? 'Correct · from source' : 'Also right · from source'}</>
+                      : sel ? <><Icon name="denied" size={13} />Your pick · {agent} made this one up</> : `made up by ${agent}`}
                   </span>
                 )}
               </button>
@@ -174,7 +191,7 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
         <div className={`kb-st-res ${response!.score === 1 ? 'is-ok' : 'is-bad'}`} role="status">
           <Icon name={response!.score === 1 ? 'allowed' : 'denied'} size={16} />
           <div>
-            <span className="kb-st-rt">{response!.score === 1 ? 'Correct.' : 'Not quite.'}</span>{' '}
+            <span className="kb-st-rt">{response!.score === 1 ? 'Got it.' : 'Not yet.'}</span>{' '}
             {question.type === 'short' ? <>The source says: «{question.answers[0]}»</> : <>From the source</>}
             <SourceMarks citations={question.citations} />
           </div>
@@ -184,17 +201,19 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent }: {
         <div className="kb-st-op kb-st-op--wait"><Spinner size="sm" label={`${agent} is checking your answer…`} /></div>
       )}
       {question.type === 'open' && response?.error && <p className="kb-inline-error" role="alert">{response.error}</p>}
-      {question.type === 'open' && checked && response?.verdict && (
-        <div className="kb-st-op" role="status">
-          <div className="kb-st-opl"><Icon name="agent" size={13} />
-            {/* Bug 1 (R5): who checked it — the agent and its model — when the backend says so. */}
-            {response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`} · not a fact
-          </div>
-          <b>{VERDICT[response.verdict] ?? response.verdict}</b>
-          {response.missing && <> Missing: {response.missing}</>}
-          {response.comment && <> {response.comment}</>}
-          <span className="kb-st-opsrc"> Source: «{question.answers[0]}»<SourceMarks citations={question.citations} /></span>
-        </div>
+      {question.type === 'open' && checked && response && statusOf(response) && (
+        <>
+          {/* Bug 1 (R5): who checked it — the agent and its model — when the backend says so. */}
+          <OpenCompact response={response} who={response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`}
+            open={reviewOpen} onToggle={() => setReviewOpen((v) => !v)} />
+          {reviewOpen && response.review && (
+            <OpenReport review={response.review} response={response} busy={!!busy}
+              who={response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`}
+              source={<>Source: «{question.answers[0]}»<SourceMarks citations={question.citations} /></>}
+              onRecheck={onRecheck} onCount={onCount}
+              footer={<div className="kb-st-rv__foot"><Button size="sm" icon="askAgent" onClick={onAsk}>Ask the agent</Button></div>} />
+          )}
+        </>
       )}
       {(checked || response?.verdict) && question.explanation && (
         <p className="kb-st-ex"><Icon name="analysis" size={14} /><span><b>Agent explanation</b> · {question.explanation}</span></p>
@@ -225,16 +244,20 @@ function TestResult({ part, busy, onRetake, onReview }: {
       <p className="kb-st-big">{formatScore(result.correct)} of {result.total}</p>
       {result.partly > 0 && (
         <p className="kb-st-note kb-st-note--flat">
-          {result.partly === 1 ? 'One open answer is' : `${result.partly} open answers are`} half-right in the agent’s opinion.
+          {result.partly === 1 ? 'One open answer is' : `${result.partly} open answers are`} almost there, in the agent’s opinion.
         </p>
       )}
       <ul className="kb-st-sum" aria-label="Answers">
         {result.rows.map((row) => {
           const hit = byId.get(row.id);
-          const icon = row.score === 1 ? 'allowed' : row.score === 0.5 ? 'concept' : 'denied';
-          const said = row.score === 1 ? 'right' : row.score === 0.5 ? 'partly right' : row.score === null ? 'not answered' : 'wrong';
+          // An open answer's own status (P3-a); a closed one is right (1) or not yet (0).
+          const kind = row.status ? { got: 'ok', almost: 'part', not_yet: 'bad' }[row.status]
+            : row.score === 1 ? 'ok' : row.score === 0.5 ? 'part' : 'bad';
+          const icon = kind === 'ok' ? 'allowed' : kind === 'part' ? 'concept' : 'minus';
+          const said = row.score === null ? 'not answered' : row.status ? STATUS_WORD[row.status].toLowerCase()
+            : kind === 'ok' ? 'right' : kind === 'part' ? 'almost there' : 'not yet';
           return (
-            <li key={row.id} className={`kb-st-sr kb-st-sr--${row.score === 1 ? 'ok' : row.score === 0.5 ? 'part' : 'bad'}`}>
+            <li key={row.id} className={`kb-st-sr kb-st-sr--${kind}`}>
               <Icon name={icon} size={15} label={said} />
               <span>{hit?.q.question ?? 'Question removed'}</span>
               {hit && <Button size="sm" onClick={() => onReview(hit.i)}>Review</Button>}
@@ -243,10 +266,13 @@ function TestResult({ part, busy, onRetake, onReview }: {
         })}
       </ul>
       <div className="kb-st-tact">
+        <DiscussUnclear count={part.questions.filter((q) => q.unclear).length} chatId={part.chat_id}
+          page={part.save.page_id ? { id: part.save.page_id, title: part.title } : null} />
+        <span className="kb-st-spacer" />
         <Button size="sm" icon="retry" busy={busy === 'retake'} disabled={!!busy} onClick={() => onRetake(false)}>Retake</Button>
         {result.mistakes > 0 && (
           <Button size="sm" variant="fill" busy={busy === 'mistakes'} disabled={!!busy} onClick={() => onRetake(true)}>
-            Retake mistakes · {result.mistakes}
+            Practice the tricky ones · {result.mistakes}
           </Button>
         )}
       </div>

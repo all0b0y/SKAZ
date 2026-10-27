@@ -14,14 +14,22 @@ from pydantic import Field
 
 from ...native_io import disk_call
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, _Args
+from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
 from ..permissions.store import RunRef
 from .checks import CardIn, QuestionIn
 from .scheduling import Mode
 from .service import StudyService
+from .unclear import unclear_items
 
 NOT_IN_CHAT = "Flashcards and tests are only possible in a chat with the user."
-STUDY_TOOL_NAMES = ("skaz_study_make_deck", "skaz_study_make_test", "skaz_study_read", "skaz_study_show")
+STUDY_TOOL_NAMES = (
+    "skaz_study_make_deck",
+    "skaz_study_make_test",
+    "skaz_study_read",
+    "skaz_study_show",
+    "skaz_study_unclear",
+)
 MAX_CARDS = 60
 MAX_QUESTIONS = 40
 
@@ -54,6 +62,12 @@ class ShowArgs(_Args):
 
 class ReadArgs(_Args):
     page_id: str = Field(min_length=1, max_length=120, description="A deck or test page id.")
+
+
+class UnclearArgs(_Args):
+    page_id: str | None = Field(
+        default=None, max_length=120, description="Optional: only the marks of this deck or test page."
+    )
 
 
 class StudyTools:
@@ -89,7 +103,8 @@ class StudyTools:
                 "Make a test (choice, multi, short or open questions, as the user asked) and show it in the "
                 "chat. Every right answer needs a citation with a verbatim quote; wrong options are yours "
                 "and are shown as made up by you. Choice and short answers are checked by SKAZ; open "
-                "answers are checked by you later." + shown,
+                "answers are checked by you later against the open question's key ideas: give 2–6 of them, "
+                "each with a verbatim citation (the points a full answer covers)." + shown,
                 MakeTestArgs,
                 run=self._run(self._make_test),
                 timeout_s=60.0,
@@ -109,6 +124,17 @@ class StudyTools:
                 ShowArgs,
                 run=self._run(self._show),
                 timeout_s=60.0,
+            ),
+            SkazTool(
+                "skaz_study_unclear",
+                "Read the cards and test questions the user marked «Unclear» (they want to talk them "
+                "through), in this chat's folders — or the whole library when the chat has none: each "
+                "with its text, type, options, right answer, the user's last answer, the source with its "
+                "quote and where it is. Read-only: you never change marks. Go through them one at a time; "
+                "at the end tell the user they can clear the marks with «Clear now» under your answer.",
+                UnclearArgs,
+                run=self._run(self._unclear),
+                timeout_s=30.0,
             ),
         )
 
@@ -149,6 +175,17 @@ class StudyTools:
 
     async def _read(self, _ref: RunRef | None, args: ReadArgs) -> dict[str, Any]:
         return {"status": "ok", "text": await disk_call(self.study.agent_summary, args.page_id)}
+
+    async def _unclear(self, ref: RunRef | None, args: UnclearArgs) -> dict[str, Any]:
+        assert ref is not None
+        chat = await disk_call(ChatRepository(self.study.kb.db).get, ref.chat_id)
+        folders = tuple(chat.folder_ids) if chat is not None else ()
+        items = await disk_call(unclear_items, self.study, folders, args.page_id)
+        scope = "this chat's folders" if folders else "the whole library"
+        result: dict[str, Any] = {"status": "ok", "scope": scope, "count": len(items), "items": items}
+        if not items:
+            result["note"] = f"Nothing is marked Unclear in {scope}."
+        return result
 
     async def _show(self, ref: RunRef | None, args: ShowArgs) -> dict[str, Any]:
         assert ref is not None

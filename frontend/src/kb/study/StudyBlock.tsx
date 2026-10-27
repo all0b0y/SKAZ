@@ -11,7 +11,7 @@ import { agentName } from '../chat/permission';
 import { RenameForm } from '../chat/ChatMenu';
 import type { KbPermissionPart } from '../api/permissions';
 import { MODE_LABEL, PLACE_LABEL, kindLabel, placeOf, studyApi, studyWhere, type KbStudyPart, type StudyPlace } from './api';
-import { CardStack } from './CardStack';
+import { CardStack, pileOf } from './CardStack';
 import { TestRunner, QUESTION_LABEL } from './TestRunner';
 import { useStudyActions, useStudyPart, useStudyRoute } from './useStudy';
 
@@ -64,7 +64,8 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
   const deck = part.kind === 'deck';
   const total = deck ? part.cards.length : part.questions.length;
   const shown = Math.min(part.position + 1, total);
-  const progress = total ? (deck ? Math.min(part.position, total) : part.result ? total : part.position) / total : 0;
+  // A deck (P3-d): the share of the pass gone through — the cards known this pass.
+  const progress = total ? (deck ? Math.min(total - pileOf(part).queue.length, total) : part.result ? total : part.position) / total : 0;
   const sources = useMemo(() => indexSources(deck ? part.cards.flatMap((c) => c.citations) : part.questions.flatMap((q) => q.citations)),
     [deck, part.cards, part.questions]);
   const size = SIZE[where];
@@ -90,6 +91,7 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
 
   return (
     <m.section ref={ref} className={`kb-st kb-st--${where}`} data-kind={part.kind} data-folded={folded || undefined} tabIndex={0}
+      data-block-id={part.id /* the «📍 question N» chip finds its test (P3-c) */}
       aria-label={`${kindLabel(part)}: ${part.title}`} layoutId={`study-${part.id}`}
       initial={reduced ? { opacity: 0 } : false} animate={{ opacity: 1, transition: reduced ? { duration: 0.14, ease: 'linear' } : SPRING_LARGE }}
       transition={SPRING_LARGE}
@@ -127,7 +129,9 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
           <>
             {subtitle && <span className="kb-st-sub">· {subtitle}</span>}
             {question && <span className="kb-st-sub">· {QUESTION_LABEL[question.type]}</span>}
-            <span className="kb-st-cnt">{!deck && part.result ? 'done' : total ? `${shown} / ${total}` : '0'}</span>
+            {/* P3-d: a deck counts what is left on the pile this pass. */}
+            <span className="kb-st-cnt">{deck ? (total ? (pileOf(part).queue.length ? `${pileOf(part).queue.length} left` : 'done') : '0')
+              : part.result ? 'done' : total ? `${shown} / ${total}` : '0'}</span>
           </>
         )}
         <span className="kb-st-route">

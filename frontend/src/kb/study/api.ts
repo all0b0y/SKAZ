@@ -33,11 +33,26 @@ export const studyApi = {
   move: (c: KbClient, id: string, body: KbStudyMove) => c.call('PATCH /kb/study/{block_id}', { path: { block_id: id }, body }),
   grade: (c: KbClient, id: string, itemId: string, grade: StudyGrade) =>
     c.call('POST /kb/study/{block_id}/grade', { path: { block_id: id }, body: { item_id: itemId, grade } }),
+  /** P3-d: one step of a pass — «I know this» (Good), a skip (Again once per pass), ← back, «Go through again». */
+  pass: (c: KbClient, id: string, action: 'know' | 'skip' | 'back' | 'restart', itemId: string | null) =>
+    c.call('POST /kb/study/{block_id}/pass', { path: { block_id: id }, body: { action, item_id: itemId } }),
   mark: (c: KbClient, id: string, itemIds: string[], mark: StudyMark) =>
     c.call('POST /kb/study/{block_id}/mark', { path: { block_id: id }, body: { item_ids: itemIds, mark } }),
   answer: (c: KbClient, id: string, body: KbStudyAnswerIn) => c.call('POST /kb/study/{block_id}/answer', { path: { block_id: id }, body }),
   checkOpen: (c: KbClient, id: string, itemId: string, text: string) =>
     c.call('POST /kb/study/{block_id}/check-open', { path: { block_id: id }, body: { item_id: itemId, text } }),
+  /** «I did say this» (P3-a): the agent rechecks one key idea against words of the user's own answer. */
+  recheck: (c: KbClient, id: string, itemId: string, ideaId: string, words: string) =>
+    c.call('POST /kb/study/{block_id}/recheck', { path: { block_id: id }, body: { item_id: itemId, idea_id: ideaId, words } }),
+  /** «Count it» / take it back: the user counts a key idea as said («counted by you»). */
+  count: (c: KbClient, id: string, itemId: string, ideaId: string, counted: boolean) =>
+    c.call('POST /kb/study/{block_id}/count', { path: { block_id: id }, body: { item_id: itemId, idea_id: ideaId, counted } }),
+  /** P3-b: what is marked «Unclear» in a chat's scope (its folders or the whole library), or on a page. */
+  unclear: (c: KbClient, where: { chatId?: string; pageId?: string }) =>
+    c.call('GET /kb/study/unclear', { query: { ...(where.chatId ? { chat_id: where.chatId } : {}), ...(where.pageId ? { page_id: where.pageId } : {}) } }),
+  /** «Clear now»: the user clears these marks (the agent never does). */
+  clearUnclear: (c: KbClient, itemIds: string[], chatId?: string) =>
+    c.call('POST /kb/study/unclear/clear', { body: { item_ids: itemIds }, ...(chatId ? { query: { chat_id: chatId } } : {}) }),
   finish: (c: KbClient, id: string) => c.call('POST /kb/study/{block_id}/finish', { path: { block_id: id } }),
   retake: (c: KbClient, id: string, mistakesOnly: boolean) =>
     c.call('POST /kb/study/{block_id}/retake', { path: { block_id: id }, body: { mistakes_only: mistakesOnly } }),

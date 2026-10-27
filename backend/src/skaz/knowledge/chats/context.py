@@ -44,6 +44,8 @@ class StudyReader(Protocol):
 
     def agent_summary(self, page_id: str) -> str: ...
 
+    def ask_context(self, block_id: str, item_id: str) -> tuple[str, str, str] | None: ...
+
 
 #: Another chat's title and messages by id (``None`` when it does not exist).
 ChatLookup = Callable[[str], tuple[str, Sequence[Message]] | None]
@@ -81,7 +83,9 @@ what was dropped — don't repeat the cards in text. The user grades and answers
 own; never treat their next message as an answer to a card. For reviewing saved decks (mentioned \
 with @, with their review state), use skaz_study_show with the mode that fits the request (due, new, \
 hard, quick10, all); if it is unclear where to start, ask once. "This card" or "this question" means \
-the one the context says is open.
+the one the context says is open. When the user wants to talk about what they marked «Unclear», read \
+the marks with skaz_study_unclear and go through them one at a time; at the end say they can clear \
+the marks with «Clear now» under your answer — you never change marks yourself.
 
 Questions to the user: when you can't go on without the user's choice, ask with skaz_ask_user \
 (up to 4 options, the one you recommend marked); ask rarely, one question at a time. The user may \
@@ -243,7 +247,12 @@ class ContextBuilder:
         for quote in given.quotes:
             add(*(self._block_to_fix(quote, chat.id, chats) or self._diagram_to_fix(quote, chat.id, chats)
                   or self._quote(quote)))
-        if given.selection is not None:  # P2: the items picked in an earlier answer of this chat
+        if given.selection is not None and given.selection.kind == "study":  # P3-c: a test question
+            asked = (self.study.ask_context(given.selection.block_id, given.selection.items[0].id)
+                     if self.study is not None and given.selection.items else None)
+            if asked is not None:
+                add(*asked)
+        elif given.selection is not None:  # P2: the items picked in an earlier answer of this chat
             own = chats(chat.id)
             picked = selection_context(own[1], given.selection) if own is not None else None
             if picked is not None:

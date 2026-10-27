@@ -109,13 +109,14 @@ from .model import (
     Part,
     PermissionPart,
     QuestionPart,
+    Selection,
     StudyPart,
     TextPart,
     WebSearchPart,
 )
 from .parsing import BlockData, BlockStart, CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
 from .resolve import MaterialReader, Resolver
-from .selection import check_selection
+from .selection import SelectionInvalid, check_selection
 from .store import RESTART_REASON, WIKI_STUDY_CHAT_ID, ChatRepository
 from .summary import ChatSummaries
 from .text import DEFAULT_TITLE, auto_title, preview, utc_now
@@ -429,8 +430,8 @@ class ChatService:
     async def _answer_question(self, chat: Chat, run: _Run, given: MessageInput) -> tuple[Message, Message]:
         """The user wrote their own message while the agent waits for an answer: it closes the question."""
         if given.selection is not None:  # P2: checked like any question's selection
-            given = replace(given, selection=check_selection(await disk_call(self.repo.messages, chat.id),
-                                                             given.selection))
+            given = replace(given, selection=await self._checked_selection(
+                await disk_call(self.repo.messages, chat.id), given.selection))
         now = utc_now()
         user = Message(id=new_id("msg"), chat_id=chat.id, seq=0, role="user", state="done", created_at=now,
                        parts=(TextPart(given.text),), input=given)
@@ -697,7 +698,7 @@ class ChatService:
             engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             prior = await disk_call(self.repo.messages, chat_id)
             if given.selection is not None:  # P2: only ids that exist in the stored answer
-                given = replace(given, selection=check_selection(prior, given.selection))
+                given = replace(given, selection=await self._checked_selection(prior, given.selection))
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)
@@ -805,8 +806,22 @@ class ChatService:
                        created_at=now, engine=chat.engine, model=chat.model, effort=chat.effort,
                        reply_to=question_id)
 
+    async def _checked_selection(self, prior: Sequence[Message], selection: Selection) -> Selection:
+        """P2's items of an earlier answer, or P3-c's test question (checked against the study block)."""
+        if selection.kind == "study":
+            from ..study.ask import check_study_selection  # the study package imports chats (C-17)
+
+            if self.study is None:
+                raise SelectionInvalid("Tests aren't available here.")
+            return await disk_call(check_study_selection, self.study, selection)
+        return check_selection(prior, selection)
+
     def _input_folders(self, given: MessageInput) -> list[str]:
         folders: list[str] = []
+        if given.selection is not None and given.selection.kind == "study" and self.study is not None:
+            from ..study.ask import study_folders
+
+            folders += study_folders(self.study, given.selection.block_id)  # P3-c: a wiki test's folder
         material_ids = [ref.id for ref in given.mentions if ref.type == "material"] + list(given.attachments)
         material_ids += [quote.id for quote in given.quotes if quote.source == "material"]
         for material_id in material_ids:

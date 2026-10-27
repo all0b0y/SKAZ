@@ -30,6 +30,8 @@ from .format import SEPARATOR, QuestionType
 MAX_ITEMS = 60
 MAX_TEXT = 1_000
 MAX_OPTIONS = 6
+MIN_IDEAS = 2
+MAX_IDEAS = 6
 
 
 class CitationIn(_Args):
@@ -60,6 +62,15 @@ class CardIn(_Args):
     )
 
 
+class IdeaIn(_Args):
+    """P3-a decision 7: one key idea of an open question's reference answer, from the source."""
+
+    text: str = Field(min_length=1, max_length=300, description="One key idea, a short sentence.")
+    citations: list[CitationIn] = Field(
+        min_length=1, max_length=2, description="Where the source says it (verbatim quote)."
+    )
+
+
 class QuestionIn(_Args):
     type: Literal["choice", "multi", "short", "open"] = Field(
         description="choice: one right option; multi: several right options; short: a word or number; "
@@ -84,6 +95,12 @@ class QuestionIn(_Args):
     )
     citations: list[CitationIn] = Field(min_length=1, max_length=4)
     explanation: str | None = Field(default=None, max_length=MAX_TEXT)
+    ideas: list[IdeaIn] = Field(
+        default_factory=list,
+        max_length=MAX_IDEAS,
+        description="open: the 2–6 key ideas a full answer covers, each with a verbatim citation. "
+        "The user's answer is judged against them.",
+    )
 
 
 @dataclass(frozen=True)
@@ -105,6 +122,8 @@ class CheckedQuestion:
     cites: tuple[Cite, ...]
     links: tuple[str, ...]
     explanation: str | None
+    #: An open question's key ideas (P3-a): ``(text, cites)``; empty = built at the first check.
+    ideas: tuple[tuple[str, tuple[Cite, ...]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -200,7 +219,21 @@ def check_question(reader: MaterialReader, item: QuestionIn) -> CheckedQuestion:
     explanation = (
         _inert(item.explanation, "The explanation") if item.explanation and item.explanation.strip() else None
     )
-    return CheckedQuestion(item.type, question, answers, wrong, accept, cites, links, explanation)
+    ideas = _ideas(reader, item.ideas) if item.type == "open" else ()
+    return CheckedQuestion(item.type, question, answers, wrong, accept, cites, links, explanation, ideas)
+
+
+def _ideas(reader: MaterialReader, ideas: Sequence[IdeaIn]) -> tuple[tuple[str, tuple[Cite, ...]], ...]:
+    """The key ideas whose quotes check out; fewer than ``MIN_IDEAS`` = none (built at the first check)."""
+    kept: list[tuple[str, tuple[Cite, ...]]] = []
+    for idea in ideas:
+        try:
+            text = _inert(idea.text, "A key idea")
+            cites, _links = _cites(reader, idea.citations)
+        except Refused:
+            continue
+        kept.append((text, cites))
+    return tuple(kept[:MAX_IDEAS]) if len(kept) >= MIN_IDEAS else ()
 
 
 def check_all(items: Sequence[Any], check: Any) -> tuple[list[Any], list[Dropped]]:

@@ -24,7 +24,8 @@ export function SelectionBar({ selection, onClear, onQuick, onWhere, whereOpen =
   /** Why the quick asks that send can't send now (the agent is answering…). */
   disabledReason?: string | null;
 }) {
-  const what = `${itemsLabel(selection.items)} selected`;
+  // P3-c: «📍 question 3 · Lecture 8 check» — a test question asked about, not items picked.
+  const what = selection.kind === 'study' ? selection.items[0]?.label ?? 'question' : `${itemsLabel(selection.items)} selected`;
   const full = selection.items.map((i) => i.label).join('; ');
   return (
     <div className="kb-pickbar" role="group" aria-label="Selection">

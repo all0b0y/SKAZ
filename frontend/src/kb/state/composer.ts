@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbQuote, KbRef } from '../../api/kb/types.gen';
+import type { Selection } from '../chat/select/model';
 
 /**
  * Hand-off into the message field from anywhere in the window: the selection toolbar ("Ask",
@@ -10,7 +11,9 @@ import type { KbQuote, KbRef } from '../../api/kb/types.gen';
 export type ComposerItem =
   | { kind: 'quote'; quote: KbQuote }
   | { kind: 'mention'; ref: KbRef }
-  | { kind: 'text'; text: string };
+  | { kind: 'text'; text: string }
+  /** P3-c: «Ask the agent» on a test question — the «📍 question N» chip of the P2 selection. */
+  | { kind: 'selection'; selection: Selection };
 
 export interface ComposerBusState {
   queue: ComposerItem[];

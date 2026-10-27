@@ -307,9 +307,11 @@ describe('Electron IPC policy — flashcards and tests (0.3.1 S)', () => {
     for (const [method, path] of [
       ['GET', '/kb/study/st-1a2b'], ['PATCH', '/kb/study/st-1a2b'], ['POST', '/kb/study/st-1a2b/grade'],
       ['POST', '/kb/study/st-1a2b/mark'], ['POST', '/kb/study/st-1a2b/answer'], ['POST', '/kb/study/st-1a2b/check-open'],
+      ['POST', '/kb/study/st-1a2b/pass'], ['POST', '/kb/study/st-1a2b/recheck'], ['POST', '/kb/study/st-1a2b/count'],
       ['POST', '/kb/study/st-1a2b/finish'], ['POST', '/kb/study/st-1a2b/retake'], ['POST', '/kb/study/st-1a2b/save'],
       ['GET', '/kb/study/decks/pg-1'], ['POST', '/kb/study/decks/pg-1/marks'], ['POST', '/kb/study/decks/pg-1/study'],
       ['GET', '/kb/study/settings'], ['PATCH', '/kb/study/settings'],
+      ['GET', '/kb/study/unclear'], ['POST', '/kb/study/unclear/clear'],
     ] as const) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
     }

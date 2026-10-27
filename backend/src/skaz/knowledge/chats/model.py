@@ -214,7 +214,8 @@ class Quote:
     message_id: str | None = None
 
 
-SelectionKind = Literal["block", "diagram"]
+#: ``study`` (P3-c): a test question, «Ask the agent» — its block and question by id.
+SelectionKind = Literal["block", "diagram", "study"]
 #: What the user asked with the selection's quick buttons (P2): a plain question, «Explain more»,
 #: «That’s wrong» (the agent rechecks the items against their sources).
 SelectionIntent = Literal["ask", "explain", "wrong"]
@@ -249,7 +250,7 @@ class Selection:
         kind = data.get("kind")
         intent = data.get("intent")
         return cls(str(data.get("message_id", "")), str(data.get("block_id", "")),
-                   "diagram" if kind == "diagram" else "block", _optional(data.get("title")),
+                   kind if kind in ("diagram", "study") else "block", _optional(data.get("title")),
                    tuple(SelectedItem(str(item.get("id", "")), str(item.get("label", "")))
                          for item in data.get("items") or [] if isinstance(item, Mapping)),
                    intent if intent in ("explain", "wrong") else "ask")

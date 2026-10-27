@@ -536,6 +536,7 @@ export interface KbDeckView {
   cards: KbStudyCard[];
   groups: KbStudyGroups;
   due: number;
+  unclear?: number;
 }
 
 export interface KbDefinitionBlock {
@@ -1551,7 +1552,7 @@ export interface KbSelectedItem {
 export interface KbSelection {
   message_id: string;
   block_id: string;
-  kind: "block" | "diagram";
+  kind: "block" | "diagram" | "study";
   title?: string | null;
   items: KbSelectedItem[];
   intent?: "ask" | "explain" | "wrong";
@@ -1668,6 +1669,13 @@ export interface KbStepsBlock {
   steps: KbStep[];
 }
 
+/** «Also right in your answer» (P3-a 6b): beyond the key ideas; never changes the score. */
+export interface KbStudyAlsoRight {
+  text: string;
+  basis: "source" | "agent";
+  citations: KbCitation[];
+}
+
 export interface KbStudyAnswerIn {
   item_id: string;
   choices?: string[] | null;
@@ -1688,6 +1696,14 @@ export interface KbStudyCard {
   intervals: KbStudyIntervals;
   graded: "again" | "hard" | "good" | "easy" | null;
   due: string | null;
+  unclear?: boolean;
+}
+
+/** «Count it»: the user counts a key idea as said («counted by you»), or takes that back. */
+export interface KbStudyCountIn {
+  item_id: string;
+  idea_id: string;
+  counted?: boolean;
 }
 
 export interface KbStudyGradeIn {
@@ -1702,6 +1718,28 @@ export interface KbStudyGroups {
   hard: number;
 }
 
+/** «I did say this» (P3-a 6a): the agent's second look at one key idea for the words the user chose. */
+export interface KbStudyIdeaRecheck {
+  status: "covered" | "partial" | "missing" | null;
+  note: string | null;
+  words: string;
+}
+
+/** One key idea of the question and how the answer covers it (P3-a decision 2) — the agent's opinion. */
+export interface KbStudyIdeaReview {
+  id: string;
+  text: string;
+  citations: KbCitation[];
+  status: "covered" | "partial" | "missing";
+  yours: string | null;
+  why: string | null;
+  why_basis: "source" | "agent" | null;
+  why_citations: KbCitation[];
+  by_user: boolean;
+  recheck: KbStudyIdeaRecheck | null;
+  rechecking: boolean;
+}
+
 /** What each grade schedules ("10m", "3d"); ``null`` where a practice mode leaves the schedule alone. */
 export interface KbStudyIntervals {
   again: string | null;
@@ -1712,7 +1750,14 @@ export interface KbStudyIntervals {
 
 export interface KbStudyMarkIn {
   item_ids: string[];
-  mark: "hard" | "known" | "hide" | "unhide" | "unhard";
+  mark: "hard" | "known" | "hide" | "unhide" | "unhard" | "unclear" | "clear";
+}
+
+/** A piece of the model answer: the user's own words, or an addition for a key idea (underlined). */
+export interface KbStudyModelPiece {
+  text: string;
+  idea: string | null;
+  added: boolean;
 }
 
 export interface KbStudyMove {
@@ -1748,6 +1793,21 @@ export interface KbStudyPart {
   result: KbStudyResult | null;
   chat_id: string;
   message_id: string;
+  pile?: KbStudyPile | null;
+}
+
+/** P3-d: «I know this» (Good), a skip (Again once per pass), ← back, or «Go through again». */
+export interface KbStudyPassIn {
+  action: "know" | "skip" | "back" | "restart";
+  item_id?: string | null;
+}
+
+/** P3-d: this pass through the deck — the pile top first («N left»), and what happened so far. */
+export interface KbStudyPile {
+  queue: string[];
+  known: number;
+  again: number;
+  can_back: boolean;
 }
 
 export interface KbStudyQuestion {
@@ -1759,6 +1819,14 @@ export interface KbStudyQuestion {
   citations: KbCitation[];
   explanation: string | null;
   response: KbStudyResponse | null;
+  unclear?: boolean;
+}
+
+/** «I did say this»: the words of the user's own answer that state the key idea. */
+export interface KbStudyRecheckIn {
+  item_id: string;
+  idea_id: string;
+  words: string;
 }
 
 export interface KbStudyRenameIn {
@@ -1771,12 +1839,14 @@ export interface KbStudyResponse {
   text: string | null;
   checked: boolean;
   score: number | null;
+  status?: "got" | "almost" | "not_yet" | null;
   verdict: string | null;
   missing: string | null;
   comment: string | null;
   checked_by?: string | null;
   checking: boolean;
   error: string | null;
+  review?: KbStudyReview | null;
 }
 
 export interface KbStudyResult {
@@ -1790,10 +1860,19 @@ export interface KbStudyResult {
 export interface KbStudyResultRow {
   id: string;
   score: number | null;
+  status?: "got" | "almost" | "not_yet" | null;
 }
 
 export interface KbStudyRetake {
   mistakes_only?: boolean;
+}
+
+/** The review of an open answer, kept in the attempt: shown again without asking the agent again. */
+export interface KbStudyReview {
+  ideas: KbStudyIdeaReview[];
+  model_answer: KbStudyModelPiece[];
+  also_right: KbStudyAlsoRight[];
+  comment: string | null;
 }
 
 /** The block's last row (S6): "<Agent> wants to create <path> · Deny · Save to wiki" and what happened. */
@@ -1813,6 +1892,25 @@ export interface KbStudySettings {
 
 export interface KbStudySettingsPatch {
   new_per_day: number;
+}
+
+/** «Clear now»: the user clears these marks (the agent never does). */
+export interface KbStudyUnclearClear {
+  item_ids: string[];
+}
+
+/** A card or test question marked «Unclear» (P3-b), as the «Clear now» row lists it. */
+export interface KbStudyUnclearItem {
+  item_id: string;
+  kind: "card" | "question";
+  question: string;
+  title: string;
+  page_id: string | null;
+}
+
+export interface KbStudyUnclearList {
+  items: KbStudyUnclearItem[];
+  scope: "folders" | "library" | "page";
 }
 
 /** What a click on a notification opens. */
@@ -2969,6 +3067,20 @@ export interface KbEndpoints {
     response: KbStudySettings;
     status: 200;
   };
+  "GET /kb/study/unclear": {
+    path: Record<string, never>;
+    query: { chat_id?: string | null; page_id?: string | null };
+    body: never;
+    response: KbStudyUnclearList;
+    status: 200;
+  };
+  "POST /kb/study/unclear/clear": {
+    path: Record<string, never>;
+    query: { chat_id?: string | null };
+    body: KbStudyUnclearClear;
+    response: KbStudyUnclearList;
+    status: 200;
+  };
   "GET /kb/study/{block_id}": {
     path: { block_id: string };
     query: Record<string, never>;
@@ -2997,6 +3109,13 @@ export interface KbEndpoints {
     response: KbStudyPart;
     status: 200;
   };
+  "POST /kb/study/{block_id}/count": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyCountIn;
+    response: KbStudyPart;
+    status: 200;
+  };
   "POST /kb/study/{block_id}/finish": {
     path: { block_id: string };
     query: Record<string, never>;
@@ -3015,6 +3134,20 @@ export interface KbEndpoints {
     path: { block_id: string };
     query: Record<string, never>;
     body: KbStudyMarkIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/pass": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyPassIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/recheck": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyRecheckIn;
     response: KbStudyPart;
     status: 200;
   };
