@@ -102,6 +102,7 @@ Mark = Literal["hard", "known", "hide", "unhide", "unhard", "unclear", "clear"]
 #: P3-b: the «Unclear» mark and its removal — on the item, never FSRS.
 UNCLEAR_MARKS = ("unclear", "clear")
 NOT_FOUND = "This deck or test is no longer in the chat."
+EARLIER_ATTEMPT = "This answer belongs to an earlier attempt of the test."
 NOT_A_DECK = "This page is not a deck."
 NOTHING_LEFT = "Every card was dropped: none had an answer with a checked quote from a source."
 
@@ -889,11 +890,15 @@ class StudyService:
             raise NotFound("This question is not in the test.")
         return question
 
-    def _put_answer(self, block: StudyBlock, item_id: str, answer: dict[str, Any]) -> StudyBlock:
+    def _put_answer(self, block: StudyBlock, item_id: str, answer: dict[str, Any], *,
+                    attempt_id: str | None = None) -> StudyBlock:
+        """``attempt_id``: only into that attempt — a late review of an earlier one is dropped (Q1 p3 M7)."""
         with self._block_locks.hold(block.id):  # answers to two questions at once both stay (C-04)
             attempt = self.attempt(self.get(block.id))
             if attempt is None:
                 raise StudyError("Start the test again.")
+            if attempt_id is not None and attempt.id != attempt_id:
+                raise StudyError(EARLIER_ATTEMPT)
             items = dict(attempt.answers.get("items") or {})
             items[item_id] = answer
             answers = {**attempt.answers, "items": items}
@@ -947,27 +952,37 @@ class StudyService:
             raise StudyError("Only open answers are checked by the agent.")
         if self.judge is None:
             raise StudyError("No agent can check answers right now.")
-        key = (block_id, item_id)
+        attempt = await disk_call(self.attempt, block)
+        if attempt is None:
+            raise StudyError("Start the test again.")
+        # Keyed by the attempt: a retake checks its own answer, the old check's result is dropped (M7).
+        key = ("check", attempt.id, item_id)
         if key in self._judging:
             return block
         self._judging.add(key)
         given = text.strip()
-        block = await disk_call(
-            self._put_answer,
-            block,
-            item_id,
-            {"text": given, "checked": False, "score": None, "checking": True},
-        )
-        self._spawn(self._judge(block, question, given), f"study-judge-{block_id}")
+        try:
+            block = await disk_call(
+                self._put_answer,
+                block,
+                item_id,
+                {"text": given, "checked": False, "score": None, "checking": True},
+                attempt_id=attempt.id,
+            )
+        except BaseException:
+            self._judging.discard(key)
+            raise
+        self._spawn(self._judge(block, question, given, attempt.id), f"study-judge-{block_id}")
         return block
 
-    def running(self, block_id: str, item_id: str, idea_id: str | None = None) -> bool:
-        """The agent checks this answer (or rechecks this key idea) right now.
+    def running(self, attempt_id: str, item_id: str, idea_id: str | None = None) -> bool:
+        """The agent checks this answer (or rechecks this key idea) of this attempt right now.
 
         The stored ``checking`` / ``rechecking`` flags outlive their task when the app quits mid-check
         (Q1 p3 M3); only this in-memory set says the work still runs.
         """
-        return ((block_id, item_id) if idea_id is None else (block_id, item_id, idea_id)) in self._judging
+        key = ("check", attempt_id, item_id) if idea_id is None else ("recheck", attempt_id, item_id, idea_id)
+        return key in self._judging
 
     def _spawn(self, work: Coroutine[Any, Any, None], name: str) -> None:
         task = asyncio.create_task(work, name=name)
@@ -995,8 +1010,8 @@ class StudyService:
         checked_by = str(raw.get("checked_by") or "") or None
         return scored({"text": given, "review": review, "checked_by": checked_by})
 
-    async def _judge(self, block: StudyBlock, question: Question, given: str) -> None:
-        key = (block.id, question.id)
+    async def _judge(self, block: StudyBlock, question: Question, given: str, attempt_id: str) -> None:
+        key = ("check", attempt_id, question.id)
         assert self.judge is not None
         try:
             ideas = await disk_call(self.ideas, question.id)
@@ -1012,20 +1027,27 @@ class StudyService:
         finally:
             self._judging.discard(key)
         try:
-            await disk_call(self._put_answer, await disk_call(self.get, block.id), question.id, entry)
+            await disk_call(self._put_answer, await disk_call(self.get, block.id), question.id, entry,
+                            attempt_id=attempt_id)
         except KnowledgeError:
             return  # the block or its attempt is gone meanwhile (a new attempt, a deleted chat)
 
     # -- «I did say this» and «counted by you» (P3-a decision 6a) ------------------------------------
 
     def _change_answer(self, block_id: str, item_id: str,
-                       change: Callable[[dict[str, Any]], dict[str, Any]]) -> StudyBlock:
-        """Change one answer of the current attempt in place; the share and status are recomputed."""
+                       change: Callable[[dict[str, Any]], dict[str, Any]], *,
+                       attempt_id: str | None = None) -> StudyBlock:
+        """Change one answer of the current attempt in place; the share and status are recomputed.
+
+        ``attempt_id``: only in that attempt — a late recheck of an earlier one is dropped (Q1 p3 M7).
+        """
         with self._block_locks.hold(block_id):
             block = self.get(block_id)
             attempt = self.attempt(block)
             if attempt is None:
                 raise StudyError("Start the test again.")
+            if attempt_id is not None and attempt.id != attempt_id:
+                raise StudyError(EARLIER_ATTEMPT)
             items = dict(attempt.answers.get("items") or {})
             entry = items.get(item_id)
             if not entry or not entry.get("review"):
@@ -1072,18 +1094,24 @@ class StudyService:
         words = " ".join(fragment.split())
         if not in_answer(words, str(entry.get("text") or "")):
             raise StudyError(NOT_IN_ANSWER)
-        key = (block_id, item_id, idea_id)
+        assert attempt is not None  # the review above is of this attempt
+        key = ("recheck", attempt.id, item_id, idea_id)
         if key in self._judging:
             return block
         self._judging.add(key)
-        block = await disk_call(self._change_answer, block_id, item_id,
-                                lambda e: self._with_idea(e, idea_id, rechecking=True))
-        self._spawn(self._recheck(block, question, dict(idea), str(entry.get("text") or ""), words),
-                    f"study-recheck-{block_id}")
+        try:
+            block = await disk_call(self._change_answer, block_id, item_id,
+                                    lambda e: self._with_idea(e, idea_id, rechecking=True),
+                                    attempt_id=attempt.id)
+        except BaseException:
+            self._judging.discard(key)
+            raise
+        self._spawn(self._recheck(block, question, dict(idea), str(entry.get("text") or ""), words,
+                                  attempt.id), f"study-recheck-{block_id}")
         return block
 
     async def _recheck(self, block: StudyBlock, question: Question, idea: dict[str, Any], answer: str,
-                       words: str) -> None:
+                       words: str, attempt_id: str) -> None:
         assert self.judge is not None
         try:
             sources = await disk_call(sources_of, self._reader(), replace(question, cites=()), [idea])
@@ -1100,10 +1128,10 @@ class StudyService:
             failed = {"status": None, "note": "The agent couldn't recheck it. Try again.", "words": words}
             fields = {"rechecking": False, "recheck": failed}
         finally:
-            self._judging.discard((block.id, question.id, str(idea["id"])))
+            self._judging.discard(("recheck", attempt_id, question.id, str(idea["id"])))
         try:
             await disk_call(self._change_answer, block.id, question.id,
-                            lambda e: self._with_idea(e, str(idea["id"]), **fields))
+                            lambda e: self._with_idea(e, str(idea["id"]), **fields), attempt_id=attempt_id)
         except KnowledgeError:
             return
 

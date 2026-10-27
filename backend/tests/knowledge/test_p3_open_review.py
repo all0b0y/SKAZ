@@ -325,3 +325,77 @@ async def test_a_check_or_recheck_cut_off_by_a_restart_never_shows_as_running_fo
                             {"text": ANSWER, "checked": False, "score": None, "checking": True})
     response = (await kb_client.get(f"/kb/study/{block.id}")).json()["questions"][0]["response"]
     assert response["checking"] is False and "Try again" in response["error"]
+
+
+async def test_a_late_check_or_recheck_never_lands_on_a_newer_attempt(world: Any) -> None:  # noqa: F811
+    """Q1 p3 M7: results are tied to the attempt they were asked for; a retake starts its own check."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block, item_id = await _made(runtime, library, _open_with_ideas(library))
+    held = asyncio.Event()
+    inner = FakeJudge(REVIEW, {"status": "covered", "note": "Да."}, REVIEW)
+
+    async def judge(call: JudgeCall) -> Mapping[str, Any]:
+        answer = await inner(call)
+        if call.kind == "recheck":  # the recheck of attempt 1 waits until attempt 2 is reviewed
+            await held.wait()
+        return answer
+
+    study.judge = judge
+    await study.check_open(block.id, item_id, ANSWER)
+    await study.settle()
+    ideas = study.attempt(study.get(block.id)).answers["items"][item_id]["review"]["ideas"]
+    await study.recheck_idea(block.id, item_id, ideas[1]["id"], "она растёт")  # held
+    for _ in range(200):
+        if len(inner.calls) == 2:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=False)
+    await study.check_open(block.id, item_id, "Хаос.")  # attempt 2: its own check
+    for _ in range(300):
+        if (study.attempt(study.get(block.id)).answers["items"].get(item_id) or {}).get("checked"):
+            break
+        await asyncio.sleep(0.01)
+    assert len(inner.calls) == 3 and "Хаос." in inner.calls[2].data
+    new_attempt = study.attempt(study.get(block.id)).id
+    held.set()
+    await study.settle()
+    attempt = study.attempt(study.get(block.id))
+    assert attempt.id == new_attempt
+    entry = attempt.answers["items"][item_id]
+    assert entry["text"] == "Хаос." and entry["checked"] is True
+    ideas = entry["review"]["ideas"]
+    assert all(idea.get("recheck") is None and not idea.get("rechecking") for idea in ideas)  # dropped
+    assert ideas[1]["status"] == "partial"  # the old «covered» didn't land on this review
+
+
+async def test_a_retake_during_a_check_starts_its_own_check_and_drops_the_old_one(world: Any) -> None:  # noqa: F811
+    """Q1 p3 M7 (the open-answer check): the old answer's review never shows on the new attempt."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block, item_id = await _made(runtime, library, _open_with_ideas(library))
+    first = asyncio.Event()
+    inner = FakeJudge(REVIEW, {**REVIEW, "points": [_point(1, "missing")]})
+
+    async def judge(call: JudgeCall) -> Mapping[str, Any]:
+        if not inner.calls:
+            answer = await inner(call)
+            await first.wait()
+            return answer
+        return await inner(call)
+
+    study.judge = judge
+    await study.check_open(block.id, item_id, ANSWER)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=False)
+    await study.check_open(block.id, item_id, "Хаос.")
+    for _ in range(200):
+        if len(inner.calls) == 2:
+            break
+        await asyncio.sleep(0.01)
+    assert len(inner.calls) == 2 and "Хаос." in inner.calls[1].data
+    await asyncio.sleep(0.05)
+    first.set()
+    await study.settle()
+    entry = study.attempt(study.get(block.id)).answers["items"][item_id]
+    assert entry["text"] == "Хаос." and entry["checked"] is True
+    assert entry["review"]["ideas"][0]["status"] == "missing"  # the new review, not the old one

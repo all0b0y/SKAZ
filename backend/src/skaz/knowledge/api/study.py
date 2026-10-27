@@ -147,7 +147,8 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
             question = by_id[item_id]
             given = items.get(item_id)
             # A stored «checking» whose task is gone (the app quit mid-check, Q1 p3 M3) is a stopped check.
-            stopped = bool(given and given.get("checking")) and not study.running(block.id, item_id)
+            running = functools.partial(study.running, attempt.id if attempt else "", item_id)
+            stopped = bool(given and given.get("checking")) and not running()
             response = KbStudyResponse(
                 choices=list(given.get("choices") or []), text=given.get("text"),
                 checked=bool(given.get("checked")),
@@ -156,7 +157,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
                 checking=bool(given.get("checking")) and not stopped,
                 error=CHECK_STOPPED if stopped else given.get("error"),
                 status=given.get("status"),
-                review=_review(given, citation, functools.partial(study.running, block.id, item_id)),
+                review=_review(given, citation, running),
             ) if given else None
             questions.append(KbStudyQuestion(
                 id=question.id, type=question.type, question=question.question,
