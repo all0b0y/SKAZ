@@ -32,3 +32,24 @@ async def test_links_are_screened_even_when_the_card_could_not_record_them(env: 
     data = payload(env.agents["codex"].outputs[0])
     assert data["status"] == "ok" and data["links"]
     assert all("pinterest" not in link["url"] for link in data["links"]) and data["hidden_by_rules"] == 2
+
+
+async def test_a_denied_search_does_not_spend_search_everywhere_once(env: Env) -> None:
+    """Q1 n78 L-1: «Search everywhere once» is spent by the search the user allows, not by a Deny."""
+    await set_settings(env, only_on=True, only=["arxiv.org"])
+    env.codex_search.links = SEARCH_LINKS
+    chat_id = await env.chat("codex")
+    url = f"/kb/chats/{chat_id}/search-rules"
+    assert (await env.client.post(f"{url}/everywhere-once")).json()["everywhere_once"] is True
+    await env.send(chat_id)
+    part = await env.pending(chat_id)
+    assert part["rules"]["everywhere_once"] is True
+    await env.decide(part["id"], "deny")
+    await finished(env.runtime.kb_chats)
+    assert (await env.client.get(url)).json()["everywhere_once"] is True  # still the user's to use
+    await env.send(chat_id, "Ещё раз")
+    part = await env.pending(chat_id)
+    await env.decide(part["id"], "allow")
+    await finished(env.runtime.kb_chats)
+    assert (await env.client.get(url)).json()["everywhere_once"] is False
+    assert any("medium.com" in link["url"] for link in payload(env.agents["codex"].outputs[-1])["links"])

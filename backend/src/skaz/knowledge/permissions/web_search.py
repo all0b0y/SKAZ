@@ -181,8 +181,10 @@ class WebSearchStore:
 
 
 Listener = Callable[[WebSearchRecord], None]
-#: N7: the rules for a search about to be asked in a chat (spends a «Search everywhere once»).
+#: N7: the rules for a search about to be asked in a chat (a snapshot; spends nothing).
 RulesSource = Callable[[str], ActiveRules]
+#: N7: spends a chat's «Search everywhere once» — when a search that used it is allowed (Q1 n78 L-1).
+SpendOnce = Callable[[str], None]
 
 
 class WebSearchBroker:
@@ -193,6 +195,8 @@ class WebSearchBroker:
         self.rules = rules
         #: The rules in force now, without spending anything (Q1 H-2: may the agent's own search run?).
         self.current: RulesSource | None = None
+        #: Spends «Search everywhere once» once a search that used it is allowed (not on Deny, L-1).
+        self.spend: SpendOnce | None = None
         self.waits = waits
         self._clock = clock
         self._futures: dict[str, asyncio.Future[WebSearchRecord]] = {}
@@ -211,6 +215,10 @@ class WebSearchBroker:
         if count:
             log.info("Cancelled %d web searches left by an earlier start", count)
         return count
+
+    async def _spent(self, record: WebSearchRecord) -> None:
+        if self.spend is not None and record.rules is not None and record.rules.everywhere_once:
+            await disk_call(self.spend, record.chat_id)
 
     async def native_held(self, chat_id: str) -> bool:
         """The user's hard rules keep the asking agent's own search off in this chat (Q1 n78 H-2)."""
@@ -248,6 +256,7 @@ class WebSearchBroker:
         if await disk_call(self.store.granted_at, run.chat_id) is not None:
             record = replace(base, status="allowed", auto=True, decided_at=now)
             await disk_call(self.store.add, record)
+            await self._spent(record)
             log.info("Web search %s (%s) allowed by the chat's grant", record.id, record.engine)
             self._notify(record)
             return record
@@ -288,6 +297,8 @@ class WebSearchBroker:
             raise PermissionConflict(ALREADY, "ALREADY_DECIDED")
         if decision == "allow_chat":
             await disk_call(self.store.grant, record.chat_id, self._clock())
+        if status == "allowed":
+            await self._spent(updated)
         log.info("Web search %s %s by the user (%s)", search_id, status, decision)
         if not future.done():
             future.set_result(updated)

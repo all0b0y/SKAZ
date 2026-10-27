@@ -382,8 +382,24 @@ class SearchRulesStore:
 
     def take_active(self, chat_id: str) -> ActiveRules:
         """The rules for a search about to be asked; spends the chat's «Search everywhere once»."""
-        chat = self.chat(chat_id)
-        rules = active_rules(self.global_rules(), chat)
-        if chat.everywhere_once:
-            self.set_chat(chat_id, replace(chat, everywhere_once=False))
+        rules = self.active(chat_id)
+        if rules.everywhere_once:
+            self.spend_once(chat_id)
         return rules
+
+    def spend_once(self, chat_id: str) -> None:
+        """Spend «Search everywhere once» in one write (Q1 n78 L-1: a panel Save meanwhile is kept)."""
+        with self.db.write() as connection:
+            row = connection.execute("SELECT rules FROM chat_search_rules WHERE chat_id = ?",
+                                     (chat_id,)).fetchone()
+            if row is None:
+                return
+            rules = ChatRules.from_json(json.loads(row[0]))
+            if not rules.everywhere_once:
+                return
+            rules = replace(rules, everywhere_once=False)
+            if rules.is_default:
+                connection.execute("DELETE FROM chat_search_rules WHERE chat_id = ?", (chat_id,))
+            else:
+                connection.execute("UPDATE chat_search_rules SET rules = ?, updated_at = ? WHERE chat_id = ?",
+                                   (json.dumps(rules.to_json(), ensure_ascii=False), utc_now(), chat_id))
