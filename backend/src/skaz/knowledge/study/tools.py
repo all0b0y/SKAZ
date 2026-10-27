@@ -89,7 +89,8 @@ class StudyTools:
                 "Make a test (choice, multi, short or open questions, as the user asked) and show it in the "
                 "chat. Every right answer needs a citation with a verbatim quote; wrong options are yours "
                 "and are shown as made up by you. Choice and short answers are checked by SKAZ; open "
-                "answers are checked by you later." + shown,
+                "answers are checked by you later against the open question's key ideas: give 2–6 of them, "
+                "each with a verbatim citation (the points a full answer covers)." + shown,
                 MakeTestArgs,
                 run=self._run(self._make_test),
                 timeout_s=60.0,

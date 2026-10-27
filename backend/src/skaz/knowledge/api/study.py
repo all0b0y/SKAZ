@@ -17,21 +17,28 @@ from .schemas_study import (
     KbDeckStudy,
     KbDeckStudyResult,
     KbDeckView,
+    KbStudyAlsoRight,
     KbStudyAnswerIn,
     KbStudyCard,
+    KbStudyCountIn,
     KbStudyGradeIn,
     KbStudyGroups,
+    KbStudyIdeaRecheck,
+    KbStudyIdeaReview,
     KbStudyIntervals,
     KbStudyMarkIn,
+    KbStudyModelPiece,
     KbStudyMove,
     KbStudyOption,
     KbStudyPart,
     KbStudyQuestion,
+    KbStudyRecheckIn,
     KbStudyRenameIn,
     KbStudyResponse,
     KbStudyResult,
     KbStudyResultRow,
     KbStudyRetake,
+    KbStudyReview,
     KbStudySave,
     KbStudySaveIn,
     KbStudySettings,
@@ -77,6 +84,36 @@ def _option(option: dict[str, str]) -> KbStudyOption:
                          origin="agent" if option["origin"] == "agent" else "source")
 
 
+def _cites(cites: Any, citation: CitationFn) -> list[KbCitation]:
+    return [citation(str(c["material_id"]), int(c["seg"]), c.get("quote")) for c in cites or []]
+
+
+def _review(given: dict[str, Any], citation: CitationFn) -> KbStudyReview | None:
+    """The stored review of an open answer (P3-a), its quotes as citations."""
+    review = given.get("review")
+    if not isinstance(review, dict):
+        return None
+    ideas = []
+    for idea in review.get("ideas") or []:
+        recheck = idea.get("recheck")
+        ideas.append(KbStudyIdeaReview(
+            id=idea["id"], text=idea["text"], citations=_cites(idea.get("cites"), citation),
+            status=idea.get("status", "missing"), yours=idea.get("yours"), why=idea.get("why"),
+            why_basis=idea.get("why_basis"), why_citations=_cites(idea.get("why_cites"), citation),
+            by_user=bool(idea.get("by_user")),
+            recheck=KbStudyIdeaRecheck(status=recheck.get("status"), note=recheck.get("note"),
+                                       words=str(recheck.get("words") or "")) if recheck else None,
+            rechecking=bool(idea.get("rechecking"))))
+    return KbStudyReview(
+        ideas=ideas,
+        model_answer=[KbStudyModelPiece(text=p["text"], idea=p.get("idea"), added=bool(p.get("added")))
+                      for p in review.get("model") or []],
+        also_right=[KbStudyAlsoRight(text=a["text"], basis=a.get("basis", "agent"),
+                                     citations=_cites(a.get("cites"), citation))
+                    for a in review.get("also") or []],
+        comment=review.get("comment"))
+
+
 def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> KbStudyPart:
     """What the block shows now (cards re-read from the deck page, states from the database)."""
     cards: list[KbStudyCard] = []
@@ -101,6 +138,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
                 score=given.get("score"), verdict=given.get("verdict"), missing=given.get("missing"),
                 comment=given.get("comment"), checked_by=given.get("checked_by"),
                 checking=bool(given.get("checking")), error=given.get("error"),
+                status=given.get("status"), review=_review(given, citation),
             ) if given else None
             questions.append(KbStudyQuestion(
                 id=question.id, type=question.type, question=question.question,
@@ -235,6 +273,24 @@ async def check_open_answer(block_id: str, body: KbStudyAnswerIn, study: StudyDe
     except KnowledgeError as error:
         raise _http(error) from error
     return await _view(study, request, block)
+
+
+@router.post("/{block_id}/recheck")
+async def recheck_idea(block_id: str, body: KbStudyRecheckIn, study: StudyDep,
+                       request: Request) -> KbStudyPart:
+    """«I did say this» (P3-a 6a): the agent rechecks ONE key idea; its answer arrives as a block update."""
+    try:
+        block = await study.recheck_idea(block_id, body.item_id, body.idea_id, body.words)
+    except KnowledgeError as error:
+        raise _http(error) from error
+    return await _view(study, request, block)
+
+
+@router.post("/{block_id}/count")
+async def count_idea(block_id: str, body: KbStudyCountIn, study: StudyDep, request: Request) -> KbStudyPart:
+    """«Count it»: the user counts a key idea as said («counted by you»); the score is recomputed."""
+    return await _act(request, study, lambda: study.count_idea(block_id, body.item_id, body.idea_id,
+                                                               body.counted))
 
 
 @router.post("/{block_id}/finish")

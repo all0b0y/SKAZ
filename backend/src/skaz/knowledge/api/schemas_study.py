@@ -59,14 +59,72 @@ class KbStudyOption(BaseModel):
     origin: Literal["source", "agent"]
 
 
+class KbStudyIdeaRecheck(BaseModel):
+    """«I did say this» (P3-a 6a): the agent's second look at one key idea for the words the user chose."""
+
+    #: ``null`` when the recheck failed (the note says so).
+    status: Literal["covered", "partial", "missing"] | None
+    note: str | None
+    words: str
+
+
+class KbStudyIdeaReview(BaseModel):
+    """One key idea of the question and how the answer covers it (P3-a decision 2) — the agent's opinion."""
+
+    id: str
+    text: str
+    #: Where the source says it (checked quotes).
+    citations: list[KbCitation]
+    status: Literal["covered", "partial", "missing"]
+    #: Partial: the user's own words that came close (verbatim from the answer).
+    yours: str | None
+    #: Why it matters (not for a covered idea).
+    why: str | None
+    #: ``source``: from the user's sources (``why_citations``); ``agent``: the agent's own knowledge.
+    why_basis: Literal["source", "agent"] | None
+    why_citations: list[KbCitation]
+    #: «counted by you»: the user counts the idea as said; the score counts it as covered.
+    by_user: bool
+    recheck: KbStudyIdeaRecheck | None
+    rechecking: bool
+
+
+class KbStudyModelPiece(BaseModel):
+    """A piece of the model answer: the user's own words, or an addition for a key idea (underlined)."""
+
+    text: str
+    idea: str | None
+    added: bool
+
+
+class KbStudyAlsoRight(BaseModel):
+    """«Also right in your answer» (P3-a 6b): beyond the key ideas; never changes the score."""
+
+    text: str
+    basis: Literal["source", "agent"]
+    citations: list[KbCitation]
+
+
+class KbStudyReview(BaseModel):
+    """The review of an open answer, kept in the attempt: shown again without asking the agent again."""
+
+    ideas: list[KbStudyIdeaReview]
+    model_answer: list[KbStudyModelPiece]
+    also_right: list[KbStudyAlsoRight]
+    comment: str | None
+
+
 class KbStudyResponse(BaseModel):
     """The user's answer to one question in the current attempt."""
 
     choices: list[str]
     text: str | None
     checked: bool
-    #: 1 right, 0.5 partly (open answers, the agent's opinion), 0 wrong; ``null`` before checking.
+    #: 1 right, 0 not yet; an open answer: the share of its key ideas SKAZ counted from the review
+    #: (P3-a decision 5); ``null`` before checking.
     score: float | None
+    #: Open answers (P3-a): «Got it» (share ≥ 0.8) / «Almost there» / «Not yet» (0) — from ``score``.
+    status: Literal["got", "almost", "not_yet"] | None = None
     #: Open answers: "right" / "partly" / "wrong" — the agent's opinion, not a fact.
     verdict: str | None
     missing: str | None
@@ -76,6 +134,8 @@ class KbStudyResponse(BaseModel):
     #: The agent is checking it now.
     checking: bool
     error: str | None
+    #: Open answers checked since P3-a: key ideas, model answer, «Also right»; ``null`` before.
+    review: KbStudyReview | None = None
 
 
 class KbStudyQuestion(BaseModel):
@@ -102,13 +162,15 @@ class KbStudySave(BaseModel):
 class KbStudyResultRow(BaseModel):
     id: str
     score: float | None
+    #: Open answers reviewed since P3-a (``got`` / ``almost`` / ``not_yet``); ``null`` for the others.
+    status: Literal["got", "almost", "not_yet"] | None = None
 
 
 class KbStudyResult(BaseModel):
     correct: float
     total: int
     mistakes: int
-    #: Open answers the agent judged partly right.
+    #: Open answers «almost there» in the agent's opinion.
     partly: int
     rows: list[KbStudyResultRow]
 
@@ -167,6 +229,22 @@ class KbStudyAnswerIn(_Request):
     item_id: str = Field(min_length=1, max_length=120)
     choices: list[str] | None = Field(default=None, max_length=12)
     text: str | None = Field(default=None, max_length=5_000)
+
+
+class KbStudyRecheckIn(_Request):
+    """«I did say this»: the words of the user's own answer that state the key idea."""
+
+    item_id: str = Field(min_length=1, max_length=120)
+    idea_id: str = Field(min_length=1, max_length=40)
+    words: str = Field(min_length=1, max_length=5_000)
+
+
+class KbStudyCountIn(_Request):
+    """«Count it»: the user counts a key idea as said («counted by you»), or takes that back."""
+
+    item_id: str = Field(min_length=1, max_length=120)
+    idea_id: str = Field(min_length=1, max_length=40)
+    counted: bool = True
 
 
 class KbStudyRetake(_Request):

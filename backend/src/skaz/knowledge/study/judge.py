@@ -1,7 +1,9 @@
-"""The agent's check of an open answer (S4, Q6): the chat's agent and model, no tools, a JSON verdict.
+"""The study judge's agent run (S4, Q6; P3-a): the chat's agent and model, no tools, a JSON object.
 
-It is a separate run, not a message of the chat: the block shows the verdict as "Agent's opinion · not
-a fact". Source text enters only as untrusted data (layer 6); chat-only writing skills stay out.
+It is a separate run, not a message of the chat: the block shows what it says as the agent's opinion,
+not a fact. What it is asked and how its answer is checked live in ``study.review``; this module only
+runs the agent. Source text enters only as untrusted data (layer 6); chat-only writing skills and «Я»
+stay out.
 """
 
 from __future__ import annotations
@@ -14,33 +16,31 @@ from typing import Any
 
 from ...native_io import disk_call
 from ..agents.engine import AgentTurn, Failed, TurnMessage, collect
-from ..agents.prompting import untrusted_block
 from ..agents.registry import EngineRegistry
 from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
 from ..service import KnowledgeService
-from .format import Question
-from .service import JUDGE_RULES, JUDGE_SCHEMA, judge_prompt
-from .store import StudyBlock
+from .review import Judge, JudgeCall
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
 
 
-def parse_verdict(text: str) -> dict[str, Any]:
+def parse_object(text: str) -> dict[str, Any]:
     raw = _FENCE.sub("", text.strip())
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
         raise ValueError("no JSON object in the answer")
     value = json.loads(raw[start : end + 1])
-    if not isinstance(value, dict) or value.get("verdict") not in ("right", "partly", "wrong"):
-        raise ValueError("not a verdict")
+    if not isinstance(value, dict):
+        raise ValueError("not a JSON object")
     return value
 
 
-def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> Callable[..., Any]:
+def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> Judge:
     repo = ChatRepository(kb.db)
 
-    async def judge(block: StudyBlock, question: Question, text: str) -> Mapping[str, Any]:
+    async def judge(call: JudgeCall) -> Mapping[str, Any]:
+        block = call.block
         # A test opened from the wiki carries the agent fixed when it was opened (bug 1); one made in a
         # chat is checked by that chat's agent, model and effort.
         fixed = block.payload.get("agent")
@@ -52,28 +52,22 @@ def make_judge(kb: KnowledgeService, registry: Callable[[], EngineRegistry]) -> 
                 raise KnowledgeError("The chat of this test is gone.")
             engine_id, model, effort = chat.engine, chat.model, chat.effort
         engine = await registry().require_known(engine_id)
-        quotes = [cite.quote for cite in question.cites if cite.quote]
         turn = AgentTurn(
             run_id=f"judge-{uuid.uuid4().hex[:12]}",
-            messages=(
-                TurnMessage(
-                    "user",
-                    untrusted_block("question, source and answer", judge_prompt(question, text, quotes)),
-                ),
-            ),
-            instructions=JUDGE_RULES,
+            messages=(TurnMessage("user", call.data),),
+            instructions=call.instructions,
             tools=None,
             model=model,
             effort=effort,
-            response_schema=JUDGE_SCHEMA,
+            response_schema=dict(call.schema),
         )
         result = await collect(engine.run(turn))
         if isinstance(result.terminal, Failed):
             raise KnowledgeError(result.terminal.message)
-        verdict = parse_verdict(result.text)
-        # Who checked it (bug 1, R5): the verdict says it — «Codex · gpt-…» — as the agent's opinion.
-        verdict["checked_by"] = await _who(registry(), engine_id, model)
-        return verdict
+        answer = parse_object(result.text)
+        # Who checked it (bug 1, R5): the review says it — «Codex · gpt-…» — as the agent's opinion.
+        answer["checked_by"] = await _who(registry(), engine_id, model)
+        return answer
 
     return judge
 

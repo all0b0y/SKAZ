@@ -1650,6 +1650,13 @@ export interface KbStepsBlock {
   steps: KbStep[];
 }
 
+/** «Also right in your answer» (P3-a 6b): beyond the key ideas; never changes the score. */
+export interface KbStudyAlsoRight {
+  text: string;
+  basis: "source" | "agent";
+  citations: KbCitation[];
+}
+
 export interface KbStudyAnswerIn {
   item_id: string;
   choices?: string[] | null;
@@ -1672,6 +1679,13 @@ export interface KbStudyCard {
   due: string | null;
 }
 
+/** «Count it»: the user counts a key idea as said («counted by you»), or takes that back. */
+export interface KbStudyCountIn {
+  item_id: string;
+  idea_id: string;
+  counted?: boolean;
+}
+
 export interface KbStudyGradeIn {
   item_id: string;
   grade: "again" | "hard" | "good" | "easy";
@@ -1682,6 +1696,28 @@ export interface KbStudyGroups {
   learning: number;
   known: number;
   hard: number;
+}
+
+/** «I did say this» (P3-a 6a): the agent's second look at one key idea for the words the user chose. */
+export interface KbStudyIdeaRecheck {
+  status: "covered" | "partial" | "missing" | null;
+  note: string | null;
+  words: string;
+}
+
+/** One key idea of the question and how the answer covers it (P3-a decision 2) — the agent's opinion. */
+export interface KbStudyIdeaReview {
+  id: string;
+  text: string;
+  citations: KbCitation[];
+  status: "covered" | "partial" | "missing";
+  yours: string | null;
+  why: string | null;
+  why_basis: "source" | "agent" | null;
+  why_citations: KbCitation[];
+  by_user: boolean;
+  recheck: KbStudyIdeaRecheck | null;
+  rechecking: boolean;
 }
 
 /** What each grade schedules ("10m", "3d"); ``null`` where a practice mode leaves the schedule alone. */
@@ -1695,6 +1731,13 @@ export interface KbStudyIntervals {
 export interface KbStudyMarkIn {
   item_ids: string[];
   mark: "hard" | "known" | "hide" | "unhide" | "unhard";
+}
+
+/** A piece of the model answer: the user's own words, or an addition for a key idea (underlined). */
+export interface KbStudyModelPiece {
+  text: string;
+  idea: string | null;
+  added: boolean;
 }
 
 export interface KbStudyMove {
@@ -1743,6 +1786,13 @@ export interface KbStudyQuestion {
   response: KbStudyResponse | null;
 }
 
+/** «I did say this»: the words of the user's own answer that state the key idea. */
+export interface KbStudyRecheckIn {
+  item_id: string;
+  idea_id: string;
+  words: string;
+}
+
 export interface KbStudyRenameIn {
   title: string;
 }
@@ -1753,12 +1803,14 @@ export interface KbStudyResponse {
   text: string | null;
   checked: boolean;
   score: number | null;
+  status?: "got" | "almost" | "not_yet" | null;
   verdict: string | null;
   missing: string | null;
   comment: string | null;
   checked_by?: string | null;
   checking: boolean;
   error: string | null;
+  review?: KbStudyReview | null;
 }
 
 export interface KbStudyResult {
@@ -1772,10 +1824,19 @@ export interface KbStudyResult {
 export interface KbStudyResultRow {
   id: string;
   score: number | null;
+  status?: "got" | "almost" | "not_yet" | null;
 }
 
 export interface KbStudyRetake {
   mistakes_only?: boolean;
+}
+
+/** The review of an open answer, kept in the attempt: shown again without asking the agent again. */
+export interface KbStudyReview {
+  ideas: KbStudyIdeaReview[];
+  model_answer: KbStudyModelPiece[];
+  also_right: KbStudyAlsoRight[];
+  comment: string | null;
 }
 
 /** The block's last row (S6): "<Agent> wants to create <path> · Deny · Save to wiki" and what happened. */
@@ -2979,6 +3040,13 @@ export interface KbEndpoints {
     response: KbStudyPart;
     status: 200;
   };
+  "POST /kb/study/{block_id}/count": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyCountIn;
+    response: KbStudyPart;
+    status: 200;
+  };
   "POST /kb/study/{block_id}/finish": {
     path: { block_id: string };
     query: Record<string, never>;
@@ -2997,6 +3065,13 @@ export interface KbEndpoints {
     path: { block_id: string };
     query: Record<string, never>;
     body: KbStudyMarkIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/recheck": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyRecheckIn;
     response: KbStudyPart;
     status: 200;
   };

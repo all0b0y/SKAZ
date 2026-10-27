@@ -38,6 +38,12 @@ export const studyApi = {
   answer: (c: KbClient, id: string, body: KbStudyAnswerIn) => c.call('POST /kb/study/{block_id}/answer', { path: { block_id: id }, body }),
   checkOpen: (c: KbClient, id: string, itemId: string, text: string) =>
     c.call('POST /kb/study/{block_id}/check-open', { path: { block_id: id }, body: { item_id: itemId, text } }),
+  /** «I did say this» (P3-a): the agent rechecks one key idea against words of the user's own answer. */
+  recheck: (c: KbClient, id: string, itemId: string, ideaId: string, words: string) =>
+    c.call('POST /kb/study/{block_id}/recheck', { path: { block_id: id }, body: { item_id: itemId, idea_id: ideaId, words } }),
+  /** «Count it» / take it back: the user counts a key idea as said («counted by you»). */
+  count: (c: KbClient, id: string, itemId: string, ideaId: string, counted: boolean) =>
+    c.call('POST /kb/study/{block_id}/count', { path: { block_id: id }, body: { item_id: itemId, idea_id: ideaId, counted } }),
   finish: (c: KbClient, id: string) => c.call('POST /kb/study/{block_id}/finish', { path: { block_id: id } }),
   retake: (c: KbClient, id: string, mistakesOnly: boolean) =>
     c.call('POST /kb/study/{block_id}/retake', { path: { block_id: id }, body: { mistakes_only: mistakesOnly } }),
