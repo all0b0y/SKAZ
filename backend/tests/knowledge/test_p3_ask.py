@@ -148,3 +148,15 @@ async def test_a_chip_for_another_chats_unsaved_test_is_refused(env: Env) -> Non
         check_study_selection(env.study, chip, chat_id=other)
     saved = await asyncio.to_thread(env.study.save, block.id, "allow")  # in the library now: any chat
     assert check_study_selection(env.study, chip, chat_id=other).block_id == saved.id
+
+
+async def test_the_chat_route_refuses_another_chats_unsaved_test_chip(env: Env) -> None:
+    """Q1 p3 L9 wired: the question route passes the asking chat to the study check."""
+    own = (await env.client.post("/kb/chats", json={})).json()["id"]
+    other = (await env.client.post("/kb/chats", json={})).json()["id"]
+    block = await _test_in(env, own)
+    chip = _chip(block, env.study.questions(block)[0].id)
+    refused = await env.ask(other, {"text": "Explain this question", "selection": chip})
+    assert refused.status_code == 422 and "another chat" in refused.json()["detail"]
+    sent = await env.ask(own, {"text": "Explain this question", "selection": chip})
+    assert sent.status_code == 202, sent.text

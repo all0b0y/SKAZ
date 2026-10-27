@@ -825,14 +825,13 @@ class ChatService:
                                  chat_id: str) -> Selection:
         """P2's items of an earlier answer, or P3-c's test question (checked against the study block).
 
-        ``chat_id``: the asking chat (Q1 p3 L9 — the study check takes it as ``chat_id=`` once
-        ``check_study_selection`` has that keyword, fix/q1-study)."""
+        ``chat_id``: the asking chat — another chat's unsaved test is refused (Q1 p3 L9)."""
         if selection.kind == "study":
             from ..study.ask import check_study_selection  # the study package imports chats (C-17)
 
             if self.study is None:
                 raise SelectionInvalid("Tests aren't available here.")
-            return await disk_call(check_study_selection, self.study, selection)
+            return await disk_call(check_study_selection, self.study, selection, chat_id=chat_id)
         return check_selection(prior, selection)
 
     def _input_folders(self, given: MessageInput) -> list[str]:
