@@ -183,3 +183,21 @@ async def test_marks_of_items_whose_chat_and_page_are_gone_are_forgotten(world: 
     await runtime.kb_chats.delete(ref.chat_id)  # the chat and its unsaved test go
     assert unclear_items(study, None) == []
     assert study.items.one(first) is None and study.items.unclear() == []
+
+
+async def test_the_test_counts_every_unclear_question_also_those_a_retake_leaves_out(
+    world: Any, kb_client: httpx.AsyncClient  # noqa: F811
+) -> None:
+    """Q1 p3 L10: «Discuss unclear · N» after a «tricky ones» retake counts the whole test's marks."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    questions = study.questions(block)
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, questions[0].id, choices=[right])  # right: not retaken
+    await asyncio.to_thread(study.mark, block.id, [questions[0].id, questions[1].id], "unclear")
+    await asyncio.to_thread(study.finish, block.id)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=True)
+    part = (await kb_client.get(f"/kb/study/{block.id}")).json()
+    assert questions[0].id not in [q["id"] for q in part["questions"]]
+    assert part["unclear"] == 2

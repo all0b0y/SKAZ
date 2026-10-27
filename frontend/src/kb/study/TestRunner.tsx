@@ -267,7 +267,8 @@ function TestResult({ part, busy, onRetake, onReview }: {
         })}
       </ul>
       <div className="kb-st-tact">
-        <DiscussUnclear count={part.questions.filter((q) => q.unclear).length} chatId={part.chat_id}
+        {/* The whole test's marks, also those a «tricky ones» retake leaves out (Q1 p3 L10). */}
+        <DiscussUnclear count={part.unclear ?? part.questions.filter((q) => q.unclear).length} chatId={part.chat_id}
           page={part.save.page_id ? { id: part.save.page_id, title: part.title } : null} />
         <span className="kb-st-spacer" />
         <Button size="sm" icon="retry" busy={busy === 'retake'} disabled={!!busy} onClick={() => onRetake(false)}>Retake</Button>

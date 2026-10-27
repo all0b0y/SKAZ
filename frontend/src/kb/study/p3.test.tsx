@@ -189,3 +189,19 @@ describe('A11y (Q1 p3 L8)', () => {
     expect(note).not.toHaveClass('is-hot');
   });
 });
+
+describe('Discuss unclear after a tricky-ones retake (Q1 p3 L10)', () => {
+  it('counts every question of the test the backend says is marked, not only those of this attempt', { timeout: 15_000 }, async () => {
+    const world = studyWorld();
+    const chat = world.chats.find((c) => c.title === 'Lecture 8 — test')!;
+    const testPart = chat.messages.flatMap((m) => m.parts).find((p) => p.type === 'study') as KbStudyPart;
+    testPart.questions[0]!.unclear = true;
+    testPart.unclear = 2; // one more is marked in a question this attempt leaves out
+    const { user } = await openChat(/Lecture 8 — test/, world);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.click(within(test).getByRole('button', { name: 'See result' }));
+    expect(await within(test).findByRole('button', { name: 'Discuss unclear · 2' })).toBeInTheDocument();
+  });
+});

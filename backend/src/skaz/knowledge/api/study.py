@@ -142,7 +142,9 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         items = (attempt.answers.get("items") if attempt else None) or {}
         by_id = {q.id: q for q in study.questions(block)}
         order = [item_id for item_id in study._test_order(block) if item_id in by_id]
-        marked = study.unclear_of(order)
+        # Every question of the test, also those a «tricky ones» retake leaves out (Q1 p3 L10).
+        marked = study.unclear_of(list(by_id))
+        unclear = len(marked)
         for item_id in order:
             question = by_id[item_id]
             given = items.get(item_id)
@@ -167,6 +169,8 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
                 explanation=question.explanation, response=response, unclear=question.id in marked))
         groups = {"new": 0, "learning": 0, "known": 0, "hard": 0}
         total = len(questions)
+    if block.kind == "deck":
+        unclear = sum(1 for card in cards if card.unclear)
     result = study.result(block) if block.kind == "test" else None
     return KbStudyPart(
         type="study", id=block.id, kind=block.kind, title=block.title, engine=block.engine,
@@ -178,7 +182,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         result=KbStudyResult(correct=result["correct"], total=result["total"], mistakes=result["mistakes"],
                              partly=result["partly"],
                              rows=[KbStudyResultRow(**row) for row in result["rows"]]) if result else None,
-        chat_id=block.chat_id, message_id=block.message_id, pile=_pile(study, block),
+        chat_id=block.chat_id, message_id=block.message_id, pile=_pile(study, block), unclear=unclear,
     )
 
 

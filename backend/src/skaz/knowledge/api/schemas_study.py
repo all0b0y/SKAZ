@@ -226,6 +226,9 @@ class KbStudyPart(BaseModel):
     message_id: str
     #: Decks (P3-d): the pass; ``null`` for a test.
     pile: KbStudyPile | None = None
+    #: P3-b: items marked «Unclear» — for a test every question, also those a «tricky ones» retake
+    #: leaves out of ``questions`` (Q1 p3 L10).
+    unclear: int = 0
 
 
 class KbStudyMove(_Request):
