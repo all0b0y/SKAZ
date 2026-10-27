@@ -16,7 +16,8 @@ export interface SelectedItem {
 export interface SelectionTarget {
   message_id: string;
   block_id: string;
-  kind: 'block' | 'diagram';
+  /** `study` (P3-c): a test question — `block_id` is the test block, the one item its question. */
+  kind: 'block' | 'diagram' | 'study';
   /** The block's own title, if it has one (shown in the chip). */
   title: string | null;
 }
@@ -46,6 +47,8 @@ export function itemsLabel(items: readonly SelectedItem[]): string {
 
 /** The chip on the question: «“Timeout” · Leader election», «3 items · Diagram». */
 export function chipLabel(selection: Pick<Selection, 'items' | 'title' | 'kind'>): string {
+  // P3-c: «📍 question 3 · Lecture 8 check».
+  if (selection.kind === 'study') return [selection.items[0]?.label ?? 'question', selection.title].filter(Boolean).join(' · ');
   const where = selection.title ? clip(selection.title, 48) : selection.kind === 'diagram' ? 'Diagram' : null;
   return where ? `${itemsLabel(selection.items)} · ${where}` : itemsLabel(selection.items);
 }

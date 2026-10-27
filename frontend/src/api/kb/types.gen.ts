@@ -1534,7 +1534,7 @@ export interface KbSelectedItem {
 export interface KbSelection {
   message_id: string;
   block_id: string;
-  kind: "block" | "diagram";
+  kind: "block" | "diagram" | "study";
   title?: string | null;
   items: KbSelectedItem[];
   intent?: "ask" | "explain" | "wrong";

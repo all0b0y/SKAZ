@@ -5,6 +5,7 @@ import type { KbMessage, KbStudyPart } from '../../api/kb/types.gen';
 import { studyWorld } from '../test/fixtures';
 import { renderKb } from '../test/renderKb';
 import { DISCUSS_UNCLEAR_TEXT } from './Unclear';
+import { ASK_QUESTION_TEXT } from './AskAgent';
 
 // P3-b: «Unclear» on test questions and cards, «Discuss unclear · N», «Clear now» (the user's button).
 
@@ -75,5 +76,33 @@ describe('P3-b: Unclear', () => {
     expect(await within(row).findByText('Nothing is marked unclear now.')).toBeInTheDocument();
     expect(fake.calls.filter((c) => c.path === '/kb/study/unclear/clear').map((c) => c.body))
       .toEqual([{ item_ids: ['q-1'] }, { item_ids: ['q-3'] }]);
+  });
+});
+
+describe('P3-c: Ask the agent', () => {
+  it('every question has it; it puts «📍 question N» and «Explain this question» in this chat’s field; Enter sends the chip', { timeout: 15_000 }, async () => {
+    const { user, fake } = await openChat(/Lecture 8 — test/);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    for (let i = 0; i < 3; i += 1) {
+      expect(within(test).getByRole('button', { name: 'Ask the agent' })).toBeInTheDocument();
+      if (i < 2) await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    }
+    await user.click(within(test).getByRole('button', { name: 'Previous question' }));
+    await user.click(within(test).getByRole('button', { name: 'Previous question' }));
+    await user.click(within(test).getByRole('button', { name: 'Ask the agent' }));
+    const bar = await screen.findByRole('group', { name: 'Selection' });
+    expect(bar).toHaveTextContent('question 1');
+    expect(bar).toHaveTextContent('· Lecture 8 check');
+    expect(within(bar).queryByRole('button', { name: /Where is this from/ })).toBeNull();
+    await waitFor(() => expect(field()).toHaveTextContent(ASK_QUESTION_TEXT));
+    expect(fake.calls.filter((c) => c.path.endsWith('/messages'))).toEqual([]); // nothing sent by itself
+    await user.click(field());
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(fake.calls.find((c) => c.method === 'POST' && c.path.endsWith('/messages'))).toBeDefined());
+    const body = fake.calls.find((c) => c.method === 'POST' && c.path.endsWith('/messages'))!.body as Record<string, unknown>;
+    expect(body.text).toBe(ASK_QUESTION_TEXT);
+    expect(body.selection).toEqual({ message_id: expect.any(String), block_id: 'st-test', kind: 'study', title: 'Lecture 8 check',
+      items: [{ id: 'q-1', label: 'question 1' }], intent: 'ask' });
+    expect(await screen.findByRole('button', { name: 'Show the selection in the answer: question 1 · Lecture 8 check' })).toBeInTheDocument();
   });
 });

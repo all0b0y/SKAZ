@@ -14,8 +14,9 @@ const StoreContext = createContext<SelectionStore | null>(null);
 
 export function SelectionProvider({ chatId, children }: { chatId: string | null; children: ReactNode }) {
   const [store] = useState(createSelectionStore);
-  // Another chat: what was picked in the previous one is gone.
-  useEffect(() => { store.getState().clear(); }, [store, chatId]);
+  // Another chat: what was picked in the previous one is gone. A layout effect, so it runs before the
+  // composer takes a hand-off that opened this chat (P3-c: «Ask the agent» brings its chip along).
+  useLayoutEffect(() => { store.getState().clear(); }, [store, chatId]);
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 
@@ -23,7 +24,7 @@ export function useSelectionStore(): SelectionStore | null {
   return useContext(StoreContext);
 }
 
-const NONE: SelectionState = { selection: null, toggle: () => {}, clear: () => {} };
+const NONE: SelectionState = { selection: null, toggle: () => {}, clear: () => {}, set: () => {} };
 const noStore = { getState: () => NONE, subscribe: () => () => {} } as unknown as SelectionStore;
 
 /** The current selection (null without a provider). */

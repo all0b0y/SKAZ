@@ -1362,6 +1362,12 @@ class StudyService:
     ) -> StudyBlock:
         return self.show_saved(ref, [page_id], mode, card_ids)
 
+    def ask_context(self, block_id: str, item_id: str) -> tuple[str, str, str] | None:
+        """P3-c «Ask the agent»: the test question for the chat — no answer before the user has one."""
+        from .ask import question_context
+
+        return question_context(self, block_id, item_id)
+
     def open_context(self, block_id: str) -> str | None:
         """What the agent is told is open (W2 "Agent sees"): the block, where it is, the current item."""
         block = self.store.block(block_id)

@@ -44,6 +44,8 @@ class StudyReader(Protocol):
 
     def agent_summary(self, page_id: str) -> str: ...
 
+    def ask_context(self, block_id: str, item_id: str) -> tuple[str, str, str] | None: ...
+
 
 #: Another chat's title and messages by id (``None`` when it does not exist).
 ChatLookup = Callable[[str], tuple[str, Sequence[Message]] | None]
@@ -245,7 +247,12 @@ class ContextBuilder:
         for quote in given.quotes:
             add(*(self._block_to_fix(quote, chat.id, chats) or self._diagram_to_fix(quote, chat.id, chats)
                   or self._quote(quote)))
-        if given.selection is not None:  # P2: the items picked in an earlier answer of this chat
+        if given.selection is not None and given.selection.kind == "study":  # P3-c: a test question
+            asked = (self.study.ask_context(given.selection.block_id, given.selection.items[0].id)
+                     if self.study is not None and given.selection.items else None)
+            if asked is not None:
+                add(*asked)
+        elif given.selection is not None:  # P2: the items picked in an earlier answer of this chat
             own = chats(chat.id)
             picked = selection_context(own[1], given.selection) if own is not None else None
             if picked is not None:

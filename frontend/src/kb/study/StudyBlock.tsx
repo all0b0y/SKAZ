@@ -90,6 +90,7 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
 
   return (
     <m.section ref={ref} className={`kb-st kb-st--${where}`} data-kind={part.kind} data-folded={folded || undefined} tabIndex={0}
+      data-block-id={part.id /* the «📍 question N» chip finds its test (P3-c) */}
       aria-label={`${kindLabel(part)}: ${part.title}`} layoutId={`study-${part.id}`}
       initial={reduced ? { opacity: 0 } : false} animate={{ opacity: 1, transition: reduced ? { duration: 0.14, ease: 'linear' } : SPRING_LARGE }}
       transition={SPRING_LARGE}

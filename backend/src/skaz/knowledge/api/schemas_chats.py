@@ -73,7 +73,9 @@ class KbSelection(BaseModel):
 
     message_id: str = Field(min_length=1, max_length=200)
     block_id: str = Field(min_length=1, max_length=200)
-    kind: Literal["block", "diagram"]
+    #: ``study`` (P3-c): «Ask the agent» on a test question — ``block_id`` is the test block, the one
+    #: item its question.
+    kind: Literal["block", "diagram", "study"]
     #: The block's own title (set by SKAZ from the stored block; ignored when sent).
     title: str | None = Field(default=None, max_length=300)
     items: list[KbSelectedItem] = Field(min_length=1, max_length=20)

@@ -10,6 +10,7 @@ import type { StudyActions } from './useStudy';
 import type { KbPermissionPart } from '../api/permissions';
 import { OpenCompact, OpenReport, STATUS_WORD, statusOf } from './OpenReview';
 import { DiscussUnclear, UnclearMark } from './Unclear';
+import { useAskAgent } from './AskAgent';
 
 export const QUESTION_LABEL: Record<KbStudyQuestion['type'], string> = {
   choice: 'Choose one', multi: 'Choose all that apply', short: 'Short answer', open: 'Open answer · checked by the agent',
@@ -37,6 +38,7 @@ export function TestRunner({ part, actions, onError, keys }: {
   keys: { current: ((event: React.KeyboardEvent) => void) | null };
 }) {
   const { client } = useServices();
+  const askAgent = useAskAgent(part);
   /** Picks option `i` of the question on screen (set by it; null when there is nothing to pick). */
   const pick = useRef<((index: number) => boolean) | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -90,7 +92,8 @@ export function TestRunner({ part, actions, onError, keys }: {
           onAskAgent={(text) => act('judge', () => studyApi.checkOpen(client, part.id, question.id, text))}
           onRecheck={(ideaId, words) => act('recheck', () => studyApi.recheck(client, part.id, question.id, ideaId, words))}
           onCount={(ideaId, counted) => void act('count', () => studyApi.count(client, part.id, question.id, ideaId, counted))}
-          onUnclear={() => void act('unclear', () => studyApi.mark(client, part.id, [question.id], question.unclear ? 'clear' : 'unclear'))} />
+          onUnclear={() => void act('unclear', () => studyApi.mark(client, part.id, [question.id], question.unclear ? 'clear' : 'unclear'))}
+          onAsk={() => askAgent(question)} />
       </m.div>
       <div className="kb-st-tact">
         <button type="button" className="kb-st-ib" aria-label="Previous question" disabled={index === 0 || !!busy} onClick={() => go(index - 1)}>
@@ -112,12 +115,12 @@ export function TestRunner({ part, actions, onError, keys }: {
 
 interface AnswerBody { choices?: string[]; text?: string }
 
-function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRecheck, onCount, onUnclear }: {
+function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRecheck, onCount, onUnclear, onAsk }: {
   part: KbStudyPart; question: KbStudyQuestion; busy: string | null;
   pick: { current: ((index: number) => boolean) | null };
   onAnswer: (body: AnswerBody) => Promise<boolean>; onAskAgent: (text: string) => Promise<boolean>;
   onRecheck: (ideaId: string, words: string) => Promise<boolean>; onCount: (ideaId: string, counted: boolean) => void;
-  onUnclear: () => void;
+  onUnclear: () => void; onAsk: () => void;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const response = question.response;
@@ -145,6 +148,10 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
       <div className="kb-st-qtop">
         {/* P3-b: the mark lives on the question, also while looking back from the result. */}
         <UnclearMark on={!!question.unclear} what="question" disabled={!!busy && busy !== 'review'} onToggle={onUnclear} />
+        {/* P3-c: on every question, always — before an answer the agent gets no answer to give away. */}
+        <button type="button" className="kb-st-ask" onClick={onAsk} title="Ask the agent about this question in the chat">
+          <Icon name="askAgent" size={14} />Ask the agent
+        </button>
       </div>
       <p className="kb-st-tq" id={`q-${question.id}`}>{question.question}</p>
       {(question.type === 'choice' || multi) && (
@@ -203,7 +210,8 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
             <OpenReport review={response.review} response={response} busy={!!busy}
               who={response.checked_by ? `Opinion of ${response.checked_by}` : `${agent}’s opinion`}
               source={<>Source: «{question.answers[0]}»<SourceMarks citations={question.citations} /></>}
-              onRecheck={onRecheck} onCount={onCount} />
+              onRecheck={onRecheck} onCount={onCount}
+              footer={<div className="kb-st-rv__foot"><Button size="sm" icon="askAgent" onClick={onAsk}>Ask the agent</Button></div>} />
           )}
         </>
       )}

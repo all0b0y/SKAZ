@@ -342,3 +342,13 @@
 .kb-st-uncrow__q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-st-uncrow__done { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-muted); }
 .kb-st-uncrow__done > .kb-icon { color: var(--kb-ok); }
+
+/* P3-c: «Ask the agent» on every test question (quiet, beside the Unclear mark); in the review's foot. */
+.kb-st-ask {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px 0 6px; border: 0; background: none;
+  border-radius: var(--kb-r-pill); color: var(--kb-muted); font: inherit; font-size: var(--t-xs); cursor: pointer; white-space: nowrap; flex: none;
+}
+.kb-st-ask:hover { background: var(--kb-accent-soft); color: var(--kb-text); }
+.kb-st-ask:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-st-qtop .kb-st-unc + .kb-st-ask { margin-left: 2px; }
+.kb-st-rv__foot { display: flex; justify-content: flex-end; margin-top: 14px; }
