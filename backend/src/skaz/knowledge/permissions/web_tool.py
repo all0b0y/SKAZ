@@ -29,7 +29,7 @@ from ..agents.codex import ENGINE_LABELS
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, _Args
 from ..agents.web import MAX_QUERY, NO_SEARCHER, WebQuery, clean_links, query_problem
 from ..agents.web_runner import WebSearchRunner
-from .search_rules import screen
+from .search_rules import ActiveRules, screen
 from .store import RunRef
 from .web_search import DENIED, ChatWebGate, WebSearchBroker
 
@@ -72,9 +72,11 @@ def web_search_tool(broker: WebSearchBroker, runs: Callable[[str], RunRef | None
             return {"status": status, "message": verdict.message}
         outcome = await runner.search(searcher, query)
         links = clean_links(outcome.links)  # http(s) only, each once, at most MAX_LINKS
-        record = await gate.results(verdict.search_id, links) if verdict.search_id else None
-        # N7: only what the user's rules allow ever reaches the agent (the card keeps the same list).
-        rules = record.rules if record is not None else None
+        if verdict.search_id:
+            await gate.results(verdict.search_id, links)
+        # N7: only what the user's rules allow ever reaches the agent (the card keeps the same list) —
+        # screened with the snapshot of the approval, never «no rules» when recording failed (M-2).
+        rules = verdict.rules if isinstance(verdict.rules, ActiveRules) else None
         screened = screen(links, rules)
         if outcome.error:
             return {"status": "error", "reason": outcome.error}

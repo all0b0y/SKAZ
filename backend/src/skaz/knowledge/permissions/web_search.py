@@ -340,7 +340,7 @@ class ChatWebGate:
             if record.rules is None:
                 return WebVerdict(True, search_id=record.id)
             return WebVerdict(True, search_id=record.id, allowed_domains=record.allowed_domains,
-                              blocked_domains=record.blocked_domains)
+                              blocked_domains=record.blocked_domains, rules=record.rules)
         if record.status == "denied":
             return WebVerdict(False, record.reason or DENIED, search_id=record.id)
         return WebVerdict(False, CANCELLED, search_id=record.id)

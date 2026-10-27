@@ -73,6 +73,9 @@ class WebVerdict:
     #: the user's Never / «only these sites» rules for an engine that filters by domain.
     allowed_domains: tuple[str, ...] | None = None
     blocked_domains: tuple[str, ...] | None = None
+    #: N7 (Q1 n78 M-2): the user's rules snapshot taken when the query was asked
+    #: (``permissions.search_rules.ActiveRules``; ``None``: none) — results are screened with it.
+    rules: object | None = None
 
 
 class WebSearchGate(Protocol):
