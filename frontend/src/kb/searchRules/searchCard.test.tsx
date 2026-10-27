@@ -89,5 +89,13 @@ describe('Search card with the user’s rules (N7)', () => {
   it('a query whose sites are all blocked is refused by the rules, nothing sent', async () => {
     const { centre } = await open(world([part('web-4', { status: 'denied', auto: true, reason: 'blocked' })]));
     expect(await within(centre()).findByRole('group', { name: /^Search blocked by your rules/ })).toHaveTextContent('Nothing was sent');
+    expect(within(centre()).queryByRole('button', { name: 'Search everywhere once' })).toBeNull(); // no «only» list
+  });
+
+  it('a search blocked by «only these sites» offers «Search everywhere once» too (Q1 n78 L-7)', async () => {
+    const rules = { ...RULES, only: ['arxiv.org'], origin: 'chat' as const };
+    const { centre } = await open(world([part('web-6', { status: 'denied', auto: true, reason: 'blocked', rules })]));
+    const box = await within(centre()).findByRole('group', { name: 'Nothing on the allowed sites' });
+    expect(within(box).getByRole('button', { name: 'Search everywhere once' })).toBeInTheDocument();
   });
 });

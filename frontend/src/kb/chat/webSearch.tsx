@@ -157,7 +157,9 @@ function EverywhereOnce({ chatId, part }: { chatId: string; part: KbWebSearchPar
   const { client } = useServices();
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
-  if (!part.rules?.only.length || part.links.length > 0 || part.status !== 'allowed') return null;
+  // Q1 n78 L-7: also on a search the rules blocked outright (every site asked was outside them).
+  const nothing = (part.status === 'allowed' && part.links.length === 0) || (part.status === 'denied' && part.auto);
+  if (!part.rules?.only.length || !nothing) return null;
   const lift = async () => {
     setState('busy');
     setError(null);
