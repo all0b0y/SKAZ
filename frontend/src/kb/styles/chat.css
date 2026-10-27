@@ -247,9 +247,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--kb-sp-6);
-  border: 1px solid var(--kb-line);
+  /* Inside the chat sheet the field is a well of the window ground, no line (decision 24). */
+  border: 1px solid transparent;
   border-radius: var(--kb-r-xl);
-  background: var(--kb-pane);
+  background: var(--kb-bg);
   container-type: inline-size;
 }
 .kb-composer:focus-within { border-color: color-mix(in srgb, var(--kb-text) 45%, var(--kb-line)); }

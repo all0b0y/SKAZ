@@ -1,12 +1,16 @@
 /* Window shell: title bar, rail, side panel, centre, document panel. Heights are fixed so
-   nothing shifts when sections or panels change (decision 13, "nothing moves"). */
+   nothing shifts when sections or panels change (decision 13, "nothing moves").
+   Inset sheets (DESIGN-SYSTEM.md decision 24 «Windows»): the title bar, the rail and the side panel
+   are one ground (--kb-side, no lines between them); the centre and the document panel are sheets
+   (--kb-pane, radius xl, no shadow at rest) with a --kb-gutter gap to the right and bottom of the
+   window and between them. The resizers live in the gutters (shell/layout.ts counts them). */
 
 .kb-app {
   display: flex;
   flex-direction: column;
   height: 100vh;
   min-width: 0;
-  background: var(--kb-bg);
+  background: var(--kb-side);
 }
 
 /* ---- Title bar ---- */
@@ -19,7 +23,6 @@
   padding: 0 var(--kb-sp-12) 0 80px;
   transition: padding-left 200ms ease;
   background: var(--kb-side);
-  border-bottom: 1px solid var(--kb-line);
   -webkit-app-region: drag;
 }
 /* Full screen: no traffic lights, so the toggle moves to the edge (M-1). */
@@ -55,7 +58,14 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 .kb-row[aria-disabled='true'] { opacity: 0.55; }
 
 /* ---- Body ---- */
-.kb-body { flex: 1; display: flex; min-height: 0; min-width: 0; position: relative; }
+.kb-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  padding: 0 var(--kb-gutter) var(--kb-gutter) 0;
+}
 
 /* ---- Rail (summary v39: 52px, icons only; names slide out on hover/focus, v43 B) ---- */
 .kb-rail {
@@ -66,8 +76,7 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   align-items: center;
   gap: var(--kb-sp-6);
   padding: var(--kb-sp-10) 0;
-  background: var(--kb-rail);
-  border-right: 1px solid var(--kb-line);
+  background: var(--kb-side);
 }
 .kb-rail__list { display: flex; flex-direction: column; gap: var(--kb-sp-6); }
 .kb-rail__spacer {
@@ -104,8 +113,8 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 .kb-rail__icon { position: relative; }
 .kb-rail__item.is-active { color: var(--kb-on-fill); }
 .kb-rail__item.is-active:hover { background: transparent; }
-.kb-rail__item .kb-badge { top: -2px; right: -4px; }
-.kb-rail__item .kb-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 2px var(--kb-rail); }
+.kb-rail__item .kb-badge { top: -2px; right: -4px; box-shadow: 0 0 0 2px var(--kb-side); }
+.kb-rail__item .kb-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 2px var(--kb-side); }
 
 /* Names slide out of the button (v43 B): the highlight extends to the right over the next column
    and shows the name beside the icon — one shape; the active item keeps its filled colours.
@@ -174,8 +183,10 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   flex-direction: column;
   min-width: 0;
   background: var(--kb-side);
-  border-right: 1px solid var(--kb-line);
-  overflow: hidden;
+  /* Clipped like before, but the list may reach across the gutter to the centre sheet (the bridge
+     of the open chat, decision 24 «Chats»). */
+  overflow: clip;
+  overflow-clip-margin: var(--kb-gutter);
 }
 .kb-head--side { border-bottom: 0; padding: 0 var(--kb-sp-12); }
 .kb-side__title {
@@ -251,30 +262,23 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 .kb-folder__more[aria-expanded='true'] { opacity: 1; }
 .kb-namefield { padding: var(--kb-sp-2) var(--kb-sp-4); }
 
-/* ---- Resizers (overlay the column edge; no width of their own) ---- */
+/* ---- Resizers: each one is the gutter between two columns ---- */
 .kb-resizer {
   position: relative;
-  width: 0;
+  width: var(--kb-gutter);
   flex: none;
   z-index: 3;
   cursor: col-resize;
   touch-action: none;
 }
-.kb-resizer::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  width: 8px;
-}
 .kb-resizer::after {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -1px;
+  top: var(--kb-r-xl);
+  bottom: var(--kb-r-xl);
+  left: calc(50% - 1px);
   width: 2px;
+  border-radius: 1px;
   background: transparent;
   transition: background-color 0.12s ease;
 }
@@ -289,6 +293,8 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
   display: flex;
   flex-direction: column;
   background: var(--kb-pane);
+  border-radius: var(--kb-r-xl);
+  overflow: hidden;
   position: relative;
 }
 .kb-center[hidden] { display: none; }
@@ -300,10 +306,13 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
   flex-direction: column;
   min-width: 0;
   background: var(--kb-pane);
-  border-left: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-xl);
   overflow: hidden;
 }
 .kb-doc.is-expanded { flex: 1 1 auto; }
+/* Headers inside a sheet: a quieter line than between panels. */
+.kb-center .kb-head,
+.kb-doc .kb-head { border-bottom-color: color-mix(in srgb, var(--kb-line) 60%, transparent); }
 .kb-head--doc { padding: 0 var(--kb-sp-10) 0 var(--kb-sp-14); }
 .kb-doc__type {
   display: inline-flex;

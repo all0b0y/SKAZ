@@ -114,6 +114,9 @@ html[data-kb-ui] {
   --kb-titlebar-h: 38px;
   --kb-head-h: 46px;
   --kb-rail-w: 52px;
+  /* Gap around the inset sheets (centre, document panel) and between them; the resizers live in it.
+     Fixed like the rail (not density-scaled) because shell/layout.ts GUTTER does the same maths. */
+  --kb-gutter: 8px;
   --kb-icon: 16px;
   --kb-icon-lg: 20px;
 }

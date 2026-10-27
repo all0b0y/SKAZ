@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
-import { computeLayout, RAIL_W } from './layout';
+import { CENTER_MIN, computeLayout, GUTTER, RAIL_W, resizeLimits, usedWidth } from './layout';
 import { unconfiguredWorld } from '../test/fakeBridge';
 
 describe('Window shell', () => {
@@ -168,20 +168,63 @@ describe('Window shell', () => {
 });
 
 describe('Column layout', () => {
-  it('fits every column at 960, 1024 and 1440 px with the document open', () => {
+  it('fits every column and every gutter at 960, 1024 and 1440 px with the document open', () => {
     for (const windowWidth of [960, 1024, 1440]) {
       const l = computeLayout({ windowWidth, sideOpen: true, sideWidth: 248, docOpen: true, docExpanded: false, rightWidth: 400 });
-      const used = RAIL_W + l.side + 340 + (l.right ?? 0);
+      // rail · side · gutter · centre · gutter · document · gutter (decision 24 «Windows»)
+      const used = RAIL_W + l.side + GUTTER + 340 + GUTTER + (l.right ?? 0) + GUTTER;
       expect(used, `width ${windowWidth}`).toBeLessThanOrEqual(windowWidth);
+      expect(usedWidth(l), `width ${windowWidth}`).toBe(used);
       expect(l.side).toBeGreaterThanOrEqual(200);
       expect(l.right!).toBeGreaterThanOrEqual(320);
     }
+    expect(GUTTER).toBe(8);
     expect(computeLayout({ windowWidth: 1440, sideOpen: true, sideWidth: 248, docOpen: true, docExpanded: false, rightWidth: 400 }))
       .toEqual({ side: 248, right: 400, centerVisible: true });
+    // 960: the gutters cost 24px, the document gives way first, the side panel keeps its minimum.
+    expect(computeLayout({ windowWidth: 960, sideOpen: true, sideWidth: 248, docOpen: true, docExpanded: false, rightWidth: 400 }))
+      .toEqual({ side: 200, right: 344, centerVisible: true });
+  });
+
+  it('never overflows: any window from 900 to 1800 px, any stored widths, panels open or closed', () => {
+    for (let windowWidth = 900; windowWidth <= 1800; windowWidth += 37) {
+      for (const sideOpen of [true, false]) {
+        for (const docOpen of [true, false]) {
+          for (const docExpanded of [false, true]) {
+            for (const [sideWidth, rightWidth] of [[200, 320], [248, 400], [360, 640]] as const) {
+              const l = computeLayout({ windowWidth, sideOpen, sideWidth, docOpen, docExpanded, rightWidth });
+              const tag = JSON.stringify({ windowWidth, sideOpen, docOpen, docExpanded, sideWidth, rightWidth });
+              expect(usedWidth(l), tag).toBeLessThanOrEqual(windowWidth);
+              if (l.side > 0) expect(l.side, tag).toBeGreaterThanOrEqual(200);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('a closed side panel takes no room and no gutter; the centre then starts at the rail', () => {
+    const l = computeLayout({ windowWidth: 1024, sideOpen: false, sideWidth: 248, docOpen: false, docExpanded: false, rightWidth: 400 });
+    expect(l).toEqual({ side: 0, right: null, centerVisible: true });
+    expect(usedWidth(l)).toBe(RAIL_W + CENTER_MIN + GUTTER);
+  });
+
+  it('resizers stop where the centre would drop below its minimum, gutters included', () => {
+    const l = computeLayout({ windowWidth: 1024, sideOpen: true, sideWidth: 248, docOpen: true, docExpanded: false, rightWidth: 400 });
+    const { sideMax, rightMax } = resizeLimits(1024, l);
+    expect(usedWidth({ ...l, side: sideMax })).toBeLessThanOrEqual(1024);
+    expect(sideMax).toBe(1024 - RAIL_W - 3 * GUTTER - CENTER_MIN - l.right!);
+    expect(rightMax).toBe(1024 - RAIL_W - 3 * GUTTER - CENTER_MIN - l.side);
+    // A wide window: the stored maximums cap them.
+    expect(resizeLimits(2400, computeLayout({ windowWidth: 2400, sideOpen: true, sideWidth: 248, docOpen: true, docExpanded: false, rightWidth: 400 })))
+      .toEqual({ sideMax: 360, rightMax: 640 });
   });
 
   it('expanded document takes the centre; a closed side panel takes no room', () => {
     expect(computeLayout({ windowWidth: 1024, sideOpen: false, sideWidth: 248, docOpen: true, docExpanded: true, rightWidth: 400 }))
       .toEqual({ side: 0, right: null, centerVisible: false });
+    const l = computeLayout({ windowWidth: 1024, sideOpen: true, sideWidth: 360, docOpen: true, docExpanded: true, rightWidth: 400 });
+    expect(l).toEqual({ side: 360, right: null, centerVisible: false });
+    expect(usedWidth(l)).toBeLessThanOrEqual(1024);
   });
 });
