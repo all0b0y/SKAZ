@@ -190,6 +190,20 @@ describe('Window shell', () => {
     expect(storedPrefs().rightWidth).toBe(416);
   });
 
+  it('the side pane owns its gutter (FIX1 S1): its box is the column plus the gutter, the resizer sits on that gutter', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    renderKb();
+    const side = await screen.findByRole('region', { name: 'Chats' });
+    expect(side).toHaveAttribute('data-pane', 'side');
+    // The chat list and its bridge reach the centre sheet without leaving [data-pane=side] (paneAudit).
+    expect(side.style.width).toBe(`${248 + GUTTER}px`);
+    const sep = screen.getByRole('separator', { name: 'Resize side panel' });
+    // The stored width (and the resizer's value) is still the column without the gutter.
+    expect(sep).toHaveAttribute('aria-valuenow', '248');
+    // Right after the pane in the row; CSS pulls it back over the pane's gutter (shell.css `.kb-side + .kb-resizer`).
+    expect(side.nextElementSibling).toBe(sep);
+  });
+
   it('answers the quit barrier at once: this interface holds no unsaved capture', async () => {
     const { fake, unmount } = renderKb();
     await screen.findByRole('navigation', { name: 'Sections' });

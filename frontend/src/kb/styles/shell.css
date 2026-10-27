@@ -187,11 +187,15 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   flex-direction: column;
   min-width: 0;
   background: var(--kb-side);
-  /* Clipped like before, but the list may reach across the gutter to the centre sheet (the bridge
-     of the open chat, decision 24 «Chats»). */
+  /* The pane owns the gutter to its right (FIX1 S1): its box is the column plus --kb-gutter
+     (SidePanel.tsx), its content ends at the gutter, and the chat list reaches across the gutter
+     to the centre sheet inside the pane (the bridge of the open chat, decision 24 «Chats»), so
+     nothing spills out of [data-pane=side] (scripts/paneAudit.ts). */
+  padding-right: var(--kb-gutter);
   overflow: clip;
-  overflow-clip-margin: var(--kb-gutter);
 }
+/* The side resizer comes right after the pane and sits back on the pane's gutter. */
+.kb-side + .kb-resizer { margin-left: calc(-1 * var(--kb-gutter)); }
 .kb-head--side { border-bottom: 0; padding: 0 var(--kb-sp-12); }
 .kb-side__title {
   font-family: var(--kb-font-display);
