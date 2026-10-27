@@ -72,8 +72,8 @@ export function markReady(errors: readonly string[] = []): void {
   if (errors.length) html.dataset.boardErrors = errors.join(' | ');
   window.setTimeout(() => {
     html.dataset.boardReady = 'true';
-    // The canvas loads its frames a few at a time: this one is done, the next may start.
-    if (window.parent !== window) window.parent.postMessage({ kbBoard: 'ready' }, window.location.origin);
+    // The canvas loads its frames a few at a time: this one (its address) is done, the next may start.
+    if (window.parent !== window) window.parent.postMessage({ kbBoard: 'ready', hash: window.location.hash }, window.location.origin);
   }, SETTLE_MS);
 }
 
