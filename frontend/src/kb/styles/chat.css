@@ -6,9 +6,21 @@
 /* ---- Side panel: chats ---- */
 .kb-chatrow.is-unread .kb-row__text { font-weight: 600; }
 .kb-chatmark { display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--kb-text); }
-/* Still marks (decision v15): a static ring for "answering", a dot for "new answer". */
-.kb-chatmark--answering { width: 14px; height: 14px; }
-.kb-chatmark--new { width: 7px; height: 7px; border-radius: 50%; background: var(--kb-accent); }
+/* Chat at work (decision 26, ChatMark.tsx): «Connecting nodes» with three nodes after the title; when
+   the answer is ready the nodes pull into the «new» dot, which pops in where they meet. The open
+   chat shows no mark. No effect on the row's edges. */
+.kb-chatmark--answering,
+.kb-chatmark--finishing { width: 28px; height: 14px; }
+.kb-chatmark--finishing { position: relative; }
+.kb-chatmark__fx { width: 28px; height: 14px; }
+.kb-chatmark--new,
+.kb-chatmark__late { width: 7px; height: 7px; border-radius: 50%; background: var(--kb-accent); }
+/* The nodes meet at (24, 7) of the 28×14 mark: the dot's centre. */
+.kb-chatmark__late { position: absolute; top: 3.5px; left: 20.5px; animation: kb-chatmark-pop 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) 0.55s both; }
+@keyframes kb-chatmark-pop {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: none; }
+}
 .kb-row--more { color: var(--kb-text); font-weight: 500; margin-top: var(--kb-sp-4); }
 
 /* ---- Centre: chat ---- */

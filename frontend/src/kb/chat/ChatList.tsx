@@ -1,7 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner, useIconPlay } from '../ui';
-import { Tooltip } from '../ui/Tooltip';
 import { clockOrDate, dayBucket, groupBy } from '../ui/time';
 import { ActiveTab } from '../ui/ActiveTab';
 import { useChats, useLibrary, useServices, useUi } from '../state/context';
@@ -11,24 +10,9 @@ import { useChatSelection } from './chatBatch';
 import { SelectionCheckbox } from '../ui/listSelection';
 import { isWaitingForUser } from '../api/permissions';
 import { NEW_CHAT_KEY, sideChats } from './sideOrder';
+import { ChatMark, WaitingMark } from './ChatMark';
 
-/** A permission or a question waits in this chat (0.3.1 P4): said in words, with a dot. */
-export function WaitingMark() {
-  return <span className="kb-chatwait" data-testid="chat-waiting">Waiting for you</span>;
-}
-
-/**
- * Static marks, no blinking (decision v15): answering = a still ring, new answer = a dot.
- * «Waiting for you» says more than «answering» and takes its place (P4).
- */
-function ChatMark({ chat }: { chat: KbChatSummary }) {
-  if (isWaitingForUser(chat)) return <WaitingMark />;
-  if (chat.state === 'answering') {
-    return <Tooltip text="Agent is answering" describes><span className="kb-chatmark kb-chatmark--answering" role="img" aria-label="answering"><Icon name="answering" size={13} /></span></Tooltip>;
-  }
-  if (chat.unread) return <span className="kb-chatmark kb-chatmark--new" role="img" aria-label="new answer" />;
-  return null;
-}
+export { WaitingMark };
 
 function useOpenChat() {
   const { chats, ui } = useServices();
@@ -66,7 +50,7 @@ export function ChatList() {
             <SelectionCheckbox checked={sel.selected.has(c.id)} />
             {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
             <span className="kb-row__text">{c.title}</span>
-            <ChatMark chat={c} />
+            <ChatMark chat={c} current={current} />
           </button>
         </div>
       </li>
