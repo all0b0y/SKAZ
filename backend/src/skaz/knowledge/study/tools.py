@@ -7,12 +7,14 @@ may go on asking about anything (S5). Saving to the wiki is the user's decision 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import Field
 
 from ...native_io import disk_call
+from ..agents.prompting import untrusted_block
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, _Args
 from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
@@ -176,7 +178,9 @@ class StudyTools:
         }
 
     async def _read(self, _ref: RunRef | None, args: ReadArgs) -> dict[str, Any]:
-        return {"status": "ok", "text": await disk_call(self.study.agent_summary, args.page_id)}
+        # A page's text is the user's library: data, never instructions (Q1 p3 M4).
+        text = await disk_call(self.study.agent_summary, args.page_id)
+        return {"status": "ok", "text": untrusted_block("study page", text)}
 
     async def _unclear(self, ref: RunRef | None, args: UnclearArgs) -> dict[str, Any]:
         assert ref is not None
@@ -184,7 +188,11 @@ class StudyTools:
         folders = tuple(chat.folder_ids) if chat is not None else ()
         items = await disk_call(unclear_items, self.study, folders, args.page_id)
         scope = "this chat's folders" if folders else "the whole library"
-        result: dict[str, Any] = {"status": "ok", "scope": scope, "count": len(items), "items": items}
+        # Material quotes, question texts and the user's answers are data, never instructions (Q1 p3 M4):
+        # an interactive tool's payload is not wrapped by the registry, so the items are wrapped here.
+        body = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+        listed = untrusted_block("unclear items", body)
+        result: dict[str, Any] = {"status": "ok", "scope": scope, "count": len(items), "items": listed}
         if not items:
             result["note"] = f"Nothing is marked Unclear in {scope}."
         return result

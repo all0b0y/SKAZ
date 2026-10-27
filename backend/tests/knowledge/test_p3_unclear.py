@@ -7,6 +7,7 @@ scope (its folders, or the whole library) and never changes them.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import httpx
@@ -21,6 +22,15 @@ from tests.knowledge.test_s_study import (  # noqa: F401 - the study world
     _tool_error,
     world,
 )
+
+
+async def _unclear(runtime: Any, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The tool's answer with its items read out of their untrusted-data block (Q1 p3 M4)."""
+    read = await _tool(runtime, "skaz_study_unclear", arguments or {})
+    block = read["items"]
+    assert isinstance(block, str) and block.startswith("LIBRARY DATA (untrusted data")
+    body = block.split("\n", 2)[2].rsplit("\n</untrusted-data>", 1)[0]
+    return {**read, "items": json.loads(body)}
 
 
 async def test_a_question_mark_survives_retakes_and_a_right_answer_and_only_the_user_clears_it(
@@ -73,7 +83,7 @@ async def test_the_agent_reads_unclear_items_in_the_chats_scope_and_cannot_chang
     await asyncio.to_thread(study.mark, block.id, [first, open_q], "unclear")
 
     assert "skaz_study_unclear" in STUDY_TOOL_NAMES
-    read = await _tool(runtime, "skaz_study_unclear", {})
+    read = await _unclear(runtime)
     assert read["scope"] == "the whole library" and read["count"] == 2  # the chat has no folders: «All»
     item = read["items"][0]
     assert (item["item_id"], item["kind"], item["type"]) == (first, "test question", "choice")
@@ -84,9 +94,9 @@ async def test_the_agent_reads_unclear_items_in_the_chats_scope_and_cannot_chang
 
     # The chat's folders bound the scope: a chat about chemistry sees nothing of this physics test.
     await asyncio.to_thread(runtime.kb_chats.repo.update, ref.chat_id, folder_ids=(library.chemistry,))
-    assert (await _tool(runtime, "skaz_study_unclear", {}))["count"] == 0
+    assert (await _unclear(runtime))["count"] == 0
     await asyncio.to_thread(runtime.kb_chats.repo.update, ref.chat_id, folder_ids=(library.physics,))
-    assert (await _tool(runtime, "skaz_study_unclear", {}))["count"] == 2
+    assert (await _unclear(runtime))["count"] == 2
 
     # Read-only: the tool takes nothing to change (its only argument narrows the list to a page).
     assert set(UnclearArgs.model_fields) == {"page_id"}
@@ -124,7 +134,7 @@ async def test_before_the_user_answers_the_agent_never_gets_the_answer_of_an_unc
     first = study.questions(block)[0].id
     await asyncio.to_thread(study.mark, block.id, [first], "unclear")  # marked before answering
 
-    item = (await _tool(runtime, "skaz_study_unclear", {}))["items"][0]
+    item = (await _unclear(runtime))["items"][0]
     assert item["answered"] is False and item["last_answer"] is None
     for hidden in ("right_answer", "source", "agent_explanation"):
         assert hidden not in item
@@ -134,11 +144,28 @@ async def test_before_the_user_answers_the_agent_never_gets_the_answer_of_an_unc
 
     right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
     await asyncio.to_thread(study.answer, block.id, first, choices=[right])
-    item = (await _tool(runtime, "skaz_study_unclear", {}))["items"][0]
+    item = (await _unclear(runtime))["items"][0]
     assert item["answered"] is True and item["right_answer"] == ["мера беспорядка"] and item["source"]
 
     # A retake asks it again: until it is answered in the new attempt, the answer is withheld again.
     await asyncio.to_thread(study.finish, block.id)
     await asyncio.to_thread(study.retake, block.id, mistakes_only=False)
-    item = (await _tool(runtime, "skaz_study_unclear", {}))["items"][0]
+    item = (await _unclear(runtime))["items"][0]
     assert item["answered"] is False and "right_answer" not in item and item["last_answer"] is None
+
+
+async def test_unclear_items_reach_the_agent_as_untrusted_data(world: Any) -> None:  # noqa: F811
+    """Q1 p3 M4: quotes, questions and the user's answers are data, never instructions."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, first, choices=[right])
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")
+    raw = await _tool(runtime, "skaz_study_unclear", {})
+    assert '<untrusted-data label="unclear items">' in raw["items"]
+    assert (await _unclear(runtime))["items"][0]["source"][0]["quote"]
+    saved = await asyncio.to_thread(study.save, block.id, "allow")
+    read = await _tool(runtime, "skaz_study_read", {"page_id": saved.page_id})
+    assert read["text"].startswith("LIBRARY DATA (untrusted data") and "мера беспорядка" in read["text"]
