@@ -270,3 +270,25 @@ def test_the_status_thresholds_of_decision_5() -> None:
     assert share_of([{"status": "missing", "by_user": True}, {"status": "missing"}]) == 0.5
     assert is_mistake({"status": "almost", "score": 0.7}) and not is_mistake({"status": "got", "score": 0.8})
     assert is_mistake({"score": 0.0}) and not is_mistake({"score": 1.0}) and is_mistake(None)
+
+
+async def test_a_review_arriving_after_see_result_updates_the_total(world: Any) -> None:  # noqa: F811
+    """Q1 p3 M1: «See result» while the agent still checks; the late review counts in the total."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block, item_id = await _made(runtime, library, _open_with_ideas(library))
+    release = asyncio.Event()
+    inner = FakeJudge(REVIEW)
+
+    async def slow(call: JudgeCall) -> Mapping[str, Any]:
+        await release.wait()
+        return await inner(call)
+
+    study.judge = slow
+    await study.check_open(block.id, item_id, ANSWER)
+    await asyncio.to_thread(study.finish, block.id)
+    assert study.result(study.get(block.id))["correct"] == 0.0
+    release.set()
+    await study.settle()
+    result = study.result(study.get(block.id))
+    assert result["correct"] == 0.5 and result["rows"][0]["status"] == "almost"

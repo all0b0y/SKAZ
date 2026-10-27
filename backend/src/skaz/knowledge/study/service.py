@@ -138,6 +138,14 @@ def _order(seed: str, items: Sequence[str]) -> list[str]:
     return sorted(items, key=lambda item: hashlib.sha256(f"{seed}:{item}".encode()).hexdigest())
 
 
+def _total(attempt: Attempt, answers: Mapping[str, Any]) -> float | None:
+    """A finished attempt's score after a change of its answers; unfinished ones are summed at «finish»."""
+    if attempt.finished_at is None:
+        return attempt.correct
+    items = answers.get("items") or {}
+    return sum(float((items.get(i) or {}).get("score") or 0.0) for i in answers.get("order") or [])
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 _Key = TypeVar("_Key", bound="str | None")
@@ -888,7 +896,9 @@ class StudyService:
                 raise StudyError("Start the test again.")
             items = dict(attempt.answers.get("items") or {})
             items[item_id] = answer
-            self.store.put_attempt(replace(attempt, answers={**attempt.answers, "items": items}))
+            answers = {**attempt.answers, "items": items}
+            # A review may land after «See result» (Q1 p3 M1): a finished attempt's total follows it.
+            self.store.put_attempt(replace(attempt, answers=answers, correct=_total(attempt, answers)))
             updated = self.store.update_block(block.id, updated_at=_now())
         assert updated is not None
         self._notify(updated)
@@ -1013,12 +1023,8 @@ class StudyService:
             if not entry or not entry.get("review"):
                 raise StudyError("Check this answer with the agent first.")
             items[item_id] = scored(change(dict(entry)))
-            correct = attempt.correct
-            if attempt.finished_at is not None:
-                order = list(attempt.answers.get("order") or [])
-                correct = sum(float(items.get(i, {}).get("score") or 0.0) for i in order)
             answers = {**attempt.answers, "items": items}
-            self.store.put_attempt(replace(attempt, answers=answers, correct=correct))
+            self.store.put_attempt(replace(attempt, answers=answers, correct=_total(attempt, answers)))
             updated = self.store.update_block(block.id, updated_at=_now())
         assert updated is not None
         self._notify(updated)
