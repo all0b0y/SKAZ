@@ -25,12 +25,13 @@ import contextlib
 import json
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
-from ..agents.web import WebLink
+from ..agents.web import WebLink, link_host
 from ..errors import KnowledgeError
 from ..ids import utc_now
 from ..store.database import KnowledgeDatabase
@@ -44,6 +45,7 @@ MAX_SOURCES = 200
 
 RulesOrigin = Literal["settings", "chat"]
 
+_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -64,6 +66,7 @@ def normalize_site(text: object) -> str | None:
     if not raw or len(raw) > 300 or any(char.isspace() for char in raw):
         return None
     raw = (urlsplit(raw).hostname or "") if "://" in raw else raw.split("/", 1)[0].split(":", 1)[0]
+    raw = unicodedata.normalize("NFKC", raw).translate(_DOTS).lower()
     raw = raw.removeprefix("*.").removeprefix(".").rstrip(".").removeprefix("www.")
     try:
         raw = raw.encode("idna").decode("ascii")
@@ -94,10 +97,9 @@ def sites(items: Iterable[object], *, strict: bool = True) -> tuple[str, ...]:
 
 
 def host_of(url: str) -> str:
-    try:
-        return (urlsplit(url).hostname or "").lower().rstrip(".")
-    except ValueError:
-        return ""
+    """The link's host as a browser opens it, in the lists' IDNA form (``""``: unclear — never kept
+    under «only these sites», and hidden whenever a hard rule is in force)."""
+    return link_host(url)
 
 
 def covers(site: str, host: str) -> bool:
@@ -251,7 +253,8 @@ def screen(links: Sequence[WebLink], rules: ActiveRules | None) -> Screened:
     hidden: dict[str, int] = {}
     for link in links:
         host = host_of(link.url)
-        if covered(host, rules.never) or (rules.only and not covered(host, rules.only)):
+        if ((not host and rules.hard) or covered(host, rules.never)
+                or (rules.only and not covered(host, rules.only))):
             site = host.removeprefix("www.") or "?"
             hidden[site] = hidden.get(site, 0) + 1
             continue
