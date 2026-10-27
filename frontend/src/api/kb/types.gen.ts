@@ -373,6 +373,26 @@ export interface KbChatPatch {
   effort?: string | null;
 }
 
+export interface KbChatSearchRules {
+  settings: KbSearchSettings;
+  web: KbSearchSettings | null;
+  active: KbRulesInForce;
+  sources_only: boolean;
+  sources: KbSourceRef[];
+  excluded: KbSourceRef[];
+  everywhere_once: boolean;
+  differs: boolean;
+  label: string | null;
+}
+
+export interface KbChatSearchRulesUpdate {
+  web?: KbSearchSettings | null;
+  sources_only?: boolean;
+  sources?: string[];
+  excluded?: string[];
+  as_global?: boolean;
+}
+
 export interface KbChatSummary {
   id: string;
   title: string;
@@ -802,6 +822,11 @@ export interface KbHiddenFinding {
   page: number | null;
   element: string | null;
   instruction: boolean;
+}
+
+export interface KbHiddenSite {
+  site: string;
+  count: number;
 }
 
 export interface KbHierarchyBlock {
@@ -1499,6 +1524,16 @@ export interface KbRestoredFragment {
   restored_at: string;
 }
 
+/** The web rules applied to a search (also on its card). */
+export interface KbRulesInForce {
+  never: string[];
+  settings_never: string[];
+  only: string[];
+  prefer: string[];
+  origin: "settings" | "chat";
+  everywhere_once: boolean;
+}
+
 /** The analysis page "Save to wiki" wrote, and what it left out (decision 9, 2026-10-21). */
 export interface KbSavedAnalysis {
   id: string;
@@ -1522,6 +1557,14 @@ export interface KbSearchResults {
   materials: KbMaterialHit[];
   counts: KbSearchCounts;
   degraded: boolean;
+}
+
+/** Web rules: Settings → Search, or one chat's own lists (``never`` = the chat's additions). */
+export interface KbSearchSettings {
+  never?: string[];
+  only_on?: boolean;
+  only?: string[];
+  prefer?: string[];
 }
 
 export interface KbSelectedItem {
@@ -1596,6 +1639,12 @@ export interface KbSnippetPart {
 export interface KbSourceKept {
   id: string;
   title: string;
+}
+
+export interface KbSourceRef {
+  id: string;
+  kind: "material" | "page";
+  title: string | null;
 }
 
 export interface KbSpeechDefaults {
@@ -1879,6 +1928,8 @@ export interface KbWebSearchPart {
   reason: string | null;
   links: KbWebLink[];
   searcher?: "codex" | "claude_code" | "hermes" | "opencode" | null;
+  rules?: KbRulesInForce | null;
+  hidden?: KbHiddenSite[];
 }
 
 export interface KbWikiChoice {
@@ -2284,6 +2335,34 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbSavedAnalysis;
+    status: 200;
+  };
+  "GET /kb/chats/{chat_id}/search-rules": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChatSearchRules;
+    status: 200;
+  };
+  "PUT /kb/chats/{chat_id}/search-rules": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: KbChatSearchRulesUpdate;
+    response: KbChatSearchRules;
+    status: 200;
+  };
+  "DELETE /kb/chats/{chat_id}/search-rules": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChatSearchRules;
+    status: 200;
+  };
+  "POST /kb/chats/{chat_id}/search-rules/everywhere-once": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbChatSearchRules;
     status: 200;
   };
   "GET /kb/chats/{chat_id}/web-search": {
@@ -2865,6 +2944,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbRecognitionSettingsUpdate;
     response: KbRecognitionSettings;
+    status: 200;
+  };
+  "GET /kb/settings/search": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbSearchSettings;
+    status: 200;
+  };
+  "PUT /kb/settings/search": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbSearchSettings;
+    response: KbSearchSettings;
     status: 200;
   };
   "GET /kb/settings/skills": {

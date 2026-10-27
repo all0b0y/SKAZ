@@ -30,6 +30,7 @@ from .knowledge.me.tools import attach as attach_me_tools
 from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
 from .knowledge.permissions.questions import QuestionBroker
+from .knowledge.permissions.search_rules import SearchRulesStore
 from .knowledge.permissions.store import ControlStore
 from .knowledge.permissions.waits import RunWaits
 from .knowledge.permissions.web_search import WebSearchBroker, WebSearchStore
@@ -127,6 +128,9 @@ class Runtime:
                                      text_layer=lambda: self.kb_ingest.text_layer)
         #: W-2: agents' own web searches wait for Allow once / Allow in this chat / Deny here.
         self.kb_web = WebSearchBroker(WebSearchStore(self.kb.db), self.kb_waits)
+        #: N7: the user's search rules (Settings → Search, a chat's changes); every web search obeys them.
+        self.kb_search_rules = SearchRulesStore(self.kb.db, self.kb.settings)
+        self.kb_web.rules = self.kb_search_rules.take_active
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer,
                                     permissions=self.kb_permissions, questions=self.kb_questions,

@@ -7,7 +7,7 @@ the chat (``ON DELETE CASCADE``) or when the user revokes it.
 from __future__ import annotations
 
 NAME = "web_search"
-VERSION = 2
+VERSION = 3
 
 SQL = """
 CREATE TABLE IF NOT EXISTS web_search_requests (
@@ -27,7 +27,11 @@ CREATE TABLE IF NOT EXISTS web_search_requests (
     created_at  TEXT NOT NULL,
     decided_at  TEXT,
     -- W-3b: the agent whose own search runs the query of ``skaz_web_search`` (NULL: the asking agent's own).
-    searcher    TEXT
+    searcher    TEXT,
+    -- N7: the search rules in force for this query (JSON; NULL before v3) and the links they hid
+    -- (JSON {site: count}).
+    rules       TEXT,
+    hidden      TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS web_search_requests_by_chat ON web_search_requests(chat_id, status);
 CREATE INDEX IF NOT EXISTS web_search_requests_by_run ON web_search_requests(run_id, status);
@@ -39,4 +43,7 @@ CREATE TABLE IF NOT EXISTS web_search_grants (
 """
 
 #: v2 (W-3b): which agent's own search ran a ``skaz_web_search`` query.
-UPGRADES = {2: "ALTER TABLE web_search_requests ADD COLUMN searcher TEXT;"}
+#: v3 (N7): the search rules in force for the query and the links they hid.
+UPGRADES = {2: "ALTER TABLE web_search_requests ADD COLUMN searcher TEXT;",
+            3: "ALTER TABLE web_search_requests ADD COLUMN rules TEXT; "
+               "ALTER TABLE web_search_requests ADD COLUMN hidden TEXT NOT NULL DEFAULT '{}';"}
