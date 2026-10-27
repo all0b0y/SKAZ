@@ -69,7 +69,7 @@ from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
 from ..permissions.search_rules import TIME_WINDOW_RULES, SearchRulesStore, rules_instructions
-from ..permissions.source_scope import sources_note
+from ..permissions.source_scope import scope_of, sources_note
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
 from ..permissions.web_tool import WEB_TOOL
@@ -873,7 +873,8 @@ class ChatService:
         run.question = question
         try:
             assert question.input is not None
-            request = await disk_call(builder.request, chat, question.input, self._other_chat)
+            scope = scope_of(await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).chat, chat.id))
+            request = await disk_call(builder.request, chat, question.input, self._other_chat, scope)
             # N7-4: the narrowed sources, told before the question each turn (kept in code by the tools).
             note = await disk_call(self._sources_note, chat.id)
             if note:

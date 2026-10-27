@@ -7,12 +7,14 @@
   given to the agent in this chat; a wiki page's citations of it lose their quote.
 
 The agent's own knowledge can't be switched off this way; answers mark it (P1 «agent's knowledge»).
-Applied in :meth:`ToolRegistry.call` for every chat turn (Codex dynamic tools and MCP alike); runs
-that are no chat answer (wiki jobs) get no scope.
+Applied in :meth:`ToolRegistry.call` for every chat turn (Codex dynamic tools and MCP alike), the
+interactive tools included: the study tools read cards and tests only of allowed pages, leave out
+«Unclear» items resting on other sources (counted) and withhold such sources' quotes; making cards or
+a test that cite them is refused. Runs that are no chat answer (wiki jobs) get no scope.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -32,6 +34,19 @@ PAGE_NOT_IN_SOURCES = ("This wiki page is not among the sources the user chose f
 PAGE_EXCLUDED = "The user excluded this wiki page from this chat. Don't use it."
 #: Added to a filtered result so the agent knows the list is not the whole library.
 SCOPED_NOTE = "Only the sources the user allows in this chat are listed."
+#: Read tools whose ``page_id`` names one deck or test page / ``page_ids`` several.
+STUDY_PAGE_TOOLS = frozenset({"skaz_study_read"})
+STUDY_PAGES_TOOLS = frozenset({"skaz_study_show"})
+#: Tools whose arguments cite fragments (``material_id`` anywhere inside): refused when one is outside.
+CITING_TOOLS = frozenset({"skaz_study_make_deck", "skaz_study_make_test"})
+CITES_OUTSIDE = ("Some citations are not among the sources the user allows in this chat ({ids}): {reason} "
+                 "Make the cards or questions only from the allowed sources.")
+#: ``skaz_study_unclear``: items left out because of the chat's sources.
+UNCLEAR_LEFT_OUT = ("{count} marked item(s) rest on sources the user excluded from this chat or that are "
+                    "outside the sources chosen for it; SKAZ left them out. Tell the user how many were "
+                    "left out and why.")
+#: A source quote SKAZ withheld (the citation stays, its words don't).
+WITHHELD = "outside this chat's sources: the quote is withheld"
 
 
 @dataclass(frozen=True)
@@ -67,11 +82,78 @@ def refuse_args(tool: str, args: Any, scope: SourceScope | None) -> str | None:
         material_id = getattr(args, "material_id", None)
         if isinstance(material_id, str):
             return scope.refusal(material_id)
-    if tool == "skaz_read_page":
+    if tool == "skaz_read_page" or tool in STUDY_PAGE_TOOLS:
         page_id = getattr(args, "page_id", None)
         if isinstance(page_id, str):
             return scope.refusal(page_id, page=True)
+    if tool in STUDY_PAGES_TOOLS:
+        for page_id in getattr(args, "page_ids", None) or ():
+            if isinstance(page_id, str) and (reason := scope.refusal(page_id, page=True)) is not None:
+                return reason
+    if tool in CITING_TOOLS and hasattr(args, "model_dump"):
+        outside = [item for item in dict.fromkeys(_material_ids(args.model_dump())) if not scope.allows(item)]
+        if outside:
+            reason = EXCLUDED if any(item in scope.excluded for item in outside) else NOT_IN_SOURCES
+            return CITES_OUTSIDE.format(ids=", ".join(outside[:5]), reason=reason)
     return None
+
+
+def _material_ids(data: object) -> Iterator[str]:
+    """Every ``material_id`` cited anywhere in a tool's arguments."""
+    if isinstance(data, Mapping):
+        if isinstance(data.get("material_id"), str):
+            yield data["material_id"]
+        for value in data.values():
+            yield from _material_ids(value)
+    elif isinstance(data, list | tuple):
+        for value in data:
+            yield from _material_ids(value)
+
+
+def cite_material(cite: object) -> str:
+    """``m:<material_id>:<seg>`` (or ``<material_id>:seg-N``) → the material id."""
+    text = str(cite or "")
+    return text.removeprefix("m:").split(":", 1)[0]
+
+
+def withhold_quotes(sources: object, scope: SourceScope) -> int:
+    """Drop the quotes of ``[{cite, quote}]`` entries outside the scope (in place); how many."""
+    count = 0
+    for source in sources if isinstance(sources, list) else ():
+        if isinstance(source, dict) and not scope.allows(cite_material(source.get("cite"))):
+            if source.pop("quote", None) is not None:
+                count += 1
+            source["withheld"] = True
+            source["note"] = WITHHELD
+    return count
+
+
+def _study_item_allowed(item: Mapping[str, Any], scope: SourceScope) -> bool:
+    """An «Unclear» item stays when its deck/test page isn't excluded and it rests on an allowed source
+    (an item without citations: when its page is allowed, or it is in an unsaved block)."""
+    page_id = item.get("page_id")
+    if isinstance(page_id, str) and page_id in scope.excluded:
+        return False
+    sources = [source for source in item.get("source") or [] if isinstance(source, Mapping)]
+    if sources:
+        return any(scope.allows(cite_material(source.get("cite"))) for source in sources)
+    return not isinstance(page_id, str) or not page_id or scope.allows(page_id)
+
+
+def _scope_unclear(payload: dict[str, Any], scope: SourceScope) -> dict[str, Any]:
+    items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
+    kept = [item for item in items if _study_item_allowed(item, scope)]
+    for item in kept:
+        withhold_quotes(item.get("source"), scope)
+    left_out = len(items) - len(kept)
+    payload["items"] = kept
+    if isinstance(payload.get("count"), int):
+        payload["count"] = len(kept)
+    if left_out:
+        payload["left_out"] = left_out
+        payload["scope_note"] = UNCLEAR_LEFT_OUT.format(count=left_out)
+        payload.pop("note", None)
+    return payload
 
 
 def _keep(items: object, key: str, scope: SourceScope) -> tuple[list[Any], int]:
@@ -109,6 +191,8 @@ def scope_payload(tool: str, payload: dict[str, Any], scope: SourceScope | None)
         payload["materials"], dropped = _keep(payload.get("materials"), "id", scope)
     elif tool == "skaz_wiki_index":
         payload["pages"], dropped = _keep(payload.get("pages"), "id", scope)
+    elif tool == "skaz_study_unclear":
+        return _scope_unclear(payload, scope)
     else:
         return payload
     if dropped or scope.only is not None:

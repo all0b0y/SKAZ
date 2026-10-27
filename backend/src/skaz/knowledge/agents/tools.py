@@ -759,14 +759,15 @@ class ToolRegistry:
             args = tool.args.model_validate(arguments if arguments is not None else {})
         except ValidationError as error:
             return ToolOutcome(_describe(error), is_error=True)
-        if tool.run is not None:
-            return await self._interactive(tool, args, context)
-        assert tool.handler is not None
+        # N7-4: the chat's sources hold on every tool, the interactive ones (study tools) included.
         narrow: ResultNarrowing | None = None
         if self.scope is not None:
             refusal, narrow = await self.scope(name, args, context)
             if refusal is not None:
                 return ToolOutcome(refusal, is_error=True)
+        if tool.run is not None:
+            return await self._interactive(tool, args, context, narrow)
+        assert tool.handler is not None
         try:
             async with asyncio.timeout(tool.timeout_s):
                 # Reads only; abandoning a slow read on timeout is harmless.
@@ -791,11 +792,17 @@ class ToolRegistry:
 
 
     @staticmethod
-    async def _interactive(tool: SkazTool, args: Any, context: ToolContext | None) -> ToolOutcome:
+    async def _interactive(tool: SkazTool, args: Any, context: ToolContext | None,
+                           narrow: ResultNarrowing | None = None) -> ToolOutcome:
         """A wiki change or a question: waits for the user (no SKAZ timeout); SKAZ's own JSON, not data."""
         assert tool.run is not None
         try:
             payload = await tool.run(context, args)
+            if narrow is not None:
+                narrowed = narrow(payload)
+                if isinstance(narrowed, str):
+                    return ToolOutcome(narrowed, is_error=True)
+                payload = narrowed
         except ToolInputError as error:
             return ToolOutcome(str(error), is_error=True)
         except asyncio.CancelledError:
