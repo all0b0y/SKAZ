@@ -78,6 +78,7 @@
 .kb-src-pick__list button:hover, .kb-src-pick__list button:focus-visible { background: var(--kb-accent-soft); outline: none; }
 
 /* ---- the search card: rules in force, links hidden by them --------------------------------- */
+.kb-web-fold-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .kb-web__rules { margin: 0; font-size: var(--t-xs); color: var(--kb-muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .kb-web__rules b { font-weight: 600; color: var(--kb-text); }
 .kb-web-hidden {
