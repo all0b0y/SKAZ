@@ -18,11 +18,12 @@ from ..agents.prompting import untrusted_block
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, _Args
 from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
+from ..permissions.source_scope import UNCLEAR_LEFT_OUT, ChatSourceScopes
 from ..permissions.store import RunRef
 from .checks import CardIn, QuestionIn
 from .scheduling import Mode
 from .service import StudyService
-from .unclear import unclear_items
+from .unclear import scoped_unclear_items
 
 NOT_IN_CHAT = "Flashcards and tests are only possible in a chat with the user."
 STUDY_TOOL_NAMES = (
@@ -76,6 +77,10 @@ class StudyTools:
     def __init__(self, study: StudyService, runs: Callable[[str], RunRef | None]) -> None:
         self.study = study
         self.runs = runs
+        #: N7-4: the chat's sources (set by the runtime to the registry's hook). ``skaz_study_unclear``
+        #: narrows its items itself before it wraps them as untrusted text — the registry's narrowing
+        #: can't read a wrapped payload, nor an unanswered question's stripped source (Q1 n78 H-1 × p3).
+        self.scope: ChatSourceScopes | None = None
 
     def _ref(self, context: ToolContext | None) -> RunRef:
         ref = self.runs(context.run_id) if context is not None else None
@@ -186,14 +191,18 @@ class StudyTools:
         assert ref is not None
         chat = await disk_call(ChatRepository(self.study.kb.db).get, ref.chat_id)
         folders = tuple(chat.folder_ids) if chat is not None else ()
-        items = await disk_call(unclear_items, self.study, folders, args.page_id)
+        sources = await disk_call(self.scope.for_chat, ref.chat_id) if self.scope is not None else None
+        items, left_out = await disk_call(scoped_unclear_items, self.study, folders, args.page_id, sources)
         scope = "this chat's folders" if folders else "the whole library"
         # Material quotes, question texts and the user's answers are data, never instructions (Q1 p3 M4):
         # an interactive tool's payload is not wrapped by the registry, so the items are wrapped here.
         body = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
         listed = untrusted_block("unclear items", body)
         result: dict[str, Any] = {"status": "ok", "scope": scope, "count": len(items), "items": listed}
-        if not items:
+        if left_out:
+            result["left_out"] = left_out
+            result["scope_note"] = UNCLEAR_LEFT_OUT.format(count=left_out)
+        elif not items:
             result["note"] = f"Nothing is marked Unclear in {scope}."
         return result
 

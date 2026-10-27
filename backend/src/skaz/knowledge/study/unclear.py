@@ -7,6 +7,11 @@ user's last answer, its source with the quote and where it is — in the scope o
 or the whole library when the chat has none («All»). A test question the user has not answered yet
 (decision 12, Q1 p3 H2) goes without its right answer, which option is right, the explanation and the
 source quotes — only what the user sees before answering, and ``answered: false``.
+
+In a chat whose sources are narrowed (N7-4, ``scope``) an item resting on sources outside them is left
+out and counted, judged by its real citations *before* an unanswered question's are stripped (so such
+a question can't slip through for lack of a source); the quotes of outside sources on a kept item are
+withheld (Q1 n78 H-1 × p3 H2).
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from ..errors import KnowledgeError
+from ..permissions.source_scope import SourceScope, unclear_item_allowed, withhold_quotes
 from .format import Card, Question, read_cards, read_questions
 from .items import ItemRow
 from .scheduling import RATING
@@ -119,7 +125,14 @@ def _last_answer(entry: dict[str, Any], question: Question) -> str | None:
 def unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: str | None = None
                   ) -> list[dict[str, Any]]:
     """Items marked «Unclear» in ``folders`` (``None`` or empty = the whole library), oldest mark first."""
+    return scoped_unclear_items(study, folders, page_id, None)[0]
+
+
+def scoped_unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: str | None,
+                         scope: SourceScope | None) -> tuple[list[dict[str, Any]], int]:
+    """:func:`unclear_items` as a chat with these sources may read them: (items, how many left out)."""
     out: list[dict[str, Any]] = []
+    left_out = 0
     wanted = set(folders or ())
     orphans: list[str] = []
     for row in study.items.unclear():
@@ -134,6 +147,9 @@ def unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: s
         if wanted and not wanted & set(item_folders):
             continue
         entry: dict[str, Any] = {"item_id": row.item_id, "in": title, "where": where, "page_id": row.page_id}
+        if scope is not None and not unclear_item_allowed({**entry, "source": _cites(item)}, scope):
+            left_out += 1
+            continue
         if isinstance(item, Question):
             entry.update({"kind": "test question", "type": item.type, "question": item.question})
             given = _newest_entry(study, row, item)
@@ -159,10 +175,12 @@ def unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: s
             rating = study.store.last_rating(item.id)
             entry["last_answer"] = f"graded {_GRADE.get(rating, '?')}" if rating else None
         entry["source"] = _cites(item)
+        if scope is not None:
+            withhold_quotes(entry["source"], scope)
         if item.explanation:
             entry["agent_explanation"] = item.explanation
         out.append(entry)
         if len(out) >= MAX_ITEMS:
             break
     study.items.forget(orphans)
-    return out
+    return out, left_out

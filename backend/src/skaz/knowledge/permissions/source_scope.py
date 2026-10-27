@@ -144,9 +144,10 @@ def narrow_unclear_items(items: list[dict[str, Any]], scope: SourceScope | None
                          ) -> tuple[list[dict[str, Any]], int]:
     """``skaz_study_unclear``'s items as the chat's sources allow them: (kept, how many left out).
 
-    For the study code to call *before* it wraps the items as untrusted text (the registry's own
-    narrowing can't read a wrapped payload): ``kept`` have the quotes of sources outside withheld;
-    say ``UNCLEAR_LEFT_OUT.format(count=left_out)`` when ``left_out``."""
+    ``kept`` have the quotes of sources outside withheld; say ``UNCLEAR_LEFT_OUT.format(count=left_out)``
+    when ``left_out``. The study tool itself applies the same predicate while it collects the items
+    (``study.unclear.scoped_unclear_items``): an unanswered question's sources are stripped before its
+    payload is built (p3 H2), so only there can it be judged by its real citations."""
     if scope is None:
         return items, 0
     kept = [item for item in items if unclear_item_allowed(item, scope)]

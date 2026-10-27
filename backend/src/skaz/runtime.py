@@ -145,8 +145,10 @@ class Runtime:
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
         #: N7-4: a chat's «Use only these sources» / «Exclude from this chat», kept by the library tools.
-        self.kb_tools.scope = ChatSourceScopes(self.kb_chats.run_ref, self.kb_search_rules)
+        chat_sources = ChatSourceScopes(self.kb_chats.run_ref, self.kb_search_rules)
+        self.kb_tools.scope = chat_sources
         self.kb_study_tools = StudyTools(self.kb_study, self.kb_chats.run_ref)
+        self.kb_study_tools.scope = chat_sources  # narrows «Unclear» before wrapping it (Q1)
         self.kb_tools.add(self.kb_study_tools.tools())
         self.kb_study.judge = make_judge(self.kb, lambda: self.kb_agents.registry)
         #: SKAZ's own question tool for agents whose native one can't work with SKAZ (Q-A1).

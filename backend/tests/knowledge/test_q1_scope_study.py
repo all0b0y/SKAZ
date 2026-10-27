@@ -25,6 +25,7 @@ from tests.knowledge.test_s_study import (  # noqa: F401 - the study world
     RUN_ID,
     _cards,
     _deck,
+    _options,
     _test,
     _tool,
     world,
@@ -46,6 +47,15 @@ async def _call(runtime: Any, name: str, arguments: dict[str, Any]) -> Any:
     return await runtime.kb_tools.call(name, arguments, ToolContext(RUN_ID, "claude_code"))
 
 
+def _unwrapped(text: str) -> dict[str, Any]:
+    """``skaz_study_unclear``'s answer with its items read out of their untrusted-data block (the study
+    code narrows them before it wraps them, Q1 p3 M4)."""
+    data = json.loads(text)
+    block = data["items"]
+    assert isinstance(block, str) and '<untrusted-data label="unclear items">' in block
+    return {**data, "items": json.loads(block.split("\n", 2)[2].rsplit("\n</untrusted-data>", 1)[0])}
+
+
 async def test_unclear_items_from_sources_outside_the_chat_are_left_out_and_counted(
         world: Any) -> None:  # noqa: F811
     runtime, library, ref = world
@@ -54,12 +64,27 @@ async def test_unclear_items_from_sources_outside_the_chat_are_left_out_and_coun
     lecture_q, textbook_q = (q.id for q in study.questions(block)[:2])
     await asyncio.to_thread(study.mark, block.id, [lecture_q, textbook_q], "unclear")
 
-    for rules in (ChatRules(excluded=(library.lecture,)),
-                  ChatRules(sources_only=True, sources=(library.textbook,))):
+    rounds = (ChatRules(excluded=(library.lecture,)),
+              ChatRules(sources_only=True, sources=(library.textbook,)))
+    # Not answered yet: the questions come without their sources (p3 H2), yet the lecture's is still left
+    # out — SKAZ judges by the real citations, not by what the agent is shown.
+    for rules in rounds:
         _scoped(runtime, ref.chat_id, rules)
         outcome = await _call(runtime, "skaz_study_unclear", {})
         assert not outcome.is_error, outcome.text
-        data = json.loads(outcome.text)
+        data = _unwrapped(outcome.text)
+        assert [item["item_id"] for item in data["items"]] == [textbook_q]
+        assert data["count"] == 1 and data["left_out"] == 1 and "left out" in data["scope_note"]
+        assert ENTROPY not in outcome.text and "Энтропия" not in outcome.text
+    # Answered: the kept item carries its source quote, the left-out one's never shows.
+    for index, question_id in enumerate((lecture_q, textbook_q)):
+        right = [o["id"] for o in _options(runtime, block, index) if o["origin"] == "source"]
+        await asyncio.to_thread(study.answer, block.id, question_id, choices=right)
+    for rules in rounds:
+        _scoped(runtime, ref.chat_id, rules)
+        outcome = await _call(runtime, "skaz_study_unclear", {})
+        assert not outcome.is_error, outcome.text
+        data = _unwrapped(outcome.text)
         assert [item["item_id"] for item in data["items"]] == [textbook_q]
         assert data["count"] == 1 and data["left_out"] == 1 and "left out" in data["scope_note"]
         assert ENTROPY not in outcome.text and GIBBS in outcome.text
@@ -75,12 +100,13 @@ async def test_a_quote_of_an_excluded_source_is_withheld_on_an_item_that_stays(w
     mixed = [card.id for card, _page in study.cards(block)][2]
     await asyncio.to_thread(study.mark, block.id, [mixed], "unclear")
     _scoped(runtime, ref.chat_id, ChatRules(excluded=(library.lecture,)))
-    data = json.loads((await _call(runtime, "skaz_study_unclear", {})).text)
+    outcome = await _call(runtime, "skaz_study_unclear", {})
+    data = _unwrapped(outcome.text)
     (item,) = data["items"]
     by_material = {source["cite"].split(":")[1]: source for source in item["source"]}
     assert by_material[library.textbook]["quote"] == GIBBS
     assert "quote" not in by_material[library.lecture] and by_material[library.lecture]["withheld"] is True
-    assert ENTROPY not in json.dumps(data, ensure_ascii=False)
+    assert ENTROPY not in json.dumps(data, ensure_ascii=False) and ENTROPY not in outcome.text
 
 
 async def test_a_deck_page_outside_the_chat_is_not_read_or_shown(world: Any) -> None:  # noqa: F811
