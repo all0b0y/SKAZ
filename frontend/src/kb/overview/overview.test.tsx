@@ -128,6 +128,20 @@ describe('Chat overview in the right panel (N8)', () => {
     expect(within(panel).getByRole('region', { name: 'Study' })).toHaveTextContent('Deck · Spaced repetitionsaved to wiki');
     expect(within(panel).getByRole('region', { name: 'Wiki' })).toHaveTextContent('disorder → number of microstates');
 
+    // Q1 n78 L-4: a tablist the keyboard can walk (arrows, Home/End), one tab in the Tab order.
+    const created = within(panel).getByRole('tab', { name: /Created/ });
+    expect(created).toHaveAttribute('tabindex', '0');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).toHaveAttribute('tabindex', '-1');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).not.toHaveAttribute('aria-controls');
+    created.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).toHaveAttribute('aria-selected', 'true');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(within(panel).getByRole('tab', { name: /Created/ })).toHaveFocus();
+    await user.keyboard('{ArrowLeft}');
+    expect(within(panel).getByRole('tab', { name: /Used/ })).toHaveAttribute('aria-selected', 'true');
+
     // The header button closes it again.
     await user.click(screen.getByRole('button', { name: 'Close the chat overview' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Chat overview' })).toBeNull());

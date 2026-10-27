@@ -17,13 +17,19 @@ import { chatOverview, type OvItem, type OvLink } from './model';
 type Tab = 'links' | 'used' | 'created';
 
 /** Scroll the chat to a message and mark it briefly (it may be far up in a long chat). */
-export function jumpToMessage(messageId: string) {
+export function jumpToMessage(messageId: string): boolean {
   const el = document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`);
-  if (!el) return;
+  if (!el) return false;
   el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  // Q1 n78 L-4: the keyboard follows the jump (the message takes focus without a second scroll).
+  if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '-1');
+  el.focus({ preventScroll: true });
   el.setAttribute('data-flash', 'true');
   window.setTimeout(() => el.removeAttribute('data-flash'), 1200);
+  return true;
 }
+
+const TABS: readonly Tab[] = ['links', 'used', 'created'];
 
 export function ChatOverview({ chatId }: { chatId: string }) {
   const { client } = useServices();
@@ -49,10 +55,19 @@ export function ChatOverview({ chatId }: { chatId: string }) {
             : <span>Sources as in Settings</span>}
         <button type="button" className="kb-ov__edit" onClick={() => openSearchPanel(chatId)}>Edit</button>
       </div>
-      <div className="kb-ov__tabs" role="tablist" aria-label="Chat overview">
+      <div className="kb-ov__tabs" role="tablist" aria-label="Chat overview" onKeyDown={(e) => {
+        // Q1 n78 L-4: arrows / Home / End move between the tabs (roving focus, selection follows).
+        const at = TABS.indexOf(tab);
+        const next = e.key === 'ArrowRight' ? (at + 1) % TABS.length : e.key === 'ArrowLeft' ? (at + TABS.length - 1) % TABS.length
+          : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1;
+        if (next < 0) return;
+        e.preventDefault();
+        setTab(TABS[next]!);
+        document.getElementById(`kb-ov-${TABS[next]!}`)?.focus();
+      }}>
         {([['links', 'Links', data.links], ['used', 'Used', used], ['created', 'Created', created]] as const).map(([id, label, count]) => (
           <button key={id} type="button" role="tab" className="kb-ov__tab" aria-selected={tab === id} id={`kb-ov-${id}`}
-            aria-controls={`kb-ov-${id}-panel`} onClick={() => setTab(id)}>
+            tabIndex={tab === id ? 0 : -1} aria-controls={tab === id ? `kb-ov-${id}-panel` : undefined} onClick={() => setTab(id)}>
             {label}<span className="kb-ov__count">{count}</span>
           </button>
         ))}
