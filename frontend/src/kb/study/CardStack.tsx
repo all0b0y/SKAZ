@@ -292,12 +292,15 @@ function LeavingCard({ card, reduced, onDone }: { card: KbStudyCard; reduced: bo
 }
 
 function DonePile({ part, pile, onAgain, busy }: { part: KbStudyPart; pile: Pile; onAgain: () => void; busy: boolean }) {
-  const later = Math.max(0, part.cards.length - pile.known);
+  // A pass ends only when every card is known (Q1 p3 L5): what comes back sooner are the cards a skip
+  // gave Again in this pass.
+  const sooner = pile.again;
   return (
     <div className="kb-st-pdone" role="status">
       <b>All done</b>
       <span>
-        {pile.known} known · {later} come back by the schedule
+        {pile.known} known
+        {sooner > 0 ? ` · ${sooner} ${sooner === 1 ? 'comes' : 'come'} back sooner by the schedule` : ''}
         {part.held_back > 0 ? ` · ${part.held_back} new ${part.held_back === 1 ? 'card waits' : 'cards wait'} for another day` : ''}
       </span>
       <button type="button" className="kb-st-knowit kb-st-knowit--quiet" disabled={busy} onClick={onAgain}>
