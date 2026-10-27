@@ -29,6 +29,8 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'privacy', label: 'Privacy', icon: 'privacy' },
       { id: 'look', label: 'Appearance', icon: 'appearance' },
       { id: 'about', label: 'About', icon: 'about' },
+      // N7: the last section of the menu — the global rules every chat's web search starts from.
+      { id: 'search', label: 'Search', icon: 'web' },
     ],
   },
 ];
@@ -117,6 +119,10 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },
   { id: 'updates', section: 'about', group: '', label: 'Updates', hint: 'From GitHub releases, checked at start and once a day', keywords: 'update check new version install download release' },
   { id: 'github', section: 'about', group: '', label: 'GitHub', keywords: 'source code repository' },
+  // Search (N7): every chat starts from these; a chat changes them from the message field.
+  { id: 'search-never', section: 'search', group: 'Never search', label: 'Blocked sites', hint: 'Always, in every chat. Links from these sites are removed before the agent sees them.', keywords: 'web search block blocked forbid never sites domains internet' },
+  { id: 'search-only', section: 'search', group: 'Search only', label: 'Only these sites', hint: 'Links from other sites are removed. A chat can change this from the message field.', keywords: 'web search allow allowed only list sites domains internet' },
+  { id: 'search-prefer', section: 'search', group: 'Prefer', label: 'Preferred sites', hint: 'A hint to the agent, shown on the search card. It may still search elsewhere.', keywords: 'web search prefer preferred favourite favorite sites scholar arxiv internet' },
 ];
 
 const fold = (text: string) => text.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase();

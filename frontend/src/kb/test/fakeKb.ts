@@ -23,6 +23,7 @@ import {
   type KbPermissionPart, type KbQuestionPart,
 } from '../api/permissions';
 import { meRoutes, type FakeMe } from './fakeMe';
+import { searchRulesRoutes } from './fakeSearchRules';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -117,6 +118,9 @@ export interface FakeWorld {
   permissionGrants?: Record<string, string[]>;
   /** W-2: chats whose web search is allowed without a question → since when (ISO). */
   webGrants?: Record<string, string>;
+  /** N7: Settings → Search (absent = no rules) and one chat's changes. */
+  searchSettings?: import('../../api/kb/types.gen').KbSearchSettings;
+  chatSearchRules?: Record<string, import('./fakeSearchRules').FakeChatRules>;
   /** D (decision 9): what «Save to wiki» left out, by answer id (one answer) or chat id (whole chat). */
   saveWarnings?: Record<string, string>;
   /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
@@ -1718,6 +1722,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
 const AGENT_UPDATE_ROUTES = agentUpdateRoutes(fail);
+const SEARCH_RULES_ROUTES = searchRulesRoutes(fail);
 
 /**
  * N6 «Я» routes (fakeMe.ts, typed by types.gen.ts). Undo marks the chat's memory
@@ -1737,7 +1742,7 @@ const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
   }
 });
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES), ...Object.entries(SEARCH_RULES_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1748,7 +1753,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES), ...Object.keys(SEARCH_RULES_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;
