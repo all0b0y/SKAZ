@@ -50,7 +50,7 @@ describe('board route', () => {
     expect(parseBoardRoute('')).toBeNull();
     expect(parseBoardRoute('#chats')).toBeNull();
     expect(parseBoardRoute('#design-board')).toMatchObject({ kind: 'canvas' });
-    expect(parseBoardRoute('#design-board/frame?theme=dark&size=s&base=sand&accent=plum')).toEqual({ kind: 'frame', theme: 'dark', size: 's', base: 'sand', accent: 'plum' });
-    expect(parseBoardRoute('#design-board/frame?theme=x&size=y&base=<b>')).toEqual({ kind: 'frame', theme: 'light', size: 'm', base: 'milk', accent: 'ink' });
+    expect(parseBoardRoute('#design-board/frame?theme=dark&size=s&base=sand&accent=plum')).toEqual({ kind: 'frame', theme: 'dark', size: 's', base: 'sand', accent: 'plum', density: 'comfortable' });
+    expect(parseBoardRoute('#design-board/frame?theme=x&size=y&base=<b>')).toEqual({ kind: 'frame', theme: 'light', size: 'm', base: 'milk', accent: 'ink', density: 'comfortable' });
   });
 });
