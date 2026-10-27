@@ -6,7 +6,8 @@ import { useAgents, useLibrary, useServices, useSettings, useUi } from '../state
 import { agentOf } from '../state/agents';
 import type { EngineId } from '../api/names';
 import {
-  fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem, type LinkItem,
+  ALREADY_IN_LIBRARY, fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem,
+  type LinkItem,
 } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
@@ -41,6 +42,8 @@ export function AddMaterialModal() {
   const [translate, setTranslate] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // N2: items whose file / address / DOI is already in the library — answered with that material, not added again.
+  const [already, setAlready] = useState<Record<string, string>>({});
   const [noneAdded, setNoneAdded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -50,7 +53,7 @@ export function AddMaterialModal() {
   // Defaults each time it opens: last used folder (decision 16), wiki auto-add (decision 15).
   useEffect(() => {
     if (!open) return;
-    setItems([]); setPaste(''); setErrors({}); setNoneAdded(false); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
+    setItems([]); setPaste(''); setErrors({}); setAlready({}); setNoneAdded(false); setToWiki(null); setDropError(null); setLanguage(''); setTranslate(false);
     setCreating(false); setNewName(''); setFolderError(null);
     // Files dropped on a folder row (0.3.1 F3) come with that folder; otherwise the last used one.
     const preset = ui.getState().addMaterialPreset;
@@ -128,7 +131,7 @@ export function AddMaterialModal() {
 
   // A link that failed its check stays on the list with its reason; Add neither counts nor sends it (QA B23).
   const broken = (i: AddItem) => i.type === 'link' && i.error !== null;
-  const sendable = items.filter((i) => !broken(i));
+  const sendable = items.filter((i) => !broken(i) && !already[i.id]);
   const typed = creating ? newName.trim() : '';
   const taken = typed ? folders.find((f) => sameName(f.name, typed)) ?? null : null;
   const pendingNew = typed !== '' && taken === null;
@@ -156,11 +159,19 @@ export function AddMaterialModal() {
       leaveNew();
     }
     const failed: Record<string, string> = {};
-    const left: AddItem[] = items.filter(broken);
+    const known: Record<string, string> = { ...already };
+    const left: AddItem[] = items.filter((i) => broken(i) || already[i.id]);
     let added = 0;
     for (const item of sendable) {
       try {
-        await submitItem(client, item, { folderId: target, language: language || null, translate, toWiki: wikiOn });
+        const made = await submitItem(client, item, { folderId: target, language: language || null, translate, toWiki: wikiOn });
+        const existing = made.find((m) => m.existing);
+        if (existing) {
+          // Stays on the list with "Open it"; nothing was added and no ingest started.
+          known[item.id] = existing.materialId;
+          left.push(item);
+          continue;
+        }
         added += 1;
       } catch (e) {
         failed[item.id] = errorText(e);
@@ -170,6 +181,7 @@ export function AddMaterialModal() {
     setBusy(false);
     void library.getState().loadContent();
     setErrors(failed);
+    setAlready(known);
     setNoneAdded(added === 0);
     setItems(left);
     if (left.length === 0) setOpen(false);
@@ -212,6 +224,14 @@ export function AddMaterialModal() {
                   <span className="kb-aqi__title">{itemTitle(item)}</span>
                   {errors[item.id] ? (
                     <span className="kb-aqi__meta is-error" role="alert">{errors[item.id]}</span>
+                  ) : already[item.id] ? (
+                    <span className="kb-aqi__meta" data-testid="already-in-library">
+                      {ALREADY_IN_LIBRARY} ·{' '}
+                      <button type="button" className="kb-linkbtn" onClick={() => {
+                        setOpen(false);
+                        ui.getState().openDocument({ type: 'material', id: already[item.id]! });
+                      }}>Open it</button>
+                    </span>
                   ) : (
                     <span className={`kb-aqi__meta${(item.type === 'link' && item.error) || (item.type === 'file' && item.kind === 'unsupported') ? ' is-error' : ''}`}>{itemMeta(item)}</span>
                   )}

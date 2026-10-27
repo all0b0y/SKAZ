@@ -231,8 +231,12 @@ async def test_article_with_an_embedded_video_text_video_or_both(app: Any, api: 
     both = await api.post(
         "/kb/materials/link", json={"url": "https://blog.example/heat", "folder_id": folder, "mode": "both"}
     )
-    assert both.status_code == 201, both.text
+    # N2: the article at this address is already in the library — that material is answered (200), not
+    # added again; the video beside it is still added.
+    assert both.status_code == 200, both.text
     result = both.json()
+    assert result["already_in_library"] is True
+    assert result["material"]["id"] == text_only.json()["material"]["id"]
     assert result["material"]["kind"] == "web" and result["video"]["kind"] == "video_link"
     assert result["video"]["folder_id"] == folder and result["video_failure_reason"] is None
 

@@ -156,18 +156,25 @@ export interface Added {
   materialId: string;
   /** Ready now (files, text) or still processing (imports, links). */
   ready: boolean;
+  /** N2: the same file / address / DOI was already in the library — this is that material; nothing new was added. */
+  existing?: { title: string };
 }
+
+/** N2: what the Add list says under an item that is already in the library. */
+export const ALREADY_IN_LIBRARY = 'This is already in your library';
 
 /** Send one item; returns the materials it created (a link in mode "both" makes two). */
 export async function submitItem(client: KbClient, item: AddItem, o: AddOptions): Promise<Added[]> {
-  const fromSummary = (m: KbMaterialSummary): Added => ({ materialId: m.id, ready: m.status === 'ready' });
+  const fromSummary = (m: KbMaterialSummary, existing = false): Added => ({
+    materialId: m.id, ready: m.status === 'ready', ...(existing ? { existing: { title: m.title } } : {}),
+  });
   if (item.type === 'file') {
     if (item.kind === 'speech') {
       const view = await client.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
       return [{ materialId: view.material_id, ready: view.status === 'ready' }];
     }
     const added = await client.call('POST /kb/materials/file', { body: { path: item.path, folder_id: o.folderId, to_wiki: o.toWiki } });
-    return [fromSummary(added.material)];
+    return [fromSummary(added.material, added.already_in_library === true)];
   }
   if (item.type === 'text') {
     const added = await client.call('POST /kb/materials/text', { body: { text: item.text, folder_id: o.folderId, to_wiki: o.toWiki } });
@@ -187,5 +194,5 @@ export async function submitItem(client: KbClient, item: AddItem, o: AddOptions)
   const added = await client.call('POST /kb/materials/link', {
     body: { url: item.url, folder_id: o.folderId, to_wiki: o.toWiki, ...(item.info?.embedded_video ? { mode: item.mode } : {}) },
   });
-  return [fromSummary(added.material)];
+  return [fromSummary(added.material, added.already_in_library === true)];
 }

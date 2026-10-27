@@ -42,6 +42,7 @@ from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
 from . import web_page
+from .duplicates import Duplicate, content_hash, find_duplicate
 from .fetch import MAX_PAGE_BYTES, FetchFailed, LinkRejected, SafeFetcher, check_url
 from .fragments import sanitize_title
 from .guard import Detection, Finding, detect_instruction
@@ -114,6 +115,9 @@ class IntakeResult:
     excluded_count: int
     hidden_count: int
     failure: str | None
+    #: N2: the same DOI, address or file was already in the library — this is that material, nothing
+    #: new was stored and no ingest was started.
+    existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -223,16 +227,22 @@ class SourceService:
         """A PDF (or book) or a ``.md``/``.txt`` file the user picked in the file dialog."""
         file_path = self._checked_file(path)
         suffix = file_path.suffix.lower()
-        origin = Origin(type="file", file_name=file_path.name)
+        self._typed_name(title)  # a typed name that can't be one is refused first, duplicate or not
+        data = file_path.read_bytes()
+        duplicate = find_duplicate(self.kb, content=data)
+        if duplicate is not None:
+            return self._existing(duplicate)
+        origin = Origin.model_validate(
+            {"type": "file", "file_name": file_path.name, "sha256": content_hash(data)})
         if suffix in PDF_EXTENSIONS:
             prepared = prepare_pdf(
-                file_path.read_bytes(),
+                data,
                 origin=origin,
                 fallback=sanitize_title(file_path.stem) or "Document",
                 original=Original("original.pdf", path=file_path),
             )
         else:
-            prepared = prepare_text_file(file_path.read_bytes(), file_path.name, origin=origin)
+            prepared = prepare_text_file(data, file_path.name, origin=origin)
             if prepared.failure:
                 raise SourceRejected("This file has no text.")
         return self._publish(prepared, folder_id, title, to_wiki)
@@ -247,14 +257,24 @@ class SourceService:
         if offline is not None and offline.kind in ("audio_file", "video_file"):
             raise SourceRejected(MEDIA_FILE_LINK)
         address = check_url(url)
+        self._typed_name(title)
+        # N2: the same address or DOI already in the library is answered before any request.
+        duplicate = await disk_call(find_duplicate, self.kb, urls=[address])
+        if duplicate is not None:
+            return self._existing(duplicate)
         limit = MAX_LINKED_PDF_BYTES if offline is not None and offline.kind == "pdf" else MAX_PAGE_BYTES
         # The user's click on this link: pinned to the checked address; a VPN fake-IP answer is accepted
         # for a public name on the default port (``fetch`` module note, security review S-02/S-05).
         fetched = await self.fetcher.fetch(address, max_bytes=limit, pin_address=True, allow_vpn_fake_ip=True)
         content_type = fetched.content_type
         domain = domain_of(address)
+        # After redirects: the page it landed on, or the same bytes, may be in the library already.
+        duplicate = await disk_call(find_duplicate, self.kb, urls=[fetched.url], content=fetched.body)
+        if duplicate is not None:
+            return self._existing(duplicate)
         origin = Origin.model_validate(
-            {"type": "url", "url": address, "final_url": fetched.url, "content_type": content_type}
+            {"type": "url", "url": address, "final_url": fetched.url, "content_type": content_type,
+             "sha256": content_hash(fetched.body)}
         )
         if content_type == "application/pdf" or (
             content_type in ("", "application/octet-stream") and fetched.body.startswith(b"%PDF-")
@@ -316,6 +336,11 @@ class SourceService:
             result = await self._publish_async(prepared, folder_id, None, to_wiki)
         return WebPageSaved(result.material_id, False, result)
 
+    def _existing(self, duplicate: Duplicate) -> IntakeResult:
+        record = self.kb.material_repo.get(duplicate.material_id)
+        status = record.status if record is not None else "ready"
+        return IntakeResult(duplicate.material_id, duplicate.title, status, 0, 0, None, existing=True)
+
     def _saved_page(self, folder_id: str, key: str) -> str | None:
         for record in self.kb.materials(folder_id=folder_id, kind="web"):
             origin = record.origin or {}
@@ -353,6 +378,11 @@ class SourceService:
         if info.st_size > limit:
             raise SourceRejected(f"This file is larger than {limit // (1024 * 1024)} MB.")
         return resolved
+
+    @staticmethod
+    def _typed_name(title: str | None) -> None:
+        if title is not None and title.strip():
+            validate_name(title)
 
     @staticmethod
     def _title(prepared: Prepared, title: str | None) -> tuple[str, bool]:

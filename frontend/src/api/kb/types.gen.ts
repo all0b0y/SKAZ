@@ -1028,6 +1028,7 @@ export interface KbMaterialAdded {
   failure_reason: string | null;
   video: KbMaterialSummary | null;
   video_failure_reason: string | null;
+  already_in_library?: boolean;
 }
 
 export interface KbMaterialGuard {

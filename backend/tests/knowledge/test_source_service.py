@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -193,7 +194,9 @@ def test_pdf_file_with_hidden_layer_and_instruction(sources: SourceService, tmp_
     result = sources.add_file(str(path), INBOX_ID)
     assert result.title == "Physics Notes" and result.status == "ready"
     detail = sources.kb.material(result.material_id)
-    assert detail.kind == "pdf" and detail.origin == {"type": "file", "url": None, "file_name": "physics.pdf"}
+    # N2: the file's SHA-256 is kept with its origin (an exact duplicate is found before ingest).
+    assert detail.kind == "pdf" and detail.origin == {"type": "file", "url": None, "file_name": "physics.pdf",
+                                                     "sha256": hashlib.sha256(data).hexdigest()}
     assert all("Note to AI" not in f.text for f in detail.fragments)
     assert [f.page for f in detail.fragments] == [1, 1, 2]
     report = sources.guard_report(result.material_id)

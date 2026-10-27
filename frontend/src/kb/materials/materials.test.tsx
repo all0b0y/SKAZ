@@ -322,6 +322,31 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByText('notes.pdf')).toBeInTheDocument();
   });
 
+  it('a file already in the library is not added again: the row says so and opens it (N2)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files: [new File(['y'], 'notes.pdf', { type: 'application/pdf' })], getData: () => '' } });
+    const there = fake.world.materials.find((m) => m.title === 'Lecture 8 — entropy')!;
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => {
+      if (req.path !== '/kb/materials/file') return original(req);
+      const res = await original(req);
+      if (!res.ok) return res;
+      const data = res.data as { material: { id: string; title: string } };
+      return { ...res, status: 200, data: { ...data, material: { ...data.material, id: there.id, title: there.title }, already_in_library: true } };
+    }) as typeof original;
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    const note = await within(dialog).findByTestId('already-in-library');
+    expect(note).toHaveTextContent('This is already in your library · Open it');
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled(); // nothing left to add
+    await user.click(within(note).getByRole('button', { name: 'Open it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeInTheDocument();
+  });
+
   it('without a ready wiki agent "Add to wiki" starts off and says where to connect one (QA B4)', async () => {
     const user = userEvent.setup();
     const world = docWorld();
