@@ -59,6 +59,7 @@ def retract_material(
     ``also``: block ids to remove as well (agent blocks only, e.g. a disagreement note about a removed side).
     """
     prefix = block_prefix(material_id)
+    present = {block.id for block in document.blocks()}
     result = Retraction()
     parts: list[Part] = []
     for part in document.parts:
@@ -71,7 +72,7 @@ def retract_material(
         # A merged repeat (N2) comes apart exactly: the material's merged paragraph comes off another
         # source's statement; when the statement is the material's own, the repeats come back in their
         # own words (never the material's words under their citation).
-        unmerged = take_material(part, material_id, author=part.id.startswith(prefix))
+        unmerged = take_material(part, material_id, author=part.id.startswith(prefix), present=present)
         restored = list(unmerged.restored) if unmerged is not None else []
         block = unmerged.block if unmerged is not None else part
         result.kept.extend(item.id for item in restored)
@@ -181,7 +182,8 @@ def retract_unquoted(
             if _breaks(part, material_id, text_of):
                 # A merged repeat (N2): the broken source's share comes apart, the rest stays.
                 author = part.id.startswith(block_prefix(material_id))
-                unmerged = take_material(part, material_id, author=author)
+                unmerged = take_material(part, material_id, author=author,
+                                         present={block.id for block in document.blocks()})
                 if unmerged is None or unmerged.restored or _breaks(unmerged.block, material_id, text_of):
                     result.removed.append(part.id)
                     if unmerged is not None:

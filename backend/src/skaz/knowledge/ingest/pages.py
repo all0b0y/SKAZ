@@ -373,13 +373,14 @@ def strip_material(document: PageDocument, material_id: str,
     back as their sources' own paragraphs.
     """
     prefix = block_prefix(material_id)
+    present = {block.id for block in document.blocks()}
     parts: list[Part] = []
     changed = 0
     for part in document.parts:
         if _is_agent(part) and isinstance(part, Block):
             # A repeat merged into a statement (N2): this material's share comes off exactly; when the
             # statement is this material's own, the repeats come back as their own paragraphs.
-            unmerged = take_material(part, material_id, author=part.id.startswith(prefix))
+            unmerged = take_material(part, material_id, author=part.id.startswith(prefix), present=present)
             restored = unmerged.restored if unmerged is not None else ()
             block = unmerged.block if unmerged is not None else part
             cites_it = any(cite.material_id == material_id for cite in block.cites)

@@ -20,7 +20,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -123,19 +123,22 @@ class Unmerged:
     restored: tuple[Block, ...] = ()
 
 
-def take_material(block: Block, material_id: str, *, author: bool) -> Unmerged | None:
+def take_material(block: Block, material_id: str, *, author: bool,
+                  present: Collection[str] = ()) -> Unmerged | None:
     """``material_id``'s share of the repeats merged into ``block``; ``None`` when there is none.
 
     ``author``: ``block`` is ``material_id``'s own statement (its wording goes with it). Then every
     merge comes off and each repeat of another material comes back as its own paragraph; otherwise
     only the material's merged repeats come off. The caller then applies its usual rule to the
-    returned block (the material's own statement goes; a statement of others stays).
+    returned block (the material's own statement goes; a statement of others stays). ``present``:
+    block ids already on the page — a repeat whose id is there again is not brought back twice.
     """
     items = merged_of(block)
     if not items:
         return None
     if author:
-        restored = [item.block() for item in items if material_id not in item.material_ids]
+        restored = [item.block() for item in items
+                    if material_id not in item.material_ids and item.block_id not in present]
         return Unmerged(_rebuilt(block, items, (), every_cite=True),
                         tuple(part for part in restored if part is not None))
     removed = [item for item in items if material_id in item.material_ids]

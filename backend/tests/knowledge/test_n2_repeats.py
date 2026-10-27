@@ -358,3 +358,11 @@ def test_taking_a_source_or_a_link_off_a_statement_keeps_its_marker_keys() -> No
                           cites=merged.cites, attrs=merged.attrs)
     unlinked, changed = strip_links(_page(linked), {"Wiki/Concepts/Gone"})
     assert changed == ["c-aaa-1"] and _only(unlinked).attrs == merged.attrs
+
+
+def test_a_repeat_already_back_on_the_page_is_not_restored_twice() -> None:
+    merged = _only(_merged_water())
+    again = Block.create("c-bbb-1", "from_source", f"Water boils at 100 °C. {B_LINK}",
+                         cites=(Cite("mat-bbb", 2),))
+    updated, _result = retract_material(_page(merged, again), "mat-aaa", "Materials/F/A")
+    assert [block.id for block in updated.blocks()] == ["c-bbb-1"]
