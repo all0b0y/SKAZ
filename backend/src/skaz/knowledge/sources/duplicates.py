@@ -13,9 +13,10 @@ wrong "you have this"):
 * **DOI** (``doi_of``): a ``doi.org`` link or a publisher path ``…/doi/[abs|full|pdf/]10.…``;
   DOIs are case-insensitive. There is no separate DOI import: a DOI arrives as a link.
 * **Content** (``content_hash``): SHA-256 of the file's bytes (or of a fetched PDF/page), kept in
-  the material's origin (``origin.sha256``) from now on. Materials added before that are compared
-  through the original kept in their ``.skaz/`` folder — only when its size is the same, so no
-  other file is read.
+  the material's origin (``origin.sha256``) from now on (speech imports too, hashed in chunks).
+  Documents added before that are compared through the original kept in their ``.skaz/`` folder —
+  only when its size is the same, so no other file is read; recordings and imports keep no such
+  original and are not searched for one.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ _DOI_HOSTS = frozenset({"doi.org", "dx.doi.org", "www.doi.org"})
 _DOI = re.compile(r"^(10\.\d{4,9}/\S+)$")
 _PUBLISHER_DOI = re.compile(r"/doi/(?:abs/|full/|pdf/|epdf/)?(10\.\d{4,9}/[^?#\s]+)", re.IGNORECASE)
 _CHUNK = 1 << 20
+#: Recordings and imports keep no original document in ``.skaz/``: never searched for one (Q1 n2 L1).
+_NO_KEPT_ORIGINAL = frozenset({"recording", "audio", "video", "video_link"})
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,11 @@ def content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def file_digest(path: Path) -> str:
+    """SHA-256 of a file read in chunks (a long recording is never held in memory)."""
+    return _file_hash(path)
+
+
 def _file_hash(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -120,16 +128,18 @@ def _original_matches(kb: KnowledgeService, record: MaterialRecord, digest: str,
 
 
 def find_duplicate(kb: KnowledgeService, *, urls: Iterable[str | None] = (),
-                   content: bytes | None = None) -> Duplicate | None:
+                   content: bytes | None = None, digest: str | None = None) -> Duplicate | None:
     """The material already in the library with the same DOI, address or content, if any.
 
     The whole library is searched (one library, whatever the folder). A DOI match wins over an
-    address match, an address match over a content match.
+    address match, an address match over a content match. ``digest``: the content's SHA-256 when
+    the caller hashed a large file itself (speech imports); then only stored hashes are compared.
     """
     wanted = [url for url in urls if url]
     dois = {doi for doi in map(doi_of, wanted) if doi}
     keys = {key for key in map(url_key, wanted) if key}
-    digest = content_hash(content) if content is not None else None
+    if content is not None:
+        digest = content_hash(content)
     records = kb.materials()
     by_reason: dict[DuplicateReason, MaterialRecord] = {}
     unhashed: list[MaterialRecord] = []
@@ -143,7 +153,8 @@ def find_duplicate(kb: KnowledgeService, *, urls: Iterable[str | None] = (),
             stored = (record.origin or {}).get("sha256")
             if stored == digest:
                 by_reason.setdefault("content", record)
-            elif stored is None and (record.origin or {}).get("type") in ("file", "url"):
+            elif (stored is None and (record.origin or {}).get("type") in ("file", "url")
+                  and record.kind not in _NO_KEPT_ORIGINAL):
                 unhashed.append(record)
     for reason in _ORDER:
         found = by_reason.get(reason)

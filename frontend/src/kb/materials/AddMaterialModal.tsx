@@ -6,7 +6,7 @@ import { useAgents, useLibrary, useServices, useSettings, useUi } from '../state
 import { agentOf } from '../state/agents';
 import type { EngineId } from '../api/names';
 import {
-  ALREADY_IN_LIBRARY, fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem,
+  addedNote, fileItem, isSpeech, itemMeta, itemTitle, pasteItem, speechBlock, submitItem, wikiDefault, type AddItem,
   type LinkItem,
 } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
@@ -42,8 +42,9 @@ export function AddMaterialModal() {
   const [translate, setTranslate] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  // N2: items whose file / address / DOI is already in the library — answered with that material, not added again.
-  const [already, setAlready] = useState<Record<string, string>>({});
+  // N2: items whose file / address / DOI is already in the library — answered with that material, not added again;
+  // in mode "both" the line tells each part (article, video) as it is (Q1 n2 M1).
+  const [already, setAlready] = useState<Record<string, { openId: string; text: string }>>({});
   const [noneAdded, setNoneAdded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -159,20 +160,19 @@ export function AddMaterialModal() {
       leaveNew();
     }
     const failed: Record<string, string> = {};
-    const known: Record<string, string> = { ...already };
+    const known: Record<string, { openId: string; text: string }> = { ...already };
     const left: AddItem[] = items.filter((i) => broken(i) || already[i.id]);
     let added = 0;
     for (const item of sendable) {
       try {
         const made = await submitItem(client, item, { folderId: target, language: language || null, translate, toWiki: wikiOn });
-        const existing = made.find((m) => m.existing);
-        if (existing) {
-          // Stays on the list with "Open it"; nothing was added and no ingest started.
-          known[item.id] = existing.materialId;
+        const note = addedNote(made);
+        if (made.some((m) => !m.existing)) added += 1;
+        if (note) {
+          // Stays on the list with what happened and "Open it"; nothing already there was added again.
+          known[item.id] = note;
           left.push(item);
-          continue;
         }
-        added += 1;
       } catch (e) {
         failed[item.id] = errorText(e);
         left.push(item);
@@ -226,10 +226,10 @@ export function AddMaterialModal() {
                     <span className="kb-aqi__meta is-error" role="alert">{errors[item.id]}</span>
                   ) : already[item.id] ? (
                     <span className="kb-aqi__meta" data-testid="already-in-library">
-                      {ALREADY_IN_LIBRARY} ·{' '}
+                      {already[item.id]!.text} ·{' '}
                       <button type="button" className="kb-linkbtn" onClick={() => {
                         setOpen(false);
-                        ui.getState().openDocument({ type: 'material', id: already[item.id]! });
+                        ui.getState().openDocument({ type: 'material', id: already[item.id]!.openId });
                       }}>Open it</button>
                     </span>
                   ) : (

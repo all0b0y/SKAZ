@@ -6,7 +6,10 @@ address is already known. Code only: no agent is involved.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -15,6 +18,8 @@ from skaz.knowledge.library.fsio import write_atomic
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.markdown.source import FragmentInput, Origin
 from skaz.knowledge.service import KnowledgeService
+from skaz.knowledge.sources import duplicates
+from skaz.knowledge.sources import service as source_service
 from skaz.knowledge.sources.duplicates import doi_of, find_duplicate, url_key
 from skaz.knowledge.sources.service import SourceEvent, SourceService
 from tests.knowledge.pdf_fixtures import line, make_pdf
@@ -161,6 +166,57 @@ async def test_a_link_landing_on_a_known_page_or_the_same_bytes_is_not_added_aga
     linked = await sources.add_link("https://files.example/paper.pdf", INBOX_ID)
     assert linked.existing and linked.material_id == file.material_id
     assert len(ready.materials()) == 2
+
+
+def test_only_documents_from_before_the_hash_have_their_kept_original_read(
+        sources: SourceService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Q1 n2 L1: a recording or an import keeps no original document in ``.skaz``; its folder is not
+    # searched on every add (a large, cloud-synced library of recordings stays untouched).
+    kb = sources.kb
+    kb.create_material(INBOX_ID, "Old talk", "audio", [FragmentInput(text=CLEAN_EN[1])],
+                       origin=Origin(type="file", file_name="talk.m4a"))
+    old = kb.create_material(INBOX_ID, "Old lecture", "pdf", [FragmentInput(text=CLEAN_EN[0])],
+                             origin=Origin(type="file", file_name="old.pdf"))
+    looked: list[str] = []
+    monkeypatch.setattr(duplicates, "_original_matches",
+                        lambda _kb, record, _digest, _size: looked.append(record.title) or False)
+    assert find_duplicate(kb, content=b"%PDF-1.4 something else") is None
+    assert looked == ["Old lecture"] and old.manifest.id
+
+
+def _slow_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Widen the window between "is it there?" and storing it, as a slow disk would."""
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        found = find_duplicate(*args, **kwargs)
+        time.sleep(0.2)
+        return found
+    monkeypatch.setattr(source_service, "find_duplicate", slow)
+
+
+async def test_two_adds_of_the_same_file_at_once_make_one_material(
+        sources: SourceService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Q1 n2 L3: both adds checked before either stored the material — both used to pass.
+    _slow_check(monkeypatch)
+    pdf = _pdf(tmp_path, "lecture.pdf")
+    results = await asyncio.gather(*(asyncio.to_thread(sources.add_file, pdf, INBOX_ID) for _ in range(2)))
+    assert sorted(result.existing for result in results) == [False, True]
+    assert len(sources.kb.materials()) == 1
+
+
+async def test_two_adds_of_the_same_link_at_once_make_one_material(
+        ready: KnowledgeService, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"}, text=ARTICLE)
+
+    sources = service_with(ready, handler)
+    _slow_check(monkeypatch)
+    url = "https://blog.example/boiling"
+    results = await asyncio.gather(*(sources.add_link(url, INBOX_ID) for _ in range(2)))
+    assert sorted(result.existing for result in results) == [False, True]
+    assert len(ready.materials()) == 1 and len(seen) == 1
 
 
 def test_pasted_text_is_never_a_duplicate(sources: SourceService) -> None:

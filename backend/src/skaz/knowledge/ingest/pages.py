@@ -32,6 +32,7 @@ from ..markdown.page import (
 )
 from ..markdown.text import format_timestamp, name_key, normalize_text
 from .checks import CheckedBlock
+from .merged import take_material
 
 #: Navigation sections written by code (not model statements), labelled in the wiki language.
 NAV_TITLES: dict[str, dict[str, str]] = {
@@ -366,22 +367,37 @@ def strip_material(document: PageDocument, material_id: str,
     N2 (a repeat strengthens): a plain statement that rests on other sources too — another source's
     statement this material repeated, or this material's own that others repeated — stays on those
     sources without this material's citation (marker and link). ``rel_dir`` names the material's
-    links; without it such a statement goes with the material, as before.
+    links; without it such a statement goes with the material, as before. A merged repeat (marker
+    ``merged``) comes apart exactly (``ingest.merged``): this material's merged paragraph comes off
+    another's statement; this material's own statement goes and the repeats merged into it come
+    back as their sources' own paragraphs.
     """
     prefix = block_prefix(material_id)
+    present = {block.id for block in document.blocks()}
     parts: list[Part] = []
     changed = 0
     for part in document.parts:
         if _is_agent(part) and isinstance(part, Block):
-            cites_it = any(cite.material_id == material_id for cite in part.cites)
-            others = tuple(cite for cite in part.cites if cite.material_id != material_id)
-            if cites_it and others and rel_dir and confirms_alone(part):
-                body = without_citation_links(part.body, rel_dir)
-                parts.append(Block.create(part.id, part.kind, body, cites=others, owner="agent",
-                                          attrs=part.attrs))
+            # A repeat merged into a statement (N2): this material's share comes off exactly; when the
+            # statement is this material's own, the repeats come back as their own paragraphs.
+            unmerged = take_material(part, material_id, author=part.id.startswith(prefix), present=present)
+            restored = unmerged.restored if unmerged is not None else ()
+            block = unmerged.block if unmerged is not None else part
+            cites_it = any(cite.material_id == material_id for cite in block.cites)
+            others = tuple(cite for cite in block.cites if cite.material_id != material_id)
+            if cites_it and others and rel_dir and confirms_alone(block):
+                body = without_citation_links(block.body, rel_dir)
+                parts.append(Block.create(block.id, block.kind, body, cites=others, owner="agent",
+                                          attrs=block.attrs))
+                parts.extend(restored)
                 changed += 1
                 continue
-            if part.id.startswith(prefix) and (cites_it or not part.cites):
+            if block.id.startswith(prefix) and (cites_it or not block.cites):
+                parts.extend(restored)
+                changed += 1
+                continue
+            if unmerged is not None:
+                parts.extend([block, *restored])
                 changed += 1
                 continue
         parts.append(_protect(part))

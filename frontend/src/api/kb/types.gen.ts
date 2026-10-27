@@ -1056,6 +1056,7 @@ export interface KbMaterialAdded {
   video: KbMaterialSummary | null;
   video_failure_reason: string | null;
   already_in_library?: boolean;
+  video_already_in_library?: boolean;
 }
 
 export interface KbMaterialGuard {
@@ -1685,6 +1686,7 @@ export interface KbSpeechMaterial {
   import_stage: string | null;
   error: string | null;
   duration_ms?: number | null;
+  already_in_library?: boolean;
 }
 
 export interface KbSpeechSettings {

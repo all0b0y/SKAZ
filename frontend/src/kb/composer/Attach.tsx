@@ -26,6 +26,8 @@ export interface Attachment {
   materialReady: boolean;
   /** A long paste kept as a card (Composer): saved to Materials only when the message is sent. */
   text?: string;
+  /** N2: the same file / link was already in the library — this is that material; never sent to the wiki again. */
+  alreadyInLibrary?: boolean;
 }
 
 const SPEECH_EXT = new Set<string>(SPEECH_EXTENSIONS);
@@ -40,7 +42,7 @@ export async function addMaterial(client: KbClient, source: 'file' | 'link' | 't
   if (source === 'file') {
     if (isSpeechFile(value)) {
       const res = await client.call('POST /kb/imports', { body: { path: value, ...hold } });
-      return { id: res.material_id, ready: res.status === 'ready' };
+      return { id: res.material_id, ready: res.status === 'ready', existing: res.already_in_library === true };
     }
     const res = await client.call('POST /kb/materials/file', { body: { path: value, ...hold } });
     // N2: the same file already in the library — that material, attached as an existing one (no second ingest).
@@ -198,7 +200,8 @@ export function AttachmentChips({ items, onToggleWiki, onRemove, renderName }: {
             {renderName?.(a) ?? <span className="kb-attachment__name" title={a.name}>{a.name}</span>}
             {a.state === 'adding' && <span className="kb-spinner kb-spinner--inline" role="status" aria-label="Saving to Materials" />}
             {a.state === 'failed' && <span className="kb-attachment__err" role="alert" title={a.error ?? ''}><Icon name="error" size={13} />{a.error}</span>}
-            {a.source !== 'existing' && a.state !== 'failed' && (
+            {a.alreadyInLibrary && <span className="kb-attachment__wiki" title="Nothing new was added; this is the material already in your library">Already in your library</span>}
+            {a.source !== 'existing' && !a.alreadyInLibrary && a.state !== 'failed' && (
               <label className="kb-attachment__wiki">
                 <input type="checkbox" checked={a.inWiki} onChange={() => onToggleWiki(a.key)} />
                 In wiki

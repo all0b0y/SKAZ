@@ -2,7 +2,7 @@
 // route per item (API-B2 §4; package-1 routes for files, text and speech imports).
 
 import { DOCUMENT_EXTENSIONS, SPEECH_EXTENSIONS, VIDEO_EXTENSIONS } from '../../api/bridge';
-import type { KbKeys, KbLinkInfo, KbMaterialSummary, KbSpeechSettings } from '../../api/kb/types.gen';
+import type { KbKeys, KbLinkInfo, KbMaterialSummary, KbSpeechMaterial, KbSpeechSettings } from '../../api/kb/types.gen';
 import type { SettingsSection } from '../state/ui';
 import type { KbClient } from '../api/client';
 
@@ -157,21 +157,52 @@ export interface Added {
   /** Ready now (files, text) or still processing (imports, links). */
   ready: boolean;
   /** N2: the same file / address / DOI was already in the library — this is that material; nothing new was added. */
-  existing?: { title: string };
+  existing?: { title: string; failed?: boolean };
+  /** Mode "both": the video beside the article. */
+  part?: 'video';
+  /** Mode "both": why the video beside the article was not added. */
+  videoFailure?: string;
 }
 
 /** N2: what the Add list says under an item that is already in the library. */
 export const ALREADY_IN_LIBRARY = 'This is already in your library';
 
+/** N2 (Q1 n2 M1): the line left under an item after Add — `null` when everything it named was added new.
+ *  In mode "both" each part is told as it is: the article and the video may each be new, already there or
+ *  (the video) not added. `openId` is the material "Open it" opens. */
+export function addedNote(made: readonly Added[]): { openId: string; text: string } | null {
+  const article = made.find((m) => m.part !== 'video');
+  if (!article) return null;
+  const video = made.find((m) => m.part === 'video');
+  const failure = article.videoFailure;
+  if (!video && !failure) {
+    if (!article.existing) return null;
+    // A failed one is still that material (its page offers Retry); the line says so instead of hiding it.
+    return { openId: article.materialId, text: article.existing.failed ? `${ALREADY_IN_LIBRARY}, but it failed to process` : ALREADY_IN_LIBRARY };
+  }
+  if (article.existing) {
+    if (video?.existing) return { openId: article.materialId, text: 'The article and the video are already in your library' };
+    if (video) return { openId: article.materialId, text: 'The article is already in your library; the video was added' };
+    return { openId: article.materialId, text: `The article is already in your library; the video wasn’t added: ${failure}` };
+  }
+  if (video?.existing) return { openId: video.materialId, text: 'The article was added; the video is already in your library' };
+  if (failure) return { openId: article.materialId, text: `The article was added; the video wasn’t added: ${failure}` };
+  return null;
+}
+
 /** Send one item; returns the materials it created (a link in mode "both" makes two). */
 export async function submitItem(client: KbClient, item: AddItem, o: AddOptions): Promise<Added[]> {
   const fromSummary = (m: KbMaterialSummary, existing = false): Added => ({
-    materialId: m.id, ready: m.status === 'ready', ...(existing ? { existing: { title: m.title } } : {}),
+    materialId: m.id, ready: m.status === 'ready', ...(existing ? { existing: { title: m.title, failed: m.status === 'failed' } } : {}),
+  });
+  // N2: the same video link / media file already in the library answers with that material (200).
+  const fromSpeech = (view: KbSpeechMaterial): Added => ({
+    materialId: view.material_id, ready: view.status === 'ready', ...(view.already_in_library ? { existing: { title: view.title, failed: view.status === 'failed' } } : {}),
   });
   if (item.type === 'file') {
     if (item.kind === 'speech') {
       const view = await client.call('POST /kb/imports', { body: { path: item.path, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
-      return [{ materialId: view.material_id, ready: view.status === 'ready' }];
+      return [fromSpeech(view)];
     }
     const added = await client.call('POST /kb/materials/file', { body: { path: item.path, folder_id: o.folderId, to_wiki: o.toWiki } });
     return [fromSummary(added.material, added.already_in_library === true)];
@@ -184,7 +215,7 @@ export async function submitItem(client: KbClient, item: AddItem, o: AddOptions)
   // an article with a video asks text/video/both and goes to /kb/materials/link (§4).
   if (item.info?.kind === 'video') {
     const view = await client.call('POST /kb/imports', { body: { url: item.url, folder_id: o.folderId, translate: o.translate, language: o.language, to_wiki: o.toWiki } });
-    return [{ materialId: view.material_id, ready: view.status === 'ready' }];
+    return [fromSpeech(view)];
   }
   // W-3: the whole page as SKAZ fetched it, then the normal ingest (when the switch is on).
   if (item.page && item.info?.kind === 'site' && !item.info.embedded_video) {
@@ -194,5 +225,7 @@ export async function submitItem(client: KbClient, item: AddItem, o: AddOptions)
   const added = await client.call('POST /kb/materials/link', {
     body: { url: item.url, folder_id: o.folderId, to_wiki: o.toWiki, ...(item.info?.embedded_video ? { mode: item.mode } : {}) },
   });
-  return [fromSummary(added.material, added.already_in_library === true)];
+  const article: Added = { ...fromSummary(added.material, added.already_in_library === true), ...(added.video_failure_reason ? { videoFailure: added.video_failure_reason } : {}) };
+  if (!added.video) return [article];
+  return [article, { ...fromSummary(added.video, added.video_already_in_library === true), part: 'video' }];
 }

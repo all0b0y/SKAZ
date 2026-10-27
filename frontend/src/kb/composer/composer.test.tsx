@@ -269,6 +269,30 @@ describe('Message field', () => {
     await waitFor(() => expect(fake.calls.some((c) => /\/kb\/materials\/m-new\d+\/ingest/.test(c.path))).toBe(true));
   });
 
+  it('"+" → Link already in the library: the chip says so, keeps its link icon and is not added to the wiki again (Q1 n2 L2)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    const input = await ready();
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => {
+      const res = await original(req);
+      if (req.path !== '/kb/materials/link' || !res.ok) return res;
+      return { ...res, status: 200, data: { ...(res.data as object), already_in_library: true } };
+    }) as typeof original;
+    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
+    await user.type(await screen.findByLabelText('Link to an article or a video'), 'https://blog.example/boiling');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    const chips = await screen.findByRole('list', { name: 'Attachments' });
+    expect(await within(chips).findByText('Already in your library')).toBeInTheDocument();
+    expect(chips.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(within(chips).queryByRole('checkbox', { name: 'In wiki' })).not.toBeInTheDocument();
+    await user.click(input);
+    await user.keyboard('Summarise it{Enter}');
+    await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.any(String)] }));
+    expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
+  });
+
   it('"+" → Link refuses anything but http(s)', async () => {
     const user = userEvent.setup();
     renderKb({ world: chatWorld() });

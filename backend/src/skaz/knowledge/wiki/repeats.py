@@ -3,17 +3,19 @@
 Who decides: the writing agent that already compares a page's new statements with the other
 sources' statements for disagreements marks, in the same answer, "new statement N repeats existing
 statement M" (``DISCREPANCY_SCHEMA.repeats`` — no extra agent call). The decision layer confirms
-each pair like a disagreement (threshold B9: a confident "no" drops it, undecided leaves the
-agent's word, logged). A confirmed repeat:
+each pair (threshold B9). Only a confident "yes" merges: a "no", an unsure answer, no layer or a
+failing one leave both statements as written (logged), because a merge deletes a paragraph and the
+agent's word alone is not a confirmation (Q1 n2 H3). A confirmed repeat:
 
 * adds the new material's citations (marker and wikilink) to the existing statement — it now has
   two sources ("2 sources");
 * removes the new material's duplicate paragraph, so only what is new stays written as text.
 
 Only SKAZ's own blocks are touched: an existing statement the user wrote or edited is never
-changed (the repeat is then left as written). The new material's later re-ingest or delete takes
-its citation off the strengthened statement again (``ingest.pages.strip_material`` /
-``wiki.retract.retract_material``); the statement stays on its other sources.
+changed (the repeat is then left as written). The merged statement keeps the repeat's own paragraph
+in its marker (``ingest.merged``): the new material's later re-ingest or delete takes exactly what
+the merge added off the statement again; the first source's re-ingest, delete or correction brings
+the repeat back in its own words (``ingest.pages.strip_material`` / ``wiki.retract``).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from dataclasses import replace
 
 from ...native_io import disk_call
 from ..agents.prompting import untrusted_block
+from ..ingest.merged import Merged, merged_of, with_merged
 from ..ingest.pages import block_prefix, spaced
 from ..markdown.page import Block, Cite, PageDocument
 from .context import WikiContext
@@ -67,6 +70,8 @@ def strengthen(document: PageDocument, kept_id: str, repeat_id: str,
     kept, repeat = blocks.get(kept_id), blocks.get(repeat_id)
     if kept is None or repeat is None or not _agent(kept) or not _agent(repeat):
         return None
+    if merged_of(repeat):
+        return None  # a statement others were merged into is not merged away itself
     material_ids = {cite.material_id for cite in repeat.cites
                     if repeat_id.startswith(block_prefix(cite.material_id))}
     known = {(cite.material_id, cite.seg, cite.quote) for cite in kept.cites}
@@ -74,9 +79,13 @@ def strengthen(document: PageDocument, kept_id: str, repeat_id: str,
              if cite.material_id in material_ids and (cite.material_id, cite.seg, cite.quote) not in known]
     if not material_ids:
         return None
-    body = _with_links(kept.body, [link for link in links(given) if link not in kept.body])
+    added = [link for link in dict.fromkeys(links(given)) if link not in kept.body]
+    body = _with_links(kept.body, added)
+    # The repeat's own paragraph rides in the marker: if the kept statement's source goes, the
+    # repeat comes back in its own words instead of leaving them under the other source's (H1/H2).
+    record = Merged(repeat.id, repeat.kind, repeat.body, repeat.cites, tuple(given), tuple(added))
     strengthened = Block.create(kept.id, kept.kind, body, cites=(*kept.cites, *given), owner="agent",
-                                attrs=kept.attrs)
+                                attrs=with_merged(kept.attrs, (*merged_of(kept), record)))
     parts = [strengthened if getattr(part, "id", None) == kept_id else part
              for part in document.parts if getattr(part, "id", None) != repeat_id]
     return replace(document, parts=spaced(parts))
@@ -111,8 +120,12 @@ class Repeats:
                 await log(f"“{title}”: the decision layer found one marked repeat to add something new; "
                           "both statements stay.")
                 continue
-            if verdict.answer is None:
-                await log(f"“{title}”: {verdict.reason}; the writing agent's finding of a repeat was kept.")
+            if verdict.answer is not True:
+                # Merging deletes the new paragraph, so the agent's word alone is not enough (spec N2-2:
+                # the decision layer confirms the pairs); unlike a disagreement note, nothing is merged.
+                await log(f"“{title}”: one marked repeat was not confirmed ({verdict.reason}); "
+                          "both statements stay.")
+                continue
             if await disk_call(self._strengthen, page_id, side_old.block_id, side_new.block_id):
                 merged.add(item.new)
         if merged:

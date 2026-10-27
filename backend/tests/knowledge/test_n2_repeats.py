@@ -12,12 +12,14 @@ from typing import Any
 
 from skaz.knowledge.decisions.protocol import Question, Undecided, YesNoAnswer
 from skaz.knowledge.ingest import prompts as ingest_prompts
-from skaz.knowledge.ingest.pages import strip_material
-from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta, parse_page
+from skaz.knowledge.ingest.pages import block_prefix, strip_material
+from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta, parse_page, render_page
 from skaz.knowledge.markdown.source import FragmentInput
 from skaz.knowledge.service import KnowledgeService
+from skaz.knowledge.wiki.overlap import material_overlap
 from skaz.knowledge.wiki.prompts import DISCREPANCY_SCHEMA
 from skaz.knowledge.wiki.repeats import QUESTION, strengthen
+from skaz.knowledge.wiki.retract import retract_material, retract_unquoted, strip_links
 from tests.knowledge.ingest_support import ScriptedWiki, add_material, block, cite, concept, concepts, notes
 from tests.knowledge.wiki_support import (
     DISCREPANCIES,
@@ -121,11 +123,26 @@ async def test_a_confident_no_keeps_both_paragraphs(ready: KnowledgeService) -> 
     statements = case.statements()
     assert statements[DISORDER] == {case.lecture}
     assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert material_overlap(ready, case.textbook).repeated == 0  # type: ignore[union-attr]
 
 
 async def test_without_a_decision_layer_the_writing_agent_s_mark_stands(ready: KnowledgeService) -> None:
-    case = await _case(ready)  # no decision layer: undecided, logged, the agent's word kept (B9)
-    assert case.statements()[DISORDER] == {case.lecture, case.textbook}
+    # Q1 n2 H3: a repeat merges only on the decision layer's confident "yes" (spec N2-2: the layer
+    # confirms the pairs). No layer → the agent's mark alone deletes nothing: both paragraphs stay,
+    # and nothing counts in the overlap line.
+    case = await _case(ready)
+    statements = case.statements()
+    assert statements[DISORDER] == {case.lecture}
+    assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert material_overlap(ready, case.textbook).repeated == 0  # type: ignore[union-attr]
+
+
+async def test_an_unsure_decision_layer_merges_nothing(ready: KnowledgeService) -> None:
+    case = await _case(ready, p_yes=0.5)  # neither a confident yes nor a confident no
+    statements = case.statements()
+    assert statements[DISORDER] == {case.lecture}
+    assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert material_overlap(ready, case.textbook).repeated == 0  # type: ignore[union-attr]
 
 
 async def test_no_repeat_marked_writes_both_as_before(ready: KnowledgeService) -> None:
@@ -143,13 +160,47 @@ async def test_deleting_the_repeating_source_leaves_the_statement_on_its_first_s
     assert "Учебник" not in block.body and block.owner == "agent" and block.hash_matches()
 
 
-async def test_deleting_the_first_source_leaves_the_statement_on_the_repeating_one(
+async def test_deleting_the_first_source_brings_back_the_repeating_source_s_own_paragraph(
         ready: KnowledgeService) -> None:
+    # Q1 n2 H2: the merged statement is the lecture's wording; the textbook never said it. When the
+    # lecture goes, the textbook's own paragraph (its words, its citations) comes back instead of the
+    # lecture's words staying under the textbook's citation.
     case = await _case(ready, p_yes=0.95)
     case.service.delete_material(case.lecture)
     statements = case.statements()
-    assert statements[DISORDER] == {case.textbook}
-    assert "Лекция 8" not in case.disorder().body
+    assert DISORDER not in statements
+    assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    assert statements[UNIT] == {case.textbook}
+    restored = next(part for part in case.document().blocks() if part.body.startswith("Энтропия — мера"))
+    assert restored.owner == "agent" and restored.hash_matches() and "Лекция 8" not in restored.body
+    assert restored.id.startswith(block_prefix(case.textbook))
+
+
+async def test_re_adding_the_first_source_gives_the_repeat_back_to_its_source(
+        ready: KnowledgeService) -> None:
+    # Q1 n2 H1: re-adding the lecture (no repeat marked this time) must not leave the lecture's old
+    # block citing only the textbook; the textbook's later re-ingest then replaces its own statements
+    # cleanly — one paragraph per statement, no stale citation left behind.
+    case = await _case(ready, p_yes=0.95)
+    case.wiki.queues[ingest_prompts.NOTES_SCHEMA_TITLE].append(LECTURE_NOTES)
+    case.wiki.queues[ingest_prompts.CONCEPTS_SCHEMA_TITLE].append(LECTURE_CONCEPTS)
+    await ingest_done(case.ingest, case.lecture)
+    await settle_wiki(case.service, case.ingest)
+    statements = case.statements()
+    assert statements[DISORDER] == {case.lecture}
+    assert statements["Энтропия — мера беспорядка."] == {case.textbook}
+    before = {part.id for part in case.document().blocks()
+              if any(cite.material_id == case.textbook for cite in part.cites)}
+    case.wiki.queues[ingest_prompts.NOTES_SCHEMA_TITLE].append(TEXTBOOK_NOTES)
+    case.wiki.queues[ingest_prompts.CONCEPTS_SCHEMA_TITLE].append(TEXTBOOK_CONCEPTS)
+    await ingest_done(case.ingest, case.textbook)
+    await settle_wiki(case.service, case.ingest)
+    textbook_blocks = [part for part in case.document().blocks()
+                       if any(cite.material_id == case.textbook for cite in part.cites)]
+    assert len(textbook_blocks) == 2  # the disorder statement and the unit, once each
+    assert not before.intersection(part.id for part in textbook_blocks)  # all written by this ingest
+    assert all(part.id.startswith(block_prefix(case.textbook)) for part in textbook_blocks)
+    assert case.statements()[DISORDER] == {case.lecture}
 
 
 async def test_re_adding_the_repeating_source_strengthens_once_not_twice(ready: KnowledgeService) -> None:
@@ -228,3 +279,90 @@ def test_strip_material_takes_only_the_citation_off_a_statement_others_support()
     # Without the material's folder (no link to take off) it is as before N2: only its own blocks go.
     old, count = strip_material(_page(both, own), "mat-bbb")
     assert count == 1 and [block.id for block in old.blocks()] == ["c-aaa-1"]
+
+
+SEA = "[[Materials/F/A/A#^seg-3|A · ¶ 3]]"
+
+
+def _merged_water() -> PageDocument:
+    """A's fuller statement with B's shorter repeat merged in (B adds nothing that A lacks)."""
+    kept = Block.create("c-aaa-1", "from_source", f"Water boils at 100 °C at sea level. {A_LINK}",
+                        cites=(Cite("mat-aaa", 1, "boils at 100 °C at sea level"),))
+    repeat = Block.create("c-bbb-1", "from_source", f"Water boils at 100 °C. {B_LINK}",
+                          cites=(Cite("mat-bbb", 2, "boils at 100"),))
+    result = strengthen(_page(kept, repeat), "c-aaa-1", "c-bbb-1", lambda cites: [B_LINK] if cites else [])
+    assert result is not None
+    return parse_page(render_page(result))  # what is on disk, read back
+
+
+def _only(document: PageDocument) -> Block:
+    [only] = list(document.blocks())
+    return only
+
+
+def test_a_merged_statement_keeps_the_repeat_s_own_words_for_later() -> None:
+    merged = _only(_merged_water())
+    assert merged.body == f"Water boils at 100 °C at sea level. {A_LINK} {B_LINK}" and merged.hash_matches()
+    assert [cite.material_id for cite in merged.cites] == ["mat-aaa", "mat-bbb"]
+
+
+def test_deleting_the_first_source_restores_the_repeat_not_the_first_source_s_words() -> None:
+    updated, result = retract_material(_merged_water(), "mat-aaa", "Materials/F/A")
+    restored = _only(updated)
+    assert restored.id == "c-bbb-1" and restored.body == f"Water boils at 100 °C. {B_LINK}"
+    assert restored.cites == (Cite("mat-bbb", 2, "boils at 100"),) and restored.owner == "agent"
+    assert result.removed == ["c-aaa-1"] and result.kept == ["c-bbb-1"]
+
+
+def test_re_ingesting_the_first_source_restores_the_repeat_with_or_without_its_folder() -> None:
+    for rel_dir in ("Materials/F/A", None):
+        stripped, changed = strip_material(_merged_water(), "mat-aaa", rel_dir)
+        restored = _only(stripped)
+        assert changed == 1 and restored.id == "c-bbb-1"
+        assert restored.body == f"Water boils at 100 °C. {B_LINK}" and restored.attrs == ()
+
+
+def test_taking_the_repeating_source_off_removes_exactly_what_the_merge_added() -> None:
+    for rel_dir in ("Materials/G/B", None):  # the added link is known even without B's folder
+        stripped, changed = strip_material(_merged_water(), "mat-bbb", rel_dir)
+        kept = _only(stripped)
+        assert changed == 1 and kept.id == "c-aaa-1" and kept.attrs == ()
+        assert kept.body == f"Water boils at 100 °C at sea level. {A_LINK}" and kept.hash_matches()
+        assert [cite.material_id for cite in kept.cites] == ["mat-aaa"]
+    updated, result = retract_material(_merged_water(), "mat-bbb", "Materials/G/B")
+    assert _only(updated).body == f"Water boils at 100 °C at sea level. {A_LINK}"
+    assert result.kept == ["c-aaa-1"] and not result.removed
+
+
+def test_a_corrected_first_source_gives_the_repeat_back() -> None:
+    # A's quote no longer verbatim after a recognition correction: A's statement goes, B's comes back.
+    updated, result = retract_unquoted(_merged_water(), "mat-aaa", lambda _seg: "Water is wet.")
+    assert _only(updated).id == "c-bbb-1" and result.removed == ["c-aaa-1"]
+    # B's quote broken: only B's merged share comes off, A's statement stays.
+    updated, result = retract_unquoted(_merged_water(), "mat-bbb", lambda _seg: "Ice is cold.")
+    kept = _only(updated)
+    assert kept.id == "c-aaa-1" and [cite.material_id for cite in kept.cites] == ["mat-aaa"]
+    assert B_LINK not in kept.body and result.removed == ["c-bbb-1"]  # B's share, rewritten by its refresh
+
+
+
+def test_taking_a_source_or_a_link_off_a_statement_keeps_its_marker_keys() -> None:
+    # Q1 n2 M3: a kept statement keeps its other marker keys (here the merged repeat of B) when
+    # another source is retracted or a link to a removed page is taken off.
+    merged = _only(_merged_water())
+    both = Block.create("c-aaa-1", "from_source", f"Water boils at 100 °C at sea level. {A_LINK} {SEA}",
+                        cites=(*merged.cites[:1], Cite("mat-ccc", 3)), attrs=merged.attrs)
+    updated, result = retract_material(_page(both), "mat-ccc", "Materials/H/C")
+    assert result.kept == ["c-aaa-1"] and _only(updated).attrs == merged.attrs
+    linked = Block.create("c-aaa-1", "from_source", f"{merged.body} [[Wiki/Concepts/Gone|Gone]]",
+                          cites=merged.cites, attrs=merged.attrs)
+    unlinked, changed = strip_links(_page(linked), {"Wiki/Concepts/Gone"})
+    assert changed == ["c-aaa-1"] and _only(unlinked).attrs == merged.attrs
+
+
+def test_a_repeat_already_back_on_the_page_is_not_restored_twice() -> None:
+    merged = _only(_merged_water())
+    again = Block.create("c-bbb-1", "from_source", f"Water boils at 100 °C. {B_LINK}",
+                         cites=(Cite("mat-bbb", 2),))
+    updated, _result = retract_material(_page(merged, again), "mat-aaa", "Materials/F/A")
+    assert [block.id for block in updated.blocks()] == ["c-bbb-1"]

@@ -6,9 +6,10 @@ already in your wiki: <pages> · what's new: <sections>".
 * A **statement of the material** is a cited plain statement (``from_source``) on a concept page
   that cites the material.
 * It is a **repeat** when another source said it first and this material's repeat was merged into
-  it (N2 decision 3): the block is not the material's own (its id does not carry the material's
-  prefix) and it still cites another material too. Once the other source is gone, it is simply the
-  material's statement again.
+  it (N2 decision 3) after the decision layer confirmed it: the statement is another material's
+  (its id does not carry this material's prefix) and its marker records this material's merged
+  paragraph (``ingest.merged``). A statement written with two sources is not a repeat. Once the
+  other source is gone, the material's own paragraph is back and simply its statement again.
 * N = repeats / statements of the material, rounded (at least 1% when there is any repeat).
 * **Sections** are the headings of the material's Notes page. A statement belongs to the section
   whose blocks cite one of its fragments (else whose fragment range holds it). A section *repeats
@@ -24,7 +25,9 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from ..ingest.merged import merged_of
 from ..ingest.pages import block_prefix
+from ..markdown.page import PageFormatError, parse_page
 from ..service import KnowledgeService
 
 
@@ -100,8 +103,29 @@ def _statements(kb: KnowledgeService, material_id: str) -> list[_Statement]:
     return list(found.values())
 
 
-def _is_repeat(item: _Statement, material_id: str) -> bool:
-    return not item.block_id.startswith(block_prefix(material_id)) and len(item.materials) > 1
+def _merged_into(kb: KnowledgeService, material_id: str, items: list[_Statement]) -> set[tuple[str, str]]:
+    """``(page id, block id)`` of the statements the material's repeat was merged into — confirmed by
+    the decision layer and recorded in the statement's marker (``ingest.merged``). Another source's
+    statement that merely cites this material too (written with two sources) is not a repeat."""
+    candidates = [item for item in items
+                  if not item.block_id.startswith(block_prefix(material_id)) and len(item.materials) > 1]
+    found: set[tuple[str, str]] = set()
+    for page_id in dict.fromkeys(item.page_id for item in candidates):
+        record = kb.page_repo.get(page_id)
+        if record is None:
+            continue
+        try:
+            document = parse_page((kb.library_root / record.rel_path).read_text(encoding="utf-8"))
+        except (OSError, PageFormatError, UnicodeDecodeError):
+            continue
+        for block in document.blocks():
+            if any(material_id in item.material_ids for item in merged_of(block)):
+                found.add((page_id, block.id))
+    return {(item.page_id, item.block_id) for item in candidates} & found
+
+
+def _is_repeat(item: _Statement, merged: set[tuple[str, str]]) -> bool:
+    return (item.page_id, item.block_id) in merged
 
 
 def _note_sections(kb: KnowledgeService, material_id: str) -> list[tuple[str, set[int]]]:
@@ -125,16 +149,24 @@ def _section_of(segs: list[int], sections: list[tuple[str, set[int]]]) -> int | 
     for index, (_title, cited) in enumerate(sections):
         if cited.intersection(segs):
             return index
+    # Within a section's fragment range: the section with the nearest cited fragment (interleaved
+    # notes put a fragment in several ranges; the first one is not necessarily its section).
+    best: tuple[int, int] | None = None
     for index, (_title, cited) in enumerate(sections):
-        if any(min(cited) <= seg <= max(cited) for seg in segs):
-            return index
-    return None
+        inside = [seg for seg in segs if min(cited) <= seg <= max(cited)]
+        if not inside:
+            continue
+        distance = min(abs(seg - other) for seg in inside for other in cited)
+        if best is None or distance < best[0]:
+            best = (distance, index)
+    return best[1] if best is not None else None
 
 
-def section_overlap(kb: KnowledgeService, material_id: str,
-                    statements: list[_Statement] | None = None) -> tuple[SectionOverlap, ...]:
+def section_overlap(kb: KnowledgeService, material_id: str, statements: list[_Statement] | None = None,
+                    merged: set[tuple[str, str]] | None = None) -> tuple[SectionOverlap, ...]:
     """Each section of the material's Notes with how many of its statements the wiki already had."""
     items = statements if statements is not None else _statements(kb, material_id)
+    merged = merged if merged is not None else _merged_into(kb, material_id, items)
     sections = _note_sections(kb, material_id)
     repeated = [0] * len(sections)
     total = [0] * len(sections)
@@ -143,7 +175,7 @@ def section_overlap(kb: KnowledgeService, material_id: str,
         if index is None:
             continue
         total[index] += 1
-        repeated[index] += _is_repeat(item, material_id)
+        repeated[index] += _is_repeat(item, merged)
     return tuple(SectionOverlap(title, repeated[index], total[index])
                  for index, (title, _segs) in enumerate(sections) if total[index])
 
@@ -153,7 +185,8 @@ def material_overlap(kb: KnowledgeService, material_id: str) -> MaterialOverlap 
     items = _statements(kb, material_id)
     if not items:
         return None
-    repeats = [item for item in items if _is_repeat(item, material_id)]
+    merged = _merged_into(kb, material_id, items)
+    repeats = [item for item in items if _is_repeat(item, merged)]
     by_page: dict[str, list[_Statement]] = defaultdict(list)
     for item in repeats:
         by_page[item.page_id].append(item)
@@ -162,4 +195,4 @@ def material_overlap(kb: KnowledgeService, material_id: str) -> MaterialOverlap 
         key=lambda page: (-page.repeated, page.title),
     )
     return MaterialOverlap(material_id, len(repeats), len(items), tuple(pages),
-                           section_overlap(kb, material_id, items))
+                           section_overlap(kb, material_id, items, merged))

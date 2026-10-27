@@ -37,7 +37,7 @@ import shutil
 import threading
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -53,6 +53,7 @@ from ..logsafe import error_note
 from ..markdown.source import MaterialStatus, Origin
 from ..markdown.text import name_key
 from ..service import KnowledgeService
+from ..sources.duplicates import file_digest, find_duplicate
 from ..sources.fragments import sanitize_title
 from ..sources.paths import given_path, resolved_file
 from ..sources.service import SourceService
@@ -111,6 +112,9 @@ class SpeechView:
     error: str | None
     #: How much audio the recording/import has (``None``: not known yet).
     duration_ms: int | None = None
+    #: N2: the same video link or media file was already in the library — this is that material;
+    #: nothing was imported (no transcription budget spent).
+    already_in_library: bool = False
 
 
 @dataclass(frozen=True)
@@ -165,6 +169,8 @@ class SpeechService:
         self._live: dict[str, asyncio.Task[None]] = {}
         self._dirty: set[str] = set()
         self._locks = KeyedLocks()
+        #: Q1 n2 L3: one import at a time per media file content (duplicate check, then the material).
+        self._same_media = KeyedLocks()
         self._closing = False
         #: Called with a material id when speech settled finished (Stop or a completed import,
         #: not a Pause): the wiki may process it now.
@@ -541,6 +547,11 @@ class SpeechService:
     # -- imports --------------------------------------------------------------
 
     async def start_import(self, request: ImportInput) -> SpeechView:
+        # Q1 n2 L3: a file's duplicate check and its new material under one lock per content.
+        async with contextlib.AsyncExitStack() as held:
+            return await self._start_import(request, held)
+
+    async def _start_import(self, request: ImportInput, held: contextlib.AsyncExitStack) -> SpeechView:
         self._remember_loop()
         self.kb.require()
         if (request.path is None) == (request.url is None):
@@ -557,6 +568,10 @@ class SpeechService:
                 raise SpeechInvalid(str(error)) from error
             kind: CarrierKind = "video_link"
             url: str | None = link.url
+            if not request.allow_duplicate:
+                known = await self._already_there(urls=[link.url])
+                if known is not None:
+                    return known
             origin = Origin(type="url", url=link.url)
             title = request.title
             derived = request.derived_title or not title
@@ -579,7 +594,14 @@ class SpeechService:
             picked = path
             path, _info = await disk_call(resolved_file, picked, self.kb.data_dir, SpeechInvalid)
             url = None
-            origin = Origin(type="file", file_name=picked.name)
+            # N2: the same bytes under any name are the same recording; the hash is kept in the origin.
+            digest = await disk_call(file_digest, path)
+            await held.enter_async_context(self._same_media.hold(digest))
+            if not request.allow_duplicate:
+                known = await self._already_there(digest=digest)
+                if known is not None:
+                    return known
+            origin = Origin.model_validate({"type": "file", "file_name": picked.name, "sha256": digest})
             derived = request.derived_title or not request.title
             title = request.title or derived_title(picked.stem, "Video" if kind == "video" else "Audio")
         clean = validate_name(title[:200])
@@ -630,6 +652,10 @@ class SpeechService:
             link = classify_video_link(url)
         except UnsupportedMedia as error:
             raise SpeechInvalid(str(error)) from error
+        # N2: a video already in the library is answered before its details are even read.
+        known = await self._already_there(urls=[link.url])
+        if known is not None:
+            return known
         try:
             metadata = await self.legacy.video_metadata(link.url)
         except IMPORT_INVALID as error:
@@ -642,6 +668,22 @@ class SpeechService:
                                                    translate=translate, language=language,
                                                    metadata=metadata, to_wiki=to_wiki,
                                                    derived_title=not typed))
+
+    async def _already_there(self, *, urls: list[str] | None = None,
+                             digest: str | None = None) -> SpeechView | None:
+        """N2 decision 2(1): the speech material with the same video link or file bytes, if any.
+
+        Only a material that is itself a recording/import answers (a saved web page of the same
+        address is not the video); then nothing is created or sent anywhere.
+        """
+        duplicate = await disk_call(find_duplicate, self.kb, urls=urls or (), digest=digest)
+        if duplicate is None:
+            return None
+        try:
+            view = await self.view(duplicate.material_id)
+        except NotFound:
+            return None
+        return replace(view, already_in_library=True)
 
     async def _import(self, material_id: str) -> Carrier:
         carrier = await disk_call(self.carriers.get, material_id)

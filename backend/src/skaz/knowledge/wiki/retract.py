@@ -24,6 +24,7 @@ import re
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field, replace
 
+from ..ingest.merged import merged_of, take_material
 from ..ingest.pages import block_prefix, confirms_alone, without_citation_links
 from ..markdown.page import Block, PageDocument, Part
 from ..markdown.text import quote_in_fragment
@@ -58,25 +59,38 @@ def retract_material(
     ``also``: block ids to remove as well (agent blocks only, e.g. a disagreement note about a removed side).
     """
     prefix = block_prefix(material_id)
+    present = {block.id for block in document.blocks()}
     result = Retraction()
     parts: list[Part] = []
     for part in document.parts:
         if not _agent(part) or not isinstance(part, Block) or part.id in NAV_IDS:
             parts.append(part)
             continue
-        others = tuple(cite for cite in part.cites if cite.material_id != material_id)
-        if part.id in also or (part.id.startswith(prefix) and not others):
+        if part.id in also:
             result.removed.append(part.id)
             continue
-        if len(others) == len(part.cites) and not part.id.startswith(prefix):
-            parts.append(part)
-            continue
-        if not others or not confirms_alone(part):
-            result.removed.append(part.id)
-            continue
-        body = without_citation_links(part.body, rel_dir)
-        parts.append(Block.create(part.id, part.kind, body, cites=others, owner="agent"))
-        result.kept.append(part.id)
+        # A merged repeat (N2) comes apart exactly: the material's merged paragraph comes off another
+        # source's statement; when the statement is the material's own, the repeats come back in their
+        # own words (never the material's words under their citation).
+        unmerged = take_material(part, material_id, author=part.id.startswith(prefix), present=present)
+        restored = list(unmerged.restored) if unmerged is not None else []
+        block = unmerged.block if unmerged is not None else part
+        result.kept.extend(item.id for item in restored)
+        others = tuple(cite for cite in block.cites if cite.material_id != material_id)
+        if block.id.startswith(prefix) and not others:
+            result.removed.append(block.id)
+        elif len(others) == len(block.cites) and not block.id.startswith(prefix):
+            parts.append(block)
+            if unmerged is not None:
+                result.kept.append(block.id)
+        elif not others or not confirms_alone(block):
+            result.removed.append(block.id)
+        else:
+            body = without_citation_links(block.body, rel_dir)
+            parts.append(Block.create(block.id, block.kind, body, cites=others, owner="agent",
+                                      attrs=block.attrs))
+            result.kept.append(block.id)
+        parts.extend(restored)
     return replace(document, parts=parts), result
 
 
@@ -145,7 +159,8 @@ def strip_links(document: PageDocument, gone: Collection[str]) -> tuple[PageDocu
         changed.append(part.id)
         body = _strip_list(part.body, gone) if part.id in LIST_BLOCKS else _strip_inline(part.body, gone)
         if body.strip():
-            parts.append(Block.create(part.id, part.kind, body, cites=part.cites, owner="agent"))
+            parts.append(Block.create(part.id, part.kind, body, cites=part.cites, owner="agent",
+                                      attrs=part.attrs))
     return replace(document, parts=parts), changed
 
 
@@ -161,15 +176,33 @@ def retract_unquoted(
     parts: list[Part] = []
     for part in document.parts:
         if _agent(part) and isinstance(part, Block) and part.id not in NAV_IDS:
-            broken = part.id in also
-            for cite in part.cites:
-                if broken or cite.material_id != material_id or not cite.quote:
-                    continue
-                text = text_of(cite.seg)
-                if text is not None and not quote_in_fragment(cite.quote, text):
-                    broken = True
-            if broken:
+            if part.id in also:
                 result.removed.append(part.id)
                 continue
+            if _breaks(part, material_id, text_of):
+                # A merged repeat (N2): the broken source's share comes apart, the rest stays.
+                author = part.id.startswith(block_prefix(material_id))
+                unmerged = take_material(part, material_id, author=author,
+                                         present={block.id for block in document.blocks()})
+                if unmerged is None or unmerged.restored or _breaks(unmerged.block, material_id, text_of):
+                    result.removed.append(part.id)
+                    if unmerged is not None:
+                        result.kept.extend(item.id for item in unmerged.restored)
+                        parts.extend(unmerged.restored)
+                    continue
+                # The broken source's merged paragraph is what was taken down (its refresh writes it again).
+                result.removed.extend(item.block_id for item in merged_of(part)
+                                      if material_id in item.material_ids)
+                part = unmerged.block
         parts.append(part)
     return replace(document, parts=parts), result
+
+
+def _breaks(block: Block, material_id: str, text_of: Callable[[int], str | None]) -> bool:
+    for cite in block.cites:
+        if cite.material_id != material_id or not cite.quote:
+            continue
+        text = text_of(cite.seg)
+        if text is not None and not quote_in_fragment(cite.quote, text):
+            return True
+    return False
