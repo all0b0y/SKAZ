@@ -221,13 +221,23 @@ class ContextBuilder:
             if fitted is not None:
                 sections.append(f"{note}\n{untrusted_block(label, fitted)}")
 
-        for note, label, body in self._recordings(chat):
+        def allowed(item_id: str, what: str) -> bool:
+            """Q1 n78 M-4: implicit context follows the chat's sources; SKAZ only says it is held back."""
+            if scope is None or scope.allows(item_id):
+                return True
+            why = ("the user excluded it from this chat" if item_id in scope.excluded
+                   else "it is outside the sources chosen for this chat")
+            sections.append(f"[SKAZ] The user has {what} open next to the chat, but {why}: its text is not "
+                            "given to you.")
+            return False
+
+        for note, label, body in self._recordings(chat, scope):
             add(note, label, body)
-        if given.context.page_id:
+        if given.context.page_id and allowed(given.context.page_id, "a wiki page"):
             page = self._page(given.context.page_id)
             if page is not None:
                 add("The user has this wiki page open next to the chat:", "open page", page)
-        if given.context.material_id:
+        if given.context.material_id and allowed(given.context.material_id, "a material"):
             material = self._material(given.context.material_id)
             if material is not None:
                 add("The user has this material open next to the chat:", "open material", material)
@@ -269,10 +279,12 @@ class ContextBuilder:
 
     # -- pieces ---------------------------------------------------------------------
 
-    def _recordings(self, chat: Chat) -> list[tuple[str, str, str]]:
+    def _recordings(self, chat: Chat, scope: SourceScope | None = None) -> list[tuple[str, str, str]]:
+        """The chat's own recording (its latest speech) and recordings in progress — only those the
+        chat's sources allow (Q1 n78 M-4)."""
         found: list[tuple[str, str, str]] = []
         own = chat.recording_material_id
-        if own is not None:
+        if own is not None and (scope is None or scope.allows(own)):
             record = self.kb.material_repo.get(own)
             if record is not None:
                 live = "is still recording" if record.status == "recording" else "has finished"
@@ -281,7 +293,8 @@ class ContextBuilder:
                 found.append(("This chat belongs to a recording. Its latest transcribed speech:",
                               "recording", body))
         for record in self.kb.material_repo.list_all(kind="recording"):
-            if record.status != "recording" or record.id == own:
+            if record.status != "recording" or record.id == own or (scope is not None
+                                                                     and not scope.allows(record.id)):
                 continue
             until = self._transcribed_until(record)
             body = (f"Recording “{record.title}” (id {record.id}) is in progress"
