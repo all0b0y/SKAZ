@@ -248,6 +248,7 @@
   text-underline-offset: 4px; border-radius: var(--kb-r-xs); transition: background 0.12s;
 }
 .kb-st-rv__add.is-hot { background: var(--kb-ok-soft); }
+.kb-st-rv__add:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
 .kb-st-rv__hint { font-size: var(--t-xs); color: var(--kb-muted); margin: 6px 0 0; }
 .kb-st-rv__also { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .kb-st-rv__also li { display: grid; grid-template-columns: 18px 1fr; gap: 0 8px; }

@@ -164,3 +164,28 @@ describe('Not yet is neutral (Q1 p3 L4, decision 3)', () => {
     expect(within(test).getByRole('radio', { name: /S = k·W²/ }).closest('.kb-st-opt')).toHaveClass('is-bad');
   });
 });
+
+describe('A11y (Q1 p3 L8)', () => {
+  it('the Unclear mark is named by its words, not only its title; the count is live; additions link to notes by keyboard', { timeout: 15_000 }, async () => {
+    const { user } = await openChat(/Lecture 8 — test/);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    // The words are hidden until hover, so the name may not depend on them (display:none drops it).
+    expect(within(test).getByRole('button', { name: 'I have a question' })).toHaveAttribute('aria-label', 'I have a question');
+    expect(test.querySelector('.kb-st-cnt')).toHaveAttribute('aria-live', 'polite');
+
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Because joined systems add up.');
+    await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
+    await user.click(await within(test).findByRole('button', { name: 'Full review' }, { timeout: 5000 }));
+    const report = within(test).getByLabelText('Full review');
+    const addition = within(report).getByText('their arrangements multiply,');
+    expect(addition).toHaveAttribute('tabindex', '0');
+    const note = document.getElementById(addition.getAttribute('aria-describedby') ?? '');
+    expect(note?.tagName).toBe('LI');
+    act(() => addition.focus());
+    expect(note).toHaveClass('is-hot');
+    act(() => addition.blur());
+    expect(note).not.toHaveClass('is-hot');
+  });
+});

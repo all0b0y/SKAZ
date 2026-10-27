@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import type { KbStudyIdeaReview, KbStudyResponse, KbStudyReview } from '../../api/kb/types.gen';
 import { Icon, type IconName } from '../ui';
 import { SourceMarks } from '../cite/SourceMarks';
@@ -90,6 +90,7 @@ export function OpenReport({ review, response, who, source, busy, onRecheck, onC
   const points = ideaPoints(review.ideas);
   const notes = review.ideas.filter((i) => i.status !== 'covered' || i.by_user || i.recheck);
   const [hot, setHot] = useState<string | null>(null);
+  const uid = useId();
   /** The idea whose «I did say this» is open: the user selects words of their answer for it. */
   const [picking, setPicking] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
@@ -139,8 +140,11 @@ export function OpenReport({ review, response, who, source, busy, onRecheck, onC
               <span key={i}>
                 {i > 0 ? ' ' : ''}
                 {piece.added
-                  ? <span className={`kb-st-rv__add${hot && hot === piece.idea ? ' is-hot' : ''}`} onMouseEnter={() => setHot(piece.idea)}
-                    onMouseLeave={() => setHot(null)}>{piece.text}</span>
+                  // Pointing or focusing an addition lights its note (Q1 p3 L8: not mouse-only).
+                  ? <span className={`kb-st-rv__add${hot && hot === piece.idea ? ' is-hot' : ''}`} tabIndex={0}
+                    aria-describedby={piece.idea && notes.some((n) => n.id === piece.idea) ? `${uid}-note-${piece.idea}` : undefined}
+                    onMouseEnter={() => setHot(piece.idea)} onMouseLeave={() => setHot(null)}
+                    onFocus={() => setHot(piece.idea)} onBlur={() => setHot(null)}>{piece.text}</span>
                   : piece.text}
               </span>
             ))}
@@ -158,7 +162,7 @@ export function OpenReport({ review, response, who, source, busy, onRecheck, onC
           <h4 className="kb-st-rv__h">Why it matters</h4>
           <ol className={`kb-st-rv__notes${hot ? ' is-dim' : ''}`}>
             {notes.map((idea) => (
-              <li key={idea.id} className={hot === idea.id ? 'is-hot' : undefined} onMouseEnter={() => setHot(idea.id)} onMouseLeave={() => setHot(null)}>
+              <li key={idea.id} id={`${uid}-note-${idea.id}`} className={hot === idea.id ? 'is-hot' : undefined} onMouseEnter={() => setHot(idea.id)} onMouseLeave={() => setHot(null)}>
                 <span className={`kb-st-rv__g kb-st-rv__g--${idea.by_user ? 'covered' : idea.status}`}>
                   <Icon name={IDEA_ICON[idea.by_user ? 'covered' : idea.status]} size={13} />
                 </span>

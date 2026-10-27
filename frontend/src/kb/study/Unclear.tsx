@@ -23,7 +23,9 @@ export function UnclearMark({ on, disabled, onToggle, what, tabIndex }: {
   on: boolean; disabled?: boolean; onToggle: () => void; what: 'card' | 'question'; tabIndex?: number;
 }) {
   return (
+    // Named by its words (Q1 p3 L8): they are hidden until hover, and hidden text gives no name.
     <button type="button" className={`kb-st-unc${on ? ' is-on' : ''}`} aria-pressed={on} disabled={disabled} tabIndex={tabIndex}
+      aria-label={on ? 'Unclear' : 'I have a question'}
       title={on ? 'Marked Unclear — click to clear' : `Mark: I have a question about this ${what}`}
       onClick={(e) => { e.stopPropagation(); onToggle(); }}>
       <Icon name="help" size={14} /><span className="kb-st-unc__l">{on ? 'Unclear' : 'I have a question'}</span>
