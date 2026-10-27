@@ -224,6 +224,10 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 .kb-side__scroll.kb-tabhost {
   margin-right: calc(-1 * var(--kb-gutter));
   padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
+  /* Room for the bridge's top concave corner when the first row (New chat) is open (FIX1 R4): the
+     box starts a corner higher, over the header's empty bottom strip, so the rows keep their place. */
+  margin-top: calc(-1 * var(--kb-bridge-corner));
+  padding-top: var(--kb-bridge-corner);
   scrollbar-width: none;
 }
 .kb-side__scroll.kb-tabhost::-webkit-scrollbar { display: none; }
