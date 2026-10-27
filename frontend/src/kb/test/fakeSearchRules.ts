@@ -16,6 +16,8 @@ export interface FakeChatRules {
   sources: string[];
   excluded: string[];
   everywhere_once: boolean;
+  /** Q1 n78 M-7: when the library sources last changed. */
+  sources_since?: string | null;
 }
 
 const EMPTY: WebRules = { never: [], only_on: false, only: [], prefer: [] };
@@ -62,6 +64,7 @@ function view(w: FakeWorld, chatId: string, fail: (status: number, detail: strin
     active: { never, settings_never: [...settings.never], only: once ? [] : [...only], prefer: [...lists.prefer], origin: chat.web ? 'chat' : 'settings', everywhere_once: once },
     sources_only: chat.sources_only, sources: chat.sources.map(ref), excluded: chat.excluded.map(ref),
     everywhere_once: chat.everywhere_once, differs: text !== null, label: text,
+    sources_since: chat.sources_since ?? null,
   };
 }
 

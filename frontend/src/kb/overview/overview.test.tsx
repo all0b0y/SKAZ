@@ -57,6 +57,17 @@ describe('chat overview model', () => {
     expect(data.hidden).toBe(3);
   });
 
+  it('agent-written links to sites the rules rule out are only counted; the user’s own stay (Q1 n78 M-5)', () => {
+    const active = { never: ['github.io', 'xn--e1afmkfd.xn--p1ai'], settings_never: [], only: [], prefer: [], origin: 'settings' as const, everywhere_once: false };
+    const extra = chatMessage('a2', 4, 'assistant', ago(7), [{ type: 'text', text: 'See https://ПРИМЕР.РФ/x and https://example.org/y' }]);
+    const data = chatOverview([...messages(), extra], active);
+    expect(data.inMessages.map((l) => [l.site, l.by])).toEqual([['github.com', 'you'], ['example.org', 'agent']]);
+    expect(data.hidden).toBe(5);
+    expect(data.inMessagesHidden).toBe(2);
+    const only = chatOverview(messages(), { ...active, never: [], only: ['arxiv.org'] });
+    expect(only.inMessages.map((l) => l.site)).toEqual(['github.com']);
+  });
+
   it('used: cited with counts and the first message; looked at; added by you', () => {
     const data = chatOverview(messages());
     expect(data.cited.map((i) => [i.kind, i.id, i.count, i.byYou, i.messageId])).toEqual([
@@ -116,6 +127,20 @@ describe('Chat overview in the right panel (N8)', () => {
     await user.click(within(panel).getByRole('tab', { name: /Created/ }));
     expect(within(panel).getByRole('region', { name: 'Study' })).toHaveTextContent('Deck · Spaced repetitionsaved to wiki');
     expect(within(panel).getByRole('region', { name: 'Wiki' })).toHaveTextContent('disorder → number of microstates');
+
+    // Q1 n78 L-4: a tablist the keyboard can walk (arrows, Home/End), one tab in the Tab order.
+    const created = within(panel).getByRole('tab', { name: /Created/ });
+    expect(created).toHaveAttribute('tabindex', '0');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).toHaveAttribute('tabindex', '-1');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).not.toHaveAttribute('aria-controls');
+    created.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).toHaveAttribute('aria-selected', 'true');
+    expect(within(panel).getByRole('tab', { name: /Links/ })).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(within(panel).getByRole('tab', { name: /Created/ })).toHaveFocus();
+    await user.keyboard('{ArrowLeft}');
+    expect(within(panel).getByRole('tab', { name: /Used/ })).toHaveAttribute('aria-selected', 'true');
 
     // The header button closes it again.
     await user.click(screen.getByRole('button', { name: 'Close the chat overview' }));

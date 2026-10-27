@@ -68,8 +68,13 @@ async def test_only_these_sources_reach_the_agent_through_the_library_tools(env:
 
     # Strict mode: the agent is told the sources before the question.
     request = env.agents.engines["codex"].turns[-1].messages[-1].content
-    assert "[SKAZ — sources of this chat, set by the user] Use only these sources: «Лекция 8»" in request
-    assert "[SKAZ — excluded from this chat by the user] Don't use: «Учебник химии»" in request
+    sources = ("[SKAZ — sources of this chat, set by the user] Use only these sources: "
+               f"{lib.lecture}, {lib.concept}.")
+    assert sources in request
+    assert f"[SKAZ — excluded from this chat by the user] Don't use: {lib.textbook}." in request
+    # Titles are data (Q1 n78 M-3): in an untrusted block, after SKAZ's lines.
+    titles = request.split("<untrusted-data", 1)[1]
+    assert f"{lib.lecture}: Лекция 8" in titles and f"{lib.textbook}: Учебник химии" in titles
     assert request.rstrip().endswith("Что такое энтропия?")
     gate.set()
     await finished(env.chats)

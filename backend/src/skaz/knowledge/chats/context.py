@@ -6,9 +6,10 @@ rules themselves are written by SKAZ and are the only instructions.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ..agents.engine import TurnMessage
 from ..agents.prompting import untrusted_block
@@ -25,6 +26,9 @@ from .model import Chat, Message, MessageInput, Quote, Ref
 from .resolve import MaterialReader
 from .selection import diagrams, history_note, selection_context
 from .text import agent_text
+
+if TYPE_CHECKING:  # the permissions package imports the chat modules
+    from ..permissions.source_scope import SourceScope
 
 ITEM_CHARS = 8_000
 RECORDING_TAIL_CHARS = 4_000
@@ -206,7 +210,9 @@ class ContextBuilder:
         #: Decks/tests (0.3.1 S): the open block and a deck's cards with their FSRS state.
         self.study = study
 
-    def request(self, chat: Chat, given: MessageInput, chats: ChatLookup) -> str:
+    def request(self, chat: Chat, given: MessageInput, chats: ChatLookup,
+                scope: SourceScope | None = None) -> str:
+        """``scope``: the chat's sources (N7-4); what they don't allow is left out of the implicit context."""
         budget = _Budget()
         sections: list[str] = []
 
@@ -215,13 +221,23 @@ class ContextBuilder:
             if fitted is not None:
                 sections.append(f"{note}\n{untrusted_block(label, fitted)}")
 
-        for note, label, body in self._recordings(chat):
+        def allowed(item_id: str, what: str) -> bool:
+            """Q1 n78 M-4: implicit context follows the chat's sources; SKAZ only says it is held back."""
+            if scope is None or scope.allows(item_id):
+                return True
+            why = ("the user excluded it from this chat" if item_id in scope.excluded
+                   else "it is outside the sources chosen for this chat")
+            sections.append(f"[SKAZ] The user has {what} open next to the chat, but {why}: its text is not "
+                            "given to you.")
+            return False
+
+        for note, label, body in self._recordings(chat, scope):
             add(note, label, body)
-        if given.context.page_id:
+        if given.context.page_id and allowed(given.context.page_id, "a wiki page"):
             page = self._page(given.context.page_id)
             if page is not None:
                 add("The user has this wiki page open next to the chat:", "open page", page)
-        if given.context.material_id:
+        if given.context.material_id and allowed(given.context.material_id, "a material"):
             material = self._material(given.context.material_id)
             if material is not None:
                 add("The user has this material open next to the chat:", "open material", material)
@@ -251,7 +267,7 @@ class ContextBuilder:
             asked = (self.study.ask_context(given.selection.block_id, given.selection.items[0].id)
                      if self.study is not None and given.selection.items else None)
             if asked is not None:
-                add(*asked)
+                add(*_scoped_question(asked, scope))
         elif given.selection is not None:  # P2: the items picked in an earlier answer of this chat
             own = chats(chat.id)
             picked = selection_context(own[1], given.selection) if own is not None else None
@@ -263,10 +279,12 @@ class ContextBuilder:
 
     # -- pieces ---------------------------------------------------------------------
 
-    def _recordings(self, chat: Chat) -> list[tuple[str, str, str]]:
+    def _recordings(self, chat: Chat, scope: SourceScope | None = None) -> list[tuple[str, str, str]]:
+        """The chat's own recording (its latest speech) and recordings in progress — only those the
+        chat's sources allow (Q1 n78 M-4)."""
         found: list[tuple[str, str, str]] = []
         own = chat.recording_material_id
-        if own is not None:
+        if own is not None and (scope is None or scope.allows(own)):
             record = self.kb.material_repo.get(own)
             if record is not None:
                 live = "is still recording" if record.status == "recording" else "has finished"
@@ -275,7 +293,8 @@ class ContextBuilder:
                 found.append(("This chat belongs to a recording. Its latest transcribed speech:",
                               "recording", body))
         for record in self.kb.material_repo.list_all(kind="recording"):
-            if record.status != "recording" or record.id == own:
+            if record.status != "recording" or record.id == own or (scope is not None
+                                                                     and not scope.allows(record.id)):
                 continue
             until = self._transcribed_until(record)
             body = (f"Recording “{record.title}” (id {record.id}) is in progress"
@@ -436,6 +455,27 @@ class ContextBuilder:
             return (f"The user quoted {where}:", "quoted material", text)
         where = f"wiki page {quote.id}" + (f", block {quote.block_id}" if quote.block_id else "")
         return (f"The user quoted {where}:", "quoted page", text)
+
+
+def _scoped_question(asked: tuple[str, str, str], scope: SourceScope | None) -> tuple[str, str, str]:
+    """P3-c «Ask the agent» (Q1 p3 H1): quotes of sources outside the chat's sources are withheld and
+    counted; the user asked about the question itself, so it stays."""
+    if scope is None:
+        return asked
+    from ..permissions.source_scope import withhold_quotes
+
+    note, label, body = asked
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return asked
+    if not isinstance(data, dict) or not isinstance(data.get("source"), list):
+        return asked
+    withheld = withhold_quotes(data["source"], scope)
+    if not withheld:
+        return asked
+    data["sources_withheld"] = withheld
+    return note, label, json.dumps(data, ensure_ascii=False, indent=1)
 
 
 def _fragment_line(material_id: str, seg: int, start_ms: int | None, speaker: str | None, page: int | None,

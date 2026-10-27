@@ -10,6 +10,7 @@ import logging
 import re
 import sqlite3
 import unicodedata
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from ..logsafe import error_note
@@ -84,10 +85,27 @@ def snippet_parts(marked: str) -> tuple[SnippetPart, ...]:
     return tuple(parts)
 
 
-def search(db: KnowledgeDatabase, query: str, *, limit: int = 20) -> SearchResults:
+def _id_filter(column: str, only: Collection[str] | None, excluded: Collection[str]) -> tuple[str, list[str]]:
+    """``AND`` clauses keeping ``column`` inside ``only`` (``None``: any) and outside ``excluded``."""
+    sql, params = "", []
+    if only is not None:
+        sql += f" AND {column} IN ({','.join('?' for _ in only) or 'NULL'})"
+        params += list(only)
+    if excluded:
+        sql += f" AND {column} NOT IN ({','.join('?' for _ in excluded)})"
+        params += list(excluded)
+    return sql, params
+
+
+def search(db: KnowledgeDatabase, query: str, *, limit: int = 20, only: Collection[str] | None = None,
+           excluded: Collection[str] = ()) -> SearchResults:
+    """``only`` / ``excluded``: material and page ids a chat's sources allow (N7-4), applied before the
+    ranking cut so a chosen source outside the library's top hits is still found (Q1 n78 M-1)."""
     expression = fts_query(query)
     if expression is None:
         return SearchResults(query=query)
+    fragment_sql, fragment_params = _id_filter("fragments_fts.material_id", only, excluded)
+    block_sql, block_params = _id_filter("blocks_fts.page_id", only, excluded)
     with db.read() as connection:
         try:
             fragment_rows = connection.execute(
@@ -96,8 +114,8 @@ def search(db: KnowledgeDatabase, query: str, *, limit: int = 20) -> SearchResul
                 "m.title AS title, m.kind AS kind, x.start_ms AS start_ms, x.page AS page "
                 "FROM fragments_fts JOIN materials m ON m.id = fragments_fts.material_id "
                 "JOIN fragments x ON x.material_id = fragments_fts.material_id AND x.seg = fragments_fts.seg "
-                "WHERE fragments_fts MATCH ? ORDER BY rank LIMIT ?",
-                (expression, limit),
+                f"WHERE fragments_fts MATCH ?{fragment_sql} ORDER BY rank LIMIT ?",
+                (expression, *fragment_params, limit),
             ).fetchall()
             block_rows = connection.execute(
                 "SELECT blocks_fts.page_id AS page_id, blocks_fts.block_id AS block_id, "
@@ -105,14 +123,14 @@ def search(db: KnowledgeDatabase, query: str, *, limit: int = 20) -> SearchResul
                 "p.title AS title, p.kind AS page_kind, b.kind AS kind, b.owner AS owner "
                 "FROM blocks_fts JOIN pages p ON p.id = blocks_fts.page_id "
                 "JOIN blocks b ON b.page_id = blocks_fts.page_id AND b.block_id = blocks_fts.block_id "
-                "WHERE blocks_fts MATCH ? ORDER BY rank LIMIT ?",
-                (expression, limit),
+                f"WHERE blocks_fts MATCH ?{block_sql} ORDER BY rank LIMIT ?",
+                (expression, *block_params, limit),
             ).fetchall()
         except sqlite3.OperationalError as error:
             # L1: a broken or busy index used to look exactly like "no matches", with no trace.
             logger.warning("Full-text search failed: %s", error_note(error))
             return SearchResults(query=query, degraded=True)
-        pages = _pages(connection, query, limit)
+        pages = _pages(connection, query, limit, only, excluded)
     return SearchResults(
         query=query,
         fragments=tuple(
@@ -129,7 +147,8 @@ def search(db: KnowledgeDatabase, query: str, *, limit: int = 20) -> SearchResul
     )
 
 
-def _pages(connection: sqlite3.Connection, query: str, limit: int) -> tuple[PageHit, ...]:
+def _pages(connection: sqlite3.Connection, query: str, limit: int, only: Collection[str] | None = None,
+           excluded: Collection[str] = ()) -> tuple[PageHit, ...]:
     key = name_key(query.strip())
     if not key:
         return ()
@@ -142,4 +161,6 @@ def _pages(connection: sqlite3.Connection, query: str, limit: int) -> tuple[Page
     ):
         if key in row["alias_key"] and row["id"] not in hits:
             hits[row["id"]] = PageHit(row["id"], row["title"], row["kind"], row["alias"])
-    return tuple(list(hits.values())[:limit])
+    kept = [hit for page_id, hit in hits.items()
+            if page_id not in excluded and (only is None or page_id in only)]
+    return tuple(kept[:limit])

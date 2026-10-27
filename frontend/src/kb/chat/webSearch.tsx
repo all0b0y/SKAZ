@@ -121,6 +121,16 @@ function outcomeState(part: KbWebSearchPart): { state: string; detail: string | 
 /** Web results v1 «Folded line + quiet rows» (2026-10-21): this many rows show before «Show N more». */
 const FIRST_LINKS = 5;
 
+/**
+ * What happened to the hidden links, true per path (Q1 n78 H-2): through `skaz_web_search` SKAZ removes
+ * them before the agent gets the result; Claude Code's own search hands its results to the model first,
+ * so SKAZ could only keep them off this card.
+ */
+export const hiddenLead = (part: Pick<KbWebSearchPart, 'searcher'>): string =>
+  (part.searcher
+    ? 'SKAZ removed these links before the agent got the results:'
+    : 'Hidden on this card only. Claude’s own search returned them to the agent before SKAZ could filter them:');
+
 /** N7: «N hidden by your rules» — which sites, on click. Hidden links are only counted, never shown. */
 function HiddenByRules({ part }: { part: KbWebSearchPart }) {
   const [open, setOpen] = useState(false);
@@ -134,7 +144,7 @@ function HiddenByRules({ part }: { part: KbWebSearchPart }) {
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} label="Links hidden by your rules" placement="bottom-start" width={260}>
         <div className="kb-web-hidden-pop">
-          <p className="kb-muted">The agent didn’t get these links:</p>
+          <p className="kb-muted">{hiddenLead(part)}</p>
           <ul>{(part.hidden ?? []).map((h) => <li key={h.site}>{h.site}{h.count > 1 ? ` · ${h.count}` : ''}</li>)}</ul>
         </div>
       </Popover>
@@ -147,7 +157,9 @@ function EverywhereOnce({ chatId, part }: { chatId: string; part: KbWebSearchPar
   const { client } = useServices();
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
-  if (!part.rules?.only.length || part.links.length > 0 || part.status !== 'allowed') return null;
+  // Q1 n78 L-7: also on a search the rules blocked outright (every site asked was outside them).
+  const nothing = (part.status === 'allowed' && part.links.length === 0) || (part.status === 'denied' && part.auto);
+  if (!part.rules?.only.length || !nothing) return null;
   const lift = async () => {
     setState('busy');
     setError(null);

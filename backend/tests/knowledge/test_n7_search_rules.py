@@ -29,7 +29,7 @@ from skaz.knowledge.permissions.search_rules import (
     sites,
 )
 from skaz.knowledge.permissions.store import RunRef
-from skaz.knowledge.permissions.web_search import OUTSIDE_RULES, ChatWebGate
+from skaz.knowledge.permissions.web_search import NATIVE_HELD, ChatWebGate
 from skaz.knowledge.permissions.web_tool import WEB_TOOL
 
 from .chat_support import finished
@@ -218,26 +218,26 @@ async def test_without_rules_the_search_is_as_before(env: Env) -> None:
     assert "date unknown" in payload(env.agents["codex"].outputs[0])["note"]
 
 
-async def test_claude_codes_gate_sends_the_rules_and_refuses_a_search_only_on_blocked_sites(env: Env) -> None:
+async def test_claude_codes_own_gate_is_refused_under_hard_rules_and_as_before_with_prefer_only(
+        env: Env) -> None:
+    """Q1 n78 H-2: Claude's own WebSearch can't be screened before its model sees the results, so with a
+    Never site or «only these sites» it is refused before any card (the chat searches through
+    ``skaz_web_search``); with Prefer only, it goes out with the agent's own filters, as before."""
     await set_settings(env, never=["pinterest.com"])
     chat_id = await env.chat("claude_code")
     env.runtime.kb_web.store.grant(chat_id, "2026-10-27T00:00:00Z")  # «Allow in this chat»: no wait
     gate = ChatWebGate(env.runtime.kb_web, RunRef("run-x", chat_id, "msg-x", "claude_code"))
     refused = await gate.approve(WebQuery("toolu_1", "pins", allowed_domains=("ru.pinterest.com",)))
-    assert not refused.allowed and refused.message == OUTSIDE_RULES
-    record = env.runtime.kb_web.get(refused.search_id)
-    assert (record.status, record.auto, record.reason) == ("denied", True, OUTSIDE_RULES)
+    assert not refused.allowed and refused.message == NATIVE_HELD and refused.search_id is None
+    await set_settings(env, never=[], prefer=["arxiv.org"])
     allowed = await gate.approve(WebQuery("toolu_2", "wiki staleness", blocked_domains=("quora.com",)))
-    assert allowed.allowed and allowed.blocked_domains == ("pinterest.com", "quora.com")
-    assert allowed.allowed_domains == ()
-    # The card shows exactly the filters that go out.
+    assert allowed.allowed and allowed.blocked_domains == ("quora.com",) and allowed.allowed_domains == ()
     card = env.runtime.kb_web.get(allowed.search_id)
-    assert card.blocked_domains == ("pinterest.com", "quora.com")
-    # Claude Code's result is screened the same way before it is recorded on the card.
+    assert card.blocked_domains == ("quora.com",)
+    assert card.rules is not None and card.rules.prefer == ("arxiv.org",)
+    # Nothing hard to screen: the card keeps what Claude's search returned.
     await gate.results(allowed.search_id, SEARCH_LINKS)
-    card = env.runtime.kb_web.get(allowed.search_id)
-    assert "https://www.pinterest.com/pin/3" not in [link.url for link in card.links]
-    assert dict(card.hidden) == {"pinterest.com": 1, "ru.pinterest.com": 1}
+    assert len(env.runtime.kb_web.get(allowed.search_id).links) == len(SEARCH_LINKS)
 
 
 # -- the routes ----------------------------------------------------------------------------------

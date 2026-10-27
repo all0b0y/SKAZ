@@ -6,6 +6,9 @@ the chat (``ON DELETE CASCADE``) or when the user revokes it.
 """
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
+
 NAME = "web_search"
 VERSION = 3
 
@@ -42,8 +45,19 @@ CREATE TABLE IF NOT EXISTS web_search_grants (
 );
 """
 
+def _add_missing(*columns: tuple[str, str]) -> Callable[[sqlite3.Connection], None]:
+    """Add each column unless it is there: ``executescript`` commits statement by statement, so a start
+    that stopped half-way leaves some columns in (Q1 n78 L-3); the next start must finish, not fail."""
+    def step(connection: sqlite3.Connection) -> None:
+        present = {row[1] for row in connection.execute("PRAGMA table_info(web_search_requests)")}
+        for name, kind in columns:
+            if name not in present:
+                connection.execute(f"ALTER TABLE web_search_requests ADD COLUMN {name} {kind}")
+
+    return step
+
+
 #: v2 (W-3b): which agent's own search ran a ``skaz_web_search`` query.
 #: v3 (N7): the search rules in force for the query and the links they hid.
-UPGRADES = {2: "ALTER TABLE web_search_requests ADD COLUMN searcher TEXT;",
-            3: "ALTER TABLE web_search_requests ADD COLUMN rules TEXT; "
-               "ALTER TABLE web_search_requests ADD COLUMN hidden TEXT NOT NULL DEFAULT '{}';"}
+UPGRADES = {2: _add_missing(("searcher", "TEXT")),
+            3: _add_missing(("rules", "TEXT"), ("hidden", "TEXT NOT NULL DEFAULT '{}'"))}

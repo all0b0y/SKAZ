@@ -20,6 +20,30 @@ async function openChat() {
 }
 
 describe('Search & sources panel in the message field (N7)', () => {
+  it('a Save that leaves the web lists alone sends no web lists: the chat keeps following Settings (Q1 n78 M-8)', async () => {
+    const { user, composer, fake } = await openChat();
+    await user.click(await within(composer).findByRole('button', { name: 'Search rules for this chat' }));
+    const panel = await within(composer).findByRole('dialog', { name: 'Search and sources for this chat' });
+    await user.click(within(panel).getByRole('radio', { name: 'Only these' }));
+    await user.click(within(panel).getByRole('button', { name: 'Add material' }));
+    await user.type(within(panel).getByRole('textbox', { name: 'Find a material or wiki page' }), 'Lecture 8');
+    await user.click(await within(panel).findByRole('button', { name: /^Lecture 8 — entropy$/ }));
+    await user.click(within(panel).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(within(composer).queryByRole('dialog')).toBeNull());
+    const put = rulesCalls(fake.calls).find(([m]) => m === 'PUT');
+    expect(put?.[2]).toEqual({ web: null, sources_only: true, sources: ['m1'], excluded: [], as_global: false });
+  });
+
+  it('a change in Settings → Search reloads the chat’s rules (no stale lists pinned on the chat)', async () => {
+    const { fake } = await openChat();
+    const { searchSettingsChanged } = await import('./sites');
+    const gets = () => rulesCalls(fake.calls).filter(([m]) => m === 'GET').length;
+    await waitFor(() => expect(gets()).toBeGreaterThan(0));
+    const before = gets();
+    searchSettingsChanged();
+    await waitFor(() => expect(rulesCalls(fake.calls).filter(([m]) => m === 'GET').length).toBeGreaterThan(before));
+  });
+
   it('starts from Settings; Never sites from Settings can’t be removed; Save keeps the chat’s changes', async () => {
     const { user, composer, fake } = await openChat();
     const button = await within(composer).findByRole('button', { name: 'Search rules for this chat' });

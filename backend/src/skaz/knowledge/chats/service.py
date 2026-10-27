@@ -43,6 +43,7 @@ from ..agents.engine import (
     SessionDeleteDeferred,
     TextDelta,
     ToolCall,
+    ToolResult,
     ToolSpec,
     TurnMessage,
     session_support,
@@ -68,8 +69,13 @@ from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
-from ..permissions.search_rules import TIME_WINDOW_RULES, SearchRulesStore, rules_instructions
-from ..permissions.source_scope import sources_note
+from ..permissions.search_rules import (
+    TIME_WINDOW_RULES,
+    TIME_WINDOW_WEB,
+    SearchRulesStore,
+    rules_instructions,
+)
+from ..permissions.source_scope import scope_of, sources_note
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
 from ..permissions.web_tool import WEB_TOOL
@@ -114,6 +120,7 @@ from .model import (
     Selection,
     StudyPart,
     TextPart,
+    ToolPart,
     WebSearchPart,
 )
 from .parsing import BlockData, BlockStart, CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
@@ -210,6 +217,11 @@ class _Run:
     #: The user's own messages that answered the agent's question during this run (the agent got them
     #: inside its turn): recorded as held with the answer, in chat order.
     absorbed: list[Message] = field(default_factory=list)
+    #: N8 «Looked at» (Q1 n78 M-6): the call id of a read tool → its part's index (dropped on an error).
+    read_parts: dict[str, int] = field(default_factory=dict)
+    #: Q1 n78 H-2: a hard search rule is in force, so this (Claude Code) chat searches through
+    #: ``skaz_web_search`` — SKAZ screens the links first — and its own WebSearch is not offered.
+    skaz_web: bool = False
 
 
 class ChatService:
@@ -433,7 +445,7 @@ class ChatService:
         """The user wrote their own message while the agent waits for an answer: it closes the question."""
         if given.selection is not None:  # P2: checked like any question's selection
             given = replace(given, selection=await self._checked_selection(
-                await disk_call(self.repo.messages, chat.id), given.selection))
+                await disk_call(self.repo.messages, chat.id), given.selection, chat.id))
         now = utc_now()
         user = Message(id=new_id("msg"), chat_id=chat.id, seq=0, role="user", state="done", created_at=now,
                        parts=(TextPart(given.text),), input=given)
@@ -700,7 +712,8 @@ class ChatService:
             engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             prior = await disk_call(self.repo.messages, chat_id)
             if given.selection is not None:  # P2: only ids that exist in the stored answer
-                given = replace(given, selection=await self._checked_selection(prior, given.selection))
+                checked = await self._checked_selection(prior, given.selection, chat_id)
+                given = replace(given, selection=checked)
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)
@@ -808,8 +821,12 @@ class ChatService:
                        created_at=now, engine=chat.engine, model=chat.model, effort=chat.effort,
                        reply_to=question_id)
 
-    async def _checked_selection(self, prior: Sequence[Message], selection: Selection) -> Selection:
-        """P2's items of an earlier answer, or P3-c's test question (checked against the study block)."""
+    async def _checked_selection(self, prior: Sequence[Message], selection: Selection,
+                                 chat_id: str) -> Selection:
+        """P2's items of an earlier answer, or P3-c's test question (checked against the study block).
+
+        ``chat_id``: the asking chat (Q1 p3 L9 — the study check takes it as ``chat_id=`` once
+        ``check_study_selection`` has that keyword, fix/q1-study)."""
         if selection.kind == "study":
             from ..study.ask import check_study_selection  # the study package imports chats (C-17)
 
@@ -850,16 +867,17 @@ class ChatService:
 
     # -- one answer -------------------------------------------------------------------
 
-    def _tools_for(self, chat: Chat) -> tuple[ToolSpec, ...]:
+    def _tools_for(self, chat: Chat, *, skaz_web: bool = False) -> tuple[ToolSpec, ...]:
         """The turn's SKAZ tools: ``skaz_ask_user`` only where the agent's own question tool can't work;
-        ``skaz_web_search`` (W-3b) only where the agent's own search isn't held (and SKAZ holds searches)."""
+        ``skaz_web_search`` (W-3b) only where the agent's own search isn't held (and SKAZ holds searches),
+        or where the user's hard search rules keep the agent's own search off (``skaz_web``, Q1 H-2)."""
         # N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill`` (registered by the runtime, ``me.tools.attach``) are in
         # every chat turn's tools (a live session's tools never change); a switched-off «Я» is refused when
         # called. Never outside chats.
         dropped: set[str] = set()
         if chat.engine in NATIVE_QUESTIONS:
             dropped.add(ASK_TOOL)
-        if self.web is None or chat.engine in NATIVE_WEB:
+        if self.web is None or (chat.engine in NATIVE_WEB and not skaz_web):
             dropped.add(WEB_TOOL)
         return tuple(spec for spec in self.tools.specs() if spec.name not in dropped)
 
@@ -873,7 +891,8 @@ class ChatService:
         run.question = question
         try:
             assert question.input is not None
-            request = await disk_call(builder.request, chat, question.input, self._other_chat)
+            scope = scope_of(await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).chat, chat.id))
+            request = await disk_call(builder.request, chat, question.input, self._other_chat, scope)
             # N7-4: the narrowed sources, told before the question each turn (kept in code by the tools).
             note = await disk_call(self._sources_note, chat.id)
             if note:
@@ -885,16 +904,22 @@ class ChatService:
             me = await disk_call(snapshot, me_store(self.kb))
             # W-2: the agent's own web search, only where SKAZ can hold each query before it is sent;
             # W-3b: the other agents search only through ``skaz_web_search`` (their own search stays off).
-            native = run.engine.id in NATIVE_WEB
+            rules = (await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).active, chat.id)
+                     if self.web is not None else None)
+            # Q1 n78 H-2: Claude Code's own search can't be screened before the model sees its results, so
+            # with a hard rule (Never / only these sites) its chat searches through ``skaz_web_search``.
+            run.skaz_web = run.engine.id in NATIVE_WEB and rules is not None and rules.hard
+            native = run.engine.id in NATIVE_WEB and not run.skaz_web
             web = web_support(run.engine)
             gate = (ChatWebGate(self.web, RunRef(run.run_id, run.chat_id, run.message.id, run.engine.id))
                     if self.web is not None and native and web.available else None)
             told = instructions(language, skills)
             web_text = web_instructions(web, tool=not native) if self.web is not None else ""
-            if web_text:  # N7: the chat's search rules (kept by SKAZ in code; the text tells the agent why)
-                rules = await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).active, chat.id)
-                parts = (web_text, rules_instructions(rules), TIME_WINDOW_RULES)
-                web_text = "\n\n".join(part for part in parts if part)
+            # N7: the chat's search rules (kept by SKAZ in code) and N7-5's time window — the window in
+            # every chat (Q1 n78 M-9), its web sentences only with web.
+            parts = (web_text, rules_instructions(rules) if rules is not None else "",
+                     TIME_WINDOW_RULES, TIME_WINDOW_WEB if web_text else "")
+            web_text = "\n\n".join(part for part in parts if part)
             if web_text:
                 told = f"{told}\n\n{web_text}"
             told = with_me(told, me)  # after every SKAZ rule; a live session gets later changes as notes
@@ -905,7 +930,8 @@ class ChatService:
                 gone = await disk_call(self._gone_materials, prior)
                 context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone,
                                          marks(me), me, tools=tuple(sorted(spec.name for spec in
-                                                                           self._tools_for(chat))),
+                                                                           self._tools_for(
+                                                                               chat, skaz_web=run.skaz_web))),
                                          base=BASE_INSTRUCTIONS)
             entries = await self._plan_session(run, chat, prior, context)
             if run.decision is not None:
@@ -924,7 +950,14 @@ class ChatService:
                     elif isinstance(event, ToolCall):
                         run.produced = True
                         run.tool_calls += 1
-                        self._add_part(run, await disk_call(resolver.tool, event.name, event.arguments))
+                        part = await disk_call(resolver.tool, event.name, event.arguments)
+                        if part.target is not None and scope is not None and not scope.allows(part.target[1]):
+                            part = replace(part, target=None)  # refused by the chat's sources (Q1 M-6)
+                        if part.target is not None:
+                            run.read_parts[event.call_id] = len(run.message.parts)
+                        self._add_part(run, part)
+                    elif isinstance(event, ToolResult):
+                        self._tool_failed(run, event)
                     elif isinstance(event, SessionBound):
                         await self._bound(run, event)
                     elif isinstance(event, Compacted):
@@ -1023,7 +1056,8 @@ class ChatService:
             before = run.session.context if run.session is not None else None
             note = context_note(before, run.context, skills) if run.context is not None else ""
             messages = (TurnMessage("user", f"{note}\n\n{request}" if note else request),)
-        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told, tools=self._tools_for(chat),
+        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told,
+                         tools=self._tools_for(chat, skaz_web=run.skaz_web),
                          web=gate, model=chat.model, effort=chat.effort, history_summary=summary,
                          session=decision.plan if decision is not None else None)
 
@@ -1287,6 +1321,17 @@ class ChatService:
             self._feed(run.chat_id).emit("delta", run.message.id, text=text)
             return
         self._add_part(run, TextPart(text))
+
+    def _tool_failed(self, run: _Run, event: ToolResult) -> None:
+        """A read that came back as an error (refused, not found) was not looked at: its target goes."""
+        index = run.read_parts.pop(event.call_id, None) if event.is_error else None
+        parts = list(run.message.parts)
+        if index is None or index >= len(parts) or not isinstance(parts[index], ToolPart):
+            return
+        part = parts[index]
+        assert isinstance(part, ToolPart)
+        parts[index] = replace(part, target=None)
+        run.message = run.message.with_parts(parts)
 
     def _add_part(self, run: _Run, part: Part) -> None:
         run.message = run.message.with_parts([*run.message.parts, part])

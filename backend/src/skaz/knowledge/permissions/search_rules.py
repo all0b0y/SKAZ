@@ -25,14 +25,15 @@ import contextlib
 import json
 import re
 import sqlite3
+import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
-from ..agents.web import WebLink
+from ..agents.web import WebLink, link_host
 from ..errors import KnowledgeError
-from ..ids import utc_now
+from ..ids import utc_now, utc_now_ms
 from ..store.database import KnowledgeDatabase
 
 #: Settings key of the global web rules (``settings`` table of ``knowledge.sqlite3``).
@@ -44,6 +45,7 @@ MAX_SOURCES = 200
 
 RulesOrigin = Literal["settings", "chat"]
 
+_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
@@ -64,6 +66,7 @@ def normalize_site(text: object) -> str | None:
     if not raw or len(raw) > 300 or any(char.isspace() for char in raw):
         return None
     raw = (urlsplit(raw).hostname or "") if "://" in raw else raw.split("/", 1)[0].split(":", 1)[0]
+    raw = unicodedata.normalize("NFKC", raw).translate(_DOTS).lower()
     raw = raw.removeprefix("*.").removeprefix(".").rstrip(".").removeprefix("www.")
     try:
         raw = raw.encode("idna").decode("ascii")
@@ -94,10 +97,9 @@ def sites(items: Iterable[object], *, strict: bool = True) -> tuple[str, ...]:
 
 
 def host_of(url: str) -> str:
-    try:
-        return (urlsplit(url).hostname or "").lower().rstrip(".")
-    except ValueError:
-        return ""
+    """The link's host as a browser opens it, in the lists' IDNA form (``""``: unclear — never kept
+    under «only these sites», and hidden whenever a hard rule is in force)."""
+    return link_host(url)
 
 
 def covers(site: str, host: str) -> bool:
@@ -156,6 +158,13 @@ class ChatRules:
     excluded: tuple[str, ...] = ()
     #: «Search everywhere once», clicked on a card: the next search ignores «only these sites».
     everywhere_once: bool = False
+    #: Q1 n78 M-7: when the library sources (only / sources / excluded) last changed (``None``: unknown) —
+    #: the citation check counts only answers written since.
+    sources_since: str | None = None
+
+    @property
+    def library_sources(self) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
+        return self.sources_only, self.sources, self.excluded
 
     @property
     def is_default(self) -> bool:
@@ -165,7 +174,8 @@ class ChatRules:
     def to_json(self) -> dict[str, Any]:
         return {"web": self.web.to_json() if self.web is not None else None,
                 "sources_only": self.sources_only, "sources": list(self.sources),
-                "excluded": list(self.excluded), "everywhere_once": self.everywhere_once}
+                "excluded": list(self.excluded), "everywhere_once": self.everywhere_once,
+                "sources_since": self.sources_since}
 
     @classmethod
     def from_json(cls, data: object) -> ChatRules:
@@ -174,7 +184,8 @@ class ChatRules:
         web = data.get("web")
         return cls(web=WebRules.from_json(web) if isinstance(web, Mapping) else None,
                    sources_only=data.get("sources_only") is True, sources=_ids(data.get("sources")),
-                   excluded=_ids(data.get("excluded")), everywhere_once=data.get("everywhere_once") is True)
+                   excluded=_ids(data.get("excluded")), everywhere_once=data.get("everywhere_once") is True,
+                   sources_since=since if isinstance(since := data.get("sources_since"), str) else None)
 
 
 @dataclass(frozen=True)
@@ -195,6 +206,11 @@ class ActiveRules:
     @property
     def empty(self) -> bool:
         return not (self.never or self.only or self.prefer or self.everywhere_once)
+
+    @property
+    def hard(self) -> bool:
+        """A Never site or «only these sites» is in force (Prefer is only a hint)."""
+        return bool(self.never or self.only)
 
     def to_json(self) -> dict[str, Any]:
         return {"never": list(self.never), "only": list(self.only), "prefer": list(self.prefer),
@@ -246,7 +262,8 @@ def screen(links: Sequence[WebLink], rules: ActiveRules | None) -> Screened:
     hidden: dict[str, int] = {}
     for link in links:
         host = host_of(link.url)
-        if covered(host, rules.never) or (rules.only and not covered(host, rules.only)):
+        if ((not host and rules.hard) or covered(host, rules.never)
+                or (rules.only and not covered(host, rules.only))):
             site = host.removeprefix("www.") or "?"
             hidden[site] = hidden.get(site, 0) + 1
             continue
@@ -302,16 +319,19 @@ def rules_instructions(rules: ActiveRules) -> str:
     return "\n".join(lines)
 
 
-#: N7-5: questions about «what is current / modern approaches» — the agent's part (the web part of the
-#: decision; library dates and scientific bases are not filtered here). Part of the web instruction text.
+#: N7-5: questions about «what is current / modern approaches» — the agent's part (library dates and
+#: scientific bases are not filtered here). Told in every chat, with or without web search (Q1 n78 M-9).
 TIME_WINDOW_RULES = (
     "Questions about what is current (\"what now\", \"modern approaches\", \"latest\"): start the answer "
     "with one line \"Looking at YYYY–YYYY\" (by default the last three years up to now) — the user can "
-    "change it with one click. Put the years into the web search query. Web links carry no date: "
-    "call them \"date unknown\" and never present one as recent unless its title or the source itself "
-    "states the date. Split the answer: first \"From YYYY–YYYY sources\" (only sources whose date you "
-    "know is inside the window), then the rest, marked as older or undated. If little is recent, say so "
-    "plainly."
+    "change it with one click. Split the answer: first \"From YYYY–YYYY sources\" (only sources whose date "
+    "you know is inside the window), then the rest, marked as older or undated. If little is recent, say "
+    "so plainly."
+)
+#: N7-5, the web part: told only where SKAZ holds web searches.
+TIME_WINDOW_WEB = (
+    "For such a question, put the years into the web search query. Web links carry no date: call them "
+    "\"date unknown\" and never present one as recent unless its title or the source itself states the date."
 )
 
 
@@ -342,6 +362,9 @@ class SearchRulesStore:
         return ChatRules.from_json(json.loads(row[0])) if row else ChatRules()
 
     def set_chat(self, chat_id: str, rules: ChatRules) -> ChatRules:
+        before = self.chat(chat_id)
+        rules = replace(rules, sources_since=before.sources_since
+                        if before.library_sources == rules.library_sources else utc_now_ms())
         with self.db.write() as connection:
             if rules.is_default:
                 connection.execute("DELETE FROM chat_search_rules WHERE chat_id = ?", (chat_id,))
@@ -359,8 +382,24 @@ class SearchRulesStore:
 
     def take_active(self, chat_id: str) -> ActiveRules:
         """The rules for a search about to be asked; spends the chat's «Search everywhere once»."""
-        chat = self.chat(chat_id)
-        rules = active_rules(self.global_rules(), chat)
-        if chat.everywhere_once:
-            self.set_chat(chat_id, replace(chat, everywhere_once=False))
+        rules = self.active(chat_id)
+        if rules.everywhere_once:
+            self.spend_once(chat_id)
         return rules
+
+    def spend_once(self, chat_id: str) -> None:
+        """Spend «Search everywhere once» in one write (Q1 n78 L-1: a panel Save meanwhile is kept)."""
+        with self.db.write() as connection:
+            row = connection.execute("SELECT rules FROM chat_search_rules WHERE chat_id = ?",
+                                     (chat_id,)).fetchone()
+            if row is None:
+                return
+            rules = ChatRules.from_json(json.loads(row[0]))
+            if not rules.everywhere_once:
+                return
+            rules = replace(rules, everywhere_once=False)
+            if rules.is_default:
+                connection.execute("DELETE FROM chat_search_rules WHERE chat_id = ?", (chat_id,))
+            else:
+                connection.execute("UPDATE chat_search_rules SET rules = ?, updated_at = ? WHERE chat_id = ?",
+                                   (json.dumps(rules.to_json(), ensure_ascii=False), utc_now(), chat_id))

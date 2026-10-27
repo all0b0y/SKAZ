@@ -46,6 +46,11 @@ OUTSIDE_RULES = ("Every site you asked to search is blocked or outside the user'
 DENIED = ("The user didn't allow this web search; nothing was sent. Don't search for it again unless "
           "the user asks — answer from the library or say what is missing.")
 CANCELLED = "The web search was cancelled; nothing was sent."
+#: Q1 n78 H-2: the agent's own search (Claude Code's WebSearch) under the user's hard search rules.
+NATIVE_HELD = ("The user's search rules (blocked sites or «only these sites») are on in this chat, so SKAZ "
+               "doesn't use your own web search here: SKAZ couldn't remove the links they rule out before "
+               "you see them. Nothing was sent. Search with skaz_web_search if you have it in this chat; "
+               "otherwise tell the user their search rules prevent this search.")
 
 
 @dataclass(frozen=True)
@@ -176,8 +181,10 @@ class WebSearchStore:
 
 
 Listener = Callable[[WebSearchRecord], None]
-#: N7: the rules for a search about to be asked in a chat (spends a «Search everywhere once»).
+#: N7: the rules for a search about to be asked in a chat (a snapshot; spends nothing).
 RulesSource = Callable[[str], ActiveRules]
+#: N7: spends a chat's «Search everywhere once» — when a search that used it is allowed (Q1 n78 L-1).
+SpendOnce = Callable[[str], None]
 
 
 class WebSearchBroker:
@@ -186,6 +193,10 @@ class WebSearchBroker:
         self.store = store
         #: N7: set by the runtime once the rules store exists (``None``: no rules, e.g. in tests).
         self.rules = rules
+        #: The rules in force now, without spending anything (Q1 H-2: may the agent's own search run?).
+        self.current: RulesSource | None = None
+        #: Spends «Search everywhere once» once a search that used it is allowed (not on Deny, L-1).
+        self.spend: SpendOnce | None = None
         self.waits = waits
         self._clock = clock
         self._futures: dict[str, asyncio.Future[WebSearchRecord]] = {}
@@ -204,6 +215,16 @@ class WebSearchBroker:
         if count:
             log.info("Cancelled %d web searches left by an earlier start", count)
         return count
+
+    async def _spent(self, record: WebSearchRecord) -> None:
+        if self.spend is not None and record.rules is not None and record.rules.everywhere_once:
+            await disk_call(self.spend, record.chat_id)
+
+    async def native_held(self, chat_id: str) -> bool:
+        """The user's hard rules keep the asking agent's own search off in this chat (Q1 n78 H-2)."""
+        if self.current is None:
+            return False
+        return (await disk_call(self.current, chat_id)).hard
 
     def get(self, search_id: str) -> WebSearchRecord:
         record = self.store.get(search_id)
@@ -235,6 +256,7 @@ class WebSearchBroker:
         if await disk_call(self.store.granted_at, run.chat_id) is not None:
             record = replace(base, status="allowed", auto=True, decided_at=now)
             await disk_call(self.store.add, record)
+            await self._spent(record)
             log.info("Web search %s (%s) allowed by the chat's grant", record.id, record.engine)
             self._notify(record)
             return record
@@ -275,6 +297,8 @@ class WebSearchBroker:
             raise PermissionConflict(ALREADY, "ALREADY_DECIDED")
         if decision == "allow_chat":
             await disk_call(self.store.grant, record.chat_id, self._clock())
+        if status == "allowed":
+            await self._spent(updated)
         log.info("Web search %s %s by the user (%s)", search_id, status, decision)
         if not future.done():
             future.set_result(updated)
@@ -319,12 +343,15 @@ class ChatWebGate:
     run: RunRef
 
     async def approve(self, query: WebQuery) -> WebVerdict:
+        if query.searcher is None and await self.broker.native_held(self.run.chat_id):
+            # Refused before any card: the chat searches through ``skaz_web_search`` (it says so).
+            return WebVerdict(False, NATIVE_HELD)
         record = await self.broker.request(self.run, query)
         if record.status == "allowed":
             if record.rules is None:
                 return WebVerdict(True, search_id=record.id)
             return WebVerdict(True, search_id=record.id, allowed_domains=record.allowed_domains,
-                              blocked_domains=record.blocked_domains)
+                              blocked_domains=record.blocked_domains, rules=record.rules)
         if record.status == "denied":
             return WebVerdict(False, record.reason or DENIED, search_id=record.id)
         return WebVerdict(False, CANCELLED, search_id=record.id)

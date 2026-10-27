@@ -60,6 +60,17 @@ describe('Search card with the user’s rules (N7)', () => {
     const pop = await screen.findByRole('dialog', { name: 'Links hidden by your rules' });
     expect(pop).toHaveTextContent('pinterest.com · 2');
     expect(pop).toHaveTextContent('medium.com');
+    expect(pop).toHaveTextContent('SKAZ removed these links before the agent got the results');
+  });
+
+  it('on Claude’s own search the hidden links are said to be hidden on the card only (Q1 n78 H-2)', async () => {
+    const links = [{ title: 'Staleness checks', url: 'https://arxiv.org/abs/1', site: 'arxiv.org' }];
+    const native = part('web-5', { engine: 'claude_code', searcher: null, status: 'allowed', links, hidden: [{ site: 'pinterest.com', count: 1 }] });
+    const { user, centre } = await open(world([native]));
+    await user.click(await within(centre()).findByRole('button', { name: '· 1 hidden by your rules' }));
+    const pop = await screen.findByRole('dialog', { name: 'Links hidden by your rules' });
+    expect(pop).toHaveTextContent('Hidden on this card only');
+    expect(pop).not.toHaveTextContent('before the agent got the results');
   });
 
   it('nothing on the allowed sites: «Search everywhere once» is the user’s click and asks the backend once', async () => {
@@ -78,5 +89,13 @@ describe('Search card with the user’s rules (N7)', () => {
   it('a query whose sites are all blocked is refused by the rules, nothing sent', async () => {
     const { centre } = await open(world([part('web-4', { status: 'denied', auto: true, reason: 'blocked' })]));
     expect(await within(centre()).findByRole('group', { name: /^Search blocked by your rules/ })).toHaveTextContent('Nothing was sent');
+    expect(within(centre()).queryByRole('button', { name: 'Search everywhere once' })).toBeNull(); // no «only» list
+  });
+
+  it('a search blocked by «only these sites» offers «Search everywhere once» too (Q1 n78 L-7)', async () => {
+    const rules = { ...RULES, only: ['arxiv.org'], origin: 'chat' as const };
+    const { centre } = await open(world([part('web-6', { status: 'denied', auto: true, reason: 'blocked', rules })]));
+    const box = await within(centre()).findByRole('group', { name: 'Nothing on the allowed sites' });
+    expect(within(box).getByRole('button', { name: 'Search everywhere once' })).toBeInTheDocument();
   });
 });
