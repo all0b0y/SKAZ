@@ -104,20 +104,26 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 }
 .kb-rail__item:hover { color: var(--kb-text); background: var(--kb-accent-soft); }
 .kb-rail__item.is-open { color: var(--kb-text); background: var(--kb-accent-soft); }
-.kb-rail__fill {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--kb-r-md);
-  background: var(--kb-fill);
-}
+/* Quiet rail (decision 24 «Left menu»): the active section is a soft tile, and one accent mark at
+   the rail's left edge slides to it (Rail.tsx, SPRING_SMALL). */
+.kb-rail__item.is-active { color: var(--kb-text); background: var(--kb-accent-soft); }
 .kb-rail__icon { position: relative; }
-.kb-rail__item.is-active { color: var(--kb-on-fill); }
-.kb-rail__item.is-active:hover { background: transparent; }
+.kb-rail__mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 20px;
+  border-radius: 0 var(--kb-r-2xs) var(--kb-r-2xs) 0;
+  background: var(--kb-accent);
+  pointer-events: none;
+  z-index: 2;
+}
 .kb-rail__item .kb-badge { top: -2px; right: -4px; box-shadow: 0 0 0 2px var(--kb-side); }
 .kb-rail__item .kb-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 2px var(--kb-side); }
 
 /* Names slide out of the button (v43 B): the highlight extends to the right over the next column
-   and shows the name beside the icon — one shape; the active item keeps its filled colours.
+   and shows the name beside the icon — one shape; on the active item too (the soft tile's colours).
    The rail paints above the columns after it so the name is never covered. */
 .kb-rail { position: relative; z-index: 6; }
 .kb-rail__label {
@@ -140,9 +146,7 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   animation: kb-rail-reveal 160ms ease-out both;
 }
 .kb-rail__label > .kb-icon { flex: none; }
-.kb-rail__item.is-active .kb-rail__label { background: var(--kb-fill); color: var(--kb-on-fill); }
 .kb-rail__hint { color: var(--kb-muted); font-size: var(--t-xs); font-weight: 400; }
-.kb-rail__item.is-active .kb-rail__hint { color: inherit; opacity: 0.6; }
 .kb-rail__item .kb-dot { z-index: 2; }
 /* The unread count moves into the name ("5 unread") while it is out. */
 .kb-rail__item[data-labelled] .kb-badge { visibility: hidden; }

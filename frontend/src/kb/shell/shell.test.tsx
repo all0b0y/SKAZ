@@ -93,6 +93,26 @@ describe('Window shell', () => {
     expect(storedPrefs()).toMatchObject({ sideOpen: true, section: 'materials' });
   });
 
+  it('quiet rail (decision 24): the active section is a soft tile with one sliding mark; no mark while the panel is closed', async () => {
+    const user = userEvent.setup();
+    renderKb();
+    const rail = await screen.findByRole('navigation', { name: 'Sections' });
+    const chats = within(rail).getByRole('button', { name: /^Chats/ });
+    expect(chats).toHaveClass('is-active');
+    expect(rail.querySelector('.kb-rail__fill')).toBeNull();
+    const mark = within(rail).getByTestId('rail-mark');
+    expect(rail.querySelectorAll('[data-testid="rail-mark"]')).toHaveLength(1);
+    expect(mark).toHaveAttribute('data-section', 'chats');
+    expect(mark).toHaveAttribute('aria-hidden', 'true');
+    await user.click(within(rail).getByRole('button', { name: /^Wiki/ }));
+    // The same element moves to the new item.
+    expect(within(rail).getByTestId('rail-mark')).toBe(mark);
+    expect(mark).toHaveAttribute('data-section', 'wiki');
+    await user.click(screen.getByRole('button', { name: 'Hide side panel' }));
+    expect(within(rail).queryByTestId('rail-mark')).not.toBeInTheDocument();
+    expect(rail.querySelector('.kb-rail__item.is-active')).toBeNull();
+  });
+
   it('shows the notification count from /kb/notifications (dismissed ones excluded)', async () => {
     renderKb();
     const bell = await screen.findByRole('button', { name: /Notifications/ });
