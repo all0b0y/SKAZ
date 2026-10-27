@@ -43,11 +43,18 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
     expect(tabOf()).toHaveAttribute('data-tab-for', 'c7');
   });
 
-  it('only a chat in the centre is bridged: New chat counts, All chats does not', async () => {
+  it('only a chat in the centre is bridged: New chat counts; All chats and an expanded document do not', async () => {
     const user = userEvent.setup();
-    renderKb({ world: chatWorld() });
+    const { services } = renderKb({ world: chatWorld() });
     await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
     expect(tabOf()).toHaveAttribute('data-tab-for', '__new');
+    await user.click(within(side()).getByRole('button', { name: /Why is there a logarithm/ }));
+    act(() => services.ui.getState().openDocument({ type: 'material', id: 'm3' }));
+    expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
+    act(() => services.ui.getState().toggleDocExpanded());
+    expect(tabOf()).toHaveAttribute('hidden');
+    act(() => services.ui.getState().toggleDocExpanded());
+    expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
     await user.click(within(side()).getByRole('button', { name: /^All chats/ }));
     expect(tabOf()).toHaveAttribute('hidden');
     expect(side().querySelector('.kb-chatrow.is-current')).toBeNull();

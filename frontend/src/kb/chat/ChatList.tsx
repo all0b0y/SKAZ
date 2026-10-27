@@ -37,8 +37,9 @@ export function ChatList() {
   const { pinned, rest, groups } = sideChats(list);
   const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
   // The open chat's row runs into its window (decision 24 «Chats»): one tab for the whole list.
-  // With All chats / All materials in the centre no row is bridged.
-  const openKey = center === 'chat' ? currentId ?? NEW_CHAT_KEY : null;
+  // With All chats / All materials (or an expanded document) in the centre no row is bridged.
+  const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
+  const openKey = center === 'chat' && !docInCenter ? currentId ?? NEW_CHAT_KEY : null;
 
   const row = (c: KbChatSummary) => {
     const current = center === 'chat' && c.id === currentId;
