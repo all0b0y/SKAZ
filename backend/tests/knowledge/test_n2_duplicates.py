@@ -15,6 +15,7 @@ from skaz.knowledge.library.fsio import write_atomic
 from skaz.knowledge.library.library import INBOX_ID
 from skaz.knowledge.markdown.source import FragmentInput, Origin
 from skaz.knowledge.service import KnowledgeService
+from skaz.knowledge.sources import duplicates
 from skaz.knowledge.sources.duplicates import doi_of, find_duplicate, url_key
 from skaz.knowledge.sources.service import SourceEvent, SourceService
 from tests.knowledge.pdf_fixtures import line, make_pdf
@@ -161,6 +162,22 @@ async def test_a_link_landing_on_a_known_page_or_the_same_bytes_is_not_added_aga
     linked = await sources.add_link("https://files.example/paper.pdf", INBOX_ID)
     assert linked.existing and linked.material_id == file.material_id
     assert len(ready.materials()) == 2
+
+
+def test_only_documents_from_before_the_hash_have_their_kept_original_read(
+        sources: SourceService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Q1 n2 L1: a recording or an import keeps no original document in ``.skaz``; its folder is not
+    # searched on every add (a large, cloud-synced library of recordings stays untouched).
+    kb = sources.kb
+    kb.create_material(INBOX_ID, "Old talk", "audio", [FragmentInput(text=CLEAN_EN[1])],
+                       origin=Origin(type="file", file_name="talk.m4a"))
+    old = kb.create_material(INBOX_ID, "Old lecture", "pdf", [FragmentInput(text=CLEAN_EN[0])],
+                             origin=Origin(type="file", file_name="old.pdf"))
+    looked: list[str] = []
+    monkeypatch.setattr(duplicates, "_original_matches",
+                        lambda _kb, record, _digest, _size: looked.append(record.title) or False)
+    assert find_duplicate(kb, content=b"%PDF-1.4 something else") is None
+    assert looked == ["Old lecture"] and old.manifest.id
 
 
 def test_pasted_text_is_never_a_duplicate(sources: SourceService) -> None:
