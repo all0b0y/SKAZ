@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { screenGrid } from './BoardCanvas';
 import { DEFAULT_LOOK } from './route';
 import { ScreenFrame } from './ScreenFrame';
 import { SCREENS } from './screens';
@@ -18,6 +19,23 @@ describe('layer 4 · screen registry', () => {
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
     expect(ids).toEqual(expect.arrayContaining(['chat', 'chat-source', 'wiki-page', 'materials', 'settings-look', 'notifications', 'onboarding']));
+  });
+});
+
+describe('layer 4 · the canvas grid', () => {
+  it('is «screen × width», both themes, each frame at its window size', () => {
+    const grid = screenGrid([1440, 1024, 820]);
+    expect(grid.map((g) => g.screen.id)).toEqual(SCREENS.map((s) => s.id));
+    for (const { rows } of grid) {
+      expect(rows.map((r) => r.theme)).toEqual(['light', 'dark']);
+      for (const r of rows) expect(r.frames.map(({ w, h }) => [w, h])).toEqual([[1440, 900], [1024, 768], [820, 700]]);
+    }
+    const keys = grid.flatMap((g) => g.rows.flatMap((r) => r.frames.map((f) => f.key)));
+    expect(new Set(keys).size).toBe(SCREENS.length * 6);
+  });
+
+  it('shows only the widths that are switched on', () => {
+    expect(screenGrid([820]).flatMap((g) => g.rows.flatMap((r) => r.frames.map((f) => f.w)))).toEqual(Array(SCREENS.length * 2).fill(820));
   });
 });
 

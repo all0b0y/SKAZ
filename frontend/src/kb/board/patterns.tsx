@@ -72,16 +72,16 @@ function cmdClick(root: HTMLElement, id: string): void {
 
 const openSettingsAt = (section: SettingsSection) => (s: KbServices) => { s.ui.getState().openSettings(section); };
 
-const settingsPattern = (id: string, section: SettingsSection, title: string, note: string): BoardPattern => ({
+const settingsPattern = (id: string, section: SettingsSection, title: string, note: string, gaps: string[] = []): BoardPattern => ({
   id, title, note, world: 'chat', width: 1040, fixedHeight: 760,
   cells: [{ label: '', prepare: openSettingsAt(section), render: () => <SettingsModal /> }],
-  gaps: ['Settings rows exist only inside the Settings window (its Row is not exported): the pattern is the real window at a section.'],
+  gaps: ['a settings row on its own — rows exist only inside the Settings window (its Row is not exported), so the pattern is the real window at a section.', ...gaps],
 });
 
-const toasts: Array<{ label: string; toast: ToastData }> = [
-  { label: 'Done · with Undo', toast: { id: 1, text: 'Moved 2 chats to Physics', tone: 'done', action: { label: 'Undo', run: noop } } },
-  { label: 'Neutral note', toast: { id: 2, text: 'Already pinned' } },
-  { label: 'Problem', toast: { id: 3, text: 'Couldn’t save the note: the library folder is unavailable.', tone: 'problem' } },
+const toasts: Array<{ toast: ToastData }> = [
+  { toast: { id: 1, text: 'Moved 2 chats to Physics', tone: 'done', action: { label: 'Undo', run: noop } } },
+  { toast: { id: 2, text: 'Already pinned' } },
+  { toast: { id: 3, text: 'Couldn’t save the note: the library folder is unavailable.', tone: 'problem' } },
 ];
 
 export const PATTERNS: readonly BoardPattern[] = [
@@ -116,7 +116,7 @@ export const PATTERNS: readonly BoardPattern[] = [
         render: () => <AssistantMessage chatId={ANSWER_CHAT} message={messages().answer} actions={{ ...ANSWER_ACTIONS, error: 'Claude Code can’t answer now: Not signed in.' }} />,
       },
     ],
-    gaps: ['A streamed answer growing word by word is not shown: the board shows still states only.'],
+    gaps: ['a streamed answer growing word by word — the board shows still states only.'],
   },
   {
     id: 'composer',
@@ -142,7 +142,7 @@ export const PATTERNS: readonly BoardPattern[] = [
     title: 'Wiki page',
     note: 'A concept page as the document panel shows it: header, folders, blocks of every kind (from sources with citations, connection, explanation edited by you, your note).',
     world: 'doc', width: 700, cellWidth: 640,
-    cells: [{ label: 'Entropy', pane: 'pane', height: 1100, render: () => <PageView target={{ type: 'page', id: 'p-entropy' }} nonce={1} /> }],
+    cells: [{ label: 'Entropy', pane: 'pane', height: 1000, render: () => <PageView target={{ type: 'page', id: 'p-entropy' }} nonce={1} /> }],
   },
   {
     id: 'material-rows',
@@ -159,18 +159,19 @@ export const PATTERNS: readonly BoardPattern[] = [
     title: 'Notification rows',
     note: 'The feed: decisions that wait for you (sources disagree, doubtful corrections, a link that failed, an excluded instruction) and plain notices.',
     world: 'chat', width: 420, cellWidth: 360,
-    cells: [{ label: 'Feed', pane: 'side', height: 760, render: () => <NotificationsFeed /> }],
+    cells: [{ label: 'Feed', pane: 'side', height: 960, render: () => <NotificationsFeed /> }],
   },
   settingsPattern('settings-wiki', 'wiki', 'Settings rows · Wiki', 'Select, switches, a button row, the per-day stepper.'),
-  settingsPattern('settings-rec', 'rec', 'Settings rows · Recording & speech', 'Device select, segmented service, consent switch, language chips, a download row.'),
+  settingsPattern('settings-rec', 'rec', 'Settings rows · Recording & speech', 'Device select, segmented service, consent switch, language chips, a download row.',
+    ['the microphone list and computer audio — they need the Electron host (a browser says «Not supported» / «Not available on this Mac»).']),
   settingsPattern('settings-conn', 'conn', 'Settings rows · Accounts & keys', 'Agent cards (ready, not installed), API key rows, local models.'),
   {
     id: 'toast',
     title: 'Toast',
     note: 'The real toast (it lives at the bottom of the window; here it is laid out in the page). Top to bottom: done with Undo · a neutral note · a problem.',
     world: 'chat', width: 700, cellWidth: 640,
-    cells: toasts.map(({ label, toast }) => ({ label, render: () => <Toast toast={toast} onClose={noop} /> })),
-    gaps: ['The toast is a portal to <body>: it can’t sit inside its cell, so the three come one under another below the cells (board.css lays them out in the page).'],
+    cells: toasts.map(({ toast }) => ({ label: '', render: () => <Toast toast={toast} onClose={noop} /> })),
+    gaps: ['the toast inside a cell — it is a portal to <body>, so board.css lays the three out in the page, one under another.'],
   },
   {
     id: 'permission',

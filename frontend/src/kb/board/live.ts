@@ -70,7 +70,11 @@ export const SETTLE_MS = 500;
 export function markReady(errors: readonly string[] = []): void {
   const html = document.documentElement;
   if (errors.length) html.dataset.boardErrors = errors.join(' | ');
-  window.setTimeout(() => { html.dataset.boardReady = 'true'; }, SETTLE_MS);
+  window.setTimeout(() => {
+    html.dataset.boardReady = 'true';
+    // The canvas loads its frames a few at a time: this one is done, the next may start.
+    if (window.parent !== window) window.parent.postMessage({ kbBoard: 'ready' }, window.location.origin);
+  }, SETTLE_MS);
 }
 
 /** Wait until the stores' answers (the fake answers after 30 ms) and the renders after them are in. */

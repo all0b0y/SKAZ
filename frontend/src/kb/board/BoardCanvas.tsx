@@ -19,6 +19,40 @@ const LAYERS: ReadonlyArray<{ id: BoardLayer; label: string }> = [
   { id: 1, label: '1–2 Foundations · Primitives' }, { id: 3, label: '3 Patterns' }, { id: 4, label: '4 Screens' },
 ];
 
+/** Frames that load at once on layers 3–4: each is a whole app instance on the dev server. */
+const AT_ONCE = 3;
+/** A frame that never says it is ready doesn't hold the queue longer than this. */
+const STALL_MS = 6000;
+
+/** Layer 4 as a grid «screen × width», both themes: rows in canvas order, each frame keyed. */
+export function screenGrid(widths: readonly ScreenWidth[]) {
+  return SCREENS.map((screen) => ({
+    screen,
+    rows: THEMES.map((theme) => ({
+      theme,
+      frames: SCREEN_SIZES.filter((s) => widths.includes(s.w)).map(({ w, h }) => ({ key: `screen:${screen.id}:${theme}-${w}`, w, h })),
+    })),
+  }));
+}
+
+/**
+ * Frames load a few at a time, in canvas order: the next starts when one says it is ready (or after
+ * STALL_MS). `reset` = anything that changes the frames' addresses starts the queue over.
+ */
+function useFrameQueue(reset: string): (index: number) => boolean {
+  const [allowed, setAllowed] = useState(AT_ONCE);
+  useEffect(() => { setAllowed(AT_ONCE); }, [reset]);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin === window.location.origin && (event.data as { kbBoard?: string })?.kbBoard === 'ready') setAllowed((n) => n + 1);
+    };
+    window.addEventListener('message', onMessage);
+    const timer = window.setInterval(() => setAllowed((n) => n + 1), STALL_MS);
+    return () => { window.removeEventListener('message', onMessage); window.clearInterval(timer); };
+  }, []);
+  return (index) => index < allowed;
+}
+
 function toggled<T>(all: readonly T[], now: readonly T[], v: T): T[] {
   if (now.includes(v)) return now.length > 1 ? now.filter((x) => x !== v) : [...now];
   return all.filter((x) => x === v || now.includes(x));
@@ -48,6 +82,8 @@ export function BoardCanvas({ initialLayer = 1 }: { initialLayer?: BoardLayer })
   useEffect(() => { window.history.replaceState(null, '', canvasHash(layer)); }, [layer]);
 
   const origin = window.location.href.split('#')[0];
+  const may = useFrameQueue(`${layer}|${base}|${accent}|${density}|${sizes.join()}|${widths.join()}`);
+  let order = 0;
   const look = (theme: BoardLook['theme'], size: BoardSize): BoardLook => ({ theme, size, base, accent, density });
   const zoom = zooms[layer];
 
@@ -96,10 +132,11 @@ export function BoardCanvas({ initialLayer = 1 }: { initialLayer?: BoardLayer })
               <div className="kb-canvas__cols">
                 {sizes.map((size) => THEMES.map((theme) => {
                   const key = `pattern:${p.id}:${theme}-${size}`;
+                  const load = may(order++);
                   return (
                     <figure key={key} className="kb-canvas__frame">
                       <figcaption>{theme === 'light' ? 'Light' : 'Dark'} · text {size.toUpperCase()}</figcaption>
-                      <iframe title={`${p.title} · ${theme} ${size}`} loading="lazy" src={`${origin}${patternHash(p.id, look(theme, size))}`}
+                      <iframe title={`${p.title} · ${theme} ${size}`} src={load ? `${origin}${patternHash(p.id, look(theme, size))}` : undefined}
                         style={{ width: p.width, height: p.fixedHeight ?? heights[key] ?? 800 }} />
                     </figure>
                   );
@@ -112,17 +149,20 @@ export function BoardCanvas({ initialLayer = 1 }: { initialLayer?: BoardLayer })
 
       {layer === 4 && (
         <div className="kb-canvas__rows" style={{ zoom }}>
-          {SCREENS.map((s) => (
-            <section key={s.id} className="kb-canvas__row" data-screen={s.id}>
-              <h2>{s.title}</h2>
-              {THEMES.map((theme) => (
+          {screenGrid(widths).map(({ screen, rows }) => (
+            <section key={screen.id} className="kb-canvas__row" data-screen={screen.id}>
+              <h2>{screen.title}</h2>
+              {rows.map(({ theme, frames }) => (
                 <div key={theme} className="kb-canvas__cols">
-                  {SCREEN_SIZES.filter((size) => widths.includes(size.w)).map(({ w, h }) => (
-                    <figure key={w} className="kb-canvas__frame">
-                      <figcaption>{theme === 'light' ? 'Light' : 'Dark'} · {w}×{h}</figcaption>
-                      <iframe title={`${s.title} · ${theme} ${w}`} loading="lazy" src={`${origin}${screenHash(s.id, w, look(theme, 'm'))}`} style={{ width: w, height: h }} />
-                    </figure>
-                  ))}
+                  {frames.map(({ key, w, h }) => {
+                    const load = may(order++);
+                    return (
+                      <figure key={key} className="kb-canvas__frame">
+                        <figcaption>{theme === 'light' ? 'Light' : 'Dark'} · {w}×{h}</figcaption>
+                        <iframe title={`${screen.title} · ${theme} ${w}`} src={load ? `${origin}${screenHash(screen.id, w, look(theme, 'm'))}` : undefined} style={{ width: w, height: h }} />
+                      </figure>
+                    );
+                  })}
                 </div>
               ))}
             </section>

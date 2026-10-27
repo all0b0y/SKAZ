@@ -121,3 +121,6 @@ html[data-board='frame'] body { background: var(--kb-bg); }
 .kb-board__pane > .kb-center { min-width: 0; flex: 1; }
 /* The real toast is a portal to <body>, fixed to the window: on its pattern page it is laid out in the flow. */
 html[data-board-pattern='toast'] body > .kb-toast { position: relative; left: auto; bottom: auto; translate: none; z-index: auto; width: max-content; margin: 0 32px var(--kb-sp-12); }
+html[data-board-pattern='toast'] #root { min-height: 0; }
+html[data-board-pattern='toast'] .kb-board { padding-bottom: var(--kb-sp-16); }
+html[data-board-pattern='toast'] .kb-board__pcells { display: none; }

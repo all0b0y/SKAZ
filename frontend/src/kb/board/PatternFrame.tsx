@@ -64,7 +64,7 @@ export function PatternFrame({ id, look }: { id: string; look: BoardLook }) {
           <span className="kb-board__muted">Layer 3 · {look.theme} · text {look.size} · {look.base} / {look.accent} / {look.density}</span>
         </header>
         <p className="kb-board__note">{pattern.note}</p>
-        {pattern.gaps?.map((g) => <p key={g} className="kb-board__tag">Not shown: {g}</p>)}
+        {pattern.gaps?.map((g) => <p key={g} className="kb-board__tag">Not shown here: {g}</p>)}
         <div className="kb-board__pcells">
           {pattern.cells.map((cell, i) => <Cell key={i} pattern={pattern} cell={cell} look={look} onDone={cellDone} />)}
         </div>
