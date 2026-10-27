@@ -310,16 +310,19 @@ def rules_instructions(rules: ActiveRules) -> str:
     return "\n".join(lines)
 
 
-#: N7-5: questions about «what is current / modern approaches» — the agent's part (the web part of the
-#: decision; library dates and scientific bases are not filtered here). Part of the web instruction text.
+#: N7-5: questions about «what is current / modern approaches» — the agent's part (library dates and
+#: scientific bases are not filtered here). Told in every chat, with or without web search (Q1 n78 M-9).
 TIME_WINDOW_RULES = (
     "Questions about what is current (\"what now\", \"modern approaches\", \"latest\"): start the answer "
     "with one line \"Looking at YYYY–YYYY\" (by default the last three years up to now) — the user can "
-    "change it with one click. Put the years into the web search query. Web links carry no date: "
-    "call them \"date unknown\" and never present one as recent unless its title or the source itself "
-    "states the date. Split the answer: first \"From YYYY–YYYY sources\" (only sources whose date you "
-    "know is inside the window), then the rest, marked as older or undated. If little is recent, say so "
-    "plainly."
+    "change it with one click. Split the answer: first \"From YYYY–YYYY sources\" (only sources whose date "
+    "you know is inside the window), then the rest, marked as older or undated. If little is recent, say "
+    "so plainly."
+)
+#: N7-5, the web part: told only where SKAZ holds web searches.
+TIME_WINDOW_WEB = (
+    "For such a question, put the years into the web search query. Web links carry no date: call them "
+    "\"date unknown\" and never present one as recent unless its title or the source itself states the date."
 )
 
 

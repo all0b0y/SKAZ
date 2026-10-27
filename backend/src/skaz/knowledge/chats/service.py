@@ -69,7 +69,12 @@ from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
-from ..permissions.search_rules import TIME_WINDOW_RULES, SearchRulesStore, rules_instructions
+from ..permissions.search_rules import (
+    TIME_WINDOW_RULES,
+    TIME_WINDOW_WEB,
+    SearchRulesStore,
+    rules_instructions,
+)
 from ..permissions.source_scope import scope_of, sources_note
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
@@ -905,9 +910,11 @@ class ChatService:
                     if self.web is not None and native and web.available else None)
             told = instructions(language, skills)
             web_text = web_instructions(web, tool=not native) if self.web is not None else ""
-            if web_text and rules is not None:  # N7: the chat's search rules (kept by SKAZ in code)
-                parts = (web_text, rules_instructions(rules), TIME_WINDOW_RULES)
-                web_text = "\n\n".join(part for part in parts if part)
+            # N7: the chat's search rules (kept by SKAZ in code) and N7-5's time window — the window in
+            # every chat (Q1 n78 M-9), its web sentences only with web.
+            parts = (web_text, rules_instructions(rules) if rules is not None else "",
+                     TIME_WINDOW_RULES, TIME_WINDOW_WEB if web_text else "")
+            web_text = "\n\n".join(part for part in parts if part)
             if web_text:
                 told = f"{told}\n\n{web_text}"
             told = with_me(told, me)  # after every SKAZ rule; a live session gets later changes as notes
