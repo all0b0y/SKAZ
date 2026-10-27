@@ -65,20 +65,29 @@ def _resolve(study: StudyService, row: ItemRow) -> tuple[Card | Question, str, t
 def _newest_entry(study: StudyService, row: ItemRow, question: Question) -> dict[str, Any] | None:
     """The user's answer in the newest attempt that asks this question; ``None``: not answered there.
 
-    Any block showing the question counts (the chat block, or a block of its saved page). A retake
-    asks it again, so until it is answered in that attempt the question is unanswered (decision 12).
+    Any block showing the question counts (the chat block, or a block of its saved page); in a block,
+    its current attempt wins (a retake asks the question again, so until it is answered there the
+    question is unanswered — decision 12), unless that attempt leaves the question out («tricky ones»).
     """
     blocks = list(dict.fromkeys([*([row.block_id] if row.block_id else []),
                                  *(study.store.block_ids_of_page(row.page_id) if row.page_id else [])]))
     newest: tuple[str, dict[str, Any] | None] | None = None
     for block_id in blocks:
+        block = study.store.block(block_id)
+        if block is None:
+            continue
+        asking = []
         for attempt in study.store.attempts(block_id):
             order = attempt.answers.get("order") or []
             entry = (attempt.answers.get("items") or {}).get(question.id)
-            if order and question.id not in order and not entry:
-                continue  # a «tricky ones» retake without this question
-            if newest is None or attempt.started_at >= newest[0]:
-                newest = (attempt.started_at, dict(entry) if entry else None)
+            if entry or not order or question.id in order:
+                asking.append((attempt, entry))
+        if not asking:
+            continue
+        current = block.state.get("attempt")
+        attempt, entry = next((pair for pair in asking if pair[0].id == current), asking[-1])
+        if newest is None or attempt.started_at >= newest[0]:
+            newest = (attempt.started_at, dict(entry) if entry else None)
     return newest[1] if newest is not None else None
 
 
