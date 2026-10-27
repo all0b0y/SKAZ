@@ -213,17 +213,20 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 var(--kb-sp-8) var(--kb-sp-12);
-  /* The scroll box reaches across the gutter to the centre sheet, so the open chat's tab can run
-     into its window; the rows keep their place. No scrollbar: it would stand in the gutter (the
-     resizer) and cut the bridge (trackpad and wheel scroll as before). */
-  margin-right: calc(-1 * var(--kb-gutter));
-  padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
-  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
-.kb-side__scroll::-webkit-scrollbar { display: none; }
+/* Only the chat list (it hosts the bridge tab) reaches across the gutter to the centre sheet, so
+   the open chat's tab can run into its window; the rows keep their place. No scrollbar there: it
+   would stand in the gutter (the resizer) and cut the bridge (trackpad and wheel scroll as before).
+   Wiki, materials and notifications end at the gutter with their normal scrollbar (FIX1 R2). */
+.kb-side__scroll.kb-tabhost {
+  margin-right: calc(-1 * var(--kb-gutter));
+  padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
+  scrollbar-width: none;
+}
+.kb-side__scroll.kb-tabhost::-webkit-scrollbar { display: none; }
 .kb-side__pad { padding: var(--kb-sp-4) var(--kb-sp-8); }
 .kb-side__wait { display: flex; justify-content: center; padding: var(--kb-sp-20); }
 .kb-side__note { color: var(--kb-muted); font-size: var(--t-sm); padding: var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-6); }
