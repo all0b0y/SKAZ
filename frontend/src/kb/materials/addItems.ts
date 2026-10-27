@@ -157,7 +157,7 @@ export interface Added {
   /** Ready now (files, text) or still processing (imports, links). */
   ready: boolean;
   /** N2: the same file / address / DOI was already in the library — this is that material; nothing new was added. */
-  existing?: { title: string };
+  existing?: { title: string; failed?: boolean };
   /** Mode "both": the video beside the article. */
   part?: 'video';
   /** Mode "both": why the video beside the article was not added. */
@@ -175,7 +175,11 @@ export function addedNote(made: readonly Added[]): { openId: string; text: strin
   if (!article) return null;
   const video = made.find((m) => m.part === 'video');
   const failure = article.videoFailure;
-  if (!video && !failure) return article.existing ? { openId: article.materialId, text: ALREADY_IN_LIBRARY } : null;
+  if (!video && !failure) {
+    if (!article.existing) return null;
+    // A failed one is still that material (its page offers Retry); the line says so instead of hiding it.
+    return { openId: article.materialId, text: article.existing.failed ? `${ALREADY_IN_LIBRARY}, but it failed to process` : ALREADY_IN_LIBRARY };
+  }
   if (article.existing) {
     if (video?.existing) return { openId: article.materialId, text: 'The article and the video are already in your library' };
     if (video) return { openId: article.materialId, text: 'The article is already in your library; the video was added' };
@@ -189,11 +193,11 @@ export function addedNote(made: readonly Added[]): { openId: string; text: strin
 /** Send one item; returns the materials it created (a link in mode "both" makes two). */
 export async function submitItem(client: KbClient, item: AddItem, o: AddOptions): Promise<Added[]> {
   const fromSummary = (m: KbMaterialSummary, existing = false): Added => ({
-    materialId: m.id, ready: m.status === 'ready', ...(existing ? { existing: { title: m.title } } : {}),
+    materialId: m.id, ready: m.status === 'ready', ...(existing ? { existing: { title: m.title, failed: m.status === 'failed' } } : {}),
   });
   // N2: the same video link / media file already in the library answers with that material (200).
   const fromSpeech = (view: KbSpeechMaterial): Added => ({
-    materialId: view.material_id, ready: view.status === 'ready', ...(view.already_in_library ? { existing: { title: view.title } } : {}),
+    materialId: view.material_id, ready: view.status === 'ready', ...(view.already_in_library ? { existing: { title: view.title, failed: view.status === 'failed' } } : {}),
   });
   if (item.type === 'file') {
     if (item.kind === 'speech') {

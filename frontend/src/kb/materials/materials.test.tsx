@@ -603,6 +603,10 @@ describe('addedNote (N2, Q1 n2 M1): what the Add list says after an add', () => 
   it('one material already there', () => {
     expect(addedNote([{ ...a, existing: { title: 'A' } }])).toEqual({ openId: 'a', text: 'This is already in your library' });
   });
+  it('one already there that failed says so — opening it offers Retry (Q1 n2 L4)', () => {
+    expect(addedNote([{ ...a, ready: false, existing: { title: 'A', failed: true } }]))
+      .toEqual({ openId: 'a', text: 'This is already in your library, but it failed to process' });
+  });
   it('mode both: each part told as it is', () => {
     const old = { ...a, existing: { title: 'A' } };
     expect(addedNote([old, { ...v, existing: { title: 'V' } }])).toEqual({ openId: 'a', text: 'The article and the video are already in your library' });
