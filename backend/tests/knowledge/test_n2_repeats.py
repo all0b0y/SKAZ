@@ -366,3 +366,42 @@ def test_a_repeat_already_back_on_the_page_is_not_restored_twice() -> None:
                          cites=(Cite("mat-bbb", 2),))
     updated, _result = retract_material(_page(merged, again), "mat-aaa", "Materials/F/A")
     assert [block.id for block in updated.blocks()] == ["c-bbb-1"]
+
+
+def _agent_replace(document: PageDocument, block: Block) -> PageDocument:
+    """The chat agent's ``skaz_wiki_edit_page`` replace of ``block.id`` (the page as written to disk)."""
+    from skaz.knowledge.permissions.wiki_tools import ChangeIn, _apply_changes
+
+    change = ChangeIn(op="replace", block_id=block.id, text="x")
+    updated, _changes = _apply_changes(document, [(change, block)], "en")
+    return parse_page(render_page(updated))
+
+
+def test_the_agent_s_rewrite_keeping_both_sources_keeps_the_repeat_s_own_paragraph() -> None:
+    # Q1 seam (n2 × the chat agent's wiki edit): the agent rewords the merged statement and still cites
+    # both sources — the marker rides along, so deleting the first source later gives the repeat back.
+    merged = _only(_merged_water())
+    reworded = Block.create("c-aaa-1", "from_source",
+                            f"At sea level water boils at 100 °C. {A_LINK} {B_LINK}", cites=merged.cites)
+    rewritten = _agent_replace(_page(merged), reworded)
+    assert _only(rewritten).attrs == merged.attrs
+    updated, result = retract_material(rewritten, "mat-aaa", "Materials/F/A")
+    restored = _only(updated)
+    assert restored.id == "c-bbb-1" and restored.body == f"Water boils at 100 °C. {B_LINK}"
+    assert restored.cites == (Cite("mat-bbb", 2, "boils at 100"),)  # never under the agent's/A's words
+    assert result.removed == ["c-aaa-1"] and result.kept == ["c-bbb-1"]
+    # The repeating source going instead takes off exactly its share; the agent's wording stays on A.
+    updated, result = retract_material(rewritten, "mat-bbb", "Materials/G/B")
+    kept = _only(updated)
+    assert kept.body == f"At sea level water boils at 100 °C. {A_LINK}" and kept.attrs == ()
+    assert [cite.material_id for cite in kept.cites] == ["mat-aaa"]
+
+
+def test_the_agent_s_rewrite_dropping_the_repeating_source_drops_the_marker() -> None:
+    merged = _only(_merged_water())
+    alone = Block.create("c-aaa-1", "from_source", f"Water boils at 100 °C at sea level. {A_LINK}",
+                         cites=merged.cites[:1])
+    rewritten = _agent_replace(_page(merged), alone)
+    assert _only(rewritten).attrs == ()
+    updated, _result = retract_material(rewritten, "mat-aaa", "Materials/F/A")
+    assert list(updated.blocks()) == []  # no repeat of B comes back that the page no longer cites
