@@ -34,7 +34,15 @@ from skaz.knowledge.permissions.web_tool import WEB_TOOL
 
 from .chat_support import finished
 from .test_w2_web_claude import ASKED, QUERY, RecordingGate, drain, engine_for, responses, turn
-from .test_w3b_web_tool import Env, env, payload  # noqa: F401  (``env`` is the fixture)
+from .test_w3b_web_tool import Env, payload
+from .test_w3b_web_tool import env as env_fixture  # noqa: F401  (the ``env`` fixture)
+
+
+@pytest.fixture
+def env(env_fixture: Env) -> Env:  # noqa: F811  (the imported fixture, by parameter)
+    """The imported environment under its usual name."""
+    return env_fixture
+
 
 SEARCH_LINKS = (
     WebLink("Staleness checks", "https://arxiv.org/abs/1"),
@@ -162,7 +170,8 @@ async def test_links_outside_the_rules_never_reach_the_agent_and_are_counted_on_
     # The agent was told the rules (a hint for Prefer; the hard ones are kept in code anyway).
     (agent_turn,) = env.agents["codex"].turns
     assert "Never search these sites: pinterest.com." in agent_turn.instructions
-    assert "Prefer these sites (a hint; you may still search elsewhere): arxiv.org." in agent_turn.instructions
+    prefer = "Prefer these sites (a hint; you may still search elsewhere): arxiv.org."
+    assert prefer in agent_turn.instructions
 
 
 async def test_nothing_on_the_allowed_sites_tells_the_agent_and_everywhere_once_is_the_users_click(
@@ -174,7 +183,8 @@ async def test_nothing_on_the_allowed_sites_tells_the_agent_and_everywhere_once_
     await env.decide((await env.pending(chat_id))["id"], "allow_chat")
     await finished(env.runtime.kb_chats)
     data = payload(env.agents["codex"].outputs[0])
-    assert data["links"] == [] and "Nothing was found on the sites the user allows (arxiv.org)" in data["note"]
+    assert data["links"] == []
+    assert "Nothing was found on the sites the user allows (arxiv.org)" in data["note"]
     assert "Search everywhere once" in data["note"]
 
     # The user's click on the card: the next search only ignores «only these sites», once.
@@ -202,6 +212,10 @@ async def test_without_rules_the_search_is_as_before(env: Env) -> None:
     await finished(env.runtime.kb_chats)
     assert "hidden_by_rules" not in payload(env.agents["codex"].outputs[0])
     assert "Search rules the user set" not in env.agents["codex"].turns[0].instructions
+    # N7-5: «what now» questions — the window line, the year in the query, undated web links (prompt only).
+    window = "start the answer with one line \"Looking at YYYY–YYYY\""
+    assert window in env.agents["codex"].turns[0].instructions
+    assert "date unknown" in payload(env.agents["codex"].outputs[0])["note"]
 
 
 async def test_claude_codes_gate_sends_the_rules_and_refuses_a_search_only_on_blocked_sites(env: Env) -> None:
@@ -232,7 +246,8 @@ async def test_claude_codes_gate_sends_the_rules_and_refuses_a_search_only_on_bl
 async def test_settings_search_round_trip_normalises_and_refuses_bad_sites(env: Env) -> None:
     assert (await env.client.get("/kb/settings/search")).json() == {
         "never": [], "only_on": False, "only": [], "prefer": []}
-    saved = await set_settings(env, never=["https://www.Pinterest.com/x", "pinterest.com"], prefer=["arxiv.org"])
+    saved = await set_settings(env, never=["https://www.Pinterest.com/x", "pinterest.com"],
+                               prefer=["arxiv.org"])
     assert saved == {"never": ["pinterest.com"], "only_on": False, "only": [], "prefer": ["arxiv.org"]}
     bad = await env.client.put("/kb/settings/search", json={"never": ["not a site"]})
     assert bad.status_code == 422 and "not a site" in bad.json()["detail"]

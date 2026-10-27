@@ -13,6 +13,7 @@ import {
 import { agentName } from './permission';
 import { searchEverywhereOnce } from '../api/searchRules';
 import { sitesShort } from '../searchRules/sites';
+import { hasYear, QueryWithYears } from '../searchRules/TimeWindow';
 
 /**
  * W-2: an agent's own web search in the chat. Pending, it shows the exact query — the only thing that
@@ -65,7 +66,7 @@ function WebSearchRequest({ chatId, part }: { chatId: string; part: KbWebSearchP
         <b>{name}</b>
       </header>
       <div className="kb-perm__body kb-web__body">
-        <p className="kb-web__query" aria-label="Search query">{part.query}</p>
+        <p className="kb-web__query" aria-label="Search query"><QueryWithYears query={part.query} /></p>
         <RulesLine part={part} />
         <Domains part={part} />
         {searcherLine(part) && <p className="kb-perm__note">{searcherLine(part)}</p>}
@@ -194,7 +195,7 @@ function WebSearchOutcome({ chatId, part }: { chatId: string; part: KbWebSearchP
         </div>
         {open && (
           <ul className="kb-web__links" aria-label="From the web">
-            {shown.map((link) => <WebLinkRow key={link.url} link={link} />)}
+            {shown.map((link) => <WebLinkRow key={link.url} link={link} undated={hasYear(part.query)} />)}
             {!all && count > FIRST_LINKS && (
               <li className="kb-web__more-row">
                 <button type="button" className="kb-web__more" onClick={() => setAll(true)}>Show {count - FIRST_LINKS} more</button>
@@ -222,7 +223,7 @@ function WebSearchOutcome({ chatId, part }: { chatId: string; part: KbWebSearchP
 }
 
 /** One web result: title · site on one quiet line; «Add to wiki» is an icon shown on hover/focus. */
-function WebLinkRow({ link }: { link: KbWebLink }) {
+function WebLinkRow({ link, undated = false }: { link: KbWebLink; undated?: boolean }) {
   const { client } = useServices();
   const [state, setState] = useState<'idle' | 'busy' | 'added'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -242,6 +243,8 @@ function WebLinkRow({ link }: { link: KbWebLink }) {
       <div className="kb-web__row">
         <a className="kb-web__title" href={link.url} target="_blank" rel="noreferrer noopener" title={link.url}>{link.title}</a>
         <span className="kb-web__site">{link.site}</span>
+        {/* N7-5: a time-bound search: links carry no date, so none is passed off as recent. */}
+        {undated && <span className="kb-web__undated" title="Web results come without a date">date unknown</span>}
         <span className="kb-perm__spacer" />
         {state === 'added'
           ? <span className="kb-web__added" role="status" title="Added to the library — the wiki follows"><Icon name="check" size={13} />In library</span>

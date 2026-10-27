@@ -134,3 +134,14 @@
 /* N7-4: the citation check under an answer; N8: the message a row of the overview jumps to. */
 .kb-notfrom { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-warn); }
 .kb-msg[data-flash] { outline: 2px solid var(--kb-fx-accent); outline-offset: 4px; border-radius: var(--kb-r-md); }
+
+/* N7-5: «what now» — the answer's time window chip, the year in the query, undated web links. */
+.kb-window { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+.kb-window__chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill); font-size: var(--t-sm); color: var(--kb-text); background: var(--kb-pane);
+}
+.kb-window__chip:hover, .kb-window__chip[aria-expanded='true'] { border-color: var(--kb-fx-accent); }
+.kb-window__chip:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-web__year { background: var(--kb-accent-soft); color: inherit; border-radius: var(--kb-r-xs); padding: 0 2px; }
+.kb-web__undated { flex: none; font-size: var(--t-xs); color: var(--kb-muted); white-space: nowrap; }

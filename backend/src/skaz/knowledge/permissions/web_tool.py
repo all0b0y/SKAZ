@@ -42,7 +42,8 @@ NOTHING_ON_ALLOWED = ("Nothing was found on the sites the user allows ({sites}).
                       "don't search for it again. The user may click «Search everywhere once» on the "
                       "search card.")
 #: Web links carry no date (title + URL only).
-UNDATED_NOTE = "Links carry no date: never present one as recent or current unless its title says so."
+UNDATED_NOTE = ("Links carry no date (\"date unknown\"): never present one as recent or current unless its "
+                "title says so.")
 
 
 class WebSearchArgs(_Args):

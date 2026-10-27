@@ -10,13 +10,22 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from skaz.knowledge.agents.fake import Gate
 from skaz.knowledge.agents.tools import ToolContext
 from skaz.knowledge.permissions.source_scope import EXCLUDED, NOT_IN_SOURCES, PAGE_NOT_IN_SOURCES, SCOPED_NOTE
 from tests.knowledge.chat_support import finished, text
 from tests.knowledge.ingest_support import settle
 
-from .test_chats_api import Env, env  # noqa: F401  (``env`` is the fixture)
+from .test_chats_api import Env
+from .test_chats_api import env as env_fixture  # noqa: F401  (the ``env`` fixture)
+
+
+@pytest.fixture
+def env(env_fixture: Env) -> Env:  # noqa: F811  (the imported fixture, by parameter)
+    """The imported environment under its usual name."""
+    return env_fixture
 
 
 async def held_turn(env: Env, rules: dict[str, object]) -> tuple[str, ToolContext, asyncio.Event]:
