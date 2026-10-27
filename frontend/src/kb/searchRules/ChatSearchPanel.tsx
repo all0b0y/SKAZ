@@ -9,7 +9,7 @@ import {
 } from '../api/searchRules';
 import { useServices } from '../state/context';
 import { Button, Icon, IconButton, Segmented, Switch } from '../ui';
-import { full, SiteList, searchSettingsStore, type WebRules } from './sites';
+import { full, SEARCH_SETTINGS_CHANGED, SiteList, searchSettingsChanged, searchSettingsStore, type WebRules } from './sites';
 
 /**
  * N7 · «Search & sources» of one chat, from the message field (no separate window, decision 2 revised):
@@ -66,8 +66,13 @@ export function useChatSearchRules(chatId: string | null): [KbChatSearchRules | 
     if (!chatId) return undefined;
     loadRules(client, chatId);
     const changed = (e: Event) => { if ((e as CustomEvent<{ chatId: string }>).detail?.chatId === chatId) loadRules(client, chatId, true); };
+    const settings = () => loadRules(client, chatId, true);
     window.addEventListener(SEARCH_RULES_CHANGED, changed);
-    return () => window.removeEventListener(SEARCH_RULES_CHANGED, changed);
+    window.addEventListener(SEARCH_SETTINGS_CHANGED, settings);
+    return () => {
+      window.removeEventListener(SEARCH_RULES_CHANGED, changed);
+      window.removeEventListener(SEARCH_SETTINGS_CHANGED, settings);
+    };
   }, [client, chatId]);
   const set = useCallback((next: KbChatSearchRules) => { if (chatId) store.setState({ [chatId]: next }); }, [store, chatId]);
   return [rules, set];
@@ -134,6 +139,9 @@ function SearchPanel({ chatId, rules, onSaved, onClose }: {
 }) {
   const { client } = useServices();
   const [draft, setDraft] = useState<Draft>(() => draftOf(rules));
+  /** Q1 n78 M-8: the web lists are sent only when the user touched them (or the chat has its own) —
+   *  never a copy of Settings that would pin them on the chat. */
+  const [webTouched, setWebTouched] = useState(false);
   const [busy, setBusy] = useState<'save' | 'global' | 'reset' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
@@ -143,7 +151,10 @@ function SearchPanel({ chatId, rules, onSaved, onClose }: {
   const settings = full(rules.settings);
   const changed = draft.sourcesOnly || draft.excluded.length > 0 || webDiffers(draft.web, settings);
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
-  const setWeb = (patch: Partial<WebRules>) => setDraft((d) => ({ ...d, web: { ...d.web, ...patch } }));
+  const setWeb = (patch: Partial<WebRules>) => {
+    setWebTouched(true);
+    setDraft((d) => ({ ...d, web: { ...d.web, ...patch } }));
+  };
 
   const run = useCallback(async (kind: 'save' | 'global' | 'reset') => {
     setBusy(kind);
@@ -152,18 +163,21 @@ function SearchPanel({ chatId, rules, onSaved, onClose }: {
       const next = kind === 'reset'
         ? await resetChatSearchRules(client, chatId)
         : await saveChatSearchRules(client, chatId, {
-          web: draft.web, sources_only: draft.sourcesOnly, sources: draft.sources.map((s) => s.id),
+          web: webTouched || rules.web || kind === 'global' ? draft.web : null, sources_only: draft.sourcesOnly, sources: draft.sources.map((s) => s.id),
           excluded: draft.excluded.map((s) => s.id), as_global: kind === 'global',
         });
-      if (kind === 'global') void searchSettingsStore(client).getState().load();
       onSaved(next);
+      if (kind === 'global') {
+        void searchSettingsStore(client).getState().load();
+        searchSettingsChanged();
+      }
       if (kind !== 'reset') onClose();
     } catch (e) {
       setError(errorText(e));
     } finally {
       setBusy(null);
     }
-  }, [client, chatId, draft, onSaved, onClose]);
+  }, [client, chatId, draft, webTouched, rules.web, onSaved, onClose]);
 
   return (
     <div ref={panel} className="kb-spanel" role="dialog" aria-label="Search and sources for this chat" tabIndex={-1}

@@ -118,6 +118,12 @@ export interface SearchSettingsState {
 
 const stores = new WeakMap<KbClient, StoreApi<SearchSettingsState>>();
 
+/** Settings → Search changed: every chat's cached rules (which embed Settings) load again (Q1 n78 M-8). */
+export const SEARCH_SETTINGS_CHANGED = 'kb:search-settings-changed';
+export function searchSettingsChanged() {
+  window.dispatchEvent(new CustomEvent(SEARCH_SETTINGS_CHANGED));
+}
+
 export function searchSettingsStore(client: KbClient): StoreApi<SearchSettingsState> {
   let store = stores.get(client);
   if (!store) {
@@ -137,6 +143,7 @@ export function searchSettingsStore(client: KbClient): StoreApi<SearchSettingsSt
         set({ rules: next, saving: true, error: null });
         try {
           set({ rules: full(await saveSearchSettings(client, next)), saving: false });
+          searchSettingsChanged();
         } catch (e) {
           set({ rules: before, saving: false, error: errorText(e) });
         }
