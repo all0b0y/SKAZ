@@ -1878,6 +1878,12 @@ export interface KbToolPart {
   type: "tool";
   name: string;
   label: string;
+  target?: KbToolTarget | null;
+}
+
+export interface KbToolTarget {
+  type: "material" | "page";
+  id: string;
 }
 
 export interface KbTranslation {

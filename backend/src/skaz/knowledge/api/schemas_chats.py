@@ -118,12 +118,19 @@ class KbConnectionPart(BaseModel):
     page: KbPageRef | None
 
 
+class KbToolTarget(BaseModel):
+    type: Literal["material", "page"]
+    id: str
+
+
 class KbToolPart(BaseModel):
     type: Literal["tool"]
     #: SKAZ tool name (``skaz_read_page``…).
     name: str
     #: What the agent looked at, e.g. "Read page Entropy" (library titles: show as text).
     label: str
+    #: N8: the material or wiki page it read (the chat overview's «Looked at»); ``None``: no one item.
+    target: KbToolTarget | None = None
 
 
 class KbPermissionSummary(BaseModel):

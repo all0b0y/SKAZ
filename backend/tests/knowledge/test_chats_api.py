@@ -431,6 +431,9 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     tools = [(part["name"], part["label"]) for part in chips(message, "tool")]
     assert tools == [("skaz_search", "Searched “энтропия”"), ("skaz_read_page", "Read page Энтропия"),
                      ("skaz_read_material", "Read Лекция 8")]
+    # N8: what a read tool opened is kept for the chat overview's «Looked at» (a search names no one item).
+    assert [part["target"] for part in chips(message, "tool")] == [
+        None, {"type": "page", "id": lib.concept}, {"type": "material", "id": lib.lecture}]
     turn = env.agents.engines["codex"].turns[-1]
     # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool;
     # W-3b: Codex searches the web only through SKAZ's tool (each query asked first);

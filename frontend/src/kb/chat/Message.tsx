@@ -321,7 +321,7 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
   }, [editing]);
   const close = () => { refocus.current = true; setEditing(false); };
   return (
-    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef}>
+    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef} data-message-id={message.id}>
       {input.selection && <SelectionChip selection={input.selection} />}
       {editing && actions ? (
         <QuestionEditor input={input} onCancel={close} onSend={async (next) => {

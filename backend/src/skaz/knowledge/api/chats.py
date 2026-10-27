@@ -86,6 +86,7 @@ from .schemas_chats import (
     KbSendResult,
     KbTextPart,
     KbToolPart,
+    KbToolTarget,
 )
 from .schemas_web import KbHiddenSite, KbRulesInForce, KbWebLink, KbWebSearchPart
 from .schemas_wiki_fix import KbWikiFixPart, wiki_fix_part
@@ -219,7 +220,8 @@ class Presenter:
                 type="memory", edit_id=part.edit_id, skill_id=part.skill_id, skill_title=skill_title,
                 action=cast(Any, part.action if part.action in MEMORY_ACTIONS else "append"),
                 summary=summary, undone=part.undone))
-        return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label))
+        target = KbToolTarget(type=cast(Any, part.target[0]), id=part.target[1]) if part.target else None
+        return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label, target=target))
 
     def message(self, message: Message) -> KbMessage:
         given = message.input

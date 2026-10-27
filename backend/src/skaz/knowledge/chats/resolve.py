@@ -129,7 +129,20 @@ class Resolver:
         short = tool_name(name)
         labeller = _TOOL_LABELS.get(short)
         label = labeller(self, arguments) if labeller is not None else f"Used {short}"
-        return ToolPart(short, _clip(label, 160))
+        return ToolPart(short, _clip(label, 160), self.target(short, arguments))
+
+    def target(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, str] | None:
+        """N8: the material or page a read tool opened (only ids the library has), for «Looked at»."""
+        if name in _MATERIAL_TOOLS:
+            material_id = arguments.get("material_id")
+            if isinstance(material_id, str) and self.kb.material_repo.get(material_id) is not None:
+                return ("material", material_id)
+        if name == "skaz_read_page":
+            page_id = arguments.get("page_id")
+            record = self.kb.page_repo.get(page_id) if isinstance(page_id, str) else None
+            if record is not None:
+                return ("page", record.id)
+        return None
 
     def page_title(self, arguments: Mapping[str, Any]) -> str:
         page_id = arguments.get("page_id")
@@ -175,6 +188,9 @@ def _recent_label(resolver: Resolver, arguments: Mapping[str, Any]) -> str:
     span = f"the last {minutes} min of " if isinstance(minutes, int) else "the latest part of "
     return f"Read {span}{resolver.material_title(arguments)}"
 
+
+#: N8: read tools whose ``material_id`` names what the agent looked at.
+_MATERIAL_TOOLS = frozenset({"skaz_read_material", "skaz_recent_speech", "skaz_get_fragment"})
 
 _TOOL_LABELS: dict[str, Callable[[Resolver, Mapping[str, Any]], str]] = {
     "skaz_wiki_index": lambda _r, _a: "Looked through the wiki index",
