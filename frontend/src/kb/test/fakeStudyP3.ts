@@ -82,7 +82,50 @@ export function p3StudyRoutes({ findStudy, studyChanged, fail }: Helpers): FakeR
     const items = marked(w).filter((i) => !pageId || i.page_id === pageId).map(({ clear: _clear, ...item }) => item);
     return { items, scope: pageId ? 'page' as const : 'library' as const };
   };
+  /** P3-d: the pass of each deck block (again / known / skipped, besides the pile the part shows). */
+  const passes = new WeakMap<KbStudyPart, { again: string[]; known: string[]; thrown: string[] }>();
   return {
+    'POST /kb/study/{block_id}/pass': [200, (w, { path, body }) => {
+      const found = findStudy(w, path.block_id);
+      const part = found.part;
+      if (part.kind !== 'deck') fail(409, 'Only cards are studied in a pass.');
+      const ids = part.cards.map((c) => c.id);
+      const queue = (part.pile?.queue ?? ids.slice(part.position)).filter((id) => ids.includes(id));
+      const pass = passes.get(part) ?? { again: [], known: [], thrown: [] };
+      const grade = (id: string, g: 'good' | 'again') => {
+        const card = part.cards.find((c) => c.id === id)!;
+        card.graded = g;
+        if (!card.marked_hard) card.group = 'learning';
+        card.state = 'learning';
+      };
+      let next = queue;
+      if (body.action === 'restart') {
+        next = ids;
+        pass.again = []; pass.known = []; pass.thrown = [];
+        part.cards.forEach((c) => { c.graded = null; });
+      } else if (body.action === 'back') {
+        const last = pass.thrown.pop();
+        if (last) next = [last, ...queue.filter((id) => id !== last)];
+      } else {
+        const id = body.item_id ?? '';
+        if (!queue.includes(id)) fail(404, 'This card is not on the pile.');
+        next = queue.filter((x) => x !== id);
+        if (body.action === 'know') {
+          grade(id, 'good');
+          pass.known.push(id);
+          pass.thrown = pass.thrown.filter((x) => x !== id);
+        } else {
+          if (!pass.again.includes(id)) { pass.again.push(id); grade(id, 'again'); }
+          next = [...next, id];
+          pass.thrown.push(id);
+        }
+      }
+      passes.set(part, pass);
+      part.pile = { queue: next, known: pass.known.length, again: pass.again.length, can_back: pass.thrown.length > 0 };
+      part.position = next.length ? ids.indexOf(next[0]!) : ids.length;
+      part.side = 'question';
+      return studyChanged(w, found as never);
+    }],
     'GET /kb/study/unclear': [200, (w, { query }) => list(w, query?.page_id)],
     'POST /kb/study/unclear/clear': [200, (w, { body }) => {
       for (const item of marked(w)) if (body.item_ids.includes(item.item_id)) item.clear();

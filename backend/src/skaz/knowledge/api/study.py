@@ -32,6 +32,8 @@ from .schemas_study import (
     KbStudyMove,
     KbStudyOption,
     KbStudyPart,
+    KbStudyPassIn,
+    KbStudyPile,
     KbStudyQuestion,
     KbStudyRecheckIn,
     KbStudyRenameIn,
@@ -164,8 +166,16 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         result=KbStudyResult(correct=result["correct"], total=result["total"], mistakes=result["mistakes"],
                              partly=result["partly"],
                              rows=[KbStudyResultRow(**row) for row in result["rows"]]) if result else None,
-        chat_id=block.chat_id, message_id=block.message_id,
+        chat_id=block.chat_id, message_id=block.message_id, pile=_pile(study, block),
     )
+
+
+def _pile(study: StudyService, block: StudyBlock) -> KbStudyPile | None:
+    if block.kind != "deck":
+        return None
+    current = study.pile(block)
+    return KbStudyPile(queue=current.queue, known=len(current.known), again=len(current.again),
+                       can_back=bool(current.thrown))
 
 
 def _presenter(request: Request) -> CitationFn:
@@ -278,6 +288,12 @@ async def move_block(block_id: str, body: KbStudyMove, study: StudyDep, request:
 @router.post("/{block_id}/grade")
 async def grade_card(block_id: str, body: KbStudyGradeIn, study: StudyDep, request: Request) -> KbStudyPart:
     return await _act(request, study, lambda: study.grade(block_id, body.item_id, body.grade))
+
+
+@router.post("/{block_id}/pass")
+async def study_pass(block_id: str, body: KbStudyPassIn, study: StudyDep, request: Request) -> KbStudyPart:
+    """P3-d: one step of a pass — «I know this», a skip, ← back, or «Go through again»."""
+    return await _act(request, study, lambda: study.study_pass(block_id, body.action, body.item_id))
 
 
 @router.post("/{block_id}/mark")

@@ -33,6 +33,9 @@ export const studyApi = {
   move: (c: KbClient, id: string, body: KbStudyMove) => c.call('PATCH /kb/study/{block_id}', { path: { block_id: id }, body }),
   grade: (c: KbClient, id: string, itemId: string, grade: StudyGrade) =>
     c.call('POST /kb/study/{block_id}/grade', { path: { block_id: id }, body: { item_id: itemId, grade } }),
+  /** P3-d: one step of a pass — «I know this» (Good), a skip (Again once per pass), ← back, «Go through again». */
+  pass: (c: KbClient, id: string, action: 'know' | 'skip' | 'back' | 'restart', itemId: string | null) =>
+    c.call('POST /kb/study/{block_id}/pass', { path: { block_id: id }, body: { action, item_id: itemId } }),
   mark: (c: KbClient, id: string, itemIds: string[], mark: StudyMark) =>
     c.call('POST /kb/study/{block_id}/mark', { path: { block_id: id }, body: { item_ids: itemIds, mark } }),
   answer: (c: KbClient, id: string, body: KbStudyAnswerIn) => c.call('POST /kb/study/{block_id}/answer', { path: { block_id: id }, body }),

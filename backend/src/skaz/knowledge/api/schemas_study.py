@@ -187,6 +187,18 @@ class KbStudyGroups(BaseModel):
     hard: int
 
 
+class KbStudyPile(BaseModel):
+    """P3-d: this pass through the deck — the pile top first («N left»), and what happened so far."""
+
+    queue: list[str]
+    #: Cards known in this pass (they left the pile).
+    known: int
+    #: Cards graded Again in this pass (once each, at the first skip).
+    again: int
+    #: ← can bring back a skipped card.
+    can_back: bool
+
+
 class KbStudyPart(BaseModel):
     """A deck or test block in a chat (S5, W2): lives in one place — the chat, beside it, or its window."""
 
@@ -212,6 +224,8 @@ class KbStudyPart(BaseModel):
     result: KbStudyResult | None
     chat_id: str
     message_id: str
+    #: Decks (P3-d): the pass; ``null`` for a test.
+    pile: KbStudyPile | None = None
 
 
 class KbStudyMove(_Request):
@@ -250,6 +264,13 @@ class KbStudyCountIn(_Request):
     item_id: str = Field(min_length=1, max_length=120)
     idea_id: str = Field(min_length=1, max_length=40)
     counted: bool = True
+
+
+class KbStudyPassIn(_Request):
+    """P3-d: «I know this» (Good), a skip (Again once per pass), ← back, or «Go through again»."""
+
+    action: Literal["know", "skip", "back", "restart"]
+    item_id: str | None = Field(default=None, max_length=120)
 
 
 class KbStudyRetake(_Request):

@@ -47,21 +47,6 @@
 .kb-st-empty { font-size: var(--t-sm); color: var(--kb-muted); margin: 4px 0; }
 .kb-st-error { margin: 0 12px 10px; }
 
-/* the stack: two cards peeking out below the current one (card A) */
-.kb-st-scene { position: relative; perspective: 1100px; margin-bottom: 26px; }
-.kb-st-scene::before, .kb-st-scene::after {
-  content: ''; position: absolute; border: 1px solid var(--kb-line); border-radius: 14px; background: var(--kb-pane);
-}
-.kb-st-scene::before { inset: 16px 28px -16px 28px; opacity: 0.5; }
-.kb-st-scene::after { inset: 8px 14px -8px 14px; opacity: 0.8; box-shadow: var(--kb-shadow-card-lo); }
-.kb-st-slot { position: relative; z-index: 2; }
-
-/* 3:2 index card; a long answer scrolls inside its face — never cut */
-.kb-st-card {
-  position: relative; aspect-ratio: 3 / 2; transform-style: preserve-3d; cursor: pointer;
-  transition: transform 0.42s cubic-bezier(0.2, 0.7, 0.2, 1);
-}
-.kb-st-card.is-back { transform: rotateX(180deg); }
 .kb-st-face {
   position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   background: var(--kb-pane); border: 1px solid var(--kb-line); border-radius: 14px;
@@ -71,28 +56,12 @@
 .kb-st-face--flat { position: relative; inset: auto; cursor: default; overflow: visible; padding: 22px 24px 20px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .kb-st-card { transition: none; }
-  .kb-st-card.is-back { transform: none; }
-  .kb-st-face { transition: opacity 0.16s linear; }
-  .kb-st-face--back { transform: none; opacity: 0; }
-  .kb-st-card.is-back .kb-st-face--back { opacity: 1; }
-  .kb-st-card.is-back .kb-st-face--front { opacity: 0; }
   .kb-st-bar i { transition: none; }
 }
 
-.kb-st-kind { font-size: var(--t-xs); color: var(--kb-muted); letter-spacing: 0.02em; display: flex; gap: 8px; align-items: center; white-space: nowrap; }
-.kb-st-know {
-  margin-left: auto; display: inline-flex; gap: 5px; align-items: center; color: var(--kb-muted);
-  border: 0; background: none; font: inherit; font-size: var(--t-xs); cursor: pointer; padding: 2px 4px; border-radius: var(--kb-r-xs);
-}
-.kb-st-know:hover { color: var(--kb-text); background: var(--kb-accent-soft); }
-.kb-st-q { font-family: var(--kb-font-display); font-weight: 600; font-size: 21px; line-height: 1.35; margin: auto 0; padding: 0 12px; text-align: center; overflow-wrap: anywhere; }
-/* isolation (here, .kb-st-res, .kb-st-op): the citation-chip stipple paints above the card, below the text. */
-.kb-st-ans { font-size: 16px; line-height: 1.55; margin: 10px 0 0; isolation: isolate; overflow-wrap: anywhere; }
 .kb-st-ex { margin: auto 0 0; padding-top: 8px; font-size: var(--t-sm); color: var(--kb-muted); display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
 .kb-st-ex b { font-weight: 600; color: var(--kb-text); white-space: nowrap; }
 .kb-st-face--flat .kb-st-ex { margin-top: 10px; }
-.kb-st-hint { text-align: center; font-size: var(--t-xs); color: var(--kb-muted); margin: auto 0 0; }
 
 .kb-st-chip {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); border: 1px solid var(--kb-line);
@@ -104,7 +73,8 @@
 .kb-st-chip--known i { background: var(--kb-folder-3); }
 .kb-st-chip--hard i { background: var(--kb-danger); }
 
-.kb-st-nav, .kb-st-tact { display: flex; align-items: center; gap: 8px; }
+.kb-st-opt:hover:not(:disabled) { background: var(--kb-bg); }
+.kb-st-tact { display: flex; align-items: center; gap: 8px; }
 .kb-st-tact { margin-top: 10px; }
 .kb-st-spacer { flex: 1; }
 .kb-st-ib {
@@ -112,26 +82,7 @@
   display: grid; place-items: center; color: var(--kb-text); cursor: pointer; flex: none;
 }
 .kb-st-ib:disabled { opacity: 0.4; cursor: default; }
-.kb-st-grades { display: flex; gap: 6px; flex: 1; min-width: 0; }
-.kb-st-g {
-  flex: 1; min-width: 0; border: 1px solid var(--kb-line); background: var(--kb-pane); border-radius: 10px;
-  padding: 9px 4px; font: inherit; font-size: 14px; color: var(--kb-text); cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; line-height: 1.2;
-}
-.kb-st-g small { font-size: var(--t-xs); color: var(--kb-muted); font-variant-numeric: tabular-nums; }
-.kb-st-g--again { border-color: color-mix(in srgb, var(--kb-danger) 45%, var(--kb-line)); }
-.kb-st-g:hover:not(:disabled), .kb-st-flip:hover, .kb-st-opt:hover:not(:disabled) { background: var(--kb-bg); }
-.kb-st-flip {
-  flex: 1; min-width: 0; height: 40px; border: 1px solid var(--kb-line); background: var(--kb-pane); border-radius: 10px;
-  font: inherit; font-size: var(--t-sm); color: var(--kb-text); cursor: pointer;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-}
 
-.kb-st-done { display: flex; align-items: center; gap: 10px; border: 1px solid var(--kb-line); border-radius: var(--kb-r-lg); background: var(--kb-pane); padding: 12px; }
-.kb-st-done > .kb-icon { color: var(--kb-ok); flex: none; }
-.kb-st-done > div { flex: 1; min-width: 0; }
-.kb-st-done__title { margin: 0; font-weight: 600; }
-.kb-st-done__meta { margin: 2px 0 0; font-size: var(--t-sm); color: var(--kb-muted); }
 
 /* save row (S6) */
 .kb-st-save {
@@ -229,7 +180,7 @@
 .kb-st-sr--part > .kb-icon { color: var(--kb-warn); }
 
 /* the 560 px column (card A): the card, its nav row, the test sheet, its actions, the result */
-.kb-st-stage > :is(.kb-st-note, .kb-st-empty, .kb-st-scene, .kb-st-nav, .kb-st-done, .kb-st-face--flat, .kb-st-tact, .kb-st-big, .kb-st-sum) {
+.kb-st-stage > :is(.kb-st-note, .kb-st-empty, .kb-st-deck, .kb-st-pnav, .kb-st-tip, .kb-st-face--flat, .kb-st-tact, .kb-st-big, .kb-st-sum) {
   width: min(560px, 100%); margin-inline: auto; box-sizing: border-box;
 }
 
@@ -352,3 +303,67 @@
 .kb-st-ask:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
 .kb-st-qtop .kb-st-unc + .kb-st-ask { margin-left: 2px; }
 .kb-st-rv__foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+
+/* P3-d: the card pile (p3d-v2 «Deck · Riffle in · Accent ink»): the top card on a neat pile — up to four
+   edges below it, each a little smaller; the cards behind show only their edge. The accent marks only
+   meaning: «Answer», the rule beside the answer, «I know this», a marked «Unclear». */
+.kb-st-deck { position: relative; aspect-ratio: 3 / 2; perspective: 1400px; margin-bottom: 34px; }
+.kb-st-pc {
+  position: absolute; inset: 0; transform-origin: 50% 60%; touch-action: none; will-change: transform;
+  transition: transform 0.42s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s;
+}
+.kb-st-pc.is-top { cursor: grab; }
+.kb-st-pc.is-drag { cursor: grabbing; transition: none; }
+.kb-st-pc__in { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform 0.42s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.kb-st-pc.is-back .kb-st-pc__in { transform: rotateX(180deg); }
+.kb-st-pf {
+  position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: var(--kb-pane); border: 1px solid var(--kb-line); border-radius: var(--kb-r-xl);
+  padding: 14px 22px 16px; display: flex; flex-direction: column; overflow: auto;
+}
+.kb-st-pc.is-top .kb-st-pf { box-shadow: var(--kb-shadow-card); }
+.kb-st-pc:not(.is-top) .kb-st-pf { box-shadow: var(--kb-shadow-card-lo); background: color-mix(in srgb, var(--kb-pane) 92%, var(--kb-text)); }
+.kb-st-pc:not(.is-top) .kb-st-pf > * { visibility: hidden; }
+.kb-st-pf--back { transform: rotateX(180deg); }
+.kb-st-pf__top { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: var(--t-xs); color: var(--kb-muted); }
+.kb-st-pf__q {
+  font-family: var(--kb-font-display); font-weight: 600; font-size: 21px; line-height: 1.35; margin: auto 0;
+  padding: 0 10px; text-align: center; overflow-wrap: anywhere;
+}
+.kb-st-pf__lab { font-weight: 600; color: var(--kb-fx-accent); display: inline-flex; align-items: center; gap: 6px; }
+.kb-st-pf__lab::before { content: ''; width: 6px; height: 6px; border-radius: var(--kb-r-pill); background: var(--kb-fx-accent); }
+.kb-st-pf__ans {
+  font-size: 17px; line-height: 1.55; margin: 14px 0 0; padding-left: 14px; border-left: 2px solid var(--kb-fx-accent);
+  isolation: isolate; overflow-wrap: anywhere;
+}
+.kb-st-pf__ex { margin: auto 0 0; padding-top: 8px; font-size: var(--t-sm); color: var(--kb-muted); display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
+.kb-st-pf__ex b { font-weight: 600; color: var(--kb-text); white-space: nowrap; }
+.kb-st-stamp {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.6); opacity: 0; z-index: 4; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: var(--kb-r-pill);
+  background: var(--kb-fx-accent); color: var(--kb-pane); font-weight: 600; font-size: 15px;
+}
+.kb-st-pdone {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  border: 1px dashed var(--kb-line); border-radius: var(--kb-r-xl); color: var(--kb-muted); text-align: center; padding: 16px;
+}
+.kb-st-pdone b { font-family: var(--kb-font-display); font-weight: 600; font-size: 19px; color: var(--kb-text); }
+.kb-st-pnav { display: flex; align-items: center; gap: 8px; }
+.kb-st-knowit {
+  height: 40px; padding: 0 14px; border-radius: var(--kb-r-lg); border: 1px solid var(--kb-fx-accent); background: var(--kb-fx-accent);
+  color: var(--kb-pane); display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
+}
+.kb-st-knowit:hover:not(:disabled) { filter: brightness(1.12); }
+.kb-st-knowit:disabled { opacity: 0.5; cursor: default; }
+.kb-st-knowit:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; }
+.kb-st-knowit .kb-kbd { opacity: 0.6; }
+.kb-st-knowit--quiet { background: var(--kb-pane); border-color: var(--kb-line); color: var(--kb-text); }
+.kb-st-tip { text-align: center; font-size: var(--t-xs); color: var(--kb-muted); margin-top: 8px; margin-bottom: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .kb-st-pc, .kb-st-pc__in { transition: none; }
+  .kb-st-pc.is-back .kb-st-pc__in { transform: none; }
+  .kb-st-pf { transition: opacity 0.16s linear; }
+  .kb-st-pf--back { transform: none; opacity: 0; }
+  .kb-st-pc.is-back .kb-st-pf--back { opacity: 1; }
+  .kb-st-pc.is-back .kb-st-pf--front { opacity: 0; }
+}

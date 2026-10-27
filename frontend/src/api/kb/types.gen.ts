@@ -1775,6 +1775,21 @@ export interface KbStudyPart {
   result: KbStudyResult | null;
   chat_id: string;
   message_id: string;
+  pile?: KbStudyPile | null;
+}
+
+/** P3-d: «I know this» (Good), a skip (Again once per pass), ← back, or «Go through again». */
+export interface KbStudyPassIn {
+  action: "know" | "skip" | "back" | "restart";
+  item_id?: string | null;
+}
+
+/** P3-d: this pass through the deck — the pile top first («N left»), and what happened so far. */
+export interface KbStudyPile {
+  queue: string[];
+  known: number;
+  again: number;
+  can_back: boolean;
 }
 
 export interface KbStudyQuestion {
@@ -3101,6 +3116,13 @@ export interface KbEndpoints {
     path: { block_id: string };
     query: Record<string, never>;
     body: KbStudyMarkIn;
+    response: KbStudyPart;
+    status: 200;
+  };
+  "POST /kb/study/{block_id}/pass": {
+    path: { block_id: string };
+    query: Record<string, never>;
+    body: KbStudyPassIn;
     response: KbStudyPart;
     status: 200;
   };

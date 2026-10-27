@@ -63,6 +63,8 @@ from .format import (
     test_parts,
 )
 from .items import StudyItems
+from .passes import Pass, PassAction, read_pass
+from .passes import apply as apply_pass
 from .review import (
     NO_IDEAS,
     NOT_IN_ANSWER,
@@ -622,6 +624,17 @@ class StudyService:
         ids = [card.id for card, _page in self.cards(block)]
         if card_id not in ids:
             raise NotFound("This card is not in the block.")
+        new_state = self._record(block, card_id, grade)
+        # The next card; ``len(ids)`` = past the last one ("Done").
+        updated = self.store.update_block(
+            block.id, state=new_state, position=ids.index(card_id) + 1, side="question", updated_at=_now()
+        )
+        assert updated is not None
+        self._notify(updated)
+        return updated
+
+    def _record(self, block: StudyBlock, card_id: str, grade: Grade) -> dict[str, Any]:
+        """A grade into FSRS (a saved deck) or into the block until it is saved (S6); the new state."""
         mode: Mode = block.mode if block.mode in MODES else "due"
         moment = self._clock()
         state = self.states(block, [card_id])[card_id]
@@ -656,10 +669,37 @@ class StudyService:
         elif scheduled:
             self.store.put_cards([after], moment.isoformat(timespec="seconds"))
             self.store.add_reviews([entry])
-        # The next card; ``len(ids)`` = past the last one ("Done").
-        updated = self.store.update_block(
-            block.id, state=new_state, position=ids.index(card_id) + 1, side="question", updated_at=_now()
-        )
+        return new_state
+
+    # -- a pass through the deck (P3-d, decisions 13–15) ------------------------------------------------
+
+    def pile(self, block: StudyBlock) -> Pass:
+        ids = [card.id for card, _page in self.cards(block)]
+        return read_pass(block.state, ids, block.position)
+
+    @_one_at_a_time
+    def study_pass(self, block_id: str, action: PassAction, card_id: str | None = None) -> StudyBlock:
+        """«I know this» = Good, the card leaves the pile; a skip = Again once per pass, the card goes
+        under the pile; ← brings back the last skipped one; «Go through again» starts a new pass."""
+        block = self.get(block_id)
+        if block.kind != "deck":
+            raise StudyError("Only cards are studied in a pass.")
+        ids = [card.id for card, _page in self.cards(block)]
+        try:
+            after, again = apply_pass(read_pass(block.state, ids, block.position), action, card_id, ids)
+        except ValueError as error:
+            raise NotFound(str(error)) from error
+        state: dict[str, Any] = dict(block.state)
+        if action == "know" and card_id is not None:
+            state = self._record(block, card_id, "good")
+        elif again and card_id is not None:
+            state = self._record(block, card_id, "again")
+        if action == "restart":
+            state["grades"] = {}
+        state["pass"] = after.to_json()
+        position = ids.index(after.queue[0]) if after.queue else len(ids)
+        updated = self.store.update_block(block.id, state=state, position=position, side="question",
+                                          updated_at=_now())
         assert updated is not None
         self._notify(updated)
         return updated

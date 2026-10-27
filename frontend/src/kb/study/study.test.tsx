@@ -51,42 +51,58 @@ const requests = (fake: { calls: Array<{ method: string; path: string; body?: un
   fake.calls.filter((c) => c.path.startsWith(prefix)).map((c) => `${c.method} ${c.path}`);
 
 describe('Flashcards in the chat (variant C)', () => {
-  it('flips to the answer from the source with the agent explanation apart, grades with intervals, and moves on', async () => {
+  it('P3-d: the top card of the pile flips to the answer with the agent explanation apart; I know this = Good and the card leaves the pile', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-    expect(within(deck).getByText('1 / 3')).toBeInTheDocument();
-    expect(within(deck).getByText('How did Boltzmann write entropy?')).toBeInTheDocument();
+    expect(within(deck).getByText('3 left')).toBeInTheDocument();
+    expect(within(deck).getByRole('region', { name: 'Question' })).toHaveTextContent('How did Boltzmann write entropy?');
+    expect(within(deck).queryByRole('region', { name: 'Answer' })).toBeNull();
+    // Decision 14: no grade grid, no intervals; decision 15: no «Not yet» words.
     expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull();
+    expect(within(deck).queryByText(/Not yet|Again|Easy|next in/)).toBeNull();
+    expect(within(deck).getByRole('button', { name: 'Skip — back to the pile (→)' })).toBeInTheDocument();
+    expect(within(deck).getByRole('button', { name: 'Bring back the last card (←)' })).toBeDisabled();
 
-    await user.click(within(deck).getByRole('button', { name: /Show answer/ }));
-    const grades = await within(deck).findByRole('group', { name: 'How well did you know it?' });
-    expect(within(deck).getByText('Answer · from source')).toBeInTheDocument();
-    expect(within(deck).getByText('S = k·ln W')).toBeInTheDocument();
-    expect(within(deck).getByText(/Like counting the ways/)).toBeInTheDocument();
-    expect(within(grades).getByRole('button', { name: 'Good, next in 10m' })).toBeInTheDocument();
+    await user.click(within(deck).getByText('How did Boltzmann write entropy?'));
+    const answer = await within(deck).findByRole('region', { name: 'Answer' });
+    expect(answer).toHaveTextContent('S = k·ln W');
+    expect(within(answer).getByText(/Like counting the ways/)).toBeInTheDocument();
 
-    await user.click(within(grades).getByRole('button', { name: 'Good, next in 10m' }));
-    await waitFor(() => expect(within(deck).getByText('2 / 3')).toBeInTheDocument());
-    expect(within(deck).getByText('Why a logarithm?')).toBeInTheDocument();
-    expect(requests(fake)).toEqual(['PATCH /kb/study/st-deck', 'POST /kb/study/st-deck/grade']);
-    expect(fake.calls.find((c) => c.path.endsWith('/grade'))?.body).toEqual({ item_id: 'c-1', grade: 'good' });
+    await user.click(within(deck).getByRole('button', { name: /I know this/ }));
+    await waitFor(() => expect(within(deck).getByText('2 left')).toBeInTheDocument());
+    expect(within(deck).getByRole('region', { name: 'Question' })).toHaveTextContent('Why a logarithm?');
+    expect(requests(fake)).toEqual(['PATCH /kb/study/st-deck', 'POST /kb/study/st-deck/pass']);
+    expect(fake.calls.find((c) => c.path.endsWith('/pass'))?.body).toEqual({ action: 'know', item_id: 'c-1' });
+    expect(fake.calls.filter((c) => c.path.endsWith('/grade') || c.path.endsWith('/mark'))).toEqual([]); // not «hide» any more
   });
 
-  it('keys work on the focused block: Space flips, 2 grades Hard, ← goes back; "I know this" hides the card', async () => {
+  it('P3-d keys on the focused block: Space flips, → skips (under the pile, comes back), ← brings it back, K knows; the pass ends with All done', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    const top = () => within(deck).getByRole('region', { name: 'Question' });
     deck.focus();
     await user.keyboard(' ');
-    await within(deck).findByRole('group', { name: 'How well did you know it?' });
-    await user.keyboard('2');
-    await waitFor(() => expect(within(deck).getByText('2 / 3')).toBeInTheDocument());
-    expect(fake.calls.find((c) => c.path.endsWith('/grade'))?.body).toEqual({ item_id: 'c-1', grade: 'hard' });
-    await user.click(within(deck).getByRole('button', { name: /I know this/ }));
-    await waitFor(() => expect(within(deck).getByText('3 / 3')).toBeInTheDocument());
-    expect(fake.calls.find((c) => c.path.endsWith('/mark'))?.body).toEqual({ item_ids: ['c-2'], mark: 'hide' });
+    await within(deck).findByRole('region', { name: 'Answer' });
+    await user.keyboard('{ArrowRight}');
+    await waitFor(() => expect(top()).toHaveTextContent('Why a logarithm?'));
+    expect(within(deck).getByText('3 left')).toBeInTheDocument(); // skipped, still on the pile
+    expect(fake.calls.filter((c) => c.path.endsWith('/pass')).map((c) => c.body)).toEqual([{ action: 'skip', item_id: 'c-1' }]);
     deck.focus();
     await user.keyboard('{ArrowLeft}');
-    await waitFor(() => expect(within(deck).getByText('2 / 3')).toBeInTheDocument());
+    await waitFor(() => expect(top()).toHaveTextContent('How did Boltzmann write entropy?'));
+    for (const key of ['k', '{Enter}', 'K']) {
+      deck.focus();
+      await user.keyboard(key);
+      await waitFor(() => expect(within(deck).queryAllByRole('button', { name: /I know this/ }).every((b) => !b.hasAttribute('disabled'))).toBe(true));
+    }
+    const done = await within(deck).findByRole('status');
+    expect(done).toHaveTextContent('All done');
+    expect(done).toHaveTextContent('3 known · 0 come back by the schedule');
+    expect(within(deck).getByText('done')).toBeInTheDocument();
+    await user.click(within(done).getByRole('button', { name: 'Go through again' }));
+    await waitFor(() => expect(within(deck).getByText('3 left')).toBeInTheDocument());
+    expect(fake.calls.filter((c) => c.path.endsWith('/pass')).map((c) => (c.body as { action: string }).action))
+      .toEqual(['skip', 'back', 'know', 'know', 'know', 'restart']);
   });
 
   it('Save to wiki: Deny keeps it in the chat and says so; Save to wiki still works later and links the page', async () => {
@@ -134,7 +150,7 @@ describe('Flashcards in the chat (variant C)', () => {
     expect(field).toHaveFocus();
     await user.keyboard(' x');
     expect(field).toHaveValue('Lecture 8 x');
-    expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull(); // not flipped
+    expect(within(deck).queryByRole('region', { name: 'Answer' })).toBeNull(); // not flipped
     await user.keyboard('{Escape}');
     expect(within(deck).queryByRole('textbox', { name: 'Deck name' })).toBeNull();
     const back = within(deck).getByRole('button', { name: 'Rename: Lecture 8' });
@@ -142,7 +158,7 @@ describe('Flashcards in the chat (variant C)', () => {
 
     await user.keyboard(' ');
     field = await within(deck).findByRole('textbox', { name: 'Deck name' }); // Space activates the title: rename, no flip
-    expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull();
+    expect(within(deck).queryByRole('region', { name: 'Answer' })).toBeNull();
     await user.keyboard('{Escape}');
     within(deck).getByRole('button', { name: 'Rename: Lecture 8' }).focus();
     await user.keyboard('{F2}');
@@ -184,7 +200,7 @@ describe('Flashcards in the chat (variant C)', () => {
     deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(within(deck).queryByRole('progressbar')).toBeNull();
     await user.click(within(deck).getByRole('button', { name: 'Expand' }));
-    expect(within(deck).getByText('1 / 3')).toBeInTheDocument();
+    expect(within(deck).getByText('3 left')).toBeInTheDocument();
   });
 
   it('U2 (decision 5): a folded deck opened beside the chat is open there; the thread keeps a folded "Open beside the chat" row; back in the chat the fold is kept', async () => {
@@ -197,7 +213,7 @@ describe('Flashcards in the chat (variant C)', () => {
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const beside = within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(within(beside).getByRole('progressbar', { name: 'Progress' })).toBeInTheDocument();
-    expect(within(beside).getByText('1 / 3')).toBeInTheDocument();
+    expect(within(beside).getByText('3 left')).toBeInTheDocument();
     expect(within(beside).queryByRole('button', { name: /^(Collapse|Expand)$/ })).toBeNull();
     await waitFor(() => expect(beside).toHaveFocus()); // keyboard focus follows the block
 
@@ -531,7 +547,7 @@ describe('The deck page (S12)', () => {
     await user.click(screen.getByRole('button', { name: 'Hard first' }));
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const deck = within(panel).getByRole('region', { name: 'Flashcards: Thermodynamics' });
-    expect(within(deck).getByText('1 / 1')).toBeInTheDocument();
+    expect(within(deck).getByText('1 left')).toBeInTheDocument();
     expect(within(deck).getByText(/Practice: doesn’t change your schedule/)).toBeInTheDocument();
     expect(fake.calls.find((c) => c.path === '/kb/study/decks/p-deck/study')?.body).toEqual({ mode: 'hard', card_ids: null });
     // No chat is made or opened for it, and there is no chat to take it back into: × only.
