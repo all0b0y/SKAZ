@@ -5,9 +5,12 @@ import { launchIsolatedSmoke } from './isolatedSmoke';
 // Design-system contrast gate (.dev/docs/DESIGN-SYSTEM.md, verification 1): the real built Electron
 // app, isolated profile. Every theme the user can choose is forced on <html>; each colour token is
 // resolved by the renderer itself (light-dark, color-mix) and the pairs the UI actually draws must
-// reach WCAG AA. Stage 3 widens THEMES to every base × accent × theme.
+// reach WCAG AA — for every base × accent × theme the Appearance settings allow (stage 3).
 
 const THEMES = ['light', 'dark'] as const;
+const BASES = ['milk', 'paper', 'slate', 'sand'] as const;
+const ACCENTS = ['ink', 'clay', 'petrol', 'plum', 'slate'] as const;
+const STATES = ['--kb-danger', '--kb-warn', '--kb-ok'];
 
 /** Text needs 4.5:1, graphics (dots, folder marks, FX) 3:1. */
 const TEXT = ['--kb-text', '--kb-muted', '--kb-muted-strong', '--kb-accent', '--kb-danger', '--kb-warn', '--kb-ok'];
@@ -19,7 +22,7 @@ const PAIRS: ReadonlyArray<[string, string]> = [
   ['--kb-text', '--kb-accent-press'],
 ];
 const SURFACES = ['--kb-rail', '--kb-side', '--kb-bg', '--kb-pane'];
-const ALL = [...new Set([...TEXT, ...GRAPHIC, ...GROUNDS, ...PAIRS.flat(), ...SURFACES])];
+const ALL = [...new Set([...TEXT, ...GRAPHIC, ...GROUNDS, ...PAIRS.flat(), ...SURFACES, '--kb-fill'])];
 
 let app: ElectronApplication;
 let page: Page;
@@ -34,10 +37,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => { await close?.(); });
 
-async function resolveTokens(theme: string): Promise<Record<string, string>> {
-  return page.evaluate(({ theme: t, names }) => {
+async function resolveTokens(theme: string, base: string, accent: string): Promise<Record<string, string>> {
+  return page.evaluate(({ theme: t, base: b, accent: a, names }) => {
     const html = document.documentElement;
-    html.dataset.theme = t;
+    Object.assign(html.dataset, { theme: t, base: b, accent: a });
     const host = document.createElement('div');
     document.body.appendChild(host);
     const out: Record<string, string> = {};
@@ -49,12 +52,13 @@ async function resolveTokens(theme: string): Promise<Record<string, string>> {
     }
     host.remove();
     return out;
-  }, { theme, names: ALL });
+  }, { theme, base, accent, names: ALL });
 }
 
-for (const theme of THEMES) {
-  test(`tokens reach WCAG AA in ${theme}`, async () => {
-    const raw = await resolveTokens(theme);
+for (const theme of THEMES) for (const base of BASES) {
+  test(`tokens reach WCAG AA: ${base} · ${theme} · every accent`, async () => {
+   for (const accent of ACCENTS) {
+    const raw = await resolveTokens(theme, base, accent);
     const c: Record<string, Rgba> = {};
     for (const [name, value] of Object.entries(raw)) {
       const parsed = parseColor(value);
@@ -64,23 +68,27 @@ for (const theme of THEMES) {
     const fails: string[] = [];
     const check = (fg: string, bg: string, min: number) => {
       const r = contrast(c[fg]!, c[bg]!);
-      if (r < min) fails.push(`${fg} on ${bg}: ${r.toFixed(2)} < ${min}`);
+      if (r < min) fails.push(`${accent}: ${fg} on ${bg}: ${r.toFixed(2)} < ${min}`);
     };
     for (const bg of GROUNDS) {
       for (const fg of TEXT) check(fg, bg, 4.5);
       for (const fg of GRAPHIC) check(fg, bg, 3);
     }
     for (const [fg, bg] of PAIRS) check(fg, bg, 4.5);
-    expect(fails).toEqual([]);
 
     // Surfaces are ordered darkest → lightest with a visible step (F1, principle 4).
     const l = SURFACES.map((n) => oklch(c[n]!).l);
     for (let i = 1; i < l.length; i += 1) expect(l[i]! - l[i - 1]!, `${SURFACES[i - 1]} → ${SURFACES[i]}`).toBeGreaterThanOrEqual(0.019);
 
-    // The accent (ink today) never shares a folder's hue (greys have none).
-    for (const f of GRAPHIC.slice(0, 4)) {
-      const d = hueDistance(oklch(c['--kb-accent']!).h, oklch(c[f]!).h);
-      if (d !== null) expect(d, `accent vs ${f}`).toBeGreaterThanOrEqual(30);
+    // The accent never shares the hue of a folder or a state colour — unless it is muted (chroma
+    // ≤ 0.07) next to a colour at least 1.4× as saturated (greys have no hue).
+    const ac = oklch(c['--kb-accent']!);
+    for (const other of [...GRAPHIC.slice(0, 4), ...STATES]) {
+      const oc = oklch(c[other]!);
+      const d = hueDistance(ac.h, oc.h);
+      if (d !== null && d < 30 && !(ac.c <= 0.07 && oc.c >= 1.4 * ac.c)) fails.push(`${accent}: hue ${Math.round(d)}° from ${other}`);
     }
+    expect(fails).toEqual([]);
+   }
   });
 }

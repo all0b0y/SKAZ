@@ -93,7 +93,7 @@
 .kb-block[data-targeted] { outline: 2px solid var(--kb-accent); outline-offset: 4px; transition: outline-color 1.6s ease 0.8s; }
 .kb-block__label { display: flex; }
 /* isolation: the citation-chip stipple canvas (z-index -1, cite.css) paints above the pane, below the text. */
-.kb-block__body { line-height: 1.6; overflow-wrap: anywhere; isolation: isolate; }
+.kb-block__body { line-height: var(--kb-lh-read); overflow-wrap: anywhere; isolation: isolate; }
 .kb-block__cites { display: inline-flex; flex-wrap: wrap; gap: var(--kb-sp-4); margin-left: var(--kb-sp-2); vertical-align: middle; max-width: 100%; min-width: 0; }
 /* A long material title shortens with an ellipsis; the time or page stays visible (I1, real backend). */
 .kb-block__cites .kb-chip { min-width: 0; }
@@ -186,7 +186,7 @@
 .kb-spk__head { display: flex; gap: var(--kb-sp-8); align-items: baseline; }
 .kb-spk__speaker { font-size: var(--t-xs); font-weight: 600; }
 .kb-spk__time { font-size: var(--t-xs); color: var(--kb-muted); font-variant-numeric: tabular-nums; }
-.kb-spk__text { line-height: 1.6; overflow-wrap: anywhere; }
+.kb-spk__text { line-height: var(--kb-lh-read); overflow-wrap: anywhere; }
 .kb-spk__text--tr { color: var(--kb-muted); }
 .kb-tail { color: var(--kb-muted); }
 .kb-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--kb-sp-16); }
@@ -224,7 +224,7 @@
 .kb-fixcard__actions { display: flex; gap: var(--kb-sp-6); flex-wrap: wrap; }
 
 .kb-mtext { display: flex; flex-direction: column; gap: var(--kb-sp-10); }
-.kb-mtext__p { line-height: 1.6; overflow-wrap: anywhere; border-radius: var(--kb-r-2xs); }
+.kb-mtext__p { line-height: var(--kb-lh-read); overflow-wrap: anywhere; border-radius: var(--kb-r-2xs); }
 /* A text file keeps its single line breaks (QA B37); PDF pages and articles have none inside a paragraph. */
 .kb-mtext > .kb-mtext__p { white-space: pre-line; }
 

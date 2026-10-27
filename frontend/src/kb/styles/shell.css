@@ -224,7 +224,7 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   gap: var(--kb-sp-8);
   width: 100%;
   min-width: 0;
-  height: 30px;
+  height: var(--kb-row-h);
   padding: 0 var(--kb-sp-8);
   border-radius: var(--kb-r-sm);
   white-space: nowrap;

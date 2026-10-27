@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../ui/motionLevel';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useReducedMotion } from 'motion/react';
+
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 import type { KbMessage } from '../../api/kb/types.gen';

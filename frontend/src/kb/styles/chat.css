@@ -87,7 +87,7 @@
 .kb-msg__attach { display: inline-flex; align-items: center; gap: var(--kb-sp-4); margin-top: var(--kb-sp-4); color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-msg--assistant { align-items: stretch; }
 /* Own stacking context: a citation chip's stipple canvas (z-index:-1) paints above the pane, below the text (F1). */
-.kb-msg__body { line-height: 1.6; overflow-wrap: anywhere; min-width: 0; isolation: isolate; }
+.kb-msg__body { line-height: var(--kb-lh-read); overflow-wrap: anywhere; min-width: 0; isolation: isolate; }
 .kb-msg__wait { color: var(--kb-muted); display: flex; align-items: center; gap: var(--kb-sp-10); }
 .kb-msg__note { color: var(--kb-muted); font-size: var(--t-sm); margin-top: var(--kb-sp-4); }
 .kb-msg__actions { display: flex; gap: var(--kb-sp-2); margin-top: var(--kb-sp-6); color: var(--kb-muted); }

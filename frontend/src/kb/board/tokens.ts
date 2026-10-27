@@ -3,10 +3,14 @@
 export type TokenMap = Map<string, string>;
 
 export interface TokenBlocks {
-  /** `html[data-kb-ui] { … }` — every token; colours as `light-dark(light, dark)` where they differ. */
+  /** Every token with its default (Milk base, Ink accent, comfortable); colours as `light-dark(light, dark)`. */
   light: TokenMap;
   textSize: Partial<Record<'s' | 'l', TokenMap>>;
-  /** Selectors other than the base / text-size ones that declare tokens (should be none). */
+  /** Knob variants: `[data-base='…']`, `[data-accent='…']`, `[data-density='…']` blocks by value. */
+  bases: Record<string, TokenMap>;
+  accents: Record<string, TokenMap>;
+  density: Record<string, TokenMap>;
+  /** Selectors outside these that declare tokens (should be none). */
   stray: string[];
 }
 
@@ -37,7 +41,7 @@ function blockAfter(css: string, from: number): { body: string; end: number } | 
 
 export function parseTokenBlocks(raw: string): TokenBlocks {
   const css = stripComments(raw);
-  const result: TokenBlocks = { light: new Map(), textSize: {}, stray: [] };
+  const result: TokenBlocks = { light: new Map(), textSize: {}, bases: {}, accents: {}, density: {}, stray: [] };
   let i = 0;
   while (i < css.length) {
     const open = css.indexOf('{', i);
@@ -47,9 +51,14 @@ export function parseTokenBlocks(raw: string): TokenBlocks {
     if (!block) break;
     const decls = declarations(block.body);
     const size = /data-text-size='([sl])'/.exec(head);
-    if (head === 'html[data-kb-ui]') result.light = decls;
-    else if (size) result.textSize[size[1] as 's' | 'l'] = decls;
-    else if (decls.size > 0) result.stray.push(head);
+    const knob = /data-(base|accent|density)='([\w-]+)'/.exec(head);
+    // `html[data-kb-ui]` alone, or listed first (the default variant of a knob), declares defaults.
+    if (head === 'html[data-kb-ui]' || head.startsWith('html[data-kb-ui],')) for (const [k, v] of decls) result.light.set(k, v);
+    if (size) result.textSize[size[1] as 's' | 'l'] = decls;
+    else if (knob) {
+      const kind = knob[1] === 'base' ? 'bases' : knob[1] === 'accent' ? 'accents' : 'density';
+      result[kind][knob[2]!] = decls;
+    } else if (head !== 'html[data-kb-ui]' && decls.size > 0) result.stray.push(head);
     i = block.end;
   }
   return result;

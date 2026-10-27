@@ -327,3 +327,37 @@ button.kb-hchip:hover:not(:disabled) { background: var(--kb-accent-soft); }
 @media (max-width: 700px) { .kb-addprovider__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .kb-modal__foot.kb-addprovider__foot { justify-content: space-between; min-width: 0; padding: var(--kb-sp-10) var(--kb-sp-16); }
 .kb-addprovider__checked { font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- Appearance: preset gallery (DESIGN-SYSTEM.md decision 9). Each art is drawn by the real tokens
+   of its base and accent (`data-kb-scope`); the card chrome stays in the app's own look. ---- */
+.kb-looks__head { display: flex; align-items: center; gap: var(--kb-sp-8); }
+.kb-looks__head .kb-sgroup__title { flex: 1; }
+.kb-looks__current { font-size: var(--t-xs); color: var(--kb-muted); }
+.kb-looks__grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--kb-sp-10); padding-bottom: var(--kb-sp-8); }
+.kb-look {
+  display: flex; flex-direction: column; align-items: stretch; gap: var(--kb-sp-2); min-width: 0;
+  padding: var(--kb-sp-6); border: 1px solid var(--kb-line); border-radius: var(--kb-r-lg);
+  background: var(--kb-pane); color: var(--kb-text); text-align: left; cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.kb-look:hover { border-color: var(--kb-muted); }
+.kb-look:active { background: var(--kb-accent-soft); }
+.kb-look[aria-pressed='true'] { border-color: var(--kb-accent); box-shadow: inset 0 0 0 1px var(--kb-accent); }
+.kb-look__art {
+  display: grid; grid-template-columns: 10% 30% 1fr; height: 64px; margin-bottom: var(--kb-sp-4);
+  border-radius: var(--kb-r-sm); overflow: hidden; border: 1px solid var(--kb-line); background: var(--kb-bg);
+}
+.kb-look__art i { display: flex; flex-direction: column; gap: var(--kb-sp-4); padding: var(--kb-sp-6) var(--kb-sp-4); }
+.kb-look__rail { background: var(--kb-rail); }
+.kb-look__side { background: var(--kb-side); }
+.kb-look__pane { background: var(--kb-pane); margin: var(--kb-sp-6) var(--kb-sp-6) 0; border-radius: var(--kb-r-2xs) var(--kb-r-2xs) 0 0; }
+.kb-look__art b { display: block; height: 4px; border-radius: var(--kb-r-pill); background: var(--kb-line); }
+.kb-look__side b.is-on { background: var(--kb-accent-soft); outline: 1px solid var(--kb-muted); }
+.kb-look__pane b { background: var(--kb-muted); opacity: 0.55; }
+.kb-look__pane b.is-short { width: 60%; }
+.kb-look__btn { display: block; width: 40%; height: 10px; margin-top: auto; padding: 0 !important; border-radius: var(--kb-r-2xs); background: var(--kb-fill); }
+.kb-look__name { font-weight: 600; font-size: var(--t-sm); }
+.kb-look__note { font-size: var(--t-xs); color: var(--kb-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Accent swatches inside the Segmented control: the swatch is its own accent scope. */
+.kb-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--kb-accent); vertical-align: -1px; }

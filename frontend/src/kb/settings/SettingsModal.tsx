@@ -27,6 +27,7 @@ import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
 import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
+import { AccentRow, BaseRow, DensityRow, MotionRow, PresetGallery, SoundsRow } from './Appearance';
 
 /**
  * The control of one settings row: live backend data where the route exists (S3/W2/B7 via
@@ -115,6 +116,11 @@ function RowControl({ row }: { row: RowDef }) {
         <Segmented<TextSize> label="Text size" value={textSize} size="sm" onChange={(v) => prefs.getState().set({ textSize: v })}
           options={[{ value: 's', label: 'S', name: 'Small' }, { value: 'm', label: 'M', name: 'Medium' }, { value: 'l', label: 'L', name: 'Large' }]} />
       );
+    case 'base': return <BaseRow />;
+    case 'accent': return <AccentRow />;
+    case 'density': return <DensityRow />;
+    case 'motion': return <MotionRow />;
+    case 'sounds': return <SoundsRow />;
     case 'log':
       return <ActivityLogRow />;
     case 'ui-language':
@@ -230,6 +236,7 @@ function SectionBody({ section }: { section: SettingsSection }) {
       {section === 'storage' && <StorageBanner />}
       <HealthPlates section={section} />
       {section === 'me' && <MeIntro />}
+      {section === 'look' && <PresetGallery />}
       {section === 'skills' && (
         <p className="kb-sintro">Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.</p>
       )}

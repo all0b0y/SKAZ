@@ -1,4 +1,8 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import {
+  ACCENTS, BASES, DEFAULT_LOOK, DENSITIES, MOTIONS, SOUNDS,
+  type AccentPref, type BasePref, type DensityPref, type MotionPref, type SoundsPref,
+} from './appearance';
 
 /**
  * Renderer-only preferences of the new interface (no secrets, no content).
@@ -24,6 +28,12 @@ export interface Prefs {
   sideWidth: number;
   rightWidth: number;
   onboardingDone: boolean;
+  /** Appearance knobs (DESIGN-SYSTEM.md); mirrored onto <html> by KbApp's ThemeSync. */
+  base: BasePref;
+  accent: AccentPref;
+  density: DensityPref;
+  motion: MotionPref;
+  sounds: SoundsPref;
 }
 
 export const PREFS_KEY = 'skaz.kb.prefs';
@@ -36,6 +46,8 @@ export const DEFAULT_PREFS: Prefs = {
   sideWidth: SIDE_DEFAULT,
   rightWidth: RIGHT_DEFAULT,
   onboardingDone: false,
+  ...DEFAULT_LOOK,
+  sounds: 'off',
 };
 
 const clamp = (n: unknown, lo: number, hi: number, fallback: number): number =>
@@ -64,6 +76,11 @@ export function readPrefs(storage: Pick<Storage, 'getItem'> | null): Prefs {
     sideWidth: clamp(raw.sideWidth, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT),
     rightWidth: clamp(raw.rightWidth, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT),
     onboardingDone: raw.onboardingDone === true,
+    base: oneOf(raw.base, BASES.map((o) => o.value), DEFAULT_PREFS.base),
+    accent: oneOf(raw.accent, ACCENTS.map((o) => o.value), DEFAULT_PREFS.accent),
+    density: oneOf(raw.density, DENSITIES.map((o) => o.value), DEFAULT_PREFS.density),
+    motion: oneOf(raw.motion, MOTIONS.map((o) => o.value), DEFAULT_PREFS.motion),
+    sounds: oneOf(raw.sounds, SOUNDS.map((o) => o.value), DEFAULT_PREFS.sounds),
   };
 }
 
@@ -87,6 +104,7 @@ export function createPrefsStore(storage: Storage | null): PrefsStore {
       theme: state.theme, textSize: state.textSize, section: state.section, sideOpen: state.sideOpen,
       sideWidth: state.sideWidth, rightWidth: state.rightWidth,
       onboardingDone: state.onboardingDone,
+      base: state.base, accent: state.accent, density: state.density, motion: state.motion, sounds: state.sounds,
     };
     try { storage?.setItem(PREFS_KEY, JSON.stringify(data)); } catch { /* full or unavailable: keep in memory */ }
   });

@@ -41,6 +41,16 @@ describe('tokens.css inventory', () => {
     expect(dark).toEqual(['#141517', '#191a1c', '#1e1f21', '#2c2e31']);
   });
 
+  it('reads every knob variant; each base/accent declares the same tokens as the default', () => {
+    expect(Object.keys(blocks.bases)).toEqual(['milk', 'paper', 'slate', 'sand']);
+    expect(Object.keys(blocks.accents)).toEqual(['ink', 'clay', 'petrol', 'plum', 'slate']);
+    expect(Object.keys(blocks.density)).toEqual(['compact', 'spacious']);
+    const keys = (m: Map<string, string>) => [...m.keys()].sort();
+    for (const b of Object.values(blocks.bases)) expect(keys(b)).toEqual(keys(blocks.bases.milk!));
+    for (const a of Object.values(blocks.accents)) expect(keys(a)).toEqual(keys(blocks.accents.ink!));
+    for (const d of Object.values(blocks.density)) expect(keys(d).every((k) => blocks.light.has(k))).toBe(true);
+  });
+
   it('picks a side of light-dark(), including rgba() arguments', () => {
     expect(themeValue('0 1px 2px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.4))', 'dark')).toBe('0 1px 2px rgba(0, 0, 0, 0.4)');
     expect(themeValue('light-dark(#fff, #000)', 'light')).toBe('#fff');

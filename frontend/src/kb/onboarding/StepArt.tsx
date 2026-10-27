@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../ui/motionLevel';
 import type { ReactNode } from 'react';
-import { m, useReducedMotion, type Transition } from 'motion/react';
+import { m, type Transition } from 'motion/react';
 
 /**
  * First-launch illustrations (decisions 32/33): 118px, "lines" style (outline), drawn with

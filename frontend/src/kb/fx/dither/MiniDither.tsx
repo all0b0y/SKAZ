@@ -1,4 +1,4 @@
-import { useReducedMotion } from 'motion/react';
+import { useReducedMotion } from '../../ui/motionLevel';
 import { useRef, useState, type PointerEvent } from 'react';
 import { FxCanvas } from '../FxCanvas';
 import { MiniScene } from './mini';

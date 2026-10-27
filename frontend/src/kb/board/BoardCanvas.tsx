@@ -11,11 +11,17 @@ const THEMES: BoardTheme[] = ['light', 'dark'];
 const SIZES: BoardSize[] = ['s', 'm', 'l'];
 const ZOOMS = [0.5, 0.75, 1] as const;
 
-export const frameHash = (theme: BoardTheme, size: BoardSize) => `#design-board/frame?theme=${theme}&size=${size}`;
+const BASES = ['milk', 'paper', 'slate', 'sand'];
+const ACCENTS = ['ink', 'clay', 'petrol', 'plum', 'slate'];
+
+export const frameHash = (theme: BoardTheme, size: BoardSize, base = 'milk', accent = 'ink') =>
+  `#design-board/frame?theme=${theme}&size=${size}&base=${base}&accent=${accent}`;
 
 export function BoardCanvas() {
   const [sizes, setSizes] = useState<BoardSize[]>(['m']);
   const [zoom, setZoom] = useState<(typeof ZOOMS)[number]>(0.75);
+  const [base, setBase] = useState('milk');
+  const [accent, setAccent] = useState('ink');
   const [heights, setHeights] = useState<Record<string, number>>({});
 
   useEffect(() => {
@@ -29,7 +35,7 @@ export function BoardCanvas() {
   }, []);
 
   const toggle = (s: BoardSize) => setSizes((now) => (now.includes(s) ? (now.length > 1 ? now.filter((x) => x !== s) : now) : SIZES.filter((x) => x === s || now.includes(x))));
-  const base = window.location.href.split('#')[0];
+  const origin = window.location.href.split('#')[0];
 
   return (
     <div className="kb-canvas">
@@ -39,12 +45,16 @@ export function BoardCanvas() {
         {SIZES.map((s) => <button key={s} type="button" aria-pressed={sizes.includes(s)} onClick={() => toggle(s)}>{s.toUpperCase()}</button>)}
         <span>Zoom</span>
         {ZOOMS.map((z) => <button key={z} type="button" aria-pressed={zoom === z} onClick={() => setZoom(z)}>{Math.round(z * 100)}%</button>)}
+        <span>Base</span>
+        {BASES.map((b) => <button key={b} type="button" aria-pressed={base === b} onClick={() => setBase(b)}>{b}</button>)}
+        <span>Accent</span>
+        {ACCENTS.map((a) => <button key={a} type="button" aria-pressed={accent === a} onClick={() => setAccent(a)}>{a}</button>)}
       </div>
       <div className="kb-canvas__grid" style={{ zoom }}>
         {sizes.map((size) => THEMES.map((theme) => (
           <figure key={`${theme}-${size}`} className="kb-canvas__frame">
             <figcaption>{theme === 'light' ? 'Light' : 'Dark'} · text {size.toUpperCase()}</figcaption>
-            <iframe title={`${theme} ${size}`} src={`${base}${frameHash(theme, size)}`} style={{ height: heights[`${theme}-${size}`] ?? 1200 }} />
+            <iframe title={`${theme} ${size}`} src={`${origin}${frameHash(theme, size, base, accent)}`} style={{ height: heights[`${theme}-${size}`] ?? 1200 }} />
           </figure>
         )))}
       </div>

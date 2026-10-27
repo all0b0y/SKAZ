@@ -14,13 +14,6 @@
 html[data-kb-ui] {
   color-scheme: light dark;
 
-  /* Surfaces, darkest → lightest in both themes: rail < side < bg < pane (F1: dark rail was lighter than bg). */
-  --kb-rail: light-dark(#e8e6df, #141517);
-  --kb-side: light-dark(#f0eee6, #191a1c);
-  --kb-bg: light-dark(#f9f8f3, #1e1f21);
-  --kb-pane: light-dark(#fffffb, #2c2e31);
-  --kb-line: light-dark(#dddedb, #555658);
-
   /* Text */
   --kb-text: light-dark(#2c2e31, #f9f8f3);
   /* F3: ≥ 4.5:1 on rail and on accent-soft (hover/selected rows) in both themes. */
@@ -28,9 +21,7 @@ html[data-kb-ui] {
   /* Muted text on the darker grounds (rail, segments); F4: in dark it was equal to muted. */
   --kb-muted-strong: light-dark(#5c5d5d, #bdbdba);
 
-  /* Accent (= text) and its soft tint; F3: the dark tint was the line colour and hid secondary text. */
-  --kb-accent: light-dark(#2c2e31, #f9f8f3);
-  --kb-accent-soft: light-dark(#e6e6e3, #3c3d40);
+  /* Accent (decision 7: the accent knob paints focus, fills, active states, FX; links keep their shape). */
   /* Pressed (F9): one step past the hover tint. */
   --kb-accent-press: color-mix(in srgb, var(--kb-accent-soft), var(--kb-text) 9%);
   --kb-art-tint: color-mix(in srgb, var(--kb-accent) 6%, transparent);
@@ -50,13 +41,7 @@ html[data-kb-ui] {
   --kb-folder-3: light-dark(#5a7420, #b8d07a);
   --kb-folder-4: light-dark(#11746a, #5cc8bb);
 
-  /* FX effects (FX-EFFECTS-SPEC): the one colour an effect flashes. Light = dark cocoa, dark = folder-2 purple. */
-  --kb-fx-accent: light-dark(#4a2c20, #bfa4f4);
-
-  /* Fills (primary button, toast, badges) */
-  --kb-fill: light-dark(#2c2e31, #f9f8f3);
-  --kb-on-fill: light-dark(#f9f8f3, #2c2e31);
-  --kb-fill-border: light-dark(#2c2e31, #f9f8f3);
+  /* Text on danger badges */
   --kb-badge-text: light-dark(#ffffff, #2c2e31);
   --kb-scrim: rgba(10, 14, 13, 0.38);
   --kb-scrim-strong: rgba(10, 14, 13, 0.55);
@@ -119,6 +104,12 @@ html[data-kb-ui] {
   --kb-sp-32: round(calc(32px * var(--kb-density)), 2px);
   --kb-sp-34: round(calc(34px * var(--kb-density)), 2px);
 
+  /* Component sizes the density knob steers (comfortable = the sizes before the knob). */
+  --kb-row-h: 30px;
+  --kb-control-h: 30px;
+  --kb-control-h-sm: 26px;
+  --kb-lh-read: 1.6;
+
   /* Fixed chrome heights */
   --kb-titlebar-h: 38px;
   --kb-head-h: 46px;
@@ -127,8 +118,113 @@ html[data-kb-ui] {
   --kb-icon-lg: 20px;
 }
 
+/* ---- Bases (decision 12): surfaces, line and the neutral hover tint. Generated and checked by
+   .dev/ui-redesign/design-system/palette.mts (AA on every ground, ordered steps ≥ 0.019 OKLCH L).
+   `[data-kb-scope]` lets a preview (the Appearance gallery) show another base inside the app. ---- */
+html[data-kb-ui], [data-kb-scope][data-base='milk'] {
+  /* Darkest → lightest in both themes: rail < side < bg < pane (F1). */
+  --kb-rail: light-dark(#e8e6df, #141517);
+  --kb-side: light-dark(#f0eee6, #191a1c);
+  --kb-bg: light-dark(#f9f8f3, #1e1f21);
+  --kb-pane: light-dark(#fffffb, #2c2e31);
+  --kb-line: light-dark(#dddedb, #555658);
+  /* Hover/selected rows (F3: in dark it was the line colour and hid secondary text). */
+  --kb-accent-soft: light-dark(#e6e6e3, #3c3d40);
+}
+[data-kb-ui][data-base='paper'], [data-kb-scope][data-base='paper'] {
+  --kb-rail: light-dark(#e6e6e6, #151515);
+  --kb-side: light-dark(#eeeeee, #1a1a1a);
+  --kb-bg: light-dark(#f8f8f8, #1f1f1f);
+  --kb-pane: light-dark(#ffffff, #2e2e2e);
+  --kb-line: light-dark(#dedede, #575757);
+  --kb-accent-soft: light-dark(#e5e5e5, #3b3b3b);
+}
+[data-kb-ui][data-base='slate'], [data-kb-scope][data-base='slate'] {
+  --kb-rail: light-dark(#e0e7ee, #0f161c);
+  --kb-side: light-dark(#e8eff6, #151b21);
+  --kb-bg: light-dark(#f2f9ff, #192026);
+  --kb-pane: light-dark(#fcffff, #2b2e32);
+  --kb-line: light-dark(#d8dfe6, #50585f);
+  --kb-accent-soft: light-dark(#dfe6ed, #353c44);
+}
+[data-kb-ui][data-base='sand'], [data-kb-scope][data-base='sand'] {
+  --kb-rail: light-dark(#eee5d6, #18140f);
+  --kb-side: light-dark(#f6edde, #1e1914);
+  --kb-bg: light-dark(#fef5e6, #231e19);
+  --kb-pane: light-dark(#fffef7, #302d2b);
+  --kb-line: light-dark(#e6ddce, #5b5650);
+  --kb-accent-soft: light-dark(#ede4d5, #403b35);
+}
+
+/* ---- Accents (decisions 7, 10): ≥ 4.6:1 on every ground of every base; hue ≥ 30° from folders and
+   state colours, or muted (chroma ≤ 0.07) next to a ≥ 1.4× more saturated one. Ink = the text. ---- */
+html[data-kb-ui], [data-kb-scope][data-accent='ink'] {
+  --kb-accent: light-dark(#2c2e31, #f9f8f3);
+  --kb-fill: light-dark(#2c2e31, #f9f8f3);
+  --kb-fill-border: light-dark(#2c2e31, #f9f8f3);
+  --kb-on-fill: light-dark(#f9f8f3, #2c2e31);
+  /* FX-EFFECTS-SPEC: light = dark cocoa, dark = folder-2 purple. */
+  --kb-fx-accent: light-dark(#4a2c20, #bfa4f4);
+}
+[data-kb-ui][data-accent='clay'], [data-kb-scope][data-accent='clay'] {
+  --kb-accent: light-dark(#885a44, #d29f88);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+[data-kb-ui][data-accent='petrol'], [data-kb-scope][data-accent='petrol'] {
+  --kb-accent: light-dark(#296d82, #70b2c9);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+[data-kb-ui][data-accent='plum'], [data-kb-scope][data-accent='plum'] {
+  --kb-accent: light-dark(#8d4f7a, #d894c1);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+[data-kb-ui][data-accent='slate'], [data-kb-scope][data-accent='slate'] {
+  --kb-accent: light-dark(#51677a, #94acc0);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+
+/* ---- Density (decision 13): spacing ×0.75 / ×1 / ×1.25, rows and controls ∓4px, reading line-height. ---- */
+[data-kb-ui][data-density='compact'] {
+  --kb-density: 0.75;
+  --kb-row-h: 26px;
+  --kb-control-h: 26px;
+  --kb-control-h-sm: 22px;
+  --kb-lh-read: 1.5;
+}
+[data-kb-ui][data-density='spacious'] {
+  --kb-density: 1.25;
+  --kb-row-h: 34px;
+  --kb-control-h: 34px;
+  --kb-control-h-sm: 30px;
+  --kb-lh-read: 1.75;
+}
+
+/* ---- Motion «off» (decision 15): no transitions or CSS animations anywhere. ---- */
+html[data-kb-ui][data-motion='off'] *,
+html[data-kb-ui][data-motion='off'] *::before,
+html[data-kb-ui][data-motion='off'] *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+}
+
 html[data-kb-ui][data-theme='light'] { color-scheme: light; }
 html[data-kb-ui][data-theme='dark'] { color-scheme: dark; }
+/* A preview card follows the app's theme; it can pin one for a side-by-side view. */
+[data-kb-scope][data-theme='light'] { color-scheme: light; }
+[data-kb-scope][data-theme='dark'] { color-scheme: dark; }
 
 html[data-kb-ui][data-text-size='s'] {
   --t-xs: 12px;
