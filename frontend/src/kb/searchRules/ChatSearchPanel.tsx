@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useStore } from 'zustand';
+import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbPageRef, KbRef } from '../../api/kb/types.gen';
-import { errorText } from '../api/client';
+import { errorText, type KbClient } from '../api/client';
 import {
   chatSearchRules, resetChatSearchRules, saveChatSearchRules,
   type KbChatSearchRules, type KbSourceRef,
@@ -28,20 +30,47 @@ export function searchRulesChanged(chatId: string) {
   window.dispatchEvent(new CustomEvent(SEARCH_RULES_CHANGED, { detail: { chatId } }));
 }
 
-/** The chat's rules, loaded and kept fresh on changes from the panel or the overview. */
+/**
+ * The chat's rules, shared by every reader of one window (the button, the overview, each answer's
+ * check) — one request per chat, again after a change from the panel or the overview.
+ */
+const ruleCaches = new WeakMap<KbClient, StoreApi<Record<string, KbChatSearchRules | null>>>();
+const inflight = new WeakMap<KbClient, Map<string, Promise<void>>>();
+
+function cacheOf(client: KbClient) {
+  let store = ruleCaches.get(client);
+  if (!store) {
+    store = createStore<Record<string, KbChatSearchRules | null>>(() => ({}));
+    ruleCaches.set(client, store);
+    inflight.set(client, new Map());
+  }
+  return store;
+}
+
+function loadRules(client: KbClient, chatId: string, force = false): void {
+  const store = cacheOf(client);
+  const running = inflight.get(client)!;
+  if (running.has(chatId) || (!force && chatId in store.getState())) return;
+  const job = chatSearchRules(client, chatId).then(
+    (rules) => store.setState({ [chatId]: rules }),
+    () => store.setState({ [chatId]: null }),
+  ).finally(() => running.delete(chatId));
+  running.set(chatId, job);
+}
+
 export function useChatSearchRules(chatId: string | null): [KbChatSearchRules | null, (next: KbChatSearchRules) => void] {
   const { client } = useServices();
-  const [rules, setRules] = useState<KbChatSearchRules | null>(null);
+  const store = cacheOf(client);
+  const rules = useStore(store, (s) => (chatId ? s[chatId] ?? null : null));
   useEffect(() => {
-    if (!chatId) { setRules(null); return undefined; }
-    let live = true;
-    const load = () => chatSearchRules(client, chatId).then((r) => { if (live) setRules(r); }, () => { if (live) setRules(null); });
-    void load();
-    const changed = (e: Event) => { if ((e as CustomEvent<{ chatId: string }>).detail?.chatId === chatId) void load(); };
+    if (!chatId) return undefined;
+    loadRules(client, chatId);
+    const changed = (e: Event) => { if ((e as CustomEvent<{ chatId: string }>).detail?.chatId === chatId) loadRules(client, chatId, true); };
     window.addEventListener(SEARCH_RULES_CHANGED, changed);
-    return () => { live = false; window.removeEventListener(SEARCH_RULES_CHANGED, changed); };
+    return () => window.removeEventListener(SEARCH_RULES_CHANGED, changed);
   }, [client, chatId]);
-  return [rules, setRules];
+  const set = useCallback((next: KbChatSearchRules) => { if (chatId) store.setState({ [chatId]: next }); }, [store, chatId]);
+  return [rules, set];
 }
 
 interface Draft {

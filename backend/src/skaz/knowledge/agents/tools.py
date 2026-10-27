@@ -160,6 +160,12 @@ class ToolContext:
     engine: EngineId | None = None
 
 
+#: N7-4: a chat's source scope for one library tool call — (tool, args, context) → (a refusal, or a
+#: narrowing of the result that may itself refuse with a string). Set by the runtime
+#: (``permissions.source_scope.ChatSourceScopes``); ``None`` for runs that are no chat answer.
+ResultNarrowing = Callable[[dict[str, Any]], "dict[str, Any] | str"]
+ScopeHook = Callable[[str, Any, "ToolContext | None"], Awaitable[tuple[str | None, ResultNarrowing | None]]]
+
 #: An interactive tool (it may wait for the user): runs on the event loop, never on a timer of SKAZ.
 AsyncHandler = Callable[[ToolContext | None, Any], Awaitable[dict[str, Any]]]
 
@@ -720,6 +726,8 @@ class ToolRegistry:
             raise ValueError("SKAZ tool names must be unique and start with skaz_")
         self.kb = kb
         self._tools = {tool.name: tool for tool in tools}
+        #: N7-4: what a chat's sources allow its library tools to give (``permissions.source_scope``).
+        self.scope: ScopeHook | None = None
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -754,6 +762,11 @@ class ToolRegistry:
         if tool.run is not None:
             return await self._interactive(tool, args, context)
         assert tool.handler is not None
+        narrow: ResultNarrowing | None = None
+        if self.scope is not None:
+            refusal, narrow = await self.scope(name, args, context)
+            if refusal is not None:
+                return ToolOutcome(refusal, is_error=True)
         try:
             async with asyncio.timeout(tool.timeout_s):
                 # Reads only; abandoning a slow read on timeout is harmless.
@@ -764,6 +777,11 @@ class ToolRegistry:
             return ToolOutcome("The library took too long to answer. Try a smaller request.", is_error=True)
         except Exception:
             return ToolOutcome("The library could not be read right now.", is_error=True)
+        if narrow is not None:
+            narrowed = narrow(payload)
+            if isinstance(narrowed, str):
+                return ToolOutcome(narrowed, is_error=True)
+            payload = narrowed
         text = (json.dumps(payload, ensure_ascii=False, separators=(",", ":")) if tool.own_data
                 else render(name, payload))
         if size(text) > tool.max_output_bytes:  # handlers fit their lists; this is a last guard

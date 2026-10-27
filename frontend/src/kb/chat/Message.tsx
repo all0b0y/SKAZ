@@ -19,6 +19,7 @@ import { StudyInChat } from '../study/StudyBlock';
 import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
+import { NotFromSources } from '../searchRules/NotFromSources';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { isMemoryPart } from '../me/api';
@@ -261,6 +262,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
+      <NotFromSources chatId={chatId} message={message} />
       {interrupted && message.failure && (
         <div className="kb-interrupt" role="alert">
           <Icon name="clock" size={16} className="kb-interrupt__icon" />

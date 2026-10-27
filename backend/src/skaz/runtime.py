@@ -31,6 +31,7 @@ from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
 from .knowledge.permissions.questions import QuestionBroker
 from .knowledge.permissions.search_rules import SearchRulesStore
+from .knowledge.permissions.source_scope import ChatSourceScopes
 from .knowledge.permissions.store import ControlStore
 from .knowledge.permissions.waits import RunWaits
 from .knowledge.permissions.web_search import WebSearchBroker, WebSearchStore
@@ -141,6 +142,8 @@ class Runtime:
         self.kb_chats.hold_deletions = lambda engine: (
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
+        #: N7-4: a chat's «Use only these sources» / «Exclude from this chat», kept by the library tools.
+        self.kb_tools.scope = ChatSourceScopes(self.kb_chats.run_ref, self.kb_search_rules)
         self.kb_study_tools = StudyTools(self.kb_study, self.kb_chats.run_ref)
         self.kb_tools.add(self.kb_study_tools.tools())
         self.kb_study.judge = make_judge(self.kb, lambda: self.kb_agents.registry)

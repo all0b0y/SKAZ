@@ -130,3 +130,7 @@
 @media (prefers-reduced-motion: no-preference) {
   .kb-ov__act { transition: opacity 120ms ease; }
 }
+
+/* N7-4: the citation check under an answer; N8: the message a row of the overview jumps to. */
+.kb-notfrom { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-warn); }
+.kb-msg[data-flash] { outline: 2px solid var(--kb-fx-accent); outline-offset: 4px; border-radius: var(--kb-r-md); }
