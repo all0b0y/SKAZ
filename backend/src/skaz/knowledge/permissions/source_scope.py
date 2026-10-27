@@ -128,7 +128,7 @@ def withhold_quotes(sources: object, scope: SourceScope) -> int:
     return count
 
 
-def _study_item_allowed(item: Mapping[str, Any], scope: SourceScope) -> bool:
+def unclear_item_allowed(item: Mapping[str, Any], scope: SourceScope) -> bool:
     """An «Unclear» item stays when its deck/test page isn't excluded and it rests on an allowed source
     (an item without citations: when its page is allowed, or it is in an unsaved block)."""
     page_id = item.get("page_id")
@@ -140,12 +140,26 @@ def _study_item_allowed(item: Mapping[str, Any], scope: SourceScope) -> bool:
     return not isinstance(page_id, str) or not page_id or scope.allows(page_id)
 
 
-def _scope_unclear(payload: dict[str, Any], scope: SourceScope) -> dict[str, Any]:
-    items = [item for item in payload.get("items") or [] if isinstance(item, dict)]
-    kept = [item for item in items if _study_item_allowed(item, scope)]
+def narrow_unclear_items(items: list[dict[str, Any]], scope: SourceScope | None
+                         ) -> tuple[list[dict[str, Any]], int]:
+    """``skaz_study_unclear``'s items as the chat's sources allow them: (kept, how many left out).
+
+    For the study code to call *before* it wraps the items as untrusted text (the registry's own
+    narrowing can't read a wrapped payload): ``kept`` have the quotes of sources outside withheld;
+    say ``UNCLEAR_LEFT_OUT.format(count=left_out)`` when ``left_out``."""
+    if scope is None:
+        return items, 0
+    kept = [item for item in items if unclear_item_allowed(item, scope)]
     for item in kept:
         withhold_quotes(item.get("source"), scope)
-    left_out = len(items) - len(kept)
+    return kept, len(items) - len(kept)
+
+
+def _scope_unclear(payload: dict[str, Any], scope: SourceScope) -> dict[str, Any]:
+    if not isinstance(payload.get("items"), list):
+        return payload  # already wrapped by the study code, which narrowed it itself
+    kept, left_out = narrow_unclear_items([item for item in payload["items"] if isinstance(item, dict)],
+                                          scope)
     payload["items"] = kept
     if isinstance(payload.get("count"), int):
         payload["count"] = len(kept)
@@ -260,12 +274,18 @@ class ChatSourceScopes:
         self.runs = runs
         self.store = store
 
+    def for_chat(self, chat_id: str) -> SourceScope | None:
+        """The chat's sources (``None``: all); a plain read — call it off the event loop."""
+        return scope_of(self.store.chat(chat_id))
+
+    async def for_context(self, context: ToolContext | None) -> SourceScope | None:
+        """The sources of the chat answer a tool call belongs to (``None``: all, or no chat answer)."""
+        ref = self.runs(context.run_id) if context is not None else None
+        return await disk_call(self.for_chat, ref.chat_id) if ref is not None else None
+
     async def __call__(self, tool: str, args: Any,
                        context: ToolContext | None) -> tuple[str | None, ResultNarrowing | None]:
-        ref = self.runs(context.run_id) if context is not None else None
-        if ref is None:
-            return None, None
-        scope = scope_of(await disk_call(self.store.chat, ref.chat_id))
+        scope = await self.for_context(context)
         if scope is None:
             return None, None
         refusal = refuse_args(tool, args, scope)

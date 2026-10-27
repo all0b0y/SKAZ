@@ -128,3 +128,40 @@ async def test_ask_the_agent_withholds_quotes_of_sources_outside_the_chat(env: E
     data = json.loads(rest.split(">", 1)[1].split("</untrusted-data>")[0])
     assert data["answered"] is True and ENTROPY not in rest
     assert data["source"][0]["withheld"] is True and data["sources_withheld"] == 1
+
+
+# -- the predicate the study code calls itself (it wraps its payload as untrusted text, fix/q1-study) --
+
+
+def test_the_study_side_can_narrow_items_before_wrapping_them() -> None:
+    from skaz.knowledge.permissions.source_scope import (
+        UNCLEAR_LEFT_OUT,
+        SourceScope,
+        narrow_unclear_items,
+        scope_payload,
+    )
+
+    scope = SourceScope(None, frozenset({"mat-x", "pg-x"}))
+    items = [
+        {"item_id": "a", "page_id": None, "source": [{"cite": "m:mat-x:1", "quote": "secret"}]},
+        {"item_id": "b", "page_id": "pg-ok", "source": [{"cite": "m:mat-x:1", "quote": "secret"},
+                                                        {"cite": "m:mat-y:2", "quote": "fine"}]},
+        {"item_id": "c", "page_id": "pg-x", "source": [{"cite": "m:mat-y:2", "quote": "fine"}]},
+    ]
+    kept, left_out = narrow_unclear_items(items, scope)
+    assert [item["item_id"] for item in kept] == ["b"] and left_out == 2
+    assert "secret" not in json.dumps(kept) and kept[0]["source"][0]["withheld"] is True
+    assert "2 marked item(s)" in UNCLEAR_LEFT_OUT.format(count=left_out)
+    # Already wrapped by the study code: the registry's narrowing leaves it alone (never empties it).
+    wrapped = {"status": "ok", "count": 1, "items": "<untrusted-data>…</untrusted-data>"}
+    assert scope_payload("skaz_study_unclear", dict(wrapped), scope) == wrapped
+
+
+async def test_the_scope_of_a_chat_or_a_run_is_public(world: Any) -> None:  # noqa: F811
+    runtime, library, ref = world
+    _scoped(runtime, ref.chat_id, ChatRules(excluded=(library.lecture,)))
+    scopes = runtime.kb_tools.scope
+    scope = await asyncio.to_thread(scopes.for_chat, ref.chat_id)
+    assert scope is not None and not scope.allows(library.lecture) and scope.allows(library.textbook)
+    assert await scopes.for_context(ToolContext(RUN_ID, "claude_code")) == scope
+    assert await scopes.for_context(None) is None
