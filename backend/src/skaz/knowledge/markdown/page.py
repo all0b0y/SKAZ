@@ -56,9 +56,9 @@ _HEADING = re.compile(r"(#{1,6})[ \t]+(.*?)[ \t#]*")
 _BLOCK_ID = re.compile(r"c-[A-Za-z0-9-]+")
 #: ``mat-x:seg-12`` or, with the exact quote the claim rests on, ``mat-x:seg-12~<base64url(utf-8)>``.
 #: Marker keys a block keeps besides its own (0.3.1 S: ``for`` an explanation's card, ``q`` a test
-#: question's type, ``role`` of an explanation, ``accept`` a short answer's spellings); values are
-#: plain tokens without spaces.
-EXTRA_KEYS: tuple[str, ...] = ("for", "q", "role", "accept")
+#: question's type, ``role`` of an explanation, ``accept`` a short answer's spellings; N2 ``merged``:
+#: the repeats merged into a statement, ``ingest.merged``); values are plain tokens without spaces.
+EXTRA_KEYS: tuple[str, ...] = ("for", "q", "role", "accept", "merged")
 _EXTRA_VALUE = re.compile(r"[A-Za-z0-9_.:=-]+")
 _CITE = re.compile(r"(mat-[A-Za-z0-9-]+):seg-([1-9]\d*)(?:~([A-Za-z0-9_-]+))?")
 _BLANK_SPLIT = re.compile(r"\n[ \t]*\n")
