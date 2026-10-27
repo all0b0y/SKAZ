@@ -383,6 +383,7 @@ export interface KbChatSearchRules {
   everywhere_once: boolean;
   differs: boolean;
   label: string | null;
+  sources_since?: string | null;
 }
 
 export interface KbChatSearchRulesUpdate {

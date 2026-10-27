@@ -72,6 +72,9 @@ class KbChatSearchRules(BaseModel):
     #: The chat differs from Settings (the composer button says how, ``label``).
     differs: bool
     label: str | None
+    #: Q1 n78 M-7: when the library sources last changed (``None``: unknown or never narrowed); the
+    #: «not from your sources» check counts only answers written since.
+    sources_since: str | None = None
 
 
 class KbChatSearchRulesUpdate(BaseModel):
@@ -143,7 +146,7 @@ def chat_rules(chats: ChatService, store: SearchRulesStore, chat_id: str) -> KbC
         active=rules_in_force(active_rules(settings, chat)), sources_only=chat.sources_only,
         sources=[_source(kb, item) for item in chat.sources],
         excluded=[_source(kb, item) for item in chat.excluded], everywhere_once=chat.everywhere_once,
-        differs=text is not None, label=text)
+        differs=text is not None, label=text, sources_since=chat.sources_since)
 
 
 @router.get("/settings/search")

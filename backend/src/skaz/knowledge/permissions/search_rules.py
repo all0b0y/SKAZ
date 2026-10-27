@@ -33,7 +33,7 @@ from urllib.parse import urlsplit
 
 from ..agents.web import WebLink, link_host
 from ..errors import KnowledgeError
-from ..ids import utc_now
+from ..ids import utc_now, utc_now_ms
 from ..store.database import KnowledgeDatabase
 
 #: Settings key of the global web rules (``settings`` table of ``knowledge.sqlite3``).
@@ -158,6 +158,13 @@ class ChatRules:
     excluded: tuple[str, ...] = ()
     #: «Search everywhere once», clicked on a card: the next search ignores «only these sites».
     everywhere_once: bool = False
+    #: Q1 n78 M-7: when the library sources (only / sources / excluded) last changed (``None``: unknown) —
+    #: the citation check counts only answers written since.
+    sources_since: str | None = None
+
+    @property
+    def library_sources(self) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
+        return self.sources_only, self.sources, self.excluded
 
     @property
     def is_default(self) -> bool:
@@ -167,7 +174,8 @@ class ChatRules:
     def to_json(self) -> dict[str, Any]:
         return {"web": self.web.to_json() if self.web is not None else None,
                 "sources_only": self.sources_only, "sources": list(self.sources),
-                "excluded": list(self.excluded), "everywhere_once": self.everywhere_once}
+                "excluded": list(self.excluded), "everywhere_once": self.everywhere_once,
+                "sources_since": self.sources_since}
 
     @classmethod
     def from_json(cls, data: object) -> ChatRules:
@@ -176,7 +184,8 @@ class ChatRules:
         web = data.get("web")
         return cls(web=WebRules.from_json(web) if isinstance(web, Mapping) else None,
                    sources_only=data.get("sources_only") is True, sources=_ids(data.get("sources")),
-                   excluded=_ids(data.get("excluded")), everywhere_once=data.get("everywhere_once") is True)
+                   excluded=_ids(data.get("excluded")), everywhere_once=data.get("everywhere_once") is True,
+                   sources_since=since if isinstance(since := data.get("sources_since"), str) else None)
 
 
 @dataclass(frozen=True)
@@ -353,6 +362,9 @@ class SearchRulesStore:
         return ChatRules.from_json(json.loads(row[0])) if row else ChatRules()
 
     def set_chat(self, chat_id: str, rules: ChatRules) -> ChatRules:
+        before = self.chat(chat_id)
+        rules = replace(rules, sources_since=before.sources_since
+                        if before.library_sources == rules.library_sources else utc_now_ms())
         with self.db.write() as connection:
             if rules.is_default:
                 connection.execute("DELETE FROM chat_search_rules WHERE chat_id = ?", (chat_id,))
