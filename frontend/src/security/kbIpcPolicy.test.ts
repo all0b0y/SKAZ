@@ -287,6 +287,24 @@ describe('Electron IPC policy — web search the user approves (W-2)', () => {
   });
 });
 
+describe('Electron IPC policy — search rules (N7)', () => {
+  it('lets Settings → Search and a chat\'s panel read and save the rules — one id segment, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/settings/search' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/settings/search', body: { never: ['pinterest.com'] } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/chats/c1/search-rules' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/chats/c1/search-rules', body: { as_global: true } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/chats/c1/search-rules' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/chats/c1/search-rules/everywhere-once' })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/settings/search'], ['DELETE', '/kb/settings/search'], ['PUT', '/kb/settings/search/x'],
+      ['POST', '/kb/chats/c1/search-rules'], ['GET', '/kb/chats/a/b/search-rules'],
+      ['GET', '/kb/chats/c1/search-rules/everywhere-once'], ['POST', '/kb/chats/c1/search-rules/other'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
 describe('Electron IPC policy — SKAZ skills (0.3.1 H)', () => {
   it('lets Settings → Skills read the list and switch a skill — one id segment, nothing wider', () => {
     expect(validateBridgeRequest({ method: 'GET', path: '/kb/settings/skills' })).toBeNull();

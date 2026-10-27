@@ -329,10 +329,13 @@ def test_a_database_of_w2_gains_the_searcher_column() -> None:
     from skaz.knowledge.store.schema import apply_schemas, web_search
 
     old_sql = web_search.SQL.replace("    decided_at  TEXT,\n", "    decided_at  TEXT\n")
+    # N7 (v3) lines go too: this is the table as W-2 (v1) wrote it.
     old_sql = "\n".join(line for line in old_sql.splitlines()
-                        if "searcher" not in line and "W-3b" not in line)
+                        if not any(mark in line for mark in ("searcher", "W-3b", "N7", "(JSON {site",
+                                                             "rules       TEXT", "hidden      TEXT")))
     connection = sqlite3.connect(":memory:")
     apply_schemas(connection, [SimpleNamespace(NAME="web_search", VERSION=1, SQL=old_sql)])
     assert "searcher" not in {row[1] for row in connection.execute("PRAGMA table_info(web_search_requests)")}
     apply_schemas(connection, [web_search])
-    assert "searcher" in {row[1] for row in connection.execute("PRAGMA table_info(web_search_requests)")}
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(web_search_requests)")}
+    assert {"searcher", "rules", "hidden"} <= columns

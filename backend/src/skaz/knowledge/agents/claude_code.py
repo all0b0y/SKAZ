@@ -709,7 +709,11 @@ class ClaudeCodeEngine:
         state.web_asked[use_id] = (allowed, query, verdict.search_id)
         if not allowed:
             return {"behavior": "deny", "message": verdict.message or WEB_REFUSED}
-        # Exactly what the user saw — nothing the model might add later.
+        # Exactly what the user saw — nothing the model might add later. N7: SKAZ's domain filters (the
+        # user's Never / «only these sites») replace the agent's own when the gate gives them.
+        if verdict.allowed_domains is not None or verdict.blocked_domains is not None:
+            domains = {"allowed_domains": verdict.allowed_domains or (),
+                       "blocked_domains": verdict.blocked_domains or ()}
         exact: dict[str, Any] = {"query": query}
         exact.update({key: list(value) for key, value in domains.items() if value})
         return {"behavior": "allow", "updatedInput": exact}

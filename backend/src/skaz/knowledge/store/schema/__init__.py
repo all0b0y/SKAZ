@@ -21,6 +21,7 @@ from . import (
     core,
     decisions,
     ingest,
+    search_rules,
     service,
     speech,
     study,
@@ -48,7 +49,7 @@ class SchemaError(RuntimeError):
 #: Registry order is application order. Append new area modules at the end.
 MODULES: tuple[SchemaModule, ...] = (
     core, service, ingest, decisions, speech, wiki2, chats, study, wiki_execution, wiki_connections,
-    web_search, agent_usage, chat_summaries, agent_sessions, study_items,
+    web_search, agent_usage, chat_summaries, agent_sessions, study_items, search_rules,
 )
 
 _VERSIONS_SQL = """

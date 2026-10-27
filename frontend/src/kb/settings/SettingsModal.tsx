@@ -27,6 +27,7 @@ import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
 import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
+import { SearchRowControl, SearchRowList, SEARCH_ROWS, type SearchRowId } from '../searchRules/SearchSettings';
 
 /**
  * The control of one settings row: live backend data where the route exists (S3/W2/B7 via
@@ -76,6 +77,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
     case 'skill-opencode': return <SkillEngineRow skillId="humanizer" engine="opencode" />;
     case 'me-enabled': return <MeSwitchRow label={row.label} />;
+    case 'search-never': case 'search-only': case 'search-prefer': return <SearchRowControl id={row.id as SearchRowId} label={row.label} />;
     // N6 decision 9: a statement, nothing to switch (no "one-off sessions" option).
     case 'p-sessions': return null;
     case 'lib-folder':
@@ -157,6 +159,7 @@ function Row({ row }: { row: RowDef }) {
       </div>
       <div className="kb-srow__control"><RowControl row={row} /></div>
       {row.id === 'agent-hermes' && <HermesProviders />}
+      {(SEARCH_ROWS as readonly string[]).includes(row.id) && <SearchRowList id={row.id as SearchRowId} />}
     </div>
   );
 }

@@ -20,6 +20,7 @@ from . import (
     notifications,
     permissions,
     search,
+    search_rules,
     settings,
     sources,
     speech,
@@ -54,4 +55,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     web_search.router,
     me.router,
     agent_updates.router,
+    search_rules.router,
 )

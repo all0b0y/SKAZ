@@ -9,6 +9,7 @@ import { isAnswering, isLocal, type AgentChoice } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
+import { ChatSearchButton } from '../searchRules/ChatSearchPanel';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
 import { clearEditor, fillEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
@@ -476,6 +477,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         )}
         <div className="kb-composer__bar">
           <AttachButton onAdd={addAttachments} disabled={false} />
+          {chatId && <ChatSearchButton chatId={chatId} />}
           <span className="kb-composer__spacer" />
           {dictation.phase === 'recording' && (
             <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>

@@ -162,6 +162,14 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/web-searches\/[^/]+\/decide$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
   { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
+  // N7: the user's search rules — Settings → Search, and one chat's changes from the composer panel
+  // (Save / Save as global / Reset to Settings, and «Search everywhere once» clicked on a card).
+  { method: 'GET', pattern: /^\/kb\/settings\/search$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/search$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'PUT', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/search-rules\/everywhere-once$/ },
   // 0.3.1 K1/K3: Hermes' providers in SKAZ's folder. Adding and signing in again open Hermes' own
   // command in Terminal (no key passes through SKAZ); remove / priority carry no secret.
   { method: 'GET', pattern: /^\/kb\/agents\/hermes\/providers$/ },

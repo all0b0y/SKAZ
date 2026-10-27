@@ -69,6 +69,10 @@ class WebVerdict:
     message: str = ""
     #: SKAZ's request id: the search's links are recorded on it.
     search_id: str | None = None
+    #: N7: the domain filters to send instead of the agent's own (``None``: as the agent asked) —
+    #: the user's Never / «only these sites» rules for an engine that filters by domain.
+    allowed_domains: tuple[str, ...] | None = None
+    blocked_domains: tuple[str, ...] | None = None
 
 
 class WebSearchGate(Protocol):
@@ -76,7 +80,7 @@ class WebSearchGate(Protocol):
 
     async def approve(self, query: WebQuery) -> WebVerdict: ...
 
-    async def results(self, search_id: str, links: Sequence[WebLink]) -> None: ...
+    async def results(self, search_id: str, links: Sequence[WebLink]) -> object: ...
 
 
 @dataclass(frozen=True)

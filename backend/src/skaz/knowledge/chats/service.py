@@ -68,6 +68,8 @@ from ..permissions.ask_tool import ASK_TOOL, NATIVE_QUESTIONS
 from ..permissions.broker import RESTARTED, PermissionBroker
 from ..permissions.broker import STOPPED as STOPPED_WAIT
 from ..permissions.questions import QuestionBroker
+from ..permissions.search_rules import TIME_WINDOW_RULES, SearchRulesStore, rules_instructions
+from ..permissions.source_scope import sources_note
 from ..permissions.store import PermissionRecord, QuestionRecord, RunRef
 from ..permissions.web_search import ChatWebGate, WebSearchBroker, WebSearchRecord
 from ..permissions.web_tool import WEB_TOOL
@@ -872,6 +874,10 @@ class ChatService:
         try:
             assert question.input is not None
             request = await disk_call(builder.request, chat, question.input, self._other_chat)
+            # N7-4: the narrowed sources, told before the question each turn (kept in code by the tools).
+            note = await disk_call(self._sources_note, chat.id)
+            if note:
+                request = f"{note}\n\n{request}"
             language = await disk_call(self._wiki_language)
             # Read when the turn is built: switching a skill applies from the next answer (H3).
             skills = await disk_call(enabled_skills, self.kb.settings)
@@ -885,6 +891,10 @@ class ChatService:
                     if self.web is not None and native and web.available else None)
             told = instructions(language, skills)
             web_text = web_instructions(web, tool=not native) if self.web is not None else ""
+            if web_text:  # N7: the chat's search rules (kept by SKAZ in code; the text tells the agent why)
+                rules = await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).active, chat.id)
+                parts = (web_text, rules_instructions(rules), TIME_WINDOW_RULES)
+                web_text = "\n\n".join(part for part in parts if part)
             if web_text:
                 told = f"{told}\n\n{web_text}"
             told = with_me(told, me)  # after every SKAZ rule; a live session gets later changes as notes
@@ -981,6 +991,16 @@ class ChatService:
         run.session = None if decision.replace else session
         run.seeded = tuple(history_keys) if decision.plan.mode == "start" else ()
         return entries
+
+    def _sources_note(self, chat_id: str) -> str:
+        def title(item_id: str) -> str | None:
+            material = self.kb.material_repo.get(item_id)
+            if material is not None:
+                return material.title
+            page = self.kb.page_repo.get(item_id)
+            return page.title if page is not None else None
+
+        return sources_note(SearchRulesStore(self.kb.db, self.kb.settings).chat(chat_id), title)
 
     def _gone_materials(self, prior: Sequence[Message]) -> tuple[str, ...]:
         """Materials this chat cited that are no longer in the library (decision 10)."""

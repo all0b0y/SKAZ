@@ -68,6 +68,8 @@ class ConnectionPart:
 class ToolPart:
     name: str
     label: str
+    #: N8: what the tool read — ``("material" | "page", id)`` — for the chat overview's «Looked at».
+    target: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -147,7 +149,10 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return block_to_json(part)  # P1: an answer block (``answer_blocks.part``)
     if isinstance(part, WikiFixPart):
         return fix_to_json(part)  # P2: «Fix in wiki» (``chats.fix_part``)
-    return {"type": "tool", "name": part.name, "label": part.label}
+    data: dict[str, Any] = {"type": "tool", "name": part.name, "label": part.label}
+    if part.target is not None:
+        data["target"] = {"type": part.target[0], "id": part.target[1]}
+    return data
 
 
 def part_from_json(data: Mapping[str, Any]) -> Part | None:
@@ -165,7 +170,10 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
                       for side in data.get("sides", []))
         return ConnectionPart(sides, str(data.get("inference", "")), _optional(data.get("page_id")))
     if kind == "tool":
-        return ToolPart(str(data.get("name", "")), str(data.get("label", "")))
+        raw = data.get("target")
+        known = isinstance(raw, Mapping) and raw.get("type") in ("material", "page") and bool(raw.get("id"))
+        target = (str(raw.get("type")), str(raw.get("id"))) if known and isinstance(raw, Mapping) else None
+        return ToolPart(str(data.get("name", "")), str(data.get("label", "")), target)
     if kind == "permission":
         return PermissionPart(str(data["id"]))
     if kind == "question":

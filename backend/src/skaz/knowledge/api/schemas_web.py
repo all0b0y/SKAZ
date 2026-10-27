@@ -18,6 +18,26 @@ class KbWebLink(BaseModel):
     site: str
 
 
+class KbRulesInForce(BaseModel):
+    """The web rules applied to a search (also on its card)."""
+
+    never: list[str]
+    #: Never sites from Settings (a chat can't remove them).
+    settings_never: list[str]
+    #: Only these sites; empty: the mode is off.
+    only: list[str]
+    prefer: list[str]
+    origin: Literal["settings", "chat"]
+    #: «Search everywhere once» lifted «only these sites» for this search.
+    everywhere_once: bool
+
+
+class KbHiddenSite(BaseModel):
+    site: str
+    #: Links of this site the rules removed from the result.
+    count: int
+
+
 class KbWebSearchPart(BaseModel):
     """An agent's web search: the exact query waits for Allow once / Allow in this chat / Deny; once
     sent, the links it found — shown apart from the material citations, never wiki sources by
@@ -28,7 +48,8 @@ class KbWebSearchPart(BaseModel):
     engine: KbEngineId
     #: Exactly what is (or would be) sent — nothing else from the chat goes with it.
     query: str
-    #: Domain filters the agent asked for, sent with the query; usually empty.
+    #: Domain filters sent with the query (the agent's own, or the user's rules for an engine that
+    #: filters by domain — N7); usually empty.
     allowed_domains: list[str]
     blocked_domains: list[str]
     status: KbWebSearchStatus
@@ -40,6 +61,10 @@ class KbWebSearchPart(BaseModel):
     #: W-3b: the agent whose own search runs the query in a separate run that gets only the query
     #: (``skaz_web_search`` of Codex, Hermes, OpenCode); ``None``: the asking agent's own search.
     searcher: KbEngineId | None = None
+    #: N7: the user's search rules in force for this query (``None``: none were set).
+    rules: KbRulesInForce | None = None
+    #: N7: links removed by the rules (only counted; never shown or given to the agent).
+    hidden: list[KbHiddenSite] = []
 
 
 class KbWebSearchDecide(BaseModel):

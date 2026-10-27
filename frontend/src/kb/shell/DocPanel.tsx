@@ -6,6 +6,7 @@ import { LivePanel } from '../recording/LivePanel';
 import { WikiFileView } from '../wiki/WikiFileView';
 import { PermissionReview } from '../chat/PermissionReview';
 import { StudyPanel } from '../study/StudyBlock';
+import { ChatOverview } from '../overview/ChatOverview';
 
 const LABEL: Record<RightView['kind'], string> = {
   doc: 'Document',
@@ -14,6 +15,7 @@ const LABEL: Record<RightView['kind'], string> = {
   wikifile: 'Document',
   review: 'Review',
   study: 'Flashcards and tests',
+  overview: 'Chat overview',
 };
 
 /**
@@ -39,6 +41,7 @@ export function DocPanel({ view, expanded, width }: { view: RightView; expanded:
       {view.kind === 'wikifile' && <WikiFileView key={view.name} name={view.name} />}
       {view.kind === 'review' && <PermissionReview key={view.partId} chatId={view.chatId} partId={view.partId} />}
       {view.kind === 'study' && <StudyPanel key={view.studyId} chatId={view.chatId} studyId={view.studyId} />}
+      {view.kind === 'overview' && <ChatOverview key={view.chatId} chatId={view.chatId} />}
     </aside>
   );
 }

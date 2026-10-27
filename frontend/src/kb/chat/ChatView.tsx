@@ -14,6 +14,7 @@ import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
+import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
 import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
@@ -196,6 +197,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         <span className="kb-head__spacer" />
         {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
+        {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}

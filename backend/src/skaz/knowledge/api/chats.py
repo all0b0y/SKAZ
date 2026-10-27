@@ -41,6 +41,7 @@ from ..chats.model import (
 from ..chats.service import ChatConflict, ChatService, ChatView, memory_view
 from ..errors import KnowledgeError
 from ..permissions.broker import PermissionConflict
+from ..permissions.search_rules import ActiveRules
 from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
 from ..permissions.web_search import WebSearchRecord, WebSearchStore
 from ..service import KnowledgeService
@@ -85,8 +86,9 @@ from .schemas_chats import (
     KbSendResult,
     KbTextPart,
     KbToolPart,
+    KbToolTarget,
 )
-from .schemas_web import KbWebLink, KbWebSearchPart
+from .schemas_web import KbHiddenSite, KbRulesInForce, KbWebLink, KbWebSearchPart
 from .schemas_wiki_fix import KbWikiFixPart, wiki_fix_part
 from .study import study_part
 
@@ -218,7 +220,8 @@ class Presenter:
                 type="memory", edit_id=part.edit_id, skill_id=part.skill_id, skill_title=skill_title,
                 action=cast(Any, part.action if part.action in MEMORY_ACTIONS else "append"),
                 summary=summary, undone=part.undone))
-        return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label))
+        target = KbToolTarget(type=cast(Any, part.target[0]), id=part.target[1]) if part.target else None
+        return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label, target=target))
 
     def message(self, message: Message) -> KbMessage:
         given = message.input
@@ -285,7 +288,15 @@ def web_search_part(record: WebSearchRecord) -> KbWebSearchPart:
         type="web_search", id=record.id, engine=cast(Any, record.engine), query=record.query,
         allowed_domains=list(record.allowed_domains), blocked_domains=list(record.blocked_domains),
         status=record.status, auto=record.auto, reason=record.reason, links=links,
-        searcher=cast(Any, record.searcher))
+        searcher=cast(Any, record.searcher),
+        rules=rules_in_force(record.rules) if record.rules is not None else None,
+        hidden=[KbHiddenSite(site=site, count=count) for site, count in record.hidden])
+
+
+def rules_in_force(rules: ActiveRules) -> KbRulesInForce:
+    return KbRulesInForce(never=list(rules.never), settings_never=list(rules.settings_never),
+                          only=list(rules.only), prefer=list(rules.prefer), origin=rules.origin,
+                          everywhere_once=rules.everywhere_once)
 
 
 def question_part(record: QuestionRecord) -> KbQuestionPart:

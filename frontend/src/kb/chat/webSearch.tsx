@@ -11,6 +11,9 @@ import {
   type KbChatWebSearch, type KbWebDecision, type KbWebLink, type KbWebSearchPart,
 } from '../api/webSearch';
 import { agentName } from './permission';
+import { searchEverywhereOnce } from '../api/searchRules';
+import { sitesShort } from '../searchRules/sites';
+import { hasYear, QueryWithYears } from '../searchRules/TimeWindow';
 
 /**
  * W-2: an agent's own web search in the chat. Pending, it shows the exact query — the only thing that
@@ -19,7 +22,7 @@ import { agentName } from './permission';
  * line; the links it found are listed apart from the material citations, each with «Add to wiki».
  */
 export function WebSearchCard({ chatId, part }: { chatId: string; part: KbWebSearchPart }) {
-  if (part.status !== 'pending') return <WebSearchOutcome part={part} />;
+  if (part.status !== 'pending') return <WebSearchOutcome chatId={chatId} part={part} />;
   return <WebSearchRequest chatId={chatId} part={part} />;
 }
 
@@ -63,7 +66,8 @@ function WebSearchRequest({ chatId, part }: { chatId: string; part: KbWebSearchP
         <b>{name}</b>
       </header>
       <div className="kb-perm__body kb-web__body">
-        <p className="kb-web__query" aria-label="Search query">{part.query}</p>
+        <p className="kb-web__query" aria-label="Search query"><QueryWithYears query={part.query} /></p>
+        <RulesLine part={part} />
         <Domains part={part} />
         {searcherLine(part) && <p className="kb-perm__note">{searcherLine(part)}</p>}
         <p className="kb-perm__note">{searchScopeNote(part.searcher ?? part.engine)}</p>
@@ -79,7 +83,29 @@ function WebSearchRequest({ chatId, part }: { chatId: string; part: KbWebSearchP
   );
 }
 
+/** N7: the user's rules in force for this query and where they come from (this chat / Settings). */
+function RulesLine({ part }: { part: KbWebSearchPart }) {
+  const rules = part.rules;
+  if (!rules) return null;
+  const from = rules.origin === 'chat' ? 'this chat' : 'Settings';
+  return (
+    <p className="kb-web__rules" aria-label="Search rules">
+      {rules.only.length > 0 && <span><b>Only:</b> {sitesShort(rules.only, 2)}</span>}
+      {rules.everywhere_once && <span><b>Everywhere once</b> (your click)</span>}
+      {rules.prefer.length > 0 && <span><b>Prefer:</b> {sitesShort(rules.prefer, 2)}</span>}
+      {rules.never.length > 0 && <span><b>Never:</b> {sitesShort(rules.never)}</span>}
+      <span>· {from}</span>
+    </p>
+  );
+}
+
+/** The domain filters sent with the query: with the user's rules, only what the agent added itself. */
 function Domains({ part }: { part: KbWebSearchPart }) {
+  if (part.rules) {
+    const ruled = new Set([...part.rules.never, ...part.rules.only]);
+    const extra = [...part.allowed_domains, ...part.blocked_domains].filter((d) => !ruled.has(d));
+    return extra.length ? <p className="kb-web__domains">The agent also asked: {extra.join(', ')}</p> : null;
+  }
   if (part.allowed_domains.length) return <p className="kb-web__domains">Only these sites: {part.allowed_domains.join(', ')}</p>;
   if (part.blocked_domains.length) return <p className="kb-web__domains">Not these sites: {part.blocked_domains.join(', ')}</p>;
   return null;
@@ -87,6 +113,7 @@ function Domains({ part }: { part: KbWebSearchPart }) {
 
 function outcomeState(part: KbWebSearchPart): { state: string; detail: string | null } {
   if (part.status === 'allowed') return { state: part.auto ? 'Searched the web · allowed in this chat' : 'Searched the web', detail: null };
+  if (part.status === 'denied' && part.auto) return { state: 'Search blocked by your rules', detail: 'Nothing was sent' };
   if (part.status === 'denied') return { state: 'Search denied', detail: 'Nothing was sent' };
   return { state: 'Search cancelled', detail: 'Nothing was sent' };
 }
@@ -94,7 +121,56 @@ function outcomeState(part: KbWebSearchPart): { state: string; detail: string | 
 /** Web results v1 «Folded line + quiet rows» (2026-10-21): this many rows show before «Show N more». */
 const FIRST_LINKS = 5;
 
-function WebSearchOutcome({ part }: { part: KbWebSearchPart }) {
+/** N7: «N hidden by your rules» — which sites, on click. Hidden links are only counted, never shown. */
+function HiddenByRules({ part }: { part: KbWebSearchPart }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement | null>(null);
+  const total = (part.hidden ?? []).reduce((n, h) => n + h.count, 0);
+  if (!total) return null;
+  return (
+    <>
+      <button ref={anchor} type="button" className="kb-web-hidden" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        · {total} hidden by your rules
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} label="Links hidden by your rules" placement="bottom-start" width={260}>
+        <div className="kb-web-hidden-pop">
+          <p className="kb-muted">The agent didn’t get these links:</p>
+          <ul>{(part.hidden ?? []).map((h) => <li key={h.site}>{h.site}{h.count > 1 ? ` · ${h.count}` : ''}</li>)}</ul>
+        </div>
+      </Popover>
+    </>
+  );
+}
+
+/** N7: «only these sites» found nothing — searching everywhere is the user's click, once; Never stays. */
+function EverywhereOnce({ chatId, part }: { chatId: string; part: KbWebSearchPart }) {
+  const { client } = useServices();
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  if (!part.rules?.only.length || part.links.length > 0 || part.status !== 'allowed') return null;
+  const lift = async () => {
+    setState('busy');
+    setError(null);
+    try {
+      await searchEverywhereOnce(client, chatId);
+      setState('done');
+    } catch (e) {
+      setError(errorText(e));
+      setState('idle');
+    }
+  };
+  return (
+    <div className="kb-web-once" role="group" aria-label="Nothing on the allowed sites">
+      <p>Only these sites are allowed in this chat. Blocked sites stay blocked.</p>
+      {state === 'done'
+        ? <p role="status">The next search in this chat looks everywhere, once. Ask again.</p>
+        : <Button size="sm" icon="search" busy={state === 'busy'} disabled={state === 'busy'} onClick={() => void lift()}>Search everywhere once</Button>}
+      {error && <p className="kb-inline-error kb-inline-error--flat" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function WebSearchOutcome({ chatId, part }: { chatId: string; part: KbWebSearchPart }) {
   const { state, detail } = outcomeState(part);
   const icon = part.status === 'allowed' ? 'web' : part.status === 'denied' ? 'denied' : 'cancelled';
   const [open, setOpen] = useState(false);
@@ -106,6 +182,7 @@ function WebSearchOutcome({ part }: { part: KbWebSearchPart }) {
     return (
       <m.div className="kb-web-done kb-web-done--links" data-status={part.status} role="group" aria-label={label}
         initial={{ opacity: 0 }} animate={{ opacity: 1, transition: SPRING_SMALL }}>
+        <div className="kb-web-fold-row">
         <button type="button" className="kb-web-fold" aria-expanded={open} onClick={() => setOpen((v) => !v)}
           aria-label={`${state} · ${part.query} · ${count} ${count === 1 ? 'link' : 'links'}`}>
           <Icon name="web" size={14} />
@@ -114,9 +191,11 @@ function WebSearchOutcome({ part }: { part: KbWebSearchPart }) {
           <span className="kb-web-fold__count">· {count} {count === 1 ? 'link' : 'links'}</span>
           <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
         </button>
+        <HiddenByRules part={part} />
+        </div>
         {open && (
           <ul className="kb-web__links" aria-label="From the web">
-            {shown.map((link) => <WebLinkRow key={link.url} link={link} />)}
+            {shown.map((link) => <WebLinkRow key={link.url} link={link} undated={hasYear(part.query)} />)}
             {!all && count > FIRST_LINKS && (
               <li className="kb-web__more-row">
                 <button type="button" className="kb-web__more" onClick={() => setAll(true)}>Show {count - FIRST_LINKS} more</button>
@@ -135,13 +214,16 @@ function WebSearchOutcome({ part }: { part: KbWebSearchPart }) {
         <b>{state}</b>
         <span className="kb-perm-done__line" title={part.query}>{part.query}</span>
         {detail && <span className="kb-perm-done__detail">{detail}</span>}
+        {part.status === 'allowed' && part.rules?.only.length ? <span className="kb-perm-done__detail">· 0 links on allowed sites</span> : null}
+        <HiddenByRules part={part} />
       </div>
+      <EverywhereOnce chatId={chatId} part={part} />
     </m.div>
   );
 }
 
 /** One web result: title · site on one quiet line; «Add to wiki» is an icon shown on hover/focus. */
-function WebLinkRow({ link }: { link: KbWebLink }) {
+function WebLinkRow({ link, undated = false }: { link: KbWebLink; undated?: boolean }) {
   const { client } = useServices();
   const [state, setState] = useState<'idle' | 'busy' | 'added'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -161,6 +243,8 @@ function WebLinkRow({ link }: { link: KbWebLink }) {
       <div className="kb-web__row">
         <a className="kb-web__title" href={link.url} target="_blank" rel="noreferrer noopener" title={link.url}>{link.title}</a>
         <span className="kb-web__site">{link.site}</span>
+        {/* N7-5: a time-bound search: links carry no date, so none is passed off as recent. */}
+        {undated && <span className="kb-web__undated" title="Web results come without a date">date unknown</span>}
         <span className="kb-perm__spacer" />
         {state === 'added'
           ? <span className="kb-web__added" role="status" title="Added to the library — the wiki follows"><Icon name="check" size={13} />In library</span>

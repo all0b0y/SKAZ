@@ -19,6 +19,8 @@ import { StudyInChat } from '../study/StudyBlock';
 import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
+import { NotFromSources } from '../searchRules/NotFromSources';
+import { splitWindow, TimeWindowChip } from '../searchRules/TimeWindow';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
 import { isMemoryPart } from '../me/api';
@@ -243,6 +245,8 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
+  // N7-5: «Looking at 2024–2026» on the first line becomes a chip whose menu changes the window.
+  const timed = useMemo(() => splitWindow(message.parts), [message.parts]);
   // D-12: a diagram of this answer that can't be drawn asks this chat's agent for a fix (diagramFix.ts).
   const fixDiagram = useDiagramFix(message.id);
   const lastUnclear = useLastUnclearAnswer(chatId);
@@ -257,12 +261,14 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
         <SourcesProvider index={sources}>
           <AnswerSelectScope messageId={message.id}>
             <DiagramFixProvider value={fixDiagram}>
-              <Parts chatId={chatId} parts={message.parts} />
+              {timed.window && <TimeWindowChip window={timed.window} disabled={message.state === 'streaming'} />}
+              <Parts chatId={chatId} parts={timed.parts as typeof message.parts} />
             </DiagramFixProvider>
           </AnswerSelectScope>
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
+      <NotFromSources chatId={chatId} message={message} />
       {/* P3-b: «Clear now» under the chat's last answer that read the «Unclear» marks. */}
       {message.state === 'done' && lastUnclear === message.id && <UnclearClearRow chatId={chatId} />}
       {interrupted && message.failure && (
@@ -325,7 +331,7 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
   }, [editing]);
   const close = () => { refocus.current = true; setEditing(false); };
   return (
-    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef}>
+    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef} data-message-id={message.id}>
       {input.selection && <SelectionChip selection={input.selection} />}
       {editing && actions ? (
         <QuestionEditor input={input} onCancel={close} onSend={async (next) => {

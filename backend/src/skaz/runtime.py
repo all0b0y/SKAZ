@@ -30,6 +30,8 @@ from .knowledge.me.tools import attach as attach_me_tools
 from .knowledge.permissions.ask_tool import ask_tool
 from .knowledge.permissions.broker import PermissionBroker
 from .knowledge.permissions.questions import QuestionBroker
+from .knowledge.permissions.search_rules import SearchRulesStore
+from .knowledge.permissions.source_scope import ChatSourceScopes
 from .knowledge.permissions.store import ControlStore
 from .knowledge.permissions.waits import RunWaits
 from .knowledge.permissions.web_search import WebSearchBroker, WebSearchStore
@@ -127,6 +129,9 @@ class Runtime:
                                      text_layer=lambda: self.kb_ingest.text_layer)
         #: W-2: agents' own web searches wait for Allow once / Allow in this chat / Deny here.
         self.kb_web = WebSearchBroker(WebSearchStore(self.kb.db), self.kb_waits)
+        #: N7: the user's search rules (Settings → Search, a chat's changes); every web search obeys them.
+        self.kb_search_rules = SearchRulesStore(self.kb.db, self.kb.settings)
+        self.kb_web.rules = self.kb_search_rules.take_active
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer,
                                     permissions=self.kb_permissions, questions=self.kb_questions,
@@ -137,6 +142,8 @@ class Runtime:
         self.kb_chats.hold_deletions = lambda engine: (
             self.kb_agents.installs.running_for(cast(Any, engine)) is not None)
         self.kb_wiki_edits.runs = self.kb_chats.run_ref
+        #: N7-4: a chat's «Use only these sources» / «Exclude from this chat», kept by the library tools.
+        self.kb_tools.scope = ChatSourceScopes(self.kb_chats.run_ref, self.kb_search_rules)
         self.kb_study_tools = StudyTools(self.kb_study, self.kb_chats.run_ref)
         self.kb_tools.add(self.kb_study_tools.tools())
         self.kb_study.judge = make_judge(self.kb, lambda: self.kb_agents.registry)
