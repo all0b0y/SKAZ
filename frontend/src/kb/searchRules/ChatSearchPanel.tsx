@@ -222,7 +222,7 @@ function SearchPanel({ chatId, rules, onSaved, onClose }: {
                   </li>
                 ))}
               </ul>
-              <p className="kb-spanel__note">Excluded from this chat: the agent doesn’t get them.</p>
+              <p className="kb-spanel__note">Excluded from this chat: from now on the agent doesn’t get them. What it already read earlier in this chat may stay in the conversation.</p>
             </>
           )}
           {!draft.sourcesOnly && draft.excluded.length === 0 && (
