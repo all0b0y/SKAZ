@@ -961,6 +961,14 @@ class StudyService:
         self._spawn(self._judge(block, question, given), f"study-judge-{block_id}")
         return block
 
+    def running(self, block_id: str, item_id: str, idea_id: str | None = None) -> bool:
+        """The agent checks this answer (or rechecks this key idea) right now.
+
+        The stored ``checking`` / ``rechecking`` flags outlive their task when the app quits mid-check
+        (Q1 p3 M3); only this in-memory set says the work still runs.
+        """
+        return ((block_id, item_id) if idea_id is None else (block_id, item_id, idea_id)) in self._judging
+
     def _spawn(self, work: Coroutine[Any, Any, None], name: str) -> None:
         task = asyncio.create_task(work, name=name)
         self._tasks.add(task)

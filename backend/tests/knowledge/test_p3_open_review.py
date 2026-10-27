@@ -292,3 +292,36 @@ async def test_a_review_arriving_after_see_result_updates_the_total(world: Any) 
     await study.settle()
     result = study.result(study.get(block.id))
     assert result["correct"] == 0.5 and result["rows"][0]["status"] == "almost"
+
+
+async def test_a_check_or_recheck_cut_off_by_a_restart_never_shows_as_running_forever(
+    world: Any, kb_client: httpx.AsyncClient  # noqa: F811
+) -> None:
+    """Q1 p3 M3: the stored «checking» / «rechecking» flags count only while SKAZ really runs the check."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block, item_id = await _made(runtime, library, _open_with_ideas(library))
+    release = asyncio.Event()
+    inner = FakeJudge(REVIEW)
+
+    async def slow(call: JudgeCall) -> Mapping[str, Any]:
+        await release.wait()
+        return await inner(call)
+
+    study.judge = slow
+    await study.check_open(block.id, item_id, ANSWER)
+    running = (await kb_client.get(f"/kb/study/{block.id}")).json()["questions"][0]["response"]
+    assert running["checking"] is True and running["error"] is None  # a live check shows as running
+    release.set()
+    await study.settle()
+
+    # The app quit mid-check / mid-recheck: the flags stay stored, the tasks are gone.
+    ideas = study.attempt(study.get(block.id)).answers["items"][item_id]["review"]["ideas"]
+    await asyncio.to_thread(study._change_answer, block.id, item_id,
+                            lambda e: study._with_idea(e, ideas[1]["id"], rechecking=True))
+    response = (await kb_client.get(f"/kb/study/{block.id}")).json()["questions"][0]["response"]
+    assert response["review"]["ideas"][1]["rechecking"] is False
+    await asyncio.to_thread(study._put_answer, study.get(block.id), item_id,
+                            {"text": ANSWER, "checked": False, "score": None, "checking": True})
+    response = (await kb_client.get(f"/kb/study/{block.id}")).json()["questions"][0]["response"]
+    assert response["checking"] is False and "Try again" in response["error"]
