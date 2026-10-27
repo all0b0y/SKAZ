@@ -126,8 +126,21 @@ export function ActiveTab({ host, activeKey, variant }: ActiveTabProps) {
     running.current.push(() => { out.cancel(); ghost.remove(); inn.cancel(); });
   };
 
+  /** The host's resize observer and the children it watches (kept in step with the list, FIX1 R3). */
+  const observer = useRef<{ ro: ResizeObserver; watched: Set<Element> } | null>(null);
+  /** Watch the host's current children: rows or groups added after mount move the open row too. */
+  const observeChildren = () => {
+    const el = host.current;
+    const o = observer.current;
+    if (!el || !o) return;
+    const now = new Set<Element>(el.children);
+    for (const child of o.watched) if (!now.has(child)) { o.ro.unobserve(child); o.watched.delete(child); }
+    for (const child of now) if (!o.watched.has(child)) { o.ro.observe(child); o.watched.add(child); }
+  };
+
   /** Place the tab on the open row; a change of row plays the switch. */
   const sync = () => {
+    observeChildren();
     const tab = tabRef.current;
     const el = host.current;
     if (!tab || !el) return;
@@ -168,8 +181,10 @@ export function ActiveTab({ host, activeKey, variant }: ActiveTabProps) {
     };
     const ro = new ResizeObserver(remeasure);
     ro.observe(el);
-    for (const child of el.children) ro.observe(child);
-    return () => ro.disconnect();
+    observer.current = { ro, watched: new Set() };
+    observeChildren();
+    return () => { ro.disconnect(); observer.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, variant]);
 
   useLayoutEffect(() => () => stopAll(), []);

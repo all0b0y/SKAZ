@@ -124,6 +124,36 @@ describe('ActiveTab (decisions 24–25)', () => {
     rows.forEach((r) => expect(r.isConnected).toBe(true));
   });
 
+  it('rows added after mount are observed too: when one of them changes size, the tab follows its row (FIX1 R3)', () => {
+    const observers: Array<{ cb: ResizeObserverCallback; els: Set<Element> }> = [];
+    class FakeResizeObserver {
+      els = new Set<Element>();
+      constructor(cb: ResizeObserverCallback) { observers.push({ cb, els: this.els }); }
+      observe(el: Element) { this.els.add(el); }
+      unobserve(el: Element) { this.els.delete(el); }
+      disconnect() { this.els.clear(); }
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    try {
+      const { rerender } = render(<List open="a" ids={['a']} />);
+      // A group of rows arrives above the open one after mount (e.g. the list finished loading).
+      rerender(<List open="a" ids={['z', 'a']} />);
+      const added = document.querySelector('[data-tab-key="z"]')!.closest('li')!;
+      const watching = observers.filter((o) => o.els.has(added));
+      expect(watching.length).toBeGreaterThan(0);
+      // That row grows: the open row moves down with no React render at all.
+      const open = document.querySelector<HTMLElement>('[data-tab-key="a"]')!;
+      open.getBoundingClientRect = () => ({ top: 50, left: 0, right: 100, bottom: 80, width: 100, height: 30, x: 0, y: 50, toJSON() {} }) as DOMRect;
+      act(() => { for (const o of watching) o.cb([], {} as ResizeObserver); });
+      expect(tab().style.top).toBe('50px');
+      // A removed row is no longer watched.
+      rerender(<List open="a" ids={['a']} />);
+      expect(observers.some((o) => o.els.has(added))).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('the spring easing settles at 1 and keeps the motion visualDuration × 1.6 when it bounces', () => {
     const s = springEasing(0.3, 0.12);
     expect(s.duration).toBe(480);
