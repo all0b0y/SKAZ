@@ -21,6 +21,7 @@ import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
 import { DitherStage } from '../fx/dither/DitherStage';
 import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
+import { useFollowSwitch } from './switchMotion';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -117,6 +118,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const [actionError, setActionError] = useState<{ id: string; text: string } | null>(null);
   const agents = useAgents((s) => s.agents);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
   const stick = useRef(true);
   const reduced = useReducedMotion() ?? false;
   const { leaving, bornHere } = useFirstMessageLeave(chats, reduced);
@@ -124,6 +126,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const chat = open?.chat ?? null;
   const questionActions = useQuestionActions(currentId, chat);
   const title = chat?.title ?? summary?.title ?? 'New chat';
+  // Decision 25: switching chats, the thread follows the tab's direction; the title crossfades.
+  useFollowSwitch(currentId, hidden, scrollRef, titleRef);
 
   useEffect(() => {
     if (!currentId) return undefined;
@@ -192,7 +196,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
             return null;
           }} />
         ) : (
-          <h1 className="kb-head__title">{title}</h1>
+          <h1 className="kb-head__title" ref={titleRef}>{title}</h1>
         )}
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         <span className="kb-head__spacer" />

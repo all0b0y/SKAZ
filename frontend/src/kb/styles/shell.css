@@ -1,12 +1,16 @@
 /* Window shell: title bar, rail, side panel, centre, document panel. Heights are fixed so
-   nothing shifts when sections or panels change (decision 13, "nothing moves"). */
+   nothing shifts when sections or panels change (decision 13, "nothing moves").
+   Inset sheets (DESIGN-SYSTEM.md decision 24 «Windows»): the title bar, the rail and the side panel
+   are one ground (--kb-side, no lines between them); the centre and the document panel are sheets
+   (--kb-pane, radius xl, no shadow at rest) with a --kb-gutter gap to the right and bottom of the
+   window and between them. The resizers live in the gutters (shell/layout.ts counts them). */
 
 .kb-app {
   display: flex;
   flex-direction: column;
   height: 100vh;
   min-width: 0;
-  background: var(--kb-bg);
+  background: var(--kb-side);
 }
 
 /* ---- Title bar ---- */
@@ -19,7 +23,6 @@
   padding: 0 var(--kb-sp-12) 0 80px;
   transition: padding-left 200ms ease;
   background: var(--kb-side);
-  border-bottom: 1px solid var(--kb-line);
   -webkit-app-region: drag;
 }
 /* Full screen: no traffic lights, so the toggle moves to the edge (M-1). */
@@ -55,7 +58,14 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 .kb-row[aria-disabled='true'] { opacity: 0.55; }
 
 /* ---- Body ---- */
-.kb-body { flex: 1; display: flex; min-height: 0; min-width: 0; position: relative; }
+.kb-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  padding: 0 var(--kb-gutter) var(--kb-gutter) 0;
+}
 
 /* ---- Rail (summary v39: 52px, icons only; names slide out on hover/focus, v43 B) ---- */
 .kb-rail {
@@ -66,8 +76,7 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   align-items: center;
   gap: var(--kb-sp-6);
   padding: var(--kb-sp-10) 0;
-  background: var(--kb-rail);
-  border-right: 1px solid var(--kb-line);
+  background: var(--kb-side);
 }
 .kb-rail__list { display: flex; flex-direction: column; gap: var(--kb-sp-6); }
 .kb-rail__spacer {
@@ -95,20 +104,26 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 }
 .kb-rail__item:hover { color: var(--kb-text); background: var(--kb-accent-soft); }
 .kb-rail__item.is-open { color: var(--kb-text); background: var(--kb-accent-soft); }
-.kb-rail__fill {
-  position: absolute;
-  inset: 0;
-  border-radius: var(--kb-r-md);
-  background: var(--kb-fill);
-}
+/* Quiet rail (decision 24 «Left menu»): the active section is a soft tile, and one accent mark at
+   the rail's left edge slides to it (Rail.tsx, SPRING_SMALL). */
+.kb-rail__item.is-active { color: var(--kb-text); background: var(--kb-accent-soft); }
 .kb-rail__icon { position: relative; }
-.kb-rail__item.is-active { color: var(--kb-on-fill); }
-.kb-rail__item.is-active:hover { background: transparent; }
-.kb-rail__item .kb-badge { top: -2px; right: -4px; }
-.kb-rail__item .kb-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 2px var(--kb-rail); }
+.kb-rail__mark {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 20px;
+  border-radius: 0 var(--kb-r-2xs) var(--kb-r-2xs) 0;
+  background: var(--kb-accent);
+  pointer-events: none;
+  z-index: 2;
+}
+.kb-rail__item .kb-badge { top: -2px; right: -4px; box-shadow: 0 0 0 2px var(--kb-side); }
+.kb-rail__item .kb-dot { position: absolute; top: 4px; right: 4px; box-shadow: 0 0 0 2px var(--kb-side); }
 
 /* Names slide out of the button (v43 B): the highlight extends to the right over the next column
-   and shows the name beside the icon — one shape; the active item keeps its filled colours.
+   and shows the name beside the icon — one shape; on the active item too (the soft tile's colours).
    The rail paints above the columns after it so the name is never covered. */
 .kb-rail { position: relative; z-index: 6; }
 .kb-rail__label {
@@ -131,9 +146,7 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   animation: kb-rail-reveal 160ms ease-out both;
 }
 .kb-rail__label > .kb-icon { flex: none; }
-.kb-rail__item.is-active .kb-rail__label { background: var(--kb-fill); color: var(--kb-on-fill); }
 .kb-rail__hint { color: var(--kb-muted); font-size: var(--t-xs); font-weight: 400; }
-.kb-rail__item.is-active .kb-rail__hint { color: inherit; opacity: 0.6; }
 .kb-rail__item .kb-dot { z-index: 2; }
 /* The unread count moves into the name ("5 unread") while it is out. */
 .kb-rail__item[data-labelled] .kb-badge { visibility: hidden; }
@@ -174,8 +187,10 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   flex-direction: column;
   min-width: 0;
   background: var(--kb-side);
-  border-right: 1px solid var(--kb-line);
-  overflow: hidden;
+  /* Clipped like before, but the list may reach across the gutter to the centre sheet (the bridge
+     of the open chat, decision 24 «Chats»). */
+  overflow: clip;
+  overflow-clip-margin: var(--kb-gutter);
 }
 .kb-head--side { border-bottom: 0; padding: 0 var(--kb-sp-12); }
 .kb-side__title {
@@ -194,10 +209,17 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 var(--kb-sp-8) var(--kb-sp-12);
+  /* The scroll box reaches across the gutter to the centre sheet, so the open chat's tab can run
+     into its window; the rows keep their place. No scrollbar: it would stand in the gutter (the
+     resizer) and cut the bridge (trackpad and wheel scroll as before). */
+  margin-right: calc(-1 * var(--kb-gutter));
+  padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
+.kb-side__scroll::-webkit-scrollbar { display: none; }
 .kb-side__pad { padding: var(--kb-sp-4) var(--kb-sp-8); }
 .kb-side__wait { display: flex; justify-content: center; padding: var(--kb-sp-20); }
 .kb-side__note { color: var(--kb-muted); font-size: var(--t-sm); padding: var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-6); }
@@ -233,6 +255,9 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 }
 button.kb-row:hover:not([aria-disabled='true']) { background: color-mix(in srgb, var(--kb-accent-soft) 70%, transparent); }
 .kb-row.is-current { background: var(--kb-accent-soft); font-weight: 600; }
+/* Rows whose open state is drawn by one moving tab (ui/ActiveTab.tsx): the row itself stays clear. */
+.kb-row--tabbed.is-current,
+button.kb-row--tabbed.is-current:hover:not([aria-disabled='true']) { background: transparent; }
 .kb-row--action { font-weight: 600; }
 .kb-row--static { color: var(--kb-text); }
 p.kb-row--static { margin-top: var(--kb-sp-4); }
@@ -251,30 +276,23 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 .kb-folder__more[aria-expanded='true'] { opacity: 1; }
 .kb-namefield { padding: var(--kb-sp-2) var(--kb-sp-4); }
 
-/* ---- Resizers (overlay the column edge; no width of their own) ---- */
+/* ---- Resizers: each one is the gutter between two columns ---- */
 .kb-resizer {
   position: relative;
-  width: 0;
+  width: var(--kb-gutter);
   flex: none;
   z-index: 3;
   cursor: col-resize;
   touch-action: none;
 }
-.kb-resizer::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  width: 8px;
-}
 .kb-resizer::after {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -1px;
+  top: var(--kb-r-xl);
+  bottom: var(--kb-r-xl);
+  left: calc(50% - 1px);
   width: 2px;
+  border-radius: 1px;
   background: transparent;
   transition: background-color 0.12s ease;
 }
@@ -289,6 +307,8 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
   display: flex;
   flex-direction: column;
   background: var(--kb-pane);
+  border-radius: var(--kb-r-xl);
+  overflow: hidden;
   position: relative;
 }
 .kb-center[hidden] { display: none; }
@@ -300,10 +320,13 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
   flex-direction: column;
   min-width: 0;
   background: var(--kb-pane);
-  border-left: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-xl);
   overflow: hidden;
 }
 .kb-doc.is-expanded { flex: 1 1 auto; }
+/* Headers inside a sheet: a quieter line than between panels. */
+.kb-center .kb-head,
+.kb-doc .kb-head { border-bottom-color: color-mix(in srgb, var(--kb-line) 60%, transparent); }
 .kb-head--doc { padding: 0 var(--kb-sp-10) 0 var(--kb-sp-14); }
 .kb-doc__type {
   display: inline-flex;
@@ -348,3 +371,47 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 .kb-wsearch__hit .kb-row__text { display: flex; flex-direction: column; gap: var(--kb-sp-2); min-width: 0; }
 .kb-wsearch__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-wsearch__snippet { color: var(--kb-muted); font-size: var(--t-xs); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+
+/* ---- The open item's tab (ui/ActiveTab.tsx, decisions 24–25) ----
+   One element per list under the rows; it never takes pointer events (the resizer under the
+   bridge keeps working). Rows paint above it. */
+.kb-tabhost { position: relative; }
+.kb-tabhost .kb-row--tabbed { position: relative; }
+.kb-tablayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.kb-tab { position: absolute; right: 0; pointer-events: none; }
+/* Bridge: a piece of the centre sheet that runs from the row into it, with two concave corners. */
+.kb-tab--bridge { background: var(--kb-pane); border-radius: var(--kb-r-sm) 0 0 var(--kb-r-sm); }
+.kb-tab--bridge::before,
+.kb-tab--bridge::after { content: ''; position: absolute; right: 0; width: 10px; height: 10px; }
+.kb-tab--bridge::before { top: -10px; background: radial-gradient(circle at 0 0, transparent 9.5px, var(--kb-pane) 10px); }
+.kb-tab--bridge::after { bottom: -10px; background: radial-gradient(circle at 0 100%, transparent 9.5px, var(--kb-pane) 10px); }
+/* Soft tile: the row's size. */
+.kb-tab--soft { right: auto; background: var(--kb-accent-soft); border-radius: var(--kb-r-sm); }
+
+/* ---- Wiki kind sections fold in place (decisions 24 «Wiki», 27) ---- */
+.kb-wfold__head { margin: 0; font: inherit; }
+.kb-wfold__toggle { gap: var(--kb-sp-6); }
+.kb-wfold__label { font-weight: 600; }
+.kb-wfold__chev { flex: none; color: var(--kb-muted); transition: transform 0.2s ease; }
+.kb-wfold__chev.is-open { transform: rotate(90deg); }
+.kb-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kb-fold.is-open { grid-template-rows: 1fr; }
+/* clip, not hidden: no scroll container, so the selection bar still sticks to the side list. */
+.kb-fold__in { min-height: 0; overflow: clip; }
+.kb-fold.is-open > .kb-fold__in { overflow-clip-margin: var(--kb-sp-4); }
+.kb-wiki-more { margin-top: var(--kb-sp-8); }
+html[data-motion='calm'] .kb-fold,
+html[data-motion='calm'] .kb-wfold__chev { transition: none; }
+@media (prefers-reduced-motion: reduce) { .kb-fold, .kb-wfold__chev { transition: none; } }

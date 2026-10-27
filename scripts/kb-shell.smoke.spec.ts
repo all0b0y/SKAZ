@@ -508,8 +508,10 @@ test('package 2 on the real backend: chats, notifications, ⌘K, all materials, 
       await page.reload();
       await rail('Wiki').click();
     }
-    await page.getByRole('region', { name: 'Wiki' }).getByRole('button', { name: /^Concepts/ }).click();
-    await page.getByRole('region', { name: 'Wiki' }).getByRole('button', { name: 'Entropy' }).click();
+    // Kind sections fold in place (decision 24 «Wiki»); Concepts is open unless a stored choice folded it.
+    const concepts = page.getByRole('region', { name: 'Wiki' }).getByRole('button', { name: /^Concepts/ });
+    if ((await concepts.getAttribute('aria-expanded')) !== 'true') await concepts.click();
+    await page.getByRole('region', { name: 'Wiki' }).getByRole('grid', { name: 'Concepts' }).getByRole('button', { name: 'Entropy' }).click();
     await expect(doc().getByRole('heading', { level: 2, name: 'Entropy' })).toBeVisible();
     await expect(doc().getByText('Entropy grows with the number of microstates W: S = k·ln W.')).toBeVisible();
     await expect(doc().getByText('Agent explanation')).toBeVisible();

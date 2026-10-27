@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { m } from 'motion/react';
 import { Icon, useIconPlay, type IconName } from '../ui';
+import { SPRING_SMALL } from '../ui/motion';
 import { useChats, useNotifications, usePrefs, useServices, useUi } from '../state/context';
 import { isWaitingForUser } from '../api/permissions';
 import type { Section } from '../state/prefs';
@@ -136,7 +137,6 @@ function RailButton({ id, label, hint, icon, iconPlay, active = false, open = fa
       onFocus={() => { if (labels.fromKeyboard()) labels.show(id, true); }}
       onBlur={() => labels.hide(id)}
     >
-      {active && <m.span layoutId="kb-rail-active" className="kb-rail__fill" aria-hidden="true" />}
       <Icon name={icon} size={18} className="kb-rail__icon" play={iconPlay} />
       {labels.shown === id && (
         <span className="kb-rail__label" aria-hidden="true" data-testid="rail-label" data-overlay="">
@@ -148,6 +148,20 @@ function RailButton({ id, label, hint, icon, iconPlay, active = false, open = fa
       {children}
     </button>
   );
+}
+
+/** Mark height (css px): a 3×20 accent bar at the rail's left edge, centred on the active item. */
+export const RAIL_MARK_H = 20;
+
+/** Where the sliding mark stands: centred on the active item (null = no active item). */
+function useRailMarkY(nav: RefObject<HTMLElement | null>, activeId: string | null): number | null {
+  const [y, setY] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const item = activeId === null ? null
+      : [...(nav.current?.querySelectorAll<HTMLElement>('.kb-rail__item[data-section]') ?? [])].find((el) => el.dataset.section === activeId);
+    setY(item ? item.offsetTop + (item.offsetHeight - RAIL_MARK_H) / 2 : null);
+  }, [nav, activeId]);
+  return y;
 }
 
 /**
@@ -172,6 +186,10 @@ export function Rail() {
   // U1: an agent update not seen yet — a dot only (no popup), and Settings opens on Accounts & keys.
   const agentUpdate = useAgentUpdatesDot();
   const labels = useRailLabels();
+  const navRef = useRef<HTMLElement | null>(null);
+  // Today's rule for the active item: the side panel is open on that section (the graph counts as Wiki).
+  const activeId = sideOpen ? ITEMS.find((item) => section === item.id || (item.id === 'wiki' && section === 'graph'))?.id ?? null : null;
+  const markY = useRailMarkY(navRef, activeId);
   // 0.3.1 P4: a chat other than the one in front of you waits for an answer — a dot, nothing pops up.
   const waiting = useChats((s) => {
     const shown = center === 'chat' ? s.currentId : null;
@@ -179,10 +197,15 @@ export function Rail() {
   });
 
   return (
-    <nav className="kb-rail" data-pane="rail" aria-label="Sections">
+    <nav className="kb-rail" data-pane="rail" aria-label="Sections" ref={navRef}>
+      {activeId !== null && markY !== null && (
+        // One mark that slides to the active section (decision 24 «Left menu»): no mark while the side panel is closed.
+        <m.span className="kb-rail__mark" data-testid="rail-mark" data-section={activeId} aria-hidden="true"
+          initial={false} animate={{ y: markY }} transition={SPRING_SMALL} />
+      )}
       <ul className="kb-rail__list">
         {ITEMS.map((item) => {
-          const active = sideOpen && (section === item.id || (item.id === 'wiki' && section === 'graph'));
+          const active = item.id === activeId;
           const badge = item.id === 'notifications' ? unread : 0;
           const waits = item.id === 'chats' && waiting;
           return (

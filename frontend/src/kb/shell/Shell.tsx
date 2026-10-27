@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { usePrefs, useServices, useUi } from '../state/context';
-import { RIGHT_MAX, RIGHT_MIN, SIDE_MAX, SIDE_MIN } from '../state/prefs';
+import { RIGHT_MIN, SIDE_MIN } from '../state/prefs';
 import { AllMaterials } from '../materials/AllMaterials';
 import { ChatCenter } from './ChatCenter';
 import { DocPanel } from './DocPanel';
-import { CENTER_MIN, RAIL_W, computeLayout } from './layout';
+import { computeLayout, resizeLimits } from './layout';
 import { Rail } from './Rail';
 import { Resizer } from './Resizer';
 import { SidePanel } from './SidePanel';
@@ -25,7 +25,9 @@ const GRAPH_W = 560;
 
 /**
  * Window shell (decision 13): title bar, icon rail, collapsible left panel, chat in the centre,
- * document panel on the right only when something is open. Header heights are fixed; the rail
+ * document panel on the right only when something is open. Title bar, rail and side panel are one
+ * ground; the centre and the document panel are inset sheets with gutters between them, where the
+ * resizers live (DESIGN-SYSTEM.md decision 24 «Windows»). Header heights are fixed; the rail
  * and the composer do not move when sections or panels change. "All materials" takes the centre
  * instead of the chat (decision 25); the right panel shows a page, a material, the graph or the
  * live recording (see state/document.ts).
@@ -45,9 +47,7 @@ export function Shell() {
   const layout = computeLayout({
     windowWidth, sideOpen, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
   });
-  const available = windowWidth - RAIL_W;
-  const sideMax = Math.max(SIDE_MIN, Math.min(SIDE_MAX, available - CENTER_MIN - (layout.right ?? 0)));
-  const rightMax = Math.max(RIGHT_MIN, Math.min(RIGHT_MAX, available - CENTER_MIN - layout.side));
+  const { sideMax, rightMax } = resizeLimits(windowWidth, layout);
 
   return (
     <div className="kb-app">

@@ -1,34 +1,18 @@
 import { useEffect, useId, useState } from 'react';
 import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner, useIconPlay } from '../ui';
-import { Tooltip } from '../ui/Tooltip';
 import { clockOrDate, dayBucket, groupBy } from '../ui/time';
+import { ActiveTab } from '../ui/ActiveTab';
 import { useChats, useLibrary, useServices, useUi } from '../state/context';
 import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
 import { useChatSelection } from './chatBatch';
 import { SelectionCheckbox } from '../ui/listSelection';
 import { isWaitingForUser } from '../api/permissions';
+import { NEW_CHAT_KEY, sideChats } from './sideOrder';
+import { ChatMark, WaitingMark } from './ChatMark';
 
-const SIDE_LIMIT = 8;
-
-/** A permission or a question waits in this chat (0.3.1 P4): said in words, with a dot. */
-export function WaitingMark() {
-  return <span className="kb-chatwait" data-testid="chat-waiting">Waiting for you</span>;
-}
-
-/**
- * Static marks, no blinking (decision v15): answering = a still ring, new answer = a dot.
- * «Waiting for you» says more than «answering» and takes its place (P4).
- */
-function ChatMark({ chat }: { chat: KbChatSummary }) {
-  if (isWaitingForUser(chat)) return <WaitingMark />;
-  if (chat.state === 'answering') {
-    return <Tooltip text="Agent is answering" describes><span className="kb-chatmark kb-chatmark--answering" role="img" aria-label="answering"><Icon name="answering" size={13} /></span></Tooltip>;
-  }
-  if (chat.unread) return <span className="kb-chatmark kb-chatmark--new" role="img" aria-label="new answer" />;
-  return null;
-}
+export { WaitingMark };
 
 function useOpenChat() {
   const { chats, ui } = useServices();
@@ -50,22 +34,24 @@ export function ChatList() {
   const showCenter = useUi((s) => s.showCenter);
   const [newPlay, replayNew] = useIconPlay();
 
-  const pinned = list.filter((c) => c.pinned);
-  const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
-  const groups = groupBy(rest, (c) => dayBucket(c.updated_at));
+  const { pinned, rest, groups } = sideChats(list);
   const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
+  // The open chat's row runs into its window (decision 24 «Chats»): one tab for the whole list.
+  // With All chats / All materials (or an expanded document) in the centre no row is bridged.
+  const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
+  const openKey = center === 'chat' && !docInCenter ? currentId ?? NEW_CHAT_KEY : null;
 
   const row = (c: KbChatSummary) => {
     const current = center === 'chat' && c.id === currentId;
     return (
       <li key={c.id} {...sel.rowProps(c.id)}>
         <div role="gridcell">
-          <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
-            aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
+          <button type="button" className={`kb-row kb-row--tabbed kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
+            data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
             <SelectionCheckbox checked={sel.selected.has(c.id)} />
             {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
             <span className="kb-row__text">{c.title}</span>
-            <ChatMark chat={c} />
+            <ChatMark chat={c} current={current} />
           </button>
         </div>
       </li>
@@ -73,9 +59,10 @@ export function ChatList() {
   };
 
   return (
-    <div className="kb-side__scroll" {...sel.listProps}>
-      <button type="button" className={`kb-row kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
-        onClick={() => { replayNew(); openChat(null); }}>
+    <div className="kb-side__scroll kb-tabhost" {...sel.listProps}>
+      <ActiveTab host={sel.listRef} activeKey={openKey} variant="bridge" />
+      <button type="button" className={`kb-row kb-row--tabbed kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
+        data-tab-key={NEW_CHAT_KEY} onClick={() => { replayNew(); openChat(null); }}>
         <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
         <span className="kb-row__text">New chat</span>
       </button>
