@@ -147,3 +147,20 @@ describe('Clear now row cost (Q1 p3 M6)', () => {
     expect(lastUnclearAnswer([])).toBeNull();
   });
 });
+
+describe('Not yet is neutral (Q1 p3 L4, decision 3)', () => {
+  it('a choice or short answer that is not yet right says so in grey with the open answer’s glyph, never in red', { timeout: 15_000 }, async () => {
+    const { user } = await openChat(/Lecture 8 — test/);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    await user.click(within(test).getByRole('radio', { name: 'S = k·W²' }));
+    await user.click(within(test).getByRole('button', { name: 'Check' }));
+    const word = await within(test).findByText('Not yet.');
+    const box = word.closest('.kb-st-res')!;
+    expect(box).toHaveClass('is-not');
+    expect(box).not.toHaveClass('is-bad');
+    expect(box.querySelector('[data-icon="denied"]')).toBeNull();
+    expect(box.querySelector('[data-icon="minus"]')).not.toBeNull();
+    // Options keep their colours (decision 3, row 9): the wrong pick is still marked as such.
+    expect(within(test).getByRole('radio', { name: /S = k·W²/ }).closest('.kb-st-opt')).toHaveClass('is-bad');
+  });
+});

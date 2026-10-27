@@ -188,8 +188,9 @@ function QuestionView({ part, question, busy, pick, onAnswer, onAskAgent, onRech
       )}
 
       {checked && question.type !== 'open' && (
-        <div className={`kb-st-res ${response!.score === 1 ? 'is-ok' : 'is-bad'}`} role="status">
-          <Icon name={response!.score === 1 ? 'allowed' : 'denied'} size={16} />
+        // «Not yet» is neutral, as for an open answer (decision 3); only the options keep their colours.
+        <div className={`kb-st-res ${response!.score === 1 ? 'is-ok' : 'is-not'}`} role="status">
+          <Icon name={response!.score === 1 ? 'allowed' : 'minus'} size={16} />
           <div>
             <span className="kb-st-rt">{response!.score === 1 ? 'Got it.' : 'Not yet.'}</span>{' '}
             {question.type === 'short' ? <>The source says: «{question.answers[0]}»</> : <>From the source</>}
