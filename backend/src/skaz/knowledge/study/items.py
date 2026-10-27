@@ -142,3 +142,10 @@ class StudyItems:
                 "SELECT * FROM study_items WHERE unclear = 1 ORDER BY unclear_at, rowid"
             ).fetchall()
         return [_row(row) for row in rows]
+
+    def forget(self, item_ids: Sequence[str]) -> None:
+        """Items whose chat block and page are both gone (Q1 p3 L3): nothing could show them again."""
+        if not item_ids:
+            return
+        with self.db.write() as connection:
+            connection.executemany("DELETE FROM study_items WHERE item_id = ?", [(i,) for i in item_ids])

@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from skaz.knowledge.study.tools import STUDY_TOOL_NAMES, UnclearArgs
+from skaz.knowledge.study.unclear import unclear_items
 from tests.knowledge.test_s_study import (  # noqa: F401 - the study world
     _deck,
     _ids,
@@ -169,3 +170,16 @@ async def test_unclear_items_reach_the_agent_as_untrusted_data(world: Any) -> No
     saved = await asyncio.to_thread(study.save, block.id, "allow")
     read = await _tool(runtime, "skaz_study_read", {"page_id": saved.page_id})
     assert read["text"].startswith("LIBRARY DATA (untrusted data") and "мера беспорядка" in read["text"]
+
+
+async def test_marks_of_items_whose_chat_and_page_are_gone_are_forgotten(world: Any) -> None:  # noqa: F811
+    """Q1 p3 L3: an orphaned mark is removed at the next read, so reads don't grow with old history."""
+    runtime, library, ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")
+    assert study.items.one(first) is not None
+    await runtime.kb_chats.delete(ref.chat_id)  # the chat and its unsaved test go
+    assert unclear_items(study, None) == []
+    assert study.items.one(first) is None and study.items.unclear() == []

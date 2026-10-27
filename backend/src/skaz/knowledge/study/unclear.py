@@ -62,6 +62,12 @@ def _resolve(study: StudyService, row: ItemRow) -> tuple[Card | Question, str, t
     return item, block.title, (block.folder_id,) if block.folder_id else (), where
 
 
+def _orphaned(study: StudyService, row: ItemRow) -> bool:
+    """Neither the block it was marked in nor its saved page exists any more."""
+    block_gone = row.block_id is None or study.store.block(row.block_id) is None
+    return block_gone and (row.page_id is None or study.kb.page_repo.get(row.page_id) is None)
+
+
 def _newest_entry(study: StudyService, row: ItemRow, question: Question) -> dict[str, Any] | None:
     """The user's answer in the newest attempt that asks this question; ``None``: not answered there.
 
@@ -115,11 +121,14 @@ def unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: s
     """Items marked «Unclear» in ``folders`` (``None`` or empty = the whole library), oldest mark first."""
     out: list[dict[str, Any]] = []
     wanted = set(folders or ())
+    orphans: list[str] = []
     for row in study.items.unclear():
         if page_id is not None and row.page_id != page_id:
             continue
         resolved = _resolve(study, row)
         if resolved is None:
+            if _orphaned(study, row):
+                orphans.append(row.item_id)  # its chat and page are deleted: forget it (Q1 p3 L3)
             continue
         item, title, item_folders, where = resolved
         if wanted and not wanted & set(item_folders):
@@ -155,4 +164,5 @@ def unclear_items(study: StudyService, folders: Sequence[str] | None, page_id: s
         out.append(entry)
         if len(out) >= MAX_ITEMS:
             break
+    study.items.forget(orphans)
     return out
