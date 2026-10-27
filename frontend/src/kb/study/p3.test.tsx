@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { KbMessage, KbStudyPart } from '../../api/kb/types.gen';
 import { studyWorld } from '../test/fixtures';
 import { renderKb } from '../test/renderKb';
-import { DISCUSS_UNCLEAR_TEXT } from './Unclear';
+import { DISCUSS_UNCLEAR_TEXT, lastUnclearAnswer } from './Unclear';
 import { ASK_QUESTION_TEXT } from './AskAgent';
 
 // P3-b: «Unclear» on test questions and cards, «Discuss unclear · N», «Clear now» (the user's button).
@@ -128,5 +128,22 @@ describe('P3-a after the result (Q1 p3 M2)', () => {
     await user.click(said[0]!);
     expect(within(report).getByRole('button', { name: 'Recheck' })).toBeEnabled();
     expect(fake.calls.filter((c) => c.path.endsWith('/recheck'))).toEqual([]);
+  });
+});
+
+describe('Clear now row cost (Q1 p3 M6)', () => {
+  it('the chat’s last answer that read the marks is found once per messages list, not once per message', () => {
+    let reads = 0;
+    const message = (i: number, unclear = false) => {
+      const parts = unclear ? [{ type: 'tool', name: 'skaz_study_unclear', label: 'Read' }] : [{ type: 'text', text: `a${i}` }];
+      return { id: `m${i}`, role: 'assistant', get parts() { reads += 1; return parts; } } as unknown as KbMessage;
+    };
+    const messages = [message(0, true), ...Array.from({ length: 199 }, (_, i) => message(i + 1))];
+    // Every assistant message asks on every store change: 200 asks must not scan 200 × 200 parts lists.
+    for (let i = 0; i < 200; i += 1) expect(lastUnclearAnswer(messages)).toBe('m0');
+    expect(reads).toBe(200);
+    const next = [...messages, message(200, true)]; // a new list (immutable update) is scanned again
+    expect(lastUnclearAnswer(next)).toBe('m200');
+    expect(lastUnclearAnswer([])).toBeNull();
   });
 });
