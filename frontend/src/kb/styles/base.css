@@ -71,7 +71,7 @@ html[data-kb-ui] ::-webkit-scrollbar {
 }
 html[data-kb-ui] ::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--kb-muted) 35%, transparent);
-  border-radius: 10px;
+  border-radius: var(--kb-r-md);
   border: 3px solid transparent;
   background-clip: padding-box;
 }
@@ -119,7 +119,7 @@ body.kb-resizing {
 .kb-link {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--kb-sp-4);
   color: var(--kb-accent);
   font-weight: 600;
   text-decoration: underline;

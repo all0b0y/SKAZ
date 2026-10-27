@@ -1,3 +1,5 @@
+import { cssColor } from '../ui/color';
+
 /*
  * Effect colours come from the theme tokens, never hard-coded (FX-EFFECTS-SPEC «Global rules»):
  * ink = --kb-text, accent = --kb-fx-accent. Fallbacks are the light theme's values, used where no
@@ -28,10 +30,13 @@ export function parseColor(value: string): Rgb | null {
   return null;
 }
 
-/** The effect palette as the element sees it (inherits the theme from html[data-kb-ui]). */
+/** The effect palette as the element sees it (inherits the theme from html[data-kb-ui]). Tokens may
+ *  be computed values (light-dark, color-mix), so they are resolved, not just read. */
 export function readFxColors(el: Element): FxColors {
-  const cs = getComputedStyle(el);
-  const read = (name: string, fallback: Rgb) => parseColor(cs.getPropertyValue(name)) ?? fallback;
+  const read = (name: string, fallback: Rgb): Rgb => {
+    const c = cssColor(el, name);
+    return c ? [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255)] : fallback;
+  };
   return {
     ink: read('--kb-text', FALLBACK.ink),
     accent: read('--kb-fx-accent', FALLBACK.accent),
