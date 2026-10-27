@@ -113,6 +113,30 @@ describe('Window shell', () => {
     expect(rail.querySelector('.kb-rail__item.is-active')).toBeNull();
   });
 
+  it('a section switch crossfades the side panel body in 140 ms (opacity only); nothing at calm', async () => {
+    const user = userEvent.setup();
+    const played: Array<{ el: Element; frames: Keyframe[]; opts: KeyframeAnimationOptions }> = [];
+    const proto = HTMLElement.prototype as unknown as { animate?: unknown };
+    proto.animate = function animate(this: HTMLElement, frames: Keyframe[], opts: KeyframeAnimationOptions) {
+      played.push({ el: this, frames, opts });
+      return { cancel() {}, finish() {}, onfinish: null };
+    };
+    try {
+      renderKb();
+      const rail = await screen.findByRole('navigation', { name: 'Sections' });
+      await user.click(within(rail).getByRole('button', { name: /^Materials/ }));
+      const body = () => document.querySelector('.kb-side__body')!;
+      const fades = () => played.filter((p) => p.el === body());
+      expect(fades().map((p) => [p.frames, p.opts.duration])).toEqual([[[{ opacity: 0 }, { opacity: 1 }], 140]]);
+      document.documentElement.dataset.motion = 'calm';
+      await user.click(within(rail).getByRole('button', { name: /^Wiki/ }));
+      expect(fades()).toHaveLength(1);
+    } finally {
+      delete proto.animate;
+      delete document.documentElement.dataset.motion;
+    }
+  });
+
   it('shows the notification count from /kb/notifications (dismissed ones excluded)', async () => {
     renderKb();
     const bell = await screen.findByRole('button', { name: /Notifications/ });

@@ -3,6 +3,7 @@ import {
   ACCENTS, BASES, DEFAULT_LOOK, DENSITIES, MOTIONS, SOUNDS,
   type AccentPref, type BasePref, type DensityPref, type MotionPref, type SoundsPref,
 } from './appearance';
+import type { PageKind } from '../api/names';
 
 /**
  * Renderer-only preferences of the new interface (no secrets, no content).
@@ -20,6 +21,14 @@ export const RIGHT_MIN = 320;
 export const RIGHT_MAX = 640;
 export const RIGHT_DEFAULT = 400;
 
+/** The wiki side panel's kind sections, in their order (decision 27). */
+export const WIKI_KINDS = ['concept', 'note', 'analysis', 'folder', 'deck', 'test'] as const satisfies readonly PageKind[];
+export type WikiKind = (typeof WIKI_KINDS)[number];
+/** Which kind sections of the wiki side panel are unfolded (decision 24 «Wiki»). */
+export type WikiOpen = Readonly<Record<WikiKind, boolean>>;
+/** Concepts open, the rest folded. */
+export const WIKI_OPEN_DEFAULT: WikiOpen = { concept: true, note: false, analysis: false, folder: false, deck: false, test: false };
+
 export interface Prefs {
   theme: ThemePref;
   textSize: TextSize;
@@ -28,6 +37,7 @@ export interface Prefs {
   sideWidth: number;
   rightWidth: number;
   onboardingDone: boolean;
+  wikiOpen: WikiOpen;
   /** Appearance knobs (DESIGN-SYSTEM.md); mirrored onto <html> by KbApp's ThemeSync. */
   base: BasePref;
   accent: AccentPref;
@@ -46,6 +56,7 @@ export const DEFAULT_PREFS: Prefs = {
   sideWidth: SIDE_DEFAULT,
   rightWidth: RIGHT_DEFAULT,
   onboardingDone: false,
+  wikiOpen: WIKI_OPEN_DEFAULT,
   ...DEFAULT_LOOK,
   sounds: 'off',
 };
@@ -55,6 +66,12 @@ const clamp = (n: unknown, lo: number, hi: number, fallback: number): number =>
 
 const oneOf = <T extends string>(v: unknown, all: readonly T[], fallback: T): T =>
   typeof v === 'string' && (all as readonly string[]).includes(v) ? (v as T) : fallback;
+
+/** Each kind's fold: a stored boolean, or its default (anything else is ignored). */
+function readWikiOpen(v: unknown): WikiOpen {
+  const raw = v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  return Object.fromEntries(WIKI_KINDS.map((k) => [k, typeof raw[k] === 'boolean' ? raw[k] : WIKI_OPEN_DEFAULT[k]])) as Record<WikiKind, boolean>;
+}
 
 /** Read and validate stored prefs; anything unknown or out of range falls back to the default. */
 export function readPrefs(storage: Pick<Storage, 'getItem'> | null): Prefs {
@@ -76,6 +93,7 @@ export function readPrefs(storage: Pick<Storage, 'getItem'> | null): Prefs {
     sideWidth: clamp(raw.sideWidth, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT),
     rightWidth: clamp(raw.rightWidth, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT),
     onboardingDone: raw.onboardingDone === true,
+    wikiOpen: readWikiOpen(raw.wikiOpen),
     base: oneOf(raw.base, BASES.map((o) => o.value), DEFAULT_PREFS.base),
     accent: oneOf(raw.accent, ACCENTS.map((o) => o.value), DEFAULT_PREFS.accent),
     density: oneOf(raw.density, DENSITIES.map((o) => o.value), DEFAULT_PREFS.density),
@@ -88,6 +106,7 @@ export interface PrefsActions {
   set: (patch: Partial<Prefs>) => void;
   setSideWidth: (px: number) => void;
   setRightWidth: (px: number) => void;
+  setWikiOpen: (kind: WikiKind, open: boolean) => void;
 }
 
 export type PrefsStore = StoreApi<Prefs & PrefsActions>;
@@ -98,12 +117,13 @@ export function createPrefsStore(storage: Storage | null): PrefsStore {
     set: (patch) => set(patch),
     setSideWidth: (px) => set({ sideWidth: clamp(px, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT) }),
     setRightWidth: (px) => set({ rightWidth: clamp(px, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT) }),
+    setWikiOpen: (kind, open) => set((s) => ({ wikiOpen: { ...s.wikiOpen, [kind]: open } })),
   }));
   store.subscribe((state) => {
     const data: Prefs = {
       theme: state.theme, textSize: state.textSize, section: state.section, sideOpen: state.sideOpen,
       sideWidth: state.sideWidth, rightWidth: state.rightWidth,
-      onboardingDone: state.onboardingDone,
+      onboardingDone: state.onboardingDone, wikiOpen: state.wikiOpen,
       base: state.base, accent: state.accent, density: state.density, motion: state.motion, sounds: state.sounds,
     };
     try { storage?.setItem(PREFS_KEY, JSON.stringify(data)); } catch { /* full or unavailable: keep in memory */ }

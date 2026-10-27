@@ -395,3 +395,23 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 .kb-tab--bridge::after { bottom: -10px; background: radial-gradient(circle at 0 100%, transparent 9.5px, var(--kb-pane) 10px); }
 /* Soft tile: the row's size. */
 .kb-tab--soft { right: auto; background: var(--kb-accent-soft); border-radius: var(--kb-r-sm); }
+
+/* ---- Wiki kind sections fold in place (decisions 24 «Wiki», 27) ---- */
+.kb-wfold__head { margin: 0; font: inherit; }
+.kb-wfold__toggle { gap: var(--kb-sp-6); }
+.kb-wfold__label { font-weight: 600; }
+.kb-wfold__chev { flex: none; color: var(--kb-muted); transition: transform 0.2s ease; }
+.kb-wfold__chev.is-open { transform: rotate(90deg); }
+.kb-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.kb-fold.is-open { grid-template-rows: 1fr; }
+/* clip, not hidden: no scroll container, so the selection bar still sticks to the side list. */
+.kb-fold__in { min-height: 0; overflow: clip; }
+.kb-fold.is-open > .kb-fold__in { overflow-clip-margin: var(--kb-sp-4); }
+.kb-wiki-more { margin-top: var(--kb-sp-8); }
+html[data-motion='calm'] .kb-fold,
+html[data-motion='calm'] .kb-wfold__chev { transition: none; }
+@media (prefers-reduced-motion: reduce) { .kb-fold, .kb-wfold__chev { transition: none; } }

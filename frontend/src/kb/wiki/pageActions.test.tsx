@@ -38,9 +38,9 @@ describe('Page ⋯: Rename, Delete, Show in Finder (B20)', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename page' })).not.toBeInTheDocument());
     expect(within(doc).getByRole('heading', { level: 2 })).toHaveTextContent('Cross entropy loss');
     expect(fake.calls.filter((c) => c.method === 'PATCH' && c.path === '/kb/wiki/pages/g-ce')).toHaveLength(2);
-    // The wiki panel list follows.
-    await user.click(screen.getByRole('button', { name: /^Concepts/ }));
-    expect(await screen.findByRole('button', { name: /Cross entropy loss/ })).toBeInTheDocument();
+    // The wiki panel list follows (Concepts is the section open by default, decision 24 «Wiki»).
+    expect(screen.getByRole('button', { name: /^Concepts/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(await within(screen.getByRole('grid', { name: 'Concepts' })).findByRole('button', { name: /Cross entropy loss/ })).toBeInTheDocument();
   });
 
   it('Delete: a preview first (links unlinked, own notes, sources kept); Cancel changes nothing; Delete closes the page', async () => {
