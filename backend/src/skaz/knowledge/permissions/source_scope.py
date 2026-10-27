@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from functools import partial
 from typing import Any
 
 from ...native_io import disk_call
@@ -218,6 +217,18 @@ def sources_note(rules: ChatRules, title: Callable[[str], str | None]) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class Narrowing:
+    """The narrowing of one call's result; ``scope`` also reaches the handler (``SOURCE_FILTER``), so
+    searches and lists filter before ranking cuts and paging (Q1 n78 M-1)."""
+
+    tool: str
+    scope: SourceScope
+
+    def __call__(self, payload: dict[str, Any]) -> dict[str, Any] | str:
+        return scope_payload(self.tool, payload, self.scope)
+
+
 class ChatSourceScopes:
     """The registry's ``scope`` hook: the chat of a run, its rules, the refusal / narrowing of one call."""
 
@@ -236,4 +247,4 @@ class ChatSourceScopes:
         refusal = refuse_args(tool, args, scope)
         if refusal is not None:
             return refusal, None
-        return None, partial(scope_payload, tool, scope=scope)
+        return None, Narrowing(tool, scope)

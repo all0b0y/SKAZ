@@ -24,8 +24,9 @@ import json
 import logging
 import math
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Literal, Protocol, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -165,6 +166,31 @@ class ToolContext:
 #: (``permissions.source_scope.ChatSourceScopes``); ``None`` for runs that are no chat answer.
 ResultNarrowing = Callable[[dict[str, Any]], "dict[str, Any] | str"]
 ScopeHook = Callable[[str, Any, "ToolContext | None"], Awaitable[tuple[str | None, ResultNarrowing | None]]]
+
+
+
+class SourceFilter(Protocol):
+    """A chat's sources as the library handlers apply them (``permissions.source_scope.SourceScope``)."""
+
+    @property
+    def only(self) -> frozenset[str] | None: ...
+
+    @property
+    def excluded(self) -> frozenset[str]: ...
+
+    def allows(self, item_id: str) -> bool: ...
+
+
+#: Q1 n78 M-1: the chat's sources for the handler running now, set by ``ToolRegistry.call`` from the
+#: scope hook's narrowing (its ``scope``): searches, lists and the index filter before ranking cuts and
+#: paging, and count only what the chat allows. ``None``: no narrowed sources.
+SOURCE_FILTER: ContextVar[SourceFilter | None] = ContextVar("skaz_source_filter", default=None)
+
+
+def _allowed(item_id: str) -> bool:
+    scope = SOURCE_FILTER.get()
+    return scope is None or scope.allows(item_id)
+
 
 #: An interactive tool (it may wait for the user): runs on the event loop, never on a timer of SKAZ.
 AsyncHandler = Callable[[ToolContext | None, Any], Awaitable[dict[str, Any]]]
@@ -398,7 +424,8 @@ def _material_brief(record: MaterialRecord, folders: Mapping[str, str]) -> dict[
 
 def _wiki_index(kb: KnowledgeService, args: WikiIndexArgs) -> dict[str, Any]:
     folder = _folder(kb, args.folder)
-    pages = kb.page_repo.list_all(kind=args.kind, folder_id=folder.id if folder else None)
+    pages = [page for page in kb.page_repo.list_all(kind=args.kind, folder_id=folder.id if folder else None)
+             if _allowed(page.id)]
     window = pages[args.offset: args.offset + args.limit]
     items = []
     for page in window:
@@ -459,9 +486,13 @@ def _read_page(kb: KnowledgeService, args: ReadPageArgs) -> dict[str, Any]:
 def _search(kb: KnowledgeService, args: SearchArgs) -> dict[str, Any]:
     folder = _folder(kb, args.folder)
     kinds = set(args.kinds) if args.kinds else None
+    scope = SOURCE_FILTER.get()
     filtered = kinds is not None or folder is not None
-    # Filters (and hiding excluded fragments) apply after FTS ranking: ask for more hits than shown.
-    results = search(kb.db, args.query, limit=200 if filtered else min(200, args.limit * 3))
+    # Filters (and hiding excluded fragments) apply after FTS ranking: ask for more hits than shown. The
+    # chat's sources apply inside the ranking (Q1 n78 M-1).
+    results = search(kb.db, args.query, limit=200 if filtered else min(200, args.limit * 3),
+                     only=scope.only if scope is not None else None,
+                     excluded=scope.excluded if scope is not None else ())
     hidden = _Hidden(kb)
     material_folders: dict[str, str] = {}
     page_records: dict[str, PageRecord | None] = {}
@@ -551,7 +582,8 @@ def _read_material(kb: KnowledgeService, args: ReadMaterialArgs) -> dict[str, An
 
 def _list_materials(kb: KnowledgeService, args: ListMaterialsArgs) -> dict[str, Any]:
     folder = _folder(kb, args.folder)
-    records = kb.materials(folder_id=folder.id if folder else None, kind=args.kind)  # newest first
+    records = [record for record in kb.materials(folder_id=folder.id if folder else None, kind=args.kind)
+               if _allowed(record.id)]  # newest first; only what the chat's sources allow (Q1 n78 L-2)
     if args.recent is not None:
         records = records[: args.recent]
     names = _folder_names(kb)
@@ -768,9 +800,11 @@ class ToolRegistry:
         if tool.run is not None:
             return await self._interactive(tool, args, context, narrow)
         assert tool.handler is not None
+        token = SOURCE_FILTER.set(getattr(narrow, "scope", None))
         try:
             async with asyncio.timeout(tool.timeout_s):
-                # Reads only; abandoning a slow read on timeout is harmless.
+                # Reads only; abandoning a slow read on timeout is harmless. The thread gets the
+                # context with ``SOURCE_FILTER`` (``asyncio.to_thread`` copies it).
                 payload = await asyncio.to_thread(tool.handler, self.kb, args)
         except ToolInputError as error:
             return ToolOutcome(str(error), is_error=True)
@@ -778,6 +812,8 @@ class ToolRegistry:
             return ToolOutcome("The library took too long to answer. Try a smaller request.", is_error=True)
         except Exception:
             return ToolOutcome("The library could not be read right now.", is_error=True)
+        finally:
+            SOURCE_FILTER.reset(token)
         if narrow is not None:
             narrowed = narrow(payload)
             if isinstance(narrowed, str):
