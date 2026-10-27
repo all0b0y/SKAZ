@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
@@ -111,6 +111,34 @@ describe('Window shell', () => {
     await user.click(screen.getByRole('button', { name: 'Hide side panel' }));
     expect(within(rail).queryByTestId('rail-mark')).not.toBeInTheDocument();
     expect(rail.querySelector('.kb-rail__item.is-active')).toBeNull();
+  });
+
+  it('the rail mark re-measures when the items move without a section change (density, text size, window height; FIX1 R1)', async () => {
+    const observers: Array<{ cb: ResizeObserverCallback; els: Element[] }> = [];
+    class FakeResizeObserver {
+      els: Element[] = [];
+      constructor(cb: ResizeObserverCallback) { observers.push({ cb, els: this.els }); }
+      observe(el: Element) { this.els.push(el); }
+      unobserve() {}
+      disconnect() { this.els.length = 0; }
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    try {
+      renderKb();
+      const rail = await screen.findByRole('navigation', { name: 'Sections' });
+      const list = rail.querySelector('.kb-rail__list')!;
+      const mark = within(rail).getByTestId('rail-mark');
+      const chats = within(rail).getByRole('button', { name: /^Chats/ });
+      // The items moved (a denser layout): nothing in React changed, only the list's size.
+      Object.defineProperty(chats, 'offsetTop', { configurable: true, value: 100 });
+      Object.defineProperty(chats, 'offsetHeight', { configurable: true, value: 36 });
+      const watching = observers.filter((o) => o.els.includes(list));
+      expect(watching.length).toBeGreaterThan(0);
+      act(() => { for (const o of watching) o.cb([], {} as ResizeObserver); });
+      expect(mark).toHaveAttribute('data-y', String(100 + (36 - 20) / 2));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('a section switch crossfades the side panel body in 140 ms (opacity only); nothing at calm', async () => {
