@@ -94,7 +94,9 @@ async def _world(kb_app: Any, kb_client: httpx.AsyncClient, *, notes_answers: li
 
 
 async def _settled(world: World) -> None:
-    await settle(lambda: not world.runtime.kb_ingest.active_jobs() and not world.runtime.kb_wiki.busy)
+    # ingest.busy, not active_jobs(): a done build leaves active_jobs() a moment before its
+    # follow-ups (overview, connections) start, and their state was read before they began.
+    await settle(lambda: not world.runtime.kb_ingest.busy and not world.runtime.kb_wiki.busy)
 
 
 async def _ingest(world: World, kb_client: httpx.AsyncClient) -> dict[str, Any]:

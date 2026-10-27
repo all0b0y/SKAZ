@@ -845,7 +845,7 @@ class WikiService:
         """Start background "Find connections" when the user allowed it, SKAZ is idle and the wiki changed."""
         if not (await disk_call(self.ingest.settings)).background_connections:  # a database read
             return None
-        if self.ingest.active_jobs() or self.busy:
+        if self.ingest.busy or self.busy:  # ingest.busy: also a finished build about to start follow-ups
             self._touch()
             return None
         if self.clock() - self._last_activity < self.idle_after_s:

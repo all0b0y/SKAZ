@@ -344,6 +344,16 @@ class IngestService:
     def active_jobs(self) -> set[str]:
         return {job_id for job_id, active in self._active.items() if active.task is not None}
 
+    @property
+    def busy(self) -> bool:
+        """A job runs, or one just finished with its "finished" listeners not told yet.
+
+        ``active_jobs()`` alone is empty between a done job leaving it and its listeners starting
+        their follow-up work (the wiki overview and connections): a check of "SKAZ is idle" then
+        saw a moment of idle that wasn't one.
+        """
+        return bool(self.active_jobs() or self._telling)
+
     def active_materials(self) -> set[str]:
         """Materials whose job is running, or finished with its "finished" listeners not yet told."""
         running = {active.material_id for active in self._active.values()

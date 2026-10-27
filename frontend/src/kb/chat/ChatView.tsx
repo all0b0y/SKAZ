@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
@@ -14,8 +14,6 @@ import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
-import { DiagramFixProvider, type DiagramFix } from '../ui/markdown/Diagram';
-import { diagramFixRequest, fixLanguage } from './diagramFix';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
 import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
@@ -106,7 +104,7 @@ function useFirstMessageLeave(chats: ChatsStore, reduced: boolean): LeaveState {
  * Streamed text is shown as it comes, never animated (decision 36).
  */
 export function ChatView({ hidden }: { hidden: boolean }) {
-  const { chats, settings } = useServices();
+  const { chats } = useServices();
   const currentId = useChats((s) => s.currentId);
   const open = useChats((s) => (s.currentId ? s.chats[s.currentId] : undefined));
   const summary = useChats((s) => (s.currentId ? s.list.find((c) => c.id === s.currentId) : undefined));
@@ -163,19 +161,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
     }
   };
 
-  // D-12: a diagram that can't be drawn asks this chat's agent for a fix — one message, only when
-  // the user presses "Ask the agent to fix"; it is a normal question the user sees in the chat.
-  // Decision 10: the request asks for the reply in the answer language (diagramFix.ts).
-  const askDiagramFix = useCallback<DiagramFix>(async (source, error) => {
-    if (!settings.getState().wiki.value) await settings.getState().loadWiki();
-    const s = chats.getState();
-    const messages = s.currentId ? s.chats[s.currentId]?.chat?.messages ?? [] : [];
-    const language = fixLanguage(settings.getState().wiki.value, messages.some((m) => m.role === 'user'));
-    const text = diagramFixRequest(source, error, language);
-    const res = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [] }, {});
-    return res.ok ? null : res.error;
-  }, [chats, settings]);
-
   const recording = !!(chat?.recording_material_id ?? summary?.recording_material_id);
   const engine = chat?.engine ?? summary?.engine;
   const chatAgent = engine ? agentOf(agents, engine) : undefined;
@@ -226,7 +211,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           </Banner>
         )}
         {chat && chat.messages.length > 0 && (
-          <DiagramFixProvider value={askDiagramFix}>
           <div className={`kb-chat__messages${enter}`}>
             {messages.map((m) => (m.role === 'user' ? <UserMessage key={m.id} message={m} actions={questionActions(m)} />
               : m.role === 'system' ? <SystemMessage key={m.id} chatId={chat.id} message={m} />
@@ -241,7 +225,6 @@ export function ChatView({ hidden }: { hidden: boolean }) {
                   }} />
                 )))}
           </div>
-          </DiagramFixProvider>
         )}
       </div>
       </DitherStage>

@@ -48,6 +48,7 @@ from ..local_models import (
     speaker_model_path,
     speaker_runtime_available,
 )
+from ..native_io import in_thread
 from ..schemas import LocalModelState
 from . import ProviderError, ProviderNotConfigured, describe_http_error, describe_transport_error
 from .asr_activity import observe_response, observed_transcription
@@ -340,7 +341,7 @@ async def _to_thread_until_finished(
     function: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
     """Do not release cache-activity guards while an uncancellable worker still runs."""
-    worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    worker = in_thread(function, *args, **kwargs)  # submitted now: never an un-awaited coroutine
     try:
         return await asyncio.shield(worker)
     except asyncio.CancelledError as cancelled:

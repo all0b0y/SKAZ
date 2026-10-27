@@ -27,6 +27,8 @@ import { MemoryChip } from '../me/MemoryChip';
 import { AnswerBlock } from './blocks/AnswerBlock';
 import { AnswerBlocks, composeBlocks } from './blocks/compose';
 import { AnswerSelectScope } from './select/context';
+import { DiagramFixProvider } from '../ui/markdown/Diagram';
+import { useDiagramFix } from './diagramFix';
 import { SelectionChip } from './select/SelectionChip';
 import { WikiFixCard } from './select/WikiFixCard';
 
@@ -240,6 +242,8 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
+  // D-12: a diagram of this answer that can't be drawn asks this chat's agent for a fix (diagramFix.ts).
+  const fixDiagram = useDiagramFix(message.id);
   return (
     <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
       <Tools parts={message.parts} />
@@ -250,7 +254,9 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
         )}
         <SourcesProvider index={sources}>
           <AnswerSelectScope messageId={message.id}>
-            <Parts chatId={chatId} parts={message.parts} />
+            <DiagramFixProvider value={fixDiagram}>
+              <Parts chatId={chatId} parts={message.parts} />
+            </DiagramFixProvider>
           </AnswerSelectScope>
         </SourcesProvider>
       </div>
