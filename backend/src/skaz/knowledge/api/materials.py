@@ -25,6 +25,7 @@ from ..sources.material_info import (
 from ..speech.carriers import CarrierRepository
 from ..store.records import MaterialRecord
 from ..wiki.delete import DeletePlan, PageRefView
+from ..wiki.overlap import MaterialOverlap, material_overlap
 from ..wiki.service import WikiService
 from .deps import KbDep, kb_call
 from .ingest import job_view
@@ -39,6 +40,7 @@ from .schemas import (
     KbTranslation,
     KbTranslationFragment,
 )
+from .schemas_overlap import KbMaterialOverlap, KbOverlapPage
 from .schemas_wiki2 import KbCorrection, KbCorrectionChange, KbDeletePreview, KbMaterialUpdate
 
 router = APIRouter(prefix="/kb/materials", tags=["kb"])
@@ -74,6 +76,19 @@ def _wiki_view(wiki: MaterialWiki) -> KbMaterialWiki:
                           job_id=wiki.job_id, error=wiki.error, error_code=wiki.error_code)
 
 
+def overlap_view(overlap: MaterialOverlap | None) -> KbMaterialOverlap | None:
+    if overlap is None:
+        return None
+    return KbMaterialOverlap(
+        percent=overlap.percent,
+        repeated=overlap.repeated,
+        total=overlap.total,
+        pages=[KbOverlapPage(id=page.id, title=page.title, repeated=page.repeated) for page in overlap.pages],
+        new_sections=[section.title for section in overlap.new_sections],
+        repeated_sections=[section.title for section in overlap.repeated_sections],
+    )
+
+
 def _translation_view(translation: Translation | None) -> KbTranslation | None:
     if translation is None:
         return None
@@ -86,7 +101,7 @@ def _translation_view(translation: Translation | None) -> KbTranslation | None:
 def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, folder_name: str,
                 wiki: MaterialWiki, translation: Translation | None, excluded: int,
                 unreadable: Sequence[int] = (), failure: str | None = None,
-                can_retry: bool = False) -> KbMaterial:
+                can_retry: bool = False, overlap: MaterialOverlap | None = None) -> KbMaterial:
     """The material with the applied recognition corrections (W2) and its wiki/translation state (S3)."""
     origin = None
     if detail.origin is not None:
@@ -120,6 +135,7 @@ def detail_view(detail: MaterialDetail, corrections: WikiService | None, *, fold
         "unreadable_pages": list(unreadable),
         "failure_reason": failure if detail.status == "failed" else None,
         "can_retry": can_retry and detail.status == "failed",
+        "overlap": overlap_view(overlap),
     })
 
 
@@ -146,9 +162,11 @@ def material_view(kb: KnowledgeService, material_id: str,
         unreadable = unreadable_pages(directory, intake)
         if carrier is None:  # a document: why no text could be read (QA B5)
             failure = intake_failure(intake)
+    # N2: computed from the wiki as it is (code only); only once the material is in the wiki.
+    overlap = material_overlap(kb, material_id) if wiki.state == "in_wiki" else None
     return detail_view(detail, corrections, folder_name=folder.name if folder else "", wiki=wiki,
                        translation=translation, excluded=excluded, unreadable=unreadable,
-                       failure=failure, can_retry=can_retry)
+                       failure=failure, can_retry=can_retry, overlap=overlap)
 
 
 def _material(kb: KbDep, wiki: WikiService, material_id: str) -> KbMaterial:

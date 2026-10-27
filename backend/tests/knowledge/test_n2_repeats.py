@@ -79,8 +79,9 @@ class Case:
         return next(part for part in self.document().blocks() if part.body.startswith(DISORDER))
 
 
-async def _case(kb: KnowledgeService, repeat: str | None = REPEAT, p_yes: float | None = None) -> Case:
-    wiki = ScriptedWiki(notes=[LECTURE_NOTES, TEXTBOOK_NOTES], concepts=[LECTURE_CONCEPTS, TEXTBOOK_CONCEPTS],
+async def _case(kb: KnowledgeService, repeat: str | None = REPEAT, p_yes: float | None = None,
+                textbook_notes: str = TEXTBOOK_NOTES) -> Case:
+    wiki = ScriptedWiki(notes=[LECTURE_NOTES, textbook_notes], concepts=[LECTURE_CONCEPTS, TEXTBOOK_CONCEPTS],
                         matches=[1])
     ingest, service = wired(kb, wiki, _verdict(p_yes) if p_yes is not None else None)
     lecture = add_material(kb, "Физика", "Лекция 8")
