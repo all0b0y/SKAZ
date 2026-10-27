@@ -97,7 +97,9 @@ describe('Flashcards in the chat (variant C)', () => {
     }
     const done = await within(deck).findByRole('status');
     expect(done).toHaveTextContent('All done');
-    expect(done).toHaveTextContent('3 known · 0 come back by the schedule');
+    // Q1 p3 L5: the pass ends only when every card is known, so «N come back» counts the cards that got
+    // Again on a skip in this pass (the schedule brings them back sooner), never an always-zero rest.
+    expect(done).toHaveTextContent('3 known · 1 comes back sooner by the schedule');
     expect(within(deck).getByText('done')).toBeInTheDocument();
     await user.click(within(done).getByRole('button', { name: 'Go through again' }));
     await waitFor(() => expect(within(deck).getByText('3 left')).toBeInTheDocument());

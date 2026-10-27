@@ -79,6 +79,31 @@ class StudyItems:
                 (item_id, data, block_id, page_id, now),
             )
 
+    def put_ideas_once(
+        self,
+        item_id: str,
+        ideas: Sequence[Mapping[str, Any]],
+        *,
+        now: str,
+        block_id: str | None,
+        page_id: str | None,
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Store ideas built at a first check only if the item has none yet; the stored ones come back.
+
+        Two checks of the same question at once (two blocks of one wiki test) keep ONE ruler (decision
+        7, Q1 p3 L2): the second never overwrites the first.
+        """
+        data = json.dumps([dict(idea) for idea in ideas], ensure_ascii=False, separators=(",", ":"))
+        with self.db.write() as connection:
+            connection.execute(
+                "INSERT INTO study_items(item_id, kind, ideas, block_id, page_id, updated_at) "
+                "VALUES (?, 'question', ?, ?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET "
+                "ideas = excluded.ideas, updated_at = excluded.updated_at WHERE study_items.ideas IS NULL",
+                (item_id, data, block_id, page_id, now),
+            )
+            row = connection.execute("SELECT * FROM study_items WHERE item_id = ?", (item_id,)).fetchone()
+        return _row(row).ideas or ()
+
     def set_unclear(
         self,
         item_ids: Sequence[str],
@@ -117,3 +142,10 @@ class StudyItems:
                 "SELECT * FROM study_items WHERE unclear = 1 ORDER BY unclear_at, rowid"
             ).fetchall()
         return [_row(row) for row in rows]
+
+    def forget(self, item_ids: Sequence[str]) -> None:
+        """Items whose chat block and page are both gone (Q1 p3 L3): nothing could show them again."""
+        if not item_ids:
+            return
+        with self.db.write() as connection:
+            connection.executemany("DELETE FROM study_items WHERE item_id = ?", [(i,) for i in item_ids])

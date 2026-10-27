@@ -1845,6 +1845,7 @@ export interface KbStudyPart {
   chat_id: string;
   message_id: string;
   pile?: KbStudyPile | null;
+  unclear?: number;
 }
 
 /** P3-d: «I know this» (Good), a skip (Again once per pass), ← back, or «Go through again». */

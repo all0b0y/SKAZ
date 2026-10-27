@@ -130,7 +130,7 @@ export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbSt
             {subtitle && <span className="kb-st-sub">· {subtitle}</span>}
             {question && <span className="kb-st-sub">· {QUESTION_LABEL[question.type]}</span>}
             {/* P3-d: a deck counts what is left on the pile this pass. */}
-            <span className="kb-st-cnt">{deck ? (total ? (pileOf(part).queue.length ? `${pileOf(part).queue.length} left` : 'done') : '0')
+            <span className="kb-st-cnt" aria-live="polite">{deck ? (total ? (pileOf(part).queue.length ? `${pileOf(part).queue.length} left` : 'done') : '0')
               : part.result ? 'done' : total ? `${shown} / ${total}` : '0'}</span>
           </>
         )}

@@ -4,7 +4,7 @@ import { errorText } from '../api/client';
 import { useChats, useServices } from '../state/context';
 import type { ComposerItem } from '../state/composer';
 import { studyApi } from './api';
-import type { KbStudyUnclearItem } from '../../api/kb/types.gen';
+import type { KbMessage, KbStudyUnclearItem } from '../../api/kb/types.gen';
 
 /**
  * P3-b: «Unclear» — the user has a question about a card or a test question (decisions 8–10). The
@@ -23,7 +23,9 @@ export function UnclearMark({ on, disabled, onToggle, what, tabIndex }: {
   on: boolean; disabled?: boolean; onToggle: () => void; what: 'card' | 'question'; tabIndex?: number;
 }) {
   return (
+    // Named by its words (Q1 p3 L8): they are hidden until hover, and hidden text gives no name.
     <button type="button" className={`kb-st-unc${on ? ' is-on' : ''}`} aria-pressed={on} disabled={disabled} tabIndex={tabIndex}
+      aria-label={on ? 'Unclear' : 'I have a question'}
       title={on ? 'Marked Unclear — click to clear' : `Mark: I have a question about this ${what}`}
       onClick={(e) => { e.stopPropagation(); onToggle(); }}>
       <Icon name="help" size={14} /><span className="kb-st-unc__l">{on ? 'Unclear' : 'I have a question'}</span>
@@ -77,17 +79,30 @@ export function useUnclearCount(pageId: string): number {
   return count;
 }
 
+const lastUnclearOf = new WeakMap<readonly KbMessage[], string | null>();
+const NO_MESSAGES: readonly KbMessage[] = [];
+
+/**
+ * The chat's last answer that read the «Unclear» marks. Every answer of the chat asks on every store
+ * change (each streaming delta), so the scan runs once per messages list — the store replaces the
+ * list on a change — not once per answer (Q1 p3 M6).
+ */
+export function lastUnclearAnswer(messages: readonly KbMessage[]): string | null {
+  const known = lastUnclearOf.get(messages);
+  if (known !== undefined) return known;
+  let found: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]!;
+    if (m.role === 'assistant' && (m.parts as ReadonlyArray<{ type: string; name?: string }>)
+      .some((p) => p.type === 'tool' && p.name === 'skaz_study_unclear')) { found = m.id; break; }
+  }
+  lastUnclearOf.set(messages, found);
+  return found;
+}
+
 /** Did this answer read the «Unclear» marks? Only the chat's last such answer shows «Clear now». */
 export function useLastUnclearAnswer(chatId: string): string | null {
-  return useChats((s) => {
-    const messages = s.chats[chatId]?.chat?.messages ?? [];
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const m = messages[i]!;
-      if (m.role === 'assistant' && (m.parts as ReadonlyArray<{ type: string; name?: string }>)
-        .some((p) => p.type === 'tool' && p.name === 'skaz_study_unclear')) return m.id;
-    }
-    return null;
-  });
+  return useChats((s) => lastUnclearAnswer(s.chats[chatId]?.chat?.messages ?? NO_MESSAGES));
 }
 
 /**

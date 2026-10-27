@@ -1,6 +1,7 @@
 """``/kb/study``: decks and tests in chats, FSRS grades, test answers, saving, deck pages (0.3.1 S)."""
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from typing import Annotated, Any, Literal, cast
 
@@ -52,6 +53,7 @@ from .schemas_study import (
 )
 
 router = APIRouter(prefix="/kb/study", tags=["kb"])
+CHECK_STOPPED = "The check stopped before the agent answered. Try again."
 
 
 async def get_study(request: Request) -> StudyService:
@@ -94,8 +96,13 @@ def _cites(cites: Any, citation: CitationFn) -> list[KbCitation]:
     return [citation(str(c["material_id"]), int(c["seg"]), c.get("quote")) for c in cites or []]
 
 
-def _review(given: dict[str, Any], citation: CitationFn) -> KbStudyReview | None:
-    """The stored review of an open answer (P3-a), its quotes as citations."""
+def _review(given: dict[str, Any], citation: CitationFn,
+            rechecking: Callable[[str], bool] = lambda _idea: False) -> KbStudyReview | None:
+    """The stored review of an open answer (P3-a), its quotes as citations.
+
+    ``rechecking`` says whether a recheck of an idea really runs: a stored flag whose task is gone
+    (the app quit meanwhile) would show «Rechecking…» forever (Q1 p3 M3).
+    """
     review = given.get("review")
     if not isinstance(review, dict):
         return None
@@ -109,7 +116,7 @@ def _review(given: dict[str, Any], citation: CitationFn) -> KbStudyReview | None
             by_user=bool(idea.get("by_user")),
             recheck=KbStudyIdeaRecheck(status=recheck.get("status"), note=recheck.get("note"),
                                        words=str(recheck.get("words") or "")) if recheck else None,
-            rechecking=bool(idea.get("rechecking"))))
+            rechecking=bool(idea.get("rechecking")) and rechecking(str(idea["id"]))))
     return KbStudyReview(
         ideas=ideas,
         model_answer=[KbStudyModelPiece(text=p["text"], idea=p.get("idea"), added=bool(p.get("added")))
@@ -135,17 +142,24 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         items = (attempt.answers.get("items") if attempt else None) or {}
         by_id = {q.id: q for q in study.questions(block)}
         order = [item_id for item_id in study._test_order(block) if item_id in by_id]
-        marked = study.unclear_of(order)
+        # Every question of the test, also those a «tricky ones» retake leaves out (Q1 p3 L10).
+        marked = study.unclear_of(list(by_id))
+        unclear = len(marked)
         for item_id in order:
             question = by_id[item_id]
             given = items.get(item_id)
+            # A stored «checking» whose task is gone (the app quit mid-check, Q1 p3 M3) is a stopped check.
+            running = functools.partial(study.running, attempt.id if attempt else "", item_id)
+            stopped = bool(given and given.get("checking")) and not running()
             response = KbStudyResponse(
                 choices=list(given.get("choices") or []), text=given.get("text"),
                 checked=bool(given.get("checked")),
                 score=given.get("score"), verdict=given.get("verdict"), missing=given.get("missing"),
                 comment=given.get("comment"), checked_by=given.get("checked_by"),
-                checking=bool(given.get("checking")), error=given.get("error"),
-                status=given.get("status"), review=_review(given, citation),
+                checking=bool(given.get("checking")) and not stopped,
+                error=CHECK_STOPPED if stopped else given.get("error"),
+                status=given.get("status"),
+                review=_review(given, citation, running),
             ) if given else None
             questions.append(KbStudyQuestion(
                 id=question.id, type=question.type, question=question.question,
@@ -155,6 +169,8 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
                 explanation=question.explanation, response=response, unclear=question.id in marked))
         groups = {"new": 0, "learning": 0, "known": 0, "hard": 0}
         total = len(questions)
+    if block.kind == "deck":
+        unclear = sum(1 for card in cards if card.unclear)
     result = study.result(block) if block.kind == "test" else None
     return KbStudyPart(
         type="study", id=block.id, kind=block.kind, title=block.title, engine=block.engine,
@@ -166,7 +182,7 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         result=KbStudyResult(correct=result["correct"], total=result["total"], mistakes=result["mistakes"],
                              partly=result["partly"],
                              rows=[KbStudyResultRow(**row) for row in result["rows"]]) if result else None,
-        chat_id=block.chat_id, message_id=block.message_id, pile=_pile(study, block),
+        chat_id=block.chat_id, message_id=block.message_id, pile=_pile(study, block), unclear=unclear,
     )
 
 

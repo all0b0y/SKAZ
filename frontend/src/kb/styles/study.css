@@ -161,10 +161,11 @@
   border-radius: var(--kb-r-md); border: 1px solid var(--kb-line); background: var(--kb-pane); isolation: isolate;
 }
 .kb-st-res.is-ok { border-color: var(--kb-ok); }
-.kb-st-res.is-bad { border-color: var(--kb-danger); }
 .kb-st-res > .kb-icon { flex: none; margin-top: 1px; }
 .kb-st-res.is-ok > .kb-icon, .kb-st-res.is-ok .kb-st-rt { color: var(--kb-ok); }
-.kb-st-res.is-bad > .kb-icon, .kb-st-res.is-bad .kb-st-rt { color: var(--kb-danger); }
+/* «Not yet» neutral, the same as an open answer's badge (decision 3): text colour, muted glyph. */
+.kb-st-res.is-not .kb-st-rt { color: var(--kb-text); }
+.kb-st-res.is-not > .kb-icon { color: var(--kb-muted); }
 .kb-st-rt { font-weight: 600; }
 .kb-st-op { border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); background: var(--kb-pane); padding: 9px 11px; margin-top: 10px; font-size: 13px; line-height: 1.5; isolation: isolate; }
 .kb-st-op b { font-weight: 600; }
@@ -247,6 +248,7 @@
   text-underline-offset: 4px; border-radius: var(--kb-r-xs); transition: background 0.12s;
 }
 .kb-st-rv__add.is-hot { background: var(--kb-ok-soft); }
+.kb-st-rv__add:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
 .kb-st-rv__hint { font-size: var(--t-xs); color: var(--kb-muted); margin: 6px 0 0; }
 .kb-st-rv__also { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .kb-st-rv__also li { display: grid; grid-template-columns: 18px 1fr; gap: 0 8px; }
