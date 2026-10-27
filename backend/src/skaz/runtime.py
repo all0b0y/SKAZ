@@ -132,6 +132,7 @@ class Runtime:
         #: N7: the user's search rules (Settings → Search, a chat's changes); every web search obeys them.
         self.kb_search_rules = SearchRulesStore(self.kb.db, self.kb.settings)
         self.kb_web.rules = self.kb_search_rules.take_active
+        self.kb_web.current = self.kb_search_rules.active
         self.kb_chats = ChatService(self.kb, agents=lambda: self.kb_agents.registry, tools=self.kb_tools,
                                     text_layer=lambda: self.kb_ingest.text_layer,
                                     permissions=self.kb_permissions, questions=self.kb_questions,

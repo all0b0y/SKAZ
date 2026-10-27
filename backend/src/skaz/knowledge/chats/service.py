@@ -210,6 +210,9 @@ class _Run:
     #: The user's own messages that answered the agent's question during this run (the agent got them
     #: inside its turn): recorded as held with the answer, in chat order.
     absorbed: list[Message] = field(default_factory=list)
+    #: Q1 n78 H-2: a hard search rule is in force, so this (Claude Code) chat searches through
+    #: ``skaz_web_search`` — SKAZ screens the links first — and its own WebSearch is not offered.
+    skaz_web: bool = False
 
 
 class ChatService:
@@ -850,16 +853,17 @@ class ChatService:
 
     # -- one answer -------------------------------------------------------------------
 
-    def _tools_for(self, chat: Chat) -> tuple[ToolSpec, ...]:
+    def _tools_for(self, chat: Chat, *, skaz_web: bool = False) -> tuple[ToolSpec, ...]:
         """The turn's SKAZ tools: ``skaz_ask_user`` only where the agent's own question tool can't work;
-        ``skaz_web_search`` (W-3b) only where the agent's own search isn't held (and SKAZ holds searches)."""
+        ``skaz_web_search`` (W-3b) only where the agent's own search isn't held (and SKAZ holds searches),
+        or where the user's hard search rules keep the agent's own search off (``skaz_web``, Q1 H-2)."""
         # N6 «Я»: ``skaz_me_edit`` / ``skaz_me_skill`` (registered by the runtime, ``me.tools.attach``) are in
         # every chat turn's tools (a live session's tools never change); a switched-off «Я» is refused when
         # called. Never outside chats.
         dropped: set[str] = set()
         if chat.engine in NATIVE_QUESTIONS:
             dropped.add(ASK_TOOL)
-        if self.web is None or chat.engine in NATIVE_WEB:
+        if self.web is None or (chat.engine in NATIVE_WEB and not skaz_web):
             dropped.add(WEB_TOOL)
         return tuple(spec for spec in self.tools.specs() if spec.name not in dropped)
 
@@ -886,14 +890,18 @@ class ChatService:
             me = await disk_call(snapshot, me_store(self.kb))
             # W-2: the agent's own web search, only where SKAZ can hold each query before it is sent;
             # W-3b: the other agents search only through ``skaz_web_search`` (their own search stays off).
-            native = run.engine.id in NATIVE_WEB
+            rules = (await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).active, chat.id)
+                     if self.web is not None else None)
+            # Q1 n78 H-2: Claude Code's own search can't be screened before the model sees its results, so
+            # with a hard rule (Never / only these sites) its chat searches through ``skaz_web_search``.
+            run.skaz_web = run.engine.id in NATIVE_WEB and rules is not None and rules.hard
+            native = run.engine.id in NATIVE_WEB and not run.skaz_web
             web = web_support(run.engine)
             gate = (ChatWebGate(self.web, RunRef(run.run_id, run.chat_id, run.message.id, run.engine.id))
                     if self.web is not None and native and web.available else None)
             told = instructions(language, skills)
             web_text = web_instructions(web, tool=not native) if self.web is not None else ""
-            if web_text:  # N7: the chat's search rules (kept by SKAZ in code; the text tells the agent why)
-                rules = await disk_call(SearchRulesStore(self.kb.db, self.kb.settings).active, chat.id)
+            if web_text and rules is not None:  # N7: the chat's search rules (kept by SKAZ in code)
                 parts = (web_text, rules_instructions(rules), TIME_WINDOW_RULES)
                 web_text = "\n\n".join(part for part in parts if part)
             if web_text:
@@ -906,7 +914,8 @@ class ChatService:
                 gone = await disk_call(self._gone_materials, prior)
                 context = SessionContext(language, tuple(skill.id for skill in skills), web_text, gone,
                                          marks(me), me, tools=tuple(sorted(spec.name for spec in
-                                                                           self._tools_for(chat))),
+                                                                           self._tools_for(
+                                                                               chat, skaz_web=run.skaz_web))),
                                          base=BASE_INSTRUCTIONS)
             entries = await self._plan_session(run, chat, prior, context)
             if run.decision is not None:
@@ -1024,7 +1033,8 @@ class ChatService:
             before = run.session.context if run.session is not None else None
             note = context_note(before, run.context, skills) if run.context is not None else ""
             messages = (TurnMessage("user", f"{note}\n\n{request}" if note else request),)
-        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told, tools=self._tools_for(chat),
+        return AgentTurn(run_id=run.run_id, messages=messages, instructions=told,
+                         tools=self._tools_for(chat, skaz_web=run.skaz_web),
                          web=gate, model=chat.model, effort=chat.effort, history_summary=summary,
                          session=decision.plan if decision is not None else None)
 

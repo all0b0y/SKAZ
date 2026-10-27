@@ -196,6 +196,11 @@ class ActiveRules:
     def empty(self) -> bool:
         return not (self.never or self.only or self.prefer or self.everywhere_once)
 
+    @property
+    def hard(self) -> bool:
+        """A Never site or «only these sites» is in force (Prefer is only a hint)."""
+        return bool(self.never or self.only)
+
     def to_json(self) -> dict[str, Any]:
         return {"never": list(self.never), "only": list(self.only), "prefer": list(self.prefer),
                 "origin": self.origin, "everywhere_once": self.everywhere_once,
