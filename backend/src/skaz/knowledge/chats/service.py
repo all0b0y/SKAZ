@@ -445,7 +445,7 @@ class ChatService:
         """The user wrote their own message while the agent waits for an answer: it closes the question."""
         if given.selection is not None:  # P2: checked like any question's selection
             given = replace(given, selection=await self._checked_selection(
-                await disk_call(self.repo.messages, chat.id), given.selection))
+                await disk_call(self.repo.messages, chat.id), given.selection, chat.id))
         now = utc_now()
         user = Message(id=new_id("msg"), chat_id=chat.id, seq=0, role="user", state="done", created_at=now,
                        parts=(TextPart(given.text),), input=given)
@@ -712,7 +712,8 @@ class ChatService:
             engine = await self.registry.require_known(chat.engine)  # bug 7: no fresh check first
             prior = await disk_call(self.repo.messages, chat_id)
             if given.selection is not None:  # P2: only ids that exist in the stored answer
-                given = replace(given, selection=await self._checked_selection(prior, given.selection))
+                checked = await self._checked_selection(prior, given.selection, chat_id)
+                given = replace(given, selection=checked)
             now = utc_now()
             user = Message(id=new_id("msg"), chat_id=chat_id, seq=0, role="user", state="done",
                            created_at=now, parts=(TextPart(given.text),), input=given)
@@ -820,8 +821,12 @@ class ChatService:
                        created_at=now, engine=chat.engine, model=chat.model, effort=chat.effort,
                        reply_to=question_id)
 
-    async def _checked_selection(self, prior: Sequence[Message], selection: Selection) -> Selection:
-        """P2's items of an earlier answer, or P3-c's test question (checked against the study block)."""
+    async def _checked_selection(self, prior: Sequence[Message], selection: Selection,
+                                 chat_id: str) -> Selection:
+        """P2's items of an earlier answer, or P3-c's test question (checked against the study block).
+
+        ``chat_id``: the asking chat (Q1 p3 L9 — the study check takes it as ``chat_id=`` once
+        ``check_study_selection`` has that keyword, fix/q1-study)."""
         if selection.kind == "study":
             from ..study.ask import check_study_selection  # the study package imports chats (C-17)
 
