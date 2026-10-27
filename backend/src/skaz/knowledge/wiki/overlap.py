@@ -149,10 +149,17 @@ def _section_of(segs: list[int], sections: list[tuple[str, set[int]]]) -> int | 
     for index, (_title, cited) in enumerate(sections):
         if cited.intersection(segs):
             return index
+    # Within a section's fragment range: the section with the nearest cited fragment (interleaved
+    # notes put a fragment in several ranges; the first one is not necessarily its section).
+    best: tuple[int, int] | None = None
     for index, (_title, cited) in enumerate(sections):
-        if any(min(cited) <= seg <= max(cited) for seg in segs):
-            return index
-    return None
+        inside = [seg for seg in segs if min(cited) <= seg <= max(cited)]
+        if not inside:
+            continue
+        distance = min(abs(seg - other) for seg in inside for other in cited)
+        if best is None or distance < best[0]:
+            best = (distance, index)
+    return best[1] if best is not None else None
 
 
 def section_overlap(kb: KnowledgeService, material_id: str, statements: list[_Statement] | None = None,

@@ -15,7 +15,7 @@ from skaz.knowledge.api.materials import material_view
 from skaz.knowledge.ingest import prompts as ingest_prompts
 from skaz.knowledge.markdown.page import Block, Cite, parse_page, render_page
 from skaz.knowledge.service import KnowledgeService
-from skaz.knowledge.wiki.overlap import material_overlap, section_overlap
+from skaz.knowledge.wiki.overlap import _section_of, material_overlap, section_overlap
 from skaz.knowledge.wiki.pages_io import page_path, reindex
 from tests.knowledge.ingest_support import block, cite, notes
 from tests.knowledge.test_n2_repeats import DISORDER, UNIT, _case
@@ -125,3 +125,13 @@ async def test_a_statement_written_with_two_sources_is_not_a_confirmed_repeat(
     reindex(ready, library, path)
     overlap = material_overlap(ready, case.textbook)
     assert overlap is not None and overlap.repeated == 0 and overlap.total == 3
+
+
+def test_a_statement_between_interleaved_sections_goes_to_the_nearest_one() -> None:
+    # Q1 n2 L5: notes whose sections interleave (1: segs 1 and 9, 2: segs 4 and 6) — a statement
+    # citing seg 5 sits in both ranges; it belongs to the section with the nearest cited fragment.
+    sections = [("One", {1, 9}), ("Two", {4, 6})]
+    assert _section_of([5], sections) == 1
+    assert _section_of([8], sections) == 0
+    assert _section_of([4], sections) == 1  # a cited fragment itself still wins outright
+    assert _section_of([20], sections) is None
