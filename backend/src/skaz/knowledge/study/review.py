@@ -292,6 +292,11 @@ def _text(value: Any, limit: int = TEXT_CHARS) -> str:
     return "" if not cleaned or detect_instruction(cleaned) is not None else cleaned
 
 
+def note_text(value: Any) -> str | None:
+    """A recheck's short note (P3-a 6a) as shown — the same filter as every judge text (Q1 p3 L1)."""
+    return _text(value, 600) or None
+
+
 def _checked(reader: MaterialReader, sources: Sources, number: Any, quote: Any) -> Cite | None:
     source = sources.number(number)
     if source is None or not isinstance(quote, str):

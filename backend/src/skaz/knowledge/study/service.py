@@ -74,6 +74,7 @@ from .review import (
     cite_json,
     in_answer,
     is_mistake,
+    note_text,
     read_review,
     recheck_call,
     scored,
@@ -1118,7 +1119,7 @@ class StudyService:
             raw = await self.judge(recheck_call(block, question, idea, answer, words, sources))
             better = {"covered": 2, "partial": 1, "missing": 0}
             status = str(raw.get("status")) if raw.get("status") in better else "missing"
-            note = " ".join(str(raw.get("note") or "").split())[:600] or None
+            note = note_text(raw.get("note"))
             recheck = {"status": status, "note": note, "words": words}
             fields: dict[str, Any] = {"rechecking": False, "recheck": recheck}
             if better[status] > better.get(str(idea.get("status")), 0):
