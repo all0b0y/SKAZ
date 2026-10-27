@@ -205,10 +205,17 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 var(--kb-sp-8) var(--kb-sp-12);
+  /* The scroll box reaches across the gutter to the centre sheet, so the open chat's tab can run
+     into its window; the rows keep their place. No scrollbar: it would stand in the gutter (the
+     resizer) and cut the bridge (trackpad and wheel scroll as before). */
+  margin-right: calc(-1 * var(--kb-gutter));
+  padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
+  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
+.kb-side__scroll::-webkit-scrollbar { display: none; }
 .kb-side__pad { padding: var(--kb-sp-4) var(--kb-sp-8); }
 .kb-side__wait { display: flex; justify-content: center; padding: var(--kb-sp-20); }
 .kb-side__note { color: var(--kb-muted); font-size: var(--t-sm); padding: var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-6); }
@@ -244,6 +251,9 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
 }
 button.kb-row:hover:not([aria-disabled='true']) { background: color-mix(in srgb, var(--kb-accent-soft) 70%, transparent); }
 .kb-row.is-current { background: var(--kb-accent-soft); font-weight: 600; }
+/* Rows whose open state is drawn by one moving tab (ui/ActiveTab.tsx): the row itself stays clear. */
+.kb-row--tabbed.is-current,
+button.kb-row--tabbed.is-current:hover:not([aria-disabled='true']) { background: transparent; }
 .kb-row--action { font-weight: 600; }
 .kb-row--static { color: var(--kb-text); }
 p.kb-row--static { margin-top: var(--kb-sp-4); }
@@ -357,3 +367,27 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 .kb-wsearch__hit .kb-row__text { display: flex; flex-direction: column; gap: var(--kb-sp-2); min-width: 0; }
 .kb-wsearch__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-wsearch__snippet { color: var(--kb-muted); font-size: var(--t-xs); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; }
+
+/* ---- The open item's tab (ui/ActiveTab.tsx, decisions 24–25) ----
+   One element per list under the rows; it never takes pointer events (the resizer under the
+   bridge keeps working). Rows paint above it. */
+.kb-tabhost { position: relative; }
+.kb-tabhost .kb-row--tabbed { position: relative; }
+.kb-tablayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.kb-tab { position: absolute; right: 0; pointer-events: none; }
+/* Bridge: a piece of the centre sheet that runs from the row into it, with two concave corners. */
+.kb-tab--bridge { background: var(--kb-pane); border-radius: var(--kb-r-sm) 0 0 var(--kb-r-sm); }
+.kb-tab--bridge::before,
+.kb-tab--bridge::after { content: ''; position: absolute; right: 0; width: 10px; height: 10px; }
+.kb-tab--bridge::before { top: -10px; background: radial-gradient(circle at 0 0, transparent 9.5px, var(--kb-pane) 10px); }
+.kb-tab--bridge::after { bottom: -10px; background: radial-gradient(circle at 0 100%, transparent 9.5px, var(--kb-pane) 10px); }
+/* Soft tile: the row's size. */
+.kb-tab--soft { right: auto; background: var(--kb-accent-soft); border-radius: var(--kb-r-sm); }

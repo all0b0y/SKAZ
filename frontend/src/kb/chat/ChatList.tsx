@@ -3,14 +3,14 @@ import type { KbChatSummary } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
 import { clockOrDate, dayBucket, groupBy } from '../ui/time';
+import { ActiveTab } from '../ui/ActiveTab';
 import { useChats, useLibrary, useServices, useUi } from '../state/context';
 import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
 import { useChatSelection } from './chatBatch';
 import { SelectionCheckbox } from '../ui/listSelection';
 import { isWaitingForUser } from '../api/permissions';
-
-const SIDE_LIMIT = 8;
+import { NEW_CHAT_KEY, sideChats } from './sideOrder';
 
 /** A permission or a question waits in this chat (0.3.1 P4): said in words, with a dot. */
 export function WaitingMark() {
@@ -50,18 +50,19 @@ export function ChatList() {
   const showCenter = useUi((s) => s.showCenter);
   const [newPlay, replayNew] = useIconPlay();
 
-  const pinned = list.filter((c) => c.pinned);
-  const rest = list.filter((c) => !c.pinned).slice(0, SIDE_LIMIT);
-  const groups = groupBy(rest, (c) => dayBucket(c.updated_at));
+  const { pinned, rest, groups } = sideChats(list);
   const { sel, overlays } = useChatSelection({ chats: [...pinned, ...rest], onOpen: (id) => openChat(id) });
+  // The open chat's row runs into its window (decision 24 «Chats»): one tab for the whole list.
+  // With All chats / All materials in the centre no row is bridged.
+  const openKey = center === 'chat' ? currentId ?? NEW_CHAT_KEY : null;
 
   const row = (c: KbChatSummary) => {
     const current = center === 'chat' && c.id === currentId;
     return (
       <li key={c.id} {...sel.rowProps(c.id)}>
         <div role="gridcell">
-          <button type="button" className={`kb-row kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
-            aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
+          <button type="button" className={`kb-row kb-row--tabbed kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
+            data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
             <SelectionCheckbox checked={sel.selected.has(c.id)} />
             {c.pinned && <Icon name="pin" size={14} className="kb-row__icon" />}
             <span className="kb-row__text">{c.title}</span>
@@ -73,9 +74,10 @@ export function ChatList() {
   };
 
   return (
-    <div className="kb-side__scroll" {...sel.listProps}>
-      <button type="button" className={`kb-row kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
-        onClick={() => { replayNew(); openChat(null); }}>
+    <div className="kb-side__scroll kb-tabhost" {...sel.listProps}>
+      <ActiveTab host={sel.listRef} activeKey={openKey} variant="bridge" />
+      <button type="button" className={`kb-row kb-row--tabbed kb-row--action${center === 'chat' && currentId === null ? ' is-current' : ''}`}
+        data-tab-key={NEW_CHAT_KEY} onClick={() => { replayNew(); openChat(null); }}>
         <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
         <span className="kb-row__text">New chat</span>
       </button>
