@@ -19,7 +19,7 @@ from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiki.overlap import material_overlap
 from skaz.knowledge.wiki.prompts import DISCREPANCY_SCHEMA
 from skaz.knowledge.wiki.repeats import QUESTION, strengthen
-from skaz.knowledge.wiki.retract import retract_material, retract_unquoted
+from skaz.knowledge.wiki.retract import retract_material, retract_unquoted, strip_links
 from tests.knowledge.ingest_support import ScriptedWiki, add_material, block, cite, concept, concepts, notes
 from tests.knowledge.wiki_support import (
     DISCREPANCIES,
@@ -344,3 +344,17 @@ def test_a_corrected_first_source_gives_the_repeat_back() -> None:
     assert kept.id == "c-aaa-1" and [cite.material_id for cite in kept.cites] == ["mat-aaa"]
     assert B_LINK not in kept.body and result.removed == ["c-bbb-1"]  # B's share, rewritten by its refresh
 
+
+
+def test_taking_a_source_or_a_link_off_a_statement_keeps_its_marker_keys() -> None:
+    # Q1 n2 M3: a kept statement keeps its other marker keys (here the merged repeat of B) when
+    # another source is retracted or a link to a removed page is taken off.
+    merged = _only(_merged_water())
+    both = Block.create("c-aaa-1", "from_source", f"Water boils at 100 °C at sea level. {A_LINK} {SEA}",
+                        cites=(*merged.cites[:1], Cite("mat-ccc", 3)), attrs=merged.attrs)
+    updated, result = retract_material(_page(both), "mat-ccc", "Materials/H/C")
+    assert result.kept == ["c-aaa-1"] and _only(updated).attrs == merged.attrs
+    linked = Block.create("c-aaa-1", "from_source", f"{merged.body} [[Wiki/Concepts/Gone|Gone]]",
+                          cites=merged.cites, attrs=merged.attrs)
+    unlinked, changed = strip_links(_page(linked), {"Wiki/Concepts/Gone"})
+    assert changed == ["c-aaa-1"] and _only(unlinked).attrs == merged.attrs

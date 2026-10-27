@@ -172,7 +172,8 @@ class Recheck:
                         "The statement changed while the agent was rechecking it; it was left as it is now."
                     )
                 updated = Block.create(
-                    before.id, before.kind, body, cites=cites or before.cites, owner="agent"
+                    before.id, before.kind, body, cites=cites or before.cites, owner="agent",
+                    attrs=current.attrs,
                 )
                 return document.with_block(updated)
 

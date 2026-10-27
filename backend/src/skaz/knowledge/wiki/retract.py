@@ -158,7 +158,8 @@ def strip_links(document: PageDocument, gone: Collection[str]) -> tuple[PageDocu
         changed.append(part.id)
         body = _strip_list(part.body, gone) if part.id in LIST_BLOCKS else _strip_inline(part.body, gone)
         if body.strip():
-            parts.append(Block.create(part.id, part.kind, body, cites=part.cites, owner="agent"))
+            parts.append(Block.create(part.id, part.kind, body, cites=part.cites, owner="agent",
+                                      attrs=part.attrs))
     return replace(document, parts=parts), changed
 
 
