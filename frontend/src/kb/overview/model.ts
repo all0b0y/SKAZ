@@ -2,7 +2,7 @@
 // that came up, the library items the agent cited or read, and what the chat created. Pure, so tests
 // check it without rendering.
 
-import type { KbCitation, KbMessage, KbMessagePart, KbWebSearchPart } from '../../api/kb/types.gen';
+import type { KbCitation, KbMessage, KbMessagePart, KbRulesInForce, KbWebSearchPart } from '../../api/kb/types.gen';
 
 /** Every citation of an answer: its cite chips, a connection's sides and answer blocks' sources (as the Sources row). */
 export function citationsOf(parts: readonly KbMessagePart[]): KbCitation[] {
@@ -60,6 +60,8 @@ export interface OvWiki {
 export interface ChatOverviewData {
   searches: OvSearch[];
   inMessages: OvLink[];
+  /** Agent-written links to sites the chat's rules rule out (only counted, Q1 n78 M-5). */
+  inMessagesHidden: number;
   hidden: number;
   links: number;
   cited: OvItem[];
@@ -77,6 +79,24 @@ export function siteOfUrl(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** The host a browser opens (lower case, punycode — the form the rules' sites are kept in); '' if none. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+  } catch {
+    return '';
+  }
+}
+
+const covered = (host: string, sites: readonly string[]) => !!host && sites.some((s) => host === s || host.endsWith(`.${s}`));
+
+/** N7 on a link the agent wrote: a Never site, or outside «only these sites» (an unclear host too). */
+export function ruledOut(url: string, rules: Pick<KbRulesInForce, 'never' | 'only'> | null | undefined): boolean {
+  if (!rules || (!rules.never.length && !rules.only.length)) return false;
+  const host = hostOf(url);
+  return !host || covered(host, rules.never) || (rules.only.length > 0 && !covered(host, rules.only));
 }
 
 /** Links written in a text: markdown ones with their title, bare ones by their address. */
@@ -108,11 +128,13 @@ function questionBefore(messages: readonly KbMessage[], index: number): string {
   return 'Answer';
 }
 
-export function chatOverview(messages: readonly KbMessage[]): ChatOverviewData {
+/** ``rules``: the chat's rules in force — links the agent wrote to sites they rule out are only counted. */
+export function chatOverview(messages: readonly KbMessage[], rules?: Pick<KbRulesInForce, 'never' | 'only'> | null): ChatOverviewData {
   const seen = new Set<string>();
   const searches: OvSearch[] = [];
   const inMessages: OvLink[] = [];
   let hidden = 0;
+  let inMessagesHidden = 0;
   const answers = messages.filter((m) => m.role === 'assistant').map((m) => ({ id: m.id, text: textOf(m) }));
 
   // Links: search results first (each address once in the whole chat), then the ones written in messages.
@@ -139,6 +161,7 @@ export function chatOverview(messages: readonly KbMessage[]): ChatOverviewData {
     for (const link of linksIn(textOf(message))) {
       if (seen.has(link.url)) continue;
       seen.add(link.url);
+      if (message.role !== 'user' && ruledOut(link.url, rules)) { inMessagesHidden += 1; continue; }
       inMessages.push({ ...link, site: siteOfUrl(link.url), messageId: message.id, by: message.role === 'user' ? 'you' : 'agent' });
     }
   }
@@ -201,5 +224,6 @@ export function chatOverview(messages: readonly KbMessage[]): ChatOverviewData {
   });
 
   const links = searches.reduce((n, s) => n + s.links.length, 0) + inMessages.length;
-  return { searches, inMessages, hidden, links, cited: [...cited.values()], lookedAt: [...looked.values()], study, wiki };
+  hidden += inMessagesHidden;
+  return { searches, inMessages, inMessagesHidden, hidden, links, cited: [...cited.values()], lookedAt: [...looked.values()], study, wiki };
 }

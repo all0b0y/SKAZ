@@ -30,8 +30,9 @@ export function ChatOverview({ chatId }: { chatId: string }) {
   const chat = useChats((s) => s.chats[chatId]?.chat ?? null);
   const close = useUi((s) => s.closeDoc);
   const [tab, setTab] = useState<Tab>('links');
-  const data = useMemo(() => chatOverview(chat?.messages ?? []), [chat?.messages]);
   const [rules] = useChatSearchRules(chatId);
+  const active = rules?.active ?? null;
+  const data = useMemo(() => chatOverview(chat?.messages ?? [], active), [chat?.messages, active]);
   const used = data.cited.length + data.lookedAt.length;
   const created = data.study.length + data.wiki.length;
 
@@ -90,6 +91,13 @@ function LinksTab({ data }: { data: ReturnType<typeof chatOverview> }) {
         <section aria-label="In messages">
           <h3 className="kb-ov__group">In messages</h3>
           <ul className="kb-ov__list">{data.inMessages.map((link) => <LinkRow key={link.url} link={link} />)}</ul>
+          {data.inMessagesHidden > 0 && <p className="kb-ov__note">{data.inMessagesHidden} {data.inMessagesHidden === 1 ? 'link' : 'links'} by the agent hidden by your rules</p>}
+        </section>
+      )}
+      {data.inMessages.length === 0 && data.inMessagesHidden > 0 && (
+        <section aria-label="In messages">
+          <h3 className="kb-ov__group">In messages</h3>
+          <p className="kb-ov__note">{data.inMessagesHidden} {data.inMessagesHidden === 1 ? 'link' : 'links'} by the agent hidden by your rules</p>
         </section>
       )}
     </>
