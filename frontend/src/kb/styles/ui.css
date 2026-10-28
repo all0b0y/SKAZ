@@ -440,6 +440,24 @@ button.kb-chip:active { background: var(--kb-accent-press); }
 .kb-menu__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .kb-menu__note { font-size: var(--t-xs); color: var(--kb-muted); }
 .kb-menu__item:hover .kb-menu__note, .kb-menu__item:focus-visible .kb-menu__note { color: inherit; }
+/* GlideSelect (stage 6, B1): in a menu ONE highlight (Popover's .kb-glide) marks the hovered / keyboard row
+   and glides between rows; the rows' own hover and focus tints step aside. Pressed keeps its own tint. The
+   highlight is the popover's first child; rows are positioned so they paint above it. */
+.kb-glide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-accent-soft);
+  pointer-events: none;
+}
+.kb-popover[data-glide] .kb-menu__item { position: relative; }
+.kb-popover[data-glide] .kb-menu__item:hover:not([aria-disabled='true']),
+.kb-popover[data-glide] .kb-menu__item:focus-visible { background: transparent; }
+.kb-popover[data-glide] .kb-menu__item:active:not([aria-disabled='true']) { background: var(--kb-accent-press); }
 
 .kb-tooltip {
   position: fixed;
