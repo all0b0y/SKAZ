@@ -106,6 +106,11 @@ export function CallChip({ call, seenAt, startedAt, endedAt }: { call: ToolCall;
       <i className="kb-call__wipe" aria-hidden="true" />
       <span className="kb-call__icon">{icon}</span>
       <span className="kb-call__label">{call.label}</span>
+      {/* FIX2 C-L5: the sweep (run) and the dashed border (stopped) are visual only; done and error speak
+          through the icon's label and the visible «failed». */}
+      {(call.state === 'run' || call.state === 'stopped') && (
+        <span className="kb-visually-hidden">{call.state === 'run' ? 'running' : 'stopped'}</span>
+      )}
       {call.state === 'error' && <span className="kb-call__err">failed</span>}
       {startedAt !== undefined && call.state !== 'error' && (call.state === 'run' || endedAt !== undefined) && (
         <Elapsed className="kb-call__time" from={startedAt} to={call.state === 'run' ? null : endedAt} />

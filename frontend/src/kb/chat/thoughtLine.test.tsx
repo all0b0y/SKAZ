@@ -226,6 +226,25 @@ describe('CallChip error look (ready for a backend that reports failed calls)', 
   });
 });
 
+describe('CallChip states for assistive tech (FIX2 C-L5)', () => {
+  const chip = (state: 'run' | 'stopped' | 'done' | 'error') => {
+    const { unmount } = render(<ul><CallChip call={{ index: 0, name: 'skaz_search', label: 'Searched «entropy»', state }} /></ul>);
+    const li = screen.getByRole('listitem');
+    const out = { text: li.textContent, hidden: Array.from(li.querySelectorAll('.kb-visually-hidden')).map((e) => e.textContent) };
+    unmount();
+    return out;
+  };
+
+  it('running and stopped are said in visually hidden words (the sweep and the dashed border are visual only)', () => {
+    expect(chip('run').hidden).toEqual(['running']);
+    expect(chip('run').text).toContain('Searched «entropy»');
+    expect(chip('stopped').hidden).toEqual(['stopped']);
+    // done and error already speak through their icons' labels / the visible «failed».
+    expect(chip('done').hidden).toEqual([]);
+    expect(chip('error').hidden).toEqual([]);
+  });
+});
+
 describe('CallChip size (FIX2 S-L2)', () => {
   it('a chip is 26 px tall as in the demo B3, at every density (a component value, not --kb-control-h-sm)', () => {
     const css = readFileSync(resolve(__dirname, '../styles/chat.css'), 'utf8');
