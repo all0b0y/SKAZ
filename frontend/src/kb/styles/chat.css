@@ -5,6 +5,10 @@
 
 /* ---- Side panel: chats ---- */
 .kb-chatrow.is-unread .kb-row__text { font-weight: 600; }
+/* The open (bridged) chat reads in regular weight — the bridge already marks it; bold stays the
+   «unread» signal (DESIGN-SYSTEM.md decision 29, FIX1 R12). Wins over is-unread if both are set. */
+.kb-row.kb-chatrow.is-current,
+.kb-row.kb-chatrow.is-current .kb-row__text { font-weight: 400; }
 .kb-chatmark { display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--kb-text); }
 /* Chat at work (decision 26, ChatMark.tsx): «Connecting nodes» with three nodes after the title; when
    the answer is ready the nodes pull into the «new» dot, which pops in where they meet. The open
