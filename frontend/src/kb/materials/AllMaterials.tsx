@@ -11,6 +11,7 @@ import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
 import { useMaterialSelection } from './materialBatch';
 import { StippleStrip } from '../fx/stipple';
 import { useSpotlight } from '../fx/spotlight';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -176,7 +177,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           <Banner tone="error" title="Couldn’t load materials." actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {state.value && rows.length === 0 && (
-          <EmptyState icon="materials" field={!all.length} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
+          <EmptyState icon="materials" art={all.length ? undefined : <HalftoneArt id="materials" />} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
             action={all.length ? undefined : <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add material</Button>}>
             {all.length ? 'Choose another type or folder.' : 'Record, drop files or paste a link — everything lands here.'}
           </EmptyState>

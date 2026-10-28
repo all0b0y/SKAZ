@@ -7,6 +7,7 @@ import { NameField } from './NameField';
 import { SelectionCheckbox, hasDragFiles, hasDragItems, markItemsDropped, readDragItems, useItemsDrag, type ListSelection } from '../ui/listSelection';
 import { useMaterialBatch, useMaterialSelection, type DragRowProps } from '../materials/materialBatch';
 import { useListEntrance } from '../fx/listEntrance';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 const RECENT = 5;
 
@@ -302,7 +303,7 @@ function FolderView({ folderId }: { folderId: string }) {
         </div>
       )}
       {load === 'ready' && items.length === 0 && (
-        <EmptyState icon="folder" title="No materials in this folder" compact />
+        <EmptyState icon="folder" title="No materials in this folder" compact art={<HalftoneArt id="folder" compact />} />
       )}
       {items.length > 0 && (
         <MaterialList items={items} labelledBy="kb-folder-title" resetKey={folderId} toneOf={() => tone} />

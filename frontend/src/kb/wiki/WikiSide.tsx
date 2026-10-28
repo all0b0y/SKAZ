@@ -15,6 +15,7 @@ import { usePageSelection } from './pageBatch';
 import type { DragRowProps } from '../materials/materialBatch';
 import { WikiTermsButton } from './WikiTermsButton';
 import { useListEntrance } from '../fx/listEntrance';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 interface Hit {
   key: string;
@@ -281,7 +282,7 @@ export function WikiSide() {
         </>
       )}
       {pages.length === 0 && (
-        <EmptyState icon="wiki" title="The wiki is empty" compact field>
+        <EmptyState icon="wiki" title="The wiki is empty" compact art={<HalftoneArt id="wiki" compact />}>
           Concepts, notes and analyses appear as materials are added to the wiki.
         </EmptyState>
       )}

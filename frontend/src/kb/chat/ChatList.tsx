@@ -12,6 +12,7 @@ import { isWaitingForUser } from '../api/permissions';
 import { NEW_CHAT_KEY, sideChats } from './sideOrder';
 import { ChatMark, WaitingMark } from './ChatMark';
 import { useListEntrance } from '../fx/listEntrance';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 export { WaitingMark };
 
@@ -91,7 +92,7 @@ export function ChatList() {
         </div>
       )}
       {load === 'ready' && list.length === 0 && (
-        <EmptyState icon="chats" title="No chats yet" compact field>Ask your first question in the field below.</EmptyState>
+        <EmptyState icon="chats" title="No chats yet" compact art={<HalftoneArt id="chats" compact />}>Ask your first question in the field below.</EmptyState>
       )}
       {pinned.length > 0 && (
         <section aria-label="Pinned">

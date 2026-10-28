@@ -20,13 +20,19 @@ export interface EmptyStateProps {
   compact?: boolean;
   /** Opt in to the small «Dither · Connect» field above the icon (decorative; clicks grow links). */
   field?: boolean;
+  /** Decorative art in the icon's (and the field's) place — the halftone drawing (stage 6, B11). */
+  art?: ReactNode;
 }
 
-export function EmptyState({ icon, title, children, action, compact = false, field = false }: EmptyStateProps) {
+export function EmptyState({ icon, title, children, action, compact = false, field = false, art }: EmptyStateProps) {
   return (
     <div className={`kb-empty${compact ? ' kb-empty--compact' : ''}`}>
-      {field && <MiniDither compact={compact} />}
-      <Icon name={icon} size={compact ? 18 : 22} className="kb-empty__icon" />
+      {art ?? (
+        <>
+          {field && <MiniDither compact={compact} />}
+          <Icon name={icon} size={compact ? 18 : 22} className="kb-empty__icon" />
+        </>
+      )}
       <p className="kb-empty__title">{title}</p>
       {children && <p className="kb-empty__text">{children}</p>}
       {action && <div className="kb-empty__action">{action}</div>}
