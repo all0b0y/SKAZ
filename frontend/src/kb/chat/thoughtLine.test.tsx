@@ -89,6 +89,31 @@ describe('ThoughtLine while the agent works', () => {
     expect(within(chip()).getByLabelText('Done')).toBeInTheDocument();
   });
 
+  it('FIX2 S-M1: the row and its live timer stay while the answer streams; the words only while it has no text', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(START + 1_000);
+    const m0 = msg([tool('skaz_search', 'Searched «entropy»')]);
+    const { rerender, container } = render(<ThoughtLine message={m0} head={head(m0)} />);
+    expect(screen.getByText('Writing an answer…')).toBeInTheDocument();
+    // The agent writes a sentence, then keeps calling tools: the timer keeps running, the words go.
+    const m1 = msg([text('Let me look.'), tool('skaz_search', 'Searched «entropy»'), tool('skaz_read_page', 'Read page Entropy')]);
+    rerender(<ThoughtLine message={m1} head={head(m1)} />);
+    expect(screen.queryByText('Writing an answer…')).toBeNull();
+    expect(screen.getByRole('timer')).toHaveTextContent('1.0 s');
+    act(() => { vi.advanceTimersByTime(2_000); });
+    expect(screen.getByRole('timer')).toHaveTextContent('3.0 s');
+    expect(container.querySelector('.kb-thought__head canvas.kb-msg__think')).toHaveAttribute('aria-hidden', 'true');
+    // An answer that streams text without any tool call has the timer row too.
+    const m2 = msg([text('Entropy is…')]);
+    rerender(<ThoughtLine message={m2} head={head(m2)} />);
+    expect(screen.getByRole('timer')).toBeInTheDocument();
+    // Finished: no timer row, no fold for an answer without tool calls.
+    const m3 = msg([text('Entropy is…')], 'done');
+    rerender(<ThoughtLine message={m3} head={head(m3)} />);
+    expect(screen.queryByRole('timer')).toBeNull();
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('calls already there when the answer is opened get no invented timer', () => {
     const m = msg([tool('skaz_search', 'Searched «entropy»'), tool('skaz_read_page', 'Read page Entropy')]);
     render(<ThoughtLine message={m} head={head(m)} />);

@@ -7,9 +7,10 @@ import { CallSweep } from '../fx/indicators/CallSweep';
 
 /*
  * Stage 6 B3 — ThoughtLine + CallChip (DESIGN-SYSTEM.md decision 30; look and timings: the demo
- * .dev/ui-blocks/motion6 motion-v1 card B3). While the agent works: «Writing an answer…» with the
- * thinking nodes and a live timer, and one chip per tool call. After the answer the block folds into
- * the «Looked at N things» line, which unfolds it again.
+ * .dev/ui-blocks/motion6 motion-v1 card B3). While the agent works: the thinking nodes and a live
+ * timer for as long as the answer streams (FIX2 S-M1: also after text arrived, tool calls keep coming),
+ * with «Writing an answer…» only while there is nothing to read yet, and one chip per tool call. After
+ * the answer the block folds into the «Looked at N things» line, which unfolds it again.
  *
  * Data honesty: a tool part (`KbToolPart`: name + label) arrives when the agent CALLS the tool; the
  * backend sends no result or error for it. So a call «runs» while it is the newest part of a streaming
@@ -133,7 +134,7 @@ const INERT = { inert: '' } as object;
 
 /**
  * The agent's work above an answer. `head` is the thinking line's words (shown while the answer has
- * nothing to read yet), or null.
+ * nothing to read yet), or null; the row itself (nodes + live timer) stays while the answer streams.
  */
 export function ThoughtLine({ message, head }: { message: KbMessage; head: string | null }) {
   const calls = callStates(message.parts, message.state);
@@ -141,8 +142,7 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
   const [open, setOpen] = useState(false);
   const level = useMotionLevel();
   const working = message.state === 'streaming';
-  const showHead = working && head !== null;
-  if (!showHead && calls.length === 0) return null;
+  if (!working && calls.length === 0) return null;
   const unfolded = working || open;
   const arrived = !working && clock.endedAt !== null;
   const n = calls.length;
@@ -158,9 +158,10 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
       )}
       <div className="kb-thought__fold" data-open={unfolded ? 'true' : 'false'} {...(unfolded ? {} : INERT)}>
         <div className="kb-thought__inner">
-          {showHead && (
+          {working && (
             <div className="kb-thought__head">
-              {/* FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status. */}
+              {/* FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
+                  One live region for the whole stream, so the words can go without remounting it. */}
               <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />{head}</p>
               <Elapsed className="kb-thought__time" role="timer" from={start} />
             </div>
