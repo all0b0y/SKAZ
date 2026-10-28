@@ -262,7 +262,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--kb-sp-6);
-  height: var(--kb-control-h-sm);
+  height: 26px; /* the demo B3 chip at every density (FIX2 S-L2): a component value, not a control height */
   max-width: 100%;
   padding: 0 var(--kb-sp-10) 0 var(--kb-sp-8);
   border-radius: var(--kb-r-pill);

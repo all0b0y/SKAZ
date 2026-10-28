@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -221,5 +223,14 @@ describe('CallChip error look (ready for a backend that reports failed calls)', 
     expect(chip).toHaveTextContent('Read Textbook');
     expect(chip).toHaveTextContent('failed');
     expect(within(chip).getByLabelText('Failed')).toBeInTheDocument();
+  });
+});
+
+describe('CallChip size (FIX2 S-L2)', () => {
+  it('a chip is 26 px tall as in the demo B3, at every density (a component value, not --kb-control-h-sm)', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/chat.css'), 'utf8');
+    const rule = /\n\.kb-call \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule).toMatch(/(^|\n)\s*height: 26px;/);
+    expect(rule).not.toMatch(/--kb-control-h/);
   });
 });
