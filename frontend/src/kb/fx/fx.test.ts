@@ -9,6 +9,7 @@ import {
   CONNECT_EDGES, CONNECT_NODES, CONNECT_STILL_T, MARK_EDGES, MARK_END, MARK_NODES, connectState, connectStateOf,
   drawConnect, drawConnectGraph, drawMarkResolve, markResolve,
 } from './indicators/connect';
+import CONNECT_GOLDEN from './connect.golden.json';
 
 const filled = (cols: number, rows: number, cell: number, v: number): FieldMask => {
   const m = emptyMask(cols, rows, cell);
@@ -371,14 +372,18 @@ function recordingCtx() {
 describe('fx/indicators connect, generalised (decision 26)', () => {
   const colors = { ink: [10, 20, 30], accent: [200, 100, 50] } as const;
 
-  it('the thinking indicator paints exactly as the general painter with its own graph', () => {
-    for (const t of [0, 0.4, 1.1, CONNECT_STILL_T, 3.7]) {
+  it('the thinking indicator paints exactly the fills of the painter before the generalisation (golden, FIX1 R10)', () => {
+    // connect.golden.json: every fillRect (style + rect) of `drawConnect` as it was at df5486d (before
+    // decision 26), recorded with these colours at these times. Regenerate only on purpose.
+    const times = [0, 0.4, 1.1, CONNECT_STILL_T, 3.7];
+    expect(Object.keys(CONNECT_GOLDEN)).toEqual(times.map(String));
+    for (const t of times) {
       const a = recordingCtx();
-      const b = recordingCtx();
       drawConnect(a.ctx, t, colors);
+      expect(a.ops, `t=${t}`).toEqual(CONNECT_GOLDEN[String(t) as keyof typeof CONNECT_GOLDEN]);
+      const b = recordingCtx();
       drawConnectGraph(b.ctx, t, colors, CONNECT_NODES, CONNECT_EDGES);
-      expect(a.ops).toEqual(b.ops);
-      expect(connectStateOf(t, CONNECT_NODES, CONNECT_EDGES)).toEqual(connectState(t));
+      expect(b.ops, `t=${t}`).toEqual(CONNECT_GOLDEN[String(t) as keyof typeof CONNECT_GOLDEN]);
     }
   });
 
