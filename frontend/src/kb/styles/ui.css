@@ -106,7 +106,8 @@ button.kb-chip:active { background: var(--kb-accent-press); }
   left: 2px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  /* A pill, not a circle: SquishSwitch (stage 6, B10, Controls.tsx) stretches it to 20 px mid-travel. */
+  border-radius: var(--kb-r-pill);
   background: var(--kb-pane);
   box-shadow: var(--kb-shadow-raise);
   transition: transform 0.18s ease;
@@ -440,6 +441,24 @@ button.kb-chip:active { background: var(--kb-accent-press); }
 .kb-menu__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .kb-menu__note { font-size: var(--t-xs); color: var(--kb-muted); }
 .kb-menu__item:hover .kb-menu__note, .kb-menu__item:focus-visible .kb-menu__note { color: inherit; }
+/* GlideSelect (stage 6, B1): in a menu ONE highlight (Popover's .kb-glide) marks the hovered / keyboard row
+   and glides between rows; the rows' own hover and focus tints step aside. Pressed keeps its own tint. The
+   highlight is the popover's first child; rows are positioned so they paint above it. */
+.kb-glide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-accent-soft);
+  pointer-events: none;
+}
+.kb-popover[data-glide] .kb-menu__item { position: relative; }
+.kb-popover[data-glide] .kb-menu__item:hover:not([aria-disabled='true']),
+.kb-popover[data-glide] .kb-menu__item:focus-visible { background: transparent; }
+.kb-popover[data-glide] .kb-menu__item:active:not([aria-disabled='true']) { background: var(--kb-accent-press); }
 
 .kb-tooltip {
   position: fixed;
@@ -454,6 +473,34 @@ button.kb-chip:active { background: var(--kb-accent-press); }
   pointer-events: none;
   box-shadow: var(--kb-shadow-pop);
 }
+/* WarmTooltip (stage 6, B5): only a COLD tooltip has an entrance — 120 ms, a 2 px rise away from its trigger
+   at full, opacity only at calm; a warm swap and «off» show it at once (Tooltip.tsx sets data-enter). */
+.kb-tooltip[data-enter='rise'] { animation: kb-tip-rise 120ms ease-out; }
+.kb-tooltip[data-enter='fade'] { animation: kb-tip-fade 120ms ease-out; }
+.kb-tooltip[data-side='bottom'] { --kb-tip-from: translateY(-2px); }
+.kb-tooltip[data-side='top'] { --kb-tip-from: translateY(2px); }
+.kb-tooltip[data-side='right'] { --kb-tip-from: translateX(-2px); }
+@keyframes kb-tip-rise { from { opacity: 0; transform: var(--kb-tip-from, none); } to { opacity: 1; transform: none; } }
+@keyframes kb-tip-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Toast fuse (stage 6, B4): on a toast with an action, a 2 px line runs down over the toast's life and
+   pauses while the toast is held (Toast.tsx owns the one timer; .is-held mirrors it). It runs at calm too
+   (a status); at «off» Toast.tsx shows a «· N s» countdown in text instead. */
+.kb-toast__fuse {
+  position: absolute;
+  left: var(--kb-sp-10);
+  right: var(--kb-sp-10);
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--kb-on-fill) 55%, transparent);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: kb-toast-fuse var(--kb-toast-life, 6s) linear forwards;
+}
+.kb-toast.is-held .kb-toast__fuse { animation-play-state: paused; }
+@keyframes kb-toast-fuse { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.kb-toast__countdown { flex: none; font-variant-numeric: tabular-nums; opacity: 0.7; }
 
 /* ---- Formulas (KaTeX, kb/ui/markdown) ---- */
 .kb-math--display {
