@@ -1,4 +1,4 @@
-import { useLayoutEffect, type RefObject } from 'react';
+import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { useServices } from '../state/context';
 import { useMotionLevel } from '../ui/motionLevel';
 import { springEasing } from '../ui/ActiveTab';
@@ -9,7 +9,8 @@ import { sessionSlot } from './session';
  * list enter once with a short stagger — on the FIRST load of the list the app opens with (see START_LIST), and never
  * again: not on a section switch (the list remounts, the session remembers), not on a chat/page
  * switch or a selection (the rows stay mounted, nothing here runs), not on a store update.
- * A row that arrives later (a new chat, a new material) fades in alone; nothing else moves.
+ * A row that arrives later in a list already on screen (a new chat, a new material) fades in alone;
+ * nothing else moves. Rows that appear with a (re)mount of the list never fade.
  *
  * Reference: `.dev/ui-blocks/motion6/motion-v1.js` card b12 — each row: opacity + 6 px rise on the
  * spring visualDuration 0.26 / bounce 0, +30 ms per row; a new row: 140 ms fade. Entrances are «full»
@@ -107,15 +108,19 @@ export function useListEntrance(id: string, host: RefObject<HTMLElement | null>,
   const services = useServices();
   const level = useMotionLevel();
   const signature = keys.join('\n');
+  // The rows this mount has shown (FIX2 C-L8). Null until its first ready pass, which takes every row
+  // as known: rows that came while the list was away (a section or folder switch, any remount) are
+  // just there; only a row new to this already-shown list fades in.
+  const shown = useRef<Set<string> | null>(null);
   useLayoutEffect(() => {
     const el = host.current;
     if (!ready || !el) return;
-    const { value: known, fresh } = sessionSlot(services, `list-entrance:${id}`, () => new Set<string>());
-    if (fresh) {
-      keys.forEach((k) => known.add(k));
+    if (shown.current === null) {
+      shown.current = new Set(keys);
       if (takeStart(services, id) && level === 'full') playEntrance(el);
       return;
     }
+    const known = shown.current;
     const arrived = new Set(keys.filter((k) => !known.has(k)));
     arrived.forEach((k) => known.add(k));
     if (arrived.size > 0 && level !== 'off') playArrivals(el, arrived);

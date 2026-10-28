@@ -90,6 +90,39 @@ describe('AnimatedList: the first load of the side list', () => {
     expect(arrivals()[0]!.opts).toMatchObject({ duration: ARRIVAL_FADE_MS });
   });
 
+  // FIX2 C-L8: the arrival fade is only for a row new to a list that is already on screen.
+  it('rows that came while the list was away do not fade when it mounts again (section switch)', async () => {
+    const { services } = await chatsLoaded();
+    act(() => services.prefs.getState().set({ section: 'notifications' }));
+    await screen.findByRole('region', { name: 'Notifications' });
+    const [one] = services.chats.getState().list;
+    act(() => services.chats.setState((s) => ({ list: [{ ...one!, id: 'c-away', title: 'Made while away', pinned: false, updated_at: new Date().toISOString() }, ...s.list] })));
+    played = [];
+    act(() => services.prefs.getState().set({ section: 'chats' }));
+    await within(side()).findByRole('button', { name: /Made while away/ });
+    expect(arrivals()).toEqual([]);
+    expect(entrances()).toEqual([]);
+    // …and the remounted list still fades a row that is new to it.
+    act(() => services.chats.setState((s) => ({ list: [{ ...one!, id: 'c-new', title: 'A brand new chat', pinned: false, updated_at: new Date().toISOString() }, ...s.list] })));
+    await within(side()).findByRole('button', { name: /A brand new chat/ });
+    expect(arrivals().map((p) => p.el.dataset.entrance)).toEqual(['c-new']);
+  });
+
+  it('rows that came while a folder was open do not fade when the overview comes back (folder switch)', async () => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { section: 'materials', motion: 'full' } });
+    const mats = await screen.findByRole('region', { name: 'Materials' });
+    await within(mats).findByRole('button', { name: /^All materials/ });
+    const folder = services.library.getState().folders[0]!;
+    await act(() => services.library.getState().openFolder(folder.id));
+    const [m] = services.library.getState().materials;
+    act(() => services.library.setState((s) => ({ materials: [{ ...m!, id: 'm-away', title: 'Added in the folder' }, ...s.materials] })));
+    played = [];
+    await act(() => services.library.getState().openFolder(null));
+    await within(mats).findByRole('button', { name: /Added in the folder/ });
+    expect(arrivals()).toEqual([]);
+    expect(entrances()).toEqual([]);
+  });
+
   it('a list first opened by a section switch shows at once (it never staggers on a switch)', async () => {
     const { services } = await chatsLoaded();
     played = [];
