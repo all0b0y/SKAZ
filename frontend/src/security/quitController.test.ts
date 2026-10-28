@@ -8,7 +8,7 @@ interface Harness {
   confirm: { value: boolean };
   resolveStop: () => void;
   rejectStop: (err: unknown) => void;
-  deps: { [K in keyof Omit<Required<QuitDeps>, 'saveBeforeQuit' | 'hideWindow' | 'showWindow'>]: ReturnType<typeof vi.fn> };
+  deps: { [K in keyof Omit<Required<QuitDeps>, 'saveBeforeQuit' | 'hideWindow' | 'showWindow' | 'relaunch'>]: ReturnType<typeof vi.fn> };
 }
 
 function makeHarness(opts: { hasUnsent?: boolean; confirm?: boolean } = {}): Harness {

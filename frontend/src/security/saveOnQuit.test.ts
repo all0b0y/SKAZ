@@ -102,3 +102,59 @@ describe('the window leaves at once when nothing is at risk', () => {
     expect(f.deps.quit).toHaveBeenCalledTimes(1);
   });
 });
+
+// The user's rule: a fast relaunch (Dock click, second launch) while the hidden window is still shutting down
+// must not be lost, and the new SKAZ may start only after this one — backend included — has fully exited.
+describe('a launch during the shutdown relaunches after the old process is gone', () => {
+  function relaunching() {
+    const f = fixture();
+    const order: string[] = [];
+    const deps = {
+      ...f.deps,
+      hasUnsentAudio: () => false,
+      stopBackend: vi.fn(async () => { order.push('stop'); }),
+      relaunch: vi.fn(() => { order.push('relaunch'); }),
+      quit: vi.fn(() => { order.push('quit'); }),
+      confirmDiscard: vi.fn(() => false),
+    };
+    return { controller: new QuitController(deps), deps, resolve: f.resolve, order };
+  }
+
+  it('is not consumed while running: the caller shows the window as before', () => {
+    const f = relaunching();
+    expect(f.controller.onLaunchRequest()).toBe(false);
+    expect(f.deps.relaunch).not.toHaveBeenCalled();
+  });
+
+  it('while saving: relaunch once, only after the backend has stopped, right before the quit', async () => {
+    const f = relaunching();
+    f.controller.onWindowClose();
+    expect(f.controller.onLaunchRequest()).toBe(true);
+    expect(f.controller.onLaunchRequest()).toBe(true);
+    expect(f.deps.relaunch).not.toHaveBeenCalled();
+    f.resolve(true);
+    await f.controller.settled();
+    expect(f.order).toEqual(['stop', 'relaunch', 'quit']);
+  });
+
+  it('after the shutdown settled (window tearing down): relaunch at once, still only once', async () => {
+    const f = relaunching();
+    f.controller.onBeforeQuit();
+    f.resolve(true);
+    await f.controller.settled();
+    expect(f.controller.onLaunchRequest()).toBe(true);
+    expect(f.controller.onLaunchRequest()).toBe(true);
+    expect(f.deps.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a cancelled quit (failed save, user stays) drops the relaunch: the window is simply back', async () => {
+    const f = relaunching();
+    f.controller.onWindowClose();
+    f.controller.onLaunchRequest();
+    f.resolve(false);
+    await f.controller.settled();
+    expect(f.deps.relaunch).not.toHaveBeenCalled();
+    expect(f.deps.quit).not.toHaveBeenCalled();
+    expect(f.controller.onLaunchRequest()).toBe(false);
+  });
+});
