@@ -124,9 +124,8 @@ const LABEL: Record<WikiKind, string> = {
 
 /**
  * How the page open in the document panel is marked in the lists: a soft tile moved by a plain
- * crossfade (decision 24 «Wiki», for now). One switch — the user's answer on bridging the page row
- * is pending (STAGE5-SHELL §5). Note: «bridge» runs toward the centre sheet, while a page opens in
- * the document panel on the right.
+ * crossfade (DESIGN-SYSTEM.md decision 28: the bridge is for chats only — it runs toward the centre
+ * sheet, while a page opens in the document panel on the right).
  */
 export const PAGE_TAB: TabVariant = 'soft';
 
@@ -181,16 +180,20 @@ function PageList({ pages, labelledBy, resetKey }: { pages: KbPageSummary[]; lab
 /**
  * One kind of page as a section that folds in place (decisions 24 «Wiki», 27): a header row —
  * chevron, name, count — over that kind's flat page list. The fold is kept per kind in prefs. A
- * folded body stays mounted (the rows keep their identity) but is inert.
+ * folded body stays mounted (the rows keep their identity) but is inert. An open section with no
+ * pages says how pages of its kind appear — unless the whole wiki is empty (`wikiEmpty`): then the
+ * panel's one «The wiki is empty» says it (FIX1 R6).
  */
-function KindSection({ kind, pages }: { kind: WikiKind; pages: KbPageSummary[] }) {
+function KindSection({ kind, pages, wikiEmpty }: { kind: WikiKind; pages: KbPageSummary[]; wikiEmpty: boolean }) {
   const { prefs } = useServices();
   const open = usePrefs((s) => s.wikiOpen[kind]);
   const labelId = `kb-wiki-kind-${kind}`;
   const bodyId = `kb-wiki-body-${kind}`;
   const label = LABEL[kind];
   return (
-    <section className="kb-wfold" aria-labelledby={labelId} data-kind={kind}>
+    // A plain group, not a <section aria-labelledby>: six region landmarks inside the Wiki region would
+    // be noise (FIX1 R8); the header button and the grid (aria-labelledby) carry the kind's name.
+    <div className="kb-wfold" data-kind={kind}>
       <h3 className="kb-wfold__head">
         <button type="button" className="kb-row kb-wfold__toggle" aria-expanded={open} aria-controls={bodyId}
           onClick={() => prefs.getState().setWikiOpen(kind, !open)}>
@@ -202,13 +205,13 @@ function KindSection({ kind, pages }: { kind: WikiKind; pages: KbPageSummary[] }
       <div className={`kb-fold${open ? ' is-open' : ''}`} id={bodyId} data-open={open ? 'true' : 'false'}>
         <div className="kb-fold__in" {...(open ? {} : { inert: '' })}>
           {pages.length === 0 ? (
-            <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
+            !wikiEmpty && <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
           ) : (
             <PageList pages={pages} labelledBy={labelId} />
           )}
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -248,7 +251,7 @@ export function WikiSide() {
         <WikiTermsButton size="sm" placement="bottom-start" />
       </div>
       {WIKI_KINDS.map((kind) => (
-        <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)} />
+        <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)} wikiEmpty={pages.length === 0} />
       ))}
       <ul className="kb-list kb-wiki-more" aria-label="More of the wiki">
         <li>

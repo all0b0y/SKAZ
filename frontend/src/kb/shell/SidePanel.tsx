@@ -7,6 +7,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { usePrefs, useUi } from '../state/context';
 import { useMotionLevel } from '../ui/motionLevel';
 import type { Section } from '../state/prefs';
+import { GUTTER } from './layout';
 
 /** A rail section switch crossfades the panel body (opacity only; nothing at calm or off). */
 export const SECTION_FADE_MS = 140;
@@ -20,7 +21,9 @@ const TITLES: Record<Section, string> = {
 };
 
 /**
- * Expandable left panel. Its header keeps one height for every section. The graph has no rail
+ * Expandable left panel. Its header keeps one height for every section. `width` is the column; the
+ * pane's box also takes the gutter to its right (FIX1 S1), where the side resizer sits and the open
+ * chat's bridge runs to the centre sheet. The graph has no rail
  * item (v39): it opens from the Wiki section; `graph` stays a section only for a saved choice.
  */
 export function SidePanel({ width }: { width: number }) {
@@ -38,7 +41,7 @@ export function SidePanel({ width }: { width: number }) {
     return () => fade.cancel();
   }, [section, level]);
   return (
-    <section id="kb-side" className="kb-side" data-pane="side" aria-label={TITLES[section]} style={{ width }}>
+    <section id="kb-side" className="kb-side" data-pane="side" aria-label={TITLES[section]} style={{ width: width + GUTTER }}>
       <header className="kb-head kb-head--side">
         <h2 className="kb-side__title">{TITLES[section]}</h2>
         <span className="kb-head__spacer" />

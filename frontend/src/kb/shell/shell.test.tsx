@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb, storedPrefs } from '../test/renderKb';
@@ -113,6 +115,34 @@ describe('Window shell', () => {
     expect(rail.querySelector('.kb-rail__item.is-active')).toBeNull();
   });
 
+  it('the rail mark re-measures when the items move without a section change (density, text size, window height; FIX1 R1)', async () => {
+    const observers: Array<{ cb: ResizeObserverCallback; els: Element[] }> = [];
+    class FakeResizeObserver {
+      els: Element[] = [];
+      constructor(cb: ResizeObserverCallback) { observers.push({ cb, els: this.els }); }
+      observe(el: Element) { this.els.push(el); }
+      unobserve() {}
+      disconnect() { this.els.length = 0; }
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    try {
+      renderKb();
+      const rail = await screen.findByRole('navigation', { name: 'Sections' });
+      const list = rail.querySelector('.kb-rail__list')!;
+      const mark = within(rail).getByTestId('rail-mark');
+      const chats = within(rail).getByRole('button', { name: /^Chats/ });
+      // The items moved (a denser layout): nothing in React changed, only the list's size.
+      Object.defineProperty(chats, 'offsetTop', { configurable: true, value: 100 });
+      Object.defineProperty(chats, 'offsetHeight', { configurable: true, value: 36 });
+      const watching = observers.filter((o) => o.els.includes(list));
+      expect(watching.length).toBeGreaterThan(0);
+      act(() => { for (const o of watching) o.cb([], {} as ResizeObserver); });
+      expect(mark).toHaveAttribute('data-y', String(100 + (36 - 20) / 2));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('a section switch crossfades the side panel body in 140 ms (opacity only); nothing at calm', async () => {
     const user = userEvent.setup();
     const played: Array<{ el: Element; frames: Keyframe[]; opts: KeyframeAnimationOptions }> = [];
@@ -190,6 +220,20 @@ describe('Window shell', () => {
     expect(storedPrefs().rightWidth).toBe(416);
   });
 
+  it('the side pane owns its gutter (FIX1 S1): its box is the column plus the gutter, the resizer sits on that gutter', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    renderKb();
+    const side = await screen.findByRole('region', { name: 'Chats' });
+    expect(side).toHaveAttribute('data-pane', 'side');
+    // The chat list and its bridge reach the centre sheet without leaving [data-pane=side] (paneAudit).
+    expect(side.style.width).toBe(`${248 + GUTTER}px`);
+    const sep = screen.getByRole('separator', { name: 'Resize side panel' });
+    // The stored width (and the resizer's value) is still the column without the gutter.
+    expect(sep).toHaveAttribute('aria-valuenow', '248');
+    // Right after the pane in the row; CSS pulls it back over the pane's gutter (shell.css `.kb-side + .kb-resizer`).
+    expect(side.nextElementSibling).toBe(sep);
+  });
+
   it('answers the quit barrier at once: this interface holds no unsaved capture', async () => {
     const { fake, unmount } = renderKb();
     await screen.findByRole('navigation', { name: 'Sections' });
@@ -230,8 +274,11 @@ describe('Column layout', () => {
       .toEqual({ side: 200, right: 344, centerVisible: true });
   });
 
-  it('never overflows: any window from 900 to 1800 px, any stored widths, panels open or closed', () => {
-    for (let windowWidth = 900; windowWidth <= 1800; windowWidth += 37) {
+  it('never overflows: any window from 820 (the board\'s narrowest screen) to 1800 px, any stored widths, panels open or closed', () => {
+    const widths: number[] = [];
+    for (let w = 820; w <= 1800; w += 37) widths.push(w);
+    widths.push(960, 1024); // the Electron minimum and the common small screen, exactly
+    for (const windowWidth of widths) {
       for (const sideOpen of [true, false]) {
         for (const docOpen of [true, false]) {
           for (const docExpanded of [false, true]) {
@@ -245,6 +292,15 @@ describe('Column layout', () => {
         }
       }
     }
+  });
+
+  it('layout GUTTER is the same gap as --kb-gutter in tokens.css (FIX1 R11)', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/tokens.css'), 'utf8');
+    const decl = css.match(/--kb-gutter:\s*([^;]+);/);
+    expect(decl, '--kb-gutter is declared').not.toBeNull();
+    expect(decl![1]!.trim()).toBe(`${GUTTER}px`);
+    // Declared once, so no theme or density override can drift from the layout maths.
+    expect(css.match(/--kb-gutter:/g)).toHaveLength(1);
   });
 
   it('a closed side panel takes no room and no gutter; the centre then starts at the rail', () => {

@@ -153,13 +153,27 @@ function RailButton({ id, label, hint, icon, iconPlay, active = false, open = fa
 /** Mark height (css px): a 3×20 accent bar at the rail's left edge, centred on the active item. */
 export const RAIL_MARK_H = 20;
 
-/** Where the sliding mark stands: centred on the active item (null = no active item). */
+/**
+ * Where the sliding mark stands: centred on the active item (null = no active item). Measured on a
+ * section change and whenever the items may have moved without one — density, text size or window
+ * height change the list's box or the rail's (FIX1 R1), so both are observed.
+ */
 function useRailMarkY(nav: RefObject<HTMLElement | null>, activeId: string | null): number | null {
   const [y, setY] = useState<number | null>(null);
   useLayoutEffect(() => {
-    const item = activeId === null ? null
-      : [...(nav.current?.querySelectorAll<HTMLElement>('.kb-rail__item[data-section]') ?? [])].find((el) => el.dataset.section === activeId);
-    setY(item ? item.offsetTop + (item.offsetHeight - RAIL_MARK_H) / 2 : null);
+    const measure = () => {
+      const item = activeId === null ? null
+        : [...(nav.current?.querySelectorAll<HTMLElement>('.kb-rail__item[data-section]') ?? [])].find((el) => el.dataset.section === activeId);
+      setY(item ? item.offsetTop + (item.offsetHeight - RAIL_MARK_H) / 2 : null);
+    };
+    measure();
+    const el = nav.current;
+    if (!el || activeId === null || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const list = el.querySelector('.kb-rail__list');
+    if (list) ro.observe(list);
+    return () => ro.disconnect();
   }, [nav, activeId]);
   return y;
 }
@@ -200,7 +214,7 @@ export function Rail() {
     <nav className="kb-rail" data-pane="rail" aria-label="Sections" ref={navRef}>
       {activeId !== null && markY !== null && (
         // One mark that slides to the active section (decision 24 «Left menu»): no mark while the side panel is closed.
-        <m.span className="kb-rail__mark" data-testid="rail-mark" data-section={activeId} aria-hidden="true"
+        <m.span className="kb-rail__mark" data-testid="rail-mark" data-section={activeId} data-y={markY} aria-hidden="true"
           initial={false} animate={{ y: markY }} transition={SPRING_SMALL} />
       )}
       <ul className="kb-rail__list">

@@ -9,7 +9,11 @@ export const FOLLOW_PX = 12;
 export const FOLLOW_DELAY_MS = 60;
 export const TITLE_FADE_MS = 160;
 export const TITLE_DELAY_MS = 40;
-/** SPRING_LARGE of ui/motion.tsx (visualDuration 0.32, no bounce), played by the Web Animations API. */
+/**
+ * The thread's spring: SPRING_LARGE's parameters (visualDuration 0.32, no bounce) through the mock's
+ * spring (`springEasing`, ω = 6.6 / vd), played by the Web Animations API. Same parameters, not the
+ * same curve as motion's SPRING_LARGE — the mock's feel is the approved one (FIX1 R9).
+ */
 const THREAD_SPRING = springEasing(0.32, 0);
 
 /**

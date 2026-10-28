@@ -187,11 +187,15 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   flex-direction: column;
   min-width: 0;
   background: var(--kb-side);
-  /* Clipped like before, but the list may reach across the gutter to the centre sheet (the bridge
-     of the open chat, decision 24 «Chats»). */
+  /* The pane owns the gutter to its right (FIX1 S1): its box is the column plus --kb-gutter
+     (SidePanel.tsx), its content ends at the gutter, and the chat list reaches across the gutter
+     to the centre sheet inside the pane (the bridge of the open chat, decision 24 «Chats»), so
+     nothing spills out of [data-pane=side] (scripts/paneAudit.ts). */
+  padding-right: var(--kb-gutter);
   overflow: clip;
-  overflow-clip-margin: var(--kb-gutter);
 }
+/* The side resizer comes right after the pane and sits back on the pane's gutter. */
+.kb-side + .kb-resizer { margin-left: calc(-1 * var(--kb-gutter)); }
 .kb-head--side { border-bottom: 0; padding: 0 var(--kb-sp-12); }
 .kb-side__title {
   font-family: var(--kb-font-display);
@@ -209,17 +213,24 @@ html[data-full-screen] .kb-titlebar { padding-left: var(--kb-sp-12); }
   overflow-y: auto;
   overflow-x: hidden;
   padding: 0 var(--kb-sp-8) var(--kb-sp-12);
-  /* The scroll box reaches across the gutter to the centre sheet, so the open chat's tab can run
-     into its window; the rows keep their place. No scrollbar: it would stand in the gutter (the
-     resizer) and cut the bridge (trackpad and wheel scroll as before). */
-  margin-right: calc(-1 * var(--kb-gutter));
-  padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
-  scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
-.kb-side__scroll::-webkit-scrollbar { display: none; }
+/* Only the chat list (it hosts the bridge tab) reaches across the gutter to the centre sheet, so
+   the open chat's tab can run into its window; the rows keep their place. No scrollbar there: it
+   would stand in the gutter (the resizer) and cut the bridge (trackpad and wheel scroll as before).
+   Wiki, materials and notifications end at the gutter with their normal scrollbar (FIX1 R2). */
+.kb-side__scroll.kb-tabhost {
+  margin-right: calc(-1 * var(--kb-gutter));
+  padding-right: calc(var(--kb-sp-8) + var(--kb-gutter));
+  /* Room for the bridge's top concave corner when the first row (New chat) is open (FIX1 R4): the
+     box starts a corner higher, over the header's empty bottom strip, so the rows keep their place. */
+  margin-top: calc(-1 * var(--kb-bridge-corner));
+  padding-top: var(--kb-bridge-corner);
+  scrollbar-width: none;
+}
+.kb-side__scroll.kb-tabhost::-webkit-scrollbar { display: none; }
 .kb-side__pad { padding: var(--kb-sp-4) var(--kb-sp-8); }
 .kb-side__wait { display: flex; justify-content: center; padding: var(--kb-sp-20); }
 .kb-side__note { color: var(--kb-muted); font-size: var(--t-sm); padding: var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-6); }
@@ -411,6 +422,8 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 /* clip, not hidden: no scroll container, so the selection bar still sticks to the side list. */
 .kb-fold__in { min-height: 0; overflow: clip; }
 .kb-fold.is-open > .kb-fold__in { overflow-clip-margin: var(--kb-sp-4); }
+/* Page rows of an open kind sit 12 px in from its header (mock shell-v4 `.m-fold > ul`, FIX1 R7). */
+.kb-fold__in > .kb-sellist > .kb-list { padding-left: var(--kb-sp-12); }
 .kb-wiki-more { margin-top: var(--kb-sp-8); }
 html[data-motion='calm'] .kb-fold,
 html[data-motion='calm'] .kb-wfold__chev { transition: none; }

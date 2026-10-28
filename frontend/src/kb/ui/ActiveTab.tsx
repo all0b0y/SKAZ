@@ -28,8 +28,15 @@ const OPEN = 'inset(-12px 0px -12px 0px)';
 const TUCKED = 'inset(-12px 0px -12px 100%)';
 
 /**
- * A spring with motion's (visualDuration, bounce) parameters sampled into a CSS `linear()` easing,
- * so the Web Animations API can play it on `clip-path` (which motion values do not spring).
+ * A spring with motion-style (visualDuration, bounce) parameters sampled into a CSS `linear()`
+ * easing, so the Web Animations API can play it on `clip-path` (which motion values do not spring).
+ *
+ * It is the mock's spring (`shell-v4.template.html` `spring()`): natural frequency ω = 6.6 / vd and
+ * damping ratio 1 − bounce, played for vd × 1.6 (bouncy) or vd × 1.25. The user approved that feel in
+ * the mock, so it is kept as is (FIX1 R9). It is NOT motion's own spring solver: with the same
+ * parameters it does not reproduce `SPRING_SMALL` / `SPRING_LARGE` of `ui/motion.tsx` frame for frame
+ * (motion's undamped frequency is ω = 2π / (1.2 × vd) ≈ 5.24 / vd, motion-dom `spring.mjs`, so the
+ * mock's curve settles faster for the same visualDuration).
  */
 export function springEasing(visualDuration: number, bounce: number): { duration: number; easing: string } {
   const z = 1 - bounce;
@@ -126,8 +133,21 @@ export function ActiveTab({ host, activeKey, variant }: ActiveTabProps) {
     running.current.push(() => { out.cancel(); ghost.remove(); inn.cancel(); });
   };
 
+  /** The host's resize observer and the children it watches (kept in step with the list, FIX1 R3). */
+  const observer = useRef<{ ro: ResizeObserver; watched: Set<Element> } | null>(null);
+  /** Watch the host's current children: rows or groups added after mount move the open row too. */
+  const observeChildren = () => {
+    const el = host.current;
+    const o = observer.current;
+    if (!el || !o) return;
+    const now = new Set<Element>(el.children);
+    for (const child of o.watched) if (!now.has(child)) { o.ro.unobserve(child); o.watched.delete(child); }
+    for (const child of now) if (!o.watched.has(child)) { o.ro.observe(child); o.watched.add(child); }
+  };
+
   /** Place the tab on the open row; a change of row plays the switch. */
   const sync = () => {
+    observeChildren();
     const tab = tabRef.current;
     const el = host.current;
     if (!tab || !el) return;
@@ -168,8 +188,10 @@ export function ActiveTab({ host, activeKey, variant }: ActiveTabProps) {
     };
     const ro = new ResizeObserver(remeasure);
     ro.observe(el);
-    for (const child of el.children) ro.observe(child);
-    return () => ro.disconnect();
+    observer.current = { ro, watched: new Set() };
+    observeChildren();
+    return () => { ro.disconnect(); observer.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, variant]);
 
   useLayoutEffect(() => () => stopAll(), []);
