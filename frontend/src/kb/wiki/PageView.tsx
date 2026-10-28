@@ -507,7 +507,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         {page && <RenamePageDialog page={page} open={dialog === 'rename'} onClose={() => setDialog(null)} onDone={set} />}
         {page && <DeletePageDialog page={page} open={dialog === 'delete'} onClose={() => setDialog(null)} />}
       </div>
-      {(swap.phase === 'cover' || swap.phase === 'reveal') && <PixelCover phase={swap.phase} phaseAt={swap.phaseAt} />}
+      {(swap.phase === 'cover' || swap.phase === 'reveal') && <PixelCover phase={swap.phase} phaseAt={swap.phaseAt} rewindFrom={swap.rewindFrom} />}
       </div>
     </>
   );
