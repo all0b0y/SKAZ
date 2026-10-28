@@ -40,7 +40,8 @@ const widthOf = (el: HTMLElement) => el.getBoundingClientRect().width;
 
 /**
  * Plays {@link swellPlan} on `slot` whenever `shape` changes (never on the first render). The slot's
- * last settled width is measured after every render, so a shape change knows where it came from.
+ * last settled width is measured after every render and on every resize of the slot (outside a
+ * swell), so a shape change knows where it came from.
  * While it swells the slot carries `is-swelling` and `data-pill` (recording.css paints the pill).
  */
 export function useVoicePill(slot: RefObject<HTMLElement | null>, shape: PillShape, level: MotionLevel): void {
@@ -93,6 +94,17 @@ export function useVoicePill(slot: RefObject<HTMLElement | null>, shape: PillSha
     }
     running.current = played;
   });
+
+  // FIX2 C-M4: the idle pill can change width by its own state (the saved folder name loads late)
+  // without a render of the control that owns the slot: watch the slot itself. Mid-swell the box is
+  // the animation's, so a resize then is not a resting width.
+  useLayoutEffect(() => {
+    const el = slot.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => { if (!swelling.current) settled.current = widthOf(el); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [slot]);
 
   useLayoutEffect(() => () => running.current.forEach((a) => a.cancel()), []);
 }
