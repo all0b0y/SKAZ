@@ -119,6 +119,16 @@ html[data-board='frame'] body { background: var(--kb-bg); }
 .kb-board__pane--side { background: var(--kb-side); }
 .kb-board__pane--pane { background: var(--kb-pane); }
 .kb-board__pane > .kb-center { min-width: 0; flex: 1; }
+/* A side pane in its window (B1): side ground, the gutter, the centre sheet's edge. The side is
+   clipped like the app's .kb-side (overflow-clip-margin = the gutter), so the chat list's scroll
+   box — and the open chat's bridge — reach across the gutter to the sheet and stop there. */
+.kb-board__window {
+  display: flex; align-items: stretch; width: max-content; max-width: 100%;
+  padding: var(--kb-gutter) var(--kb-gutter) var(--kb-gutter) 0;
+  background: var(--kb-side); border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); overflow: hidden;
+}
+.kb-board__pane--bridged { border: 0; border-radius: 0; overflow: clip; overflow-clip-margin: var(--kb-gutter); flex: none; }
+.kb-board__sheet { flex: none; width: 72px; margin-left: var(--kb-gutter); background: var(--kb-pane); border-radius: var(--kb-r-xl); }
 /* The real toast is a portal to <body>, fixed to the window: on its pattern page it is laid out in the flow. */
 html[data-board-pattern='toast'] body > .kb-toast { position: relative; left: auto; bottom: auto; translate: none; z-index: auto; width: max-content; margin: 0 32px var(--kb-sp-12); }
 html[data-board-pattern='toast'] #root { min-height: 0; }

@@ -26,12 +26,24 @@ function Cell({ pattern, cell, look, onDone }: { pattern: BoardPattern; cell: Pa
   }, (error) => onDone(error ?? failed.current));
 
   const width = cell.width ?? pattern.cellWidth;
+  const bridged = cell.pane === 'side' && cell.sheet === true;
+  const stage = (
+    <div ref={root} className={`kb-board__pstage${cell.pane ? ` kb-board__pane kb-board__pane--${cell.pane}` : ''}${bridged ? ' kb-board__pane--bridged' : ''}`}
+      style={{ width, height: cell.height }}>
+      {ready && <Scope services={live.services}>{cell.render()}</Scope>}
+    </div>
+  );
   return (
     <figure className="kb-board__pcell" data-board-cell={cell.label}>
       {cell.label && <figcaption className="kb-board__label">{cell.label}</figcaption>}
-      <div ref={root} className={`kb-board__pstage${cell.pane ? ` kb-board__pane kb-board__pane--${cell.pane}` : ''}`} style={{ width, height: cell.height }}>
-        {ready && <Scope services={live.services}>{cell.render()}</Scope>}
-      </div>
+      {bridged ? (
+        // The window around the side list: side ground · gutter · the centre sheet's edge, so the
+        // open chat's bridge has a sheet to run into (board-only markup, the list is the real one).
+        <div className="kb-board__window">
+          {stage}
+          <div className="kb-board__sheet" aria-hidden="true" />
+        </div>
+      ) : stage}
     </figure>
   );
 }
