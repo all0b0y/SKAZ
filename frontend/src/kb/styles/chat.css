@@ -270,7 +270,8 @@
   container-type: inline-size;
 }
 .kb-composer:focus-within { border-color: color-mix(in srgb, var(--kb-text) 45%, var(--kb-line)); }
-/* Quick questions over the field while a recording runs (v39 rec): one row of pills, scrolls sideways. */
+/* Quick questions over the field while a recording runs (v39 rec): one row of pills. PANES-SPEC §3: in a
+   narrow centre the pills shrink first (ellipsis, full label in the title), and only then the row scrolls. */
 .kb-quick {
   flex: none;
   display: flex;
@@ -281,7 +282,10 @@
 }
 .kb-quick::-webkit-scrollbar { display: none; }
 .kb-quick__chip {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   height: 30px;
   padding: 0 var(--kb-sp-12);
   border: 1px solid var(--kb-line);
