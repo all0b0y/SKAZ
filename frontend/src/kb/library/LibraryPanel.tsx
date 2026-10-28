@@ -169,9 +169,14 @@ function Overview() {
       )}
 
       <h3 className="kb-subhead" id="kb-recent" data-entrance="">Recent</h3>
-      {materials.length === 0 ? (
-        <p className="kb-side__note" data-entrance="">{contentLoad === 'loading' ? 'Loading…' : 'No materials yet.'}</p>
-      ) : (
+      {materials.length === 0 && contentLoad === 'loading' && <p className="kb-side__note" data-entrance="">Loading…</p>}
+      {materials.length === 0 && contentLoad !== 'loading' && (
+        // The panel's own empty state has the halftone art like the others (FIX2 S-L3).
+        <div data-entrance="">
+          <EmptyState icon="materials" title="No materials yet" compact art={<HalftoneArt id="library" compact />} />
+        </div>
+      )}
+      {materials.length > 0 && (
         <MaterialList items={materials.slice(0, RECENT)} labelledBy="kb-recent" resetKey="recent"
           toneOf={(m) => toneOf(m.folder_id)} metaOf={(m) => systemName(m.folder_id)} />
       )}
