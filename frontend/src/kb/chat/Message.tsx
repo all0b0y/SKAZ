@@ -20,7 +20,7 @@ import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
-import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
+import { ThoughtLine } from './ThoughtLine';
 import { isMemoryPart } from '../me/api';
 import type { KbMemoryPart } from '../../api/kb/types.gen';
 import { MemoryChip } from '../me/MemoryChip';
@@ -182,26 +182,6 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
   );
 }
 
-/** SKAZ's web search tool (backend `permissions/web_tool.py` WEB_TOOL). */
-const WEB_TOOL = 'skaz_web_search';
-
-/** What the agent looked at ("Read page Entropy"), folded. */
-function Tools({ parts }: { parts: KbMessagePart[] }) {
-  // W-3b: the skaz_web_search call has its own «Searched the web» line — not repeated here.
-  const tools = parts.filter((p): p is Extract<KbMessagePart, { type: 'tool' }> => p.type === 'tool' && !p.name.endsWith(WEB_TOOL));
-  const [open, setOpen] = useState(false);
-  if (!tools.length) return null;
-  return (
-    <div className="kb-tools">
-      <button type="button" className="kb-tools__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <Icon name="tool" size={13} />Looked at {tools.length} {tools.length === 1 ? 'thing' : 'things'}
-        <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
-      </button>
-      {open && <ul className="kb-tools__list">{tools.map((t, i) => <li key={i}>{t.label}</li>)}</ul>}
-    </div>
-  );
-}
-
 function retryText(iso: string | null): string {
   if (!iso) return '';
   const t = new Date(iso);
@@ -246,12 +226,10 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const fixDiagram = useDiagramFix(message.id);
   return (
     <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
-      <Tools parts={message.parts} />
+      {/* Stage 6 B3: the agent's work (thinking line, live timer, a chip per tool call) folds into
+          «Looked at N things» after the answer. */}
+      <ThoughtLine message={message} head={empty && message.state === 'streaming' ? waitingFor ?? 'Writing an answer…' : null} />
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
-        {empty && message.state === 'streaming' && (
-          // FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
-          <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />{waitingFor ?? 'Writing an answer…'}</p>
-        )}
         <SourcesProvider index={sources}>
           <AnswerSelectScope messageId={message.id}>
             <DiagramFixProvider value={fixDiagram}>

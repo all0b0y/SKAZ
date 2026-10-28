@@ -86,6 +86,27 @@
   .kb-chat__backdrop { animation-duration: 200ms; }
   .kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
 }
+/*
+ * Stage 6 B2 — GradualBlur (decision 30, demo motion-v1 B2; chat/ScrollEdges.tsx): the thread fades and
+ * softly blurs under the title bar and above the composer. Four stacked backdrop blurs (0.5/1/2/4 px),
+ * each masked to a shorter band, plus a pane-tone fade; 44 px. Each edge hides at its scroll end with a
+ * 0.16 s fade (instant at motion «off», where transitions are off). Never takes the pointer.
+ */
+.kb-edge { position: absolute; left: 0; right: 0; height: 44px; pointer-events: none; z-index: 2; transition: opacity 0.16s ease; }
+.kb-edge[data-on='false'] { opacity: 0; }
+.kb-edge--top { top: 0; }
+.kb-edge--bottom { bottom: 0; }
+.kb-edge__blur { position: absolute; inset: 0; }
+.kb-edge__blur--1 { backdrop-filter: blur(0.5px); --kb-edge-from: 70%; --kb-edge-to: 100%; }
+.kb-edge__blur--2 { backdrop-filter: blur(1px); --kb-edge-from: 48%; --kb-edge-to: 78%; }
+.kb-edge__blur--3 { backdrop-filter: blur(2px); --kb-edge-from: 26%; --kb-edge-to: 56%; }
+.kb-edge__blur--4 { backdrop-filter: blur(4px); --kb-edge-from: 4%; --kb-edge-to: 34%; }
+.kb-edge--top .kb-edge__blur { -webkit-mask-image: linear-gradient(to bottom, black var(--kb-edge-from), transparent var(--kb-edge-to)); mask-image: linear-gradient(to bottom, black var(--kb-edge-from), transparent var(--kb-edge-to)); }
+.kb-edge--bottom .kb-edge__blur { -webkit-mask-image: linear-gradient(to top, black var(--kb-edge-from), transparent var(--kb-edge-to)); mask-image: linear-gradient(to top, black var(--kb-edge-from), transparent var(--kb-edge-to)); }
+.kb-edge::after { content: ''; position: absolute; inset: 0; opacity: 0.75; }
+.kb-edge--top::after { background: linear-gradient(to bottom, var(--kb-pane), color-mix(in srgb, var(--kb-pane) 0%, transparent)); }
+.kb-edge--bottom::after { background: linear-gradient(to top, var(--kb-pane), color-mix(in srgb, var(--kb-pane) 0%, transparent)); }
+
 /* «Connecting nodes» beside «Writing an answer…» (FX §7). */
 .kb-msg__think { width: 84px; height: 16px; flex: none; }
 
@@ -211,7 +232,71 @@
 .kb-tools { margin-bottom: var(--kb-sp-4); }
 .kb-tools__toggle { display: inline-flex; align-items: center; gap: var(--kb-sp-4); color: var(--kb-muted); font-size: var(--t-xs); border-radius: var(--kb-r-xs); padding: 1px var(--kb-sp-4); margin-left: calc(var(--kb-sp-4) * -1); }
 .kb-tools__toggle:hover { color: var(--kb-text); }
-.kb-tools__list { margin: var(--kb-sp-4) 0 var(--kb-sp-6) var(--kb-sp-18); color: var(--kb-muted); font-size: var(--t-xs); display: flex; flex-direction: column; gap: var(--kb-sp-2); list-style: disc; }
+
+/*
+ * Stage 6 B3 — ThoughtLine + CallChip (decision 30, demo motion-v1 B3; chat/ThoughtLine.tsx).
+ * `data-level` = the effective motion level (full | calm | off). full: chips fade in 140 ms, a done
+ * chip's tint wipes across 0.26 s, an error shakes once, the block folds with grid rows 0.26 s + fade;
+ * calm: fades only (no wipe, shake or height travel); off: everything instant, the timers still count.
+ */
+.kb-thought__sum b { font-weight: 600; color: var(--kb-text); }
+.kb-thought__total { font-variant-numeric: tabular-nums; }
+.kb-thought__chev { transition: transform 0.16s ease; }
+.kb-thought__chev.is-open { transform: rotate(180deg); }
+.kb-thought[data-arrived='true'] .kb-thought__sum { animation: kb-fx-fade 160ms ease-out 120ms both; }
+.kb-thought[data-level='off'] .kb-thought__sum { animation: none; }
+.kb-thought__fold { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.26s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease; }
+.kb-thought__fold[data-open='false'] { grid-template-rows: 0fr; opacity: 0; }
+.kb-thought[data-level='calm'] .kb-thought__fold { transition: opacity 0.16s ease; }
+.kb-thought[data-level='off'] .kb-thought__fold { transition: none; }
+.kb-thought__inner { overflow: hidden; min-height: 0; }
+.kb-thought__fold[data-open='true'] > .kb-thought__inner { overflow: visible; }
+.kb-thought__head { display: flex; align-items: center; gap: var(--kb-sp-8); min-height: 22px; }
+.kb-thought__time { color: var(--kb-muted); font-size: var(--t-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kb-thought__time::before { content: '· '; }
+.kb-thought__calls { display: flex; flex-wrap: wrap; gap: var(--kb-sp-6); padding: var(--kb-sp-8) 0 var(--kb-sp-4); margin: 0; list-style: none; }
+.kb-thought:not([data-working]) .kb-thought__calls { padding-top: var(--kb-sp-4); }
+
+.kb-call {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-6);
+  height: var(--kb-control-h-sm);
+  max-width: 100%;
+  padding: 0 var(--kb-sp-10) 0 var(--kb-sp-8);
+  border-radius: var(--kb-r-pill);
+  border: 1px solid var(--kb-line);
+  color: var(--kb-muted-strong);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  isolation: isolate; /* the Stippling fill and the tint sit behind the words (z-index -1) */
+}
+.kb-call__fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+.kb-call__wipe { position: absolute; inset: 0; z-index: -1; background: var(--kb-accent-soft); clip-path: inset(0 100% 0 0); }
+.kb-call[data-state='done'] .kb-call__wipe { clip-path: inset(0 0 0 0); }
+.kb-call__icon { display: inline-flex; flex: none; color: var(--kb-text); }
+.kb-call__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.kb-call__time { flex: none; color: var(--kb-muted); font-variant-numeric: tabular-nums; }
+.kb-call__err { flex: none; color: var(--kb-danger); }
+.kb-call[data-state='error'] { border-color: var(--kb-danger); }
+.kb-call[data-state='error'] .kb-call__icon { color: var(--kb-danger); }
+.kb-call[data-state='stopped'] { border-style: dashed; }
+/* Only what happened on screen moves: a call that arrived, finished or failed while the answer was open. */
+.kb-thought[data-level='full'] .kb-call[data-live='true'],
+.kb-thought[data-level='calm'] .kb-call[data-live='true'] { animation: kb-fx-fade 140ms ease-out both; }
+.kb-thought[data-level='full'] .kb-call[data-live='true'][data-state='done'] .kb-call__wipe { animation: kb-call-wipe 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.kb-thought[data-level='calm'] .kb-call[data-live='true'][data-state='done'] .kb-call__wipe { animation: kb-fx-fade 160ms ease-out both; }
+.kb-thought[data-level='full'] .kb-call[data-live='true'][data-state='error'] { animation: kb-call-shake 0.3s ease-in-out both; }
+@keyframes kb-call-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes kb-call-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
 
 /* "Connection · N folders" (v4). */
 .kb-conn { margin-top: var(--kb-sp-8); display: flex; flex-direction: column; align-items: flex-start; gap: var(--kb-sp-8); }

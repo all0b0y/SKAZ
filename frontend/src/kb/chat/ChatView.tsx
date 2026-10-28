@@ -22,6 +22,7 @@ import { DitherStage } from '../fx/dither/DitherStage';
 import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
 import { useFollowSwitch } from './switchMotion';
+import { ScrollEdges } from './ScrollEdges';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -232,6 +233,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           </div>
         )}
       </div>
+      {/* Stage 6 B2 GradualBlur: soft edges under the title bar and above the composer (only over a thread). */}
+      <ScrollEdges scrollRef={scrollRef} show={showBackdrop} />
       </DitherStage>
       {showField && (
         // FX §5: what the empty chat is for, on a solid plate above the field — never on the canvas.
