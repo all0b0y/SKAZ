@@ -33,6 +33,8 @@ function useGlide(enabled: boolean, open: boolean) {
   const hovered = useRef<HTMLElement | null>(null);
   /** A key was pressed inside the menu since the pointer last moved: focus moves are keyboard moves. */
   const keyboard = useRef(false);
+  /** The row the pointer gave focus to (cleared once a key moves on): leaving the menu takes it back. */
+  const pointerFocus = useRef<HTMLElement | null>(null);
 
   const popOf = () => glideRef.current?.parentElement ?? null;
   const play = (frames: Keyframe[], options: KeyframeAnimationOptions) => {
@@ -86,11 +88,27 @@ function useGlide(enabled: boolean, open: boolean) {
     if (keyboard.current) return true;
     try { return el.matches(':focus-visible'); } catch { return false; }
   };
-  /** Where the highlight rests without a hovered row: on the keyboard-focused row, or nowhere. */
+  /** Where the highlight rests without a hovered row: on the keyboard-focused row, or nowhere. A
+   *  disabled row the keyboard reached shows it too (focus is always visible, FIX2 C-M2). */
   const rest = () => {
     const row = rowOf(document.activeElement);
-    if (row && usable(row) && focusVisible(row)) go(row);
+    if (row && focusVisible(row)) go(row);
     else hide();
+  };
+  const typing = (el: Element | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+    || (el instanceof HTMLElement && el.isContentEditable);
+  /**
+   * The ARIA menu pattern (FIX2 C-M2): the row under the pointer IS the current row — it takes real
+   * focus, so Enter chooses what is highlighted and keyboard focus never hides under the highlight.
+   * A disabled row or a gap hands focus to the menu itself (nothing is current). Never out of a text
+   * field in the menu (the model-picker search): the user is typing there.
+   */
+  const pointTo = (target: HTMLElement) => {
+    const active = document.activeElement;
+    const pop = popOf();
+    if (!pop || (typing(active) && pop.contains(active))) return;
+    if (active !== target) target.focus({ preventScroll: true });
+    pointerFocus.current = target === pop ? null : target;
   };
 
   /** Re-place the highlight on its row, or take it away when the row left or can no longer be chosen. */
@@ -99,7 +117,16 @@ function useGlide(enabled: boolean, open: boolean) {
     const el = glideRef.current;
     const pop = popOf();
     if (!row || !el || !pop) return;
-    if (!row.isConnected || !pop.contains(row) || !usable(row)) {
+    if (!row.isConnected || !pop.contains(row)) {
+      if (hovered.current === row) hovered.current = null;
+      if (pointerFocus.current === row) pointerFocus.current = null;
+      hide(true);
+      // A focused row that left drops focus to <body>: keep it in the menu (Escape, arrows still work).
+      const active = document.activeElement;
+      if (!active || active === document.body) pop.focus({ preventScroll: true });
+      return;
+    }
+    if (!usable(row) && !(row === document.activeElement && focusVisible(row))) {
       if (hovered.current === row) hovered.current = null;
       hide(true);
       return;
@@ -131,19 +158,27 @@ function useGlide(enabled: boolean, open: boolean) {
     onPointerOver: (event: { target: EventTarget | null }) => {
       const row = rowOf(event.target);
       if (!row) return; // gaps, headings, separators: the highlight stays where it is
-      if (usable(row)) { hovered.current = row; go(row); } else { hovered.current = null; rest(); }
+      const pop = popOf();
+      if (usable(row)) { hovered.current = row; go(row); pointTo(row); }
+      else { hovered.current = null; if (pop) pointTo(pop); rest(); }
     },
-    onPointerLeave: () => { hovered.current = null; rest(); },
+    onPointerLeave: () => {
+      hovered.current = null;
+      const pop = popOf();
+      if (pop && pointerFocus.current && document.activeElement === pointerFocus.current) pop.focus({ preventScroll: true });
+      pointerFocus.current = null;
+      rest();
+    },
     onPointerMove: () => { keyboard.current = false; },
-    onKeyDownCapture: () => { keyboard.current = true; },
+    onKeyDownCapture: () => { keyboard.current = true; pointerFocus.current = null; },
     onFocus: (event: { target: EventTarget | null }) => {
       const row = rowOf(event.target);
-      if (row && usable(row) && focusVisible(row)) go(row);
+      if (row && (focusVisible(row) || row === hovered.current)) go(row);
       else if (!row && !hovered.current) hide();
     },
   } : {};
 
-  const reset = () => { cur.current = null; hovered.current = null; keyboard.current = false; };
+  const reset = () => { cur.current = null; hovered.current = null; keyboard.current = false; pointerFocus.current = null; };
   return { glideRef, handlers, reset };
 }
 

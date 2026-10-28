@@ -248,6 +248,149 @@ describe('GlideSelect (B1)', () => {
     });
   });
 
+  describe('one current row: focus and highlight never part (FIX2 C-M2)', () => {
+    function Spied({ picks }: { picks: Record<string, () => void> }) {
+      const [open, setOpen] = useState(false);
+      const ref = useRef<HTMLButtonElement | null>(null);
+      return (
+        <>
+          <button ref={ref} type="button" onClick={() => setOpen(true)}>Actions</button>
+          <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} label="Folder"
+            items={[
+              { id: 'r', label: 'Rename', onSelect: picks.Rename! },
+              { id: 'm', label: 'Move', onSelect: picks.Move! },
+              { id: 'd', label: 'Delete', disabled: true, onSelect: picks.Delete! },
+            ]} />
+        </>
+      );
+    }
+    async function openByKeyboard() {
+      const picks = { Rename: vi.fn(), Move: vi.fn(), Delete: vi.fn() };
+      const user = userEvent.setup();
+      render(<Spied picks={picks} />);
+      screen.getByRole('button', { name: 'Actions' }).focus();
+      await user.keyboard('{Enter}');
+      const menu = await screen.findByRole('menu', { name: 'Folder' });
+      const row = (name: string) => within(menu).getByRole('menuitem', { name });
+      await waitFor(() => expect(row('Rename')).toHaveFocus());
+      return { user, picks, menu, row, glide: menu.querySelector<HTMLElement>('.kb-glide')! };
+    }
+
+    it('hovering a row moves real focus to it, so Enter chooses the highlighted row', async () => {
+      stubAnimate();
+      const { user, picks, row, glide } = await openByKeyboard();
+      await user.hover(row('Move'));
+      expect(row('Move')).toHaveFocus();
+      expect(glide.style.transform).toBe(`translate(0px, ${ROW_H}px)`);
+      await user.keyboard('{Enter}');
+      expect(picks.Move).toHaveBeenCalledTimes(1);
+      expect(picks.Rename).not.toHaveBeenCalled();
+    });
+
+    it('hovering a disabled row takes focus off the previous row: nothing is current, Enter chooses nothing', async () => {
+      stubAnimate();
+      const { user, picks, menu, row, glide } = await openByKeyboard();
+      await user.keyboard('{ArrowDown}');
+      expect(row('Move')).toHaveFocus();
+      expect(glide.style.opacity).toBe('1');
+      await user.hover(row('Delete'));
+      expect(menu).toHaveFocus();
+      expect(glide.style.opacity).toBe('0');
+      await user.keyboard('{Enter}');
+      expect(picks.Move).not.toHaveBeenCalled();
+      expect(picks.Rename).not.toHaveBeenCalled();
+      expect(picks.Delete).not.toHaveBeenCalled();
+      await user.keyboard('{ArrowDown}');
+      expect(row('Rename')).toHaveFocus(); // the arrows start again from the top
+    });
+
+    it('the pointer leaving the menu takes the focus it gave back to the menu (the highlight fades with it)', async () => {
+      stubAnimate();
+      const { user, picks, menu, row, glide } = await openByKeyboard();
+      await user.hover(row('Move'));
+      fireEvent.pointerLeave(menu);
+      expect(menu).toHaveFocus();
+      expect(glide.style.opacity).toBe('0');
+      await user.keyboard('{Enter}');
+      expect(picks.Move).not.toHaveBeenCalled();
+    });
+
+    it('a row the keyboard reached after the hover keeps focus and highlight when the pointer leaves', async () => {
+      stubAnimate();
+      const { user, menu, row, glide } = await openByKeyboard();
+      await user.hover(row('Rename'));
+      await user.keyboard('{ArrowDown}');
+      fireEvent.pointerLeave(menu);
+      expect(row('Move')).toHaveFocus();
+      expect(glide.style.opacity).toBe('1');
+      expect(glide.style.transform).toBe(`translate(0px, ${ROW_H}px)`);
+    });
+
+    it('a disabled row that has keyboard focus keeps a visible highlight', async () => {
+      stubAnimate();
+      const { menu, row, glide } = await openByKeyboard();
+      fireEvent.keyDown(menu, { key: 'Shift' });
+      act(() => { row('Delete').focus(); });
+      expect(row('Delete')).toHaveFocus();
+      expect(glide.style.opacity).toBe('1');
+      expect(glide.style.transform).toBe(`translate(0px, ${2 * ROW_H}px)`);
+    });
+
+    it('hovering never pulls focus out of a text field in the menu (the model-picker search)', async () => {
+      stubAnimate();
+      const user = userEvent.setup();
+      function Search() {
+        const ref = useRef<HTMLButtonElement | null>(null);
+        return (
+          <>
+            <button ref={ref} type="button">Anchor</button>
+            <Popover open onClose={() => undefined} anchorRef={ref} label="Models" role="menu">
+              <input type="search" aria-label="Search models" />
+              <div className="kb-menu__list">
+                <button type="button" role="menuitem" tabIndex={-1} className="kb-menu__item">Rename</button>
+                <button type="button" role="menuitem" tabIndex={-1} className="kb-menu__item">Move</button>
+              </div>
+            </Popover>
+          </>
+        );
+      }
+      render(<Search />);
+      const menu = await screen.findByRole('menu', { name: 'Models' });
+      const field = within(menu).getByRole('searchbox', { name: 'Search models' });
+      await waitFor(() => expect(field).toHaveFocus());
+      await user.hover(within(menu).getByRole('menuitem', { name: 'Move' }));
+      expect(field).toHaveFocus();
+      await user.keyboard('gpt');
+      expect(field).toHaveValue('gpt');
+    });
+
+    it('a focused row that is removed hands focus to the menu, not to the page', async () => {
+      stubAnimate();
+      const user = userEvent.setup();
+      function Drop() {
+        const ref = useRef<HTMLButtonElement | null>(null);
+        const [rows, setRows] = useState(['Rename', 'Move']);
+        return (
+          <>
+            <button ref={ref} type="button" onClick={() => setRows(['Rename'])}>drop</button>
+            <Popover open onClose={() => undefined} anchorRef={ref} label="Drop" role="menu" autoFocus={false}>
+              <div className="kb-menu__list">
+                {rows.map((r) => <button key={r} type="button" role="menuitem" tabIndex={-1} className="kb-menu__item">{r}</button>)}
+              </div>
+            </Popover>
+          </>
+        );
+      }
+      render(<Drop />);
+      const menu = await screen.findByRole('menu', { name: 'Drop' });
+      await user.hover(within(menu).getByRole('menuitem', { name: 'Move' }));
+      expect(within(menu).getByRole('menuitem', { name: 'Move' })).toHaveFocus();
+      fireEvent.click(screen.getByRole('button', { name: 'drop' })); // a click without moving focus
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+      expect(menu).toHaveFocus();
+    });
+  });
+
   it('only menus glide: a dialog popover has no highlight', async () => {
     function Dialog() {
       const ref = useRef<HTMLButtonElement | null>(null);
