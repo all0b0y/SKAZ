@@ -106,7 +106,8 @@ button.kb-chip:active { background: var(--kb-accent-press); }
   left: 2px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  /* A pill, not a circle: SquishSwitch (stage 6, B10, Controls.tsx) stretches it to 20 px mid-travel. */
+  border-radius: var(--kb-r-pill);
   background: var(--kb-pane);
   box-shadow: var(--kb-shadow-raise);
   transition: transform 0.18s ease;
