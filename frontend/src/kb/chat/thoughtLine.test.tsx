@@ -21,17 +21,32 @@ const head = (m: KbMessage) => (m.state === 'streaming' && m.parts.every((p) => 
 afterEach(() => { vi.useRealTimers(); delete document.documentElement.dataset.motion; });
 
 describe('callStates: what each tool call is doing, from the parts the message already has', () => {
-  it('the newest call of a streaming answer runs; a call with anything after it is done', () => {
+  it('FIX2 C-M3: parallel calls (back-to-back tool parts) all run until a non-tool part follows the group', () => {
+    // Claude Code sends every tool_use of one turn before any result: two tool parts in a row are two
+    // calls in flight, not one finished and one running.
     const parts = [tool('skaz_search', 'Searched «entropy»'), tool('skaz_read_page', 'Read page Entropy')];
-    expect(callStates(parts, 'streaming').map((c) => c.state)).toEqual(['done', 'run']);
+    expect(callStates(parts, 'streaming').map((c) => c.state)).toEqual(['run', 'run']);
     expect(callStates([...parts, text('Entropy is…')], 'streaming').map((c) => c.state)).toEqual(['done', 'done']);
+    // Only the trailing group runs: calls before the last non-tool part are done.
+    const more = [...parts, text('Now the textbook.'), tool('skaz_read_material', 'Read Textbook'), tool('skaz_search', 'Searched «W»')];
+    expect(callStates(more, 'streaming').map((c) => c.state)).toEqual(['done', 'done', 'run', 'run']);
   });
 
-  it('a finished answer finished every call; a stopped one leaves its last call unfinished, not «done»', () => {
+  it('FIX2 C-M3: a permission or question after a call is the call waiting on the user, not its result', () => {
+    const permission: KbMessagePart = { type: 'permission', id: 'perm-1' } as unknown as KbMessagePart;
+    const question: KbMessagePart = { type: 'question', id: 'q-1' } as unknown as KbMessagePart;
+    expect(callStates([tool('skaz_search', 'Searched'), permission], 'streaming').map((c) => c.state)).toEqual(['run']);
+    expect(callStates([tool('skaz_search', 'Searched'), question], 'streaming').map((c) => c.state)).toEqual(['run']);
+    expect(callStates([tool('skaz_search', 'Searched'), permission, text('Found it.')], 'streaming').map((c) => c.state)).toEqual(['done']);
+  });
+
+  it('a finished answer finished every call; a stopped one leaves its unfinished calls unfinished, not «done»', () => {
     const parts = [tool('skaz_search', 'Searched'), tool('skaz_read_page', 'Read page Entropy')];
     expect(callStates(parts, 'done').map((c) => c.state)).toEqual(['done', 'done']);
-    expect(callStates(parts, 'cancelled').map((c) => c.state)).toEqual(['done', 'stopped']);
-    expect(callStates(parts, 'interrupted').map((c) => c.state)).toEqual(['done', 'stopped']);
+    expect(callStates(parts, 'cancelled').map((c) => c.state)).toEqual(['stopped', 'stopped']);
+    expect(callStates(parts, 'interrupted').map((c) => c.state)).toEqual(['stopped', 'stopped']);
+    expect(callStates([tool('skaz_search', 'Searched'), text('So…'), tool('skaz_read_page', 'Read')], 'cancelled').map((c) => c.state))
+      .toEqual(['done', 'stopped']);
   });
 
   it('the web search call has its own card and is not a chip (W-3b)', () => {
@@ -81,12 +96,33 @@ describe('ThoughtLine while the agent works', () => {
     const chip = () => within(screen.getByRole('list', { name: 'Tool calls' })).getAllByRole('listitem')[0]!;
     expect(chip()).toHaveAttribute('data-live', 'true');
     expect(chip()).toHaveTextContent('1.2 s');
+    // A second call in the same batch: both still run (FIX2 C-M3), the first one's timer keeps going.
     const m2 = msg([tool('skaz_search', 'Searched «entropy»'), tool('skaz_read_page', 'Read page Entropy')]);
     rerender(<ThoughtLine message={m2} head={head(m2)} />);
+    act(() => { vi.advanceTimersByTime(800); });
+    expect(chip()).toHaveAttribute('data-state', 'run');
+    expect(chip()).toHaveTextContent('2.0 s');
+    const m3 = msg([...m2.parts, text('Entropy is…')]);
+    rerender(<ThoughtLine message={m3} head={head(m3)} />);
     act(() => { vi.advanceTimersByTime(2_000); });
     expect(chip()).toHaveAttribute('data-state', 'done');
-    expect(chip()).toHaveTextContent('1.2 s'); // frozen at the moment the next part came
+    expect(chip()).toHaveTextContent('2.0 s'); // frozen at the moment the answer went on past the calls
     expect(within(chip()).getByLabelText('Done')).toBeInTheDocument();
+  });
+
+  it('FIX2 C-M3: a call never seen running gets no duration (its start was not seen)', () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(START + 1_000);
+    const m0 = msg([]);
+    const { rerender } = render(<ThoughtLine message={m0} head={head(m0)} />);
+    // The call and the text after it land in one update: it arrived on screen already done.
+    const m1 = msg([tool('skaz_search', 'Searched «entropy»'), text('Entropy is…')]);
+    rerender(<ThoughtLine message={m1} head={head(m1)} />);
+    act(() => { vi.advanceTimersByTime(1_000); });
+    const chip = within(screen.getByRole('list', { name: 'Tool calls' })).getByRole('listitem');
+    expect(chip).toHaveAttribute('data-state', 'done');
+    expect(chip).toHaveAttribute('data-live', 'true'); // it did arrive on screen: it may fade/wipe in
+    expect(chip.querySelector('.kb-call__time')).toBeNull();
   });
 
   it('FIX2 S-M1: the row and its live timer stay while the answer streams; the words only while it has no text', () => {

@@ -13,10 +13,12 @@ import { CallSweep } from '../fx/indicators/CallSweep';
  * the answer the block folds into the «Looked at N things» line, which unfolds it again.
  *
  * Data honesty: a tool part (`KbToolPart`: name + label) arrives when the agent CALLS the tool; the
- * backend sends no result or error for it. So a call «runs» while it is the newest part of a streaming
- * answer and is «done» once anything follows it (or the answer finished). Timers only count what this
- * window saw: the thinking timer from the answer's `created_at`, a chip's timer only for a call that
- * arrived while the answer was on screen. No percentages anywhere.
+ * backend sends no result or error for it. Parallel calls arrive back to back before any result
+ * (Claude Code sends every tool_use of a turn first), so a call «runs» while it belongs to the trailing
+ * group of tool parts of a streaming answer and is «done» only once a part that is the agent going on
+ * follows it (or the answer finished) — FIX2 C-M3, a stop-gap until the backend sends ToolResult.
+ * Timers only count what this window saw: the thinking timer from the answer's `created_at`, a chip's
+ * timer only for a call seen both start (arrive running) and end on screen. No percentages anywhere.
  */
 
 /** SKAZ's web search tool (backend `permissions/web_tool.py` WEB_TOOL): it has its own card (W-3b). */
@@ -32,13 +34,21 @@ export interface ToolCall {
   state: CallState;
 }
 
+/**
+ * Parts that are NOT evidence a call finished: another call (parallel calls come back to back), and a
+ * permission or question — the running call (or the agent) waiting on the user.
+ */
+const NOT_A_RESULT: ReadonlySet<KbMessagePart['type']> = new Set(['tool', 'permission', 'question']);
+
 /** Each tool call of a message and what it is doing, from the parts the message already has. */
 export function callStates(parts: readonly KbMessagePart[], state: KbMessage['state']): ToolCall[] {
+  // The agent went on past every call before the last part that is not a call (or a wait on the user).
+  let wentOn = -1;
+  parts.forEach((part, index) => { if (!NOT_A_RESULT.has(part.type)) wentOn = index; });
   const out: ToolCall[] = [];
   parts.forEach((part, index) => {
     if (part.type !== 'tool' || part.name.endsWith(WEB_TOOL)) return;
-    const newest = index === parts.length - 1;
-    const callState: CallState = !newest || state === 'done' ? 'done' : state === 'streaming' ? 'run' : 'stopped';
+    const callState: CallState = index < wentOn || state === 'done' ? 'done' : state === 'streaming' ? 'run' : 'stopped';
     out.push({ index, name: part.name, label: part.label, state: callState });
   });
   return out;
@@ -80,8 +90,12 @@ function Elapsed({ from, to, className, role }: { from: number; to?: number | nu
   return <span className={className} role={role}>{formatSeconds(((frozen ? to : Date.now()) - from) / 1000)}</span>;
 }
 
-/** One tool call: a pill with the tool's icon and label; Stippling while it runs, ✓ when done. */
-export function CallChip({ call, seenAt, endedAt }: { call: ToolCall; seenAt?: number; endedAt?: number }) {
+/**
+ * One tool call: a pill with the tool's icon and label; Stippling while it runs, ✓ when done. `seenAt`
+ * = it arrived on screen (it may fade/wipe in); `startedAt` = it was seen running, the only case with a
+ * timer (FIX2 C-M3: no duration unless its start was seen; the end is `endedAt`, or now while it runs).
+ */
+export function CallChip({ call, seenAt, startedAt, endedAt }: { call: ToolCall; seenAt?: number; startedAt?: number; endedAt?: number }) {
   const live = seenAt !== undefined;
   const icon = call.state === 'done' ? <Icon name="check" size={14} label="Done" />
     : call.state === 'error' ? <Icon name="warning" size={14} label="Failed" />
@@ -93,7 +107,9 @@ export function CallChip({ call, seenAt, endedAt }: { call: ToolCall; seenAt?: n
       <span className="kb-call__icon">{icon}</span>
       <span className="kb-call__label">{call.label}</span>
       {call.state === 'error' && <span className="kb-call__err">failed</span>}
-      {live && call.state !== 'error' && <Elapsed className="kb-call__time" from={seenAt} to={call.state === 'run' ? null : endedAt ?? seenAt} />}
+      {startedAt !== undefined && call.state !== 'error' && (call.state === 'run' || endedAt !== undefined) && (
+        <Elapsed className="kb-call__time" from={startedAt} to={call.state === 'run' ? null : endedAt} />
+      )}
     </li>
   );
 }
@@ -105,24 +121,31 @@ function startOf(message: KbMessage, firstSeen: number): number {
 }
 
 /**
- * Remembers, for this mounted answer, when each call was first seen and when it stopped running, and
- * when the answer stopped working. Only things that happened on screen get a time; calls that were
- * already there when the answer was opened get none (no invented durations).
+ * Remembers, for this mounted answer, when each call was first seen, when it was seen running and when
+ * it stopped running, and when the answer stopped working. Only things that happened on screen get a
+ * time; calls that were already there when the answer was opened get none (no invented durations), and
+ * neither does a call that arrived already finished (its start was never seen).
  */
 function useLiveClock(message: KbMessage, calls: ToolCall[]) {
   const ref = useRef<{
-    firstSeen: number; initial: Set<number>; seen: Map<number, number>; ended: Map<number, number>;
-    wasWorking: boolean; endedAt: number | null;
+    firstSeen: number; initial: Set<number>; seen: Map<number, number>; started: Map<number, number>;
+    ended: Map<number, number>; wasWorking: boolean; endedAt: number | null;
   } | null>(null);
   const now = Date.now();
   const working = message.state === 'streaming';
   if (!ref.current) {
-    ref.current = { firstSeen: now, initial: new Set(calls.map((c) => c.index)), seen: new Map(), ended: new Map(), wasWorking: working, endedAt: null };
+    ref.current = {
+      firstSeen: now, initial: new Set(calls.map((c) => c.index)), seen: new Map(), started: new Map(), ended: new Map(),
+      wasWorking: working, endedAt: null,
+    };
   }
   const clock = ref.current;
   for (const c of calls) {
-    if (!clock.initial.has(c.index) && !clock.seen.has(c.index)) clock.seen.set(c.index, now);
-    if (clock.seen.has(c.index) && c.state !== 'run' && !clock.ended.has(c.index)) clock.ended.set(c.index, now);
+    if (!clock.initial.has(c.index) && !clock.seen.has(c.index)) {
+      clock.seen.set(c.index, now);
+      if (c.state === 'run') clock.started.set(c.index, now);
+    }
+    if (clock.started.has(c.index) && c.state !== 'run' && !clock.ended.has(c.index)) clock.ended.set(c.index, now);
   }
   if (working) clock.wasWorking = true;
   else if (clock.wasWorking && clock.endedAt === null) clock.endedAt = now;
@@ -168,7 +191,8 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
           )}
           {n > 0 && (
             <ul className="kb-thought__calls" aria-label="Tool calls">
-              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={clock.seen.get(c.index)} endedAt={clock.ended.get(c.index)} />)}
+              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={clock.seen.get(c.index)} startedAt={clock.started.get(c.index)}
+                endedAt={clock.ended.get(c.index)} />)}
             </ul>
           )}
         </div>
