@@ -161,6 +161,13 @@ function useLiveClock(message: KbMessage, calls: ToolCall[]) {
 const INERT = { inert: '' } as object;
 
 /**
+ * FIX2 C-L6: a folded answer keeps its chips only for the fold motion (0.26 s at full, 0.16 s at calm),
+ * then unmounts them (long chats would otherwise keep every chip of every answer). They go on the fold's
+ * own transitionend, or after this time when none comes (motion off, a hidden pane).
+ */
+export const FOLD_UNMOUNT_MS = 400;
+
+/**
  * The agent's work above an answer. `head` is the thinking line's words (shown while the answer has
  * nothing to read yet), or null; the row itself (nodes + live timer) stays while the answer streams.
  */
@@ -170,8 +177,20 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
   const [open, setOpen] = useState(false);
   const level = useMotionLevel();
   const working = message.state === 'streaming';
-  if (!working && calls.length === 0) return null;
   const unfolded = working || open;
+  // Chips are mounted while unfolded and, after folding, until the fold motion ended (C-L6).
+  const [kept, setKept] = useState(unfolded);
+  if (unfolded && !kept) setKept(true);
+  // Chips mounted again by an unfold are not arrivals: no fade-in or wipe replay (only their frozen times).
+  const remounted = useRef(false);
+  const foldAway = () => { remounted.current = true; setKept(false); };
+  useEffect(() => {
+    if (unfolded || !kept) return undefined;
+    if (level === 'off') { foldAway(); return undefined; }
+    const id = setTimeout(foldAway, FOLD_UNMOUNT_MS);
+    return () => clearTimeout(id);
+  }, [unfolded, kept, level]);
+  if (!working && calls.length === 0) return null;
   const arrived = !working && clock.endedAt !== null;
   const n = calls.length;
   return (
@@ -184,7 +203,8 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
           <Icon name="chevronDown" size={12} className={`kb-thought__chev${open ? ' is-open' : ''}`} />
         </button>
       )}
-      <div className="kb-thought__fold" data-open={unfolded ? 'true' : 'false'} {...(unfolded ? {} : INERT)}>
+      <div className="kb-thought__fold" data-open={unfolded ? 'true' : 'false'} {...(unfolded ? {} : INERT)}
+        onTransitionEnd={(e) => { if (e.target === e.currentTarget && !unfolded) foldAway(); }}>
         <div className="kb-thought__inner">
           {working && (
             <div className="kb-thought__head">
@@ -194,9 +214,9 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
               <Elapsed className="kb-thought__time" role="timer" from={start} />
             </div>
           )}
-          {n > 0 && (
+          {n > 0 && (unfolded || (kept && level !== 'off')) && (
             <ul className="kb-thought__calls" aria-label="Tool calls">
-              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={clock.seen.get(c.index)} startedAt={clock.started.get(c.index)}
+              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={remounted.current ? undefined : clock.seen.get(c.index)} startedAt={clock.started.get(c.index)}
                 endedAt={clock.ended.get(c.index)} />)}
             </ul>
           )}

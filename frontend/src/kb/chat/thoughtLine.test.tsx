@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { KbMessage, KbMessagePart } from '../../api/kb/types.gen';
-import { CallChip, ThoughtLine, callStates, formatSeconds } from './ThoughtLine';
+import { CallChip, FOLD_UNMOUNT_MS, ThoughtLine, callStates, formatSeconds } from './ThoughtLine';
 
 // Stage 6 B3 (decision 30): ThoughtLine + CallChip. While the agent works: the thinking line with a
 // live timer and one chip per tool call; after the answer it folds into «Looked at N things».
@@ -193,6 +193,53 @@ describe('ThoughtLine after the answer', () => {
     const toggle = screen.getByRole('button', { name: /Looked at 1 thing/ });
     expect(toggle.textContent).not.toMatch(/\d s/);
     expect(container.querySelector('.kb-thought')).not.toHaveAttribute('data-arrived');
+  });
+
+  it('FIX2 C-L6: folded answers unmount their chips once the fold motion ended; the «Looked at» line stays', async () => {
+    const parts = [tool('skaz_search', 'Searched «entropy»'), tool('skaz_read_page', 'Read page Entropy')];
+    const empty = msg([]);
+    const { rerender, container } = render(<ThoughtLine message={empty} head={head(empty)} />);
+    const working = msg(parts); // both calls arrive on screen: arrivals
+    rerender(<ThoughtLine message={working} head={head(working)} />);
+    const done = msg([...parts, text('Entropy is…')], 'done');
+    rerender(<ThoughtLine message={done} head={head(done)} />);
+    const fold = container.querySelector('.kb-thought__fold')!;
+    // During the fold the chips are still there (they fold away), out of reach.
+    expect(fold.querySelectorAll('.kb-call')).toHaveLength(2);
+    expect(fold.querySelector('.kb-call')).toHaveAttribute('data-live', 'true');
+    // A transition of something inside does not count; the fold's own end does.
+    fireEvent.transitionEnd(fold.querySelector('.kb-call')!);
+    expect(fold.querySelectorAll('.kb-call')).toHaveLength(2);
+    fireEvent.transitionEnd(fold);
+    expect(container.querySelectorAll('.kb-call')).toHaveLength(0);
+    expect(screen.queryByRole('list', { name: 'Tool calls' })).toBeNull();
+    const toggle = screen.getByRole('button', { name: /Looked at 2 things/ });
+    // Unfolding mounts them again; folding again unmounts them after the motion.
+    await userEvent.setup().click(toggle);
+    const again = within(screen.getByRole('list', { name: 'Tool calls' })).getAllByRole('listitem');
+    expect(again).toHaveLength(2);
+    // Mounted again by the unfold, they are not arrivals: no fade-in / wipe replay.
+    for (const c of again) expect(c).not.toHaveAttribute('data-live');
+    await userEvent.setup().click(toggle);
+    expect(container.querySelectorAll('.kb-call')).toHaveLength(2);
+    fireEvent.transitionEnd(container.querySelector('.kb-thought__fold')!);
+    expect(container.querySelectorAll('.kb-call')).toHaveLength(0);
+  });
+
+  it('FIX2 C-L6: an answer opened later mounts no chips; without a transition end (off, hidden) they go after the fold time', () => {
+    const m = msg([tool('skaz_read_page', 'Read page Entropy'), text('Entropy is…')], 'done');
+    const { container, unmount } = render(<ThoughtLine message={m} head={head(m)} />);
+    expect(container.querySelectorAll('.kb-call')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /Looked at 1 thing/ })).toBeInTheDocument();
+    unmount();
+    vi.useFakeTimers();
+    const working = msg([tool('skaz_search', 'Searched')]);
+    const r = render(<ThoughtLine message={working} head={head(working)} />);
+    const done = msg([tool('skaz_search', 'Searched'), text('So…')], 'done');
+    r.rerender(<ThoughtLine message={done} head={head(done)} />);
+    expect(r.container.querySelectorAll('.kb-call')).toHaveLength(1);
+    act(() => { vi.advanceTimersByTime(FOLD_UNMOUNT_MS); });
+    expect(r.container.querySelectorAll('.kb-call')).toHaveLength(0);
   });
 
   it('nothing at all for an answer that called no tools', () => {
