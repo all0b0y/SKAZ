@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRef } from 'react';
@@ -51,6 +51,82 @@ describe('ScrollEdges', () => {
       expect(edge.querySelectorAll('.kb-edge__blur')).toHaveLength(4);
       expect(edge.querySelector('button, a, [tabindex]')).toBeNull();
     }
+  });
+});
+
+/** A ResizeObserver the test drives: `resize(el)` delivers a resize of `el` to whoever observes it. */
+class FakeResizeObserver {
+  static all: FakeResizeObserver[] = [];
+  targets = new Set<Element>();
+  constructor(private readonly cb: ResizeObserverCallback) { FakeResizeObserver.all.push(this); }
+  observe(el: Element) { this.targets.add(el); }
+  unobserve(el: Element) { this.targets.delete(el); }
+  disconnect() { this.targets.clear(); }
+  static resize(el: Element) {
+    for (const ro of FakeResizeObserver.all) {
+      if (ro.targets.has(el)) ro.cb([{ target: el } as ResizeObserverEntry], ro as unknown as ResizeObserver);
+    }
+  }
+}
+
+function Streaming({ more }: { more: boolean }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  return (
+    <div>
+      <div ref={ref} data-testid="scroll">
+        <div data-testid="content"><p>text</p></div>
+        {more && <div data-testid="later">later</div>}
+      </div>
+      <ScrollEdges scrollRef={ref} show />
+    </div>
+  );
+}
+
+describe('FIX2 C-L4: ScrollEdges follows content growth and coalesces streamed mutations', () => {
+  afterEach(() => { vi.unstubAllGlobals(); FakeResizeObserver.all = []; });
+
+  it('content that grows without a DOM change (an image decoding) turns the bottom edge on: the content wrapper is observed', async () => {
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    const { container, rerender } = render(<Streaming more={false} />);
+    const el = screen.getByTestId('scroll');
+    let height = 300;
+    Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true });
+    Object.defineProperty(el, 'scrollHeight', { get: () => height, configurable: true });
+    const bottom = () => container.querySelector('.kb-edge--bottom')!;
+    act(() => { fireEvent.scroll(el); });
+    expect(bottom()).toHaveAttribute('data-on', 'false');
+    height = 900; // the image inside the content wrapper decoded: the wrapper grew, the scroller did not
+    act(() => { FakeResizeObserver.resize(screen.getByTestId('content')); });
+    expect(bottom()).toHaveAttribute('data-on', 'true');
+    // A wrapper that appears later (the first message of a new chat) is observed too.
+    rerender(<Streaming more />);
+    await act(async () => { await Promise.resolve(); }); // the mutation observer sees the new child
+    height = 300;
+    act(() => { fireEvent.scroll(el); });
+    expect(bottom()).toHaveAttribute('data-on', 'false');
+    height = 1200;
+    act(() => { FakeResizeObserver.resize(screen.getByTestId('later')); });
+    expect(bottom()).toHaveAttribute('data-on', 'true');
+  });
+
+  it('a stream of token batches reads the layout once per frame, not once per batch', async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    render(<Thread />);
+    const el = screen.getByTestId('scroll');
+    let reads = 0;
+    Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true });
+    Object.defineProperty(el, 'scrollHeight', { get: () => { reads += 1; return 1000; }, configurable: true });
+    const textNode = el.querySelector('p')!.firstChild as Text;
+    reads = 0;
+    for (let i = 0; i < 5; i++) {
+      textNode.data += ` token${i}`; // one streamed batch
+      await act(async () => { await Promise.resolve(); }); // the observer delivers it
+    }
+    expect(reads).toBe(0);
+    act(() => { frames.splice(0).forEach((cb) => cb(0)); });
+    expect(reads).toBe(1);
   });
 });
 
