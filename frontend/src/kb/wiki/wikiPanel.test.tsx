@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { docWorld } from '../test/fakeBridge';
+import { baseWorld, docWorld } from '../test/fakeBridge';
 
 async function wikiPanel() {
   const r = renderKb({ world: docWorld() });
@@ -157,6 +157,22 @@ describe('Wiki kind sections fold in place (decisions 24 «Wiki», 27)', () => {
     await user.click(empty!);
     const body = document.getElementById(empty!.getAttribute('aria-controls')!)!;
     expect(within(body).getByText(/yet$/)).toBeInTheDocument();
+  });
+
+  it('an empty wiki says only «The wiki is empty»: no per-kind hint in the open section (FIX1 R6)', async () => {
+    renderKb({ world: baseWorld(), prefs: { section: 'wiki' } });
+    expect(await within(await screen.findByRole('region', { name: 'Wiki' })).findByText('The wiki is empty')).toBeInTheDocument();
+    const concepts = within(side()).getByRole('button', { name: /^Concepts\s*0$/ });
+    expect(concepts).toHaveAttribute('aria-expanded', 'true');
+    const body = document.getElementById(concepts.getAttribute('aria-controls')!)!;
+    expect(within(body).queryByText(/yet$/)).not.toBeInTheDocument();
+    expect(within(side()).queryByText(/^No \w+ yet$/)).not.toBeInTheDocument();
+  });
+
+  it('the kind sections add no landmarks inside the Wiki region; each list keeps its name (FIX1 R8)', async () => {
+    await wikiPanel();
+    expect(within(side()).queryAllByRole('region')).toEqual([]);
+    expect(screen.getByRole('grid', { name: 'Concepts' })).toBeInTheDocument();
   });
 
   it('opening another page never remounts the list: same row nodes, a soft tile moves', async () => {
