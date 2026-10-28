@@ -114,6 +114,51 @@ describe('WarmTooltip (B5)', () => {
     expect(tip()).not.toHaveAttribute('data-enter');
   });
 
+  describe('warmth counts open tooltips (FIX2 C-L2)', () => {
+    it('stays warm while ANY tooltip is open: another one closing does not cool the row', () => {
+      render(<Row />);
+      fireEvent.mouseEnter(btn('Search')); // the first one: open after the wait, and it stays open
+      wait(TOOLTIP_WAIT_MS);
+      fireEvent.mouseEnter(btn('Pin it')); // a second one opens (warm) and closes
+      fireEvent.mouseLeave(btn('Pin it'));
+      wait(TOOLTIP_WARM_MS * 3); // «Search in chat» is still open all this time
+      expect(screen.getByRole('tooltip', { name: 'Search in chat' })).toBeInTheDocument();
+      fireEvent.mouseEnter(btn('More actions'));
+      expect(screen.getByRole('tooltip', { name: 'More' })).not.toHaveAttribute('data-enter'); // at once: warm
+      fireEvent.mouseLeave(btn('More actions'));
+      fireEvent.mouseLeave(btn('Search'));
+      wait(TOOLTIP_WARM_MS - 1);
+      fireEvent.mouseEnter(btn('Pin it'));
+      expect(tip()).toHaveTextContent('Pin'); // the last one closed < 800 ms ago
+      fireEvent.mouseLeave(btn('Pin it'));
+      wait(TOOLTIP_WARM_MS);
+      fireEvent.mouseEnter(btn('More actions'));
+      expect(tip()).toBeNull(); // none open for 800 ms: cold
+    });
+
+    it('one tooltip shown twice (pointer, then again) counts once: it cools 800 ms after it closes', () => {
+      render(<Row />);
+      fireEvent.mouseEnter(btn('Search'));
+      wait(TOOLTIP_WAIT_MS);
+      fireEvent.mouseEnter(btn('Search'));
+      fireEvent.mouseLeave(btn('Search'));
+      wait(TOOLTIP_WARM_MS);
+      fireEvent.mouseEnter(btn('Pin it'));
+      expect(tip()).toBeNull();
+    });
+
+    it('an open tooltip that unmounts counts as closed', () => {
+      const { unmount } = render(<Tooltip text="Gone"><button type="button">G</button></Tooltip>);
+      render(<Tooltip text="Stays"><button type="button">K</button></Tooltip>);
+      fireEvent.mouseEnter(btn('G'));
+      wait(TOOLTIP_WAIT_MS);
+      unmount();
+      wait(TOOLTIP_WARM_MS);
+      fireEvent.mouseEnter(btn('K'));
+      expect(tip()).toBeNull();
+    });
+  });
+
   it('a disabled-reason tooltip on a wrapper still opens after the wait', () => {
     render(
       <Tooltip text="Connect the library first">

@@ -12,18 +12,22 @@ export const TOOLTIP_WAIT_MS = 500;
 export const TOOLTIP_WARM_MS = 800;
 
 /**
- * One warm state for the whole window, shared by every Tooltip: warm while a tooltip is open and
- * for TOOLTIP_WARM_MS after it closed. The timing rule holds at every motion level; only the
- * entrance changes (full: rise, calm: fade, off: none — and none while warm).
+ * One warm state for the whole window, shared by every Tooltip: warm while ANY tooltip is open and
+ * for TOOLTIP_WARM_MS after the last one closed — it counts the open ones, so one closing while
+ * another (say, a keyboard-focused one) stays open does not cool the row (FIX2 C-L2). The timing
+ * rule holds at every motion level; only the entrance changes (full: rise, calm: fade, off: none —
+ * and none while warm). Each Tooltip calls heat() once when it opens and cool() once when it closes.
  */
-const warmth = { warm: false, cool: undefined as number | undefined };
+const warmth = { warm: false, open: 0, cool: undefined as number | undefined };
 function heat() {
   window.clearTimeout(warmth.cool);
   warmth.cool = undefined;
+  warmth.open += 1;
   warmth.warm = true;
 }
 function cool() {
-  if (!warmth.warm) return;
+  warmth.open = Math.max(0, warmth.open - 1);
+  if (warmth.open > 0 || !warmth.warm) return;
   window.clearTimeout(warmth.cool);
   warmth.cool = window.setTimeout(() => { warmth.warm = false; warmth.cool = undefined; }, TOOLTIP_WARM_MS);
 }
@@ -31,6 +35,7 @@ function cool() {
 export function resetTooltipWarmth() {
   window.clearTimeout(warmth.cool);
   warmth.warm = false;
+  warmth.open = 0;
   warmth.cool = undefined;
 }
 
@@ -74,7 +79,7 @@ export function Tooltip({ text, children, placement = 'bottom', describes = fals
   const open = entrance !== null;
 
   const reveal = useCallback((how: Entrance) => {
-    heat();
+    if (!openRef.current) heat(); // shown again while open (hover, then focus): counted once
     openRef.current = true;
     setEntrance(how);
   }, []);
@@ -97,6 +102,7 @@ export function Tooltip({ text, children, placement = 'bottom', describes = fals
   useEffect(() => () => {
     window.clearTimeout(timer.current);
     if (openRef.current) cool();
+    openRef.current = false;
   }, []);
   useEffect(() => {
     if (!open) return undefined;
