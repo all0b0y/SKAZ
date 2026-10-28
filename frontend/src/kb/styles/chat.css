@@ -86,6 +86,27 @@
   .kb-chat__backdrop { animation-duration: 200ms; }
   .kb-chat__messages--enter > .kb-msg--user:first-child { animation: kb-fx-fade 200ms linear both; }
 }
+/*
+ * Stage 6 B2 — GradualBlur (decision 30, demo motion-v1 B2; chat/ScrollEdges.tsx): the thread fades and
+ * softly blurs under the title bar and above the composer. Four stacked backdrop blurs (0.5/1/2/4 px),
+ * each masked to a shorter band, plus a pane-tone fade; 44 px. Each edge hides at its scroll end with a
+ * 0.16 s fade (instant at motion «off», where transitions are off). Never takes the pointer.
+ */
+.kb-edge { position: absolute; left: 0; right: 0; height: 44px; pointer-events: none; z-index: 2; transition: opacity 0.16s ease; }
+.kb-edge[data-on='false'] { opacity: 0; }
+.kb-edge--top { top: 0; }
+.kb-edge--bottom { bottom: 0; }
+.kb-edge__blur { position: absolute; inset: 0; }
+.kb-edge__blur--1 { backdrop-filter: blur(0.5px); --kb-edge-from: 70%; --kb-edge-to: 100%; }
+.kb-edge__blur--2 { backdrop-filter: blur(1px); --kb-edge-from: 48%; --kb-edge-to: 78%; }
+.kb-edge__blur--3 { backdrop-filter: blur(2px); --kb-edge-from: 26%; --kb-edge-to: 56%; }
+.kb-edge__blur--4 { backdrop-filter: blur(4px); --kb-edge-from: 4%; --kb-edge-to: 34%; }
+.kb-edge--top .kb-edge__blur { -webkit-mask-image: linear-gradient(to bottom, black var(--kb-edge-from), transparent var(--kb-edge-to)); mask-image: linear-gradient(to bottom, black var(--kb-edge-from), transparent var(--kb-edge-to)); }
+.kb-edge--bottom .kb-edge__blur { -webkit-mask-image: linear-gradient(to top, black var(--kb-edge-from), transparent var(--kb-edge-to)); mask-image: linear-gradient(to top, black var(--kb-edge-from), transparent var(--kb-edge-to)); }
+.kb-edge::after { content: ''; position: absolute; inset: 0; opacity: 0.75; }
+.kb-edge--top::after { background: linear-gradient(to bottom, var(--kb-pane), color-mix(in srgb, var(--kb-pane) 0%, transparent)); }
+.kb-edge--bottom::after { background: linear-gradient(to top, var(--kb-pane), color-mix(in srgb, var(--kb-pane) 0%, transparent)); }
+
 /* «Connecting nodes» beside «Writing an answer…» (FX §7). */
 .kb-msg__think { width: 84px; height: 16px; flex: none; }
 
