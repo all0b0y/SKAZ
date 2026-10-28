@@ -14,6 +14,7 @@ import { SelectionCheckbox, type ListSelection } from '../ui/listSelection';
 import { usePageSelection } from './pageBatch';
 import type { DragRowProps } from '../materials/materialBatch';
 import { WikiTermsButton } from './WikiTermsButton';
+import { useListEntrance } from '../fx/listEntrance';
 
 interface Hit {
   key: string;
@@ -148,7 +149,7 @@ function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection;
   const openDocument = useUi((s) => s.openDocument);
   const current = useUi((s) => s.right?.kind === 'doc' && s.right.target.type === 'page' && s.right.target.id === page.id);
   return (
-    <li {...sel.rowProps(page.id)} {...drag}>
+    <li {...sel.rowProps(page.id)} {...drag} data-entrance={page.id}>
       <div role="gridcell">
         <button type="button" className={`kb-row kb-row--tabbed${current ? ' is-current' : ''}`} aria-current={current ? 'true' : undefined}
           data-tab-key={page.id} onClick={() => openDocument({ type: 'page', id: page.id })}>
@@ -194,7 +195,7 @@ function KindSection({ kind, pages, wikiEmpty }: { kind: WikiKind; pages: KbPage
     // A plain group, not a <section aria-labelledby>: six region landmarks inside the Wiki region would
     // be noise (FIX1 R8); the header button and the grid (aria-labelledby) carry the kind's name.
     <div className="kb-wfold" data-kind={kind}>
-      <h3 className="kb-wfold__head">
+      <h3 className="kb-wfold__head" data-entrance="">
         <button type="button" className="kb-row kb-wfold__toggle" aria-expanded={open} aria-controls={bodyId}
           onClick={() => prefs.getState().setWikiOpen(kind, !open)}>
           <Icon name="chevronRight" size={14} className={`kb-wfold__chev${open ? ' is-open' : ''}`} />
@@ -232,6 +233,9 @@ export function WikiSide() {
   useEffect(() => { if (seen.current !== revision) { seen.current = revision; reload(); } }, [revision, reload]);
   const pages = state.value ?? [];
   const byId = new Map(pages.map((p) => [p.id, p]));
+  const host = useRef<HTMLDivElement | null>(null);
+  // AnimatedList (stage 6): the rows enter once, on the first load; a page added later fades in alone.
+  useListEntrance('wiki', host, state.value !== null, pages.map((p) => p.id));
 
   if (state.load === 'loading' && !state.value) return <div className="kb-side__wait"><Spinner label="Reading the wiki" /></div>;
   if (state.load === 'error' && !state.value) {
@@ -244,9 +248,9 @@ export function WikiSide() {
 
   const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
   return (
-    <div className="kb-side__scroll">
+    <div className="kb-side__scroll" ref={host}>
       <WikiSearch />
-      <div className="kb-subhead kb-subhead--row">
+      <div className="kb-subhead kb-subhead--row" data-entrance="">
         <h3 className="kb-subhead__text" id="kb-wiki-sections">Sections</h3>
         <WikiTermsButton size="sm" placement="bottom-start" />
       </div>
@@ -254,14 +258,14 @@ export function WikiSide() {
         <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)} wikiEmpty={pages.length === 0} />
       ))}
       <ul className="kb-list kb-wiki-more" aria-label="More of the wiki">
-        <li>
+        <li data-entrance="">
           <button type="button" className={`kb-row${graphOpen ? ' is-current' : ''}`} onClick={() => openGraph()} aria-current={graphOpen ? 'true' : undefined}>
             <Icon name="graph" size={16} className="kb-row__icon" />
             <span className="kb-row__text">Graph of connections</span>
           </button>
         </li>
         {FILES.map((f) => (
-          <li key={f.name}>
+          <li key={f.name} data-entrance="">
             <button type="button" className={`kb-row${fileOpen === f.name ? ' is-current' : ''}`} aria-current={fileOpen === f.name ? 'true' : undefined}
               title="SKAZ keeps Index and Log — they can’t be selected" onClick={() => openWikiFile(f.name)}>
               <Icon name="text" size={16} className="kb-row__icon" />
@@ -272,7 +276,7 @@ export function WikiSide() {
       </ul>
       {recentPages.length > 0 && (
         <>
-          <h3 className="kb-subhead" id="kb-wiki-recent">Recently opened</h3>
+          <h3 className="kb-subhead" id="kb-wiki-recent" data-entrance="">Recently opened</h3>
           <PageList pages={recentPages} labelledBy="kb-wiki-recent" />
         </>
       )}
