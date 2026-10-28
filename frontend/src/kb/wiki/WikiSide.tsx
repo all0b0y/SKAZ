@@ -124,9 +124,8 @@ const LABEL: Record<WikiKind, string> = {
 
 /**
  * How the page open in the document panel is marked in the lists: a soft tile moved by a plain
- * crossfade (decision 24 «Wiki», for now). One switch — the user's answer on bridging the page row
- * is pending (STAGE5-SHELL §5). Note: «bridge» runs toward the centre sheet, while a page opens in
- * the document panel on the right.
+ * crossfade (DESIGN-SYSTEM.md decision 28: the bridge is for chats only — it runs toward the centre
+ * sheet, while a page opens in the document panel on the right).
  */
 export const PAGE_TAB: TabVariant = 'soft';
 
