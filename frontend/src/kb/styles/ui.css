@@ -482,6 +482,25 @@ button.kb-chip:active { background: var(--kb-accent-press); }
 @keyframes kb-tip-rise { from { opacity: 0; transform: var(--kb-tip-from, none); } to { opacity: 1; transform: none; } }
 @keyframes kb-tip-fade { from { opacity: 0; } to { opacity: 1; } }
 
+/* Toast fuse (stage 6, B4): on a toast with an action, a 2 px line runs down over the toast's life and
+   pauses while the toast is held (Toast.tsx owns the one timer; .is-held mirrors it). It runs at calm too
+   (a status); at «off» Toast.tsx shows a «· N s» countdown in text instead. */
+.kb-toast__fuse {
+  position: absolute;
+  left: var(--kb-sp-10);
+  right: var(--kb-sp-10);
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--kb-on-fill) 55%, transparent);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: kb-toast-fuse var(--kb-toast-life, 6s) linear forwards;
+}
+.kb-toast.is-held .kb-toast__fuse { animation-play-state: paused; }
+@keyframes kb-toast-fuse { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.kb-toast__countdown { flex: none; font-variant-numeric: tabular-nums; opacity: 0.7; }
+
 /* ---- Formulas (KaTeX, kb/ui/markdown) ---- */
 .kb-math--display {
   display: block;
