@@ -58,6 +58,7 @@ export const DEFAULT_PREFS: Prefs = {
   onboardingDone: false,
   wikiOpen: WIKI_OPEN_DEFAULT,
   ...DEFAULT_LOOK,
+  motion: 'full',
   sounds: 'off',
 };
 

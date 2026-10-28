@@ -1,4 +1,4 @@
-import { useReducedMotion } from '../ui/motionLevel';
+import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useStore } from 'zustand';
@@ -122,6 +122,10 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const stick = useRef(true);
   const reduced = useReducedMotion() ?? false;
+  // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
+  // keeps answering clicks and only its background drift stops.
+  const fieldStill = useStillIndicators();
+  const fieldCalm = useMotionLevel() === 'calm';
   const { leaving, bornHere } = useFirstMessageLeave(chats, reduced);
 
   const chat = open?.chat ?? null;
@@ -205,7 +209,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
-      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={reduced}>
+      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
       {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>

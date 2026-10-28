@@ -26,24 +26,35 @@ describe('Settings → Appearance (design system stage 3)', () => {
     expect(html()).toMatchObject({ base: 'milk', accent: 'ink', density: 'comfortable', motion: 'full', sounds: 'off' });
   });
 
-  it('a preset sets its four knobs at once; moving one knob turns it into Custom; Reset brings the default back', async () => {
+  it('a preset sets its three knobs at once; moving one knob turns it into Custom; Reset brings the default back', async () => {
     renderKb({ prefs: { theme: 'dark', sounds: 'subtle' } });
     const { user, dialog } = await openAppearance();
     await user.click(within(dialog).getByRole('button', { name: /^Lecture/ }));
-    expect(html()).toMatchObject({ base: 'sand', accent: 'clay', density: 'spacious', motion: 'calm' });
-    // A preset never touches theme, text size or sounds.
-    expect(html()).toMatchObject({ theme: 'dark', sounds: 'subtle' });
+    expect(html()).toMatchObject({ base: 'sand', accent: 'clay', density: 'spacious' });
+    // A preset never touches theme, text size, motion or sounds (decision 32: Lecture/Focus used to switch
+    // Motion to calm silently, which stilled the main screen's field).
+    expect(html()).toMatchObject({ theme: 'dark', sounds: 'subtle', motion: 'full' });
     expect(within(dialog).getByTestId('look-current')).toHaveTextContent('Lecture');
 
     await user.click(within(within(dialog).getByRole('radiogroup', { name: 'Density' })).getByRole('radio', { name: 'Compact' }));
     expect(within(dialog).getByTestId('look-current')).toHaveTextContent('Custom');
     expect(within(dialog).getByRole('button', { name: /^Lecture/ })).toHaveAttribute('aria-pressed', 'false');
-    expect(storedPrefs()).toMatchObject({ base: 'sand', accent: 'clay', density: 'compact', motion: 'calm' });
+    expect(storedPrefs()).toMatchObject({ base: 'sand', accent: 'clay', density: 'compact', motion: 'full' });
 
     await user.click(within(dialog).getByRole('button', { name: 'Reset to default' }));
     expect(html()).toMatchObject({ base: 'milk', accent: 'ink', density: 'comfortable', motion: 'full', sounds: 'off' });
     expect(html().theme).toBeUndefined();
     expect(within(dialog).getByRole('button', { name: 'Reset to default' })).toBeDisabled();
+  });
+
+  it('the motion knob is the user\'s own: a preset keeps it, and the preset still counts as chosen', async () => {
+    renderKb({ prefs: { motion: 'off' } });
+    const { user, dialog } = await openAppearance();
+    await user.click(within(dialog).getByRole('button', { name: /^Focus/ }));
+    expect(html()).toMatchObject({ base: 'paper', accent: 'ink', density: 'compact', motion: 'off' });
+    expect(within(dialog).getByTestId('look-current')).toHaveTextContent('Focus');
+    await user.click(within(dialog).getByRole('button', { name: 'Reset to default' }));
+    expect(html().motion).toBe('full');
   });
 
   it('accent swatches are named radios; motion and sounds are their own knobs', async () => {
