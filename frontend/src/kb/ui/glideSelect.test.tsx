@@ -148,6 +148,106 @@ describe('GlideSelect (B1)', () => {
     expect(glideAnims(played)).toHaveLength(0);
   });
 
+  describe('rows that change while the menu is open (FIX2 C-M1)', () => {
+    /* Rows sit where they are in the DOM: a removed row moves the ones after it up. */
+    const byDomOrder = () => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const rows = this.classList.contains('kb-menu__item') && this.parentElement
+        ? Array.from(this.parentElement.querySelectorAll('.kb-menu__item')) : [];
+      const i = rows.indexOf(this);
+      const top = i >= 0 ? i * ROW_H : 0;
+      const height = i >= 0 ? ROW_H : 0;
+      return { left: 0, right: 200, top, bottom: top + height, width: 200, height, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+    });
+
+    function Rows({ rows }: { rows: string[] }) {
+      return (
+        <div className="kb-menu__list">
+          {rows.map((r) => <button key={r} type="button" role="menuitem" tabIndex={-1} className="kb-menu__item">{r}</button>)}
+        </div>
+      );
+    }
+    function Inner({ next }: { next: string[] }) {
+      const [mine, setMine] = useState(['Rename', 'Move', 'Delete']);
+      return <><Rows rows={mine} /><button type="button" onClick={() => setMine(next)}>change</button></>;
+    }
+    /** `own`: the rows' state lives under Popover (Popover itself does not re-render), as a picker's
+     *  inner component; otherwise in Popover's parent (the model-picker search re-renders Popover). */
+    function Live({ own, next }: { own: boolean; next: string[] }) {
+      const ref = useRef<HTMLButtonElement | null>(null);
+      const [rows, setRows] = useState(['Rename', 'Move', 'Delete']);
+      return (
+        <>
+          <button ref={ref} type="button">Anchor</button>
+          {!own && <button type="button" onClick={() => setRows(next)}>change</button>}
+          <Popover open onClose={() => undefined} anchorRef={ref} label="Live" role="menu" autoFocus={false}>
+            {own ? <Inner next={next} /> : <Rows rows={rows} />}
+          </Popover>
+        </>
+      );
+    }
+    const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+
+    for (const own of [false, true]) {
+      const where = own ? 'below Popover' : 'in Popover’s parent (Popover re-renders)';
+      it(`a removed row takes the highlight with it — rows state ${where}`, async () => {
+        stubAnimate();
+        render(<Live own={own} next={['Rename', 'Delete']} />);
+        const menu = await screen.findByRole('menu', { name: 'Live' });
+        await act(async () => undefined);
+        const glide = menu.querySelector<HTMLElement>('.kb-glide')!;
+        fireEvent.pointerOver(within(menu).getByRole('menuitem', { name: 'Move' }));
+        expect(glide.style.opacity).toBe('1');
+        fireEvent.click(screen.getByRole('button', { name: 'change' }));
+        await settle();
+        expect(within(menu).queryByRole('menuitem', { name: 'Move' })).toBeNull();
+        expect(glide.style.opacity).toBe('0');
+      });
+
+      it(`the highlight follows its row to its new place — rows state ${where}`, async () => {
+        stubAnimate();
+        byDomOrder();
+        render(<Live own={own} next={['Move', 'Delete']} />);
+        const menu = await screen.findByRole('menu', { name: 'Live' });
+        await act(async () => undefined);
+        const glide = menu.querySelector<HTMLElement>('.kb-glide')!;
+        fireEvent.pointerOver(within(menu).getByRole('menuitem', { name: 'Delete' }));
+        expect(glide.style.transform).toBe(`translate(0px, ${2 * ROW_H}px)`);
+        fireEvent.click(screen.getByRole('button', { name: 'change' }));
+        await settle();
+        expect(glide.style.opacity).toBe('1');
+        expect(glide.style.transform).toBe(`translate(0px, ${ROW_H}px)`);
+      });
+    }
+
+    it('a hovered row that turns disabled loses the highlight', async () => {
+      stubAnimate();
+      function Flip() {
+        const ref = useRef<HTMLButtonElement | null>(null);
+        const [off, setOff] = useState(false);
+        return (
+          <>
+            <button ref={ref} type="button" onClick={() => setOff(true)}>disable</button>
+            <Popover open onClose={() => undefined} anchorRef={ref} label="Flip" role="menu" autoFocus={false}>
+              <div className="kb-menu__list">
+                <button type="button" role="menuitem" tabIndex={-1} className="kb-menu__item">Rename</button>
+                <button type="button" role="menuitem" tabIndex={-1} aria-disabled={off || undefined} className="kb-menu__item">Move</button>
+              </div>
+            </Popover>
+          </>
+        );
+      }
+      render(<Flip />);
+      const menu = await screen.findByRole('menu', { name: 'Flip' });
+      await act(async () => undefined);
+      const glide = menu.querySelector<HTMLElement>('.kb-glide')!;
+      fireEvent.pointerOver(within(menu).getByRole('menuitem', { name: 'Move' }));
+      expect(glide.style.opacity).toBe('1');
+      fireEvent.click(screen.getByRole('button', { name: 'disable' }));
+      await settle();
+      expect(glide.style.opacity).toBe('0');
+    });
+  });
+
   it('only menus glide: a dialog popover has no highlight', async () => {
     function Dialog() {
       const ref = useRef<HTMLButtonElement | null>(null);
