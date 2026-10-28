@@ -113,6 +113,8 @@ const quitController = new QuitController({
   },
   stopBackend: () => manager.stop(),
   quit: () => app.quit(),
+  hideWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); },
+  showWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); },
   onShutdownError: (err) => {
     console.error('[main] backend shutdown failed; quitting anyway:', err instanceof Error ? err.message : err);
   },

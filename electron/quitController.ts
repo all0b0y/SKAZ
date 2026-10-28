@@ -27,6 +27,10 @@ export interface QuitDeps {
   quit: () => void;
   /** Report a shutdown failure (optional). The app still quits afterwards. */
   onShutdownError?: (error: unknown) => void;
+  /** Take the window off the screen at once (the user's 200 ms rule); only when no audio is at risk. */
+  hideWindow?: () => void;
+  /** Bring the window back, e.g. before the warning about a failed save. */
+  showWindow?: () => void;
 }
 
 type Phase = 'idle' | 'saving' | 'draining' | 'settled';
@@ -91,9 +95,13 @@ export class QuitController {
   private beginSave(): void {
     if (this.phase !== 'idle') return;
     this.phase = 'saving';
+    // Nothing at risk: the window leaves now; saving and stopping the backend finish unseen.
+    const hidden = !this.deps.hasUnsentAudio();
+    if (hidden) this.deps.hideWindow?.();
     this.pending = (async () => {
       let saved = false;
       try { saved = await this.deps.saveBeforeQuit!(); } catch { /* explicit discard gate below */ }
+      if (!saved && hidden) this.deps.showWindow?.();
       if (!saved && !this.deps.confirmDiscard()) {
         this.phase = 'idle';
         this.authorized = false;
