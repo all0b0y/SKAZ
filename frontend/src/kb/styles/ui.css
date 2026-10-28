@@ -472,6 +472,15 @@ button.kb-chip:active { background: var(--kb-accent-press); }
   pointer-events: none;
   box-shadow: var(--kb-shadow-pop);
 }
+/* WarmTooltip (stage 6, B5): only a COLD tooltip has an entrance — 120 ms, a 2 px rise away from its trigger
+   at full, opacity only at calm; a warm swap and «off» show it at once (Tooltip.tsx sets data-enter). */
+.kb-tooltip[data-enter='rise'] { animation: kb-tip-rise 120ms ease-out; }
+.kb-tooltip[data-enter='fade'] { animation: kb-tip-fade 120ms ease-out; }
+.kb-tooltip[data-side='bottom'] { --kb-tip-from: translateY(-2px); }
+.kb-tooltip[data-side='top'] { --kb-tip-from: translateY(2px); }
+.kb-tooltip[data-side='right'] { --kb-tip-from: translateX(-2px); }
+@keyframes kb-tip-rise { from { opacity: 0; transform: var(--kb-tip-from, none); } to { opacity: 1; transform: none; } }
+@keyframes kb-tip-fade { from { opacity: 0; } to { opacity: 1; } }
 
 /* ---- Formulas (KaTeX, kb/ui/markdown) ---- */
 .kb-math--display {
