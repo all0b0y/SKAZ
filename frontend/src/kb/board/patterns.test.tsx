@@ -54,6 +54,28 @@ describe('layer 3 · states are the real ones', () => {
     await waitFor(() => expect(selected!.querySelectorAll('[aria-selected="true"]')).toHaveLength(2));
   }, 15_000);
 
+  it('chat rows: the side list sits next to a centre sheet, so the open chat’s bridge meets it (B1)', async () => {
+    const { container } = render(<PatternFrame id="chat-rows" look={DEFAULT_LOOK} />);
+    await ready();
+    const stages = [...container.querySelectorAll<HTMLElement>('.kb-board__pstage')];
+    expect(stages).toHaveLength(2);
+    for (const stage of stages) {
+      // The window's order: side ground · gutter · centre sheet, the side clipped like the app's
+      // (it may reach across the gutter, nothing more).
+      expect(stage).toHaveClass('kb-board__pane--side', 'kb-board__pane--bridged');
+      const sheet = stage.nextElementSibling;
+      expect(sheet).toHaveClass('kb-board__sheet');
+      expect(sheet).toHaveAttribute('aria-hidden', 'true');
+      expect(stage.parentElement).toHaveClass('kb-board__window');
+      // The real list draws the bridge for the open chat.
+      expect(stage.querySelector('.kb-tab--bridge')).not.toBeNull();
+    }
+    // Cells of other side panels keep the plain pane (no bridge to show there).
+    const other = render(<PatternFrame id="notification-rows" look={DEFAULT_LOOK} />);
+    await ready();
+    expect(other.container.querySelector('.kb-board__sheet')).toBeNull();
+  }, 15_000);
+
   it('chat exchange: citations with the sources row, thinking, Resume, the failed Regenerate', async () => {
     render(<PatternFrame id="chat-exchange" look={DEFAULT_LOOK} />);
     await ready();

@@ -34,6 +34,11 @@ export interface PatternCell {
   height?: number;
   /** The pane the component lives in inside the app: the side panel, or a centre/document pane. */
   pane?: 'side' | 'pane';
+  /**
+   * A side pane with the centre sheet beside it, across the gutter, as in the window: for lists
+   * whose open row bridges into the sheet (the chat list), so the bridge and its corners show.
+   */
+  sheet?: boolean;
   /** Store steps after the warm-up, before the component is shown. */
   prepare?: (s: KbServices) => void | Promise<void>;
   /** DOM steps after the cell is on screen, done as a user would (a ⌘-click selects a row). */
@@ -88,12 +93,12 @@ export const PATTERNS: readonly BoardPattern[] = [
   {
     id: 'chat-rows',
     title: 'Chat list rows',
-    note: 'The side list: current (open) chat, pinned, answering (still ring), new answer (dot), «Waiting for you» (a permission or a question), then two rows ⌘-selected with the selection bar.',
-    world: 'agentControls', width: 700, cellWidth: 300,
+    note: 'The side list beside the centre sheet: the open chat (its row bridges into the sheet, no mark on it), pinned, answering (the Connecting nodes mark), new answer (dot), «Waiting for you» (a permission or a question), then two rows ⌘-selected with the selection bar.',
+    world: 'agentControls', width: 880, cellWidth: 300,
     cells: [
-      { label: 'Current · pinned · answering · unread · waiting', pane: 'side', height: 560, prepare: (s) => { s.chats.getState().open(ANSWER_CHAT); }, render: () => <ChatList /> },
+      { label: 'Open · pinned · answering · unread · waiting', pane: 'side', sheet: true, height: 560, prepare: (s) => { s.chats.getState().open(ANSWER_CHAT); }, render: () => <ChatList /> },
       {
-        label: 'Selected (⌘-click on two rows)', pane: 'side', height: 560,
+        label: 'Selected (⌘-click on two rows)', pane: 'side', sheet: true, height: 560,
         prepare: (s) => { s.chats.getState().open(ANSWER_CHAT); },
         act: (root) => { cmdClick(root, 'c3'); cmdClick(root, 'c6'); },
         render: () => <ChatList />,
