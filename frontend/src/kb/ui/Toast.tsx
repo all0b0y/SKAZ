@@ -26,7 +26,9 @@ const COUNTDOWN_TICK_MS = 250;
  *
  * Toast fuse (stage 6, B4): a toast with an action shows the time left to act — a 2 px line that
  * runs down over the toast's life (full and calm: it is a status) or, at motion «off», a «· N s»
- * countdown in text. One source of truth: the timer below; the line pauses with it (`is-held`).
+ * countdown in text. One source of truth: the timer below; the line pauses with it (`is-held`) and,
+ * whenever it mounts (a new toast, or motion turned back on mid-toast), starts at the time already
+ * gone (`animation-delay: -elapsed`), so the line and the timer never drift apart (FIX2 S-L1).
  */
 export function Toast({ toast, onClose }: { toast: ToastData | null; onClose: () => void }) {
   const level = useMotionLevel();
@@ -65,7 +67,8 @@ export function Toast({ toast, onClose }: { toast: ToastData | null; onClose: ()
   };
 
   useEffect(() => {
-    if (!toast) return undefined;
+    // No toast: the one that is fading out owns no timer any more (its handlers go quiet, FIX2 C-L1).
+    if (!toast) { runningFor.current = null; return undefined; }
     left.current = TOAST_SHOW_MS;
     holds.current = { pointer: false, focus: false };
     heldRef.current = false;
@@ -82,10 +85,17 @@ export function Toast({ toast, onClose }: { toast: ToastData | null; onClose: ()
     return () => window.clearInterval(iv);
   }, [countdown, held, toast?.id]);
 
-  const onBlur = (event: FocusEvent<HTMLElement>) => {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-    holds.current.focus = false;
+  /** The exiting toast (AnimatePresence keeps it while it fades) keeps its old handlers on the same
+   *  refs: they must not hold the next toast's clock nor re-arm a timer (FIX2 C-L1). */
+  const live = (id: number) => runningFor.current === id;
+  const hold = (id: number, what: 'pointer' | 'focus', on: boolean) => {
+    if (!live(id)) return;
+    holds.current[what] = on;
     sync();
+  };
+  const onBlur = (id: number, event: FocusEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    hold(id, 'focus', false);
   };
 
   return createPortal(
@@ -94,9 +104,9 @@ export function Toast({ toast, onClose }: { toast: ToastData | null; onClose: ()
         <m.div key={toast.id} role="status" aria-live="polite"
           className={`kb-toast${toast.tone === 'problem' ? ' kb-toast--problem' : ''}${held ? ' is-held' : ''}`}
           data-testid="toast"
-          onMouseEnter={() => { holds.current.pointer = true; sync(); }}
-          onMouseLeave={() => { holds.current.pointer = false; sync(); }}
-          onFocus={() => { holds.current.focus = true; sync(); }} onBlur={onBlur}
+          onMouseEnter={() => hold(toast.id, 'pointer', true)}
+          onMouseLeave={() => hold(toast.id, 'pointer', false)}
+          onFocus={() => hold(toast.id, 'focus', true)} onBlur={(event) => onBlur(toast.id, event)}
           initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0, transition: SPRING_SMALL }} exit={{ opacity: 0, transition: EXIT }}>
           {/* A quiet shimmer left of the toast, once per toast (a new id remounts it); only for good news
               (tone 'done') — never a problem, nor a neutral note («Already pinned»). */}
@@ -115,12 +125,20 @@ export function Toast({ toast, onClose }: { toast: ToastData | null; onClose: ()
           <button type="button" className="kb-toast__close" aria-label="Dismiss" onClick={() => onCloseRef.current()}>
             <Icon name="close" size={12} />
           </button>
-          {toast.action && !countdown && (
-            <i className="kb-toast__fuse" aria-hidden="true" style={{ '--kb-toast-life': `${TOAST_SHOW_MS}ms` } as CSSProperties} />
-          )}
+          {toast.action && !countdown && <Fuse elapsed={TOAST_SHOW_MS - remaining()} />}
         </m.div>
       )}
     </AnimatePresence>,
     document.body,
+  );
+}
+
+/** The fuse line. `elapsed` is read once, when it mounts: later renders must not re-time the running
+ *  CSS animation (changing the delay of a running animation would jump it). */
+function Fuse({ elapsed }: { elapsed: number }) {
+  const [delay] = useState(() => Math.max(0, Math.min(TOAST_SHOW_MS, Math.round(elapsed))));
+  return (
+    <i className="kb-toast__fuse" aria-hidden="true"
+      style={{ '--kb-toast-life': `${TOAST_SHOW_MS}ms`, animationDelay: `${-delay}ms` } as CSSProperties} />
   );
 }
