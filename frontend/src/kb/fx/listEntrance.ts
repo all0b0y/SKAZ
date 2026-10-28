@@ -6,7 +6,7 @@ import { sessionSlot } from './session';
 
 /**
  * AnimatedList (stage 6, B12; DESIGN-SYSTEM.md decision 30 and its guard rail): the rows of a side
- * list enter once with a short stagger — on the FIRST load of the list the app opens with, and never
+ * list enter once with a short stagger — on the FIRST load of the list the app opens with (see START_LIST), and never
  * again: not on a section switch (the list remounts, the session remembers), not on a chat/page
  * switch or a selection (the rows stay mounted, nothing here runs), not on a store update.
  * A row that arrives later (a new chat, a new material) fades in alone; nothing else moves.
@@ -30,8 +30,42 @@ export const ARRIVAL_FADE_MS = 140;
 export const ENTRANCE_ID = 'kb-list-entrance';
 export const ARRIVAL_ID = 'kb-list-arrival';
 
-/** The session's first side list: only it may play the entrance (the others first load on a switch). */
-const FIRST_LIST = 'list-entrance:first';
+/**
+ * The list the app opens with (FIX2 S-H1): decided once, when the shell first renders — the side
+ * panel's section if the panel is shown and that section has a list, otherwise none. Only that list,
+ * on its first load, may play the entrance; the claim is dropped as soon as the panel's section
+ * changes or the panel closes (a list first mounted by a switch never staggers), and once it played.
+ */
+const START_LIST = 'list-entrance:start';
+/** The side sections that have an animated list (their `useListEntrance` ids). */
+export const ENTRANCE_LISTS: ReadonlySet<string> = new Set(['chats', 'materials', 'wiki']);
+
+interface StartClaim { id: string | null; shown: string | null }
+
+function startClaim(owner: object, shown: string | null): StartClaim {
+  return sessionSlot<StartClaim>(owner, START_LIST, () => ({ id: shown !== null && ENTRANCE_LISTS.has(shown) ? shown : null, shown })).value;
+}
+
+/**
+ * The shell's half of S-H1. `shown` = the side panel's section while the panel is on screen, else
+ * null. The first call of the session decides the start list; any later change of `shown` drops it.
+ */
+export function useStartList(shown: string | null): void {
+  const services = useServices();
+  startClaim(services, shown); // the first render decides (idempotent: a re-render finds the slot)
+  useLayoutEffect(() => {
+    const claim = startClaim(services, shown);
+    if (claim.shown !== shown) { claim.id = null; claim.shown = shown; }
+  }, [services, shown]);
+}
+
+/** True once, for the start list's first load; false for every other list and every later load. */
+function takeStart(owner: object, id: string): boolean {
+  const claim = startClaim(owner, null);
+  if (claim.id !== id) return false;
+  claim.id = null;
+  return true;
+}
 
 function items(host: HTMLElement): HTMLElement[] {
   const all = [...host.querySelectorAll<HTMLElement>('[data-entrance]')].filter((el) => !el.closest('[inert]'));
@@ -76,11 +110,10 @@ export function useListEntrance(id: string, host: RefObject<HTMLElement | null>,
   useLayoutEffect(() => {
     const el = host.current;
     if (!ready || !el) return;
-    const first = sessionSlot(services, FIRST_LIST, () => id).value === id;
     const { value: known, fresh } = sessionSlot(services, `list-entrance:${id}`, () => new Set<string>());
     if (fresh) {
       keys.forEach((k) => known.add(k));
-      if (first && level === 'full') playEntrance(el);
+      if (takeStart(services, id) && level === 'full') playEntrance(el);
       return;
     }
     const arrived = new Set(keys.filter((k) => !known.has(k)));

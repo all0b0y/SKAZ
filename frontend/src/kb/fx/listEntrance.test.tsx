@@ -102,6 +102,50 @@ describe('AnimatedList: the first load of the side list', () => {
     expect(entrances()).toEqual([]);
   });
 
+  // FIX2 S-H1: only the list the app opens with may play — never a list first mounted by a switch.
+  it.each([
+    ['notifications', 'chats', 'Chats', /Why is there a logarithm/],
+    ['graph', 'wiki', 'Wiki', /Concepts/],
+  ] as const)('the app opens on %s (no list): a later switch to %s shows the list at once', async (start, to, name, row) => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { section: start, motion: 'full' } });
+    await screen.findByRole('region', { name: start === 'graph' ? 'Graph' : 'Notifications' });
+    await new Promise((r) => setTimeout(r, 200));
+    played = [];
+    act(() => services.prefs.getState().set({ section: to }));
+    const list = await screen.findByRole('region', { name });
+    await within(list).findByRole('button', { name: row });
+    expect(entrances()).toEqual([]);
+  });
+
+  it('the app opens with the side panel closed: opening it later shows the list at once', async () => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { sideOpen: false, motion: 'full' } });
+    await new Promise((r) => setTimeout(r, 300));
+    played = [];
+    act(() => services.prefs.getState().set({ sideOpen: true }));
+    await within(await screen.findByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ });
+    expect(entrances()).toEqual([]);
+  });
+
+  it('the start list left before it loaded never plays later (its first mount is gone)', async () => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { motion: 'full' } });
+    // Leave Chats in the same tick, before the list has loaded.
+    act(() => services.prefs.getState().set({ section: 'notifications' }));
+    await screen.findByRole('region', { name: 'Notifications' });
+    await new Promise((r) => setTimeout(r, 200));
+    played = [];
+    act(() => services.prefs.getState().set({ section: 'chats' }));
+    await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
+    expect(entrances()).toEqual([]);
+  });
+
+  it('the materials list, when the app opens on it, enters after the library has loaded', async () => {
+    renderKb({ world: chatWorld(), prefs: { section: 'materials', motion: 'full' } });
+    const mats = await screen.findByRole('region', { name: 'Materials' });
+    await within(mats).findByRole('button', { name: /^All materials/ });
+    await waitFor(() => expect(entrances().length).toBeGreaterThan(0));
+    expect(entrances()[0]!.el).toHaveTextContent('Add material');
+  });
+
   it('the wiki list, when the app opens on it, enters the same way; folded sections take no part', async () => {
     renderKb({ world: chatWorld(), prefs: { section: 'wiki' } });
     const wiki = await screen.findByRole('region', { name: 'Wiki' });
