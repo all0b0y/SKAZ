@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { cssColor } from '../../ui/color';
 import { readFxColors } from '../colors';
-import { drawPixelCover, PIXEL_CELL, pixelField, pixelThreshold, type PixelField } from './pixel';
-import { PIXEL_HALF_MS, type PixelPhase } from './usePixelSwap';
+import { drawPixelCover, PIXEL_CELL, pixelField, pixelFrame, type PixelField } from './pixel';
+import type { PixelPhase } from './usePixelSwap';
 
 const LIGHT_PANE = [255, 255, 251] as const;
 
@@ -12,7 +12,7 @@ const LIGHT_PANE = [255, 255, 251] as const;
  * (aria-hidden), never takes the pointer. Mounted only while a swap plays at motion «full»; the timing
  * lives in usePixelSwap, the canvas only draws the moment of the phase it is told.
  */
-export function PixelCover({ phase, phaseAt }: { phase: PixelPhase; phaseAt: number }) {
+export function PixelCover({ phase, phaseAt, rewindFrom = null }: { phase: PixelPhase; phaseAt: number; rewindFrom?: number | null }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const fieldRef = useRef<{ w: number; h: number; field: PixelField } | null>(null);
   useEffect(() => {
@@ -34,13 +34,13 @@ export function PixelCover({ phase, phaseAt }: { phase: PixelPhase; phaseAt: num
     const field = fieldRef.current.field;
     let raf = 0;
     const frame = () => {
-      const p = Math.min(1, Math.max(0, (performance.now() - phaseAt) / PIXEL_HALF_MS));
-      drawPixelCover(ctx, field, w, h, pixelThreshold(p), phase === 'cover', colors);
+      const f = pixelFrame(phase, performance.now() - phaseAt, rewindFrom);
+      drawPixelCover(ctx, field, w, h, f.threshold, f.covering, colors);
       // The cover holds full until the swap; the reveal ends when the phase does (usePixelSwap).
-      if (p < 1) raf = requestAnimationFrame(frame);
+      if (!f.done) raf = requestAnimationFrame(frame);
     };
     frame();
     return () => cancelAnimationFrame(raf);
-  }, [phase, phaseAt]);
+  }, [phase, phaseAt, rewindFrom]);
   return <canvas ref={ref} className="kb-pxcover" aria-hidden="true" />;
 }

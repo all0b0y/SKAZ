@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { PIXEL_CELL, PIXEL_FRINGE, pixelField, pixelThreshold, drawPixelCover } from './pixel';
+import { PIXEL_CELL, PIXEL_FRINGE, pixelField, pixelThreshold, drawPixelCover, pixelFrame } from './pixel';
 import { PIXEL_HALF_MS, CALM_OUT_MS, CALM_IN_MS, usePixelSwap } from './usePixelSwap';
 import { vi, afterEach } from 'vitest';
 
@@ -97,5 +97,85 @@ describe('usePixelSwap: shows the old value under the cover, the new one after',
     expect(result.current.shown).toBe('c');
     act(() => { vi.advanceTimersByTime(PIXEL_HALF_MS); });
     expect(result.current).toMatchObject({ shown: 'c', phase: 'idle', played: 1 });
+  });
+});
+
+describe('FIX2 C-L3: a swap never plays across pages, and a second change never restarts the cover', () => {
+  type Page = { id: string; rev: number } | null;
+  // The page view's rule: only the same page, both loaded, a different revision (the agent's change).
+  const samePage = (a: Page, b: Page) => !!a && !!b && a.id === b.id && a.rev !== b.rev;
+  const A1: Page = { id: 'a', rev: 1 };
+  const A2: Page = { id: 'a', rev: 2 };
+  const A3: Page = { id: 'a', rev: 3 };
+  const B1: Page = { id: 'b', rev: 1 };
+
+  for (const level of ['full', 'calm'] as const) {
+    it(`${level}: another page (or null while loading) during the first half cancels the swap and shows at once`, () => {
+      vi.useFakeTimers();
+      for (const other of [B1, null]) {
+        const { result, rerender } = renderHook(({ v }) => usePixelSwap<Page>(v, samePage, level), { initialProps: { v: A1 as Page } });
+        rerender({ v: A2 });
+        expect(result.current.phase).toBe(level === 'full' ? 'cover' : 'fade-out');
+        act(() => { vi.advanceTimersByTime(100); });
+        rerender({ v: other });
+        expect(result.current).toMatchObject({ shown: other, phase: 'idle', played: 0 });
+        act(() => { vi.advanceTimersByTime(1_000); });
+        expect(result.current).toMatchObject({ shown: other, phase: 'idle', played: 0 });
+      }
+    });
+  }
+
+  it('full: another page during the reveal stops the reveal and shows at once', () => {
+    vi.useFakeTimers();
+    const { result, rerender } = renderHook(({ v }) => usePixelSwap<Page>(v, samePage, 'full'), { initialProps: { v: A1 as Page } });
+    rerender({ v: A2 });
+    act(() => { vi.advanceTimersByTime(PIXEL_HALF_MS + 100); });
+    expect(result.current.phase).toBe('reveal');
+    rerender({ v: B1 });
+    expect(result.current).toMatchObject({ shown: B1, phase: 'idle' });
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(result.current).toMatchObject({ shown: B1, phase: 'idle' });
+  });
+
+  it('the old value coming back during the cover cancels the swap', () => {
+    vi.useFakeTimers();
+    const { result, rerender } = renderHook(({ v }) => usePixelSwap<Page>(v, samePage, 'full'), { initialProps: { v: A1 as Page } });
+    rerender({ v: A2 });
+    rerender({ v: A1 });
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(result.current).toMatchObject({ shown: A1, phase: 'idle', played: 0 });
+  });
+
+  it('full: a second agent change during the reveal re-covers from where the reveal is, not from p = 0', () => {
+    vi.useFakeTimers();
+    const { result, rerender } = renderHook(({ v }) => usePixelSwap<Page>(v, samePage, 'full'), { initialProps: { v: A1 as Page } });
+    rerender({ v: A2 });
+    act(() => { vi.advanceTimersByTime(PIXEL_HALF_MS); });
+    act(() => { vi.advanceTimersByTime(140); }); // the reveal is 40 % through
+    expect(result.current).toMatchObject({ shown: A2, phase: 'reveal' });
+    rerender({ v: A3 });
+    expect(result.current).toMatchObject({ shown: A2, phase: 'cover' });
+    expect(result.current.rewindFrom).toBeCloseTo(0.4, 2);
+    // The cover is the reveal played backwards: it takes as long as the reveal had run (140 ms).
+    act(() => { vi.advanceTimersByTime(139); });
+    expect(result.current).toMatchObject({ shown: A2, phase: 'cover' });
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(result.current).toMatchObject({ shown: A3, phase: 'reveal', rewindFrom: null });
+    act(() => { vi.advanceTimersByTime(PIXEL_HALF_MS); });
+    expect(result.current).toMatchObject({ shown: A3, phase: 'idle', played: 1 });
+  });
+
+  it('pixelFrame: the rewinding cover starts on the very cells the reveal showed, and ends fully covered', () => {
+    const at40 = pixelFrame('reveal', 0.4 * PIXEL_HALF_MS, null);
+    const rewind0 = pixelFrame('cover', 0, 0.4);
+    expect(rewind0).toEqual({ ...at40, done: false });
+    expect(at40.covering).toBe(false);
+    const end = pixelFrame('cover', 0.4 * PIXEL_HALF_MS, 0.4);
+    expect(end.done).toBe(true);
+    expect(end.covering).toBe(false);
+    expect(end.threshold).toBe(pixelThreshold(0)); // reveal-order at 0 = every cell covered
+    // A plain cover / reveal is unchanged.
+    expect(pixelFrame('cover', PIXEL_HALF_MS / 2, null)).toEqual({ threshold: pixelThreshold(0.5), covering: true, done: false });
+    expect(pixelFrame('reveal', PIXEL_HALF_MS, null)).toEqual({ threshold: pixelThreshold(1), covering: false, done: true });
   });
 });

@@ -1,6 +1,7 @@
 import type { Rgb } from '../colors';
 import { rgba } from '../colors';
 import { bayerAt, valueNoise } from '../noise';
+import { PIXEL_HALF_MS, type PixelPhase } from './usePixelSwap';
 
 /*
  * Stage 6 B6 — PixelTransition (DESIGN-SYSTEM.md decision 30; demo .dev/ui-blocks/motion6 motion-v1 B6).
@@ -37,6 +38,23 @@ export function pixelField(nx: number, ny: number): PixelField {
 /** The front at progress p (0..1) of one half: from just below every cell to just above every cell. */
 export function pixelThreshold(p: number): number {
   return p * 1.2 - 0.1;
+}
+
+/**
+ * What one frame draws, `elapsed` ms into a phase. A plain cover runs the front forward in cover order;
+ * a cover that interrupts a reveal (`rewindFrom` = how far the reveal had got, 0..1) plays that reveal
+ * BACKWARDS from where it stood, so the cells already on screen stay put and the page re-covers in the
+ * reverse order (FIX2 C-L3: never a jump back to an empty cover at p = 0). `done` = this phase's
+ * picture is complete (the swap timer in usePixelSwap ends it).
+ */
+export function pixelFrame(phase: PixelPhase, elapsed: number, rewindFrom: number | null): { threshold: number; covering: boolean; done: boolean } {
+  const t = Math.max(0, elapsed) / PIXEL_HALF_MS;
+  if (phase === 'cover' && rewindFrom !== null) {
+    const p = Math.max(0, rewindFrom - t);
+    return { threshold: pixelThreshold(p), covering: false, done: p <= 0 };
+  }
+  const p = Math.min(1, t);
+  return { threshold: pixelThreshold(p), covering: phase === 'cover', done: p >= 1 };
 }
 
 export interface PixelColors {
