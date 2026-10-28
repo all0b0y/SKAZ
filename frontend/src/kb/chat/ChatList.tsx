@@ -11,6 +11,8 @@ import { SelectionCheckbox } from '../ui/listSelection';
 import { isWaitingForUser } from '../api/permissions';
 import { NEW_CHAT_KEY, sideChats } from './sideOrder';
 import { ChatMark, WaitingMark } from './ChatMark';
+import { useListEntrance } from '../fx/listEntrance';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 export { WaitingMark };
 
@@ -52,11 +54,13 @@ export function ChatList() {
   // With All chats / All materials (or an expanded document) in the centre no row is open.
   const openKey = useOpenChatKey();
   const newOpen = openKey === NEW_CHAT_KEY;
+  // AnimatedList (stage 6): the rows enter once, on the first load; a chat that arrives later fades in alone.
+  useListEntrance('chats', sel.listRef, load === 'ready' || load === 'error' || list.length > 0, list.map((c) => c.id));
 
   const row = (c: KbChatSummary) => {
     const current = openKey === c.id;
     return (
-      <li key={c.id} {...sel.rowProps(c.id)}>
+      <li key={c.id} {...sel.rowProps(c.id)} data-entrance={c.id}>
         <div role="gridcell">
           <button type="button" className={`kb-row kb-row--tabbed kb-chatrow${current ? ' is-current' : ''}${c.unread ? ' is-unread' : ''}`}
             data-tab-key={c.id} aria-current={current ? 'page' : undefined} onClick={() => openChat(c.id)}>
@@ -74,7 +78,7 @@ export function ChatList() {
     <div className="kb-side__scroll kb-tabhost" {...sel.listProps}>
       <ActiveTab host={sel.listRef} activeKey={openKey} variant="bridge" />
       <button type="button" className={`kb-row kb-row--tabbed kb-row--action${newOpen ? ' is-current' : ''}`}
-        data-tab-key={NEW_CHAT_KEY} aria-current={newOpen ? 'page' : undefined} onClick={() => { replayNew(); openChat(null); }}>
+        data-entrance="" data-tab-key={NEW_CHAT_KEY} aria-current={newOpen ? 'page' : undefined} onClick={() => { replayNew(); openChat(null); }}>
         <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
         <span className="kb-row__text">New chat</span>
       </button>
@@ -88,22 +92,22 @@ export function ChatList() {
         </div>
       )}
       {load === 'ready' && list.length === 0 && (
-        <EmptyState icon="chats" title="No chats yet" compact field>Ask your first question in the field below.</EmptyState>
+        <EmptyState icon="chats" title="No chats yet" compact art={<HalftoneArt id="chats" compact />}>Ask your first question in the field below.</EmptyState>
       )}
       {pinned.length > 0 && (
         <section aria-label="Pinned">
-          <h3 className="kb-subhead"><span className="kb-subhead__text">Pinned</span></h3>
+          <h3 className="kb-subhead" data-entrance=""><span className="kb-subhead__text">Pinned</span></h3>
           <ul className="kb-list" {...sel.gridProps} aria-label="Pinned">{pinned.map(row)}</ul>
         </section>
       )}
       {groups.map((g) => (
         <section key={g.label} aria-label={g.label}>
-          <h3 className="kb-subhead"><span className="kb-subhead__text">{g.label}</span></h3>
+          <h3 className="kb-subhead" data-entrance=""><span className="kb-subhead__text">{g.label}</span></h3>
           <ul className="kb-list" {...sel.gridProps} aria-label={g.label}>{g.items.map(row)}</ul>
         </section>
       ))}
       {list.length > 0 && (
-        <button type="button" className={`kb-row kb-row--more${center === 'allChats' ? ' is-current' : ''}`}
+        <button type="button" className={`kb-row kb-row--more${center === 'allChats' ? ' is-current' : ''}`} data-entrance=""
           onClick={() => showCenter('allChats')} aria-current={center === 'allChats' ? 'page' : undefined}>
           <span className="kb-row__text">All chats · {list.length}</span>
         </button>

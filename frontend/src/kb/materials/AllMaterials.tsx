@@ -10,6 +10,8 @@ import { useLibrary, useServices, useUi } from '../state/context';
 import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
 import { useMaterialSelection } from './materialBatch';
 import { StippleStrip } from '../fx/stipple';
+import { useSpotlight } from '../fx/spotlight';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -82,6 +84,8 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   const openedId = useUi((s) => s.docMaterialId);
   const setAddOpen = useUi((s) => s.setAddMaterialOpen);
   const tone = useFolderTone();
+  // SpotlightCard (stage 6): the cards layout's tiles are card surfaces; the table rows are not.
+  const spotlight = useSpotlight();
   const [type, setType] = useState<TypeFilter>('all');
   const [folderId, setFolderId] = useState('');
   const [sort, setSort] = useState<Sort>('newest');
@@ -173,7 +177,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           <Banner tone="error" title="Couldn’t load materials." actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
         {state.value && rows.length === 0 && (
-          <EmptyState icon="materials" field={!all.length} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
+          <EmptyState icon="materials" art={all.length ? undefined : <HalftoneArt id="materials" />} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
             action={all.length ? undefined : <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add material</Button>}>
             {all.length ? 'Choose another type or folder.' : 'Record, drop files or paste a link — everything lands here.'}
           </EmptyState>
@@ -211,10 +215,10 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         )}
         {overlays}
         {rows.length > 0 && layout === 'cards' && (
-          <ul className="kb-amg" aria-label="Materials">
+          <ul className="kb-amg" aria-label="Materials" {...spotlight}>
             {rows.map((m) => (
               <li key={m.id}>
-                <button type="button" className={`kb-amc${openedId === m.id ? ' is-current' : ''}`} onClick={() => openDocument({ type: 'material', id: m.id })}>
+                <button type="button" className={`kb-amc kb-spot${openedId === m.id ? ' is-current' : ''}`} onClick={() => openDocument({ type: 'material', id: m.id })}>
                   <span className="kb-amc__top"><Icon name={KIND_ICON[m.kind]} size={16} label={KIND_LABEL[m.kind]} /><span className="kb-head__spacer" /><WikiCell material={m} /></span>
                   <span className="kb-amc__title">{m.title}</span>
                   <span className="kb-amc__meta"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" />{folderName(m)}</span>
