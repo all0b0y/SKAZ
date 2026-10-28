@@ -422,6 +422,8 @@ p.kb-row--static { margin-top: var(--kb-sp-4); }
 /* clip, not hidden: no scroll container, so the selection bar still sticks to the side list. */
 .kb-fold__in { min-height: 0; overflow: clip; }
 .kb-fold.is-open > .kb-fold__in { overflow-clip-margin: var(--kb-sp-4); }
+/* Page rows of an open kind sit 12 px in from its header (mock shell-v4 `.m-fold > ul`, FIX1 R7). */
+.kb-fold__in > .kb-sellist > .kb-list { padding-left: var(--kb-sp-12); }
 .kb-wiki-more { margin-top: var(--kb-sp-8); }
 html[data-motion='calm'] .kb-fold,
 html[data-motion='calm'] .kb-wfold__chev { transition: none; }
