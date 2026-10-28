@@ -24,7 +24,7 @@ const glideTransform = (b: GlideBox) => `translate(${b.left}px, ${b.top}px)`;
  * stays real DOM focus on the row (arrows still move it), and the highlight follows that focus when
  * it is visible (`:focus-visible`) — a menu opened by the mouse shows nothing until a row is hovered.
  */
-function useGlide(enabled: boolean) {
+function useGlide(enabled: boolean, open: boolean) {
   const level = useMotionLevel();
   const levelRef = useRef<MotionLevel>(level);
   levelRef.current = level;
@@ -33,6 +33,8 @@ function useGlide(enabled: boolean) {
   const hovered = useRef<HTMLElement | null>(null);
   /** A key was pressed inside the menu since the pointer last moved: focus moves are keyboard moves. */
   const keyboard = useRef(false);
+  /** The row the pointer gave focus to (cleared once a key moves on): leaving the menu takes it back. */
+  const pointerFocus = useRef<HTMLElement | null>(null);
 
   const popOf = () => glideRef.current?.parentElement ?? null;
   const play = (frames: Keyframe[], options: KeyframeAnimationOptions) => {
@@ -86,49 +88,97 @@ function useGlide(enabled: boolean) {
     if (keyboard.current) return true;
     try { return el.matches(':focus-visible'); } catch { return false; }
   };
-  /** Where the highlight rests without a hovered row: on the keyboard-focused row, or nowhere. */
+  /** Where the highlight rests without a hovered row: on the keyboard-focused row, or nowhere. A
+   *  disabled row the keyboard reached shows it too (focus is always visible, FIX2 C-M2). */
   const rest = () => {
     const row = rowOf(document.activeElement);
-    if (row && usable(row) && focusVisible(row)) go(row);
+    if (row && focusVisible(row)) go(row);
     else hide();
   };
+  const typing = (el: Element | null) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+    || (el instanceof HTMLElement && el.isContentEditable);
+  /**
+   * The ARIA menu pattern (FIX2 C-M2): the row under the pointer IS the current row — it takes real
+   * focus, so Enter chooses what is highlighted and keyboard focus never hides under the highlight.
+   * A disabled row or a gap hands focus to the menu itself (nothing is current). Never out of a text
+   * field in the menu (the model-picker search): the user is typing there.
+   */
+  const pointTo = (target: HTMLElement) => {
+    const active = document.activeElement;
+    const pop = popOf();
+    if (!pop || (typing(active) && pop.contains(active))) return;
+    if (active !== target) target.focus({ preventScroll: true });
+    pointerFocus.current = target === pop ? null : target;
+  };
+
+  /** Re-place the highlight on its row, or take it away when the row left or can no longer be chosen. */
+  const sync = () => {
+    const row = cur.current;
+    const el = glideRef.current;
+    const pop = popOf();
+    if (!row || !el || !pop) return;
+    if (!row.isConnected || !pop.contains(row)) {
+      if (hovered.current === row) hovered.current = null;
+      if (pointerFocus.current === row) pointerFocus.current = null;
+      hide(true);
+      // A focused row that left drops focus to <body>: keep it in the menu (Escape, arrows still work).
+      const active = document.activeElement;
+      if (!active || active === document.body) pop.focus({ preventScroll: true });
+      return;
+    }
+    if (!usable(row) && !(row === document.activeElement && focusVisible(row))) {
+      if (hovered.current === row) hovered.current = null;
+      hide(true);
+      return;
+    }
+    const b = boxIn(pop, row);
+    el.style.transform = glideTransform(b);
+    el.style.width = `${b.width}px`;
+    el.style.height = `${b.height}px`;
+  };
+  const syncRef = useRef(sync);
+  syncRef.current = sync;
 
   // Rows come and go while the menu is open (search filters the model picker, a provider folds):
-  // the highlight follows its row's new place at once, or leaves with it.
+  // the highlight follows its row's new place at once, or leaves with it (FIX2 C-M1). Two paths,
+  // because rows change in two ways: with a render of Popover itself (its parent filtered them) —
+  // the layout effect re-places after every such render, before paint — or below it (an inner
+  // component's own state) — one observer for the whole time the menu is open. The observer is
+  // never torn down by a render, so no mutation record is dropped.
+  useLayoutEffect(() => { if (enabled) sync(); });
   useEffect(() => {
     const pop = popOf();
-    if (!enabled || !pop || typeof MutationObserver === 'undefined') return undefined;
-    const obs = new MutationObserver(() => {
-      const row = cur.current;
-      const el = glideRef.current;
-      if (!row || !el) return;
-      if (!row.isConnected || !pop.contains(row)) { hide(true); return; }
-      const b = boxIn(pop, row);
-      el.style.transform = glideTransform(b);
-      el.style.width = `${b.width}px`;
-      el.style.height = `${b.height}px`;
-    });
-    obs.observe(pop, { childList: true, subtree: true });
+    if (!enabled || !open || !pop || typeof MutationObserver === 'undefined') return undefined;
+    const obs = new MutationObserver(() => syncRef.current());
+    obs.observe(pop, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-disabled', 'disabled'] });
     return () => obs.disconnect();
-  });
+  }, [enabled, open]);
 
   const handlers = enabled ? {
     onPointerOver: (event: { target: EventTarget | null }) => {
       const row = rowOf(event.target);
       if (!row) return; // gaps, headings, separators: the highlight stays where it is
-      if (usable(row)) { hovered.current = row; go(row); } else { hovered.current = null; rest(); }
+      const pop = popOf();
+      if (usable(row)) { hovered.current = row; go(row); pointTo(row); }
+      else { hovered.current = null; if (pop) pointTo(pop); rest(); }
     },
-    onPointerLeave: () => { hovered.current = null; rest(); },
+    onPointerLeave: () => {
+      hovered.current = null;
+      const pop = popOf();
+      if (pop && pointerFocus.current && document.activeElement === pointerFocus.current) pop.focus({ preventScroll: true });
+      pointerFocus.current = null;
+      rest();
+    },
     onPointerMove: () => { keyboard.current = false; },
-    onKeyDownCapture: () => { keyboard.current = true; },
+    onKeyDownCapture: () => { keyboard.current = true; pointerFocus.current = null; },
     onFocus: (event: { target: EventTarget | null }) => {
       const row = rowOf(event.target);
-      if (row && usable(row) && focusVisible(row)) go(row);
+      if (row && (focusVisible(row) || row === hovered.current)) go(row);
       else if (!row && !hovered.current) hide();
     },
   } : {};
 
-  const reset = () => { cur.current = null; hovered.current = null; keyboard.current = false; };
+  const reset = () => { cur.current = null; hovered.current = null; keyboard.current = false; pointerFocus.current = null; };
   return { glideRef, handlers, reset };
 }
 
@@ -159,7 +209,7 @@ export function Popover({
   autoFocus = true, onKeyDown, width, scope = 'pane', glide = role === 'menu',
 }: PopoverProps) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const { glideRef, handlers: glideHandlers, reset: resetGlide } = useGlide(glide);
+  const { glideRef, handlers: glideHandlers, reset: resetGlide } = useGlide(glide, open);
   if (!open) resetGlide();
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const onCloseRef = useRef(onClose);
