@@ -9,6 +9,7 @@ import { Rail } from './Rail';
 import { Resizer } from './Resizer';
 import { SidePanel } from './SidePanel';
 import { TitleBar } from './TitleBar';
+import { useStartList } from '../fx/listEntrance';
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(() => window.innerWidth);
@@ -35,6 +36,7 @@ const GRAPH_W = 560;
 export function Shell() {
   const { prefs } = useServices();
   const sideOpen = usePrefs((s) => s.sideOpen);
+  const section = usePrefs((s) => s.section);
   const sideWidth = usePrefs((s) => s.sideWidth);
   const rightWidth = usePrefs((s) => s.rightWidth);
   const right = useUi((s) => s.right);
@@ -48,6 +50,8 @@ export function Shell() {
     windowWidth, sideOpen, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
   });
   const { sideMax, rightMax } = resizeLimits(windowWidth, layout);
+  // AnimatedList (FIX2 S-H1): only the side list shown when the app opens may stagger in.
+  useStartList(layout.side > 0 ? section : null);
 
   return (
     <div className="kb-app">

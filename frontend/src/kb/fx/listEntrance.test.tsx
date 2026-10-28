@@ -90,6 +90,39 @@ describe('AnimatedList: the first load of the side list', () => {
     expect(arrivals()[0]!.opts).toMatchObject({ duration: ARRIVAL_FADE_MS });
   });
 
+  // FIX2 C-L8: the arrival fade is only for a row new to a list that is already on screen.
+  it('rows that came while the list was away do not fade when it mounts again (section switch)', async () => {
+    const { services } = await chatsLoaded();
+    act(() => services.prefs.getState().set({ section: 'notifications' }));
+    await screen.findByRole('region', { name: 'Notifications' });
+    const [one] = services.chats.getState().list;
+    act(() => services.chats.setState((s) => ({ list: [{ ...one!, id: 'c-away', title: 'Made while away', pinned: false, updated_at: new Date().toISOString() }, ...s.list] })));
+    played = [];
+    act(() => services.prefs.getState().set({ section: 'chats' }));
+    await within(side()).findByRole('button', { name: /Made while away/ });
+    expect(arrivals()).toEqual([]);
+    expect(entrances()).toEqual([]);
+    // …and the remounted list still fades a row that is new to it.
+    act(() => services.chats.setState((s) => ({ list: [{ ...one!, id: 'c-new', title: 'A brand new chat', pinned: false, updated_at: new Date().toISOString() }, ...s.list] })));
+    await within(side()).findByRole('button', { name: /A brand new chat/ });
+    expect(arrivals().map((p) => p.el.dataset.entrance)).toEqual(['c-new']);
+  });
+
+  it('rows that came while a folder was open do not fade when the overview comes back (folder switch)', async () => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { section: 'materials', motion: 'full' } });
+    const mats = await screen.findByRole('region', { name: 'Materials' });
+    await within(mats).findByRole('button', { name: /^All materials/ });
+    const folder = services.library.getState().folders[0]!;
+    await act(() => services.library.getState().openFolder(folder.id));
+    const [m] = services.library.getState().materials;
+    act(() => services.library.setState((s) => ({ materials: [{ ...m!, id: 'm-away', title: 'Added in the folder' }, ...s.materials] })));
+    played = [];
+    await act(() => services.library.getState().openFolder(null));
+    await within(mats).findByRole('button', { name: /Added in the folder/ });
+    expect(arrivals()).toEqual([]);
+    expect(entrances()).toEqual([]);
+  });
+
   it('a list first opened by a section switch shows at once (it never staggers on a switch)', async () => {
     const { services } = await chatsLoaded();
     played = [];
@@ -100,6 +133,50 @@ describe('AnimatedList: the first load of the side list', () => {
     const wiki = await screen.findByRole('region', { name: 'Wiki' });
     await within(wiki).findByRole('button', { name: /Concepts/ });
     expect(entrances()).toEqual([]);
+  });
+
+  // FIX2 S-H1: only the list the app opens with may play — never a list first mounted by a switch.
+  it.each([
+    ['notifications', 'chats', 'Chats', /Why is there a logarithm/],
+    ['graph', 'wiki', 'Wiki', /Concepts/],
+  ] as const)('the app opens on %s (no list): a later switch to %s shows the list at once', async (start, to, name, row) => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { section: start, motion: 'full' } });
+    await screen.findByRole('region', { name: start === 'graph' ? 'Graph' : 'Notifications' });
+    await new Promise((r) => setTimeout(r, 200));
+    played = [];
+    act(() => services.prefs.getState().set({ section: to }));
+    const list = await screen.findByRole('region', { name });
+    await within(list).findByRole('button', { name: row });
+    expect(entrances()).toEqual([]);
+  });
+
+  it('the app opens with the side panel closed: opening it later shows the list at once', async () => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { sideOpen: false, motion: 'full' } });
+    await new Promise((r) => setTimeout(r, 300));
+    played = [];
+    act(() => services.prefs.getState().set({ sideOpen: true }));
+    await within(await screen.findByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ });
+    expect(entrances()).toEqual([]);
+  });
+
+  it('the start list left before it loaded never plays later (its first mount is gone)', async () => {
+    const { services } = renderKb({ world: chatWorld(), prefs: { motion: 'full' } });
+    // Leave Chats in the same tick, before the list has loaded.
+    act(() => services.prefs.getState().set({ section: 'notifications' }));
+    await screen.findByRole('region', { name: 'Notifications' });
+    await new Promise((r) => setTimeout(r, 200));
+    played = [];
+    act(() => services.prefs.getState().set({ section: 'chats' }));
+    await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
+    expect(entrances()).toEqual([]);
+  });
+
+  it('the materials list, when the app opens on it, enters after the library has loaded', async () => {
+    renderKb({ world: chatWorld(), prefs: { section: 'materials', motion: 'full' } });
+    const mats = await screen.findByRole('region', { name: 'Materials' });
+    await within(mats).findByRole('button', { name: /^All materials/ });
+    await waitFor(() => expect(entrances().length).toBeGreaterThan(0));
+    expect(entrances()[0]!.el).toHaveTextContent('Add material');
   });
 
   it('the wiki list, when the app opens on it, enters the same way; folded sections take no part', async () => {

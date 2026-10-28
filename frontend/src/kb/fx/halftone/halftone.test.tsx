@@ -133,6 +133,21 @@ describe('HalftoneReveal in the empty states', () => {
     expect(within(empty as HTMLElement).getByRole('button', { name: 'Add material' })).toBeInTheDocument();
   });
 
+  // FIX2 S-L3: the materials panel's own «no materials» state has the art too.
+  it('the materials panel with no materials: the compact art above «No materials yet»', async () => {
+    const world = docWorld();
+    world.materials = [];
+    renderKb({ world, prefs: { motion: 'full', section: 'materials' } });
+    const mats = await screen.findByRole('region', { name: 'Materials' });
+    await within(mats).findByRole('button', { name: /^All materials/ });
+    const empty = (await within(mats).findByText('No materials yet')).closest('.kb-empty')!;
+    expect(empty).toBeTruthy();
+    const art = empty.querySelector('.kb-empty__art--compact');
+    expect(art?.querySelector('canvas')).toBeInTheDocument();
+    expect(art).toHaveAttribute('data-reveal', 'draw');
+    expect(art).toHaveAttribute('aria-hidden', 'true');
+  });
+
   it('an empty folder in the materials panel shows the compact art', async () => {
     const world = docWorld();
     const r = renderKb({ world, prefs: { motion: 'full', section: 'materials' } });

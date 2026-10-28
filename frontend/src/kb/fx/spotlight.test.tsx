@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { act, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import type { MotionLevel } from '../ui/motionLevel';
-import { spotAt, spotMode } from './spotlight';
+import { SPOT_LIT, spotAt, spotEnter, spotLeave, spotMode } from './spotlight';
 
 /*
  * SpotlightCard (stage 6, B9): the light follows a mouse over card surfaces only, at «full»; calm and
@@ -66,6 +68,40 @@ async function allMaterialsCards(motion: MotionLevel) {
   return { ...r, user, all };
 }
 
+// FIX2 C-L7: a card lights only for a mouse — never for the sticky «hover» a pen or a touch leaves.
+describe('spotEnter / spotLeave: the lit card', () => {
+  it('a mouse entering a card (or anything inside it) lights it; leaving it for outside puts it out', () => {
+    const { host, c, inner } = card();
+    expect(spotEnter(host, inner, 'mouse')).toBe(c);
+    expect(c).toHaveAttribute(SPOT_LIT);
+    spotLeave(host, inner, c); // into the card itself: still lit
+    expect(c).toHaveAttribute(SPOT_LIT);
+    spotLeave(host, c, host);
+    expect(c).not.toHaveAttribute(SPOT_LIT);
+  });
+  it('touch and pen never light a card, at any level', () => {
+    const { host, c } = card();
+    expect(spotEnter(host, c, 'touch')).toBeNull();
+    expect(spotEnter(host, c, 'pen')).toBeNull();
+    expect(c).not.toHaveAttribute(SPOT_LIT);
+  });
+  it('a row or a card of another container is never lit', () => {
+    const { host } = card();
+    const row = document.createElement('button');
+    row.className = 'kb-row';
+    host.append(row);
+    expect(spotEnter(host, row, 'mouse')).toBeNull();
+    const other = card();
+    expect(spotEnter(host, other.c, 'mouse')).toBeNull();
+    expect(other.c).not.toHaveAttribute(SPOT_LIT);
+  });
+  it('the CSS lights a card by that attribute only, not by :hover (sticky after a tap)', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/materials.css'), 'utf8');
+    expect(css).not.toMatch(/\.kb-spot:hover/);
+    expect(css).toContain(`.kb-spot[${SPOT_LIT}]::before`);
+  });
+});
+
 describe('All materials: the cards are spotlight cards, the table rows are not', () => {
   it.each([['full', 'follow'], ['calm', 'flat'], ['off', 'flat']] as const)('%s → %s', async (motion, mode) => {
     const { user, all } = await allMaterialsCards(motion);
@@ -76,6 +112,20 @@ describe('All materials: the cards are spotlight cards, the table rows are not',
     const cards = grid.querySelectorAll('.kb-amc');
     expect(cards.length).toBeGreaterThan(0);
     cards.forEach((c) => expect(c).toHaveClass('kb-spot'));
+  });
+
+  it('in the grid a mouse lights the card under it; a touch or a pen does not', async () => {
+    const { user, all } = await allMaterialsCards('calm');
+    await user.click(within(all).getByRole('radio', { name: 'Cards' }));
+    const [first, second] = [...within(all).getByRole('list', { name: 'Materials' }).querySelectorAll<HTMLElement>('.kb-amc')];
+    fireEvent.pointerOver(first!, { pointerType: 'touch' });
+    fireEvent.pointerOver(second!, { pointerType: 'pen' });
+    expect(first).not.toHaveAttribute(SPOT_LIT);
+    expect(second).not.toHaveAttribute(SPOT_LIT);
+    fireEvent.pointerOver(first!, { pointerType: 'mouse' });
+    expect(first).toHaveAttribute(SPOT_LIT);
+    fireEvent.pointerOut(first!, { pointerType: 'mouse', relatedTarget: second! });
+    expect(first).not.toHaveAttribute(SPOT_LIT);
   });
 
   it('side-panel list rows never carry the light', async () => {
