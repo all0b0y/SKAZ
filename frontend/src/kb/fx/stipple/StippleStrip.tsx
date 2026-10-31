@@ -1,5 +1,6 @@
+import { useStillIndicators } from '../../ui/motionLevel';
 import { useRef } from 'react';
-import { useReducedMotion } from 'motion/react';
+
 import { FxCanvas } from '../FxCanvas';
 import { drawStrip } from './draw';
 import { stripPoints, STRIP_HEIGHT, type Pt } from './stipple';
@@ -16,7 +17,7 @@ const STRIP_STILL_T = 1.5;
  * still frame. Off-screen, in a hidden section or a hidden window FxCanvas stops its loop.
  */
 export function StippleStrip({ className }: { className?: string }) {
-  const reduced = useReducedMotion() ?? false;
+  const reduced = useStillIndicators() ?? false;
   const cache = useRef<{ w: number; pts: Pt[] } | null>(null);
   return (
     <span className={className ? `kb-stipstrip ${className}` : 'kb-stipstrip'} aria-hidden="true" data-stipple-strip="">

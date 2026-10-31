@@ -232,6 +232,7 @@ async def test_claude_codes_own_gate_is_refused_under_hard_rules_and_as_before_w
     await set_settings(env, never=[], prefer=["arxiv.org"])
     allowed = await gate.approve(WebQuery("toolu_2", "wiki staleness", blocked_domains=("quora.com",)))
     assert allowed.allowed and allowed.blocked_domains == ("quora.com",) and allowed.allowed_domains == ()
+    assert allowed.search_id is not None
     card = env.runtime.kb_web.get(allowed.search_id)
     assert card.blocked_domains == ("quora.com",)
     assert card.rules is not None and card.rules.prefer == ("arxiv.org",)

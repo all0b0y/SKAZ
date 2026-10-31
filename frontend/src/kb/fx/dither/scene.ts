@@ -88,7 +88,8 @@ export class DitherScene {
   /** Drop the links and the burn-out (the view was hidden: nothing of it comes back when shown). */
   reset(): void { this.edges = []; this.bursts = []; this.outT0 = null; }
 
-  draw(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, colors: FxColors, family: string, leaving: boolean): void {
+  /** `driftT` = the clock of the slow background drift; a fixed value holds it still (motion «calm»). */
+  draw(ctx: CanvasRenderingContext2D, w: number, h: number, t: number, colors: FxColors, family: string, leaving: boolean, driftT = t): void {
     this.t = t;
     const layout = this.ensureLayout(w, h, family);
     if (!layout || !this.offCtx || !this.off) return;
@@ -104,7 +105,7 @@ export class DitherScene {
       drawOverlay(layout.ov, layout.mask.cols, layout.mask.rows, this.opts.cell, this.edges, this.bursts, t);
     }
     const image = this.image!;
-    renderDither(image.data, { mask: layout.mask, nodeCells: layout.cells, ov: layout.ov }, t, out, colors.ink, colors.accent, this.opts.alpha);
+    renderDither(image.data, { mask: layout.mask, nodeCells: layout.cells, ov: layout.ov }, out === null ? driftT : t, out, colors.ink, colors.accent, this.opts.alpha);
     this.offCtx.putImageData(image, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.off, 0, 0, layout.mask.cols * this.opts.cell, layout.mask.rows * this.opts.cell);

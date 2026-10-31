@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../ui/motionLevel';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { m, useReducedMotion } from 'motion/react';
+import { m } from 'motion/react';
 import { Button, EmptyState, Icon, IconButton } from '../ui';
 import { SPRING_LARGE, SPRING_SMALL } from '../ui/motion';
 import { PathText } from '../ui/PathText';

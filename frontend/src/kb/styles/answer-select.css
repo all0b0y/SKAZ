@@ -59,21 +59,21 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  margin: -2px -4px 2px;
-  padding: 2px 2px 8px 4px;
+  gap: var(--kb-sp-6);
+  margin: calc(var(--kb-sp-2) * -1) calc(var(--kb-sp-4) * -1) var(--kb-sp-2);
+  padding: var(--kb-sp-2) var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-4);
   border-bottom: 1px solid var(--kb-line);
 }
-.kb-pickbar__what { display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-right: 4px; font-size: var(--t-xs); font-weight: 600; }
+.kb-pickbar__what { display: inline-flex; align-items: center; gap: var(--kb-sp-6); min-width: 0; margin-right: var(--kb-sp-4); font-size: var(--t-xs); font-weight: 600; }
 .kb-pickbar__what svg { flex: none; color: var(--kb-sel); }
 .kb-pickbar__where { color: var(--kb-muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
 .kb-pickbar__x { margin-left: auto; }
 .kb-qbtn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--kb-sp-4);
   height: 26px;
-  padding: 0 10px;
+  padding: 0 var(--kb-sp-10);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-pill);
   background: none;
@@ -92,11 +92,11 @@
 .kb-selchip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--kb-sp-6);
   max-width: 100%;
   height: 24px;
-  margin-bottom: 6px;
-  padding: 0 9px;
+  margin-bottom: var(--kb-sp-6);
+  padding: 0 var(--kb-sp-8);
   border: 1px solid var(--kb-sel-line);
   border-radius: var(--kb-r-pill);
   background: var(--kb-pane);
@@ -111,19 +111,19 @@
 .kb-selchip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- «Where is this from?»: SKAZ shows the sources itself ---- */
-.kb-where { margin: 0 -4px 2px; padding: 6px 4px 8px; border-bottom: 1px solid var(--kb-line); font-size: var(--t-sm); max-height: 220px; overflow-y: auto; }
+.kb-where { margin: 0 calc(var(--kb-sp-4) * -1) var(--kb-sp-2); padding: var(--kb-sp-6) var(--kb-sp-4) var(--kb-sp-8); border-bottom: 1px solid var(--kb-line); font-size: var(--t-sm); max-height: 220px; overflow-y: auto; }
 .kb-where__head { display: flex; align-items: center; justify-content: space-between; color: var(--kb-muted); font-size: var(--t-xs); font-weight: 600; }
-.kb-where__row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); gap: 4px 10px; padding: 5px 0; }
+.kb-where__row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr); gap: var(--kb-sp-4) var(--kb-sp-10); padding: var(--kb-sp-4) 0; }
 .kb-where__row + .kb-where__row { border-top: 1px dashed var(--kb-line); }
 .kb-where__item { min-width: 0; overflow-wrap: anywhere; }
-.kb-where__srcs { display: flex; flex-wrap: wrap; gap: 5px; align-items: flex-start; min-width: 0; }
+.kb-where__srcs { display: flex; flex-wrap: wrap; gap: var(--kb-sp-4); align-items: flex-start; min-width: 0; }
 .kb-where__src {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--kb-sp-4);
   max-width: 100%;
   min-height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--kb-sp-8);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-pill);
   background: none;
@@ -139,23 +139,23 @@ button.kb-where__src:hover { background: var(--kb-accent-soft); border-color: va
 .kb-where__meta { color: var(--kb-muted); font-variant-numeric: tabular-nums; }
 .kb-where__src.is-gone, .kb-where__src--agent { border-style: dashed; color: var(--kb-muted); cursor: default; }
 .kb-where__none, .kb-where__note { margin: 0; color: var(--kb-muted); font-size: var(--t-xs); }
-.kb-where__note { margin-top: 4px; }
+.kb-where__note { margin-top: var(--kb-sp-4); }
 
 /* ---- «Fix in wiki»: before → after, changed only on the user's click ---- */
-.kb-wikifix { margin: 12px 0; padding: 12px 14px; border: 1px solid var(--kb-line); border-radius: var(--kb-r-lg); background: var(--kb-pane); }
-.kb-wikifix__head { display: flex; align-items: center; gap: 8px; color: var(--kb-muted); font-size: var(--t-sm); }
+.kb-wikifix { margin: var(--kb-sp-12) 0; padding: var(--kb-sp-12) var(--kb-sp-14); border: 1px solid var(--kb-line); border-radius: var(--kb-r-lg); background: var(--kb-pane); }
+.kb-wikifix__head { display: flex; align-items: center; gap: var(--kb-sp-8); color: var(--kb-muted); font-size: var(--t-sm); }
 .kb-wikifix__head svg { flex: none; }
 .kb-wikifix__page { border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .kb-wikifix__page:hover { color: var(--kb-text); }
 .kb-wikifix__page:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 1px; border-radius: var(--kb-r-xs); }
-.kb-wikifix__why { margin: 6px 0 0; font-size: var(--t-sm); }
-.kb-wikifix__diff { margin: 10px 0; overflow: hidden; border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); font-size: var(--t-sm); }
-.kb-wikifix__diff > div { display: flex; gap: 8px; padding: 6px 10px; }
+.kb-wikifix__why { margin: var(--kb-sp-6) 0 0; font-size: var(--t-sm); }
+.kb-wikifix__diff { margin: var(--kb-sp-10) 0; overflow: hidden; border: 1px solid var(--kb-line); border-radius: var(--kb-r-md); font-size: var(--t-sm); }
+.kb-wikifix__diff > div { display: flex; gap: var(--kb-sp-8); padding: var(--kb-sp-6) var(--kb-sp-10); }
 .kb-wikifix__was { background: var(--kb-danger-soft); }
 .kb-wikifix__now { background: var(--kb-ok-soft); }
 .kb-wikifix__diff del { text-decoration-color: color-mix(in srgb, var(--kb-text) 50%, transparent); }
 .kb-wikifix__diff ins { text-decoration: none; }
-.kb-wikifix__tag { flex: none; width: 42px; color: var(--kb-muted); font-size: 11px; font-weight: 600; }
-.kb-wikifix__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.kb-wikifix__note, .kb-wikifix__done { display: inline-flex; align-items: center; gap: 6px; color: var(--kb-muted); font-size: var(--t-xs); }
+.kb-wikifix__tag { flex: none; width: 42px; color: var(--kb-muted); font-size: var(--t-xs); font-weight: 600; }
+.kb-wikifix__foot { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kb-sp-8); }
+.kb-wikifix__note, .kb-wikifix__done { display: inline-flex; align-items: center; gap: var(--kb-sp-6); color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-wikifix__done { color: var(--kb-ok); font-weight: 600; }

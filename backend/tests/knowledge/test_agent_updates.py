@@ -13,7 +13,15 @@ from typing import Any
 
 import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, EngineId, EngineStatus, Failed, TextDelta, TurnMessage
+from skaz.knowledge.agents.engine import (
+    AgentEngine,
+    AgentTurn,
+    EngineId,
+    EngineStatus,
+    Failed,
+    TextDelta,
+    TurnMessage,
+)
 from skaz.knowledge.agents.fake import FakeEngine, Gate
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.update_gate import UpdateGate, guard, holding
@@ -777,8 +785,9 @@ async def test_codex_engine_forgets_its_status_on_reset(tmp_path: Path) -> None:
 
     connection = Connection()
     codex = CodexEngine(connection, None)
-    engines = {engine: FakeEngine(engine, status=status(engine, None, False))
-               for engine in ("claude_code", "hermes", "opencode")}
+    engines: dict[EngineId, AgentEngine] = {
+        engine: FakeEngine(engine, status=status(engine, None, False))
+        for engine in ("claude_code", "hermes", "opencode")}
     registry = EngineRegistry({"codex": codex, **engines}, Settings())
     assert (await registry.view("codex")).status.version == "0.160.0"
     connection.version = "codex-cli 0.164.0"

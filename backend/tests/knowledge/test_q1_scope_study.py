@@ -168,7 +168,7 @@ def test_the_study_side_can_narrow_items_before_wrapping_them() -> None:
     )
 
     scope = SourceScope(None, frozenset({"mat-x", "pg-x"}))
-    items = [
+    items: list[dict[str, Any]] = [
         {"item_id": "a", "page_id": None, "source": [{"cite": "m:mat-x:1", "quote": "secret"}]},
         {"item_id": "b", "page_id": "pg-ok", "source": [{"cite": "m:mat-x:1", "quote": "secret"},
                                                         {"cite": "m:mat-y:2", "quote": "fine"}]},

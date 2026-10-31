@@ -1,5 +1,6 @@
+import { useReducedMotion } from './motionLevel';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type RefAttributes, type SVGProps } from 'react';
-import { useReducedMotion } from 'motion/react';
+
 import type { IconHandle } from '@animateicons/react';
 // Per-icon modules, never the barrels: a barrel would pull all 1170 icons into dev and tests.
 import { ArrowUpIcon } from '@animateicons/react/lucide/arrow-up-icon';

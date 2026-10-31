@@ -1,52 +1,59 @@
 /*
- * SKAZ design tokens — palette "Graphite on milk" (decision 35, palettes4.json → graphitemilk,
- * summary v39: dark folder 3 is #b8d07a). The accent equals the text colour, so links, mentions
- * and quote chips are told apart by shape (chip / underline), never by colour alone.
+ * SKAZ design tokens — palette "Graphite on milk" (decision 35). The accent equals the text colour,
+ * so links, mentions and quote chips are told apart by shape (chip / underline), never by colour
+ * alone. Rules and the findings these values fix: .dev/docs/DESIGN-SYSTEM.md (F1–F12).
  *
- * Theme: follows the system unless html[data-theme] forces light or dark.
- * Text size: html[data-text-size] = s | m | l (scale Б·14 is "m"; nothing below 12px).
+ * Theme: one declaration per colour, light-dark(light, dark). It follows `color-scheme`: the system's
+ * unless html[data-theme] forces light or dark. JS that needs a colour resolves it (ui/color.ts
+ * cssColor) — getPropertyValue returns light-dark()/color-mix() unresolved.
+ * Text size: html[data-text-size] = s | m | l (scale Б·14 is "m"; nothing below 12px except
+ * --t-badge, the digits/letters inside 16px badges).
+ * Density: --kb-density scales every --kb-sp-* spacing step (rounded to 2px); 1 = comfortable.
  */
 
 html[data-kb-ui] {
-  /* Light (default) */
-  --kb-bg: #f9f8f3;
-  --kb-pane: #fffffb;
-  --kb-side: #f0eee6;
-  --kb-rail: #e8e6df;
-  --kb-line: #dddedb;
-  --kb-text: #2c2e31;
-  --kb-muted: #686969;
-  /* Muted text on the darker rail/segment grounds: #686969 gives 4.41 on #e8e6df, this 4.83. */
-  --kb-muted-strong: #626363;
-  --kb-accent: #2c2e31;
-  --kb-accent-soft: #e6e6e3;
-  --kb-danger: #b3261e;
-  --kb-danger-soft: #f5e3de;
-  --kb-warn: #8a5a00;
-  --kb-warn-soft: #ede6d5;
+  color-scheme: light dark;
+
+  /* Text */
+  --kb-text: light-dark(#2c2e31, #f9f8f3);
+  /* F3: ≥ 4.5:1 on rail and on accent-soft (hover/selected rows) in both themes. */
+  --kb-muted: light-dark(#646565, #a7a7a5);
+  /* Muted text on the darker grounds (rail, segments); F4: in dark it was equal to muted. */
+  --kb-muted-strong: light-dark(#5c5d5d, #bdbdba);
+
+  /* Accent (decision 7: the accent knob paints focus, fills, active states, FX; links keep their shape). */
+  /* Pressed (F9): one step past the hover tint. */
+  --kb-accent-press: color-mix(in srgb, var(--kb-accent-soft), var(--kb-text) 9%);
+  --kb-art-tint: color-mix(in srgb, var(--kb-accent) 6%, transparent);
+
+  /* States */
+  --kb-danger: light-dark(#b3261e, #ff8a80);
+  --kb-danger-soft: light-dark(#f5e3de, #473a3b);
+  --kb-warn: light-dark(#8a5a00, #f0c060);
+  --kb-warn-soft: light-dark(#ede6d5, #494438);
   /* 0.3.1 P: added blocks of an agent's change (never the only cue: «Added» is written). */
-  --kb-ok: #2f6b3a;
-  --kb-ok-soft: #e1eadc;
-  --kb-folder-1: #2f62b0;
-  --kb-folder-2: #7046b8;
-  --kb-folder-3: #5a7420;
-  --kb-folder-4: #11746a;
-  /* FX effects (FX-EFFECTS-SPEC): the one colour an effect flashes during an interaction. Light = dark cocoa
-     (chosen 2026-10-22; the folder olive stays a folder colour). */
-  --kb-fx-accent: #4a2c20;
-  --kb-fill: #2c2e31;
-  --kb-on-fill: #f9f8f3;
-  --kb-fill-border: #2c2e31;
-  --kb-badge-text: #ffffff;
+  --kb-ok: light-dark(#2f6b3a, #9fd3a6);
+  --kb-ok-soft: light-dark(#e1eadc, #36443a);
+
+  /* Folders; F5: folder 4 is teal in both themes (dark was pink). */
+  --kb-folder-1: light-dark(#2f62b0, #8fb4f2);
+  --kb-folder-2: light-dark(#7046b8, #bfa4f4);
+  --kb-folder-3: light-dark(#5a7420, #b8d07a);
+  --kb-folder-4: light-dark(#11746a, #5cc8bb);
+
+  /* Text on danger badges */
+  --kb-badge-text: light-dark(#ffffff, #2c2e31);
   --kb-scrim: rgba(10, 14, 13, 0.38);
   --kb-scrim-strong: rgba(10, 14, 13, 0.55);
-  --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.18);
-  --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.08);
-  /* the study card (index card A): the sheet itself, and the lighter cards of the stack behind it */
-  --kb-shadow-card: 0 2px 4px rgba(0, 0, 0, 0.06), 0 14px 34px rgba(30, 30, 20, 0.12);
-  --kb-shadow-card-lo: 0 1px 2px rgba(0, 0, 0, 0.06), 0 6px 18px rgba(30, 30, 20, 0.08);
-  --kb-art-tint: color-mix(in srgb, var(--kb-accent) 6%, transparent);
-  color-scheme: light;
+
+  /* Elevation (popovers, modals, the study card). Ring/inset outlines are not elevation and stay where
+     they are. One geometry for both themes (dark used to have a slightly larger card blur). */
+  --kb-shadow-pop: 0 12px 40px light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.6));
+  --kb-shadow-raise: 0 1px 2px light-dark(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.4));
+  --kb-shadow-card: 0 2px 4px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.45)),
+    0 14px 34px light-dark(rgba(30, 30, 20, 0.12), rgba(0, 0, 0, 0.5));
+  --kb-shadow-card-lo: 0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.4)),
+    0 6px 18px light-dark(rgba(30, 30, 20, 0.08), rgba(0, 0, 0, 0.35));
 
   /* Type: Inter for everything, Unbounded 600/700 for headings */
   --kb-font: 'SKAZ Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -65,26 +72,166 @@ html[data-kb-ui] {
   --t-h1: 22px;
   --t-h2: 19px;
   --t-h3: 16.5px;
+  /* Digits/letters inside 16px badges (counters, citation numbers, block avatars): the only text under 12px. */
+  --t-badge: 10px;
 
-  /* Radii, spacing (4px rhythm), fixed chrome heights */
+  /* Radii */
+  --kb-r-2xs: 3px;
   --kb-r-xs: 5px;
   --kb-r-sm: 7px;
   --kb-r-md: 9px;
   --kb-r-lg: 12px;
   --kb-r-xl: 14px;
   --kb-r-pill: 999px;
-  --kb-s-1: 4px;
-  --kb-s-2: 8px;
-  --kb-s-3: 12px;
-  --kb-s-4: 16px;
-  --kb-s-5: 20px;
-  --kb-s-6: 24px;
+
+  /* Spacing: 2px steps (F6). Every padding/margin/gap uses one; density scales them all. */
+  --kb-density: 1;
+  --kb-sp-2: round(calc(2px * var(--kb-density)), 2px);
+  --kb-sp-4: round(calc(4px * var(--kb-density)), 2px);
+  --kb-sp-6: round(calc(6px * var(--kb-density)), 2px);
+  --kb-sp-8: round(calc(8px * var(--kb-density)), 2px);
+  --kb-sp-10: round(calc(10px * var(--kb-density)), 2px);
+  --kb-sp-12: round(calc(12px * var(--kb-density)), 2px);
+  --kb-sp-14: round(calc(14px * var(--kb-density)), 2px);
+  --kb-sp-16: round(calc(16px * var(--kb-density)), 2px);
+  --kb-sp-18: round(calc(18px * var(--kb-density)), 2px);
+  --kb-sp-20: round(calc(20px * var(--kb-density)), 2px);
+  --kb-sp-22: round(calc(22px * var(--kb-density)), 2px);
+  --kb-sp-24: round(calc(24px * var(--kb-density)), 2px);
+  --kb-sp-26: round(calc(26px * var(--kb-density)), 2px);
+  --kb-sp-28: round(calc(28px * var(--kb-density)), 2px);
+  --kb-sp-30: round(calc(30px * var(--kb-density)), 2px);
+  --kb-sp-32: round(calc(32px * var(--kb-density)), 2px);
+  --kb-sp-34: round(calc(34px * var(--kb-density)), 2px);
+
+  /* Component sizes the density knob steers (comfortable = the sizes before the knob). */
+  --kb-row-h: 30px;
+  --kb-control-h: 30px;
+  --kb-control-h-sm: 26px;
+  --kb-lh-read: 1.6;
+
+  /* Fixed chrome heights */
   --kb-titlebar-h: 38px;
   --kb-head-h: 46px;
   --kb-rail-w: 52px;
+  /* Gap around the inset sheets (centre, document panel) and between them; the resizers live in it.
+     Fixed like the rail (not density-scaled) because shell/layout.ts GUTTER does the same maths. */
+  --kb-gutter: 8px;
+  /* Size of the open chat bridge's concave corners (shell.css .kb-tab--bridge::before/::after) and
+     the room the chat list keeps above its first row so the top corner is not cut (FIX1 R4). Fixed:
+     the corners are drawn with fixed 10px gradients. */
+  --kb-bridge-corner: 10px;
   --kb-icon: 16px;
   --kb-icon-lg: 20px;
 }
+
+/* ---- Bases (decision 12): surfaces, line and the neutral hover tint. Generated and checked by
+   .dev/ui-redesign/design-system/palette.mts (AA on every ground, ordered steps ≥ 0.019 OKLCH L).
+   `[data-kb-scope]` lets a preview (the Appearance gallery) show another base inside the app. ---- */
+html[data-kb-ui], [data-kb-scope][data-base='milk'] {
+  /* Darkest → lightest in both themes: rail < side < bg < pane (F1). */
+  --kb-rail: light-dark(#e8e6df, #141517);
+  --kb-side: light-dark(#f0eee6, #191a1c);
+  --kb-bg: light-dark(#f9f8f3, #1e1f21);
+  --kb-pane: light-dark(#fffffb, #2c2e31);
+  --kb-line: light-dark(#dddedb, #555658);
+  /* Hover/selected rows (F3: in dark it was the line colour and hid secondary text). */
+  --kb-accent-soft: light-dark(#e6e6e3, #3c3d40);
+}
+[data-kb-ui][data-base='paper'], [data-kb-scope][data-base='paper'] {
+  --kb-rail: light-dark(#e6e6e6, #151515);
+  --kb-side: light-dark(#eeeeee, #1a1a1a);
+  --kb-bg: light-dark(#f8f8f8, #1f1f1f);
+  --kb-pane: light-dark(#ffffff, #2e2e2e);
+  --kb-line: light-dark(#dedede, #575757);
+  --kb-accent-soft: light-dark(#e5e5e5, #3b3b3b);
+}
+[data-kb-ui][data-base='slate'], [data-kb-scope][data-base='slate'] {
+  --kb-rail: light-dark(#e0e7ee, #0f161c);
+  --kb-side: light-dark(#e8eff6, #151b21);
+  --kb-bg: light-dark(#f2f9ff, #192026);
+  --kb-pane: light-dark(#fcffff, #2b2e32);
+  --kb-line: light-dark(#d8dfe6, #50585f);
+  --kb-accent-soft: light-dark(#dfe6ed, #353c44);
+}
+[data-kb-ui][data-base='sand'], [data-kb-scope][data-base='sand'] {
+  --kb-rail: light-dark(#eee5d6, #18140f);
+  --kb-side: light-dark(#f6edde, #1e1914);
+  --kb-bg: light-dark(#fef5e6, #231e19);
+  --kb-pane: light-dark(#fffef7, #302d2b);
+  --kb-line: light-dark(#e6ddce, #5b5650);
+  --kb-accent-soft: light-dark(#ede4d5, #403b35);
+}
+
+/* ---- Accents (decisions 7, 10): ≥ 4.6:1 on every ground of every base; hue ≥ 30° from folders and
+   state colours, or muted (chroma ≤ 0.07) next to a ≥ 1.4× more saturated one. Ink = the text. ---- */
+html[data-kb-ui], [data-kb-scope][data-accent='ink'] {
+  --kb-accent: light-dark(#2c2e31, #f9f8f3);
+  --kb-fill: light-dark(#2c2e31, #f9f8f3);
+  --kb-fill-border: light-dark(#2c2e31, #f9f8f3);
+  --kb-on-fill: light-dark(#f9f8f3, #2c2e31);
+  /* FX-EFFECTS-SPEC: light = dark cocoa, dark = folder-2 purple. */
+  --kb-fx-accent: light-dark(#4a2c20, #bfa4f4);
+}
+[data-kb-ui][data-accent='clay'], [data-kb-scope][data-accent='clay'] {
+  --kb-accent: light-dark(#885a44, #d29f88);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+[data-kb-ui][data-accent='petrol'], [data-kb-scope][data-accent='petrol'] {
+  --kb-accent: light-dark(#296d82, #70b2c9);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+[data-kb-ui][data-accent='plum'], [data-kb-scope][data-accent='plum'] {
+  --kb-accent: light-dark(#8d4f7a, #d894c1);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+[data-kb-ui][data-accent='slate'], [data-kb-scope][data-accent='slate'] {
+  --kb-accent: light-dark(#51677a, #94acc0);
+  --kb-fill: var(--kb-accent);
+  --kb-fill-border: var(--kb-accent);
+  --kb-on-fill: light-dark(#fffffb, #1e1f21);
+  --kb-fx-accent: var(--kb-accent);
+}
+
+/* ---- Density (decision 13): spacing ×0.75 / ×1 / ×1.25, rows and controls ∓4px, reading line-height. ---- */
+[data-kb-ui][data-density='compact'] {
+  --kb-density: 0.75;
+  --kb-row-h: 26px;
+  --kb-control-h: 26px;
+  --kb-control-h-sm: 22px;
+  --kb-lh-read: 1.5;
+}
+[data-kb-ui][data-density='spacious'] {
+  --kb-density: 1.25;
+  --kb-row-h: 34px;
+  --kb-control-h: 34px;
+  --kb-control-h-sm: 30px;
+  --kb-lh-read: 1.75;
+}
+
+/* ---- Motion «off» (decision 15): no transitions or CSS animations anywhere. ---- */
+html[data-kb-ui][data-motion='off'] *,
+html[data-kb-ui][data-motion='off'] *::before,
+html[data-kb-ui][data-motion='off'] *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+}
+
+html[data-kb-ui][data-theme='light'] { color-scheme: light; }
+html[data-kb-ui][data-theme='dark'] { color-scheme: dark; }
+/* A preview card follows the app's theme; it can pin one for a side-by-side view. */
+[data-kb-scope][data-theme='light'] { color-scheme: light; }
+[data-kb-scope][data-theme='dark'] { color-scheme: dark; }
 
 html[data-kb-ui][data-text-size='s'] {
   --t-xs: 12px;
@@ -110,74 +257,4 @@ html[data-kb-ui][data-text-size='l'] {
   --t-h1: 24px;
   --t-h2: 20.5px;
   --t-h3: 17.5px;
-}
-
-/* Dark — inversion of the pair (#1E1F21 / #F9F8F3). Declared twice: system and forced. */
-@media (prefers-color-scheme: dark) {
-  html[data-kb-ui]:not([data-theme='light']) {
-    --kb-bg: #1e1f21;
-    --kb-pane: #2c2e31;
-    --kb-side: #191a1c;
-    --kb-rail: #222325;
-    --kb-line: #555658;
-    --kb-text: #f9f8f3;
-    --kb-muted: #a7a7a5;
-    --kb-muted-strong: #a7a7a5;
-    --kb-accent: #f9f8f3;
-    --kb-accent-soft: #555658;
-    --kb-danger: #ff8a80;
-    --kb-danger-soft: #473a3b;
-    --kb-warn: #f0c060;
-    --kb-warn-soft: #494438;
-    --kb-ok: #9fd3a6;
-    --kb-ok-soft: #36443a;
-    --kb-folder-1: #8fb4f2;
-    --kb-folder-2: #bfa4f4;
-    --kb-folder-3: #b8d07a;
-    --kb-folder-4: #f59ad6;
-    --kb-fx-accent: var(--kb-folder-2);
-    --kb-fill: #f9f8f3;
-    --kb-on-fill: #2c2e31;
-    --kb-fill-border: #f9f8f3;
-    --kb-badge-text: #2c2e31;
-    --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
-    --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --kb-shadow-card: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.5);
-    --kb-shadow-card-lo: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 22px rgba(0, 0, 0, 0.35);
-    color-scheme: dark;
-  }
-}
-
-html[data-kb-ui][data-theme='dark'] {
-  --kb-bg: #1e1f21;
-  --kb-pane: #2c2e31;
-  --kb-side: #191a1c;
-  --kb-rail: #222325;
-  --kb-line: #555658;
-  --kb-text: #f9f8f3;
-  --kb-muted: #a7a7a5;
-  --kb-muted-strong: #a7a7a5;
-  --kb-accent: #f9f8f3;
-  --kb-accent-soft: #555658;
-  --kb-danger: #ff8a80;
-  --kb-danger-soft: #473a3b;
-  --kb-warn: #f0c060;
-  --kb-warn-soft: #494438;
-  --kb-ok: #9fd3a6;
-  --kb-ok-soft: #36443a;
-  --kb-folder-1: #8fb4f2;
-  --kb-folder-2: #bfa4f4;
-  --kb-folder-3: #b8d07a;
-  --kb-folder-4: #f59ad6;
-  /* Dark = purple (folder 2), not dark olive. */
-  --kb-fx-accent: var(--kb-folder-2);
-  --kb-fill: #f9f8f3;
-  --kb-on-fill: #2c2e31;
-  --kb-fill-border: #f9f8f3;
-  --kb-badge-text: #2c2e31;
-  --kb-shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.6);
-  --kb-shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --kb-shadow-card: 0 2px 4px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.5);
-  --kb-shadow-card-lo: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 22px rgba(0, 0, 0, 0.35);
-  color-scheme: dark;
 }

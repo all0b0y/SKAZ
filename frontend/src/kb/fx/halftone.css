@@ -1,0 +1,5 @@
+/* HalftoneReveal (stage 6, B11; fx/halftone/HalftoneArt.tsx): the empty-state art, drawn once in
+   halftone dots above the title. It takes the icon's place; decorative (aria-hidden). */
+.kb-empty__art { display: block; width: 200px; height: 116px; margin-bottom: var(--kb-sp-4); flex: none; }
+.kb-empty__art--compact { width: 140px; height: 80px; margin-bottom: var(--kb-sp-2); }
+.kb-empty__art .kb-fx-halftone { display: block; width: 100%; height: 100%; }

@@ -15,19 +15,26 @@ import { DecisionModal } from './notifications/DecisionModal';
 import { SelectionToolbar } from './ui/Selection';
 import { AddMaterialModal } from './materials/AddMaterialModal';
 import { Toast } from './ui/Toast';
+import { UiSounds } from './sound/UiSounds';
 import { useStudyPlacement } from './study/useStudy';
 
-/** Mirror theme and text size onto <html>, where the tokens read them. */
+/** Mirror the appearance prefs onto <html>, where the tokens (and the motion hook) read them. */
 function ThemeSync() {
   const theme = usePrefs((s) => s.theme);
   const textSize = usePrefs((s) => s.textSize);
+  const base = usePrefs((s) => s.base);
+  const accent = usePrefs((s) => s.accent);
+  const density = usePrefs((s) => s.density);
+  const motion = usePrefs((s) => s.motion);
+  const sounds = usePrefs((s) => s.sounds);
   useEffect(() => {
     const html = document.documentElement;
     html.dataset.kbUi = '';
     if (theme === 'system') delete html.dataset.theme;
     else html.dataset.theme = theme;
     html.dataset.textSize = textSize;
-  }, [theme, textSize]);
+    Object.assign(html.dataset, { base, accent, density, motion, sounds });
+  }, [theme, textSize, base, accent, density, motion, sounds]);
   return null;
 }
 
@@ -203,6 +210,7 @@ function Workspace() {
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
       <AddMaterialModal />
       <ToastHost />
+      <UiSounds />
     </>
   );
 }

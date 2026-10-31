@@ -9,7 +9,8 @@ from typing import Any
 
 import pytest
 
-from tests.knowledge.chat_support import FragmentInput, finished
+from skaz.knowledge.markdown.source import FragmentInput
+from tests.knowledge.chat_support import finished
 
 from .test_chats_api import Env
 from .test_chats_api import env as env_fixture  # noqa: F401  (the ``env`` fixture)

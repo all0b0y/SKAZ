@@ -107,7 +107,7 @@ async def test_open_answers_are_checked_by_the_default_agent_with_its_last_model
 
     models = (ModelOption("fast", "Fast", ("low", "high"), "low"),
               ModelOption("deep", "Deep", ("medium", "xhigh")))
-    engines: dict[str, Any] = {engine: FakeEngine(engine, script=judge, models=models)  # type: ignore[arg-type]
+    engines: dict[str, Any] = {engine: FakeEngine(engine, script=judge, models=models)
                                for engine in ("codex", "claude_code", "hermes", "opencode")}
     registry = EngineRegistry(engines, runtime.kb.settings, cache_s=0.0)  # type: ignore[arg-type]
     runtime.kb_agents.registry = registry

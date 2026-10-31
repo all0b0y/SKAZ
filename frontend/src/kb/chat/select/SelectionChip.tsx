@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../../ui/motionLevel';
 import { useState } from 'react';
-import { useReducedMotion } from 'motion/react';
+
 import type { KbSelection } from '../../../api/kb/types.gen';
 import { Icon } from '../../ui';
 import { flashItems } from './items';

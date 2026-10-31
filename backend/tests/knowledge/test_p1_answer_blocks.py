@@ -348,7 +348,7 @@ async def test_an_answer_closed_at_shutdown_or_left_interrupted_shows_no_block_d
     from skaz.knowledge.answer_blocks.part import drawing
     engine = env.agents.engines["codex"]
 
-    async def deaf(_run_id: str) -> None:
+    async def deaf(run_id: str) -> None:
         return None  # ignores the interrupt
 
     engine.interrupt = deaf  # type: ignore[method-assign]

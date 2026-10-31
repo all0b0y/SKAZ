@@ -153,15 +153,17 @@ test('wiki page: sections, statement labels, chips; expanded; citation opens the
       const tag = `${v.width}-${theme}`;
       await rail('Wiki').click();
       const side = page.getByRole('region', { name: 'Wiki' });
-      await side.getByRole('button', { name: /^Concepts/ }).click();
-      await side.getByRole('button', { name: 'Entropy', exact: true }).click();
+      // Kind sections fold in place (decision 24 «Wiki»); Concepts is open unless a stored choice folded it.
+      const concepts = side.getByRole('button', { name: /^Concepts/ });
+      if ((await concepts.getAttribute('aria-expanded')) !== 'true') await concepts.click();
+      await side.getByRole('grid', { name: 'Concepts' }).getByRole('button', { name: 'Entropy', exact: true }).click();
       await expect(doc().getByRole('heading', { level: 2, name: 'Entropy' })).toBeVisible();
       await expect(doc().getByText('Connection — agent inference')).toBeVisible();
       await check(`page-${tag}`);
       await page.getByRole('button', { name: 'Expand to the centre' }).click();
       await check(`page-expanded-${tag}`, v.width === 1440);
       await page.getByRole('button', { name: 'Back to side panel' }).click();
-      await side.getByRole('button', { name: 'Wiki', exact: true }).click();
+      // No drill-in any more: the sections stay in place, so there is no «Wiki» back step.
       await check(`wiki-side-${tag}`, v.width === 1440 && theme === 'light');
 
       // Citation → material at that fragment, the checked quote marked, Original shown.

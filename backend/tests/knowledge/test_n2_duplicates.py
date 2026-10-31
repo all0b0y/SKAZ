@@ -178,8 +178,10 @@ def test_only_documents_from_before_the_hash_have_their_kept_original_read(
     old = kb.create_material(INBOX_ID, "Old lecture", "pdf", [FragmentInput(text=CLEAN_EN[0])],
                              origin=Origin(type="file", file_name="old.pdf"))
     looked: list[str] = []
-    monkeypatch.setattr(duplicates, "_original_matches",
-                        lambda _kb, record, _digest, _size: looked.append(record.title) or False)
+    def record_lookup(_kb: Any, record: Any, _digest: str, _size: int) -> bool:
+        looked.append(record.title)
+        return False
+    monkeypatch.setattr(duplicates, "_original_matches", record_lookup)
     assert find_duplicate(kb, content=b"%PDF-1.4 something else") is None
     assert looked == ["Old lecture"] and old.manifest.id
 

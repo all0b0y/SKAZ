@@ -223,7 +223,9 @@ async def test_a_session_that_never_deletes_is_given_up_after_the_attempt_limit(
     assert (await env.client.delete(f"/kb/chats/{chat['id']}")).status_code == 204
     await deletions_done(env)
     for day in range(1, MAX_DELETE_ATTEMPTS):  # FIX-1: each retry waits for its backoff
-        env.chats.sessions.clock = lambda day=day: datetime.now(UTC) + timedelta(days=day)
+        def clock(day: int = day) -> datetime:
+            return datetime.now(UTC) + timedelta(days=day)
+        env.chats.sessions.clock = clock
         await env.chats.delete_sessions()
     assert pending(env) == [] and codex(env).deleted_sessions == []
 

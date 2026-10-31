@@ -112,8 +112,13 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'p-sessions', section: 'privacy', group: 'Chats', label: 'Agent conversations', hint: 'Each agent keeps a copy of a chat’s conversation in SKAZ’s folder while the chat exists; deleting the chat deletes it.', keywords: 'privacy session sessions history chat delete codex claude hermes opencode copy' },
   { id: 'log', section: 'privacy', group: '', label: 'Activity log', hint: 'Without conversation text or keys', keywords: 'logs' },
   // Appearance
-  { id: 'theme', section: 'look', group: '', label: 'Theme', keywords: 'dark light mode colour color appearance' },
-  { id: 'text-size', section: 'look', group: '', label: 'Text size', keywords: 'font scale zoom' },
+  { id: 'theme', section: 'look', group: 'Look', label: 'Theme', keywords: 'dark light mode colour color appearance' },
+  { id: 'base', section: 'look', group: 'Look', label: 'Base', hint: 'The surfaces of both themes', keywords: 'background surface palette milk paper slate sand colour color appearance preset' },
+  { id: 'accent', section: 'look', group: 'Look', label: 'Accent', hint: 'Focus, buttons and active items; links keep their underline', keywords: 'colour color highlight ink clay petrol plum slate appearance preset' },
+  { id: 'text-size', section: 'look', group: 'Look', label: 'Text size', keywords: 'font scale zoom' },
+  { id: 'density', section: 'look', group: 'Look', label: 'Density', hint: 'Spacing, row height and reading line height', keywords: 'compact spacious comfortable spacing padding rows appearance preset' },
+  { id: 'motion', section: 'look', group: 'Motion & sound', label: 'Motion', hint: 'Off also stops transitions. The system’s Reduce motion always wins', keywords: 'animation animations reduce reduced calm transitions effects appearance preset' },
+  { id: 'sounds', section: 'look', group: 'Motion & sound', label: 'Sounds', hint: 'Answer ready, import done, errors. Never while recording the computer’s sound', keywords: 'sound sounds audio notification chime appearance' },
   { id: 'ui-language', section: 'look', group: '', label: 'Interface language', hint: 'Answer and wiki language are set separately', keywords: 'english' },
   // About
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },

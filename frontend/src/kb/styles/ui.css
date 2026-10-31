@@ -12,7 +12,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--kb-sp-6);
   flex: none;
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-sm);
@@ -20,10 +20,10 @@
   color: var(--kb-text);
   font-weight: 600;
   white-space: nowrap;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, scale 0.08s ease;
 }
-.kb-btn--md { height: 30px; padding: 0 12px; font-size: var(--t-sm); }
-.kb-btn--sm { height: 26px; padding: 0 9px; font-size: var(--t-xs); }
+.kb-btn--md { height: var(--kb-control-h); padding: 0 var(--kb-sp-12); font-size: var(--t-sm); }
+.kb-btn--sm { height: var(--kb-control-h-sm); padding: 0 var(--kb-sp-8); font-size: var(--t-xs); }
 .kb-btn:hover:not(:disabled) { background: var(--kb-accent-soft); }
 .kb-btn--fill {
   background: var(--kb-fill);
@@ -35,6 +35,13 @@
 .kb-btn--quiet:hover:not(:disabled) { background: var(--kb-accent-soft); }
 .kb-btn--danger { color: var(--kb-danger); border-color: var(--kb-danger); background: transparent; }
 .kb-btn--danger:hover:not(:disabled) { background: var(--kb-danger-soft); }
+/* Pressed (F9): one tint past hover; a slight press-in where motion is allowed. */
+.kb-btn:active:not(:disabled) { background: var(--kb-accent-press); }
+.kb-btn--fill:active:not(:disabled) { background: color-mix(in srgb, var(--kb-fill) 74%, var(--kb-bg)); }
+.kb-btn--danger:active:not(:disabled) { background: color-mix(in srgb, var(--kb-danger-soft), var(--kb-danger) 12%); }
+@media (prefers-reduced-motion: no-preference) {
+  html:not([data-motion='calm']):not([data-motion='off']) .kb-btn:active:not(:disabled) { scale: 0.98; }
+}
 .kb-btn:disabled { opacity: 0.5; }
 .kb-btn[aria-busy='true'] { cursor: progress; }
 .kb-btn__label { overflow: hidden; text-overflow: ellipsis; }
@@ -53,18 +60,20 @@
 .kb-iconbtn--md { width: 28px; height: 28px; }
 .kb-iconbtn--lg { width: 36px; height: 36px; border-radius: var(--kb-r-md); }
 .kb-iconbtn:hover:not(:disabled) { background: var(--kb-accent-soft); color: var(--kb-text); }
+.kb-iconbtn:active:not(:disabled) { background: var(--kb-accent-press); color: var(--kb-text); }
+/* A toggle that is on keeps a tint (F9: it looked the same as off). */
 .kb-iconbtn.is-active,
-.kb-iconbtn[aria-pressed='true'] { color: var(--kb-text); }
+.kb-iconbtn[aria-pressed='true'] { color: var(--kb-text); background: var(--kb-accent-soft); }
 .kb-iconbtn:disabled { opacity: 0.45; }
 
 /* ---- Chips (source references: shape, not colour, marks them) ---- */
 .kb-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--kb-sp-4);
   height: 20px;
   max-width: 100%;
-  padding: 0 7px 0 5px;
+  padding: 0 var(--kb-sp-8) 0 var(--kb-sp-4);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-pill);
   background: var(--kb-bg);
@@ -78,7 +87,8 @@
 .kb-chip .kb-icon { color: var(--kb-muted); }
 .kb-chip__label { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kb-chip__meta { color: var(--kb-muted); font-variant-numeric: tabular-nums; flex: none; }
-button.kb-chip:hover { border-color: var(--kb-muted); }
+button.kb-chip:hover { border-color: var(--kb-muted); background: var(--kb-accent-soft); }
+button.kb-chip:active { background: var(--kb-accent-press); }
 
 /* ---- Switch ---- */
 .kb-switch {
@@ -86,7 +96,7 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   width: 30px;
   height: 18px;
   flex: none;
-  border-radius: 9px;
+  border-radius: var(--kb-r-md);
   background: var(--kb-line);
   transition: background-color 0.16s ease;
 }
@@ -96,7 +106,8 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   left: 2px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  /* A pill, not a circle: SquishSwitch (stage 6, B10, Controls.tsx) stretches it to 20 px mid-travel. */
+  border-radius: var(--kb-r-pill);
   background: var(--kb-pane);
   box-shadow: var(--kb-shadow-raise);
   transition: transform 0.18s ease;
@@ -111,8 +122,8 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 /* ---- Segmented ---- */
 .kb-seg {
   display: inline-flex;
-  gap: 2px;
-  padding: 2px;
+  gap: var(--kb-sp-2);
+  padding: var(--kb-sp-2);
   border-radius: var(--kb-r-md);
   background: var(--kb-rail);
   flex: none;
@@ -126,8 +137,8 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   color: var(--kb-muted-strong);
   white-space: nowrap;
 }
-.kb-seg--md .kb-seg__opt { height: 28px; padding: 0 12px; font-size: var(--t-base); }
-.kb-seg--sm .kb-seg__opt { height: 24px; padding: 0 10px; font-size: var(--t-sm); }
+.kb-seg--md .kb-seg__opt { height: 28px; padding: 0 var(--kb-sp-12); font-size: var(--t-base); }
+.kb-seg--sm .kb-seg__opt { height: 24px; padding: 0 var(--kb-sp-10); font-size: var(--t-sm); }
 .kb-seg__opt.is-on { color: var(--kb-text); font-weight: 600; }
 .kb-seg__ind {
   position: absolute;
@@ -141,14 +152,14 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-seg[aria-disabled='true'] { opacity: 0.55; }
 
 /* ---- Text field ---- */
-.kb-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kb-field { display: flex; flex-direction: column; gap: var(--kb-sp-4); min-width: 0; }
 .kb-field__label { font-size: var(--t-sm); font-weight: 600; }
 .kb-field__box {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--kb-sp-6);
   height: 30px;
-  padding: 0 8px;
+  padding: 0 var(--kb-sp-8);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-sm);
   background: var(--kb-pane);
@@ -176,14 +187,14 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   color: var(--kb-danger);
   font-weight: 500;
 }
-.kb-inline-error { padding: 2px 8px 4px 32px; }
+.kb-inline-error { padding: var(--kb-sp-2) var(--kb-sp-8) var(--kb-sp-4) var(--kb-sp-32); }
 
 /* ---- Select (native, styled) ---- */
 .kb-select { position: relative; display: inline-flex; align-items: center; flex: none; }
 .kb-select select {
   appearance: none;
   height: 28px;
-  padding: 0 26px 0 10px;
+  padding: 0 var(--kb-sp-26) 0 var(--kb-sp-10);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-sm);
   background: var(--kb-pane);
@@ -193,13 +204,13 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-select__chev { position: absolute; right: 9px; pointer-events: none; color: var(--kb-muted); }
 
 /* ---- Tags (toggle chips) ---- */
-.kb-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-tags { display: flex; flex-wrap: wrap; gap: var(--kb-sp-6); }
 .kb-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--kb-sp-4);
   height: 26px;
-  padding: 0 10px;
+  padding: 0 var(--kb-sp-10);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-pill);
   font-size: var(--t-sm);
@@ -215,9 +226,9 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 /* ---- Banners: the only coloured spot ---- */
 .kb-banner {
   display: flex;
-  gap: 10px;
+  gap: var(--kb-sp-10);
   align-items: flex-start;
-  padding: 10px 12px;
+  padding: var(--kb-sp-10) var(--kb-sp-12);
   border-radius: var(--kb-r-lg);
   line-height: 1.45;
   flex: none;
@@ -229,25 +240,25 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-banner--error .kb-banner__icon { color: var(--kb-danger); }
 .kb-banner--progress { background: var(--kb-accent-soft); }
 .kb-banner--progress .kb-banner__icon { color: var(--kb-accent); }
-.kb-banner__body { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 1; }
+.kb-banner__body { display: flex; flex-direction: column; gap: var(--kb-sp-8); min-width: 0; flex: 1; }
 .kb-banner__text { overflow-wrap: anywhere; }
-.kb-banner__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kb-banner__actions { display: flex; flex-wrap: wrap; gap: var(--kb-sp-6); align-items: center; }
 .kb-progress {
   display: block;
   width: 90px;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--kb-r-2xs);
   background: var(--kb-line);
   overflow: hidden;
 }
 .kb-progress--wide { width: min(220px, 100%); }
-.kb-progress i { display: block; height: 100%; border-radius: 3px; background: var(--kb-accent); }
+.kb-progress i { display: block; height: 100%; border-radius: var(--kb-r-2xs); background: var(--kb-accent); }
 
 /* ---- Status text ---- */
 .kb-pending {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--kb-sp-4);
   color: var(--kb-muted);
   font-size: var(--t-sm);
   white-space: nowrap;
@@ -255,11 +266,11 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-ok, .kb-status {
   display: inline-flex;
   align-items: flex-start;
-  gap: 5px;
+  gap: var(--kb-sp-4);
   font-weight: 600;
   text-align: right;
 }
-.kb-ok .kb-icon, .kb-status .kb-icon { margin-top: 2px; }
+.kb-ok .kb-icon, .kb-status .kb-icon { margin-top: var(--kb-sp-2); }
 .kb-status { min-width: 0; }
 .kb-status .kb-path { max-width: 340px; font-weight: 500; }
 .kb-status--ok { color: var(--kb-accent); }
@@ -299,21 +310,21 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-empty {
   margin: auto;
   max-width: 300px;
-  padding: 24px 16px;
+  padding: var(--kb-sp-24) var(--kb-sp-16);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: var(--kb-sp-6);
   text-align: center;
 }
-.kb-empty--compact { padding: 16px 12px; margin: 0 auto; }
+.kb-empty--compact { padding: var(--kb-sp-16) var(--kb-sp-12); margin: 0 auto; }
 .kb-empty__icon { color: var(--kb-muted); }
 .kb-empty__title { font-weight: 600; }
 .kb-empty__text { color: var(--kb-muted); font-size: var(--t-sm); line-height: 1.45; }
-.kb-empty__action { margin-top: 6px; }
+.kb-empty__action { margin-top: var(--kb-sp-6); }
 /* Opt-in «Dither · Connect» field above the icon (fx/dither/MiniDither). Decorative, on its own area. */
-.kb-empty__field { width: 100%; height: 70px; margin-bottom: 6px; }
-.kb-empty__field--compact { height: 40px; margin-bottom: 4px; }
+.kb-empty__field { width: 100%; height: 70px; margin-bottom: var(--kb-sp-6); }
+.kb-empty__field--compact { height: 40px; margin-bottom: var(--kb-sp-4); }
 .kb-empty__field .kb-fx-mini { width: 100%; height: 100%; display: block; }
 .kb-empty__field[data-interactive='true'] .kb-fx-mini { cursor: pointer; }
 
@@ -324,11 +335,11 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   right: -6px;
   min-width: 16px;
   height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
+  padding: 0 var(--kb-sp-4);
+  border-radius: var(--kb-r-md);
   background: var(--kb-danger);
   color: var(--kb-badge-text);
-  font-size: 10px; /* counter digits: the only text allowed under 12px */
+  font-size: var(--t-badge); /* counter digits: the only text allowed under 12px */
   font-weight: 700;
   line-height: 16px;
   text-align: center;
@@ -383,9 +394,9 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-modal__head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--kb-sp-8);
   height: 50px;
-  padding: 0 12px 0 18px;
+  padding: 0 var(--kb-sp-12) 0 var(--kb-sp-18);
   border-bottom: 1px solid var(--kb-line);
   flex: none;
 }
@@ -403,7 +414,7 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   z-index: 60;
   min-width: 180px;
   max-width: 320px;
-  padding: 6px;
+  padding: var(--kb-sp-6);
   background: var(--kb-pane);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-lg);
@@ -414,27 +425,46 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
 .kb-menu__item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--kb-sp-8);
   width: 100%;
-  height: 30px;
-  padding: 0 8px;
+  height: var(--kb-row-h);
+  padding: 0 var(--kb-sp-8);
   border-radius: var(--kb-r-sm);
   white-space: nowrap;
 }
 .kb-menu__item:hover:not([aria-disabled='true']),
 .kb-menu__item:focus-visible { background: var(--kb-accent-soft); outline: none; }
+.kb-menu__item:active:not([aria-disabled='true']) { background: var(--kb-accent-press); }
 .kb-menu__item.is-danger { color: var(--kb-danger); }
 .kb-menu__item[aria-disabled='true'] { color: var(--kb-muted); }
 .kb-menu__item .kb-icon { color: inherit; }
 .kb-menu__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .kb-menu__note { font-size: var(--t-xs); color: var(--kb-muted); }
 .kb-menu__item:hover .kb-menu__note, .kb-menu__item:focus-visible .kb-menu__note { color: inherit; }
+/* GlideSelect (stage 6, B1): in a menu ONE highlight (Popover's .kb-glide) marks the hovered / keyboard row
+   and glides between rows; the rows' own hover and focus tints step aside. Pressed keeps its own tint. The
+   highlight is the popover's first child; rows are positioned so they paint above it. */
+.kb-glide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  border-radius: var(--kb-r-sm);
+  background: var(--kb-accent-soft);
+  pointer-events: none;
+}
+.kb-popover[data-glide] .kb-menu__item { position: relative; }
+.kb-popover[data-glide] .kb-menu__item:hover:not([aria-disabled='true']),
+.kb-popover[data-glide] .kb-menu__item:focus-visible { background: transparent; }
+.kb-popover[data-glide] .kb-menu__item:active:not([aria-disabled='true']) { background: var(--kb-accent-press); }
 
 .kb-tooltip {
   position: fixed;
   z-index: 70;
   max-width: 260px;
-  padding: 5px 8px;
+  padding: var(--kb-sp-4) var(--kb-sp-8);
   border-radius: var(--kb-r-sm);
   background: var(--kb-text);
   color: var(--kb-bg);
@@ -443,6 +473,34 @@ button.kb-chip:hover { border-color: var(--kb-muted); }
   pointer-events: none;
   box-shadow: var(--kb-shadow-pop);
 }
+/* WarmTooltip (stage 6, B5): only a COLD tooltip has an entrance — 120 ms, a 2 px rise away from its trigger
+   at full, opacity only at calm; a warm swap and «off» show it at once (Tooltip.tsx sets data-enter). */
+.kb-tooltip[data-enter='rise'] { animation: kb-tip-rise 120ms ease-out; }
+.kb-tooltip[data-enter='fade'] { animation: kb-tip-fade 120ms ease-out; }
+.kb-tooltip[data-side='bottom'] { --kb-tip-from: translateY(-2px); }
+.kb-tooltip[data-side='top'] { --kb-tip-from: translateY(2px); }
+.kb-tooltip[data-side='right'] { --kb-tip-from: translateX(-2px); }
+@keyframes kb-tip-rise { from { opacity: 0; transform: var(--kb-tip-from, none); } to { opacity: 1; transform: none; } }
+@keyframes kb-tip-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Toast fuse (stage 6, B4): on a toast with an action, a 2 px line runs down over the toast's life and
+   pauses while the toast is held (Toast.tsx owns the one timer; .is-held mirrors it). It runs at calm too
+   (a status); at «off» Toast.tsx shows a «· N s» countdown in text instead. */
+.kb-toast__fuse {
+  position: absolute;
+  left: var(--kb-sp-10);
+  right: var(--kb-sp-10);
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--kb-on-fill) 55%, transparent);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: kb-toast-fuse var(--kb-toast-life, 6s) linear forwards;
+}
+.kb-toast.is-held .kb-toast__fuse { animation-play-state: paused; }
+@keyframes kb-toast-fuse { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.kb-toast__countdown { flex: none; font-variant-numeric: tabular-nums; opacity: 0.7; }
 
 /* ---- Formulas (KaTeX, kb/ui/markdown) ---- */
 .kb-math--display {
