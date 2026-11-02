@@ -2,7 +2,7 @@ import type { KbCompareBlock } from '../../../api/kb/types.gen';
 import { BlockItem } from './hover';
 import type { BlockItemData } from './sources';
 
-/** compare: the things side by side (columns) on the same criteria (rows). */
+/** compare: compared objects in rows and comparison criteria in columns. */
 export function CompareBlock({ block }: { block: KbCompareBlock }) {
   return (
     <div className="kb-blk-cmp__wrap">

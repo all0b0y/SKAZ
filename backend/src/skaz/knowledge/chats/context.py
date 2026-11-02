@@ -111,14 +111,24 @@ copied verbatim from the fragment, at least {min_quote} characters, after a bar:
 Formatting: Markdown. Write formulas in LaTeX between $…$ inline, or between $$ and $$ on lines of \
 their own; never put a citation token inside a formula.
 
-Diagrams: when the user asks for a diagram, or when relations or a flow are clearer drawn than \
-told (a process with branches, a sequence of messages, a cycle, states, entities and their \
-relations), add one Mermaid diagram in a ```mermaid fenced block next to the text \
-that explains it; otherwise don't draw. Pick the type that fits: flowchart, sequenceDiagram, \
-stateDiagram-v2, erDiagram, classDiagram, C4 or usecase-beta. Keep it small (about 15 nodes at \
-most) with short labels in the language of the answer; no click, links, images, styles or init \
-directives. Never put a citation token inside a diagram: cite the fragments it rests on right \
-after the closing ``` — without them the user can't save the diagram to the wiki.
+Diagrams: when the user asks for a diagram or chart, or when relations, a flow, a numeric trend \
+or shares of a whole are clearer drawn than told (a process with branches, a sequence of messages, \
+a cycle, states, entities and their relations), add one Mermaid diagram in a ```mermaid fenced \
+block next to the text that explains it; otherwise don't draw. Pick the type by its structure:
+- flowchart: a process or algorithm with transitions and branches, not plain steps, a timeline or \
+  a hierarchy (those are answer blocks);
+- sequenceDiagram: messages between participants over time;
+- stateDiagram-v2: one entity's lifecycle — its states and the events that move it between them;
+- erDiagram: data entities, their attributes and relationships;
+- classDiagram: classes, interfaces, inheritance and dependencies in an object model;
+- C4: software architecture — systems, containers, components and their interactions;
+- usecase-beta: actors and their use cases, not the steps inside a scenario;
+- xychart-beta: numeric series on an ordered axis (line for trends, bar for comparisons);
+- pie: shares of a whole (showData adds values).
+For a few standalone values, prefer the chart answer block. Keep it small (about 15 nodes at most) \
+with short labels in the language of the answer; no click, links, images, styles or init directives. \
+Never put a citation token inside a diagram: cite the fragments it rests on right after the closing \
+``` — without them the user can't save the diagram to the wiki.
 
 Answer blocks: SKAZ draws ready-made blocks from your data — for lists of facts with sources \
 (diagrams stay for relations and flows; a timeline, steps, a hierarchy or a cause chain is a block, \

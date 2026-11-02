@@ -25,15 +25,16 @@ const compare: KbAnswerBlockPart = {
   type: 'answer_block', id: 'blk-cmp', state: 'ready', hidden: 1, error: null, raw: null, ...PLACE,
   sources: [LECTURE, BOOK, PAGE],
   block: {
-    kind: 'compare', title: null, columns: ['Boltzmann', 'Shannon'],
+    kind: 'compare', title: null, columns: ['Formula', 'Used in', 'Page'],
     rows: [
-      { id: 'r1', label: 'Formula', cells: [
+      { id: 'r1', label: 'Boltzmann', cells: [
         { id: 'r1c1', src: [0], agent: false, text: 'S = k·ln W' },
-        { id: 'r1c2', src: [1], agent: false, text: 'H = −Σ p·log p' }] },
-      { id: 'r2', label: 'Used in', cells: [
-        { id: 'r2c1', src: [], agent: true, text: 'Statistical mechanics' },
-        null] },
-      { id: 'r3', label: 'Page', cells: [{ id: 'r3c1', src: [2], agent: false, text: 'See the wiki' }, { id: 'r3c2', src: [0], agent: false, text: 'Lecture' }] },
+        { id: 'r1c2', src: [], agent: true, text: 'Statistical mechanics' },
+        { id: 'r1c3', src: [2], agent: false, text: 'See the wiki' }] },
+      { id: 'r2', label: 'Shannon', cells: [
+        { id: 'r2c1', src: [1], agent: false, text: 'H = −Σ p·log p' },
+        null,
+        { id: 'r2c3', src: [0], agent: false, text: 'Lecture' }] },
     ],
   },
 };
@@ -78,8 +79,8 @@ describe('P1: answer blocks in a chat answer', () => {
   it('compare: a table with one row of source chips, no type caption, the hidden badge only when something is hidden', async () => {
     const { chat } = await openAnswer([compare, steps]);
     const table = within(chat).getByRole('region', { name: 'Comparison' });
-    expect(within(table).getByRole('columnheader', { name: 'Boltzmann' })).toBeInTheDocument();
-    expect(within(table).getByRole('rowheader', { name: 'Formula' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Formula' })).toBeInTheDocument();
+    expect(within(table).getByRole('rowheader', { name: 'Boltzmann' })).toBeInTheDocument();
     expect(within(table).getByText('S = k·ln W')).toBeInTheDocument();
     expect(within(table).getByLabelText('Hidden')).toHaveTextContent('—');
     // R1: no captions such as «Comparison» or «Steps» are drawn as text.
@@ -87,7 +88,7 @@ describe('P1: answer blocks in a chat answer', () => {
     expect(within(chat).queryByText('Steps')).toBeNull();
     const row = within(table).getByRole('group', { name: 'Sources of this block' });
     expect(within(row).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Open source: Lecture 8', 'Open source: Textbook', 'Open source: Entropy']);
+      'Open source: Lecture 8', 'Open source: Entropy', 'Open source: Textbook']);
     expect(within(row).getByRole('note', { name: 'Agent’s knowledge: not from your materials' })).toBeInTheDocument();
     expect(within(row).getByRole('note', { name: /^1 item hidden/ })).toHaveTextContent('1');
     // The steps block hides nothing: no badge, and no agent chip.
@@ -110,10 +111,10 @@ describe('P1: answer blocks in a chat answer', () => {
     expect(lecture).not.toHaveClass('is-hl');
     await user.hover(lecture);
     const lit = Array.from(table.querySelectorAll('.kb-blk__item.is-hl')).map((el) => el.getAttribute('data-item-id'));
-    expect(lit).toEqual(['r1c1', 'r3c2']);
+    expect(lit).toEqual(['r1c1', 'r2c3']);
     await user.unhover(lecture);
     await user.hover(within(table).getByRole('note', { name: /Agent’s knowledge/ }));
-    expect(Array.from(table.querySelectorAll('.kb-blk__item.is-hl')).map((el) => el.getAttribute('data-item-id'))).toEqual(['r2c1']);
+    expect(Array.from(table.querySelectorAll('.kb-blk__item.is-hl')).map((el) => el.getAttribute('data-item-id'))).toEqual(['r1c2']);
     await user.click(lecture);
     expect(await screen.findByRole('complementary', { name: 'Document' })).toBeInTheDocument();
   });

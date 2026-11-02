@@ -50,7 +50,7 @@ def markdown(block: KbConceptCardsBlock, refs: md.Refs) -> list[str]:
 
 SPEC = BlockSpec(
     name="concept_cards",
-    when="the key concepts of a topic at a glance, each with one line (what to know for an exam)",
+    when="the key concepts of a topic at a glance, each explained in one line on its own card",
     schema=ConceptCardsIn,
     example={
         "type": "concept_cards",
