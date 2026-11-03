@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react';
 import { MiniDither } from '../fx/dither/MiniDither';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { Icon, type IconName } from './Icon';
 
 /** Only for a real wait (a request in flight). Never a fake progress indicator. */
 export function Spinner({ label, size = 'md' }: { label: string; size?: 'sm' | 'md' }) {
   return (
     <span role="status" className={`kb-spinner-wrap kb-spinner-wrap--${size}`}>
-      <span className="kb-spinner" aria-hidden="true" />
+      <StippleRing className="kb-spinner" />
       <span className="kb-visually-hidden">{label}</span>
     </span>
   );

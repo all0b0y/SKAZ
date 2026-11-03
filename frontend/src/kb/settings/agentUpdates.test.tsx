@@ -68,7 +68,10 @@ describe('Agent updates (U1)', () => {
     await user.click(await within(codex).findByRole('button', { name: 'Update after current work' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/codex/update' })));
     expect(await within(codex).findByText(/Updates after current work/)).toBeInTheDocument();
-    await user.click(within(codex).getByRole('button', { name: 'Cancel' }));
+    const progress = await screen.findByRole('dialog', { name: 'Update Codex' });
+    expect(progress).toHaveTextContent('Current work is not interrupted.');
+    await user.click(within(progress).getByRole('button', { name: 'Cancel installation' }));
+    await user.keyboard('{Escape}');
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/codex/update/cancel' })));
     expect(await within(codex).findByRole('button', { name: 'Update after current work' })).toBeInTheDocument();
   });
@@ -140,18 +143,32 @@ describe('Agent updates (U1)', () => {
     const dialog = await openAccounts();
     const claude = row(dialog, 'Claude Code');
     expect(await within(claude).findByRole('alert')).toHaveTextContent('Claude Code wasn’t updated: it is still 2.1.281.');
-    expect(within(claude).getByLabelText('Claude Code update output')).toHaveTextContent('Claude is managed by Homebrew.');
-    expect(within(claude).getByText('brew upgrade claude-code')).toBeInTheDocument();
-    expect(within(claude).queryByRole('button', { name: /Roll back/ })).not.toBeInTheDocument();
+    await user.click(within(claude).getByRole('button', { name: 'Details' }));
+    const progressClaude = await screen.findByRole('dialog', { name: 'Update Claude Code' });
+    expect(within(progressClaude).queryByLabelText('Install log')).toBeNull();
+    await user.click(within(progressClaude).getByRole('button', { name: 'Show output' }));
+    expect(within(progressClaude).getByLabelText('Install log')).toHaveTextContent('Claude is managed by Homebrew.');
+    expect(within(progressClaude).getByText('brew upgrade claude-code')).toBeInTheDocument();
+    expect(within(progressClaude).queryByRole('button', { name: /Roll back/ })).not.toBeInTheDocument();
+    await user.click(within(progressClaude).getByRole('button', { name: 'Copy command' }));
+    expect(await navigator.clipboard.readText()).toBe('brew upgrade claude-code');
+    expect(within(progressClaude).getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
     const codexRow = row(dialog, 'Codex');
-    expect(within(codexRow).getByRole('link', { name: 'instructions' })).toHaveAttribute('href', 'https://github.com/openai/codex/releases');
-    expect(within(codexRow).getByText(/Roll back manually to 0\.160\.0/)).toBeInTheDocument();
+    await user.click(within(codexRow).getByRole('button', { name: 'Details' }));
+    const progressCodex = await screen.findByRole('dialog', { name: 'Update Codex' });
+    expect(within(progressCodex).getByRole('link', { name: 'instructions' })).toHaveAttribute('href', 'https://github.com/openai/codex/releases');
+    expect(within(progressCodex).getByText(/Roll back manually to 0\.160\.0/)).toBeInTheDocument();
+    await user.keyboard('{Escape}');
     const open = row(dialog, 'OpenCode');
-    await user.click(within(open).getByRole('button', { name: 'Roll back to 1.17.18' }));
+    await user.click(within(open).getByRole('button', { name: 'Details' }));
+    const progressOpen = await screen.findByRole('dialog', { name: 'Update OpenCode' });
+    await user.click(within(progressOpen).getByRole('button', { name: 'Roll back to 1.17.18' }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/opencode/update/rollback' })));
   });
 
   it('Roll back for Claude Code says it may update itself again; OpenCode’s does not', async () => {
+    const user = userEvent.setup();
     const world = withUpdate({ channel: 'native', installed: '2.1.310', latest: '2.1.310', failure: {
       reason: 'This Claude Code version can’t be used.', command: 'claude install 2.1.281', output: [], previous: '2.1.281',
       rollback: 'skaz', docs_url: 'https://code.claude.com/docs/en/setup',
@@ -164,11 +181,16 @@ describe('Agent updates (U1)', () => {
     renderKb({ world });
     const dialog = await openAccounts();
     const claude = row(dialog, 'Claude Code');
-    expect(await within(claude).findByRole('button', { name: 'Roll back to 2.1.281' })).toBeInTheDocument();
-    expect(within(claude).getByText('Claude Code may update itself again.')).toBeInTheDocument();
+    await user.click(await within(claude).findByRole('button', { name: 'Details' }));
+    const progressClaude = await screen.findByRole('dialog', { name: 'Update Claude Code' });
+    expect(within(progressClaude).getByRole('button', { name: 'Roll back to 2.1.281' })).toBeInTheDocument();
+    expect(within(progressClaude).getByText('Claude Code may update itself again.')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
     const open = row(dialog, 'OpenCode');
-    expect(within(open).getByRole('button', { name: 'Roll back to 1.17.18' })).toBeInTheDocument();
-    expect(within(open).queryByText(/may update itself again/)).not.toBeInTheDocument();
+    await user.click(within(open).getByRole('button', { name: 'Details' }));
+    const progressOpen = await screen.findByRole('dialog', { name: 'Update OpenCode' });
+    expect(within(progressOpen).getByRole('button', { name: 'Roll back to 1.17.18' })).toBeInTheDocument();
+    expect(within(progressOpen).queryByText(/may update itself again/)).not.toBeInTheDocument();
   });
 
   it('one switch for automatic checks, "Last checked" and Check for updates', async () => {

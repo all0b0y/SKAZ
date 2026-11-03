@@ -21,7 +21,7 @@ async def test_links_are_screened_even_when_the_card_could_not_record_them(env: 
     await set_settings(env, never=["pinterest.com"])
     env.codex_search.links = SEARCH_LINKS
 
-    async def lost(_search_id: str, _links: Any) -> None:
+    async def lost(_search_id: str, _links: Any, *, is_error: bool = False) -> None:
         return None  # the card's row is gone (e.g. the chat was deleted while searching)
 
     env.runtime.kb_web.record_links = lost

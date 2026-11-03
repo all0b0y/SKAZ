@@ -7,12 +7,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
+from ..chats.model import ToolStatus
 from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
 from .schemas_blocks import KbAnswerBlockPart
+from .schemas_search import KbChatSearchRulesUpdate
 from .schemas_study import KbStudyPart
 from .schemas_web import KbWebSearchPart
 from .schemas_wiki_fix import KbWikiFixPart
@@ -86,6 +88,12 @@ class KbSelection(BaseModel):
 # -- message parts ---------------------------------------------------------------
 
 
+class KbKnowledgePart(BaseModel):
+    """Informational declaration, no approval, execution state or invented duration."""
+
+    type: Literal["knowledge"]
+
+
 class KbTextPart(BaseModel):
     type: Literal["text"]
     #: Markdown; render it with the safe renderer (never as HTML).
@@ -133,6 +141,10 @@ class KbToolPart(BaseModel):
     label: str
     #: N8: the material or wiki page it read (the chat overview's «Looked at»); ``None``: no one item.
     target: KbToolTarget | None = None
+    call_id: str | None = None
+    status: ToolStatus = "unknown"
+    started_at: str | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class KbPermissionSummary(BaseModel):
@@ -218,7 +230,8 @@ class KbMemoryPart(BaseModel):
     undone: bool
 
 
-class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
+class KbMessagePart(RootModel[Annotated[KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart
+                                        | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
                                         | KbWebSearchPart | KbMemoryPart
                                         | KbAnswerBlockPart | KbWikiFixPart,
@@ -299,6 +312,15 @@ class KbChatCreate(_Request):
     model: str | None = Field(default=None, max_length=200)
     effort: str | None = Field(default=None, max_length=50)
     recording_material_id: str | None = Field(default=None, max_length=200)
+    #: Rules chosen in the draft composer, committed with the chat before its first answer.
+    search_rules: KbChatSearchRulesUpdate | None = None
+
+    @field_validator("search_rules")
+    @classmethod
+    def initial_rules_are_local(cls, value: KbChatSearchRulesUpdate | None) -> KbChatSearchRulesUpdate | None:
+        if value is not None and value.as_global:
+            raise ValueError("Save global search settings separately before creating a chat.")
+        return value
 
 
 class KbChatLastChoice(_Request):

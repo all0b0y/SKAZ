@@ -449,7 +449,8 @@ async def test_a_refusing_command_shows_its_output_and_the_terminal_command(tmp_
     failure = agent(await world.updates.view(), "claude_code").failure
     assert failure.reason == "Claude Code wasn't updated: it is still 2.1.281."
     assert failure.command == "brew upgrade claude-code"
-    assert failure.output == ("Claude is managed by Homebrew.", "To update, run: brew upgrade claude-code",
+    assert failure.output == ("Update Claude Code…", "Claude is managed by Homebrew.",
+                              "To update, run: brew upgrade claude-code", "Check Claude Code…",
                               "Claude Code 2.1.281 is ready.")
     assert failure.rollback == "none"
 

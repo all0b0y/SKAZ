@@ -55,6 +55,26 @@ describe('P3-b: Unclear', () => {
     expect(field().querySelector('[data-kind="mention"], .kb-token')).not.toBeNull();
   });
 
+  it('Show again stays an explicit row action while other deck cards are selected', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = renderKb({ world: studyWorld() });
+    await screen.findByRole('region', { name: 'Chats' });
+    act(() => services.ui.getState().openDocument({ type: 'page', id: 'p-deck' }));
+    const cards = await screen.findByRole('grid', { name: 'Cards' });
+    const [first, second] = within(cards).getAllByRole('row');
+    await user.click(within(first!).getByRole('button', { name: 'Don’t show' }));
+    const restore = await within(first!).findByRole('button', { name: 'Show again' });
+    await user.keyboard('{Meta>}');
+    await user.click(within(second!).getAllByRole('gridcell')[0]!);
+    await user.keyboard('{/Meta}');
+    expect(second).toHaveAttribute('aria-selected', 'true');
+    await user.click(restore);
+    await waitFor(() => expect(within(first!).queryByRole('button', { name: 'Show again' })).toBeNull());
+    expect(second).toHaveAttribute('aria-selected', 'true');
+    expect(fake.calls.filter((c) => c.path === '/kb/study/decks/p-deck/marks').at(-1)?.body)
+      .toEqual({ item_ids: [first!.getAttribute('data-sel-id')], mark: 'unhide' });
+  });
+
   it('Clear now under the agent’s answer that read the marks clears them — the user’s button, one or all', async () => {
     const world = studyWorld();
     const chat = world.chats.find((c) => c.title === 'Lecture 8 — test')!;

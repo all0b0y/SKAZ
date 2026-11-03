@@ -227,10 +227,12 @@ async def test_agents_api(agents_client: Any, kb_client: httpx.AsyncClient) -> N
             break
         await asyncio.sleep(0.01)
     assert task["state"] == "failed" and "internet connection" in task["reason"]
-    assert [line["text"] for line in task["lines"]][1:] == [
-        "Installing...",
-        "curl: (6) Could not resolve host: x",
-    ]
+    output = [line["text"] for line in task["lines"]]
+    assert output[0] == f"{task['stages'][0]['label']}…"
+    assert output[1].startswith("$ /bin/bash -c ")
+    assert output[2:] == ["Installing...", "curl: (6) Could not resolve host: x"]
+    assert task["stages"][0]["state"] == "error"
+    assert all(stage["state"] == "pending" for stage in task["stages"][1:])
     newer = (await kb_client.get(f"/kb/agents/install/{task['id']}", params={"after": task["cursor"]})).json()
     assert newer["lines"] == [] and newer["cursor"] == task["cursor"]
 

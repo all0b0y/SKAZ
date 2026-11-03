@@ -198,8 +198,11 @@ class _OnlyThisQuery:
 
     def __init__(self, query: str) -> None:
         self.query = query
+        # Only this clean runner gate may accept its exact already approved generated query.
+        self.preapproved_query = query
         self.allowed = False
         self.searched = False
+        self.running = False
         self.links: list[WebLink] = []
 
     async def approve(self, query: WebQuery) -> WebVerdict:
@@ -208,8 +211,12 @@ class _OnlyThisQuery:
         self.allowed = True
         return WebVerdict(True, search_id="approved")
 
-    async def results(self, search_id: str, links: Sequence[WebLink]) -> None:
-        self.searched = True
+    async def started(self, search_id: str) -> None:
+        self.running = True
+
+    async def results(self, search_id: str, links: Sequence[WebLink], *, is_error: bool = False) -> None:
+        self.running = False
+        self.searched = not is_error
         self.links.extend(links)
 
 

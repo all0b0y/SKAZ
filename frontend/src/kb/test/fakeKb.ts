@@ -24,7 +24,7 @@ import {
 } from '../api/permissions';
 import { meRoutes, type FakeMe } from './fakeMe';
 import { defaultReview, p3StudyRoutes, scoreOf } from './fakeStudyP3';
-import { searchRulesRoutes } from './fakeSearchRules';
+import { applyFakeChatRules, searchRulesRoutes } from './fakeSearchRules';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -673,6 +673,7 @@ const WEB_ROUTES: FakeRoutes = {
     const found = findWebSearch(w, path.search_id);
     if (found.part.status !== 'pending') fail(409, 'This request was already answered.');
     found.part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    found.part.execution = null; // A permission response does not run or finish a search.
     if (body.decision === 'allow_chat') (w.webGrants ??= {})[found.chat.id] = new Date().toISOString();
     updated(w, found);
     return structuredClone(found.part);
@@ -1161,6 +1162,7 @@ const ROUTES: FakeRoutes = {
       pinned: false, engine: a!.id, model: body?.model ?? a!.current_model, effort: body?.effort ?? 'medium', created_at: at, updated_at: at,
       last_preview: '', recording_material_id: recording, folder_ids: [], state: 'idle', unread: false, messages: [], cursor: 0,
     };
+    if (body?.search_rules) applyFakeChatRules(w, c.id, body.search_rules, fail);
     w.chats.push(c);
     w.chatEvents[c.id] = [];
     touchList(w, c);

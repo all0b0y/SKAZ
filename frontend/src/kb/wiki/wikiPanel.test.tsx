@@ -78,6 +78,56 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
     return { ...r, user, grid, rowOf, tick };
   }
 
+  it('shares one Wiki selection across groups and deduplicates Recent without remounting rows', async () => {
+    const user = userEvent.setup();
+    const { fake } = await wikiPanel();
+    const side = screen.getByRole('region', { name: 'Wiki' });
+    const concept = fake.world.pages.find((p) => p.kind === 'concept')!;
+    const other = fake.world.pages.find((p) => p.kind !== 'concept')!;
+    expect(other).toBeDefined();
+    const otherGroup = side.querySelector<HTMLElement>(`[data-kind="${other.kind}"]`)!;
+    await user.click(otherGroup.querySelector('button')!);
+    const conceptsGrid = within(side).getByRole('grid', { name: 'Concepts' });
+    const first = within(conceptsGrid).getByRole('button', { name: concept.title });
+    const firstRow = first.closest('[data-sel-id]');
+    await user.click(first);
+    const recent = await within(side).findByRole('grid', { name: 'Recently opened' });
+    await user.keyboard('{Meta>}');
+    await user.click(first);
+    await user.click(within(otherGroup).getByRole('button', { name: other.title }));
+    await user.keyboard('{/Meta}');
+    const bar = within(side).getByRole('toolbar', { name: '2 selected' });
+    expect(within(side).getAllByRole('toolbar')).toHaveLength(1);
+    expect(bar.closest('header')).toBe(side.querySelector('header'));
+    const duplicate = within(recent).getByRole('button', { name: concept.title });
+    expect(duplicate.closest('[data-sel-id]')).toHaveAttribute('aria-selected', 'true');
+    expect(within(conceptsGrid).getByRole('button', { name: concept.title }).closest('[data-sel-id]')).toBe(firstRow);
+    await user.keyboard('{Meta>}');
+    await user.click(duplicate);
+    await user.keyboard('{/Meta}');
+    expect(within(side).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
+    expect(firstRow).toHaveAttribute('aria-selected', 'false');
+    expect(within(side).getByRole('button', { name: 'Index' }).closest('[data-sel-id]')).toBeNull();
+  });
+
+  it('Choose focuses the visible Recent copy, never its inert kind-group duplicate', async () => {
+    const user = userEvent.setup();
+    const { fake } = await wikiPanel();
+    const side = screen.getByRole('region', { name: 'Wiki' });
+    const concept = fake.world.pages.find((p) => p.kind === 'concept')!;
+    const grid = within(side).getByRole('grid', { name: 'Concepts' });
+    await user.click(within(grid).getByRole('button', { name: concept.title }));
+    const recent = await within(side).findByRole('grid', { name: 'Recently opened' });
+    await user.click(within(side).getByRole('button', { name: /^Concepts/ }));
+    expect(grid.closest('[inert]')).not.toBeNull();
+    const visibleCopy = within(recent).getByRole('button', { name: concept.title });
+    await user.click(within(side).getByRole('button', { name: 'Select items' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Choose…' }));
+    expect(visibleCopy).toHaveFocus();
+    await user.keyboard(' ');
+    expect(within(side).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
+  });
+
   it('Index and Log can’t be selected and say why', async () => {
     await wikiPanel();
     expect(screen.getByRole('button', { name: 'Index' })).toHaveAttribute('title', 'SKAZ keeps Index and Log — they can’t be selected');
@@ -90,7 +140,7 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
       .map((r) => r.textContent ?? '');
     await tick(titles[0]!, titles[1]!);
     const bar = screen.getByRole('toolbar', { name: '2 selected' });
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Ask in chat', 'Export .md', 'More actions', 'Delete', 'Clear selection']);
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Ask in chat', 'Export .md', 'More actions', 'Delete', 'Clear selection', 'All', 'Concepts']);
     await user.click(within(bar).getByRole('button', { name: 'Ask in chat' }));
     expect(services.ui.getState().center).toBe('chat');
     const input = await screen.findByTestId('message-input');

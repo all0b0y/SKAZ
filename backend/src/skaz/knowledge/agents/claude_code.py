@@ -159,8 +159,9 @@ _LINE_LIMIT = 32 * 1024 * 1024
 _STRUCTURED_TOOL = "StructuredOutput"
 #: Claude Code's own web search tool (the only built-in tool a chat turn may get, W-2).
 WEB_TOOL = "WebSearch"
-#: Tool uses that are no "Looked at" chip: structured output, and web searches (their own card).
-_NOT_CHIPS = (_STRUCTURED_TOOL, WEB_TOOL)
+#: Structured output is not a tool activity. Web search emits real events for the shared count;
+#: its detail card, rather than this adapter, decides whether a separate chip is shown.
+_NOT_CHIPS = (_STRUCTURED_TOOL,)
 WEB_REFUSED = "Refused by SKAZ: only web searches the user approves are allowed here."
 NOT_SUPPORTED = "Not supported by SKAZ."
 _AUTH_ERRORS = {"authentication_failed", "oauth_org_not_allowed", "account_on_hold"}
@@ -684,7 +685,10 @@ class ClaudeCodeEngine:
             await _answer(process, {"subtype": "error", "request_id": request_id, "error": NOT_SUPPORTED})
             return
         decision = await self._decide(body, gate, state, active)
-        await _answer(process, {"subtype": "success", "request_id": request_id, "response": decision})
+        sent = await _answer(process, {"subtype": "success", "request_id": request_id, "response": decision})
+        asked = state.web_asked.get(str(body.get("tool_use_id") or ""))
+        if sent and decision.get("behavior") == "allow" and gate is not None and asked and asked[2]:
+            await gate.started(asked[2])
 
     async def _decide(self, body: Mapping[str, Any], gate: WebSearchGate | None, state: _RunState,
                       active: _ActiveRun) -> dict[str, Any]:
@@ -692,7 +696,12 @@ class ClaudeCodeEngine:
         raw = body.get("input")
         given: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
         use_id = str(body.get("tool_use_id") or "")
-        query = clean_query(given.get("query"))
+        # Machine-added site operators may exceed the raw 400-character query cap. Only the
+        # clean search runner owns this exact preapproval; ordinary chat gates have no bypass.
+        preapproved = getattr(gate, "preapproved_query", None)
+        raw_query = given.get("query")
+        query = (preapproved if isinstance(preapproved, str) and raw_query == preapproved
+                 else clean_query(raw_query))
         domains = {key: tuple(str(d) for d in given.get(key) or () if isinstance(d, str))
                    for key in ("allowed_domains", "blocked_domains")}
         unknown = set(given) - {"query", "allowed_domains", "blocked_domains"}
@@ -741,12 +750,14 @@ class ClaudeCodeEngine:
                 return
             allowed, query, search_id = asked
             if not isinstance(output, dict):
-                continue  # a denial or an error: nothing was searched
+                if allowed and gate is not None and search_id and block.get("is_error"):
+                    await gate.results(search_id, (), is_error=True)
+                continue  # no result links; a denial is not a completed search
             if not allowed or output.get("query") != query:
                 state.web_breach = True
                 return
             if gate is not None and search_id:
-                await gate.results(search_id, _links(output))
+                await gate.results(search_id, _links(output), is_error=bool(block.get("is_error")))
 
     async def _stop_after_cancel(self, process: asyncio.subprocess.Process, active: _ActiveRun) -> None:
         await active.cancel.wait()
@@ -795,8 +806,7 @@ class ClaudeCodeEngine:
         elif kind == "user":
             content = (item.get("message") or {}).get("content")
             for block in content if isinstance(content, list) else []:
-                if (isinstance(block, dict) and block.get("type") == "tool_result"
-                        and str(block.get("tool_use_id") or "") not in state.web_uses):
+                if isinstance(block, dict) and block.get("type") == "tool_result":
                     events.append(ToolResult(run_id, str(block.get("tool_use_id") or ""),
                                              _text_of(block.get("content")), bool(block.get("is_error"))))
         elif kind == "rate_limit_event":
@@ -862,14 +872,16 @@ async def _drain(stream: asyncio.StreamReader, tail: deque[str]) -> None:
         tail.append(line.decode(errors="replace").strip())
 
 
-async def _answer(process: asyncio.subprocess.Process, response: Mapping[str, Any]) -> None:
-    """One control response on stdin (the CLI may already be gone after a Stop)."""
+async def _answer(process: asyncio.subprocess.Process, response: Mapping[str, Any]) -> bool:
+    """Report whether the control response reached stdin; a closed pipe is not an execution start."""
     if process.stdin is None or process.stdin.is_closing():
-        return
+        return False
     line = json.dumps({"type": "control_response", "response": response}, ensure_ascii=False) + "\n"
     with contextlib.suppress(BrokenPipeError, ConnectionResetError, RuntimeError):
         process.stdin.write(line.encode())
         await process.stdin.drain()
+        return True
+    return False
 
 
 def _close_stdin(process: asyncio.subprocess.Process) -> None:

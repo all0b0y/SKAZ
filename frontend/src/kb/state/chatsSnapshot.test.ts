@@ -1,9 +1,9 @@
 // C-19: the answer an action returns (send, edit, regenerate, resume) is the new answer as it was
 // created; the long poll may already have shown more of it. That newer text stays.
 import { describe, expect, it, vi } from 'vitest';
-import type { KbChat, KbChatEvent, KbMessage } from '../../api/kb/types.gen';
+import type { KbChat, KbChatEvent, KbMessage, KbToolPart } from '../../api/kb/types.gen';
 import type { KbClient } from '../api/client';
-import { createChatsStore } from './chats';
+import { applyEvents, createChatsStore } from './chats';
 
 interface Pending { route: string; resolve: (value: unknown) => void }
 
@@ -51,6 +51,28 @@ async function opened() {
   const messages = () => store.getState().chats.c1!.chat!.messages;
   return { fake, store, stop, streamed, news, messages };
 }
+
+describe('Tool-result updates are addressed to one call of one answer', () => {
+  const running: KbToolPart = { type: 'tool', name: 'skaz_search', label: 'Search', call_id: 'shared-id', status: 'running' };
+  const done: KbToolPart = { ...running, status: 'done', duration_ms: 210 };
+  const old = { ...OLD, parts: [running] };
+  const active = { ...CREATED, parts: [running, { ...running, call_id: 'parallel' }] };
+  const before: KbChat = { ...chat, messages: [old, active] };
+
+  it('updates only the matching parallel call, not the same id of an older answer', () => {
+    const after = applyEvents(before, [{ seq: 6, type: 'part_update', message_id: active.id, part: done }]);
+    expect(after.messages[0]).toBe(old);
+    expect(after.messages[1]!.parts).toEqual([done, active.parts[1]]);
+    expect(after.messages[1]!.parts[1]).toBe(active.parts[1]);
+  });
+
+  it('never falls back to another answer when the target message is gone or unspecified', () => {
+    for (const message_id of ['deleted-answer', null]) {
+      const after = applyEvents(before, [{ seq: 6, type: 'part_update', message_id, part: done }]);
+      expect(after.messages).toBe(before.messages);
+    }
+  });
+});
 
 describe('A returned answer never takes back what the poll already showed', () => {
   it('Regenerate', async () => {

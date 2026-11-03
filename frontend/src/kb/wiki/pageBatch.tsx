@@ -6,7 +6,7 @@ import { useServices } from '../state/context';
 import { useExportItems } from '../document/exportItems';
 import {
   BatchDeleteDialog, SelectionBar, ShortcutsPopover, countOf, endItemsDrag, namesList, resultText, runOneByOne,
-  startItemsDrag, useListSelection, type ListSelection, type SelectionAction,
+  startItemsDrag, useListSelection, type ListSelection, type SelectionAction, type SelectionSet,
 } from '../ui/listSelection';
 import type { DragRowProps } from '../materials/materialBatch';
 import { useMakeStudy } from '../study/makeFrom';
@@ -28,8 +28,9 @@ export function useAskAboutPages() {
  * chat, Export .md, Delete; ⋯ Open in Obsidian. Deleting is the user's own act: one consequences
  * window from the page delete previews, no agent permission card.
  */
-export function usePageSelection({ pages, resetKey, onOpen }: {
+export function usePageSelection({ pages, resetKey, onOpen, sets }: {
   pages: ReadonlyArray<KbPageSummary>;
+  sets?: readonly SelectionSet[];
   resetKey?: unknown;
   onOpen: (id: string) => void;
 }): { sel: ListSelection; overlays: ReactNode; dragProps: (p: KbPageSummary) => DragRowProps } {
@@ -96,7 +97,7 @@ export function usePageSelection({ pages, resetKey, onOpen }: {
 
   const overlays = (
     <>
-      <SelectionBar count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
+      <SelectionBar selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant="compact" actions={actions} more={more} onClear={sel.clear} />
       {obsidian.message && <div className="kb-side__pad">{obsidian.message}</div>}
       {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}

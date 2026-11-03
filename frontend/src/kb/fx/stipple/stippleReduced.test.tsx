@@ -9,6 +9,7 @@ import { SourceMarks } from '../../cite/SourceMarks';
 import { createFakeBridge } from '../../test/fakeBridge';
 import { chatWorld } from '../../test/fixtures';
 import { StippleStrip } from './StippleStrip';
+import { StippleGlobe, StippleRing } from './StippleWork';
 
 // prefers-reduced-motion: reduce — set before Motion first reads it (this file only).
 vi.stubGlobal('matchMedia', (query: string) => ({
@@ -27,6 +28,13 @@ const cit: KbCitation = {
 };
 
 describe('Stippling with reduced motion', () => {
+  it.each([['ring', StippleRing], ['globe', StippleGlobe]] as const)('%s remains as a still frame with the system preference', (_name, Indicator) => {
+    const raf = vi.spyOn(window, 'requestAnimationFrame');
+    const { container } = render(<Indicator />);
+    expect(container.querySelector('canvas')).not.toBeNull();
+    expect(raf).not.toHaveBeenCalled();
+    raf.mockRestore();
+  });
   it('no chip effect on hover', async () => {
     const user = userEvent.setup();
     const services = createServices(createFakeBridge(chatWorld()).bridge, null, { capture: null });

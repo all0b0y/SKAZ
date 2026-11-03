@@ -1,10 +1,10 @@
-import { IconButton } from '../ui';
+import { SelectionHeader, SelectionHeaderProvider } from '../ui/listSelection';
 import { LibraryPanel } from '../library/LibraryPanel';
 import { ChatList } from '../chat/ChatList';
 import { NotificationsFeed } from '../notifications/Feed';
 import { GraphSide, WikiSide } from '../wiki/WikiSide';
 import { useLayoutEffect, useRef } from 'react';
-import { usePrefs, useUi } from '../state/context';
+import { usePrefs } from '../state/context';
 import { useMotionLevel } from '../ui/motionLevel';
 import type { Section } from '../state/prefs';
 import { GUTTER } from './layout';
@@ -28,7 +28,6 @@ const TITLES: Record<Section, string> = {
  */
 export function SidePanel({ width }: { width: number }) {
   const section = usePrefs((s) => s.section);
-  const showCenter = useUi((s) => s.showCenter);
   const level = useMotionLevel();
   const body = useRef<HTMLDivElement | null>(null);
   const shownSection = useRef(section);
@@ -41,12 +40,12 @@ export function SidePanel({ width }: { width: number }) {
     return () => fade.cancel();
   }, [section, level]);
   return (
-    <section id="kb-side" className="kb-side" data-pane="side" aria-label={TITLES[section]} style={{ width: width + GUTTER }}>
-      <header className="kb-head kb-head--side">
+    <SelectionHeaderProvider>
+    <section id="kb-side" className="kb-side" data-selection-surface="" data-pane="side" aria-label={TITLES[section]} style={{ width: width + GUTTER }}>
+      <SelectionHeader className="kb-head kb-head--side">
         <h2 className="kb-side__title">{TITLES[section]}</h2>
         <span className="kb-head__spacer" />
-        {section === 'chats' && <IconButton icon="search" label="Find in chats" size="sm" onClick={() => showCenter('allChats')} />}
-      </header>
+      </SelectionHeader>
       <div className="kb-side__body" data-section={section} ref={body}>
         {section === 'chats' && <ChatList />}
         {section === 'materials' && <LibraryPanel />}
@@ -55,5 +54,6 @@ export function SidePanel({ width }: { width: number }) {
         {section === 'notifications' && <NotificationsFeed />}
       </div>
     </section>
+    </SelectionHeaderProvider>
   );
 }

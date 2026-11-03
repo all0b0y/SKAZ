@@ -119,6 +119,21 @@ describe('The open chat runs into its window (decisions 24–25)', () => {
 });
 
 describe('Chats in the side panel', () => {
+  it('omits the duplicate header search while keeping New chat, global search and All chats search', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    await within(side()).findByRole('button', { name: /^All chats/ });
+    expect(within(side()).queryByRole('button', { name: 'Find in chats' })).toBeNull();
+    expect(within(side()).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByRole('dialog', { name: 'Search' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull());
+    await user.click(within(side()).getByRole('button', { name: /^All chats/ }));
+    const all = await screen.findByRole('region', { name: 'All chats' });
+    expect(within(all).getByRole('searchbox', { name: 'Find in chats' })).toBeInTheDocument();
+  });
+
   it('pinned first, then by date, a few only, "All chats · N"; answering and new-answer marks are still', async () => {
     atMidday(); // day groups (Today / Yesterday) must not depend on when the suite runs
     renderKb({ world: chatWorld() });
@@ -192,7 +207,7 @@ describe('Chats in the side panel', () => {
     // Connection rows use the answer's numbers: Lecture 5 is 1 here as in the text.
     expect(within(rows).getAllByRole('button', { name: /^Source / }).map((b) => b.textContent)).toEqual(['2', '3', '1']);
     expect(within(rows).getByText('Agent inference:')).toBeInTheDocument();
-    expect(within(answer).getByRole('button', { name: /Looked at 1 thing/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(within(answer).getByRole('button', { name: '1 tool call' })).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('a question shows the moment it is sent, before the backend answers; no copy is left after (bug 7)', async () => {
@@ -523,7 +538,7 @@ describe('Selecting several chats in "All chats" (0.3.1 F4)', () => {
     await user.keyboard('{/Meta}');
     expect(services.chats.getState().currentId).toBe(before);
     const bar = within(all).getByRole('toolbar', { name: '2 selected' });
-    await user.click(within(bar).getByRole('button', { name: /^Pin/ }));
+    await user.click(within(bar).getByRole('button', { name: 'Pin' }));
     await waitFor(() => expect(fake.world.chats.filter((c) => c.pinned).map((c) => c.id)).toEqual(expect.arrayContaining(['c3', 'c6'])));
     await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
     expect(within(all).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
@@ -550,7 +565,7 @@ describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
     expect(rowOf('Transformer paper review')).toHaveAttribute('aria-selected', 'true');
     expect(services.chats.getState().currentId).toBe(before);
     const bar = within(panel).getByRole('toolbar', { name: '2 selected' });
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Pin', 'Export .md', 'More actions', 'Delete', 'Clear selection']);
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Pin', 'Export .md', 'More actions', 'Delete', 'Clear selection', 'All', 'Unread', 'Pinned', 'Older than 30 days']);
     await user.click(within(bar).getByRole('button', { name: 'More actions' }));
     await user.click(await screen.findByRole('menuitem', { name: /Mark as read/ }));
     await waitFor(() => expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/kb/chats/c3/read')).toBe(true));

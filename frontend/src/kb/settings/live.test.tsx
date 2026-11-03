@@ -44,10 +44,12 @@ describe('Live settings (package 2)', () => {
     expect(within(hermes).getByRole('note')).toHaveTextContent('Nothing starts until you press Check.');
     expect(within(hermes).getByRole('note')).not.toHaveTextContent(/GB|download|prepar/i);
     await user.click(within(hermes).getByRole('button', { name: 'Install' }));
-    expect(await within(hermes).findByLabelText('Install log')).toHaveTextContent('Downloading Hermes Agent…');
-    expect(within(hermes).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    await user.click(within(hermes).getByRole('button', { name: 'Cancel' }));
+    const progress = await screen.findByRole('dialog', { name: 'Install Hermes Agent' });
+    await user.click(within(progress).getByRole('button', { name: 'Show output' }));
+    expect(within(progress).getByLabelText('Install log')).toHaveTextContent('Downloading Hermes Agent…');
+    await user.click(within(progress).getByRole('button', { name: 'Cancel installation' }));
     expect(await within(hermes).findByText('Cancelled')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
 
     const soniox = row(dialog, 'Soniox');
     expect(within(soniox).getByText('Key works')).toBeInTheDocument();
@@ -220,7 +222,9 @@ describe('Live settings (package 2)', () => {
     await user.click(checks[0]!);
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({ method: 'POST', path: '/kb/agents/hermes/install', body: { action: 'first_check' } })));
     expect(await within(hermes).findByRole('status')).toHaveTextContent('Checking…');
-    expect(within(hermes).getByLabelText('Install log')).toHaveTextContent('Checking Hermes Agent…');
+    const progress = await screen.findByRole('dialog', { name: 'Check Hermes Agent' });
+    await user.click(within(progress).getByRole('button', { name: 'Show output' }));
+    expect(within(progress).getByLabelText('Install log')).toHaveTextContent('Checking Hermes Agent…');
   });
 
   it('Hermes that asks for its own repair (H3): Repair runs it, never Update or Reinstall', async () => {

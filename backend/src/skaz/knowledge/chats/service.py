@@ -72,6 +72,7 @@ from ..permissions.questions import QuestionBroker
 from ..permissions.search_rules import (
     TIME_WINDOW_RULES,
     TIME_WINDOW_WEB,
+    ChatRules,
     SearchRulesStore,
     rules_instructions,
 )
@@ -110,6 +111,7 @@ from .model import (
     CitePart,
     ConnectionPart,
     Failure,
+    KnowledgePart,
     MemoryPart,
     Message,
     MessageInput,
@@ -123,7 +125,17 @@ from .model import (
     ToolPart,
     WebSearchPart,
 )
-from .parsing import BlockData, BlockStart, CiteToken, ConnectionOut, Output, PageToken, StreamParser, TextOut
+from .parsing import (
+    BlockData,
+    BlockStart,
+    CiteToken,
+    ConnectionOut,
+    KnowledgeOut,
+    Output,
+    PageToken,
+    StreamParser,
+    TextOut,
+)
 from .resolve import MaterialReader, Resolver
 from .selection import SelectionInvalid, check_selection
 from .store import RESTART_REASON, WIKI_STUDY_CHAT_ID, ChatRepository
@@ -217,8 +229,9 @@ class _Run:
     #: The user's own messages that answered the agent's question during this run (the agent got them
     #: inside its turn): recorded as held with the answer, in chat order.
     absorbed: list[Message] = field(default_factory=list)
-    #: N8 «Looked at» (Q1 n78 M-6): the call id of a read tool → its part's index (dropped on an error).
-    read_parts: dict[str, int] = field(default_factory=dict)
+    #: Pending call identity → stable part index and observed monotonic start (never raw output).
+    tool_parts: dict[str, tuple[int, float]] = field(default_factory=dict)
+    tool_ids: set[str] = field(default_factory=set)
     #: Q1 n78 H-2: a hard search rule is in force, so this (Claude Code) chat searches through
     #: ``skaz_web_search`` — SKAZ screens the links first — and its own WebSearch is not offered.
     skaz_web: bool = False
@@ -542,7 +555,8 @@ class ChatService:
 
     async def create(self, *, title: str | None = None, engine: EngineId | None = None,
                      model: str | None = None, effort: str | None = None,
-                     recording_material_id: str | None = None) -> ChatView:
+                     recording_material_id: str | None = None,
+                     initial_search_rules: ChatRules | None = None) -> ChatView:
         chosen: EngineId = engine if engine is not None else await disk_call(self.registry.default)
         if engine is None and model is None and effort is None:
             # Bug 5: a chat SKAZ makes itself (a recording's chat) starts from the agent's last choice,
@@ -573,7 +587,7 @@ class ChatService:
         chat = Chat(id=new_id("chat"), title=name or DEFAULT_TITLE, title_auto=title_auto, pinned=False,
                     engine=chosen, model=model, effort=effort, recording_material_id=recording_material_id,
                     folder_ids=folder_ids, unread=False, last_preview="", created_at=now, updated_at=now)
-        await disk_call(self.repo.create, chat)
+        await disk_call(self.repo.create, chat, search_rules=initial_search_rules)
         # An explicit choice; "as set in the agent" in New chat is remembered when it is picked.
         if model is not None:
             await disk_call(LastChoice(self.registry.settings).remember, chosen, model, effort)
@@ -943,20 +957,31 @@ class ChatService:
                 stream = run.engine.run(turn)
                 lost = False
                 async for event in stream:
+                    if event.run_id != run.run_id:
+                        continue  # a late notification of another answer cannot mutate this one
                     if isinstance(event, TextDelta):
                         run.produced = True
                         await self._apply(run, parser.feed(event.text), resolver)
                     elif isinstance(event, ToolCall):
+                        if event.call_id and event.call_id in run.tool_ids:
+                            continue  # an adapter redelivered the same call, not a new operation
+                        if event.call_id:
+                            run.tool_ids.add(event.call_id)
                         run.produced = True
                         run.tool_calls += 1
+                        started_at, started = utc_now(), time.monotonic()
                         part = await disk_call(resolver.tool, event.name, event.arguments)
                         if part.target is not None and scope is not None and not scope.allows(part.target[1]):
                             part = replace(part, target=None)  # refused by the chat's sources (Q1 M-6)
-                        if part.target is not None:
-                            run.read_parts[event.call_id] = len(run.message.parts)
+                        if event.call_id:
+                            part = replace(part, call_id=event.call_id, status="running",
+                                           started_at=started_at)
+                            run.tool_parts[event.call_id] = len(run.message.parts), started
+                        else:
+                            part = replace(part, target=None)  # no identity can confirm this read
                         self._add_part(run, part)
                     elif isinstance(event, ToolResult):
-                        self._tool_failed(run, event)
+                        await self._tool_result(run, event)
                     elif isinstance(event, SessionBound):
                         await self._bound(run, event)
                     elif isinstance(event, Compacted):
@@ -1271,7 +1296,10 @@ class ChatService:
 
     async def _apply(self, run: _Run, outputs: Sequence[Output], resolver: Resolver) -> None:
         for output in outputs:
-            if isinstance(output, TextOut):
+            if isinstance(output, KnowledgeOut):
+                if not any(isinstance(part, KnowledgePart) for part in run.message.parts):
+                    self._add_part(run, KnowledgePart())
+            elif isinstance(output, TextOut):
                 self._append_text(run, output.text)
             elif isinstance(output, CiteToken):
                 cite = await disk_call(resolver.cite, output)
@@ -1321,35 +1349,50 @@ class ChatService:
             return
         self._add_part(run, TextPart(text))
 
-    def _tool_failed(self, run: _Run, event: ToolResult) -> None:
-        """A read that came back as an error (refused, not found) was not looked at: its target goes."""
-        index = run.read_parts.pop(event.call_id, None) if event.is_error else None
-        parts = list(run.message.parts)
-        if index is None or index >= len(parts) or not isinstance(parts[index], ToolPart):
+    async def _tool_result(self, run: _Run, event: ToolResult) -> None:
+        """Record only the outcome, not raw tool output; failed reads have no looked-at target."""
+        pending = run.tool_parts.pop(event.call_id, None)
+        if pending is None:
             return
+        index, started = pending
+        parts = list(run.message.parts)
         part = parts[index]
         assert isinstance(part, ToolPart)
-        parts[index] = replace(part, target=None)
+        updated = replace(part, status="error" if event.is_error else "done",
+                          duration_ms=max(0, round((time.monotonic() - started) * 1000)),
+                          target=None if event.is_error else part.target)
+        parts[index] = updated
         run.message = run.message.with_parts(parts)
+        self._feed(run.chat_id).emit("part_update", run.message.id, part=updated)
+        await self._checkpoint(run, force=True)
 
     def _add_part(self, run: _Run, part: Part) -> None:
         run.message = run.message.with_parts([*run.message.parts, part])
         self._feed(run.chat_id).emit("part", run.message.id, part=part)
 
-    async def _checkpoint(self, run: _Run) -> None:
-        if time.monotonic() - run.saved_at < self._checkpoint_s:
+    async def _checkpoint(self, run: _Run, *, force: bool = False) -> None:
+        if not force and time.monotonic() - run.saved_at < self._checkpoint_s:
             return
         run.saved_at = time.monotonic()
         await disk_call(self.repo.save_message, run.message)
 
     async def _finish(self, run: _Run, terminal: Completed | Failed | None) -> None:
-        await self._cancel_waits(run.run_id)
-        run.message = run.message.with_parts(finish_drawing(run.message.parts))  # P1: a block left unfinished
         state, failure = _outcome(terminal)
+        await self._cancel_waits(run.run_id, closing=run.closing, stopped=state == "cancelled")
+        run.message = run.message.with_parts(finish_drawing(run.message.parts))  # P1: a block left unfinished
+        parts = list(run.message.parts)
+        for index, part in enumerate(parts):
+            if isinstance(part, ToolPart) and part.status == "running":
+                pending = run.tool_parts.get(part.call_id or "")
+                duration = (max(0, round((time.monotonic() - pending[1]) * 1000))
+                            if state == "cancelled" and pending is not None else None)
+                parts[index] = replace(part, status="stopped" if state == "cancelled" else "unknown",
+                                       duration_ms=duration, target=None)
+        run.message = run.message.with_parts(parts)
         if state == "cancelled" and run.closing:
             state, failure = "interrupted", Failure("other", RESTART_REASON)
         if state == "done" and not any(not isinstance(part, TextPart) or part.text.strip()
-                                       for part in run.message.parts):
+                                       for part in run.message.parts if not isinstance(part, KnowledgePart)):
             state, failure = "failed", Failure("other", EMPTY_ANSWER)
         message = replace(run.message, state=state, failure=failure)
         run.message = message
@@ -1426,7 +1469,7 @@ class ChatService:
             await self._stop_run(run)
         return await self._message(chat_id, message_id)
 
-    async def _cancel_waits(self, run_id: str, *, closing: bool = False) -> None:
+    async def _cancel_waits(self, run_id: str, *, closing: bool = False, stopped: bool = True) -> None:
         """What the run still waits for (permissions, questions) ends as cancelled; the agent learns it."""
         reason = RESTARTED if closing else STOPPED_WAIT
         try:
@@ -1435,7 +1478,8 @@ class ChatService:
             if self.questions is not None:
                 await self.questions.cancel_run(run_id)
             if self.web is not None:
-                await self.web.cancel_run(run_id, reason)
+                await self.web.cancel_run(run_id, reason,
+                                          execution="stopped" if stopped and not closing else "unknown")
         except Exception as error:
             log.error("Cancelling the requests of chat answer %s failed: %s", run_id, error_note(error))
 

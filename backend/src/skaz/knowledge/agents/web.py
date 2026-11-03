@@ -76,6 +76,8 @@ class WebVerdict:
     #: N7 (Q1 n78 M-2): the user's rules snapshot taken when the query was asked
     #: (``permissions.search_rules.ActiveRules``; ``None``: none) — results are screened with it.
     rules: object | None = None
+    #: The effective query shown on the approval card (None when the original was unchanged).
+    effective_query: str | None = None
 
 
 class WebSearchGate(Protocol):
@@ -83,7 +85,10 @@ class WebSearchGate(Protocol):
 
     async def approve(self, query: WebQuery) -> WebVerdict: ...
 
-    async def results(self, search_id: str, links: Sequence[WebLink]) -> object: ...
+    async def started(self, search_id: str) -> object: ...
+
+    async def results(self, search_id: str, links: Sequence[WebLink], *,
+                      is_error: bool = False) -> object: ...
 
 
 @dataclass(frozen=True)

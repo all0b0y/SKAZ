@@ -416,8 +416,18 @@ def test_instructions_list_the_blocks_and_leave_timelines_to_blocks_not_mermaid(
     for spec in BLOCKS.values():
         assert f"- {spec.name}: {spec.when}" in rules  # decision 3: name + one line, no schemas
     assert "skaz_answer_blocks" in rules and "```skaz-block" in rules and "basis" in rules
-    assert "about 3 blocks" in rules and "otherwise write text" in rules  # decision 8
-    assert '"type"' not in rules  # the full schemas come from the tool only
+    assert "about 3 blocks" in rules  # default cap remains, unless the user asks for more
+    assert "Ordinary short answers" in rules and "stay plain" in rules
+    assert "Do not force a block" in rules and "Default to the matching ready-made block" in rules
+    # The later A1 requirement adds compact data examples, not every full JSON schema.
+    examples = [json.loads(part.split("\n```", 1)[0])
+                for part in rules.split("```skaz-block\n")[1:]]
+    assert {example["type"] for example in examples} == {"compare", "definition", "steps"}
+    assert len(examples) == 3
+    for example in examples:
+        BLOCKS[example["type"]].schema.model_validate(example)
+    assert '"properties"' not in rules and '"$defs"' not in rules  # full schemas stay on demand
+    assert "fictitious ids" in rules and "never copy an example id" in rules
     mermaid = text[text.index("Diagrams:"):text.index("Answer blocks:")]
     assert "mindmap" not in mermaid and "timeline" not in mermaid.split("Pick the type")[1]  # decision 9
     allowed = "flowchart, sequenceDiagram, stateDiagram-v2, erDiagram, classDiagram, C4 or usecase-beta"

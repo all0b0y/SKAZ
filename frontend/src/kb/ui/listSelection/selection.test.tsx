@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MotionProvider } from '../motion';
 import { SelectionBar, SelectionCheckbox, ShortcutsPopover, useListSelection, type ListSelectionOptions } from './index';
@@ -18,10 +18,11 @@ const ROWS = [
 type Handlers = Pick<ListSelectionOptions, 'onOpen' | 'onAttach' | 'onDelete' | 'onMove' | 'onExport'>;
 
 /** A list the way the app wires it: a button per row that opens, the hook on top. */
-function List(props: Handlers & { resetKey?: string; label?: string }) {
+function List(props: Handlers & { resetKey?: string; label?: string; omit?: readonly string[]; busy?: boolean; inertAlpha?: boolean }) {
+  const rows = ROWS.filter((r) => !props.omit?.includes(r.id));
   const sel = useListSelection({
-    ids: ROWS.map((r) => r.id),
-    reasonNotSelectable: (id) => (id === 'c' ? 'Being recorded — can’t be selected yet' : null),
+    ids: rows.map((r) => r.id),
+    reasonNotSelectable: (id) => id === 'c' ? 'Being recorded — can’t be selected yet' : props.busy && id === 'a' ? 'Processing' : null,
     resetKey: props.resetKey,
     ...props,
   });
@@ -29,8 +30,8 @@ function List(props: Handlers & { resetKey?: string; label?: string }) {
     <MotionProvider>
       <div {...sel.listProps}>
         <ul {...sel.gridProps} aria-label={props.label ?? 'Things'}>
-          {ROWS.map((r) => (
-            <li key={r.id} {...sel.rowProps(r.id)}>
+          {rows.map((r) => (
+            <li key={r.id} {...sel.rowProps(r.id)} {...(props.inertAlpha && r.id === 'a' ? { inert: '' } : {})}>
               <div role="gridcell">
                 <button type="button" onClick={() => props.onOpen?.(r.id)}>
                   <SelectionCheckbox checked={sel.selected.has(r.id)} reason={sel.reasonOf(r.id)} />
@@ -40,7 +41,9 @@ function List(props: Handlers & { resetKey?: string; label?: string }) {
             </li>
           ))}
         </ul>
-        <SelectionBar count={sel.selected.size} variant="compact" onClear={sel.clear}
+        <SelectionBar selection={sel} count={sel.selected.size} variant="compact" onClear={sel.clear}
+          sets={[{ id: 'all', label: 'All', ids: ['a', 'b', 'c', 'd'] }, { id: 'ends', label: 'Ends', ids: ['a', 'd'] },
+            { id: 'other', label: 'Not in this list', ids: ['foreign'] }]}
           actions={[{ id: 'move', label: 'Move to…', icon: 'folder', shortcut: '⌘⇧M', onSelect: () => props.onMove?.([...sel.selected]) }]}
           more={[{ id: 'export', label: 'Export .md', icon: 'export', shortcut: '⌘⇧E', onSelect: () => props.onExport?.([...sel.selected]) }]} />
         <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
@@ -54,6 +57,288 @@ const row = (name: string): Element => screen.getByRole('button', { name: new Re
 const selectedIds = () => screen.getAllByRole('row').filter((r) => r.getAttribute('aria-selected') === 'true').map((r) => r.getAttribute('data-sel-id'));
 
 describe('useListSelection (0.3.1 F2/F5)', () => {
+  it('holding a row for 350 ms selects without opening or toggling it again on release', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const onOpen = vi.fn();
+      render(<List onOpen={onOpen} />);
+      const alpha = screen.getByRole('button', { name: /^Alpha/ });
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true, clientX: 30, clientY: 30 });
+      expect(document.querySelector('.kb-selection-hold[data-phase="pending"]')).toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(349); });
+      expect(selectedIds()).toEqual([]);
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(selectedIds()).toEqual(['a']);
+      fireEvent.pointerUp(alpha, { pointerId: 7 });
+      fireEvent.click(alpha, { detail: 1 });
+      expect(selectedIds()).toEqual(['a']);
+      expect(onOpen).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it('Escape after the hold completed does not reopen the row on release, but a new click still opens', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const onOpen = vi.fn();
+      render(<List onOpen={onOpen} />);
+      const alpha = screen.getByRole('button', { name: /^Alpha/ });
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true });
+      act(() => { vi.advanceTimersByTime(350); });
+      expect(selectedIds()).toEqual(['a']);
+      fireEvent.keyDown(alpha, { key: 'Escape' });
+      expect(selectedIds()).toEqual([]);
+      fireEvent.pointerUp(alpha, { pointerId: 7 });
+      fireEvent.click(alpha, { detail: 1 });
+      expect(onOpen).not.toHaveBeenCalled();
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 8, isPrimary: true });
+      fireEvent.pointerUp(alpha, { pointerId: 8 });
+      fireEvent.click(alpha, { detail: 1 });
+      expect(onOpen).toHaveBeenCalledExactlyOnceWith('a');
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['full', 'calm', 'off'])('the completed hold lifts only the actual row in full motion (%s)', (motion) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const before = document.documentElement.dataset.motion;
+    document.documentElement.dataset.motion = motion;
+    try {
+      render(<List />);
+      const alpha = screen.getByRole('button', { name: /^Alpha/ });
+      const element = alpha.closest('[data-sel-id]')!;
+      const animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve() }));
+      Object.defineProperty(element, 'animate', { configurable: true, value: animate });
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true, clientX: 30, clientY: 30 });
+      expect(animate).not.toHaveBeenCalled();
+      act(() => { vi.advanceTimersByTime(350); });
+      expect(selectedIds()).toEqual(['a']);
+      expect(animate).toHaveBeenCalledTimes(motion === 'full' ? 1 : 0);
+      fireEvent.pointerUp(alpha, { pointerId: 7 });
+    } finally {
+      cleanup();
+      if (before === undefined) delete document.documentElement.dataset.motion;
+      else document.documentElement.dataset.motion = before;
+      vi.useRealTimers();
+    }
+  });
+
+  it('after holding, sweeps a reversible range, skips unavailable rows and blocks native drag', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const onOpen = vi.fn();
+      render(<List onOpen={onOpen} />);
+      const alpha = screen.getByRole('button', { name: /^Alpha/ });
+      const bravo = screen.getByRole('button', { name: /^Bravo/ });
+      const delta = screen.getByRole('button', { name: /^Delta/ });
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true, clientX: 30, clientY: 30 });
+      act(() => { vi.advanceTimersByTime(350); });
+      fireEvent.pointerMove(delta, { pointerId: 7, clientX: 30, clientY: 130 });
+      expect(selectedIds()).toEqual(['a', 'b', 'd']);
+      fireEvent.pointerMove(bravo, { pointerId: 7, clientX: 30, clientY: 60 });
+      expect(selectedIds()).toEqual(['a', 'b']);
+      const drag = new Event('dragstart', { bubbles: true, cancelable: true });
+      alpha.dispatchEvent(drag);
+      expect(drag.defaultPrevented).toBe(true);
+      fireEvent.pointerUp(bravo, { pointerId: 7 });
+      fireEvent.click(bravo, { detail: 1 });
+      expect(selectedIds()).toEqual(['a', 'b']);
+      // The next physical click is a new action, not swallowed by the finished gesture.
+      fireEvent.pointerDown(bravo, { button: 0, pointerId: 8, isPrimary: true });
+      fireEvent.pointerUp(bravo, { pointerId: 8 });
+      fireEvent.click(bravo, { detail: 1 });
+      expect(selectedIds()).toEqual(['a']);
+      expect(onOpen).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it('moving before the hold threshold cancels selection and leaves drag-start untouched', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      render(<List />);
+      const alpha = screen.getByRole('button', { name: /^Alpha/ });
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true, clientX: 30, clientY: 30 });
+      act(() => { vi.advanceTimersByTime(100); });
+      fireEvent.pointerMove(alpha, { pointerId: 7, clientX: 40, clientY: 30 });
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(selectedIds()).toEqual([]);
+      const drag = new Event('dragstart', { bubbles: true, cancelable: true });
+      alpha.dispatchEvent(drag);
+      expect(drag.defaultPrevented).toBe(false);
+      fireEvent.pointerUp(alpha, { pointerId: 7 });
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['pointercancel', 'blur', 'Escape', 'reset', 'unmount', 'foreign-pointercancel'])(
+    'pending hold respects cancellation and pointer identity (%s)', (how) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const onOpen = vi.fn();
+        const view = render(<List resetKey="one" onOpen={onOpen} />);
+        const alpha = screen.getByRole('button', { name: /^Alpha/ });
+        fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true, clientX: 30, clientY: 30 });
+        act(() => { vi.advanceTimersByTime(100); });
+        if (how === 'pointercancel') fireEvent.pointerCancel(alpha, { pointerId: 7 });
+        if (how === 'foreign-pointercancel') fireEvent.pointerCancel(alpha, { pointerId: 8 });
+        if (how === 'blur') fireEvent(window, new Event('blur'));
+        if (how === 'Escape') fireEvent.keyDown(document.body, { key: 'Escape' });
+        if (how === 'reset') view.rerender(<List resetKey="two" onOpen={onOpen} />);
+        if (how === 'unmount') view.unmount();
+        act(() => { vi.advanceTimersByTime(400); });
+        if (how === 'unmount') expect(vi.getTimerCount()).toBe(0);
+        else {
+          expect(selectedIds()).toEqual(how === 'foreign-pointercancel' ? ['a'] : []);
+          fireEvent.pointerUp(alpha, { pointerId: 7 });
+          fireEvent.click(alpha, { detail: 1 });
+          expect(onOpen).not.toHaveBeenCalled();
+        }
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(['removed', 'busy', 'inert'])('data changes cancel a pending hold immediately (%s)', (how) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const onOpen = vi.fn();
+      const view = render(<List onOpen={onOpen} />);
+      const alpha = screen.getByRole('button', { name: /^Alpha/ });
+      fireEvent.pointerDown(alpha, { button: 0, pointerId: 7, isPrimary: true });
+      act(() => { vi.advanceTimersByTime(100); });
+      view.rerender(<List onOpen={onOpen} omit={how === 'removed' ? ['a'] : []}
+        busy={how === 'busy'} inertAlpha={how === 'inert'} />);
+      expect(document.querySelector('.kb-selection-hold[data-phase="pending"]')).toBeNull();
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(selectedIds()).toEqual([]);
+      if (how !== 'removed') {
+        fireEvent.pointerUp(alpha, { pointerId: 7 });
+        fireEvent.click(alpha, { detail: 1 });
+        expect(onOpen).not.toHaveBeenCalled();
+      }
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it('Choose enters selection with zero targets, disables actions and never opens the first clicked row', async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(<List onOpen={onOpen} />);
+    await user.click(screen.getByRole('button', { name: 'Select items' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Choose…' }));
+    const bar = screen.getByRole('toolbar', { name: 'Choose items' });
+    expect(within(bar).getByRole('button', { name: 'Move to…' })).toBeDisabled();
+    expect(selectedIds()).toEqual([]);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Choose items' })).toBeNull());
+    await user.click(screen.getByRole('button', { name: 'Select items' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Choose…' }));
+    await user.click(screen.getByRole('button', { name: /^Alpha/ }));
+    expect(selectedIds()).toEqual(['a']);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('shows shortcut help for the first three selections, without removing keyboard selection afterwards', async () => {
+    const user = userEvent.setup();
+    render(<List />);
+    for (let use = 1; use <= 4; use++) {
+      await user.click(screen.getByRole('button', { name: 'Select items' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Choose…' }));
+      const bar = screen.getByRole('toolbar', { name: 'Choose items' });
+      const hint = within(bar).queryByText(/range/);
+      if (use <= 3) expect(hint).toBeInTheDocument();
+      else expect(hint).toBeNull();
+      if (use === 3) expect(hint).toHaveAttribute('data-last-use', 'true');
+      if (use === 4) {
+        await user.keyboard(' ');
+        expect(selectedIds()).toEqual(['a']);
+      }
+      await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+    }
+  });
+
+  it('smart-set menu replaces; chips widen or narrow without unavailable or foreign IDs', async () => {
+    const user = userEvent.setup();
+    render(<List />);
+    await user.click(screen.getByRole('button', { name: 'Select items' }));
+    await user.click(screen.getByRole('menuitem', { name: /All/ }));
+    expect(selectedIds()).toEqual(['a', 'b', 'd']);
+    const bar = screen.getByRole('toolbar', { name: '3 selected' });
+    expect(within(bar).getByRole('button', { name: 'Ends' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(bar).getByRole('button', { name: 'Not in this list' })).toBeDisabled();
+    await user.click(within(bar).getByRole('button', { name: 'Ends' }));
+    expect(selectedIds()).toEqual(['b']);
+    await user.click(screen.getByRole('button', { name: 'Ends' }));
+    expect(selectedIds()).toEqual(['a', 'b', 'd']);
+  });
+
+  it('removes targets whose eligibility changes without changing their IDs', () => {
+    const { result, rerender } = renderHook(({ busy }) => useListSelection({ ids: ['a', 'b'],
+      reasonNotSelectable: (id) => busy && id === 'a' ? 'Processing' : null }), { initialProps: { busy: false } });
+    act(() => result.current.toggle('a'));
+    expect(result.current.targets()).toEqual(['a']);
+    rerender({ busy: true });
+    expect(result.current.available).toEqual(['b']);
+    expect(result.current.ordered).toEqual([]);
+    expect(result.current.targets()).toEqual([]);
+  });
+
+  it('choosing a set replaces existing targets and keeps the reference fixed until cleared', () => {
+    const { result } = renderHook(() => useListSelection({ ids: ['a', 'b', 'c'],
+      reasonNotSelectable: (id) => id === 'c' ? 'Unavailable' : null }));
+    act(() => result.current.choose(['a', 'a', 'c', 'foreign']));
+    expect(result.current.ordered).toEqual(['a']);
+    expect(result.current.available).toEqual(['a', 'b']);
+    const reference = result.current.reference;
+    act(() => result.current.toggle('b'));
+    act(() => result.current.choose(['b']));
+    expect(result.current.ordered).toEqual(['b']);
+    expect(result.current.reference).toBe(reference);
+    act(() => result.current.clear());
+    expect(result.current.selecting).toBe(false);
+    expect(result.current.reference).toBeNull();
+  });
+
+  it.each([false, true])('rubber band from empty space is reversible and respects add mode (%s)', (add) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      render(<List />);
+      const grid = screen.getByRole('grid', { name: 'Things' });
+      const list = grid.parentElement!;
+      vi.spyOn(list, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 240, 220));
+      for (const [i, r] of within(grid).getAllByRole('row').entries()) {
+        vi.spyOn(r, 'getBoundingClientRect').mockReturnValue(new DOMRect(10, 20 + i * 30, 210, 25));
+      }
+      if (add) fireEvent.click(screen.getByRole('button', { name: /^Alpha/ }), { metaKey: true });
+      fireEvent.pointerDown(list, { button: 0, isPrimary: true, pointerId: 17, clientX: 230, clientY: 150, metaKey: add });
+      fireEvent.pointerMove(list, { pointerId: 17, clientX: 0, clientY: 25 });
+      expect(document.querySelector('.kb-selection-band')).toBeInTheDocument();
+      expect(selectedIds()).toEqual(['a', 'b', 'd']);
+      fireEvent.pointerMove(list, { pointerId: 17, clientX: 0, clientY: 100 });
+      expect(selectedIds()).toEqual(add ? ['a', 'd'] : ['d']);
+      fireEvent.pointerUp(list, { pointerId: 17 });
+      expect(document.querySelector('.kb-selection-band')).toBeNull();
+      expect(selectedIds()).toEqual(add ? ['a', 'd'] : ['d']);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it('a plain click keeps opening; ⌘-click and the box select without opening; then a plain click toggles', async () => {
     const user = userEvent.setup();
     const onOpen = vi.fn();
@@ -78,6 +363,19 @@ describe('useListSelection (0.3.1 F2/F5)', () => {
     expect(screen.getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
   });
 
+  it('right-click selects even without a caller menu, preserves a selected group and skips unavailable rows', () => {
+    render(<List />);
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Alpha/ }));
+    expect(selectedIds()).toEqual(['a']);
+    fireEvent.click(screen.getByRole('button', { name: /^Bravo/ }), { metaKey: true });
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Alpha/ }));
+    expect(selectedIds()).toEqual(['a', 'b']);
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Delta/ }));
+    expect(selectedIds()).toEqual(['d']);
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Charlie/ }));
+    expect(selectedIds()).toEqual(['d']);
+  });
+
   it('⇧-click selects a range and skips a row that can’t be selected; that row shows why', async () => {
     const user = userEvent.setup();
     render(<List />);
@@ -99,7 +397,7 @@ describe('useListSelection (0.3.1 F2/F5)', () => {
     const user = userEvent.setup();
     const h = { onOpen: vi.fn(), onAttach: vi.fn(), onDelete: vi.fn(), onMove: vi.fn(), onExport: vi.fn() };
     render(<List {...h} />);
-    screen.getByRole('button', { name: /^Alpha/ }).focus();
+    act(() => screen.getByRole('button', { name: /^Alpha/ }).focus());
     await user.keyboard('{ArrowDown}');
     expect(screen.getByRole('button', { name: /^Bravo/ })).toHaveFocus();
     await user.keyboard(' ');
@@ -134,7 +432,7 @@ describe('useListSelection (0.3.1 F2/F5)', () => {
     const onKey = vi.fn();
     window.addEventListener('keydown', onKey);
     render(<List onDelete={onDelete} />);
-    screen.getByRole('button', { name: /^Bravo/ }).focus();
+    act(() => screen.getByRole('button', { name: /^Bravo/ }).focus());
     await user.keyboard('{Meta>}{Backspace}{/Meta}');
     expect(onDelete).toHaveBeenCalledWith(['b']);
     await user.keyboard('{Meta>}k{/Meta}{Meta>},{/Meta}');

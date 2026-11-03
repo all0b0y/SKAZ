@@ -36,7 +36,11 @@ describe('agent updates store (U1)', () => {
     await Promise.resolve();
     await new Promise((r) => setTimeout(r, 0));
     expect(agents.getState().installs.codex?.task.id).toBe('t9');
-    expect(calls.filter((c) => c === 'GET /kb/agents/install/{task_id}')).toHaveLength(1);
+    // First snapshot, then one cursor poll owned by the store (no mounted card is needed).
+    expect(calls.filter((c) => c === 'GET /kb/agents/install/{task_id}')).toHaveLength(2);
+    await updates.getState().load();
+    expect(calls.filter((c) => c === 'GET /kb/agents/install/{task_id}')).toHaveLength(2);
+    agents.getState().stopMonitoring();
   });
 
   it('marking seen is sent only when something is unseen', async () => {

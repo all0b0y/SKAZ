@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from .schemas_agents import KbEngineId
 
 KbWebSearchStatus = Literal["pending", "allowed", "denied", "cancelled"]
+KbWebExecution = Literal["running", "done", "error", "stopped", "unknown"]
 
 
 class KbWebLink(BaseModel):
@@ -65,6 +66,13 @@ class KbWebSearchPart(BaseModel):
     rules: KbRulesInForce | None = None
     #: N7: links removed by the rules (only counted; never shown or given to the agent).
     hidden: list[KbHiddenSite] = []
+    #: N9: observed execution, not permission. None means not handed to an executor yet.
+    execution: KbWebExecution | None = None
+    started_at: str | None = None
+    duration_ms: int | None = None
+    execution_error: str | None = None
+    #: Native provider call identity for message-local tool/card matching; absent for SKAZ tools/legacy.
+    call_id: str | None = None
 
 
 class KbWebSearchDecide(BaseModel):

@@ -29,16 +29,22 @@ def offered(turn: Any) -> set[str]:
     return {spec.name for spec in turn.tools or ()}
 
 
-@pytest.mark.parametrize("rules", [{"never": ["pinterest.com"]},
-                                   {"only_on": True, "only": ["arxiv.org", "semanticscholar.org"]}])
+@pytest.mark.parametrize(("rules", "expected_query"), [
+    ({"never": ["pinterest.com"]}, "(entropy definition) -site:pinterest.com"),
+    ({"only_on": True, "only": ["arxiv.org", "semanticscholar.org"]},
+     "(entropy definition) (site:arxiv.org OR site:semanticscholar.org)"),
+    ({"beta": False, "never": ["pinterest.com"]}, "(entropy definition) -site:pinterest.com"),
+])
 async def test_hard_rules_move_a_claude_chat_to_skaz_web_search_with_links_screened(
-        env: Env, rules: dict[str, Any]) -> None:
+        env: Env, rules: dict[str, Any], expected_query: str) -> None:
     await set_settings(env, **rules)
     env.claude_search.links = SEARCH_LINKS
     chat_id = await env.chat("claude_code")
     await env.send(chat_id)
     part = await env.pending(chat_id)
     assert part["searcher"] == "claude_code" and part["rules"] is not None  # the same card, via SKAZ
+    assert part["query"] == expected_query  # the effective restrictions are visible BEFORE approval
+    assert not env.claude_search.calls
     await env.decide(part["id"], "allow")
     await finished(env.runtime.kb_chats)
     (turn,) = env.agents["claude_code"].turns
@@ -47,7 +53,7 @@ async def test_hard_rules_move_a_claude_chat_to_skaz_web_search_with_links_scree
     data = payload(env.agents["claude_code"].outputs[0])
     urls = [link["url"] for link in data["links"]]
     assert all("pinterest" not in url for url in urls) and data["hidden_by_rules"] >= 2
-    assert env.claude_search.calls == [("claude_code", "entropy definition")]
+    assert env.claude_search.calls == [("claude_code", expected_query)]
 
 
 async def test_a_chat_level_never_site_moves_the_claude_chat_too(env: Env) -> None:
@@ -68,6 +74,19 @@ async def test_without_hard_rules_claude_keeps_its_own_held_websearch(
         env: Env, rules: dict[str, Any]) -> None:
     if rules:
         await set_settings(env, **rules)
+    env.agents["claude_code"].queries = []
+    chat_id = await env.chat("claude_code")
+    await env.send(chat_id, "Привет")
+    await finished(env.runtime.kb_chats)
+    (turn,) = env.agents["claude_code"].turns
+    assert WEB_TOOL not in offered(turn) and turn.web is not None
+
+
+async def test_beta_off_pauses_saved_only_for_claude_without_deleting_the_list(env: Env) -> None:
+    await set_settings(env, only_on=True, only=["arxiv.org"], prefer=["acm.org"])
+    disabled = await env.client.put("/kb/settings/search", json={"beta": False})
+    assert disabled.status_code == 200
+    assert disabled.json()["only"] == ["arxiv.org"]
     env.agents["claude_code"].queries = []
     chat_id = await env.chat("claude_code")
     await env.send(chat_id, "Привет")

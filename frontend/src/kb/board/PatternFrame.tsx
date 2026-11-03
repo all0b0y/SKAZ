@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { KbServicesProvider, type KbServices } from '../state/context';
 import { MotionProvider } from '../ui/motion';
+import { SelectionHeader, SelectionHeaderProvider } from '../ui/listSelection';
 import { boardWorld } from '../test/boardWorlds';
 import { boardServices, lookPrefs, markReady, settle, useOnce, useReportHeight, warmUp } from './live';
 import { patternById, type BoardPattern, type PatternCell } from './patterns';
@@ -29,8 +30,13 @@ function Cell({ pattern, cell, look, onDone }: { pattern: BoardPattern; cell: Pa
   const bridged = cell.pane === 'side' && cell.sheet === true;
   const stage = (
     <div ref={root} className={`kb-board__pstage${cell.pane ? ` kb-board__pane kb-board__pane--${cell.pane}` : ''}${bridged ? ' kb-board__pane--bridged' : ''}`}
-      style={{ width, height: cell.height }}>
-      {ready && <Scope services={live.services}>{cell.render()}</Scope>}
+      style={{ width, height: cell.height }} data-selection-surface={cell.header ? '' : undefined}>
+      {ready && <Scope services={live.services}>{cell.header ? (
+        <SelectionHeaderProvider>
+          <SelectionHeader className="kb-head kb-head--side"><h2 className="kb-side__title">{cell.header}</h2></SelectionHeader>
+          {cell.render()}
+        </SelectionHeaderProvider>
+      ) : cell.render()}</Scope>}
     </div>
   );
   return (

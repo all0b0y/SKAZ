@@ -52,6 +52,9 @@ describe('layer 3 · states are the real ones', () => {
     expect(within(states!).getAllByTestId('chat-waiting').length).toBeGreaterThan(0);
     expect(states!.querySelectorAll('[aria-selected="true"]')).toHaveLength(0);
     await waitFor(() => expect(selected!.querySelectorAll('[aria-selected="true"]')).toHaveLength(2));
+    const bar = within(selected!).getByRole('toolbar', { name: '2 selected' });
+    expect(bar.closest('header')).not.toBeNull();
+    expect(within(states!).getByRole('button', { name: 'Select items' }).closest('header')).not.toBeNull();
   }, 15_000);
 
   it('chat rows: the side list sits next to a centre sheet, so the open chat’s bridge meets it (B1)', async () => {

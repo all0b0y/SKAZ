@@ -107,7 +107,7 @@ describe('All materials: the cards are spotlight cards, the table rows are not',
     const { user, all } = await allMaterialsCards(motion);
     expect(all.querySelectorAll('.kb-spot')).toHaveLength(0); // table: rows only
     await user.click(within(all).getByRole('radio', { name: 'Cards' }));
-    const grid = within(all).getByRole('list', { name: 'Materials' });
+    const grid = within(all).getByRole('grid', { name: 'Materials' });
     expect(grid).toHaveAttribute('data-spotlight', mode);
     const cards = grid.querySelectorAll('.kb-amc');
     expect(cards.length).toBeGreaterThan(0);
@@ -117,7 +117,7 @@ describe('All materials: the cards are spotlight cards, the table rows are not',
   it('in the grid a mouse lights the card under it; a touch or a pen does not', async () => {
     const { user, all } = await allMaterialsCards('calm');
     await user.click(within(all).getByRole('radio', { name: 'Cards' }));
-    const [first, second] = [...within(all).getByRole('list', { name: 'Materials' }).querySelectorAll<HTMLElement>('.kb-amc')];
+    const [first, second] = [...within(all).getByRole('grid', { name: 'Materials' }).querySelectorAll<HTMLElement>('.kb-amc')];
     fireEvent.pointerOver(first!, { pointerType: 'touch' });
     fireEvent.pointerOver(second!, { pointerType: 'pen' });
     expect(first).not.toHaveAttribute(SPOT_LIT);

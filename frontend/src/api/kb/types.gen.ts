@@ -330,6 +330,7 @@ export interface KbChatCreate {
   model?: string | null;
   effort?: string | null;
   recording_material_id?: string | null;
+  search_rules?: KbChatSearchRulesUpdate | null;
 }
 
 /** ``delta`` appends ``text`` to the message's last text part; ``part`` appends a new part; ``part_update`` replaces the message's part with the same ``type`` and ``id`` (permission, question, study); ``removed`` takes the message out of the chat (an edited question's later messages). */
@@ -375,7 +376,7 @@ export interface KbChatPatch {
 
 export interface KbChatSearchRules {
   settings: KbSearchSettings;
-  web: KbSearchSettings | null;
+  web: KbWebRules | null;
   active: KbRulesInForce;
   sources_only: boolean;
   sources: KbSourceRef[];
@@ -387,7 +388,7 @@ export interface KbChatSearchRules {
 }
 
 export interface KbChatSearchRulesUpdate {
-  web?: KbSearchSettings | null;
+  web?: KbWebRules | null;
   sources_only?: boolean;
   sources?: string[];
   excluded?: string[];
@@ -863,6 +864,11 @@ export interface KbInstallLine {
   at: string;
 }
 
+export interface KbInstallStage {
+  label: string;
+  state: "pending" | "running" | "done" | "error" | "stopped";
+}
+
 export interface KbInstallStart {
   action?: "install" | "update" | "first_check" | "repair";
 }
@@ -880,6 +886,8 @@ export interface KbInstallTask {
   install: KbAgentInstallInfo;
   started_at: string;
   finished_at: string | null;
+  stages?: KbInstallStage[];
+  manual_command?: string | null;
 }
 
 export interface KbJob {
@@ -945,6 +953,11 @@ export interface KbKeyUpdate {
 
 export interface KbKeys {
   providers: KbKeyStatus[];
+}
+
+/** Informational declaration, no approval, execution state or invented duration. */
+export interface KbKnowledgePart {
+  type: "knowledge";
 }
 
 export interface KbLibrary {
@@ -1225,7 +1238,7 @@ export interface KbMessageInput {
   selection?: KbSelection | null;
 }
 
-export type KbMessagePart = KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
+export type KbMessagePart = KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";
@@ -1580,12 +1593,13 @@ export interface KbSearchResults {
   degraded: boolean;
 }
 
-/** Web rules: Settings → Search, or one chat's own lists (``never`` = the chat's additions). */
+/** Global web rules and the feature flag for Only/Prefer (off by default). */
 export interface KbSearchSettings {
   never?: string[];
   only_on?: boolean;
   only?: string[];
   prefer?: string[];
+  beta?: boolean;
 }
 
 export interface KbSelectedItem {
@@ -1999,6 +2013,10 @@ export interface KbToolPart {
   name: string;
   label: string;
   target?: KbToolTarget | null;
+  call_id?: string | null;
+  status?: "running" | "done" | "error" | "stopped" | "unknown";
+  started_at?: string | null;
+  duration_ms?: number | null;
 }
 
 export interface KbToolTarget {
@@ -2037,6 +2055,14 @@ export interface KbWebLink {
   site: string;
 }
 
+/** Web lists, global or a chat's own (never = that chat's additions). */
+export interface KbWebRules {
+  never?: string[];
+  only_on?: boolean;
+  only?: string[];
+  prefer?: string[];
+}
+
 export interface KbWebSearchDecide {
   decision: "allow" | "allow_chat" | "deny";
 }
@@ -2056,6 +2082,11 @@ export interface KbWebSearchPart {
   searcher?: "codex" | "claude_code" | "hermes" | "opencode" | null;
   rules?: KbRulesInForce | null;
   hidden?: KbHiddenSite[];
+  execution?: "running" | "done" | "error" | "stopped" | "unknown" | null;
+  started_at?: string | null;
+  duration_ms?: number | null;
+  execution_error?: string | null;
+  call_id?: string | null;
 }
 
 export interface KbWikiChoice {

@@ -164,17 +164,19 @@ function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection;
 }
 
 /** Pages that can be selected several at once (0.3.1 F4): compact bar, ⌘/ keys, drag to the chat field. */
-function PageList({ pages, labelledBy, resetKey }: { pages: KbPageSummary[]; labelledBy: string; resetKey?: unknown }) {
-  const openDocument = useUi((s) => s.openDocument);
-  const { sel, overlays, dragProps } = usePageSelection({ pages, resetKey, onOpen: (id) => openDocument({ type: 'page', id }) });
+type PageSelection = Pick<ReturnType<typeof usePageSelection>, 'sel' | 'dragProps'>;
+
+function PageList({ pages, labelledBy, sel, dragProps }: {
+  pages: KbPageSummary[]; labelledBy: string;
+} & PageSelection) {
+  const host = useRef<HTMLDivElement | null>(null);
   const openId = useOpenPageId();
   return (
-    <div className="kb-sellist kb-tabhost" {...sel.listProps}>
-      <ActiveTab host={sel.listRef} activeKey={openId} variant={PAGE_TAB} />
+    <div className="kb-sellist kb-tabhost" ref={host}>
+      <ActiveTab host={host} activeKey={openId} variant={PAGE_TAB} />
       <ul className="kb-list" {...sel.gridProps} aria-labelledby={labelledBy}>
         {pages.map((p) => <PageRow key={p.id} page={p} sel={sel} drag={dragProps(p)} />)}
       </ul>
-      {overlays}
     </div>
   );
 }
@@ -186,7 +188,9 @@ function PageList({ pages, labelledBy, resetKey }: { pages: KbPageSummary[]; lab
  * pages says how pages of its kind appear — unless the whole wiki is empty (`wikiEmpty`): then the
  * panel's one «The wiki is empty» says it (FIX1 R6).
  */
-function KindSection({ kind, pages, wikiEmpty }: { kind: WikiKind; pages: KbPageSummary[]; wikiEmpty: boolean }) {
+function KindSection({ kind, pages, wikiEmpty, sel, dragProps }: {
+  kind: WikiKind; pages: KbPageSummary[]; wikiEmpty: boolean;
+} & PageSelection) {
   const { prefs } = useServices();
   const open = usePrefs((s) => s.wikiOpen[kind]);
   const labelId = `kb-wiki-kind-${kind}`;
@@ -197,7 +201,7 @@ function KindSection({ kind, pages, wikiEmpty }: { kind: WikiKind; pages: KbPage
     // be noise (FIX1 R8); the header button and the grid (aria-labelledby) carry the kind's name.
     <div className="kb-wfold" data-kind={kind}>
       <h3 className="kb-wfold__head" data-entrance="">
-        <button type="button" className="kb-row kb-wfold__toggle" aria-expanded={open} aria-controls={bodyId}
+        <button type="button" className="kb-row kb-wfold__toggle" data-sel-keep="" aria-expanded={open} aria-controls={bodyId}
           onClick={() => prefs.getState().setWikiOpen(kind, !open)}>
           <Icon name="chevronRight" size={14} className={`kb-wfold__chev${open ? ' is-open' : ''}`} />
           <span className="kb-row__text kb-wfold__label" id={labelId}>{label}</span>
@@ -209,7 +213,7 @@ function KindSection({ kind, pages, wikiEmpty }: { kind: WikiKind; pages: KbPage
           {pages.length === 0 ? (
             !wikiEmpty && <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
           ) : (
-            <PageList pages={pages} labelledBy={labelId} />
+            <PageList pages={pages} labelledBy={labelId} sel={sel} dragProps={dragProps} />
           )}
         </div>
       </div>
@@ -222,6 +226,8 @@ const byTitle = (a: KbPageSummary, b: KbPageSummary) => a.title.localeCompare(b.
 /** Side panel "Wiki" (v39): search, kind sections that fold in place, the graph, Index / Log, recently opened pages. */
 export function WikiSide() {
   const { client } = useServices();
+  const openDocument = useUi((s) => s.openDocument);
+  const openKinds = usePrefs((s) => s.wikiOpen);
   const openGraph = useUi((s) => s.openGraph);
   const graphOpen = useUi((s) => s.right?.kind === 'graph');
   const recent = useUi((s) => s.recentPages);
@@ -234,9 +240,17 @@ export function WikiSide() {
   useEffect(() => { if (seen.current !== revision) { seen.current = revision; reload(); } }, [revision, reload]);
   const pages = state.value ?? [];
   const byId = new Map(pages.map((p) => [p.id, p]));
-  const host = useRef<HTMLDivElement | null>(null);
+  const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
+  const visible = [...WIKI_KINDS.flatMap((kind) => openKinds[kind]
+    ? pages.filter((p) => p.kind === kind).sort(byTitle) : []), ...recentPages];
+  const unique = [...new Map(visible.map((p) => [p.id, p])).values()];
+  const sets = [{ id: 'all', label: 'All', ids: unique.map((p) => p.id) },
+    ...WIKI_KINDS.filter((kind) => openKinds[kind]).map((kind) => ({ id: kind, label: LABEL[kind],
+      ids: unique.filter((p) => p.kind === kind).map((p) => p.id) }))];
+  const { sel, overlays, dragProps } = usePageSelection({ pages: unique, sets,
+    onOpen: (id) => openDocument({ type: 'page', id }) });
   // AnimatedList (stage 6): the rows enter once, on the first load; a page added later fades in alone.
-  useListEntrance('wiki', host, state.value !== null, pages.map((p) => p.id));
+  useListEntrance('wiki', sel.listRef, state.value !== null, pages.map((p) => p.id));
 
   if (state.load === 'loading' && !state.value) return <div className="kb-side__wait"><Spinner label="Reading the wiki" /></div>;
   if (state.load === 'error' && !state.value) {
@@ -247,16 +261,16 @@ export function WikiSide() {
     );
   }
 
-  const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
   return (
-    <div className="kb-side__scroll" ref={host}>
+    <div className="kb-side__scroll" {...sel.listProps}>
       <WikiSearch />
       <div className="kb-subhead kb-subhead--row" data-entrance="">
         <h3 className="kb-subhead__text" id="kb-wiki-sections">Sections</h3>
         <WikiTermsButton size="sm" placement="bottom-start" />
       </div>
       {WIKI_KINDS.map((kind) => (
-        <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)} wikiEmpty={pages.length === 0} />
+        <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)}
+          wikiEmpty={pages.length === 0} sel={sel} dragProps={dragProps} />
       ))}
       <ul className="kb-list kb-wiki-more" aria-label="More of the wiki">
         <li data-entrance="">
@@ -278,9 +292,10 @@ export function WikiSide() {
       {recentPages.length > 0 && (
         <>
           <h3 className="kb-subhead" id="kb-wiki-recent" data-entrance="">Recently opened</h3>
-          <PageList pages={recentPages} labelledBy="kb-wiki-recent" />
+          <PageList pages={recentPages} labelledBy="kb-wiki-recent" sel={sel} dragProps={dragProps} />
         </>
       )}
+      {overlays}
       {pages.length === 0 && (
         <EmptyState icon="wiki" title="The wiki is empty" compact art={<HalftoneArt id="wiki" compact />}>
           Concepts, notes and analyses appear as materials are added to the wiki.

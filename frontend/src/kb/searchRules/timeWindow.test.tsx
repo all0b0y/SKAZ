@@ -12,7 +12,7 @@ import { splitWindow } from './TimeWindow';
 
 const search: KbWebSearchPart = {
   type: 'web_search', id: 'web-9', engine: 'codex', searcher: 'codex', query: 'wiki staleness detection 2025 2026', allowed_domains: [], blocked_domains: [],
-  status: 'allowed', auto: false, reason: null, rules: null, hidden: [],
+  status: 'allowed', execution: 'done', auto: false, reason: null, rules: null, hidden: [],
   links: [{ title: 'Detecting outdated statements', url: 'https://aclanthology.org/x', site: 'aclanthology.org' }],
 };
 

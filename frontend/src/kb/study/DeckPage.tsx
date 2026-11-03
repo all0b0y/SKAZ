@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import type { KbPage } from '../../api/kb/types.gen';
 import { Banner, Button, Icon, IconButton, Spinner } from '../ui';
-import { SelectionCheckbox, useListSelection } from '../ui/listSelection';
+import { SelectionCheckbox, SelectionFeedback, useListSelection } from '../ui/listSelection';
 import { errorText } from '../api/client';
 import { useServices } from '../state/context';
 import { useAskAbout } from '../document/parts';
@@ -103,7 +103,7 @@ export function DeckPage({ page }: { page: KbPage }) {
             {card.unclear && <span className="kb-deck__unc" title="Marked Unclear"><Icon name="help" size={13} label="Unclear" /></span>}
             <span role="gridcell">
               {card.suspended ? (
-                <span className="kb-deck__hidden"><Icon name="hidden" size={13} />Not shown
+                <span className="kb-deck__hidden" data-sel-ignore><Icon name="hidden" size={13} />Not shown
                   <Button size="sm" onClick={() => void mark([card.id], 'unhide')}>Show again</Button></span>
               ) : (
                 <>
@@ -122,6 +122,7 @@ export function DeckPage({ page }: { page: KbPage }) {
           </li>
         ))}
       </ul>
+      <SelectionFeedback feedback={sel.feedback} />
     </div>
   );
 }

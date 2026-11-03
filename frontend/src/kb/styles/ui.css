@@ -277,23 +277,21 @@ button.kb-chip:active { background: var(--kb-accent-press); }
 .kb-status--warn, .kb-warn-text { color: var(--kb-warn); font-weight: 600; }
 .kb-status--err { color: var(--kb-danger); }
 
+/* N9 work indicators: same FxCanvas runtime, no CSS spin or simulated percentage. */
+.kb-stipwork { position: relative; display: inline-block; width: 16px; height: 16px; flex: none; vertical-align: middle; pointer-events: none; }
+.kb-stipwork--globe { width: 24px; height: 24px; }
+.kb-stipwork__canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.kb-btn--fill .kb-stipwork, .kb-spinner--onfill { --kb-text: var(--kb-on-fill); --kb-fx-accent: var(--kb-on-fill); }
+
 /* ---- Spinner (real waits only) ---- */
 .kb-spinner-wrap { display: inline-flex; align-items: center; justify-content: center; }
 .kb-spinner {
   display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid var(--kb-accent);
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: kb-spin 0.9s linear infinite;
   flex: none;
 }
 .kb-spinner-wrap--sm .kb-spinner, .kb-spinner--inline { width: 12px; height: 12px; }
-@keyframes kb-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .kb-spinner { animation-duration: 2.4s; }
-}
 
 /* SKAZ is closing (BackendGate, phase `quitting`): one spinner in the middle of the window. */
 .kb-quitting {
@@ -304,7 +302,7 @@ button.kb-chip:active { background: var(--kb-accent-press); }
   justify-content: center;
   background: var(--kb-bg);
 }
-.kb-quitting .kb-spinner { width: 28px; height: 28px; border-width: 3px; }
+.kb-quitting .kb-spinner { width: 28px; height: 28px; }
 
 /* ---- Empty state ---- */
 .kb-empty {

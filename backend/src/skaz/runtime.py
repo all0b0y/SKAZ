@@ -34,6 +34,7 @@ from .knowledge.permissions.search_rules import SearchRulesStore
 from .knowledge.permissions.source_scope import ChatSourceScopes
 from .knowledge.permissions.store import ControlStore
 from .knowledge.permissions.waits import RunWaits
+from .knowledge.permissions.web_read import WebPageReader
 from .knowledge.permissions.web_search import WebSearchBroker, WebSearchStore
 from .knowledge.permissions.web_tool import web_search_tool
 from .knowledge.permissions.wiki_tools import WikiEditor
@@ -159,6 +160,12 @@ class Runtime:
                                              {"codex": CodexSearch(self.codex_connection),
                                               "claude_code": EngineSearch()})
         self.kb_tools.add((web_search_tool(self.kb_web, self.kb_chats.run_ref, self.kb_web_search),))
+        #: Only pages already returned by an approved search of this chat; no native WebFetch.
+        self.kb_web_reader = WebPageReader(
+            self.kb_web.store, self.kb_search_rules, self.kb_chats.run_ref,
+            cache_dir=config.data_dir / "cache" / "web",
+        )
+        self.kb_tools.add((self.kb_web_reader.tool(),))
         #: P2: «Fix in wiki» — the agent's checked proposal after «That’s wrong», written only on the
         #: user's click, as the user's own edit.
         self.kb_wiki_fixes = WikiFixes(self.kb, self.kb_chats, lambda: self.kb_wiki)
@@ -260,6 +267,7 @@ class Runtime:
         if self._close_started:
             return
         self._close_started = True
+        self.kb_web_reader.close()
         self.local_models.close()
         self.kb_decisions.kill_now()
         self.kb.close()

@@ -4,7 +4,7 @@ import { useServices } from '../state/context';
 import { useExportItems } from '../document/exportItems';
 import {
   BatchDeleteDialog, SelectionBar, ShortcutsPopover, countOf, namesList, resultText, useListSelection,
-  type BatchResult, type ListSelection, type SelectionAction,
+  type BatchResult, type ListSelection, type SelectionAction, type SelectionSet,
 } from '../ui/listSelection';
 
 /** One chat action as a batch step: ActionResult → throw, so `runOneByOne`-style results keep the reason. */
@@ -91,11 +91,19 @@ export function useChatSelection({ chats: list, onOpen, variant = 'compact', res
     { id: 'save', label: 'Save to wiki as analyses', icon: 'saveWiki', onSelect: () => void save(ids()) },
   ];
 
+  const cutoff = Date.now() - 30 * 86_400_000;
+  const sets: SelectionSet[] = [
+    { id: 'all', label: 'All', ids: list.map((c) => c.id) },
+    { id: 'unread', label: 'Unread', ids: list.filter((c) => c.unread).map((c) => c.id) },
+    { id: 'pinned', label: 'Pinned', ids: list.filter((c) => c.pinned).map((c) => c.id) },
+    { id: 'old', label: 'Older than 30 days', shortLabel: '30+ days',
+      ids: list.filter((c) => Date.parse(c.updated_at) < cutoff).map((c) => c.id) },
+  ];
   const doomed = pick(deleteIds ?? []);
   const answering = doomed.filter((c) => c.state === 'answering');
   const overlays = (
     <>
-      <SelectionBar count={sel.selected.size} variant={variant} actions={actions} more={more} onClear={sel.clear} />
+      <SelectionBar selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={actions} more={more} onClear={sel.clear} />
       {exp.dialog}
       <ShortcutsPopover open={sel.shortcutsOpen} onClose={() => sel.setShortcutsOpen(false)} anchorRef={sel.listRef}
         has={{ delete: true, export: Boolean(exportMd) }} />

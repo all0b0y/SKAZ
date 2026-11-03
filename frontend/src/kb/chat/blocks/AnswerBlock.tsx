@@ -37,7 +37,7 @@ function ReadyBlock({ part, block }: { part: KbAnswerBlockPart; block: BlockData
       data-block-id={part.id} data-kind={block.kind}>
       <BlockScopeProvider value={scope}>
         {block.title && <div className="kb-blk__title">{block.title}</div>}
-        <div className="kb-blk__body"><View block={block} /></div>
+        <div className="kb-blk__body"><View block={block} blockId={part.id} /></div>
         <div className="kb-blk__foot" role="group" aria-label="Sources of this block">
           {chips.map((chip) => (
             <SourceChip key={chip.key} chip={chip} lit={lit(chip)}

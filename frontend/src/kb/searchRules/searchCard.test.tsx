@@ -75,7 +75,7 @@ describe('Search card with the user’s rules (N7)', () => {
 
   it('nothing on the allowed sites: «Search everywhere once» is the user’s click and asks the backend once', async () => {
     const rules = { ...RULES, only: ['arxiv.org', 'semanticscholar.org'], origin: 'chat' as const };
-    const { user, centre, fake } = await open(world([part('web-3', { status: 'allowed', rules, hidden: [{ site: 'medium.com', count: 4 }] })]));
+    const { user, centre, fake } = await open(world([part('web-3', { status: 'allowed', execution: 'done', rules, hidden: [{ site: 'medium.com', count: 4 }] })]));
     const box = await within(centre()).findByRole('group', { name: 'Nothing on the allowed sites' });
     expect(box).toHaveTextContent('Only these sites are allowed in this chat. Blocked sites stay blocked.');
     expect(fake.calls.filter((c) => c.path.endsWith('/everywhere-once'))).toEqual([]);

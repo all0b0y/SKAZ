@@ -7,7 +7,7 @@ import { useChats, useLibrary, useServices, useUi } from '../state/context';
 import { ChatMenu } from './ChatMenu';
 import { useFolderTone } from './parts';
 import { useChatSelection } from './chatBatch';
-import { SelectionCheckbox } from '../ui/listSelection';
+import { SelectionCheckbox, SelectionHeader, SelectionHeaderProvider } from '../ui/listSelection';
 import { isWaitingForUser } from '../api/permissions';
 import { NEW_CHAT_KEY, sideChats } from './sideOrder';
 import { ChatMark, WaitingMark } from './ChatMark';
@@ -157,14 +157,15 @@ export function AllChats() {
   const folderName = (id: string) => folders.find((f) => f.id === id)?.name;
 
   return (
-    <section className="kb-center kb-allchats" data-pane="center" aria-label="All chats">
-      <header className="kb-head">
+    <SelectionHeaderProvider>
+    <section className="kb-center kb-allchats" data-selection-surface="" data-pane="center" aria-label="All chats">
+      <SelectionHeader className="kb-head">
         <h1 className="kb-head__title">All chats <span className="kb-head__count">{total}</span></h1>
         <span className="kb-head__spacer" />
         <Button size="sm" variant="fill" icon="newChat" iconPlay={newPlay}
           onClick={() => { replayNew(); openChat(null); }}>New chat</Button>
         <IconButton icon="close" label="Back to the chat" onClick={() => showCenter('chat')} />
-      </header>
+      </SelectionHeader>
       <div className="kb-allchats__tools">
         <div className="kb-searchfield">
           <Icon name="search" size={14} />
@@ -219,5 +220,6 @@ export function AllChats() {
         {overlays}
       </div>
     </section>
+    </SelectionHeaderProvider>
   );
 }

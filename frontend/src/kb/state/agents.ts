@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbAgent, KbAgentLoginResult, KbAgents, KbInstallLine, KbInstallTask, KbModelChange } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
-import { errorText, type KbClient } from '../api/client';
+import { errorText, KbApiError, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
 
@@ -17,6 +17,10 @@ export interface AgentsData {
   error: string | null;
   /** Install/update/first-check logs by engine. */
   installs: Partial<Record<EngineId, InstallView>>;
+  installDialog: EngineId | null;
+  installDialogKind: 'install' | 'update';
+  /** A read failure is not an installer failure or a confirmed stop. */
+  installErrors: Partial<Record<EngineId, string>>;
   /** A check of this agent is on its way (one at a time per agent). */
   checking: Partial<Record<EngineId, boolean>>;
   /** When this window last got a checked status of the agent (ms), for the automatic checks. */
@@ -58,7 +62,12 @@ export interface AgentsActions {
   refresh: () => Promise<void>;
   setDefault: (engine: EngineId) => Promise<ActionResult>;
   install: (engine: EngineId, action?: 'install' | 'update' | 'first_check' | 'repair') => Promise<ActionResult>;
-  /** Follow a running task's log; returns stop. */
+  showInstall: (engine: EngineId, kind?: 'install' | 'update') => void;
+  closeInstallDialog: () => void;
+  /** Window lifecycle, not dialog/card lifecycle. Stops only observation, never backend work. */
+  startMonitoring: () => void;
+  stopMonitoring: () => void;
+  /** One store-owned reader per engine/task; returns its explicit observation stop. */
   followInstall: (engine: EngineId, taskId: string) => () => void;
   cancelInstall: (engine: EngineId) => Promise<ActionResult>;
   login: (engine: EngineId, consent?: boolean) => Promise<ActionResult<KbAgentLoginResult>>;
@@ -145,6 +154,8 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
   return createStore<AgentsData & AgentsActions>()((set, get) => {
     const inflight = new Map<EngineId, Promise<ActionResult<KbAgent>>>();
     const following = new Map<EngineId, () => void>();
+    const installsFollowing = new Map<EngineId, { id: string; stop: () => void }>();
+    let monitoring = true;
     const putSignIn = (engine: EngineId, view: SignInView | null) => set((st) => {
       const { [engine]: _old, ...rest } = st.signIns;
       return { signIns: view ? { ...rest, [engine]: view } : rest };
@@ -195,6 +206,9 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
       load: 'idle',
       error: null,
       installs: {},
+      installDialog: null,
+      installDialogKind: 'install',
+      installErrors: {},
       checking: {},
       checkedAt: {},
       awaitingSignIn: {},
@@ -204,9 +218,17 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
         reading ??= (async () => {
           if (get().load !== 'ready') set({ load: 'loading' });
           try {
+            const installsAtRead = get().installs;
             const agents = await client.call('GET /kb/agents');
             set({ agents, load: 'ready', error: null, checkedAt: stamped(agents.agents.map((a) => a.id)) });
-            agents.agents.forEach(settle);
+            agents.agents.forEach((agent) => {
+              settle(agent);
+              const current = get().installs[agent.id]?.task.id;
+              const unchanged = current === installsAtRead[agent.id]?.task.id;
+              if (monitoring && agent.install_task && (unchanged || current === agent.install_task)) {
+                get().followInstall(agent.id, agent.install_task);
+              }
+            });
           } catch (error) {
             set({ load: get().agents ? 'ready' : 'error', error: errorText(error) });
           } finally {
@@ -229,30 +251,86 @@ export function createAgentsStore(client: KbClient, clock: { now: () => number; 
       install: async (engine, action = 'install') => {
         try {
           const task = await client.call('POST /kb/agents/{engine}/install', { path: { engine }, body: { action } });
-          set((s) => ({ installs: { ...s.installs, [engine]: { task, lines: task.lines } } }));
+          set((s) => ({ installs: { ...s.installs, [engine]: { task, lines: task.lines } }, installDialog: engine, installDialogKind: 'install' }));
+          if (monitoring) get().followInstall(engine, task.id);
           return { ok: true, value: undefined };
         } catch (error) {
           return { ok: false, error: errorText(error) };
         }
       },
 
-      followInstall: (engine, taskId) => longPoll(async (after, wait) => {
-        const task = await client.call('GET /kb/agents/install/{task_id}', { path: { task_id: taskId }, query: { after, wait } });
-        const prev = get().installs[engine];
-        const seen = new Set((prev?.lines ?? []).map((l) => l.seq));
-        const lines = [...(prev?.lines ?? []), ...task.lines.filter((l) => !seen.has(l.seq))];
-        set((s) => ({ installs: { ...s.installs, [engine]: { task, lines } } }));
-        // Installed, updated or first-checked: the agent's status is read again right away.
-        if (task.state !== 'running') void get().check(engine);
-        return { cursor: task.cursor, changed: task.lines.length > 0, done: task.state !== 'running' };
-      }, 0),
+      showInstall: (engine, kind = 'install') => {
+        set({ installDialog: engine, installDialogKind: kind });
+        const id = get().installs[engine]?.task.id ?? agentOf(get().agents, engine)?.install_task;
+        if (id && monitoring) get().followInstall(engine, id);
+      },
+      closeInstallDialog: () => set({ installDialog: null }),
+      startMonitoring: () => {
+        monitoring = true;
+        for (const engine of ENGINE_ORDER) {
+          const view = get().installs[engine];
+          if (view?.task.state === 'running') get().followInstall(engine, view.task.id);
+        }
+      },
+      stopMonitoring: () => {
+        monitoring = false;
+        for (const owner of [...installsFollowing.values()]) owner.stop();
+      },
+      followInstall: (engine, taskId) => {
+        const active = installsFollowing.get(engine);
+        if (active?.id === taskId) return active.stop;
+        active?.stop();
+        const current = get().installs[engine];
+        if (!monitoring || (current?.task.id === taskId && current.task.state !== 'running')) return () => {};
+        let cancel: (() => void) | undefined;
+        const owner = { id: taskId, stop: () => {
+          cancel?.();
+          if (installsFollowing.get(engine) === owner) installsFollowing.delete(engine);
+        } };
+        installsFollowing.set(engine, owner);
+        cancel = longPoll<number>(async (after, wait, signal) => {
+          const ended = { cursor: after, changed: false, done: true };
+          try {
+            const task = await client.call('GET /kb/agents/install/{task_id}', { path: { task_id: taskId }, query: { after, wait } });
+            if (signal.aborted || installsFollowing.get(engine) !== owner) return ended;
+            const prev = get().installs[engine];
+            const previous = prev?.task.id === taskId ? prev.lines : [];
+            const seen = new Set(previous.map((l) => l.seq));
+            const lines = [...previous, ...task.lines.filter((l) => !seen.has(l.seq))];
+            set((s) => {
+              const { [engine]: _error, ...installErrors } = s.installErrors;
+              return { installs: { ...s.installs, [engine]: { task, lines } }, installErrors };
+            });
+            if (task.state !== 'running') {
+              owner.stop();
+              void get().check(engine);
+            }
+            return { cursor: task.cursor, changed: task.cursor > after, done: task.state !== 'running' };
+          } catch (error) {
+            if (signal.aborted || installsFollowing.get(engine) !== owner) return ended;
+            set((s) => ({ installErrors: { ...s.installErrors, [engine]: errorText(error) } }));
+            if (error instanceof KbApiError && error.status === 404) { owner.stop(); return ended; }
+            throw error; // the shared long-poll backs off, without inventing a task outcome
+          }
+        }, current?.task.id === taskId ? current.task.cursor : 0);
+        return owner.stop;
+      },
 
       cancelInstall: async (engine) => {
         const view = get().installs[engine];
         if (!view) return { ok: true, value: undefined };
         try {
           const task = await client.call('POST /kb/agents/install/{task_id}/cancel', { path: { task_id: view.task.id } });
-          set((s) => ({ installs: { ...s.installs, [engine]: { task, lines: view.lines } } }));
+          if (get().installs[engine]?.task.id === task.id) {
+            installsFollowing.get(engine)?.stop();
+            set((s) => {
+              const previous = s.installs[engine]?.lines ?? [];
+              const seen = new Set(previous.map((line) => line.seq));
+              const lines = [...previous, ...task.lines.filter((line) => !seen.has(line.seq))];
+              const { [engine]: _error, ...installErrors } = s.installErrors;
+              return { installs: { ...s.installs, [engine]: { task, lines } }, installErrors };
+            });
+          }
           return { ok: true, value: undefined };
         } catch (error) {
           return { ok: false, error: errorText(error) };

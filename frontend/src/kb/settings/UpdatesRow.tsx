@@ -3,6 +3,7 @@ import type { UpdateState } from '../../api/bridge';
 import { Button, Icon, Modal } from '../ui';
 import { useServices } from '../state/context';
 import { relativeTime } from '../document/text';
+import { StippleStrip } from '../fx/stipple/StippleStrip';
 
 /**
  * Settings → About → Updates (B20): what main last learned from GitHub Releases (current version,
@@ -57,7 +58,7 @@ export function UpdatesRow() {
       {state.phase === 'downloading' && (
         <span className="kb-progress-row">
           <span className="kb-progress" role="progressbar" aria-label="Downloading the update" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
-            <i style={{ width: `${pct ?? 5}%` }} />
+            <StippleStrip value={state.progress} />
           </span>
           <span className="kb-muted">{pct === null ? '…' : `${pct}%`}</span>
           {bridge.cancelUpdate && (

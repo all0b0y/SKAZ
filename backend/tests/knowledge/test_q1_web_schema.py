@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from skaz.knowledge.store.schema import applied_versions, apply_schemas
 from skaz.knowledge.store.schema import web_search as module
 
@@ -35,3 +37,30 @@ def test_a_half_done_upgrade_finishes_on_the_next_start() -> None:
     assert {"searcher", "rules", "hidden"} <= _columns(connection)
     assert applied_versions(connection)["web_search"] == module.VERSION
     apply_schemas(connection, [module])  # and again: nothing to do
+
+
+@pytest.mark.parametrize("version", [3, 4])
+def test_older_searches_upgrade_to_unknown_without_inventing_success_or_time(version: int) -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.executescript(V1)
+    connection.executescript("ALTER TABLE web_search_requests ADD COLUMN searcher TEXT;"
+                             "ALTER TABLE web_search_requests ADD COLUMN rules TEXT;"
+                             "ALTER TABLE web_search_requests ADD COLUMN hidden TEXT NOT NULL DEFAULT '{}';")
+    applied_versions(connection)
+    if version == 4:
+        module.UPGRADES[4](connection)
+    connection.execute("INSERT INTO schema_versions(name, version) VALUES ('web_search', ?)", (version,))
+    connection.execute(
+        "INSERT INTO web_search_requests(id,chat_id,message_id,run_id,engine,query,status,created_at,links) "
+        "VALUES ('web-old','chat','msg','run','codex','entropy','allowed','2026-10-30T12:00:00Z',"
+        "'[{\"title\":\"Example\",\"url\":\"https://example.org\"}]')")
+
+    apply_schemas(connection, [module])
+
+    assert connection.execute(
+        "SELECT execution, started_at, duration_ms, execution_error, call_id FROM web_search_requests "
+        "WHERE id='web-old'").fetchone() == ("unknown", None, None, None, None)
+    assert connection.execute("SELECT status, query FROM web_search_requests").fetchone() == (
+        "allowed", "entropy")
+    apply_schemas(connection, [module])
+    assert applied_versions(connection)["web_search"] == module.VERSION == 5

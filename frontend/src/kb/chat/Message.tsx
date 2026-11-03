@@ -19,6 +19,7 @@ import { StudyInChat } from '../study/StudyBlock';
 import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
+import { KnowledgeNotice, usesGeneralKnowledge } from './KnowledgeNotice';
 import { NotFromSources } from '../searchRules/NotFromSources';
 import { splitWindow, TimeWindowChip } from '../searchRules/TimeWindow';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
@@ -70,7 +71,7 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
     pendingSpace = null;
   };
   for (const part of parts) {
-    if (part.type === 'tool') continue;
+    if (part.type === 'tool' || part.type === 'knowledge') continue;
     if (isMemoryPart(part)) {
       // N6 decision 7: an agent's edit of «Я» is its own compact line with Undo.
       flushSpace();
@@ -158,7 +159,7 @@ export function plainText(parts: KbMessagePart[]): string {
   }).join('').trim();
 }
 
-function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePart[] }) {
+function Parts({ chatId, parts, working }: { chatId: string; parts: readonly AnyMessagePart[]; working: boolean }) {
   const open = useOpenDocument();
   const { ui } = useServices();
   return (
@@ -175,7 +176,7 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         }
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
-        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} working={working} />;
         if (b.kind === 'memory') return <MemoryChip key={b.part.edit_id} part={b.part} />;
         if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
         if (b.kind === 'fix') return <WikiFixCard key={b.part.id} chatId={chatId} part={b.part} />;
@@ -220,7 +221,7 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const [copyPlay, replayCopy] = useIconPlay();
   const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
-  const empty = message.parts.filter((p) => p.type !== 'tool').length === 0;
+  const empty = message.parts.filter((p) => p.type !== 'tool' && p.type !== 'knowledge').length === 0;
   // U1: an answer that waits for its agent's update says so instead of «Writing an answer…».
   const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
@@ -233,14 +234,15 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   return (
     <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
       {/* Stage 6 B3: the agent's work (thinking line, live timer, a chip per tool call) folds into
-          «Looked at N things» after the answer. */}
+          `N tool calls · M failed` after the answer. */}
       <ThoughtLine message={message} head={empty && message.state === 'streaming' ? waitingFor ?? 'Writing an answer…' : null} />
+      {usesGeneralKnowledge(message.parts) && <KnowledgeNotice />}
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
         <SourcesProvider index={sources}>
           <AnswerSelectScope messageId={message.id}>
             <DiagramFixProvider value={fixDiagram}>
               {timed.window && <TimeWindowChip window={timed.window} disabled={message.state === 'streaming'} />}
-              <Parts chatId={chatId} parts={timed.parts as typeof message.parts} />
+              <Parts chatId={chatId} parts={timed.parts as typeof message.parts} working={message.state === 'streaming'} />
             </DiagramFixProvider>
           </AnswerSelectScope>
         </SourcesProvider>

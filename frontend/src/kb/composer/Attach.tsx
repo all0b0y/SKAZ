@@ -5,6 +5,7 @@ import type { MaterialKind } from '../api/names';
 import { errorText, type KbClient } from '../api/client';
 import { Button, Icon, IconButton, Menu } from '../ui';
 import { Popover } from '../ui/Popover';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { useLibrary, useServices } from '../state/context';
 
 /**
@@ -198,7 +199,7 @@ export function AttachmentChips({ items, onToggleWiki, onRemove, renderName }: {
           <li key={a.key} className={`kb-attachment is-${a.state}`}>
             <Icon name={a.source === 'link' ? 'link' : a.source === 'text' ? 'text' : 'pdf'} size={13} />
             {renderName?.(a) ?? <span className="kb-attachment__name" title={a.name}>{a.name}</span>}
-            {a.state === 'adding' && <span className="kb-spinner kb-spinner--inline" role="status" aria-label="Saving to Materials" />}
+            {a.state === 'adding' && <span role="status" aria-label="Saving to Materials"><StippleRing className="kb-spinner kb-spinner--inline" /></span>}
             {a.state === 'failed' && <span className="kb-attachment__err" role="alert" title={a.error ?? ''}><Icon name="error" size={13} />{a.error}</span>}
             {a.alreadyInLibrary && <span className="kb-attachment__wiki" title="Nothing new was added; this is the material already in your library">Already in your library</span>}
             {a.source !== 'existing' && !a.alreadyInLibrary && a.state !== 'failed' && (

@@ -33,6 +33,11 @@ TOKEN_PATTERN = re.compile(r"⟦[^⟦⟧]*⟧")
 
 
 @dataclass(frozen=True)
+class KnowledgeOut:
+    """A disclosure marker, never a tool invocation."""
+
+
+@dataclass(frozen=True)
 class TextOut:
     text: str
 
@@ -71,11 +76,13 @@ class BlockData:
     cut: Cut = ""
 
 
-Output = TextOut | CiteToken | PageToken | ConnectionOut | BlockStart | BlockData
+Output = KnowledgeOut | TextOut | CiteToken | PageToken | ConnectionOut | BlockStart | BlockData
 
 
-def parse_token(body: str) -> CiteToken | PageToken | None:
+def parse_token(body: str) -> CiteToken | PageToken | KnowledgeOut | None:
     """``m:…`` / ``p:…`` without the brackets; ``None`` when it is not a well-formed reference."""
+    if body == "knowledge":
+        return KnowledgeOut()
     kind, sep, rest = body.partition(":")
     if not sep:
         return None

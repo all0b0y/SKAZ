@@ -39,6 +39,7 @@ from .schemas_agents import (
     KbEngineId,
     KbFavoriteModel,
     KbInstallLine,
+    KbInstallStage,
     KbInstallStart,
     KbInstallTask,
     KbModelChanges,
@@ -122,6 +123,8 @@ def task_view(task: InstallTask, after: int) -> KbInstallTask:
         lines=[KbInstallLine(seq=line.seq, text=line.text, at=line.at) for line in lines], cursor=cursor,
         dropped=task.dropped, reason=task.reason, version=task.version, install=_install_info(task.recipe),
         started_at=task.started_at, finished_at=task.finished_at,
+        stages=[KbInstallStage(label=stage.label, state=stage.state) for stage in task.stages],
+        manual_command=task.manual_command,
     )
 
 

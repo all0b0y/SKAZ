@@ -7,7 +7,7 @@ import { useFolderTone } from '../document/parts';
 import { errorText } from '../api/client';
 import { useInterval, useLoad } from '../document/useLoad';
 import { useLibrary, useServices, useUi } from '../state/context';
-import { SelectAllBox, SelectionCheckbox } from '../ui/listSelection';
+import { SelectAllBox, SelectionCheckbox, SelectionHeader, SelectionHeaderProvider } from '../ui/listSelection';
 import { useMaterialSelection } from './materialBatch';
 import { StippleStrip } from '../fx/stipple';
 import { useSpotlight } from '../fx/spotlight';
@@ -122,18 +122,18 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
       : sort === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
     return out;
   }, [all, type, folderId, sort]);
-  const tableRows = layout === 'table' ? rows : [];
   const { sel, overlays, dragProps } = useMaterialSelection({
-    rows: tableRows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
+    rows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
     onOpen: (id) => openDocument({ type: 'material', id }),
   });
-  const selectable = tableRows.filter((m) => !sel.reasonOf(m.id)).length;
+  const selectable = rows.filter((m) => !sel.reasonOf(m.id)).length;
   const allState = sel.selected.size === 0 ? 'none' : sel.selected.size >= selectable ? 'all' : 'some';
   const folderName = (m: KbMaterialSummary) => m.folder_name || folders.find((f) => f.id === m.folder_id)?.name || '';
 
   return (
-    <section className="kb-center kb-allmat" data-pane="materials" aria-label="All materials" hidden={hidden}>
-      <header className="kb-head">
+    <SelectionHeaderProvider>
+    <section className="kb-center kb-allmat" data-selection-surface="" data-pane="materials" aria-label="All materials" hidden={hidden}>
+      <SelectionHeader className="kb-head">
         <h1 className="kb-head__title kb-allmat__title">All materials</h1>
         <span className="kb-muted kb-allmat__count">{all.length || libraryCount}</span>
         <span className="kb-head__spacer" />
@@ -145,7 +145,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         )}
         <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add</Button>
         <IconButton icon="close" label="Close all materials" onClick={() => showCenter('chat')} />
-      </header>
+      </SelectionHeader>
       <div className="kb-allmat__body" {...sel.listProps}>
         <div className="kb-amf">
           <Segmented label="Type" size="sm" value={type} options={TYPE_OPTIONS} onChange={setType} />
@@ -215,20 +215,23 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         )}
         {overlays}
         {rows.length > 0 && layout === 'cards' && (
-          <ul className="kb-amg" aria-label="Materials" {...spotlight}>
+          <ul className="kb-amg" aria-label="Materials" {...sel.gridProps} {...spotlight}>
             {rows.map((m) => (
-              <li key={m.id}>
+              <li key={m.id} {...sel.rowProps(m.id)} {...dragProps(m)}>
+                <div role="gridcell">
                 <button type="button" className={`kb-amc kb-spot${openedId === m.id ? ' is-current' : ''}`} onClick={() => openDocument({ type: 'material', id: m.id })}>
-                  <span className="kb-amc__top"><Icon name={KIND_ICON[m.kind]} size={16} label={KIND_LABEL[m.kind]} /><span className="kb-head__spacer" /><WikiCell material={m} /></span>
+                  <span className="kb-amc__top"><SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} /><Icon name={KIND_ICON[m.kind]} size={16} label={KIND_LABEL[m.kind]} /><span className="kb-head__spacer" /><WikiCell material={m} /></span>
                   <span className="kb-amc__title">{m.title}</span>
                   <span className="kb-amc__meta"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" />{folderName(m)}</span>
                   <span className="kb-amc__meta kb-muted">{addedLabel(m.created_at)}</span>
                 </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </div>
     </section>
+    </SelectionHeaderProvider>
   );
 }

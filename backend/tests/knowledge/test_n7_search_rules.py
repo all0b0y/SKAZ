@@ -79,14 +79,14 @@ def test_a_site_covers_its_subdomains_only() -> None:
 
 def test_a_chat_starts_from_settings_and_can_only_add_never_sites() -> None:
     settings = WebRules(never=("pinterest.com",), only_on=True, only=("arxiv.org",), prefer=("acm.org",))
-    assert active_rules(settings, None) == ActiveRules(never=("pinterest.com",), only=("arxiv.org",),
-                                                       prefer=("acm.org",), origin="settings")
+    assert active_rules(settings, None, beta=True) == ActiveRules(
+        never=("pinterest.com",), only=("arxiv.org",), prefer=("acm.org",), origin="settings")
     # The chat's own lists replace Only / Prefer; its Never sites are added to Settings' ones.
     own = ChatRules(web=WebRules(never=("habr.com",), only_on=False, prefer=()))
-    rules = active_rules(settings, own)
+    rules = active_rules(settings, own, beta=True)
     assert rules.never == ("pinterest.com", "habr.com") and rules.only == () and rules.origin == "chat"
     # «Search everywhere once» lifts «only these sites», never the Never sites.
-    once = active_rules(settings, ChatRules(everywhere_once=True))
+    once = active_rules(settings, ChatRules(everywhere_once=True), beta=True)
     assert once.only == () and once.everywhere_once and once.never == ("pinterest.com",)
 
 
@@ -141,7 +141,7 @@ async def test_claude_code_sends_the_users_never_sites_as_blocked_domains(tmp_pa
 
 
 async def set_settings(env: Env, **rules: Any) -> dict[str, Any]:
-    response = await env.client.put("/kb/settings/search", json=rules)
+    response = await env.client.put("/kb/settings/search", json={"beta": True, **rules})
     assert response.status_code == 200, response.text
     data: dict[str, Any] = response.json()
     return data
@@ -184,7 +184,7 @@ async def test_nothing_on_the_allowed_sites_tells_the_agent_and_everywhere_once_
     await finished(env.runtime.kb_chats)
     data = payload(env.agents["codex"].outputs[0])
     assert data["links"] == []
-    assert "Nothing was found on the sites the user allows (arxiv.org)" in data["note"]
+    assert "no links that pass the allowed-site rules (arxiv.org)" in data["note"]
     assert "Search everywhere once" in data["note"]
 
     # The user's click on the card: the next search only ignores «only these sites», once.
@@ -246,10 +246,11 @@ async def test_claude_codes_own_gate_is_refused_under_hard_rules_and_as_before_w
 
 async def test_settings_search_round_trip_normalises_and_refuses_bad_sites(env: Env) -> None:
     assert (await env.client.get("/kb/settings/search")).json() == {
-        "never": [], "only_on": False, "only": [], "prefer": []}
+        "never": [], "only_on": False, "only": [], "prefer": [], "beta": False}
     saved = await set_settings(env, never=["https://www.Pinterest.com/x", "pinterest.com"],
                                prefer=["arxiv.org"])
-    assert saved == {"never": ["pinterest.com"], "only_on": False, "only": [], "prefer": ["arxiv.org"]}
+    assert saved == {"never": ["pinterest.com"], "only_on": False, "only": [], "prefer": ["arxiv.org"],
+                     "beta": True}
     bad = await env.client.put("/kb/settings/search", json={"never": ["not a site"]})
     assert bad.status_code == 422 and "not a site" in bad.json()["detail"]
     assert (await env.client.get("/kb/settings/search")).json()["never"] == ["pinterest.com"]
@@ -286,7 +287,7 @@ async def test_chat_rules_save_reset_and_save_as_global(env: Env) -> None:
     assert glob["web"] is None and glob["label"] == "1 excluded"  # library sources stay per chat
     assert (await env.client.get("/kb/settings/search")).json() == {
         "never": ["pinterest.com", "habr.com"], "only_on": True, "only": ["arxiv.org", "acm.org"],
-        "prefer": ["arxiv.org"]}
+        "prefer": ["arxiv.org"], "beta": True}
     assert (await env.client.get("/kb/chats/chat-missing/search-rules")).status_code == 404
 
 

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 
 from ..answer_blocks.part import BlockPart
 from ..answer_blocks.text import block_agent_text, block_plain
-from .model import CitePart, ConnectionPart, PagePart, Part, StudyPart, TextPart, ToolPart
+from .model import CitePart, ConnectionPart, KnowledgePart, PagePart, Part, StudyPart, TextPart, ToolPart
 
 PREVIEW_CHARS = 140
 TITLE_CHARS = 60
@@ -73,6 +73,8 @@ def agent_text(parts: Sequence[Part]) -> str:
             pieces.append(f"\n[You showed the user {what} “{part.title}” (study block {part.study_id}).]\n")
         elif isinstance(part, BlockPart):
             pieces.append(block_agent_text(part))
+        elif isinstance(part, KnowledgePart):
+            pieces.append("⟦knowledge⟧")
         elif isinstance(part, ToolPart):
             continue
     return "".join(pieces).strip()

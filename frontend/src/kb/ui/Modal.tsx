@@ -79,6 +79,8 @@ function ModalLayer({
       layerRef.current?.setAttribute('inert', '');
       return undefined;
     }
+    // AnimatePresence can revive this same layer before its exit finishes.
+    layerRef.current?.removeAttribute('inert');
     const made: Element[] = [];
     for (const child of Array.from(document.body.children)) {
       if (child === layerRef.current || child.hasAttribute('inert') || child.tagName === 'SCRIPT') continue;
@@ -90,11 +92,12 @@ function ModalLayer({
   }, [present]);
 
   useEffect(() => {
+    if (!present) return;
     const dialog = dialogRef.current;
     if (!dialog) return;
     const target = initialFocusRef?.current ?? (initialFocus === 'dialog' ? dialog : focusableIn(dialog)[0] ?? dialog);
     target.focus({ preventScroll: true });
-  }, [initialFocusRef, initialFocus]);
+  }, [initialFocusRef, initialFocus, present]);
 
   // Escape with the focus lost to <body> (a pressed button unmounted, a window behind closed):
   // the topmost dialog still closes, as if the focus were in it (QA A32, A29). Inside a dialog

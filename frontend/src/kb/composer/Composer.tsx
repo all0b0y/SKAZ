@@ -477,7 +477,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         )}
         <div className="kb-composer__bar">
           <AttachButton onAdd={addAttachments} disabled={false} />
-          {chatId && <ChatSearchButton chatId={chatId} />}
+          <ChatSearchButton chatId={chatId} />
           <span className="kb-composer__spacer" />
           {dictation.phase === 'recording' && (
             <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>

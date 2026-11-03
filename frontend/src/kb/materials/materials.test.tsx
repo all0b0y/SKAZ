@@ -15,6 +15,44 @@ async function ready() {
 }
 
 describe('All materials (v11, decision 25)', () => {
+  it('puts the selection bar in the header without remounting list rows', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const table = await within(center).findByRole('grid');
+    const item = within(table).getByRole('button', { name: 'Lecture 8 — entropy' });
+    const before = item.closest('tr');
+    await user.keyboard('{Meta>}');
+    await user.click(item);
+    await user.keyboard('{/Meta}');
+    const bar = within(center).getByRole('toolbar', { name: '1 selected' });
+    expect(bar.closest('header')).toBe(center.querySelector('header'));
+    expect(within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')).toBe(before);
+    await user.click(within(bar).getByRole('button', { name: 'Clear selection' }));
+    expect(within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')).toBe(before);
+  });
+
+  it('cards have the same selection and drag contract without opening a document', async () => {
+    const user = userEvent.setup();
+    const { services } = await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    await within(center).findByRole('grid');
+    await user.click(within(center).getByRole('radio', { name: 'Cards' }));
+    const grid = within(center).getByRole('grid', { name: 'Materials' });
+    const item = within(grid).getByRole('button', { name: /Lecture 8 — entropy/ });
+    const row = item.closest('[data-sel-id]');
+    const opened = services.ui.getState().right;
+    await user.keyboard('{Meta>}');
+    await user.click(item);
+    await user.keyboard('{/Meta}');
+    expect(row).toHaveAttribute('aria-selected', 'true');
+    expect(row).toHaveAttribute('draggable', 'true');
+    expect(within(center).getByRole('toolbar', { name: '1 selected' }).closest('header')).toBe(center.querySelector('header'));
+    expect(services.ui.getState().right).toBe(opened);
+  });
+
   it('opens over the centre as a table with type, name, folder, added and the wiki state', async () => {
     const user = userEvent.setup();
     await ready();
@@ -48,7 +86,7 @@ describe('All materials (v11, decision 25)', () => {
     const names = within(center).getAllByRole('row').slice(1).map((r) => r.querySelector('.kb-amt__open')!.textContent);
     expect(names).toEqual([...names].sort((a, b) => a!.localeCompare(b!)));
     await user.click(within(center).getByRole('radio', { name: 'Cards' }));
-    expect(within(center).getByRole('list', { name: 'Materials' })).toBeInTheDocument();
+    expect(within(center).getByRole('grid', { name: 'Materials' })).toBeInTheDocument();
     await user.click(within(center).getByRole('button', { name: /Cross-entropy explained/ }));
     expect(await screen.findByRole('heading', { level: 2, name: 'Cross-entropy explained' })).toBeInTheDocument();
     await user.click(within(center).getByRole('button', { name: 'Close all materials' }));

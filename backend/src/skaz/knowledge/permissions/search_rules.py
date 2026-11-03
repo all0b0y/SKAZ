@@ -36,8 +36,9 @@ from ..errors import KnowledgeError
 from ..ids import utc_now, utc_now_ms
 from ..store.database import KnowledgeDatabase
 
-#: Settings key of the global web rules (``settings`` table of ``knowledge.sqlite3``).
+#: Settings keys of the global web rules and the Only/Prefer feature flag.
 SETTINGS_KEY = "search_rules"
+BETA_KEY = "search_beta"
 #: Most sites in one list (a longer list is refused, never cut silently).
 MAX_SITES = 100
 #: Most library sources a chat may pin or exclude.
@@ -188,6 +189,14 @@ class ChatRules:
                    sources_since=since if isinstance(since := data.get("sources_since"), str) else None)
 
 
+def chat_web_rules(own: WebRules | None, settings: WebRules) -> WebRules | None:
+    """Keep only a chat's actual changes; inherited Never sites remain global and cannot be lifted."""
+    if own is None:
+        return None
+    own = replace(own, never=tuple(site for site in own.never if site not in settings.never))
+    return None if own == replace(settings, never=()) else own
+
+
 @dataclass(frozen=True)
 class ActiveRules:
     """The web rules in force for one search (a snapshot is kept on its card)."""
@@ -230,15 +239,30 @@ class ActiveRules:
                    settings_never=sites(_list(data.get("settings_never")), strict=False))
 
 
-def active_rules(settings: WebRules, chat: ChatRules | None) -> ActiveRules:
-    """What applies in a chat: its own lists if it changed them, else Settings'. Never = Settings'
-    plus the chat's own — a chat can only add to it."""
+def restricted_query(query: str, rules: ActiveRules | None) -> str:
+    """The effective query shown BEFORE approval and sent to a query-only searcher.
+
+    Site tokens express search intent, not the hard boundary: screen() still filters every result.
+    Keep raw-query validation separate: generated operators can legitimately exceed its length cap.
+    """
+    if rules is None or not rules.hard:
+        return query
+    restrictions: list[str] = []
+    if rules.only:
+        allowed = " OR ".join(f"site:{site}" for site in rules.only)
+        restrictions.append(f"({allowed})" if len(rules.only) > 1 else allowed)
+    restrictions.extend(f"-site:{site}" for site in rules.never)
+    return f"({query}) {' '.join(restrictions)}"
+
+
+def active_rules(settings: WebRules, chat: ChatRules | None, *, beta: bool = False) -> ActiveRules:
+    """What applies in a chat. Never is always active; Only/Prefer require the persisted Beta flag."""
     own = chat.web if chat is not None else None
     lists = own if own is not None else settings
     never = sites((*settings.never, *(own.never if own is not None else ())), strict=False)
-    only = lists.only if lists.only_on else ()
+    only = lists.only if beta and lists.only_on else ()
     once = bool(chat is not None and chat.everywhere_once and only)
-    return ActiveRules(never=never, only=() if once else only, prefer=lists.prefer,
+    return ActiveRules(never=never, only=() if once else only, prefer=lists.prefer if beta else (),
                        origin="chat" if own is not None else "settings", everywhere_once=once,
                        settings_never=settings.never)
 
@@ -355,6 +379,13 @@ class SearchRulesStore:
         self.settings.set(SETTINGS_KEY, rules.to_json())
         return self.global_rules()
 
+    def beta(self) -> bool:
+        return self.settings.get(BETA_KEY) is True
+
+    def set_beta(self, enabled: bool) -> bool:
+        self.settings.set(BETA_KEY, enabled)
+        return self.beta()
+
     def chat(self, chat_id: str) -> ChatRules:
         with self.db.read() as connection:
             row = connection.execute("SELECT rules FROM chat_search_rules WHERE chat_id = ?",
@@ -378,7 +409,7 @@ class SearchRulesStore:
         return self.chat(chat_id)
 
     def active(self, chat_id: str) -> ActiveRules:
-        return active_rules(self.global_rules(), self.chat(chat_id))
+        return active_rules(self.global_rules(), self.chat(chat_id), beta=self.beta())
 
     def take_active(self, chat_id: str) -> ActiveRules:
         """The rules for a search about to be asked; spends the chat's «Search everywhere once»."""

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KbMessage, KbMessagePart } from '../../api/kb/types.gen';
+import type { KbMessage, KbMessagePart, KbWebSearchPart } from '../../api/kb/types.gen';
 import { Icon, type IconName } from '../ui/Icon';
 import { useMotionLevel } from '../ui/motionLevel';
 import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
@@ -10,21 +10,16 @@ import { CallSweep } from '../fx/indicators/CallSweep';
  * .dev/ui-blocks/motion6 motion-v1 card B3). While the agent works: the thinking nodes and a live
  * timer for as long as the answer streams (FIX2 S-M1: also after text arrived, tool calls keep coming),
  * with «Writing an answer…» only while there is nothing to read yet, and one chip per tool call. After
- * the answer the block folds into the «Looked at N things» line, which unfolds it again.
+ * the answer the block folds into its factual call/error count, which unfolds it again.
  *
- * Data honesty: a tool part (`KbToolPart`: name + label) arrives when the agent CALLS the tool; the
- * backend sends no result or error for it. Parallel calls arrive back to back before any result
- * (Claude Code sends every tool_use of a turn first), so a call «runs» while it belongs to the trailing
- * group of tool parts of a streaming answer and is «done» only once a part that is the agent going on
- * follows it (or the answer finished) — FIX2 C-M3, a stop-gap until the backend sends ToolResult.
- * Timers only count what this window saw: the thinking timer from the answer's `created_at`, a chip's
- * timer only for a call seen both start (arrive running) and end on screen. No percentages anywhere.
+ * Tool outcomes and times come only from persisted backend events. Text, permissions, questions and
+ * the end of an answer cannot prove a call succeeded. Old calls without metadata stay unknown.
  */
 
 /** SKAZ's web search tool (backend `permissions/web_tool.py` WEB_TOOL): it has its own card (W-3b). */
 const WEB_TOOL = 'skaz_web_search';
 
-export type CallState = 'run' | 'done' | 'stopped' | 'error';
+export type CallState = 'run' | 'done' | 'stopped' | 'error' | 'unknown';
 
 export interface ToolCall {
   /** Index of the part in the message (stable while it streams: parts are only appended). */
@@ -32,24 +27,44 @@ export interface ToolCall {
   name: string;
   label: string;
   state: CallState;
+  startedAt?: number;
+  durationMs?: number;
 }
 
-/**
- * Parts that are NOT evidence a call finished: another call (parallel calls come back to back), and a
- * permission or question — the running call (or the agent) waiting on the user.
- */
-const NOT_A_RESULT: ReadonlySet<KbMessagePart['type']> = new Set(['tool', 'permission', 'question']);
+const nativeWebCards = (parts: readonly KbMessagePart[]): KbWebSearchPart[] =>
+  parts.filter((p): p is KbWebSearchPart => p.type === 'web_search' && p.engine === 'claude_code' && !p.searcher);
 
-/** Each tool call of a message and what it is doing, from the parts the message already has. */
+/** Native cards from before tool events still count; match new cards only by real message-local IDs. */
+function activityCounts(parts: readonly KbMessagePart[]) {
+  const tools = parts.filter((p) => p.type === 'tool');
+  const byId = new Map(tools.flatMap((p) => p.call_id ? [[p.call_id, p] as const] : []));
+  const seen = new Set<string>();
+  let n = tools.length;
+  let failed = tools.filter((p) => p.status === 'error').length;
+  for (const card of nativeWebCards(parts)) {
+    const key = card.call_id ? `call:${card.call_id}` : `request:${card.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const tool = card.call_id ? byId.get(card.call_id) : undefined;
+    if (!tool) n++;
+    if (card.execution === 'error' && tool?.status !== 'error') failed++;
+  }
+  return { n, failed };
+}
+
+/** Each outcome is explicit; a stale running checkpoint in a finished answer is unknown. */
 export function callStates(parts: readonly KbMessagePart[], state: KbMessage['state']): ToolCall[] {
-  // The agent went on past every call before the last part that is not a call (or a wait on the user).
-  let wentOn = -1;
-  parts.forEach((part, index) => { if (!NOT_A_RESULT.has(part.type)) wentOn = index; });
   const out: ToolCall[] = [];
+  const nativeIds = new Set(nativeWebCards(parts).flatMap((p) => p.call_id ? [p.call_id] : []));
   parts.forEach((part, index) => {
-    if (part.type !== 'tool' || part.name.endsWith(WEB_TOOL)) return;
-    const callState: CallState = index < wentOn || state === 'done' ? 'done' : state === 'streaming' ? 'run' : 'stopped';
-    out.push({ index, name: part.name, label: part.label, state: callState });
+    if (part.type !== 'tool' || part.name.endsWith(WEB_TOOL)
+      || (part.call_id && nativeIds.has(part.call_id))) return;
+    const callState: CallState = part.status === 'running' ? (state === 'streaming' ? 'run' : 'unknown') : part.status ?? 'unknown';
+    const startedAt = Date.parse(part.started_at ?? '');
+    out.push({ index, name: part.name, label: part.label, state: callState,
+      ...(Number.isFinite(startedAt) ? { startedAt } : {}),
+      ...(part.duration_ms != null && Number.isFinite(part.duration_ms) && part.duration_ms >= 0
+        ? { durationMs: part.duration_ms } : {}) });
   });
   return out;
 }
@@ -79,7 +94,7 @@ export function toolIcon(name: string): IconName {
 }
 
 /** A ticking (or, with `to`, frozen) time since `from`, in 0.1 s steps. */
-function Elapsed({ from, to, className, role }: { from: number; to?: number | null; className: string; role?: 'timer' }) {
+export function Elapsed({ from, to, className, role }: { from: number; to?: number | null; className: string; role?: 'timer' }) {
   const [, setTick] = useState(0);
   const frozen = to !== undefined && to !== null;
   useEffect(() => {
@@ -90,12 +105,8 @@ function Elapsed({ from, to, className, role }: { from: number; to?: number | nu
   return <span className={className} role={role}>{formatSeconds(((frozen ? to : Date.now()) - from) / 1000)}</span>;
 }
 
-/**
- * One tool call: a pill with the tool's icon and label; Stippling while it runs, ✓ when done. `seenAt`
- * = it arrived on screen (it may fade/wipe in); `startedAt` = it was seen running, the only case with a
- * timer (FIX2 C-M3: no duration unless its start was seen; the end is `endedAt`, or now while it runs).
- */
-export function CallChip({ call, seenAt, startedAt, endedAt }: { call: ToolCall; seenAt?: number; startedAt?: number; endedAt?: number }) {
+/** A call's arrival may animate; its times are backend facts, not the component's mount clock. */
+export function CallChip({ call, seenAt }: { call: ToolCall; seenAt?: number }) {
   const live = seenAt !== undefined;
   const icon = call.state === 'done' ? <Icon name="check" size={14} label="Done" />
     : call.state === 'error' ? <Icon name="warning" size={14} label="Failed" />
@@ -112,8 +123,10 @@ export function CallChip({ call, seenAt, startedAt, endedAt }: { call: ToolCall;
         <span className="kb-visually-hidden">{call.state === 'run' ? 'running' : 'stopped'}</span>
       )}
       {call.state === 'error' && <span className="kb-call__err">failed</span>}
-      {startedAt !== undefined && call.state !== 'error' && (call.state === 'run' || endedAt !== undefined) && (
-        <Elapsed className="kb-call__time" from={startedAt} to={call.state === 'run' ? null : endedAt} />
+      {call.state === 'unknown' && <span className="kb-call__unknown">result unknown</span>}
+      {call.state === 'run' && call.startedAt !== undefined && <Elapsed className="kb-call__time" from={call.startedAt} />}
+      {(call.state === 'done' || call.state === 'stopped') && call.durationMs !== undefined && (
+        <span className="kb-call__time">{formatSeconds(call.durationMs / 1000)}</span>
       )}
     </li>
   );
@@ -125,22 +138,17 @@ function startOf(message: KbMessage, firstSeen: number): number {
   return Number.isFinite(t) && t <= firstSeen + 2000 ? Math.min(t, firstSeen) : firstSeen;
 }
 
-/**
- * Remembers, for this mounted answer, when each call was first seen, when it was seen running and when
- * it stopped running, and when the answer stopped working. Only things that happened on screen get a
- * time; calls that were already there when the answer was opened get none (no invented durations), and
- * neither does a call that arrived already finished (its start was never seen).
- */
+/** Arrival/fold timing is local UI state only; no tool outcome or duration is inferred here. */
 function useLiveClock(message: KbMessage, calls: ToolCall[]) {
   const ref = useRef<{
-    firstSeen: number; initial: Set<number>; seen: Map<number, number>; started: Map<number, number>;
-    ended: Map<number, number>; wasWorking: boolean; endedAt: number | null;
+    firstSeen: number; initial: Set<number>; seen: Map<number, number>;
+    wasWorking: boolean; endedAt: number | null;
   } | null>(null);
   const now = Date.now();
   const working = message.state === 'streaming';
   if (!ref.current) {
     ref.current = {
-      firstSeen: now, initial: new Set(calls.map((c) => c.index)), seen: new Map(), started: new Map(), ended: new Map(),
+      firstSeen: now, initial: new Set(calls.map((c) => c.index)), seen: new Map(),
       wasWorking: working, endedAt: null,
     };
   }
@@ -148,9 +156,7 @@ function useLiveClock(message: KbMessage, calls: ToolCall[]) {
   for (const c of calls) {
     if (!clock.initial.has(c.index) && !clock.seen.has(c.index)) {
       clock.seen.set(c.index, now);
-      if (c.state === 'run') clock.started.set(c.index, now);
     }
-    if (clock.started.has(c.index) && c.state !== 'run' && !clock.ended.has(c.index)) clock.ended.set(c.index, now);
   }
   if (working) clock.wasWorking = true;
   else if (clock.wasWorking && clock.endedAt === null) clock.endedAt = now;
@@ -173,6 +179,7 @@ export const FOLD_UNMOUNT_MS = 400;
  */
 export function ThoughtLine({ message, head }: { message: KbMessage; head: string | null }) {
   const calls = callStates(message.parts, message.state);
+  const { n, failed } = activityCounts(message.parts);
   const { clock, start } = useLiveClock(message, calls);
   const [open, setOpen] = useState(false);
   const level = useMotionLevel();
@@ -190,18 +197,19 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
     const id = setTimeout(foldAway, FOLD_UNMOUNT_MS);
     return () => clearTimeout(id);
   }, [unfolded, kept, level]);
-  if (!working && calls.length === 0) return null;
+  if (!working && n === 0) return null;
   const arrived = !working && clock.endedAt !== null;
-  const n = calls.length;
+  const Summary = calls.length ? 'button' : 'div';
   return (
     <div className="kb-tools kb-thought" data-level={level} data-working={working ? 'true' : undefined}
       data-arrived={arrived ? 'true' : undefined}>
       {!working && (
-        <button type="button" className="kb-tools__toggle kb-thought__sum" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          <Icon name="tool" size={13} /><b>Looked at {n} {n === 1 ? 'thing' : 'things'}</b>
+        <Summary type={calls.length ? 'button' : undefined} className="kb-tools__toggle kb-thought__sum"
+          aria-expanded={calls.length ? open : undefined} onClick={calls.length ? () => setOpen((v) => !v) : undefined}>
+          <Icon name="tool" size={13} /><b>{n} {n === 1 ? 'tool call' : 'tool calls'}{failed > 0 ? ` · ${failed} failed` : ''}</b>
           {arrived && <span className="kb-thought__total"> · {formatSeconds((clock.endedAt! - start) / 1000)}</span>}
-          <Icon name="chevronDown" size={12} className={`kb-thought__chev${open ? ' is-open' : ''}`} />
-        </button>
+          {calls.length > 0 && <Icon name="chevronDown" size={12} className={`kb-thought__chev${open ? ' is-open' : ''}`} />}
+        </Summary>
       )}
       <div className="kb-thought__fold" data-open={unfolded ? 'true' : 'false'} {...(unfolded ? {} : INERT)}
         onTransitionEnd={(e) => { if (e.target === e.currentTarget && !unfolded) foldAway(); }}>
@@ -214,10 +222,9 @@ export function ThoughtLine({ message, head }: { message: KbMessage; head: strin
               <Elapsed className="kb-thought__time" role="timer" from={start} />
             </div>
           )}
-          {n > 0 && (unfolded || (kept && level !== 'off')) && (
+          {calls.length > 0 && (unfolded || (kept && level !== 'off')) && (
             <ul className="kb-thought__calls" aria-label="Tool calls">
-              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={remounted.current ? undefined : clock.seen.get(c.index)} startedAt={clock.started.get(c.index)}
-                endedAt={clock.ended.get(c.index)} />)}
+              {calls.map((c) => <CallChip key={c.index} call={c} seenAt={remounted.current ? undefined : clock.seen.get(c.index)} />)}
             </ul>
           )}
         </div>

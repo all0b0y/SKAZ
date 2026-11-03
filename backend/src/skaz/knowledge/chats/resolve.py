@@ -128,7 +128,7 @@ class Resolver:
     def tool(self, name: str, arguments: Mapping[str, Any]) -> ToolPart:
         short = tool_name(name)
         labeller = _TOOL_LABELS.get(short)
-        label = labeller(self, arguments) if labeller is not None else f"Used {short}"
+        label = labeller(self, arguments) if labeller is not None else tool_label(short)
         return ToolPart(short, _clip(label, 160), self.target(short, arguments))
 
     def target(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, str] | None:
@@ -191,6 +191,44 @@ def _recent_label(resolver: Resolver, arguments: Mapping[str, Any]) -> str:
 
 #: N8: read tools whose ``material_id`` names what the agent looked at.
 _MATERIAL_TOOLS = frozenset({"skaz_read_material", "skaz_recent_speech", "skaz_get_fragment"})
+
+#: Argument-free titles also project old generic labels without modifying saved history.
+_TOOL_ACTIONS: dict[str, str] = {
+    "skaz_wiki_index": "Browse Wiki Index",
+    "skaz_read_page": "Read Wiki Page",
+    "skaz_search": "Search Library",
+    "skaz_read_material": "Read Material",
+    "skaz_list_materials": "List Materials",
+    "skaz_list_folders": "List Folders",
+    "skaz_recent_speech": "Read Recent Speech",
+    "skaz_get_fragment": "Read Source Passage",
+    "skaz_answer_blocks": "Look Up Answer Blocks",
+    "skaz_wiki_create_page": "Create Wiki Page",
+    "skaz_wiki_edit_page": "Edit Wiki Page",
+    "skaz_wiki_rename_page": "Rename Wiki Page",
+    "skaz_wiki_delete_page": "Delete Wiki Page",
+    "skaz_wiki_propose_fix": "Propose Wiki Fix",
+    "skaz_study_make_deck": "Create Flashcards",
+    "skaz_study_make_test": "Create Practice Test",
+    "skaz_study_read": "Read Flashcards or Test",
+    "skaz_study_show": "Show Flashcards or Test",
+    "skaz_study_unclear": "Read Unclear Study Items",
+    "skaz_me_edit": "Edit Me Profile or Skill",
+    "skaz_me_skill": "Read Me Skill",
+    "skaz_ask_user": "Ask Question",
+    "skaz_web_search": "Search Web",
+    "skaz_web_read": "Read Web Page",
+    "WebSearch": "Search Web",
+}
+
+
+def tool_label(name: str, existing: str | None = None) -> str:
+    """Human action, keeping contextual labels and protocol identifiers separate."""
+    short = tool_name(name)
+    if existing and existing not in {name, short, f"Used {name}", f"Used {short}"}:
+        return existing
+    return _TOOL_ACTIONS.get(short, "Use Tool")
+
 
 _TOOL_LABELS: dict[str, Callable[[Resolver, Mapping[str, Any]], str]] = {
     "skaz_wiki_index": lambda _r, _a: "Looked through the wiki index",

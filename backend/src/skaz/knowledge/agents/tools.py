@@ -209,6 +209,8 @@ class SkazTool:
     run: AsyncHandler | None = None
     #: The handler returns SKAZ's own data (the answer block catalog), not library text: plain JSON.
     own_data: bool = False
+    #: Async tools usually return app-owned control data; external page text needs the data boundary.
+    untrusted_result: bool = False
 
     @property
     def interactive(self) -> bool:
@@ -277,9 +279,9 @@ def _clean(node: Any) -> Any:
 # -- output ----------------------------------------------------------------
 
 
-def render(tool: str, payload: Mapping[str, Any]) -> str:
+def render(tool: str, payload: Mapping[str, Any], *, web: bool = False) -> str:
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    return untrusted_block(f"skaz tool {tool}", body)
+    return untrusted_block(f"skaz tool {tool}", body, web=web)
 
 
 def size(text: str) -> int:
@@ -846,7 +848,9 @@ class ToolRegistry:
         except Exception as error:
             log.error("Tool %s failed: %s", tool.name, type(error).__name__)
             return ToolOutcome("SKAZ could not do this right now.", is_error=True)
-        text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        text = (render(tool.name, payload, web=True)
+                if tool.untrusted_result and payload.get("status") == "ok" else
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         if size(text) > tool.max_output_bytes:
             return ToolOutcome("The result is too large.", is_error=True)
         return ToolOutcome(text, is_error=payload.get("status") == "error")

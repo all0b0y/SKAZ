@@ -23,9 +23,9 @@ image or a gradient.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import lxml.html  # type: ignore[import-untyped]
 from lxml import etree
@@ -440,17 +440,20 @@ def _subtree_hidden(element: Any, style: dict[str, str]) -> str | None:
 
 
 class _Pruner:
-    def __init__(self, document: Any) -> None:
+    def __init__(self, document: Any, check: Callable[[], None] | None = None) -> None:
+        self._check = check or (lambda: None)
         self.document = document
         self.findings: list[Finding] = []
         self.rules = _stylesheet(document)
         self.sheet: dict[Any, dict[str, str]] = {}
         for selector, declarations, _source in self.rules:
+            self._check()
             try:
                 matched = selector(document)
             except Exception:
                 continue
             for element in matched:
+                self._check()
                 self.sheet.setdefault(element, {}).update(declarations)
 
     def style(self, element: Any) -> dict[str, str]:
@@ -481,7 +484,9 @@ class _Pruner:
             )
 
     def prune(self, element: Any, context: _Context) -> None:
+        self._check()
         for child in list(element):
+            self._check()
             if child.getparent() is None:
                 continue
             if child.tag is etree.Comment:
@@ -701,11 +706,22 @@ class _Pruned:
     password_fields: int
 
 
-def _pruned(html: str) -> _Pruned:
-    if not html.strip():
+class HtmlReader(Protocol):
+    def read(self, size: int = -1, /) -> bytes: ...
+
+
+def _pruned(html: str | HtmlReader, check: Callable[[], None] | None = None) -> _Pruned:
+    if isinstance(html, str) and not html.strip():
         raise ArticleRejected("The page is empty.")
     try:
-        document = lxml.html.document_fromstring(html)
+        if isinstance(html, str):
+            document = lxml.html.document_fromstring(html)
+        else:
+            # The web reader streams canonical UTF-8 into a private file; no giant Python HTML copy.
+            # Other import callers keep their original parser and byte limits. No external fetches.
+            document = lxml.html.parse(
+                html, parser=lxml.html.HTMLParser(encoding="utf-8", huge_tree=True, no_network=True),
+            ).getroot()
     except (etree.ParserError, ValueError) as error:
         raise ArticleRejected("SKAZ can't read this page.") from error
     title_tag = document.find(".//title")
@@ -716,7 +732,7 @@ def _pruned(html: str) -> _Pruned:
     password_fields = sum(
         1 for item in document.iter("input") if (item.get("type") or "").lower() == "password"
     )
-    pruner = _Pruner(document)
+    pruner = _Pruner(document, check)
     body = document.find("body")
     pruner.prune(document, _Context())
     for element in document.iter():
@@ -770,13 +786,14 @@ def extract_article(html: str) -> ArticleExtraction:
 _MENUS = "//nav | //*[@role='navigation']"
 
 
-def extract_page(html: str) -> ArticleExtraction:
+def extract_page(html: str | HtmlReader, *,
+                 check: Callable[[], None] | None = None) -> ArticleExtraction:
     """The whole visible page as text (W-3 "Add to wiki" snapshot), not readability's article guess.
 
     Same layer 2 as articles (hidden content, scripts, styles, comments and
     attributes never become text); site menus (``nav``) are left out.
     """
-    pruned = _pruned(html)
+    pruned = _pruned(html, check)
     root = pruned.body if pruned.body is not None else pruned.document
     for menu in root.xpath(_MENUS):
         _Pruner._drop(menu)

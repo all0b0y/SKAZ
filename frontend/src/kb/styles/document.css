@@ -171,7 +171,7 @@
 }
 .kb-pst--wrap > .kb-icon { flex: none; margin-top: var(--kb-sp-2); }
 .kb-pst.is-link:hover { border-color: var(--kb-muted); }
-.kb-spinner--xs { width: 10px; height: 10px; border-width: 1.5px; }
+.kb-spinner--xs { width: 10px; height: 10px; }
 .kb-mat__note { font-size: var(--t-sm); color: var(--kb-muted); }
 /* Header of a material: title, one muted meta line, one row of status chips (same height, so
    their words share a baseline), then the excluded-fragments line. */

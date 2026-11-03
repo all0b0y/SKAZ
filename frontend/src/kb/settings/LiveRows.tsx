@@ -11,6 +11,7 @@ import { useAgents, useServices, useSettings, useUi } from '../state/context';
 import type { SettingsSection } from '../state/ui';
 import { AgentCard } from './AgentCard';
 import { LANGUAGES, languageName } from './Languages';
+import { StippleStrip } from '../fx/stipple/StippleStrip';
 import { modelName } from '../composer/modelCatalog';
 
 /** Visible, honest "not here yet" (no dummy buttons). */
@@ -257,7 +258,7 @@ function Progress({ value, label }: { value: number | null; label: string }) {
   return (
     <span className="kb-progress-row">
       <span className="kb-progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
-        <i style={{ width: `${pct ?? 30}%` }} />
+        <StippleStrip value={value} />
       </span>
       <span className="kb-muted">{pct === null ? '…' : `${pct}%`}</span>
     </span>

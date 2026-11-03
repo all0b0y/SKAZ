@@ -34,6 +34,8 @@ export interface PatternCell {
   height?: number;
   /** The pane the component lives in inside the app: the side panel, or a centre/document pane. */
   pane?: 'side' | 'pane';
+  /** Real selection header for a standalone side-list pattern. */
+  header?: string;
   /**
    * A side pane with the centre sheet beside it, across the gutter, as in the window: for lists
    * whose open row bridges into the sheet (the chat list), so the bridge and its corners show.
@@ -96,9 +98,9 @@ export const PATTERNS: readonly BoardPattern[] = [
     note: 'The side list beside the centre sheet: the open chat (its row bridges into the sheet, no mark on it), pinned, answering (the Connecting nodes mark), new answer (dot), «Waiting for you» (a permission or a question), then two rows ⌘-selected with the selection bar.',
     world: 'agentControls', width: 880, cellWidth: 300,
     cells: [
-      { label: 'Open · pinned · answering · unread · waiting', pane: 'side', sheet: true, height: 560, prepare: (s) => { s.chats.getState().open(ANSWER_CHAT); }, render: () => <ChatList /> },
+      { label: 'Open · pinned · answering · unread · waiting', pane: 'side', header: 'Chats', sheet: true, height: 560, prepare: (s) => { s.chats.getState().open(ANSWER_CHAT); }, render: () => <ChatList /> },
       {
-        label: 'Selected (⌘-click on two rows)', pane: 'side', sheet: true, height: 560,
+        label: 'Selected (⌘-click on two rows)', pane: 'side', header: 'Chats', sheet: true, height: 560,
         prepare: (s) => { s.chats.getState().open(ANSWER_CHAT); },
         act: (root) => { cmdClick(root, 'c3'); cmdClick(root, 'c6'); },
         render: () => <ChatList />,
@@ -156,7 +158,7 @@ export const PATTERNS: readonly BoardPattern[] = [
     world: 'doc', width: 1440, cellWidth: 1060,
     cells: [
       { label: 'All materials', pane: 'pane', height: 560, render: () => <AllMaterials hidden={false} /> },
-      { label: 'Materials side panel', pane: 'side', width: 280, height: 560, render: () => <LibraryPanel /> },
+      { label: 'Materials side panel', pane: 'side', header: 'Materials', width: 280, height: 560, render: () => <LibraryPanel /> },
     ],
   },
   {

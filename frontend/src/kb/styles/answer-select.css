@@ -13,7 +13,7 @@
 
 /* ---- block items ---- */
 .kb-blk [data-selectable] { cursor: pointer; }
-.kb-blk [data-selectable]:hover { background: color-mix(in srgb, var(--kb-text) 5%, transparent); }
+.kb-blk [data-selectable]:not(tr):hover { background: color-mix(in srgb, var(--kb-text) 5%, transparent); }
 .kb-blk [data-selectable]:focus-visible { outline: 2px solid var(--kb-sel); outline-offset: 1px; border-radius: var(--kb-r-xs); }
 .kb-blk [data-selected='true'],
 .kb-blk [data-selected='true']:hover,

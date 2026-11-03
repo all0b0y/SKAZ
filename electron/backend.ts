@@ -206,6 +206,8 @@ export class BackendManager {
       cwd,
       env: {
         ...backendEnvironment(process.env, app.isPackaged),
+        // A shared editable venv can point at another checkout. Trust this dev source, not the shell.
+        ...(!app.isPackaged ? { PYTHONPATH: path.join(this.repoRoot, 'backend', 'src') } : {}),
         SKAZ_TOKEN: token,
         SKAZ_DATA_DIR: this.dataDir,
         // Settings → About shows the app's version, not the backend package's (QA A21).

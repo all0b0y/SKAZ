@@ -7,6 +7,7 @@ add a machine ``code`` (``ANSWERING``, ``AGENT_UNAVAILABLE`` with ``engine`` and
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -22,6 +23,7 @@ from ..chats.fix_part import WikiFixPart
 from ..chats.model import (
     CitePart,
     ConnectionPart,
+    KnowledgePart,
     MemoryPart,
     Message,
     MessageInput,
@@ -36,12 +38,14 @@ from ..chats.model import (
     Selection,
     StudyPart,
     TextPart,
+    ToolPart,
     WebSearchPart,
 )
+from ..chats.resolve import tool_label
 from ..chats.service import ChatConflict, ChatService, ChatView, memory_view
 from ..errors import KnowledgeError
 from ..permissions.broker import PermissionConflict
-from ..permissions.search_rules import ActiveRules
+from ..permissions.search_rules import ActiveRules, SearchRulesStore
 from ..permissions.store import ControlStore, PermissionRecord, QuestionRecord
 from ..permissions.web_search import WebSearchRecord, WebSearchStore
 from ..service import KnowledgeService
@@ -65,6 +69,7 @@ from .schemas_chats import (
     KbConnectionFolder,
     KbConnectionPart,
     KbFailure,
+    KbKnowledgePart,
     KbMemoryPart,
     KbMessage,
     KbMessageEdit,
@@ -220,18 +225,25 @@ class Presenter:
                 type="memory", edit_id=part.edit_id, skill_id=part.skill_id, skill_title=skill_title,
                 action=cast(Any, part.action if part.action in MEMORY_ACTIONS else "append"),
                 summary=summary, undone=part.undone))
+        if isinstance(part, KnowledgePart):
+            return KbMessagePart(KbKnowledgePart(type="knowledge"))
         target = KbToolTarget(type=cast(Any, part.target[0]), id=part.target[1]) if part.target else None
-        return KbMessagePart(KbToolPart(type="tool", name=part.name, label=part.label, target=target))
+        return KbMessagePart(KbToolPart(
+            type="tool", name=part.name, label=tool_label(part.name, part.label), target=target,
+            call_id=part.call_id, status=part.status, started_at=part.started_at,
+            duration_ms=part.duration_ms))
 
     def message(self, message: Message) -> KbMessage:
         given = message.input
+        # Checkpoints recovered after a crash prove neither a tool result nor its duration.
+        parts = (message.parts if message.state == "streaming" else tuple(
+            replace(part, status="unknown", duration_ms=None, target=None) if isinstance(part, ToolPart)
+            and part.status == "running" else part for part in finish_drawing(message.parts)))
         return KbMessage(
             id=message.id, seq=message.seq, role=message.role, created_at=message.created_at,
             engine=message.engine, model=message.model, state=message.state,
-            # P1: a block can only be drawing while its answer streams (one stored by a checkpoint
-            # and flipped to interrupted at startup shows as unfinished).
-            parts=[self.part(part) for part in (message.parts if message.state == "streaming"
-                                                else finish_drawing(message.parts))],
+            # P1: unfinished blocks in a recovered checkpoint remain unfinished.
+            parts=[self.part(part) for part in parts],
             failure=KbFailure(kind=message.failure.kind, message=message.failure.message,
                               retry_at=message.failure.retry_at) if message.failure else None,
             saved_page_id=message.saved_page_id,
@@ -288,6 +300,8 @@ def web_search_part(record: WebSearchRecord) -> KbWebSearchPart:
         type="web_search", id=record.id, engine=cast(Any, record.engine), query=record.query,
         allowed_domains=list(record.allowed_domains), blocked_domains=list(record.blocked_domains),
         status=record.status, auto=record.auto, reason=record.reason, links=links,
+        execution=record.execution, started_at=record.started_at, duration_ms=record.duration_ms,
+        execution_error=record.execution_error, call_id=record.call_id,
         searcher=cast(Any, record.searcher),
         rules=rules_in_force(record.rules) if record.rules is not None else None,
         hidden=[KbHiddenSite(site=site, count=count) for site, count in record.hidden])
@@ -369,8 +383,13 @@ async def list_chats(chats: ChatsDep, q: Annotated[str | None, Query(max_length=
 @router.post("", status_code=201)
 async def create_chat(chats: ChatsDep, body: KbChatCreate | None = None) -> KbChat:
     request = body or KbChatCreate()
+    initial = None
+    if request.search_rules is not None:
+        settings = await kb_call(SearchRulesStore(chats.kb.db, chats.kb.settings).global_rules)
+        initial = request.search_rules.initial(settings)
     view = await chats.create(title=request.title, engine=request.engine, model=request.model,
-                              effort=request.effort, recording_material_id=request.recording_material_id)
+                              effort=request.effort, recording_material_id=request.recording_material_id,
+                              initial_search_rules=initial)
     return await kb_call(full_chat, chats.kb, view)
 
 

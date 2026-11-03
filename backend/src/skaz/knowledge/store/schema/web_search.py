@@ -10,7 +10,7 @@ import sqlite3
 from collections.abc import Callable
 
 NAME = "web_search"
-VERSION = 3
+VERSION = 5
 
 SQL = """
 CREATE TABLE IF NOT EXISTS web_search_requests (
@@ -34,7 +34,15 @@ CREATE TABLE IF NOT EXISTS web_search_requests (
     -- N7: the search rules in force for this query (JSON; NULL before v3) and the links they hid
     -- (JSON {site: count}).
     rules       TEXT,
-    hidden      TEXT NOT NULL DEFAULT '{}'
+    hidden      TEXT NOT NULL DEFAULT '{}',
+    -- N9: permission is not execution. Legacy calls have no observed result or duration.
+    execution   TEXT DEFAULT 'unknown' CHECK (execution IS NULL OR execution IN
+                    ('running', 'done', 'error', 'stopped', 'unknown')),
+    started_at  TEXT,
+    duration_ms INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0),
+    execution_error TEXT,
+    -- Native provider call id; NULL for tool-based searches and legacy rows.
+    call_id     TEXT
 );
 CREATE INDEX IF NOT EXISTS web_search_requests_by_chat ON web_search_requests(chat_id, status);
 CREATE INDEX IF NOT EXISTS web_search_requests_by_run ON web_search_requests(run_id, status);
@@ -59,5 +67,14 @@ def _add_missing(*columns: tuple[str, str]) -> Callable[[sqlite3.Connection], No
 
 #: v2 (W-3b): which agent's own search ran a ``skaz_web_search`` query.
 #: v3 (N7): the search rules in force for the query and the links they hid.
+#: v4 (N9): observed execution, separate from permission; old calls stay unknown.
+#: v5 (N9): native provider call identity, not the SKAZ web-tool name constant.
 UPGRADES = {2: _add_missing(("searcher", "TEXT")),
-            3: _add_missing(("rules", "TEXT"), ("hidden", "TEXT NOT NULL DEFAULT '{}'"))}
+            3: _add_missing(("rules", "TEXT"), ("hidden", "TEXT NOT NULL DEFAULT '{}'")),
+            4: _add_missing(
+                ("execution", "TEXT DEFAULT 'unknown' CHECK (execution IS NULL OR execution IN "
+                 "('running', 'done', 'error', 'stopped', 'unknown'))"),
+                ("started_at", "TEXT"),
+                ("duration_ms", "INTEGER CHECK (duration_ms IS NULL OR duration_ms >= 0)"),
+                ("execution_error", "TEXT")),
+            5: _add_missing(("call_id", "TEXT"))}

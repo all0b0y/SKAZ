@@ -205,7 +205,6 @@
 .kb-deck__actions { display: flex; gap: var(--kb-sp-6); margin: var(--kb-sp-12) 0; flex-wrap: wrap; }
 .kb-deck__list { list-style: none; margin: 0; padding: 0; }
 .kb-deck__row { display: flex; align-items: center; gap: var(--kb-sp-8); padding: var(--kb-sp-8) var(--kb-sp-2); border-bottom: 1px solid var(--kb-line); min-height: 42px; }
-.kb-deck__row[aria-selected='true'] { background: var(--kb-accent-soft); }
 .kb-deck__q { flex: 1; min-width: 0; font-size: var(--t-sm); line-height: 1.35; }
 .kb-deck__q small { display: block; color: var(--kb-muted); font-size: var(--t-xs); }
 .kb-deck__marks { display: none; gap: var(--kb-sp-4); }

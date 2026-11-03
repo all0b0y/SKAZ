@@ -4,7 +4,8 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import { errorText } from '../api/client';
 import type { KbClient } from '../api/client';
 import { saveSearchSettings, searchSettings, type KbSearchSettings } from '../api/searchRules';
-import { Icon } from '../ui';
+import type { KbWebRules } from '../../api/kb/types.gen';
+import { Button, Icon } from '../ui';
 
 /**
  * N7: the user's search rules in the interface. A domain covers its subdomains; the backend keeps
@@ -13,10 +14,14 @@ import { Icon } from '../ui';
  */
 
 /** Web rules with every list present (the generated type marks defaulted fields optional). */
-export type WebRules = Required<KbSearchSettings>;
-export const EMPTY_RULES: WebRules = { never: [], only_on: false, only: [], prefer: [] };
-export const full = (rules: KbSearchSettings | null | undefined): WebRules => ({
+export type WebRules = Required<KbWebRules>;
+export type SearchSettings = WebRules & { beta: boolean };
+export const EMPTY_RULES: SearchSettings = { never: [], only_on: false, only: [], prefer: [], beta: false };
+export const full = (rules: KbWebRules | null | undefined): WebRules => ({
   never: rules?.never ?? [], only_on: rules?.only_on ?? false, only: rules?.only ?? [], prefer: rules?.prefer ?? [],
+});
+export const fullSettings = (rules: KbSearchSettings | null | undefined): SearchSettings => ({
+  ...full(rules), beta: rules?.beta ?? false,
 });
 
 /**
@@ -52,7 +57,7 @@ export interface SiteListProps {
   dim?: boolean;
 }
 
-/** Site chips with remove, and «Add site» → an inline field (Enter adds, Escape cancels). */
+/** Site chips: Add, Enter or leaving the field commits; Escape cancels the pending site. */
 export function SiteList({ label, sites, inherited = [], onChange, disabled = false, dim = false }: SiteListProps) {
   const [adding, setAdding] = useState(false);
   const [text, setText] = useState('');
@@ -61,6 +66,7 @@ export function SiteList({ label, sites, inherited = [], onChange, disabled = fa
   useEffect(() => { if (adding) input.current?.focus(); }, [adding]);
 
   const add = () => {
+    if (disabled) return;
     const site = siteOf(text);
     if (!site) { setProblem('Write it like example.com.'); return; }
     setProblem(null);
@@ -86,14 +92,24 @@ export function SiteList({ label, sites, inherited = [], onChange, disabled = fa
         ))}
         <li className="kb-sites__add">
           {adding ? (
-            <input ref={input} className="kb-site-input" aria-label={`Add to ${label.toLowerCase()}`} placeholder="example.com" value={text}
-              disabled={disabled}
-              onChange={(e) => { setText(e.target.value); setProblem(null); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); add(); }
-                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setAdding(false); setText(''); setProblem(null); }
-              }}
-              onBlur={() => { if (!text.trim()) { setAdding(false); setProblem(null); } }} />
+            <>
+              <input ref={input} className="kb-site-input" aria-label={`Add to ${label.toLowerCase()}`} placeholder="example.com" value={text}
+                disabled={disabled} aria-invalid={!!problem || undefined}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  e.target.setCustomValidity(value.trim() && !siteOf(value) ? 'Write it like example.com.' : '');
+                  setText(value);
+                  setProblem(null);
+                }}
+                onInvalid={(e) => { e.preventDefault(); setProblem('Write it like example.com.'); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); add(); }
+                  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setAdding(false); setText(''); setProblem(null); }
+                }}
+                onBlur={() => { if (text.trim()) add(); else { setAdding(false); setProblem(null); } }} />
+              <Button size="sm" variant="quiet" disabled={disabled}
+                onMouseDown={(e) => { if (e.button === 0) e.preventDefault(); }} onClick={add}>Add</Button>
+            </>
           ) : (
             <button type="button" className="kb-site-add" disabled={disabled} onClick={() => setAdding(true)}>
               <Icon name="plus" size={12} />Add site
@@ -109,11 +125,11 @@ export function SiteList({ label, sites, inherited = [], onChange, disabled = fa
 // ---- Settings → Search: one shared state for its rows ----------------------------------------
 
 export interface SearchSettingsState {
-  rules: WebRules | null;
+  rules: SearchSettings | null;
   error: string | null;
   saving: boolean;
   load: () => Promise<void>;
-  save: (next: WebRules) => Promise<void>;
+  save: (next: SearchSettings) => Promise<void>;
 }
 
 const stores = new WeakMap<KbClient, StoreApi<SearchSettingsState>>();
@@ -127,26 +143,50 @@ export function searchSettingsChanged() {
 export function searchSettingsStore(client: KbClient): StoreApi<SearchSettingsState> {
   let store = stores.get(client);
   if (!store) {
+    // Keep edits responsive across blur → click, but serialize complete snapshots on the wire.
+    // A read that began before an edit must not replace the newer confirmed/optimistic rules.
+    let revision = 0;
+    let readVersion = 0;
+    let writes = Promise.resolve();
+    let confirmed: SearchSettings | null = null;
     store = createStore<SearchSettingsState>((set, get) => ({
       rules: null,
       error: null,
       saving: false,
       load: async () => {
+        if (get().saving) return;
+        const read = ++readVersion;
+        const version = revision;
         try {
-          set({ rules: full(await searchSettings(client)), error: null });
+          const next = fullSettings(await searchSettings(client));
+          if (read === readVersion && version === revision && !get().saving) {
+            confirmed = next;
+            set({ rules: next, error: null });
+          }
         } catch (e) {
-          set({ error: errorText(e) });
+          if (read === readVersion && version === revision) set({ error: errorText(e) });
         }
       },
       save: async (next) => {
-        const before = get().rules;
-        set({ rules: next, saving: true, error: null });
-        try {
-          set({ rules: full(await saveSearchSettings(client, next)), saving: false });
-          searchSettingsChanged();
-        } catch (e) {
-          set({ rules: before, saving: false, error: errorText(e) });
-        }
+        const version = ++revision;
+        ++readVersion;
+        const wanted = { never: [...next.never], only_on: next.only_on, only: [...next.only], prefer: [...next.prefer], beta: next.beta };
+        set({ rules: wanted, saving: true, error: null });
+        writes = writes.then(async () => {
+          try {
+            confirmed = fullSettings(await saveSearchSettings(client, wanted));
+            if (version === revision) {
+              set({ rules: confirmed, saving: false });
+              searchSettingsChanged();
+            }
+          } catch (e) {
+            if (version === revision) {
+              set({ rules: confirmed, saving: false, error: errorText(e) });
+              searchSettingsChanged();
+            }
+          }
+        });
+        await writes;
       },
     }));
     stores.set(client, store);

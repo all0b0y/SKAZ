@@ -14,6 +14,8 @@ import { agentName } from './permission';
 import { searchEverywhereOnce } from '../api/searchRules';
 import { sitesShort } from '../searchRules/sites';
 import { hasYear, QueryWithYears } from '../searchRules/TimeWindow';
+import { StippleGlobe, StippleRing } from '../fx/stipple/StippleWork';
+import { Elapsed, formatSeconds } from './ThoughtLine';
 
 /**
  * W-2: an agent's own web search in the chat. Pending, it shows the exact query — the only thing that
@@ -21,9 +23,12 @@ import { hasYear, QueryWithYears } from '../searchRules/TimeWindow';
  * OpenCode ask through SKAZ's tool; the card names the agent whose own search runs it in a clean run. Decided, it folds into one
  * line; the links it found are listed apart from the material citations, each with «Add to wiki».
  */
-export function WebSearchCard({ chatId, part }: { chatId: string; part: KbWebSearchPart }) {
-  if (part.status !== 'pending') return <WebSearchOutcome chatId={chatId} part={part} />;
-  return <WebSearchRequest chatId={chatId} part={part} />;
+export function WebSearchCard({ chatId, part, working }: { chatId: string; part: KbWebSearchPart; working?: boolean }) {
+  if (part.status === 'pending') return <WebSearchRequest chatId={chatId} part={part} />;
+  // Legacy has no observed outcome; a finished answer cannot keep an old running checkpoint alive.
+  const execution = part.execution === undefined || (working === false && (part.execution === 'running' || part.execution === null))
+    ? 'unknown' : part.execution;
+  return <WebSearchOutcome chatId={chatId} part={{ ...part, execution }} />;
 }
 
 const ONLY_QUERY = 'Only this query is sent — nothing else from the chat or your library.';
@@ -112,7 +117,14 @@ function Domains({ part }: { part: KbWebSearchPart }) {
 }
 
 function outcomeState(part: KbWebSearchPart): { state: string; detail: string | null } {
-  if (part.status === 'allowed') return { state: part.auto ? 'Searched the web · allowed in this chat' : 'Searched the web', detail: null };
+  if (part.status === 'allowed') {
+    if (part.execution === 'done') return { state: part.auto ? 'Searched the web · allowed in this chat' : 'Searched the web', detail: null };
+    if (part.execution === 'running') return { state: 'Searching the web…', detail: null };
+    if (part.execution === 'error') return { state: 'Search failed', detail: null };
+    if (part.execution === 'stopped') return { state: 'Search stopped', detail: null };
+    if (part.execution === null) return { state: 'Search approved', detail: 'Not started' };
+    return { state: 'Search result unknown', detail: null };
+  }
   if (part.status === 'denied' && part.auto) return { state: 'Search blocked by your rules', detail: 'Nothing was sent' };
   if (part.status === 'denied') return { state: 'Search denied', detail: 'Nothing was sent' };
   return { state: 'Search cancelled', detail: 'Nothing was sent' };
@@ -158,7 +170,8 @@ function EverywhereOnce({ chatId, part }: { chatId: string; part: KbWebSearchPar
   const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
   const [error, setError] = useState<string | null>(null);
   // Q1 n78 L-7: also on a search the rules blocked outright (every site asked was outside them).
-  const nothing = (part.status === 'allowed' && part.links.length === 0) || (part.status === 'denied' && part.auto);
+  const nothing = (part.status === 'allowed' && part.execution === 'done' && part.links.length === 0)
+    || (part.status === 'denied' && part.auto);
   if (!part.rules?.only.length || !nothing) return null;
   const lift = async () => {
     setState('busy');
@@ -182,6 +195,16 @@ function EverywhereOnce({ chatId, part }: { chatId: string; part: KbWebSearchPar
   );
 }
 
+function WebTime({ part }: { part: KbWebSearchPart }) {
+  const from = Date.parse(part.started_at ?? '');
+  if (part.execution === 'running' && Number.isFinite(from)) return <Elapsed className="kb-web__time" from={from} />;
+  if (['done', 'error', 'stopped'].includes(part.execution ?? '') && part.duration_ms != null
+    && Number.isFinite(part.duration_ms) && part.duration_ms >= 0) {
+    return <span className="kb-web__time">{formatSeconds(part.duration_ms / 1000)}</span>;
+  }
+  return null;
+}
+
 function WebSearchOutcome({ chatId, part }: { chatId: string; part: KbWebSearchPart }) {
   const { state, detail } = outcomeState(part);
   const icon = part.status === 'allowed' ? 'web' : part.status === 'denied' ? 'denied' : 'cancelled';
@@ -189,22 +212,32 @@ function WebSearchOutcome({ chatId, part }: { chatId: string; part: KbWebSearchP
   const [all, setAll] = useState(false);
   const count = part.links.length;
   const label = `${state}: ${part.query}`;
+  const running = part.execution === 'running';
+  const done = part.execution === 'done';
+  const error = part.execution === 'error';
+  const mark = running || done ? <StippleGlobe complete={done} /> : <Icon name={error ? 'warning' : icon} size={15} />;
+  const completion = done ? <span className="kb-web__completion">Done</span> : null;
+  const failure = error ? <p className="kb-inline-error kb-inline-error--flat" role="alert">
+    {part.execution_error ?? 'Web search could not be completed. Check the search agent and try again.'}
+  </p> : null;
   if (count > 0) {
     const shown = all ? part.links : part.links.slice(0, FIRST_LINKS);
     return (
       <m.div className="kb-web-done kb-web-done--links" data-status={part.status} role="group" aria-label={label}
         initial={{ opacity: 0 }} animate={{ opacity: 1, transition: SPRING_SMALL }}>
         <div className="kb-web-fold-row">
+        {mark}
         <button type="button" className="kb-web-fold" aria-expanded={open} onClick={() => setOpen((v) => !v)}
           aria-label={`${state} · ${part.query} · ${count} ${count === 1 ? 'link' : 'links'}`}>
-          <Icon name="web" size={14} />
-          <b>{state}</b>
+          <b role={running ? 'status' : undefined}>{state}</b>
           <span className="kb-web-fold__query" title={part.query}>{part.query}</span>
           <span className="kb-web-fold__count">· {count} {count === 1 ? 'link' : 'links'}</span>
+          {completion}<WebTime part={part} />
           <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
         </button>
         <HiddenByRules part={part} />
         </div>
+        {failure}
         {open && (
           <ul className="kb-web__links" aria-label="From the web">
             {shown.map((link) => <WebLinkRow key={link.url} link={link} undated={hasYear(part.query)} />)}
@@ -222,13 +255,15 @@ function WebSearchOutcome({ chatId, part }: { chatId: string; part: KbWebSearchP
     <m.div className="kb-perm-done kb-web-done" data-status={part.status} role="group" aria-label={label}
       initial={{ opacity: 0 }} animate={{ opacity: 1, transition: SPRING_SMALL }}>
       <div className="kb-perm-done__row">
-        <Icon name={icon} size={15} className="kb-perm-done__icon" />
-        <b>{state}</b>
+        {mark}
+        <b role={running ? 'status' : undefined}>{state}</b>
         <span className="kb-perm-done__line" title={part.query}>{part.query}</span>
         {detail && <span className="kb-perm-done__detail">{detail}</span>}
-        {part.status === 'allowed' && part.rules?.only.length ? <span className="kb-perm-done__detail">· 0 links on allowed sites</span> : null}
+        {completion}<WebTime part={part} />
+        {done && <span className="kb-perm-done__detail">{part.rules?.only.length ? '0 links on allowed sites' : '0 links'}</span>}
         <HiddenByRules part={part} />
       </div>
+      {failure}
       <EverywhereOnce chatId={chatId} part={part} />
     </m.div>
   );
@@ -261,7 +296,7 @@ function WebLinkRow({ link, undated = false }: { link: KbWebLink; undated?: bool
         {state === 'added'
           ? <span className="kb-web__added" role="status" title="Added to the library — the wiki follows"><Icon name="check" size={13} />In library</span>
           : state === 'busy'
-            ? <span className="kb-web__busy" role="status" aria-label="Adding to the library"><span className="kb-spinner kb-spinner--inline" aria-hidden="true" /></span>
+            ? <span className="kb-web__busy" role="status" aria-label="Adding to the library"><StippleRing className="kb-spinner kb-spinner--inline" /></span>
             : <IconButton icon="saveWiki" label="Add to wiki" size="sm" className="kb-web__add" onClick={() => void add()} />}
       </div>
       {error && (

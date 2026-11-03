@@ -9,6 +9,7 @@ import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import { isLive, type LiveView, type RecErrorWhen, type RecOptions } from './recordingStore';
 import { speechServiceName } from './connection';
 import { SpeechBars } from '../fx/indicators/SpeechBars';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { useMotionLevel } from '../ui/motionLevel';
 import { useVoicePill, type PillShape } from './voicePill';
 
@@ -298,7 +299,7 @@ function RecordBody() {
         <button ref={recordRef} type="button" className="kb-capsule kb-capsule--go" aria-disabled={!ready || phase === 'starting' || undefined}
           onClick={() => { if (ready && phase === 'idle') startFromButton(); }}>
           {phase === 'starting' && !mic.held
-            ? <span className="kb-spinner kb-spinner--inline kb-spinner--onfill" aria-hidden="true" />
+            ? <StippleRing className="kb-spinner kb-spinner--inline kb-spinner--onfill" />
             : <Icon name="mic" size={14} play={mic.play} />}
           <span className="kb-capsule__main">Record</span>
         </button>

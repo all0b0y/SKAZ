@@ -22,7 +22,7 @@ from ..errors import KnowledgeError
 from ..markdown.source import Origin
 from .fetch import Fetched
 from .fragments import to_fragments
-from .html import ArticleRejected, decode_html, extract_page
+from .html import ArticleExtraction, ArticleRejected, decode_html, extract_page
 from .intake import Original, Prepared, flag_instructions
 from .links import domain_of
 
@@ -74,6 +74,17 @@ def _letters(texts: list[str]) -> int:
     return sum(char.isalpha() for text in texts for char in text)
 
 
+def check_readable_page(extraction: ArticleExtraction) -> None:
+    """Shared access/visibility checks for byte imports and the file-backed chat reader."""
+    letters = _letters([paragraph.text for paragraph in extraction.paragraphs])
+    if extraction.password_fields and letters < SIGN_IN_LETTERS:
+        raise WebPageUnavailable("This page asks you to sign in before it shows its text.")
+    if extraction.scripts and letters < JS_ONLY_LETTERS:
+        raise WebPageUnavailable("This page shows its text only with JavaScript, which SKAZ doesn't run.")
+    if not extraction.paragraphs:
+        raise WebPageUnavailable("SKAZ couldn't find any text on this page.")
+
+
 def prepare_web_page(fetched: Fetched, url: str, *, fetched_at: str) -> Prepared:
     """The fetched page as a ``web`` material: whole visible text, link, final address and date."""
     content_type = fetched.content_type
@@ -85,13 +96,7 @@ def prepare_web_page(fetched: Fetched, url: str, *, fetched_at: str) -> Prepared
         extraction = extract_page(decode_html(fetched.body, fetched.charset))
     except ArticleRejected as error:
         raise WebPageUnavailable(error.message) from error
-    letters = _letters([paragraph.text for paragraph in extraction.paragraphs])
-    if extraction.password_fields and letters < SIGN_IN_LETTERS:
-        raise WebPageUnavailable("This page asks you to sign in before it shows its text.")
-    if extraction.scripts and letters < JS_ONLY_LETTERS:
-        raise WebPageUnavailable("This page shows its text only with JavaScript, which SKAZ doesn't run.")
-    if not extraction.paragraphs:
-        raise WebPageUnavailable("SKAZ couldn't find any text on this page.")
+    check_readable_page(extraction)
     origin = Origin.model_validate({
         "type": "url",
         "url": url,
