@@ -17,9 +17,9 @@ Aufnehmen oder Quelle hinzufügen · fragen mit genauen Belegen · ein Wiki, das
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="Rundgang durch SKAZ: eine Vorlesung aufnehmen, mit Fußnote danach fragen, eine Änderung des Agenten erlauben, Karteikarten aus der Vorlesung lernen" width="880">
+<img src="../images/skaz-tour.webp" alt="SKAZ 0.3.1 — Rundgang durch SKAZ: eine Vorlesung aufnehmen, mit Fußnote danach fragen, eine Änderung des Agenten erlauben, Karteikarten aus der Vorlesung lernen" width="880">
 
-<sub>Produkt-Rundgang · Demoprofil mit vorbereiteten Daten · <a href="../images/skaz-tour.mp4">Der ganze Rundgang in Full HD (MP4, 80 s)</a></sub>
+<sub>SKAZ-0.3.1-Rundgang · frühere Oberfläche, nicht 0.3.2 · vorbereitete Demodaten · <a href="../images/skaz-tour.mp4">Der ganze Rundgang in Full HD (MP4, 80 s)</a></sub>
 
 <br><br>
 
@@ -76,18 +76,24 @@ Spracherkennung, keine echten KI-Ausgaben und keine echte Suche.</sub>
 
 ## ✨ Funktionen
 
+**Für 0.3.2 aktualisiert.** Der Rundgang und die Animationen oben zeigen die frühere Oberfläche von 0.3.1, nicht die von 0.3.2.
+
 | | |
 |---|---|
 | 🎙️ **Live-Aufnahme** | Mikrofon, auf Wunsch zusammen mit dem Ton des Macs (Zoom, Videos; macOS 14.2+ und Systemberechtigung nötig). Erkennung mit **Soniox** (Cloud-Streaming, Sprechertrennung, Übersetzung) oder **Whisper auf diesem Computer** (funktioniert offline). SKAZ wechselt den Dienst nie stillschweigend. |
 | 📚 **Jede Quelle** | PDF, Dokumente, Text- und Markdown-Dateien, Audio- und Videodateien, Webartikel (bereinigt), eingefügter Text beliebiger Länge und Videolinks von YouTube, VK Video, RuTube und Vimeo. Verwende nur Material, das du verarbeiten darfst. |
 | 🧠 **Ein lebendiges Wiki** | Notizen zu jeder Quelle, eine Seite pro Begriff über alle Ordner hinweg und gespeicherte Analysen. Jede Aussage ist gekennzeichnet: Zitat aus einer Quelle, vom Agenten gefolgerte Verbindung oder Erklärung des Agenten. Widersprechen sich Quellen, werden beide Fassungen gezeigt, und du entscheidest. |
-| 💬 **Chats mit Fußnoten** | Frag zur ganzen Bibliothek; der Agent weiß, was geöffnet ist und ob gerade aufgenommen wird. Fußnoten öffnen die genaue Stelle einer Aufnahme oder die Seite eines Dokuments. Mit **@** verweist du auf eine Seite, ein Material oder einen Chat. Antworten können Diagramme mit einer Vollbildansicht enthalten. |
+| 💬 **Chats mit Fußnoten** | Frag zur ganzen Bibliothek oder beschränke einen Chat unter **Search & sources** auf ausgewählte Quellen, mit Ausschlüssen für diesen Chat. Fußnoten öffnen die genaue Stelle einer Aufnahme oder die Seite eines Dokuments. Mit **@** verweist du auf eine Seite, ein Material oder einen Chat. |
+| 🧱 **Strukturierte Antworten** | Vergleiche mit anpassbaren Spaltenbreiten, Zeitachsen, Schritte, Definitionen, Begriffskarten, Kennzahlen und Diagramme. Quellenlinks bleiben bei den Elementen, die sie belegen. Kopiere einen Block als Markdown oder wähle ein Element aus, um dazu zu fragen. |
 | 🃏 **Karteikarten und Tests** | Bitte um Karteikarten oder einen Test zu einer Seite, einem Material oder einem Chat. Jede richtige Antwort ist durch ein geprüftes Zitat belegt. Karten werden mit FSRS-Wiederholung gelernt; Stapel und Tests lassen sich im Wiki speichern. |
-| 🌐 **Websuche, mit deinem OK** | Bevor etwas deinen Mac verlässt, siehst du die genaue Anfrage und wählst Allow once, Allow in this chat oder Deny. Gesendet wird nur die Anfrage. Eine gefundene Seite lässt sich mit einem Klick in die Bibliothek aufnehmen. |
+| 🌐 **Websuche, mit deinem OK** | Du siehst die genaue Anfrage vor dem Senden und wählst Allow once, Allow in this chat oder Deny. Die Ergebnisse zeigen die geltenden Website-Regeln; du entscheidest, ob eine Seite in die Bibliothek kommt. |
+| 🧪 **Search Beta** | Aktiviere **Beta search features** unter **Settings → Search** für **Only these sites** (eine Beschränkung) und **Prefer** (eine Präferenz). Standardmäßig aus; Ausschalten pausiert diese Regeln für neue Suchen, behält aber deine Listen. **Never** und die Quellenfilter der Bibliothek bleiben aktiv. |
+| 📖 **Webseiten lesen** | Der Agent kann öffentliche Seiten aus genehmigten Suchergebnissen lesen, ohne sie zuerst zu importieren. Lange Seiten werden in begrenzten Teilen desselben Snapshots gelesen. **Add to library** ist eine eigene Aktion; Lesen allein fügt kein Material hinzu. |
 | 🤖 **Dein Agent** | **Codex**, **Claude Code**, **Hermes Agent** oder **OpenCode**, mit deinem eigenen Abo oder Schlüssel; SKAZ kann sie für dich installieren. Agenten lesen die Bibliothek über SKAZ-Werkzeuge und ändern Wiki-Seiten nur, wenn du es erlaubst, mit Undo; deine eigenen Notizen bleiben unberührt. Wähle ein Modell pro Chat und markiere Favoriten mit einem Stern. Kleine Ablageentscheidungen können ein lokales Modell oder OpenRouter übernehmen. |
 | ✍️ **Erkennungskorrekturen** | Eine optionale Prüfung findet wahrscheinliche Erkennungsfehler, korrigiert die sicheren und markiert die zweifelhaften nur. Jede Korrektur lässt sich rückgängig machen. |
 | 🗂️ **Normale Dateien** | Die Bibliothek ist ein Ordner mit `.md`-Dateien. Öffne ihn in **Obsidian** oder exportiere alles als Markdown mit Quellen als Fußnoten. Deine eigenen Änderungen an Wiki-Seiten sind vor dem Agenten geschützt. |
 | 🔄 **Updates** | SKAZ prüft GitHub-Releases beim Start und einmal am Tag und installiert ein geprüftes Update über **Settings → About**. |
+| 🎨 **Darstellung** | Helle/dunkle Basis, Akzent, Dichte, Bewegung und optionale Oberflächentöne unter **Settings → Appearance**. Voreinstellungen bieten einen Ausgangspunkt; die Regler bleiben unabhängig. |
 
 ## 📦 Installation
 
@@ -146,7 +152,8 @@ Alles lässt sich später unter **Settings** ändern.
 | Live-Audio | Wird nicht als Archiv zum Abspielen aufbewahrt. Temporäres Audio kann zur Verarbeitung oder Wiederherstellung genutzt werden. |
 | Spracherkennung | **Soniox:** Audio wird nach deiner Zustimmung gesendet, die du jederzeit zurücknehmen kannst. **Whisper auf diesem Computer:** Audio verlässt deinen Mac nie. |
 | Agent | Deine Frage und die gelesenen Teile der Bibliothek gehen an den gewählten Agenten; dessen Aufbewahrungs- und Trainingsrichtlinien gelten. |
-| Websuche | Nur eine von dir erlaubte Anfrage, an die Suche des auf der Karte genannten Agenten – ohne Chatverlauf und ohne Text aus der Bibliothek. Eine gefundene Seite hinzuzufügen ist eine einzige Anfrage an diese Adresse. |
+| Websuche | Nur die genehmigte Anfrage geht an den Suchdienst des auf der Karte genannten Agenten, nicht der gesamte Chatverlauf oder Bibliothekskontext. |
+| Webseiten lesen | Lesen oder Importieren einer Seite kontaktiert deren Website. Der extrahierte Text kann an den gewählten Agenten gehen. Lesen allein speichert die Seite nicht als Bibliotheksmaterial. |
 | Schlüssel | Eine verschlüsselte lokale Datei im App-Ordner von SKAZ, der Schlüssel liegt daneben. Die Dateiberechtigungen sind die Hauptgrenze – kein Schutz vor Prozessen, die unter deinem Benutzer laufen. |
 | Aktivitätsprotokoll | Ohne Gesprächstext und Schlüssel. |
 | Backend | Python, nur Loopback, bei jedem Start mit neuem Token. |
