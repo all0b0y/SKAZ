@@ -54,7 +54,7 @@ def markdown(block: KbKeyNumbersBlock, refs: md.Refs) -> list[str]:
 
 SPEC = BlockSpec(
     name="key_numbers",
-    when="two to six numbers that matter, shown large with what each measures",
+    when="one to six numbers that matter, shown large with what each measures",
     schema=KeyNumbersIn,
     example={
         "type": "key_numbers",

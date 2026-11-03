@@ -5,11 +5,11 @@ import { MIN_COLUMN_WIDTH, useColumnWidths } from './columnWidths';
 import { BlockItem } from './hover';
 import type { BlockItemData } from './sources';
 
-/** compare: the things side by side (columns) on the same criteria (rows). */
+/** compare: compared objects in rows and comparison criteria in columns. */
 export function CompareBlock({ block, blockId }: { block: KbCompareBlock; blockId: string }) {
   const table = useRef<HTMLTableElement | null>(null);
   const messageId = useAnswerId();
-  const labels = ['Criterion', ...block.columns];
+  const labels = ['Row label', ...block.columns];
   const { widths, handle } = useColumnWidths(`${messageId ?? ''}:${blockId}`, labels.length, table);
   const grip = (index: number) => <button type="button" className="kb-blk-cmp__resize" {...handle(index)}
     aria-label={`Resize ${labels[index]} column`}
@@ -20,7 +20,7 @@ export function CompareBlock({ block, blockId }: { block: KbCompareBlock; blockI
         ...(widths ? { width: widths.reduce((sum, n) => sum + n, 0) } : {}) }}>
         <colgroup>{labels.map((_, i) => <col key={i} style={widths ? { width: widths[i] } : undefined} />)}</colgroup>
         <thead>
-          <tr><th scope="col" aria-label="Criterion">{grip(0)}</th>{block.columns.map((column, i) => (
+          <tr><th scope="col" aria-label="Row label">{grip(0)}</th>{block.columns.map((column, i) => (
             <th key={i} scope="col" aria-label={column}>{column}{grip(i + 1)}</th>))}</tr>
         </thead>
         <tbody>

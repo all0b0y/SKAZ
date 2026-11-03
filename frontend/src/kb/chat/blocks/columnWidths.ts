@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEven
 // Presentation only: opaque message/block ids and pixels, never answer text or sources.
 const STORAGE_KEY = 'skaz.kb.compare-widths';
 const MAX_TABLES = 200;
-// The criterion column plus the catalog's at most six compared things.
+// The row-label column plus the catalog's at most six comparison criteria.
 const MAX_TABLE_COLUMNS = 1 + 6;
 export const MIN_COLUMN_WIDTH = 144;
 const MAX_COLUMN_WIDTH = 1200;

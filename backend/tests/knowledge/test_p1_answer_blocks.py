@@ -89,12 +89,12 @@ def _build(data: Any) -> tuple[dict[str, Any], int, list[str]]:
 
 def test_compare_keeps_valid_cells_and_hides_invalid_ones_and_unknown_sources() -> None:
     data, hidden, sources = _build({
-        "type": "compare", "title": "Raft или Paxos", "columns": ["Raft", "Paxos"],
+        "type": "compare", "title": "Raft или Paxos", "columns": ["Лидер", "Где"],
         "rows": [
-            {"label": "Лидер", "cells": [{"text": "Один на терм", "cite": "m:mat-rec:12"},
-                                          {"text": "Не обязателен", "cite": "m:mat-none:3"}]},
-            {"label": "Где", "cells": [{"text": "etcd ⟦m:mat-doc:2⟧", "id": "where-raft"},
-                                        {"text": "Chubby", "basis": "agent"}]},
+            {"label": "Raft", "cells": [{"text": "Один на терм", "cite": "m:mat-rec:12"},
+                                         {"text": "etcd ⟦m:mat-doc:2⟧", "id": "where-raft"}]},
+            {"label": "Paxos", "cells": [{"text": "Не обязателен", "cite": "m:mat-none:3"},
+                                          {"text": "Chubby", "basis": "agent"}]},
             {"label": "Сломано", "cells": [{"text": "x", "cite": "p:pg-real", "basis": "agent"},
                                            {"txt": "y"}]},
             {"label": "Не та длина", "cells": [{"text": "a", "basis": "agent"},
@@ -104,12 +104,12 @@ def test_compare_keeps_valid_cells_and_hides_invalid_ones_and_unknown_sources() 
     })
     assert hidden == 1 + 2 + 3  # a made-up source; a row of two bad cells; a row with three cells
     assert data["kind"] == "compare" and data["title"] == "Raft или Paxos"
-    assert data["columns"] == ["Raft", "Paxos"]
+    assert data["columns"] == ["Лидер", "Где"]
     assert [row["id"] for row in data["rows"]] == ["r1", "r2"]
     first, second = data["rows"]
     assert first["cells"][0] == {"id": "r1c1", "src": [0], "agent": False, "text": "Один на терм"}
-    assert first["cells"][1] is None
-    assert second["cells"][0] == {"id": "where-raft", "src": [1], "agent": False, "text": "etcd"}
+    assert first["cells"][1] == {"id": "where-raft", "src": [1], "agent": False, "text": "etcd"}
+    assert second["cells"][0] is None
     assert second["cells"][1] == {"id": "r2c2", "src": [], "agent": True, "text": "Chubby"}
     assert sources[:2] == ["m:mat-rec:12", "m:mat-doc:2"]
 
@@ -429,9 +429,21 @@ def test_instructions_list_the_blocks_and_leave_timelines_to_blocks_not_mermaid(
     assert '"properties"' not in rules and '"$defs"' not in rules  # full schemas stay on demand
     assert "fictitious ids" in rules and "never copy an example id" in rules
     mermaid = text[text.index("Diagrams:"):text.index("Answer blocks:")]
-    assert "mindmap" not in mermaid and "timeline" not in mermaid.split("Pick the type")[1]  # decision 9
-    allowed = "flowchart, sequenceDiagram, stateDiagram-v2, erDiagram, classDiagram, C4 or usecase-beta"
-    assert allowed in mermaid
+    assert "- mindmap" not in mermaid and "- timeline" not in mermaid  # decision 9
+    purposes = {
+        "flowchart": "a process or algorithm with transitions and branches",
+        "sequenceDiagram": "messages between participants over time",
+        "stateDiagram-v2": "one entity's lifecycle",
+        "erDiagram": "data entities, their attributes and relationships",
+        "classDiagram": "classes, interfaces, inheritance and dependencies",
+        "C4": "software architecture",
+        "usecase-beta": "actors and their use cases, not the steps inside a scenario",
+        "xychart-beta": "numeric series on an ordered axis",
+        "pie": "shares of a whole",
+    }
+    for diagram, purpose in purposes.items():
+        assert f"- {diagram}: {purpose}" in mermaid
+    assert "showData" in mermaid and "prefer the chart answer block" in mermaid
 
 
 async def test_the_answer_blocks_tool_returns_full_schemas_and_one_example(ready: Any) -> None:

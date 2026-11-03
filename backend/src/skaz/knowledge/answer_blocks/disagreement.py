@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from . import md
-from .base import BlockError, BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, envelope
+from .base import BlockError, BlockIn, BlockSpec, ItemIn, Items, KbBlockItem, envelope, required
 
 MAX_SIDES = 4
 NOT_TWO = ("A disagreement needs at least two sides that can be shown: each needs valid data and a source "
@@ -28,7 +28,7 @@ class AgreeIn(ItemIn):
 class DisagreementEnvelope(BlockIn):
     type: Literal["disagreement"]
     sides: list[Any] = Field(min_length=2, max_length=MAX_SIDES)
-    agree: Any = None
+    agree: Any
 
 
 class DisagreementIn(DisagreementEnvelope):
@@ -36,7 +36,7 @@ class DisagreementIn(DisagreementEnvelope):
                               description="The question they disagree on, in the answer's language.")
     sides: list[SideIn] = Field(min_length=2, max_length=MAX_SIDES,
                                 description="One per source, each citing that source.")
-    agree: AgreeIn | None = Field(default=None, description="Optional: what they agree on.")
+    agree: AgreeIn = Field(description="What they agree on.")
 
 
 class KbDisagreementSide(KbBlockItem):
@@ -47,6 +47,7 @@ class KbDisagreementBlock(BaseModel):
     kind: Literal["disagreement"]
     title: str | None
     sides: list[KbDisagreementSide]
+    #: Optional only for blocks saved before agreement became required.
     agree: KbDisagreementSide | None
 
 
@@ -56,10 +57,8 @@ def build(data: dict[str, Any], items: Items) -> KbDisagreementBlock:
              for ids, side in items.many(SideIn, block.sides, "d")]
     if len(sides) < 2:
         raise BlockError(NOT_TWO)
-    agree = None
-    if block.agree is not None:
-        found = items.item(AgreeIn, block.agree, "agree")
-        agree = KbDisagreementSide(**found[0].out(), text=found[1].text) if found else None
+    ids, agreement = required(items.item(AgreeIn, block.agree, "agree"), "The agreement")
+    agree = KbDisagreementSide(**ids.out(), text=agreement.text)
     return KbDisagreementBlock(kind="disagreement", title=block.title, sides=sides, agree=agree)
 
 

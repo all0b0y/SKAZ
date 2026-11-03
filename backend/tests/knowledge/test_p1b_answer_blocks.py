@@ -57,6 +57,27 @@ def test_the_catalog_has_the_fifteen_blocks_of_decision_4_with_valid_examples() 
         assert built.kind == spec.name and built.hidden == 0, spec.name
 
 
+def test_compare_puts_compared_objects_in_rows_and_criteria_in_columns() -> None:
+    spec = BLOCKS["compare"]
+    assert spec.when == ("two to six compared objects as rows, two to six criteria as columns "
+                         "(a comparison table)")
+    properties = spec.schema.model_json_schema()["properties"]
+    assert properties["columns"]["description"] == "The comparison criteria (column headings)."
+    assert properties["rows"]["description"] == "One row per compared object."
+    assert spec.example["columns"] == ["Leader", "Used in"]
+    assert [row["label"] for row in spec.example["rows"]] == ["Raft", "Paxos"]
+
+
+def test_concept_cards_and_key_numbers_descriptions_match_their_schemas() -> None:
+    concepts = BLOCKS["concept_cards"]
+    assert concepts.when == ("the key concepts of a topic at a glance, each explained in one line "
+                             "on its own card")
+    numbers = BLOCKS["key_numbers"]
+    assert numbers.when == "one to six numbers that matter, shown large with what each measures"
+    schema = numbers.schema.model_json_schema()["properties"]["numbers"]
+    assert (schema["minItems"], schema["maxItems"]) == (1, 6)
+
+
 class _Everything(FakeChecker):
     def source(self, ref: str) -> int | None:
         if ref not in self.sources:
@@ -215,13 +236,20 @@ def test_chart_sorts_by_value_unless_told_and_shows_one_text_for_each_value() ->
     assert [b["label"] for b in data["bars"]] == ["A", "B"] and data["alt_label"] is None
 
 
-def test_disagreement_needs_two_sides_that_can_be_shown() -> None:
+def test_disagreement_needs_two_sides_and_an_agreement_that_can_be_shown() -> None:
     data, hidden = _build({"type": "disagreement", "title": "Leader?", "sides": [
         {"text": "No leader at all", "cite": REC}, {"text": "A proposer is needed", "cite": DOC}],
-        "agree": {"text": "Safety needs none", "cite": "m:mat-none:1"}})
-    assert hidden == 1 and [s["id"] for s in data["sides"]] == ["d1", "d2"] and data["agree"] is None
+        "agree": {"text": "Safety needs none", "basis": "agent"}})
+    assert hidden == 0 and [s["id"] for s in data["sides"]] == ["d1", "d2"]
+    assert data["agree"]["text"] == "Safety needs none"
     assert "at least two sides" in _broken({"type": "disagreement", "sides": [
-        {"text": "a", "cite": REC}, {"text": "b", "cite": "m:mat-none:1"}]})
+        {"text": "a", "cite": REC}, {"text": "b", "cite": "m:mat-none:1"}],
+        "agree": {"text": "Still safe", "basis": "agent"}})
+    assert "The agreement couldn't be shown" in _broken({"type": "disagreement", "sides": [
+        {"text": "a", "cite": REC}, {"text": "b", "cite": DOC}],
+        "agree": {"text": "Unknown", "cite": "m:mat-none:1"}})
+    assert "agree" in _broken({"type": "disagreement", "sides": [
+        {"text": "a", "cite": REC}, {"text": "b", "cite": DOC}]})
 
 
 # -- composition (decision 2) ------------------------------------------------------------------
@@ -327,7 +355,8 @@ def test_hierarchies_and_cause_chains_are_blocks_and_the_layout_rule_is_in_the_t
 
     full = instructions(None)
     mermaid = full[full.index("Diagrams:"):full.index("Answer blocks:")]
-    assert "hierarch" not in mermaid  # decision 9: a hierarchy is no longer a reason for a flowchart
+    assert "- hierarchy" not in mermaid  # decision 9: not a Mermaid type
+    assert "not plain steps" in mermaid and "a hierarchy (those are answer blocks)" in mermaid
     rules = full[full.index("Answer blocks:"):]
     assert "a timeline, steps, a hierarchy or a cause chain is a block" in rules
     layout = next(rule for rule in BLOCK_RULES if rule.startswith("Layout"))

@@ -1,4 +1,4 @@
-"""``compare``: two to six things side by side on the same criteria (a table)."""
+"""``compare``: compared objects in rows and comparison criteria in columns."""
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -13,28 +13,29 @@ MAX_ROWS = 30
 
 
 class CompareCellIn(ItemIn):
-    text: str = Field(min_length=1, max_length=300, description="What this thing is on this criterion.")
+    text: str = Field(min_length=1, max_length=300, description="What this object is on this criterion.")
 
 
 class CompareRowEnvelope(Strict):
-    label: str = Field(min_length=1, max_length=120, description="The criterion of this row.")
+    label: str = Field(min_length=1, max_length=120, description="The compared object named by this row.")
     cells: list[Any] = Field(min_length=2, max_length=MAX_COLUMNS)
 
 
 class CompareRowIn(CompareRowEnvelope):
     cells: list[CompareCellIn] = Field(min_length=2, max_length=MAX_COLUMNS,
-                                       description="One cell per column, in the order of columns.")
+                                       description="One cell per criterion column, in the order of columns.")
 
 
 class CompareEnvelope(BlockIn):
     type: Literal["compare"]
     columns: list[str] = Field(min_length=2, max_length=MAX_COLUMNS,
-                               description="The things compared (column headings).")
+                               description="The comparison criteria (column headings).")
     rows: list[Any] = Field(min_length=1, max_length=MAX_ROWS)
 
 
 class CompareIn(CompareEnvelope):
-    rows: list[CompareRowIn] = Field(min_length=1, max_length=MAX_ROWS, description="One row per criterion.")
+    rows: list[CompareRowIn] = Field(min_length=1, max_length=MAX_ROWS,
+                                     description="One row per compared object.")
 
 
 class KbCompareCell(KbBlockItem):
@@ -70,7 +71,7 @@ def build(data: dict[str, Any], items: Items) -> KbCompareBlock:
             continue
         label = clean(row.label)
         if len(row.cells) != len(columns) or not label:
-            items.hide(len(row.cells))  # cells don't line up with the columns, or no criterion is left
+            items.hide(len(row.cells))  # cells don't line up with the columns, or no compared object is left
             continue
         row_id = items.ident(f"r{r}")
         cells: list[KbCompareCell | None] = []
@@ -98,17 +99,17 @@ def markdown(block: KbCompareBlock, refs: md.Refs) -> list[str]:
 
 SPEC = BlockSpec(
     name="compare",
-    when="two to six things side by side on the same criteria (a comparison table)",
+    when="two to six compared objects as rows, two to six criteria as columns (a comparison table)",
     schema=CompareIn,
     example={
         "type": "compare",
-        "columns": ["Raft", "Paxos"],
+        "columns": ["Leader", "Used in"],
         "rows": [
-            {"label": "Leader", "cells": [
+            {"label": "Raft", "cells": [
                 {"text": "Always one strong leader per term", "cite": "m:mat-1a2b3c:12"},
-                {"text": "Optional, an optimisation (Multi-Paxos)", "cite": "m:mat-4d5e6f:3"}]},
-            {"label": "Used in", "cells": [
-                {"text": "etcd, Consul", "basis": "agent"},
+                {"text": "etcd, Consul", "basis": "agent"}]},
+            {"label": "Paxos", "cells": [
+                {"text": "Optional, an optimisation (Multi-Paxos)", "cite": "m:mat-4d5e6f:3"},
                 {"text": "Chubby (Google)", "cite": "p:pg-7a8b9c"}]},
         ],
     },
