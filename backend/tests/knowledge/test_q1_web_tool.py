@@ -3,6 +3,7 @@ asked — never «no rules» because recording them on the card failed (the chat
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -31,7 +32,12 @@ async def test_links_are_screened_even_when_the_card_could_not_record_them(env: 
     await finished(env.runtime.kb_chats)
     data = payload(env.agents["codex"].outputs[0])
     assert data["status"] == "ok" and data["links"]
-    assert all("pinterest" not in link["url"] for link in data["links"]) and data["hidden_by_rules"] == 2
+    hosts = {urlsplit(link["url"]).hostname for link in data["links"]}
+    assert all(
+        host is not None and host != "pinterest.com" and not host.endswith(".pinterest.com")
+        for host in hosts
+    )
+    assert data["hidden_by_rules"] == 2
 
 
 async def test_a_denied_search_does_not_spend_search_everywhere_once(env: Env) -> None:
@@ -52,4 +58,7 @@ async def test_a_denied_search_does_not_spend_search_everywhere_once(env: Env) -
     await env.decide(part["id"], "allow")
     await finished(env.runtime.kb_chats)
     assert (await env.client.get(url)).json()["everywhere_once"] is False
-    assert any("medium.com" in link["url"] for link in payload(env.agents["codex"].outputs[-1])["links"])
+    assert any(
+        urlsplit(link["url"]).hostname == "medium.com"
+        for link in payload(env.agents["codex"].outputs[-1])["links"]
+    )

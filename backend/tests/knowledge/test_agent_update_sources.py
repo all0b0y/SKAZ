@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -141,7 +142,7 @@ async def test_codex_standalone_falls_back_to_github_releases() -> None:
 
     async def fetch(target: str) -> str:
         asked.append(target)
-        if "releases.openai.com" in target:
+        if urlsplit(target).hostname == "releases.openai.com":
             raise OSError("unreachable")
         return fixture("github-openai-codex-latest.json")
 

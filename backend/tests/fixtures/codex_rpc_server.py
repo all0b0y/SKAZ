@@ -65,7 +65,7 @@ for line in sys.stdin:
     elif "result" in request:
         send({"id": request["id"], "result": request["result"]})
     elif method == "fixture/env":
-        send({"id": request["id"], "result": os.environ.get("SKAZ_TEST_PARENT_SECRET")})
+        send({"id": request["id"], "result": "SKAZ_TEST_PARENT_SECRET" in os.environ})
     elif method == "fixture/pid":
         send({"id": request["id"], "result": os.getpid()})
     elif method == "fixture/stubborn":
