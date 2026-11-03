@@ -1,6 +1,6 @@
 [project]
 name = "skaz"
-version = "0.3.1"
+version = "0.3.2"
 description = "SKAZ local backend: audio ingestion, ASR, temporal agent, notes"
 requires-python = ">=3.11"
 dependencies = [
