@@ -90,6 +90,8 @@ async def test_chat_routes_require_the_token(kb_app: Any) -> None:
 
 
 async def test_new_chat_has_its_draft_search_rules_before_the_first_answer(env: Env) -> None:
+    enabled = await env.client.put("/kb/settings/search", json={"beta": True})
+    assert enabled.status_code == 200 and enabled.json()["beta"] is True
     response = await env.client.post("/kb/chats", json={"search_rules": {
         "sources_only": True, "sources": [env.library.lecture],
         "web": {"only_on": True, "only": ["arxiv.org"]}}})
@@ -106,6 +108,39 @@ async def test_new_chat_has_its_draft_search_rules_before_the_first_answer(env: 
     assert "Search only these sites: arxiv.org." in sent
 
 
+async def test_initial_rules_default_beta_off_keeps_never_and_sources_and_restores_hidden_lists(
+        env: Env) -> None:
+    settings = await env.client.get("/kb/settings/search")
+    assert settings.status_code == 200 and settings.json()["beta"] is False
+    saved = await env.client.put("/kb/settings/search", json={"never": ["quora.com"]})
+    assert saved.status_code == 200
+    chat = await env.chat(search_rules={
+        "sources_only": True, "sources": [env.library.lecture],
+        "web": {"never": ["pinterest.com"], "only_on": True,
+                "only": ["arxiv.org"], "prefer": ["acm.org"]}})
+    url = f"/kb/chats/{chat['id']}/search-rules"
+    rules = (await env.client.get(url)).json()
+    assert rules["settings"]["beta"] is False
+    assert rules["active"]["only"] == [] and rules["active"]["prefer"] == []
+    assert rules["active"]["never"] == ["quora.com", "pinterest.com"]
+    assert rules["web"]["only"] == ["arxiv.org"] and rules["web"]["prefer"] == ["acm.org"]
+    assert rules["sources_only"] is True
+    assert [source["id"] for source in rules["sources"]] == [env.library.lecture]
+    await env.answered(chat["id"], "A controlled question with Beta disabled")
+    turn = env.agents.engines["codex"].turns[0]
+    sent = turn.instructions + "\n".join(message.content for message in turn.messages)
+    assert "Use only these sources: " + env.library.lecture in sent
+    assert "Never search these sites: quora.com, pinterest.com." in sent
+    assert "Search only these sites" not in sent and "Prefer these sites" not in sent
+    enabled = await env.client.put("/kb/settings/search", json={"beta": True})
+    assert enabled.status_code == 200
+    restored = (await env.client.get(url)).json()
+    assert restored["active"]["only"] == ["arxiv.org"]
+    assert restored["active"]["prefer"] == ["acm.org"]
+    assert restored["active"]["never"] == rules["active"]["never"]
+    assert restored["sources"] == rules["sources"]
+
+
 @pytest.mark.parametrize("rules", [
     {"web": {"only_on": True, "only": ["not a site"]}},
     {"sources": [""]},
@@ -120,7 +155,7 @@ async def test_invalid_initial_rules_do_not_create_a_chat(env: Env, rules: dict[
 
 
 async def test_initial_rules_preserve_global_never_and_normalise_library_choices(env: Env) -> None:
-    settings = {"never": ["quora.com"], "prefer": ["arxiv.org"]}
+    settings = {"never": ["quora.com"], "prefer": ["arxiv.org"], "beta": True}
     assert (await env.client.put("/kb/settings/search", json=settings)).status_code == 200
     chat = await env.chat(search_rules={
         "sources_only": True, "sources": [env.library.lecture, env.library.textbook, env.library.lecture],
@@ -134,7 +169,7 @@ async def test_initial_rules_preserve_global_never_and_normalise_library_choices
     assert [source["id"] for source in rules["excluded"]] == [env.library.lecture]
     assert rules["sources_since"] is not None
     assert (await env.client.get("/kb/settings/search")).json() == {
-        "never": ["quora.com"], "only_on": False, "only": [], "prefer": ["arxiv.org"]}
+        "never": ["quora.com"], "only_on": False, "only": [], "prefer": ["arxiv.org"], "beta": True}
 
 
 async def test_initial_rules_insert_failure_rolls_back_the_chat_and_its_fts(env: Env) -> None:

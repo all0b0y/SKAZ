@@ -12,7 +12,7 @@ from skaz.knowledge.agents.web import WebLink, clean_links
 from skaz.knowledge.permissions.search_rules import WebRules, active_rules, host_of, screen, sites
 
 NEVER = active_rules(WebRules(never=sites(["пример.рф", "bad.com"])), None)
-ONLY = active_rules(WebRules(only_on=True, only=sites(["x.org"])), None)
+ONLY = active_rules(WebRules(only_on=True, only=sites(["x.org"])), None, beta=True)
 
 
 @pytest.mark.parametrize("url", [
@@ -38,4 +38,6 @@ def test_plain_hosts_still_pass() -> None:
     kept = screen(links, NEVER).kept
     assert [link.url for link in kept] == ["https://docs.x.org/p?q=1", "https://example.com/"]
     assert host_of("https://Пример.РФ:8080/x") == "xn--e1afmkfd.xn--p1ai"
+    assert ONLY.only == ("x.org",)  # This is an active Only fixture, not Beta-off's empty rules.
+    assert screen(links, ONLY).kept == (links[0],)
     assert screen([WebLink("t", "https://docs.x.org/")], ONLY).kept != ()
