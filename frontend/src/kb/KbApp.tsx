@@ -9,25 +9,33 @@ import { useProblems } from './shell/problems';
 import type { SettingsSection } from './state/ui';
 import { EditModelsModal } from './composer/EditModels';
 import { SettingsModal } from './settings/SettingsModal';
+import { InstallProgressModal } from './settings/InstallProgress';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
 import { CommandK } from './search/CommandK';
 import { DecisionModal } from './notifications/DecisionModal';
 import { SelectionToolbar } from './ui/Selection';
 import { AddMaterialModal } from './materials/AddMaterialModal';
 import { Toast } from './ui/Toast';
+import { UiSounds } from './sound/UiSounds';
 import { useStudyPlacement } from './study/useStudy';
 
-/** Mirror theme and text size onto <html>, where the tokens read them. */
+/** Mirror the appearance prefs onto <html>, where the tokens (and the motion hook) read them. */
 function ThemeSync() {
   const theme = usePrefs((s) => s.theme);
   const textSize = usePrefs((s) => s.textSize);
+  const base = usePrefs((s) => s.base);
+  const accent = usePrefs((s) => s.accent);
+  const density = usePrefs((s) => s.density);
+  const motion = usePrefs((s) => s.motion);
+  const sounds = usePrefs((s) => s.sounds);
   useEffect(() => {
     const html = document.documentElement;
     html.dataset.kbUi = '';
     if (theme === 'system') delete html.dataset.theme;
     else html.dataset.theme = theme;
     html.dataset.textSize = textSize;
-  }, [theme, textSize]);
+    Object.assign(html.dataset, { base, accent, density, motion, sounds });
+  }, [theme, textSize, base, accent, density, motion, sounds]);
   return null;
 }
 
@@ -158,11 +166,13 @@ function useLiveData() {
   const { chats, notifications, agents, settings } = useServices();
   const ready = useLibrary((s) => s.library?.state === 'ready');
   useEffect(() => {
+    agents.getState().startMonitoring();
     void agents.getState().refresh();
     const s = settings.getState();
     void s.loadHealth();
     void s.loadWiki();
     void s.loadSpeech();
+    return () => agents.getState().stopMonitoring();
   }, [agents, settings]);
   // Agents are checked again when the window comes back (throttled per agent in the store;
   // nothing runs while the window is hidden — there is no timer, only this event).
@@ -202,7 +212,9 @@ function Workspace() {
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
       <AddMaterialModal />
+      <InstallProgressModal />
       <ToastHost />
+      <UiSounds />
     </>
   );
 }

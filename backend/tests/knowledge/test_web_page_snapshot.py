@@ -182,7 +182,9 @@ async def test_the_same_url_in_the_same_folder_returns_the_existing_material_wit
     assert len(sources.kb.materials(folder_id=INBOX_ID, kind="web")) == 1
     other = sources.kb.create_folder("Physics")
     elsewhere = await sources.add_web_page(f"{base}/article", other.id)
-    assert elsewhere.existing is False and elsewhere.material_id != first.material_id
+    # N2 (Q1 n2 M1): the same page is one material in the whole library, whatever the folder.
+    assert elsewhere.existing is True and elsewhere.material_id == first.material_id
+    assert hits == [] and len(sources.kb.materials(kind="web")) == 1
 
 
 async def test_add_to_wiki_on_a_saved_page_kept_out_of_the_wiki_asks_for_ingest_again(

@@ -11,6 +11,8 @@ KbAgentState = Literal["ready", "not_installed", "outdated", "signed_out", "unav
 #: ``first_check``: Hermes' one-time check with SKAZ's own folder; ``check``: look at the state again.
 KbAgentAction = Literal["install", "update", "login", "check", "first_check", "repair"]
 KbInstallAction = Literal["install", "update", "first_check", "repair"]
+#: A task's action: also U1's ``upgrade`` (an offered update) and ``rollback`` (started by their own routes).
+KbInstallTaskAction = Literal["install", "update", "first_check", "repair", "upgrade", "rollback"]
 KbInstallState = Literal["running", "succeeded", "failed", "cancelled"]
 
 
@@ -160,10 +162,16 @@ class KbInstallLine(BaseModel):
     at: str
 
 
+class KbInstallStage(BaseModel):
+    #: A real recipe step or the final installed-agent check, never a simulated Download stage.
+    label: str
+    state: Literal["pending", "running", "done", "error", "stopped"]
+
+
 class KbInstallTask(BaseModel):
     id: str
     engine: KbEngineId
-    action: KbInstallAction
+    action: KbInstallTaskAction
     state: KbInstallState
     #: Log lines after the requested ``after`` cursor.
     lines: list[KbInstallLine]
@@ -176,6 +184,9 @@ class KbInstallTask(BaseModel):
     install: KbAgentInstallInfo
     started_at: str
     finished_at: str | None
+    stages: list[KbInstallStage] = []
+    #: The last attempted step, with its exact argv safely quoted for Terminal.
+    manual_command: str | None = None
 
 
 class KbAgentLogin(_Request):

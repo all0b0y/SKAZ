@@ -11,8 +11,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import shlex
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,9 +28,17 @@ from .runner import Executor, RunningStep, SubprocessExecutor, clean_line
 from .system import ElevationRefused, base_env, refuse_sudo
 
 TaskState = Literal["running", "succeeded", "failed", "cancelled"]
+StageState = Literal["pending", "running", "done", "error", "stopped"]
 DEFAULT_TIMEOUT_S = 20 * 60
 MAX_LINES = 5000
 SUDO_SHIM = "#!/bin/sh\necho 'SKAZ never runs commands with administrator rights.' >&2\nexit 1\n"
+
+
+def _manual_command(argv: Sequence[str], cwd: str | None, overrides: Mapping[str, str]) -> str:
+    """Reproduce only the resolved step scope, never serialize the parent's environment/secrets."""
+    command = shlex.join(("env", *(f"{name}={value}" for name, value in overrides.items()), *argv)
+                         if overrides else argv)
+    return f"(cd -- {shlex.quote(cwd)} && {command})" if cwd else command
 
 
 def _now() -> str:
@@ -44,6 +53,12 @@ class LogLine:
 
 
 @dataclass
+class InstallStage:
+    label: str
+    state: StageState = "pending"
+
+
+@dataclass
 class InstallTask:
     id: str
     engine: EngineId
@@ -53,11 +68,31 @@ class InstallTask:
     lines: list[LogLine] = field(default_factory=list)
     reason: str | None = None
     version: str | None = None
+    #: Actual argv/cwd/explicit step env, shell-quoted; never stdout or the inherited environment.
+    manual_command: str | None = None
     started_at: str = field(default_factory=_now)
     finished_at: str | None = None
     dropped: int = 0
+    #: Extra step values of this task (``{version}`` of a rollback).
+    values: Mapping[str, str] = field(default_factory=dict)
+    #: N9: freeze the real recipe once; the last stage is the actual result check.
+    plan: tuple[Step, ...] = field(init=False, repr=False)
+    stages: list[InstallStage] = field(init=False)
     _seq: int = 0
     _changed: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def __post_init__(self) -> None:
+        self.plan = self.recipe.plan(self.action)
+        self.stages = [InstallStage(step.label) for step in self.plan]
+        self.stages.append(InstallStage(f"Check {self.recipe.name}"))
+
+    def stage(self, index: int, state: StageState) -> None:
+        self.stages[index].state = state
+        if state == "running":
+            # A real stage transition advances the existing log cursor too, so long polls cannot miss it.
+            self.log(f"{self.stages[index].label}…")
+        else:
+            self._signal()
 
     def log(self, text: str) -> None:
         self._seq += 1
@@ -68,6 +103,10 @@ class InstallTask:
         self._signal()
 
     def finish(self, state: TaskState, reason: str | None = None) -> None:
+        for stage in self.stages:
+            if stage.state == "running":
+                stage.state = ("done" if state == "succeeded"
+                               else "stopped" if state == "cancelled" else "error")
         self.state, self.reason, self.finished_at = state, reason, _now()
         self._signal()
 
@@ -129,7 +168,7 @@ class InstallManager:
         env.update({"NONINTERACTIVE": "1", "HOMEBREW_NO_AUTO_UPDATE": "1"})
         return env
 
-    def start(self, engine: EngineId, action: Action) -> InstallTask:
+    def start(self, engine: EngineId, action: Action, values: Mapping[str, str] | None = None) -> InstallTask:
         for task in self._tasks.values():
             if task.engine == engine and task.state == "running":
                 if task.action != action:
@@ -140,7 +179,7 @@ class InstallManager:
             raise InstallBusy(f"{recipe.name} has nothing to check first.")
         if action == "repair" and not recipe.repair:
             raise InstallBusy(f"{recipe.name} has no repair of its own. Reinstall it instead.")
-        task = InstallTask(uuid.uuid4().hex, engine, action, recipe)
+        task = InstallTask(uuid.uuid4().hex, engine, action, recipe, values=dict(values or {}))
         self._tasks[task.id] = task
         self._running[task.id] = asyncio.create_task(self._run(task))
         return task
@@ -154,12 +193,27 @@ class InstallManager:
     def running_for(self, engine: EngineId) -> InstallTask | None:
         return next((t for t in self._tasks.values() if t.engine == engine and t.state == "running"), None)
 
+    async def finished(self, task_id: str) -> InstallTask:
+        """Wait until the task has ended (any state) and return it."""
+        task = self.get(task_id)
+        runner = self._running.get(task_id)
+        if runner is not None:
+            await asyncio.gather(asyncio.shield(runner), return_exceptions=True)
+        return task
+
     async def cancel(self, task_id: str) -> InstallTask:
         task = self.get(task_id)
         runner = self._running.get(task_id)
         if runner is not None and not runner.done():
-            runner.cancel()
-            await asyncio.gather(runner, return_exceptions=True)
+            if not runner.cancelling():
+                runner.cancel()
+            await asyncio.gather(asyncio.shield(runner), return_exceptions=True)
+        # A coroutine cancelled before its first instruction cannot run its CancelledError handler.
+        if task.state == "running":
+            task.log("Cancelled.")
+            task.finish("cancelled", "The installation was cancelled. Nothing else will run.")
+        if runner is not None and runner.done():
+            self._running.pop(task.id, None)
         return task
 
     async def aclose(self) -> None:
@@ -171,6 +225,7 @@ class InstallManager:
         try:
             async with asyncio.timeout(self._timeout):
                 if await self._steps(task, step_handle):
+                    task.stage(len(task.plan), "running")
                     if self._after_steps is not None:
                         self._after_steps(task.engine, task.action)
                     await self._check_result(task)
@@ -183,9 +238,15 @@ class InstallManager:
             minutes = round(self._timeout / 60)
             task.finish("failed", f"The installation took longer than {minutes} minutes and was stopped.")
         except (ElevationRefused, StepRefused) as error:
+            await self._stop(step_handle)
             task.finish("failed", str(error))
         except OSError as error:
+            await self._stop(step_handle)
             task.finish("failed", f"SKAZ couldn't run the installer: {error.strerror or error}.")
+        except Exception:
+            # An unexpected executor/check failure must not orphan a process or leak raw diagnostics.
+            await self._stop(step_handle)
+            task.finish("failed", "The installation could not be completed. Check the output and try again.")
         finally:
             self._running.pop(task.id, None)
 
@@ -197,9 +258,11 @@ class InstallManager:
 
     async def _steps(self, task: InstallTask, step_handle: list[RunningStep]) -> bool:
         env = self.environment()
-        for step in task.recipe.plan(task.action):
-            argv, cwd, extra = await self._fill(task.engine, step)
+        for index, step in enumerate(task.plan):
+            task.stage(index, "running")
+            argv, cwd, extra = await self._fill(task.engine, step, task.values)
             refuse_sudo(argv)
+            task.manual_command = _manual_command(argv, cwd, extra)
             task.log(f"$ {' '.join(argv)}")
             watch = self._watch_step(task.engine, extra) if self._watch_step is not None else None
             handle = await self._executor.start(argv, cwd=Path(cwd) if cwd else None, env={**env, **extra})
@@ -222,11 +285,13 @@ class InstallManager:
             if code != 0:
                 task.finish("failed", f"{step.label} failed. {failure_reason(seen, code)}")
                 return False
+            task.stage(index, "done")
         return True
 
-    async def _fill(self, engine: EngineId, step: Step) -> tuple[list[str], str | None, dict[str, str]]:
+    async def _fill(self, engine: EngineId, step: Step,
+                    own: Mapping[str, str] | None = None) -> tuple[list[str], str | None, dict[str, str]]:
         needs = any("{" in part for part in (*step.argv, step.cwd or "", *(value for _, value in step.env)))
-        values = dict(await self._resolve(engine)) if needs else {}
+        values = {**(await self._resolve(engine)), **(own or {})} if needs else {}
         try:
             argv = [part.format(**values) for part in step.argv]
             cwd = step.cwd.format(**values) if step.cwd else None

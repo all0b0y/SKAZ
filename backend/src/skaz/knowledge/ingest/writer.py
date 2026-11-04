@@ -238,7 +238,7 @@ class WikiWriter:
                        if found is not None and found.target != ref.target]
             update = ConceptUpdate(plan.material_id, blocks, draft.all_aliases(), related)
             existed = path.exists()
-            page_id = self._write_concept(library, path, draft, update, plan.language, result)
+            page_id = self._write_concept(library, path, draft, update, plan.language, result, plan.rel_dir)
             if page_id is None:
                 continue
             touched.append(path)
@@ -258,11 +258,12 @@ class WikiWriter:
             path = library.root / record.rel_path
 
             def cleanup(document: PageDocument) -> PageDocument | None:
-                _stripped, removed = strip_material(document, plan.material_id)
+                _stripped, removed = strip_material(document, plan.material_id, plan.rel_dir)
                 if not removed:
                     return None
                 return merge_concept(document, None, material_id=plan.material_id,
-                                     folders_of=self._folders_of, folders_body=self._folders_body)
+                                     folders_of=self._folders_of, folders_body=self._folders_body,
+                                     rel_dir=plan.rel_dir)
 
             try:
                 if _rewrite(library, path, cleanup):
@@ -312,10 +313,11 @@ class WikiWriter:
         return result
 
     def _write_concept(self, library: Library, path: Path, draft: ConceptDraft, update: ConceptUpdate,
-                       language: str, result: WriteResult) -> str | None:
+                       language: str, result: WriteResult, rel_dir: str | None = None) -> str | None:
         def build(document: PageDocument) -> PageDocument:
             return merge_concept(document, update, material_id=update.material_id,
-                                 folders_of=self._folders_of, folders_body=self._folders_body)
+                                 folders_of=self._folders_of, folders_body=self._folders_body,
+                                 rel_dir=rel_dir)
 
         if path.exists():
             try:
@@ -333,7 +335,7 @@ class WikiWriter:
             library.create_page(build(new_concept(meta)))
         except NameTaken:
             if path.exists():  # created by a parallel writer between the check and now: merge into it
-                return self._write_concept(library, path, draft, update, language, result)
+                return self._write_concept(library, path, draft, update, language, result, rel_dir)
             result.journal.append(f"“{path.stem}” clashes with another page name; the concept was skipped.")
             result.dropped["concept_name_taken"] += 1
             return None

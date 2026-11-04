@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from ...native_io import disk_call
 from ..errors import KnowledgeError, NotFound
 from ..ids import utc_now
+from ..keyed_locks import KeyedLocks, KeyedThreadLocks
 from ..library.fsio import dump_json, fsync_dir, read_json, write_atomic
 from ..library.layout import SERVICE_DIR
 from ..library.library import MaterialFiles
@@ -42,6 +43,7 @@ from ..markdown.source import Fragment, MaterialStatus, Origin
 from ..markdown.text import block_hash, format_timestamp
 from ..service import KnowledgeService
 from . import web_page
+from .duplicates import Duplicate, content_hash, find_duplicate, url_key
 from .fetch import MAX_PAGE_BYTES, FetchFailed, LinkRejected, SafeFetcher, check_url
 from .fragments import sanitize_title
 from .guard import Detection, Finding, detect_instruction
@@ -114,6 +116,9 @@ class IntakeResult:
     excluded_count: int
     hidden_count: int
     failure: str | None
+    #: N2: the same DOI, address or file was already in the library — this is that material, nothing
+    #: new was stored and no ingest was started.
+    existing: bool = False
 
 
 @dataclass(frozen=True)
@@ -189,8 +194,11 @@ class SourceService:
         self.video_probe = video_probe
         self._listeners: list[Listener] = []
         self._lock = _GUARD_LOCK
-        #: One save at a time per (folder, page): a double click makes one material, one request.
-        self._web_locks: weakref.WeakValueDictionary[tuple[str, str], asyncio.Lock] = (
+        #: Q1 n2 L3: one add at a time per file content / per address (duplicate check, then store).
+        self._same_file = KeyedThreadLocks()
+        self._same_link = KeyedLocks()
+        #: One save at a time per page: a double click makes one material, one request.
+        self._web_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
 
@@ -223,19 +231,27 @@ class SourceService:
         """A PDF (or book) or a ``.md``/``.txt`` file the user picked in the file dialog."""
         file_path = self._checked_file(path)
         suffix = file_path.suffix.lower()
-        origin = Origin(type="file", file_name=file_path.name)
-        if suffix in PDF_EXTENSIONS:
-            prepared = prepare_pdf(
-                file_path.read_bytes(),
-                origin=origin,
-                fallback=sanitize_title(file_path.stem) or "Document",
-                original=Original("original.pdf", path=file_path),
-            )
-        else:
-            prepared = prepare_text_file(file_path.read_bytes(), file_path.name, origin=origin)
-            if prepared.failure:
-                raise SourceRejected("This file has no text.")
-        return self._publish(prepared, folder_id, title, to_wiki)
+        self._typed_name(title)  # a typed name that can't be one is refused first, duplicate or not
+        data = file_path.read_bytes()
+        digest = content_hash(data)
+        # Q1 n2 L3: the check and the store under one lock per content — two adds at once make one.
+        with self._same_file.hold(digest):
+            duplicate = find_duplicate(self.kb, content=data)
+            if duplicate is not None:
+                return self._existing(duplicate)
+            origin = Origin.model_validate({"type": "file", "file_name": file_path.name, "sha256": digest})
+            if suffix in PDF_EXTENSIONS:
+                prepared = prepare_pdf(
+                    data,
+                    origin=origin,
+                    fallback=sanitize_title(file_path.stem) or "Document",
+                    original=Original("original.pdf", path=file_path),
+                )
+            else:
+                prepared = prepare_text_file(data, file_path.name, origin=origin)
+                if prepared.failure:
+                    raise SourceRejected("This file has no text.")
+            return self._publish(prepared, folder_id, title, to_wiki)
 
     async def add_link(self, url: str, folder_id: str, title: str | None = None, *,
                        to_wiki: bool | None = None) -> IntakeResult:
@@ -247,14 +263,30 @@ class SourceService:
         if offline is not None and offline.kind in ("audio_file", "video_file"):
             raise SourceRejected(MEDIA_FILE_LINK)
         address = check_url(url)
+        self._typed_name(title)
+        # Q1 n2 L3: the checks and the store under one lock per address — two adds at once make one.
+        async with self._same_link.hold(url_key(address) or address):
+            return await self._add_link(address, offline, folder_id, title, to_wiki)
+
+    async def _add_link(self, address: str, offline: LinkInfo | None, folder_id: str, title: str | None,
+                        to_wiki: bool | None) -> IntakeResult:
+        # N2: the same address or DOI already in the library is answered before any request.
+        duplicate = await disk_call(find_duplicate, self.kb, urls=[address])
+        if duplicate is not None:
+            return self._existing(duplicate)
         limit = MAX_LINKED_PDF_BYTES if offline is not None and offline.kind == "pdf" else MAX_PAGE_BYTES
         # The user's click on this link: pinned to the checked address; a VPN fake-IP answer is accepted
         # for a public name on the default port (``fetch`` module note, security review S-02/S-05).
         fetched = await self.fetcher.fetch(address, max_bytes=limit, pin_address=True, allow_vpn_fake_ip=True)
         content_type = fetched.content_type
         domain = domain_of(address)
+        # After redirects: the page it landed on, or the same bytes, may be in the library already.
+        duplicate = await disk_call(find_duplicate, self.kb, urls=[fetched.url], content=fetched.body)
+        if duplicate is not None:
+            return self._existing(duplicate)
         origin = Origin.model_validate(
-            {"type": "url", "url": address, "final_url": fetched.url, "content_type": content_type}
+            {"type": "url", "url": address, "final_url": fetched.url, "content_type": content_type,
+             "sha256": content_hash(fetched.body)}
         )
         if content_type == "application/pdf" or (
             content_type in ("", "application/octet-stream") and fetched.body.startswith(b"%PDF-")
@@ -285,8 +317,9 @@ class SourceService:
     async def add_web_page(self, url: str, folder_id: str, *, to_wiki: bool = True) -> WebPageSaved:
         """W-3 "Add to wiki": one request to ``url`` (and its redirects), the whole page as text.
 
-        The same page already in ``folder_id`` is returned as it is, without a
-        request; if it isn't in the wiki, ``to_wiki`` asks for ingest again.
+        The same page already in the library — in ``folder_id`` or, by the N2 address/DOI rule,
+        anywhere else — is returned as it is, without a request; if it isn't in the wiki,
+        ``to_wiki`` asks for ingest again.
         """
         self.kb.require()  # refuse before any request when no library is connected
         if self.kb.folder_repo.get(folder_id) is None:
@@ -296,11 +329,15 @@ class SourceService:
         except LinkRejected as error:
             raise WebPageUnavailable(error.message) from error
         key = page_key(address) or address
-        lock = self._web_locks.get((folder_id, key))
+        # One lock per page, not per folder: the same page is one material in the whole library (N2).
+        lock = self._web_locks.get(key)
         if lock is None:
-            lock = self._web_locks[(folder_id, key)] = asyncio.Lock()
+            lock = self._web_locks[key] = asyncio.Lock()
         async with lock:
             existing = await disk_call(self._saved_page, folder_id, key)
+            if existing is None:
+                duplicate = await disk_call(find_duplicate, self.kb, urls=[address])
+                existing = duplicate.material_id if duplicate is not None else None
             if existing is not None:
                 if to_wiki and await disk_call(self._not_in_wiki, existing):
                     self._emit(SourceEvent("material_ready", existing, to_wiki=True))
@@ -315,6 +352,11 @@ class SourceService:
             prepared = prepare_web_page(fetched, address, fetched_at=utc_now())
             result = await self._publish_async(prepared, folder_id, None, to_wiki)
         return WebPageSaved(result.material_id, False, result)
+
+    def _existing(self, duplicate: Duplicate) -> IntakeResult:
+        record = self.kb.material_repo.get(duplicate.material_id)
+        status = record.status if record is not None else "ready"
+        return IntakeResult(duplicate.material_id, duplicate.title, status, 0, 0, None, existing=True)
 
     def _saved_page(self, folder_id: str, key: str) -> str | None:
         for record in self.kb.materials(folder_id=folder_id, kind="web"):
@@ -353,6 +395,11 @@ class SourceService:
         if info.st_size > limit:
             raise SourceRejected(f"This file is larger than {limit // (1024 * 1024)} MB.")
         return resolved
+
+    @staticmethod
+    def _typed_name(title: str | None) -> None:
+        if title is not None and title.strip():
+            validate_name(title)
 
     @staticmethod
     def _title(prepared: Prepared, title: str | None) -> tuple[str, bool]:

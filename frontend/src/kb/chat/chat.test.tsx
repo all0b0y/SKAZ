@@ -20,7 +20,120 @@ afterEach(() => { vi.useRealTimers(); });
 
 const side = () => screen.getByRole('region', { name: 'Chats' });
 
+describe('The open chat runs into its window (decisions 24–25)', () => {
+  const tabOf = () => side().querySelector<HTMLElement>('[data-testid="active-tab"]')!;
+
+  it('switching a chat never remounts the list: the same row nodes stay, only the tab and the current class move', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    const first = await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
+    const other = within(side()).getByRole('button', { name: /Seminar questions/ });
+    const rowsBefore = [...side().querySelectorAll('[data-tab-key]')];
+    await user.click(first);
+    expect(first).toHaveClass('is-current');
+    expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
+    await user.click(other);
+    expect(first.isConnected).toBe(true);
+    expect(within(side()).getByRole('button', { name: /Why is there a logarithm/ })).toBe(first);
+    expect([...side().querySelectorAll('[data-tab-key]')]).toEqual(rowsBefore);
+    expect(first).not.toHaveClass('is-current');
+    expect(other).toHaveClass('is-current');
+    expect(other).toHaveAttribute('aria-current', 'page');
+    expect(side().querySelectorAll('[data-testid="active-tab"]')).toHaveLength(1);
+    expect(tabOf()).toHaveAttribute('data-tab-for', 'c7');
+  });
+
+  it('only a chat in the centre is bridged: New chat counts; All chats and an expanded document do not', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: chatWorld() });
+    await within(side()).findByRole('button', { name: /Why is there a logarithm/ });
+    expect(tabOf()).toHaveAttribute('data-tab-for', '__new');
+    await user.click(within(side()).getByRole('button', { name: /Why is there a logarithm/ }));
+    act(() => services.ui.getState().openDocument({ type: 'material', id: 'm3' }));
+    expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
+    act(() => services.ui.getState().toggleDocExpanded());
+    expect(tabOf()).toHaveAttribute('hidden');
+    act(() => services.ui.getState().toggleDocExpanded());
+    expect(tabOf()).toHaveAttribute('data-tab-for', 'c1');
+    await user.click(within(side()).getByRole('button', { name: /^All chats/ }));
+    expect(tabOf()).toHaveAttribute('hidden');
+    expect(side().querySelector('.kb-chatrow.is-current')).toBeNull();
+  });
+
+  it('one «open chat» condition (FIX1 R5): class, aria-current (New chat too) and the mark agree; an expanded document closes it', async () => {
+    const user = userEvent.setup();
+    const { services } = renderKb({ world: chatWorld() });
+    const newChat = await within(side()).findByRole('button', { name: 'New chat' });
+    expect(newChat).toHaveClass('is-current');
+    expect(newChat).toHaveAttribute('aria-current', 'page');
+    const working = within(side()).getByRole('button', { name: /What did I miss in lecture 8/ });
+    await user.click(working);
+    expect(newChat).not.toHaveClass('is-current');
+    expect(newChat).not.toHaveAttribute('aria-current');
+    expect(working).toHaveClass('is-current');
+    expect(working).toHaveAttribute('aria-current', 'page');
+    // The open chat shows no mark: the thread shows the work.
+    expect(within(working).queryByRole('img', { name: 'answering' })).toBeNull();
+    act(() => services.ui.getState().openDocument({ type: 'material', id: 'm3' }));
+    act(() => services.ui.getState().toggleDocExpanded());
+    // The document takes the centre: no chat is open, so no row claims it and the mark is back.
+    expect(tabOf()).toHaveAttribute('hidden');
+    expect(working).not.toHaveClass('is-current');
+    expect(working).not.toHaveAttribute('aria-current');
+    expect(within(working).getByRole('img', { name: 'answering' })).toBeInTheDocument();
+    act(() => services.ui.getState().toggleDocExpanded());
+    expect(working).toHaveClass('is-current');
+    expect(within(working).queryByRole('img', { name: 'answering' })).toBeNull();
+  });
+
+  it('the thread follows the direction of the switch; the title crossfades; the same chat plays nothing', async () => {
+    const user = userEvent.setup();
+    const played: Array<{ el: Element; frames: Keyframe[] }> = [];
+    const proto = HTMLElement.prototype as unknown as { animate?: unknown };
+    proto.animate = function animate(this: HTMLElement, frames: Keyframe[]) {
+      played.push({ el: this, frames });
+      return { cancel() {}, finish() {}, onfinish: null };
+    };
+    try {
+      renderKb({ world: chatWorld() });
+      const lower = await within(side()).findByRole('button', { name: /Seminar questions/ });
+      const upper = within(side()).getByRole('button', { name: /Why is there a logarithm/ });
+      const thread = () => screen.getByRole('log', { name: 'Conversation' });
+      const threadMoves = () => played.filter((p) => p.el === thread()).map((p) => p.frames[0]);
+      await user.click(upper);
+      played.length = 0;
+      await user.click(lower);
+      expect(threadMoves()).toEqual([{ opacity: 0, transform: 'translateY(12px)' }]);
+      const title = screen.getByRole('region', { name: 'Chat' }).querySelector('h1')!;
+      expect(played.some((p) => p.el === title && JSON.stringify(p.frames) === JSON.stringify([{ opacity: 0 }, { opacity: 1 }]))).toBe(true);
+      played.length = 0;
+      await user.click(upper);
+      expect(threadMoves()).toEqual([{ opacity: 0, transform: 'translateY(-12px)' }]);
+      played.length = 0;
+      await user.click(upper);
+      expect(threadMoves()).toEqual([]);
+    } finally {
+      delete proto.animate;
+    }
+  });
+});
+
 describe('Chats in the side panel', () => {
+  it('omits the duplicate header search while keeping New chat, global search and All chats search', async () => {
+    const user = userEvent.setup();
+    renderKb({ world: chatWorld() });
+    await within(side()).findByRole('button', { name: /^All chats/ });
+    expect(within(side()).queryByRole('button', { name: 'Find in chats' })).toBeNull();
+    expect(within(side()).getByRole('button', { name: 'New chat' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+    expect(await screen.findByRole('dialog', { name: 'Search' })).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Search' })).toBeNull());
+    await user.click(within(side()).getByRole('button', { name: /^All chats/ }));
+    const all = await screen.findByRole('region', { name: 'All chats' });
+    expect(within(all).getByRole('searchbox', { name: 'Find in chats' })).toBeInTheDocument();
+  });
+
   it('pinned first, then by date, a few only, "All chats · N"; answering and new-answer marks are still', async () => {
     atMidday(); // day groups (Today / Yesterday) must not depend on when the suite runs
     renderKb({ world: chatWorld() });
@@ -94,7 +207,57 @@ describe('Chats in the side panel', () => {
     // Connection rows use the answer's numbers: Lecture 5 is 1 here as in the text.
     expect(within(rows).getAllByRole('button', { name: /^Source / }).map((b) => b.textContent)).toEqual(['2', '3', '1']);
     expect(within(rows).getByText('Agent inference:')).toBeInTheDocument();
-    expect(within(answer).getByRole('button', { name: /Looked at 1 thing/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(within(answer).getByRole('button', { name: '1 tool call' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('a question shows the moment it is sent, before the backend answers; no copy is left after (bug 7)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    await within(centre).findByRole('article', { name: 'Answer' });
+    const real = fake.requestMock.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    fake.requestMock.mockImplementation(async (req) => {
+      if (req.method === 'POST' && /\/messages$/.test(req.path)) await held;
+      return real(req);
+    });
+    const input = screen.getByTestId('message-input');
+    await user.click(input);
+    await user.keyboard('Is it the same as KL?');
+    const before = within(centre).getAllByRole('article', { name: 'Your question' }).length;
+    await user.keyboard('{Enter}');
+    // Shown while the request is still held: your message, and an answer that is starting.
+    const mine = within(centre).getAllByRole('article', { name: 'Your question' });
+    expect(mine).toHaveLength(before + 1);
+    expect(mine.at(-1)).toHaveTextContent('Is it the same as KL?');
+    expect(input).toHaveTextContent('');
+    release();
+    await waitFor(() => expect(within(centre).getAllByRole('article', { name: 'Your question' })).toHaveLength(before + 1));
+    await waitFor(() => expect(fake.calls.some((c) => c.method === 'POST' && /\/messages$/.test(c.path))).toBe(true));
+    // No copy is left behind once the backend's own arrives.
+    await waitFor(() => expect(within(centre).getAllByRole('article', { name: 'Your question' }).filter((a) => a.textContent?.includes('Is it the same as KL?'))).toHaveLength(1));
+  });
+
+  it('a refused question leaves the chat and comes back into the field (bug 7)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    await user.click(await within(side()).findByRole('button', { name: /Why is there a logarithm/ }));
+    const centre = screen.getByRole('region', { name: 'Chat' });
+    await within(centre).findByRole('article', { name: 'Answer' });
+    const real = fake.requestMock.getMockImplementation()!;
+    fake.requestMock.mockImplementation(async (req) => {
+      if (req.method === 'POST' && /\/messages$/.test(req.path)) throw new Error('Codex is signed out.');
+      return real(req);
+    });
+    const before = within(centre).getAllByRole('article', { name: 'Your question' }).length;
+    const input = screen.getByTestId('message-input');
+    await user.click(input);
+    await user.keyboard('Is it the same as KL?{Enter}');
+    await waitFor(() => expect(input).toHaveTextContent('Is it the same as KL?'));
+    expect(within(centre).getAllByRole('article', { name: 'Your question' })).toHaveLength(before);
+    expect(await screen.findByText(/signed out/)).toBeInTheDocument();
   });
 
   it('sends a question in a new chat; the answer arrives and the list moves it to the top', async () => {
@@ -375,7 +538,7 @@ describe('Selecting several chats in "All chats" (0.3.1 F4)', () => {
     await user.keyboard('{/Meta}');
     expect(services.chats.getState().currentId).toBe(before);
     const bar = within(all).getByRole('toolbar', { name: '2 selected' });
-    await user.click(within(bar).getByRole('button', { name: /^Pin/ }));
+    await user.click(within(bar).getByRole('button', { name: 'Pin' }));
     await waitFor(() => expect(fake.world.chats.filter((c) => c.pinned).map((c) => c.id)).toEqual(expect.arrayContaining(['c3', 'c6'])));
     await user.click(rowOf('Transformer paper review').querySelector('[data-sel-box]')!);
     expect(within(all).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
@@ -402,7 +565,7 @@ describe('Selecting several chats in the side panel (0.3.1 F4)', () => {
     expect(rowOf('Transformer paper review')).toHaveAttribute('aria-selected', 'true');
     expect(services.chats.getState().currentId).toBe(before);
     const bar = within(panel).getByRole('toolbar', { name: '2 selected' });
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Pin', 'Export .md', 'More actions', 'Delete', 'Clear selection']);
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Pin', 'Export .md', 'More actions', 'Delete', 'Clear selection', 'All', 'Unread', 'Pinned', 'Older than 30 days']);
     await user.click(within(bar).getByRole('button', { name: 'More actions' }));
     await user.click(await screen.findByRole('menuitem', { name: /Mark as read/ }));
     await waitFor(() => expect(fake.calls.some((c) => c.method === 'POST' && c.path === '/kb/chats/c3/read')).toBe(true));

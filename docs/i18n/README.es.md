@@ -17,9 +17,9 @@ Graba o añade una fuente · pregunta con citas exactas · una wiki que se manti
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="Recorrido por SKAZ: grabar una clase, preguntar sobre ella con una nota al pie, permitir la edición de un agente, estudiar tarjetas hechas a partir de la clase" width="880">
+<img src="../images/skaz-tour.webp" alt="SKAZ 0.3.1 — Recorrido por SKAZ: grabar una clase, preguntar sobre ella con una nota al pie, permitir la edición de un agente, estudiar tarjetas hechas a partir de la clase" width="880">
 
-<sub>Recorrido del producto · perfil de demostración con datos preparados · <a href="../images/skaz-tour.mp4">El recorrido completo en Full HD (MP4, 80 s)</a></sub>
+<sub>Recorrido de SKAZ 0.3.1 · interfaz anterior, no la de 0.3.2 · datos de demostración preparados · <a href="../images/skaz-tour.mp4">El recorrido completo en Full HD (MP4, 80 s)</a></sub>
 
 <br><br>
 
@@ -76,18 +76,24 @@ preparados, no reconocimiento de voz, resultados de IA ni búsquedas reales.</su
 
 ## ✨ Funciones
 
+**Actualizado para 0.3.2.** El recorrido y las animaciones anteriores muestran la interfaz de 0.3.1, no la de 0.3.2.
+
 | | |
 |---|---|
 | 🎙️ **Grabación en vivo** | Micrófono y, si quieres, el sonido del Mac (Zoom, vídeos; requiere macOS 14.2+ y permiso del sistema). Reconocimiento con **Soniox** (en la nube y en streaming, separación de hablantes, traducción) o **Whisper en este ordenador** (funciona sin conexión). SKAZ nunca cambia de servicio sin avisar. |
 | 📚 **Cualquier fuente** | PDF, documentos, archivos de texto y Markdown, audio y vídeo, artículos web (limpios), texto pegado de cualquier longitud y enlaces de vídeo de YouTube, VK Video, RuTube y Vimeo. Usa solo material que tengas permiso para procesar. |
 | 🧠 **Una wiki viva** | Apuntes de cada fuente, una página por concepto para todas las carpetas y análisis guardados. Cada afirmación está marcada: cita de una fuente, conexión deducida por el agente o explicación del agente. Cuando las fuentes no coinciden, se muestran ambas versiones y decides tú. |
-| 💬 **Chats con notas al pie** | Pregunta sobre toda la biblioteca; el agente sabe qué está abierto y si hay una grabación en curso. Las notas abren el momento exacto de una grabación o la página de un documento. Señala una página, un material o un chat con **@**. Las respuestas pueden incluir diagramas con un visor a tamaño completo. |
+| 💬 **Chats con notas al pie** | Pregunta sobre toda la biblioteca o limita un chat a fuentes seleccionadas en **Search & sources**, con exclusiones para ese chat. Las notas abren el momento exacto de una grabación o la página de un documento. Señala una página, un material o un chat con **@**. |
+| 🧱 **Respuestas estructuradas** | Comparaciones con columnas de ancho ajustable, líneas de tiempo, pasos, definiciones, tarjetas de conceptos, cifras clave y diagramas. Los enlaces a fuentes acompañan a los elementos que respaldan. Copia un bloque como Markdown o selecciona un elemento para preguntar sobre él. |
 | 🃏 **Tarjetas y tests** | Pide tarjetas o un test sobre una página, un material o un chat. Cada respuesta correcta se apoya en una cita comprobada. Las tarjetas se repasan con repetición espaciada FSRS; las barajas y los tests se pueden guardar en la wiki. |
-| 🌐 **Búsqueda web, con tu permiso** | Antes de que nada salga de tu Mac ves la consulta exacta y eliges Allow once, Allow in this chat o Deny. Solo se envía la consulta. Una página encontrada se puede añadir a la biblioteca con un clic. |
+| 🌐 **Búsqueda web, con tu permiso** | Ves la consulta exacta antes de enviarla y eliges Allow once, Allow in this chat o Deny. Los resultados muestran las reglas de sitios vigentes; tú decides si añades una página a la biblioteca. |
+| 🧪 **Search Beta** | Activa **Beta search features** en **Settings → Search** para usar **Only these sites** (una restricción) y **Prefer** (una preferencia). Está desactivado por defecto; al desactivarlo se pausan estas reglas para nuevas búsquedas, pero se conservan las listas. **Never** y los filtros de fuentes de la biblioteca siguen activos. |
+| 📖 **Lectura de páginas web** | El agente puede leer páginas públicas de resultados de búsqueda aprobados sin importarlas primero. Las páginas largas se leen en partes acotadas de la misma instantánea. **Add to library** es una acción aparte; leer no añade un material. |
 | 🤖 **Tu agente** | **Codex**, **Claude Code**, **Hermes Agent** u **OpenCode**, con tu propia suscripción o clave; SKAZ puede instalarlos por ti. Los agentes leen la biblioteca con herramientas de SKAZ y cambian páginas de la wiki solo cuando lo permites, con Undo; tus propias notas nunca se tocan. Elige un modelo por chat y marca tus favoritos con una estrella. Las pequeñas decisiones de organización pueden ir a un modelo local o a OpenRouter. |
 | ✍️ **Corrección del reconocimiento** | Una revisión opcional encuentra posibles errores de reconocimiento, corrige los seguros y solo resalta los dudosos. Toda corrección se puede deshacer. |
 | 🗂️ **Archivos normales** | La biblioteca es una carpeta de archivos `.md`. Ábrela en **Obsidian** o exporta todo a Markdown con las fuentes como notas al pie. Tus propias ediciones de la wiki están protegidas frente al agente. |
 | 🔄 **Actualizaciones** | SKAZ consulta las versiones de GitHub al iniciar y una vez al día e instala una actualización verificada desde **Settings → About**. |
+| 🎨 **Apariencia** | Elige base clara u oscura, acento, densidad, movimiento y sonidos opcionales de la interfaz en **Settings → Appearance**. Los preajustes dan un punto de partida; los controles siguen siendo independientes. |
 
 ## 📦 Instalación
 
@@ -142,7 +148,8 @@ Todo se puede cambiar después en **Settings**.
 | Audio en vivo | No se guarda como archivo para reproducirlo. Puede usarse audio temporal para procesar o recuperar. |
 | Reconocimiento de voz | **Soniox:** el audio se envía tras tu consentimiento, que puedes retirar en cualquier momento. **Whisper en este ordenador:** el audio no sale de tu Mac. |
 | Agente | Tu pregunta y las partes de la biblioteca que lee van al agente que elegiste; se aplican sus políticas de conservación y entrenamiento. |
-| Búsqueda web | Solo una consulta que aprobaste, enviada a la búsqueda del agente indicado en la tarjeta: sin historial del chat ni texto de la biblioteca. Añadir una página encontrada hace una sola petición a esa dirección. |
+| Búsqueda web | Solo la consulta aprobada va al servicio de búsqueda del agente indicado en la tarjeta, no todo el historial del chat ni el contexto de la biblioteca. |
+| Lectura de páginas web | Leer o importar una página contacta con ese sitio web. El texto extraído puede enviarse al agente elegido. Leer no guarda la página como material de la biblioteca. |
 | Claves | Un archivo local cifrado en la carpeta de la app SKAZ, con su clave de cifrado al lado. Los permisos de archivo son la barrera principal, no una protección frente a procesos que se ejecutan con tu usuario. |
 | Registro de actividad | Sin texto de las conversaciones ni claves. |
 | Backend | Python, solo loopback, con un token nuevo en cada arranque. |

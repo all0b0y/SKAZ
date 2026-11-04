@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import (
+    agent_updates,
     agents,
     chats,
     decisions,
@@ -14,10 +15,12 @@ from . import (
     ingest,
     library,
     materials,
+    me,
     mentions,
     notifications,
     permissions,
     search,
+    search_rules,
     settings,
     sources,
     speech,
@@ -50,4 +53,7 @@ ROUTERS: tuple[APIRouter, ...] = (
     permissions.router,
     study.router,
     web_search.router,
+    me.router,
+    agent_updates.router,
+    search_rules.router,
 )

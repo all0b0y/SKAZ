@@ -6,6 +6,9 @@ import { KbClient } from '../api/client';
 import { nativeCapture, type CaptureFactory } from '../recording/capture';
 import { createRecordingStore, type RecordingActions, type RecordingData, type RecordingStore } from '../recording/recordingStore';
 import { createAgentsStore, type AgentsActions, type AgentsData, type AgentsStore } from './agents';
+import {
+  createAgentUpdatesStore, type AgentUpdatesActions, type AgentUpdatesData, type AgentUpdatesStore,
+} from './agentUpdates';
 import { createChatsStore, type ChatsActions, type ChatsData, type ChatsStore } from './chats';
 import { createComposerBus, type ComposerBus, type ComposerBusState } from './composer';
 import { createFoldsStore, type FoldsStore } from './folds';
@@ -37,6 +40,8 @@ export interface KbServices {
   chats: ChatsStore;
   notifications: NotificationsStore;
   agents: AgentsStore;
+  /** U1: agent updates SKAZ found by itself, their offers and the dot on Settings. */
+  agentUpdates: AgentUpdatesStore;
   settings: SettingsStore;
   composer: ComposerBus;
 }
@@ -99,6 +104,7 @@ export function createServices(
     chats,
     notifications: createNotificationsStore(client),
     agents,
+    agentUpdates: createAgentUpdatesStore(client, agents),
     settings,
     composer: createComposerBus(),
   };
@@ -153,6 +159,10 @@ export function useNotifications<T>(selector: (state: NotificationsData & Notifi
 
 export function useAgents<T>(selector: (state: AgentsData & AgentsActions) => T): T {
   return useStore(useServices().agents, selector);
+}
+
+export function useAgentUpdates<T>(selector: (state: AgentUpdatesData & AgentUpdatesActions) => T): T {
+  return useStore(useServices().agentUpdates, selector);
 }
 
 export function useSettings<T>(selector: (state: SettingsData & SettingsActions) => T): T {

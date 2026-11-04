@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../ui/motionLevel';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
-import { useReducedMotion } from 'motion/react';
+
 import type { KbCitation, KbGraph } from '../../api/kb/types.gen';
 import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
 import { CitationChip, FolderTag, PanelFrameButtons, useFolderTone } from '../document/parts';

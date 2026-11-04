@@ -267,7 +267,8 @@ def plan_page_delete(kb: KnowledgeService, graph: GraphIndex, page_id: str) -> P
             body = strip(block.body, written)
             if not body.strip():
                 return None  # a navigation list that only pointed here goes
-            return Block.create(block.id, block.kind, body, cites=block.cites, owner="agent")
+            return Block.create(block.id, block.kind, body, cites=block.cites, owner="agent",
+                                attrs=block.attrs)
 
         updated, _changed, in_user = _map_parts(other_document, agent=unlink_agent, user=unlink_user)
         links = counted + in_user

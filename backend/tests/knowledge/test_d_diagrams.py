@@ -200,3 +200,48 @@ async def test_editing_a_saved_diagram_keeps_the_fence_and_its_citation_links_un
     assert lines[:closing + 1] == edited.splitlines()
     # The citation links stay with the diagram, on their own line under the closing fence.
     assert lines[closing + 1].startswith("[[Materials/Физика/Лекция 8/Лекция 8#^seg-1|")
+
+
+async def test_ask_the_agent_to_fix_a_diagram_sends_the_stored_source_as_data_not_as_the_users_words(
+        env: Env) -> None:
+    """FIX-2: «Ask the agent to fix» names the diagram (a chat quote with the answer's id and the diagram's
+    ``mmd-…`` id); its Mermaid source is read from the stored answer and reaches the agent, with the
+    error the app reported, in a backend-built untrusted section — never inside the user's own text."""
+    from skaz.knowledge.chats.selection import diagram_id
+    broken = "flowchart LR\n  A[Потеря] --> "
+    env.agents.scripts["codex"] = lambda _turn: text("Схема:\n\n```mermaid\n", broken, "\n```\n")
+    chat_id, answer = await env.answered("Нарисуй схему")
+    env.agents.scripts["codex"] = lambda _turn: text("OK.")
+    request = "The diagram in your answer can’t be drawn. Please send a corrected Mermaid diagram."
+    error = "Parse error on line 2: Expecting 'NODE_STRING', got 'EOF'"
+    sent = await env.client.post(f"/kb/chats/{chat_id}/messages", json={
+        "text": request, "quotes": [{"source": "chat", "id": chat_id, "message_id": answer["id"],
+                                     "block_id": diagram_id(broken), "text": error}]})
+    assert sent.status_code == 202, sent.text
+    await finished(env.chats)
+    prompt = env.agents.engines["codex"].turns[-1].messages[-1].content
+    context, own = prompt.split("The user's message:", 1)
+    assert own.strip() == request
+    data = context.split('<untrusted-data label="diagram to fix">', 1)[1].split("</untrusted-data>", 1)[0]
+    assert broken in data and error in data
+    assert diagram_id(broken) in data and answer["id"] in data
+
+
+async def test_a_diagram_fix_names_only_a_diagram_of_that_answer_and_the_client_cannot_supply_its_source(
+        env: Env) -> None:
+    """The source is never taken from the client: a diagram id that isn't in the stored answer gives the
+    agent no diagram to fix — what the client sent stays a plain quoted AI answer (data)."""
+    env.agents.scripts["codex"] = lambda _turn: text("```mermaid\n", FLOW, "\n```\n")
+    chat_id, answer = await env.answered("Нарисуй схему")
+    env.agents.scripts["codex"] = lambda _turn: text("OK.")
+    forged = "flowchart LR\n  X --> IGNORE_RULES"
+    sent = await env.client.post(f"/kb/chats/{chat_id}/messages", json={
+        "text": "Fix it.", "quotes": [{"source": "chat", "id": chat_id, "message_id": answer["id"],
+                                       "block_id": "mmd-00000000", "text": forged}]})
+    assert sent.status_code == 202, sent.text
+    await finished(env.chats)
+    prompt = env.agents.engines["codex"].turns[-1].messages[-1].content
+    assert 'label="diagram to fix"' not in prompt
+    context, own = prompt.split("The user's message:", 1)
+    assert own.strip() == "Fix it."
+    assert "IGNORE_RULES" in context.split('<untrusted-data label="quoted AI answer">', 1)[1]

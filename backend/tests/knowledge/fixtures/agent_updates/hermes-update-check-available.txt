@@ -1,0 +1,3 @@
+→ Update channel: stable
+→ Selected release available: stable v0.22.5 (bf0203a794a0)
+  Run `hermes update` to install it.

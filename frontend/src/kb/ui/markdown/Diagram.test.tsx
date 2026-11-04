@@ -23,6 +23,28 @@ describe('D: Mermaid diagrams through Pele', () => {
     expect(figure.querySelector('a')).toBeNull();
   });
 
+  it('renders an xychart-beta line chart with its labels and plotted line', async () => {
+    md(fence('xychart-beta\n  title "Latency"\n  x-axis [Jan, Feb, Mar]\n  y-axis "ms" 0 --> 100\n  line [10, 40, 25]'));
+    const figure = await screen.findByRole('figure', { name: 'Diagram' });
+    await waitFor(() => expect(figure.querySelector('svg.pele')).not.toBeNull());
+    expect(figure.textContent).toContain('Latency');
+    expect(figure.textContent).toContain('Jan');
+    expect(figure.textContent).toContain('ms');
+    expect(figure.querySelectorAll('svg.pele path').length).toBeGreaterThan(0);
+    expect(within(figure).queryByRole('alert')).toBeNull();
+  });
+
+  it('renders a pie chart with its labels, values and slices', async () => {
+    md(fence('pie showData\n  title Sources\n  "Lecture" : 60\n  "Textbook" : 40'));
+    const figure = await screen.findByRole('figure', { name: 'Diagram' });
+    await waitFor(() => expect(figure.querySelector('svg.pele')).not.toBeNull());
+    expect(figure.textContent).toContain('Sources');
+    expect(figure.textContent).toContain('Lecture');
+    expect(figure.textContent).toContain('60');
+    expect(figure.querySelectorAll('svg.pele path').length).toBeGreaterThan(0);
+    expect(within(figure).queryByRole('alert')).toBeNull();
+  });
+
   it('keeps untrusted diagram text inert: no HTML elements, handlers, scripts or javascript: links', async () => {
     md(fence('flowchart LR\n  A["<img src=x onerror=alert(1)><script>alert(2)</script>"] --> B\n  click A "javascript:alert(3)"\n  click B href "https://example.org"'));
     const figure = await screen.findByRole('figure', { name: 'Diagram' });

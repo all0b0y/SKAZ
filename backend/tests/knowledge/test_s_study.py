@@ -23,6 +23,7 @@ import pytest
 from skaz.knowledge.agents.engine import TextDelta
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.tools import ToolContext
+from skaz.knowledge.chats.store import WIKI_STUDY_CHAT_ID
 from skaz.knowledge.errors import KnowledgeError
 from skaz.knowledge.markdown.page import parse_page
 from skaz.knowledge.permissions.store import RunRef
@@ -311,12 +312,20 @@ async def test_an_open_answer_is_judged_without_blocking_and_shown_as_the_agents
     block = await _test(runtime, library)
     open_id = study.questions(block)[3].id
     release = asyncio.Event()
-    seen: list[tuple[str, list[str]]] = []
+    seen: list[str] = []
 
-    async def judge(_block: StudyBlock, question: Any, text: str) -> Mapping[str, Any]:
-        seen.append((text, [c.quote for c in question.cites]))
+    async def judge(call: Any) -> Mapping[str, Any]:
+        seen.append(call.data)
         await release.wait()
-        return {"verdict": "partly", "missing": "Не сказано о системе.", "comment": "Почти."}
+        # P3-a: the open question was made without key ideas, so the first check builds them.
+        return {
+            "ideas": [{"text": "Энтропия — мера беспорядка системы.", "source": 1, "quote": ENTROPY},
+                      {"text": "В изолированной системе она растёт.", "source": 1,
+                       "quote": "она растёт в изолированной системе"}],
+            "points": [{"idea": 1, "status": "partial", "yours": "Беспорядок", "why": "", "basis": "agent",
+                        "source": 0, "quote": ""}],
+            "model_answer": [], "also_right": [], "comment": "Почти.",
+        }
 
     study.judge = judge
     block = await study.check_open(block.id, open_id, "Беспорядок")
@@ -326,8 +335,9 @@ async def test_an_open_answer_is_judged_without_blocking_and_shown_as_the_agents
     release.set()
     await study.settle()
     entry = study.attempt(study.get(block.id)).answers["items"][open_id]
-    assert (entry["verdict"], entry["score"], entry["missing"]) == ("partly", 0.5, "Не сказано о системе.")
-    assert seen == [("Беспорядок", [ENTROPY])]
+    # SKAZ counts the share from the key ideas: ½ of one idea of two = 0.25 → «Almost there».
+    assert (entry["status"], entry["verdict"], entry["score"]) == ("almost", "partly", 0.25)
+    assert len(seen) == 1 and "Беспорядок" in seen[0] and ENTROPY in seen[0]
 
     async def broken(*_args: Any) -> Mapping[str, Any]:
         raise RuntimeError("engine down")
@@ -459,10 +469,13 @@ async def test_deck_page_groups_marks_and_study_from_the_page(
     assert response.status_code == 200, response.text
     started = response.json()
     assert started["study"]["place"] == "panel" and [c["id"] for c in started["study"]["cards"]] == [one]
+    # Bug 1 (2026-10-26): beside the chat only, in SKAZ's own wiki-study thread — never a listed chat.
+    assert started["chat_id"] == WIKI_STUDY_CHAT_ID
     chat = (await kb_client.get(f"/kb/chats/{started['chat_id']}")).json()
-    assert chat["title"].startswith("Study · ")
     (part,) = [p for m in chat["messages"] for p in m["parts"] if p["type"] == "study"]
     assert part["id"] == started["study"]["id"] and part["mode"] == "hard"
+    listed = (await kb_client.get("/kb/chats")).json()
+    assert WIKI_STUDY_CHAT_ID not in {c["id"] for c in listed}
     hidden = await kb_client.post(f"/kb/study/decks/{page_id}/study", json={"mode": "all"})
     assert [c["id"] for c in hidden.json()["study"]["cards"]] == [one, two]  # "don't show" is left out
 
@@ -551,7 +564,10 @@ async def test_test_api_answers_finishes_and_retakes(world: Any, kb_client: http
     open_id = part["questions"][3]["id"]
 
     async def judge(*_args: Any) -> Mapping[str, Any]:
-        return {"verdict": "wrong", "missing": "Нет слова «система».", "comment": "Не совсем."}
+        return {"ideas": [{"text": "Мера беспорядка.", "source": 1, "quote": ENTROPY},
+                          {"text": "Растёт в изолированной.", "source": 1,
+                           "quote": "она растёт в изолированной системе"}],
+                "points": [], "model_answer": [], "also_right": [], "comment": "Начните с беспорядка."}
 
     runtime.kb_study.judge = judge
     checking = (
@@ -561,6 +577,7 @@ async def test_test_api_answers_finishes_and_retakes(world: Any, kb_client: http
     await runtime.kb_study.settle()
     judged = (await kb_client.get(f"/kb/study/{block.id}")).json()["questions"][3]["response"]
     assert (judged["verdict"], judged["score"], judged["checking"]) == ("wrong", 0.0, False)
+    assert judged["status"] == "not_yet" and len(judged["review"]["ideas"]) == 2
     runtime.kb_study.judge = None
     refused = await kb_client.post(
         f"/kb/study/{block.id}/check-open", json={"item_id": open_id, "text": "Хаос"}

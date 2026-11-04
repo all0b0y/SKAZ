@@ -63,6 +63,10 @@ class AttemptUsage:
     message_characters: int
     output_characters: int
     duration_ms: int
+    #: Parts of the tokens above (``usage.py``); ``None`` unless every call reported them.
+    cached_input_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -86,16 +90,23 @@ class ExecutionView:
 
 def _usage(counters: Mapping[str, int]) -> AttemptUsage:
     calls = counters.get("calls", 0)
+
+    def known(key: str, count: str) -> int | None:
+        return counters.get(key, 0) if counters.get(count, 0) == calls else None
+
     return AttemptUsage(
         calls=calls, cache_hits=counters.get("cache_hits", 0),
         completed_calls=counters.get("completed_calls", 0),
         failed_calls=counters.get("failed_calls", 0),
         unknown_usage_calls=calls - counters.get("known_usage_calls", 0),
-        input_tokens=counters.get("input_tokens", 0) if counters.get("known_inputs", 0) == calls else None,
-        output_tokens=counters.get("output_tokens", 0) if counters.get("known_outputs", 0) == calls else None,
+        input_tokens=known("input_tokens", "known_inputs"),
+        output_tokens=known("output_tokens", "known_outputs"),
         instruction_characters=counters.get("instruction_characters", 0),
         message_characters=counters.get("message_characters", 0),
         output_characters=counters.get("output_characters", 0), duration_ms=counters.get("duration_ms", 0),
+        cached_input_tokens=known("cached_input_tokens", "known_cached_inputs"),
+        cache_write_tokens=known("cache_write_tokens", "known_cache_writes"),
+        reasoning_tokens=known("reasoning_tokens", "known_reasoning"),
     )
 
 
@@ -183,6 +194,14 @@ class ExecutionScope:
                 changes["input_tokens"] = usage.input_tokens
             if usage.output_tokens is not None:
                 changes["output_tokens"] = usage.output_tokens
+            # Each part counted with how many calls reported it: unknown is never summed as 0.
+            for key, known, value in (
+                    ("cached_input_tokens", "known_cached_inputs", usage.cached_input_tokens),
+                    ("cache_write_tokens", "known_cache_writes", usage.cache_write_tokens),
+                    ("reasoning_tokens", "known_reasoning", usage.reasoning_tokens)):
+                if value is not None:
+                    changes[key] = value
+                    changes[known] = 1
         self._add(stage, changes)
 
 

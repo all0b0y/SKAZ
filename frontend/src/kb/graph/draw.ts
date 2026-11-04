@@ -1,3 +1,4 @@
+import { cssColor, toCss } from '../ui/color';
 import { placeLabels, toScreen, type Sim, type View } from './layout';
 
 export interface Palette {
@@ -16,10 +17,10 @@ export interface DrawState {
   selected: string | null;
 }
 
-/** Read the theme from CSS variables of `el` (both themes; re-read on every draw). */
+/** Read the theme from CSS variables of `el` (both themes; re-read on every draw). Tokens may be
+ *  computed values (light-dark, color-mix), so colours are resolved to rgb() first. */
 export function readPalette(el: Element, folderSlot: (folderId: string) => number | null): Palette {
-  const cs = getComputedStyle(el);
-  const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  const v = (name: string, fallback: string) => { const c = cssColor(el, name); return c ? toCss(c) : fallback; };
   const slots = [1, 2, 3, 4].map((i) => v(`--kb-folder-${i}`, '#2f62b0'));
   return {
     text: v('--kb-text', '#2c2e31'),

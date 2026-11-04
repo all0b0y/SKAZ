@@ -21,10 +21,15 @@ import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
 import { UpdatesRow } from './UpdatesRow';
 import { HermesProviders } from './HermesProviders';
+import { AgentUpdatesRow, useAgentUpdatesDot } from './AgentUpdates';
 import { WikiTermsShowButton } from '../wiki/WikiTermsButton';
 import type { EngineId } from '../api/names';
 import { NAV, ROWS, SECTION_LABEL, searchRows, type RowDef } from './schema';
 import { version as appVersion } from '../../../../package.json';
+import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
+import { SearchRowControl, SearchRowList, SEARCH_ROWS, type SearchRowId } from '../searchRules/SearchSettings';
+import { useSearchSettings } from '../searchRules/sites';
+import { AccentRow, BaseRow, DensityRow, MotionRow, PresetGallery, SoundsRow } from './Appearance';
 
 /**
  * The control of one settings row: live backend data where the route exists (S3/W2/B7 via
@@ -41,6 +46,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'agent-claude': return <AgentRow engine="claude_code" />;
     case 'agent-hermes': return <AgentRow engine="hermes" />;
     case 'agent-opencode': return <AgentRow engine="opencode" />;
+    case 'agent-updates': return <AgentUpdatesRow label={row.label} />;
     case 'key-openrouter': return <KeyRow provider="openrouter" />;
     case 'key-soniox': return <KeyRow provider="soniox" />;
     case 'local-whisper': return <LocalWhisperRow />;
@@ -72,6 +78,10 @@ function RowControl({ row }: { row: RowDef }) {
     case 'skill-claude': return <SkillEngineRow skillId="humanizer" engine="claude_code" />;
     case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
     case 'skill-opencode': return <SkillEngineRow skillId="humanizer" engine="opencode" />;
+    case 'me-enabled': return <MeSwitchRow label={row.label} />;
+    case 'search-beta': case 'search-never': case 'search-only': case 'search-prefer': return <SearchRowControl id={row.id as SearchRowId} label={row.label} />;
+    // N6 decision 9: a statement, nothing to switch (no "one-off sessions" option).
+    case 'p-sessions': return null;
     case 'lib-folder':
       if (library?.state === 'ready' || library?.state === 'unavailable') {
         return (
@@ -109,6 +119,11 @@ function RowControl({ row }: { row: RowDef }) {
         <Segmented<TextSize> label="Text size" value={textSize} size="sm" onChange={(v) => prefs.getState().set({ textSize: v })}
           options={[{ value: 's', label: 'S', name: 'Small' }, { value: 'm', label: 'M', name: 'Medium' }, { value: 'l', label: 'L', name: 'Large' }]} />
       );
+    case 'base': return <BaseRow />;
+    case 'accent': return <AccentRow />;
+    case 'density': return <DensityRow />;
+    case 'motion': return <MotionRow />;
+    case 'sounds': return <SoundsRow />;
     case 'log':
       return <ActivityLogRow />;
     case 'ui-language':
@@ -151,6 +166,7 @@ function Row({ row }: { row: RowDef }) {
       </div>
       <div className="kb-srow__control"><RowControl row={row} /></div>
       {row.id === 'agent-hermes' && <HermesProviders />}
+      {(SEARCH_ROWS as readonly string[]).includes(row.id) && <SearchRowList id={row.id as SearchRowId} />}
     </div>
   );
 }
@@ -217,12 +233,20 @@ function SkillsNote() {
   );
 }
 
+function visibleSearchRows(rows: ReadonlyArray<RowDef>, beta: boolean): RowDef[] {
+  return rows.filter((row) => beta || (row.id !== 'search-only' && row.id !== 'search-prefer'));
+}
+
 function SectionBody({ section }: { section: SettingsSection }) {
-  const rows = ROWS.filter((r) => r.section === section);
+  const { client } = useServices();
+  const beta = useSearchSettings(client, (s) => s.rules?.beta ?? false);
+  const rows = visibleSearchRows(ROWS.filter((r) => r.section === section), beta);
   return (
     <>
       {section === 'storage' && <StorageBanner />}
       <HealthPlates section={section} />
+      {section === 'me' && <MeIntro />}
+      {section === 'look' && <PresetGallery />}
       {section === 'skills' && (
         <p className="kb-sintro">Skills SKAZ gives to every agent. Only skills from SKAZ’s own folder are used — your personal skills in ~/.claude, ~/.codex and ~/.hermes are not.</p>
       )}
@@ -237,6 +261,8 @@ function SectionBody({ section }: { section: SettingsSection }) {
       )}
       {section === 'about' && <Licenses />}
       {section === 'skills' && <SkillsNote />}
+      {section === 'me' && <MeSkills />}
+      {section === 'me' && <MeStorageNote />}
     </>
   );
 }
@@ -248,7 +274,8 @@ export function SettingsModal() {
   const close = useUi((s) => s.closeSettings);
   const setSection = useUi((s) => s.setSettingsSection);
   const problems = useProblems();
-  const { settings, agents } = useServices();
+  const { settings, agents, client } = useServices();
+  const beta = useSearchSettings(client, (s) => s.rules?.beta ?? false);
 
   // Fresh live data each time the window opens (cheap reads; the backend owns the truth).
   useEffect(() => {
@@ -262,13 +289,15 @@ export function SettingsModal() {
     void s.loadPrivacy();
     void s.loadAbout();
     void s.loadSkills();
+    void s.loadMe();
     // Agents: checked by themselves on open (at most every 30 s each; Check forces it).
     agents.getState().autoCheck('open');
   }, [open, settings, agents]);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const results = query.trim() ? searchRows(query) : null;
+  const results = query.trim() ? visibleSearchRows(searchRows(query), beta) : null;
   const flagged = new Map(problems.map((p) => [p.section, p.tone] as const));
+  const updateSeen = !useAgentUpdatesDot();
 
   return (
     <Modal open={open} onClose={() => { setQuery(''); close(); }} title="Settings" className="kb-settings" testId="settings" pane="settings"
@@ -309,6 +338,7 @@ export function SettingsModal() {
                         <Icon name={item.icon} size={16} className="kb-row__icon" />
                         <span className="kb-row__text">{item.label}</span>
                         {tone && <span className={`kb-dot kb-dot--${tone}`} aria-label="Needs attention" role="img" />}
+                        {!tone && !updateSeen && item.id === 'conn' && <span className="kb-dot kb-dot--update" aria-label="Agent update available" role="img" />}
                       </button>
                     </li>
                   );

@@ -52,6 +52,9 @@ if args == ["models", "--verbose"]:
     sys.exit(SCENARIO.get("models_exit", 0))
 if args[:2] == ["session", "delete"]:
     record("session_delete", id=args[2], data=os.environ.get("XDG_DATA_HOME"))
+    if args[2] in SCENARIO.get("missing_sessions", []):  # 1.17.18 Cli.session.delete: UI error, exit 1
+        sys.stderr.write("Error: Session not found: " + args[2] + "\n")
+        sys.exit(1)
     sys.exit(SCENARIO.get("delete_exit", 0))
 assert args == ["acp"], args
 state = {"options": json.loads(json.dumps(SCENARIO["session_new"]["configOptions"]))}
@@ -79,6 +82,19 @@ while True:
     elif method == "session/new":
         send({"jsonrpc": "2.0", "id": ident, "result": {**SCENARIO["session_new"],
                                                          "configOptions": state["options"]}})
+    elif method in ("session/resume", "session/load"):
+        # N6, 1.17.18 ACP.resumeSession / ACP.loadSession: ``session.get`` with throwOnError (an unknown
+        # id is an error); load replays the history before its reply, resume doesn't.
+        if method == "session/resume" and SCENARIO.get("resume_unknown"):
+            send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": "Method not found"}})
+            continue
+        if method == "session/load":
+            for body in SCENARIO.get("load_replay", []):
+                update(params["sessionId"], body)
+        if "resume_error" in SCENARIO:
+            send({"jsonrpc": "2.0", "id": ident, "error": SCENARIO["resume_error"]})
+        else:
+            send({"jsonrpc": "2.0", "id": ident, "result": {"configOptions": state["options"]}})
     elif method == "session/set_config_option":
         if params["configId"] == "model":
             state["options"] = json.loads(json.dumps(SCENARIO["set_model"]["configOptions"]))

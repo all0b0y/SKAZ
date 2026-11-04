@@ -18,6 +18,8 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'rec', label: 'Recording & speech', icon: 'mic' },
       { id: 'wiki', label: 'Wiki', icon: 'wiki' },
       { id: 'skills', label: 'Skills', icon: 'skills' },
+      // N6 decision 1: «Я» — one place for what agents know about you and how to work with you.
+      { id: 'me', label: 'Me', icon: 'me' },
     ],
   },
   {
@@ -27,6 +29,8 @@ export const NAV: ReadonlyArray<{ group: string; items: ReadonlyArray<SectionDef
       { id: 'privacy', label: 'Privacy', icon: 'privacy' },
       { id: 'look', label: 'Appearance', icon: 'appearance' },
       { id: 'about', label: 'About', icon: 'about' },
+      // N7: the last section of the menu — the global rules every chat's web search starts from.
+      { id: 'search', label: 'Search', icon: 'web' },
     ],
   },
 ];
@@ -55,6 +59,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'agent-claude', section: 'conn', group: 'Agent', label: 'Claude Code', hint: 'Claude subscription or Anthropic key', keywords: 'anthropic login sign in' },
   { id: 'agent-hermes', section: 'conn', group: 'Agent', label: 'Hermes Agent', hint: 'Subscriptions and API keys, added through Hermes', keywords: 'nous provider providers subscription api key sign in openrouter anthropic gemini deepseek fallback order' },
   { id: 'agent-opencode', section: 'conn', group: 'Agent', label: 'OpenCode', hint: 'Model providers you sign in to through OpenCode', keywords: 'opencode provider providers subscription api key sign in anthropic openai copilot zen' },
+  { id: 'agent-updates', section: 'conn', group: 'Agent', label: 'Check for agent updates automatically', hint: 'Once a day while SKAZ is open; only version numbers are asked for', keywords: 'update updates upgrade new version codex claude hermes opencode skip' },
   { id: 'key-openrouter', section: 'conn', group: 'API keys', label: 'OpenRouter', hint: 'Other models with an API key', keywords: 'key token jev' },
   { id: 'key-soniox', section: 'conn', group: 'API keys', label: 'Soniox', hint: 'Live recording and translation', keywords: 'key speech asr' },
   { id: 'local-whisper', section: 'conn', group: 'On this computer', label: 'Whisper on this computer', hint: 'Works without internet', keywords: 'local offline speech asr download' },
@@ -92,6 +97,8 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'skill-claude', section: 'skills', group: 'Applies to', label: 'Claude Code', keywords: 'humanizer skills loaded status' },
   { id: 'skill-hermes', section: 'skills', group: 'Applies to', label: 'Hermes Agent', keywords: 'humanizer skills loaded status' },
   { id: 'skill-opencode', section: 'skills', group: 'Applies to', label: 'OpenCode', keywords: 'humanizer skills loaded status' },
+  // Me (N6 «Я»): the master switch; the skills are listed below it (MeSkills), found by these words too.
+  { id: 'me-enabled', section: 'me', group: '', label: 'Use Me in chats', hint: 'Off: nothing of Me goes to any agent, and agents can’t change it', keywords: 'me profile memory remember remembered personal about me how to work with me search preferences skills undo versions' },
   // Storage
   { id: 'lib-folder', section: 'storage', group: 'Library', label: 'Folder', hint: 'Materials and wiki are plain .md files', keywords: 'library path location documents' },
   { id: 'obsidian', section: 'storage', group: 'Library', label: 'Open in Obsidian', hint: 'The library folder opens as an Obsidian vault; SKAZ adds it to Obsidian’s vaults the first time.', keywords: 'vault obsidian markdown' },
@@ -101,15 +108,27 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'p-agent', section: 'privacy', group: 'Where data goes', label: 'Your agent', hint: 'Codex, Claude Code or Hermes Agent', keywords: 'privacy data cloud' },
   { id: 'p-openrouter', section: 'privacy', group: 'Where data goes', label: 'OpenRouter', keywords: 'privacy data cloud' },
   { id: 'p-local', section: 'privacy', group: 'Where data goes', label: 'On this computer', keywords: 'privacy local' },
+  // N6 decision 9: an agent's session of a chat lives as long as the chat.
+  { id: 'p-sessions', section: 'privacy', group: 'Chats', label: 'Agent conversations', hint: 'Each agent keeps a copy of a chat’s conversation in SKAZ’s folder while the chat exists; deleting the chat deletes it.', keywords: 'privacy session sessions history chat delete codex claude hermes opencode copy' },
   { id: 'log', section: 'privacy', group: '', label: 'Activity log', hint: 'Without conversation text or keys', keywords: 'logs' },
   // Appearance
-  { id: 'theme', section: 'look', group: '', label: 'Theme', keywords: 'dark light mode colour color appearance' },
-  { id: 'text-size', section: 'look', group: '', label: 'Text size', keywords: 'font scale zoom' },
+  { id: 'theme', section: 'look', group: 'Look', label: 'Theme', keywords: 'dark light mode colour color appearance' },
+  { id: 'base', section: 'look', group: 'Look', label: 'Base', hint: 'The surfaces of both themes', keywords: 'background surface palette milk paper slate sand colour color appearance preset' },
+  { id: 'accent', section: 'look', group: 'Look', label: 'Accent', hint: 'Focus, buttons and active items; links keep their underline', keywords: 'colour color highlight ink clay petrol plum slate appearance preset' },
+  { id: 'text-size', section: 'look', group: 'Look', label: 'Text size', keywords: 'font scale zoom' },
+  { id: 'density', section: 'look', group: 'Look', label: 'Density', hint: 'Spacing, row height and reading line height', keywords: 'compact spacious comfortable spacing padding rows appearance preset' },
+  { id: 'motion', section: 'look', group: 'Motion & sound', label: 'Motion', hint: 'Off also stops transitions. The system’s Reduce motion always wins', keywords: 'animation animations reduce reduced calm transitions effects appearance preset' },
+  { id: 'sounds', section: 'look', group: 'Motion & sound', label: 'Sounds', hint: 'Answer ready, import done, errors. Never while recording the computer’s sound', keywords: 'sound sounds audio notification chime appearance' },
   { id: 'ui-language', section: 'look', group: '', label: 'Interface language', hint: 'Answer and wiki language are set separately', keywords: 'english' },
   // About
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },
   { id: 'updates', section: 'about', group: '', label: 'Updates', hint: 'From GitHub releases, checked at start and once a day', keywords: 'update check new version install download release' },
   { id: 'github', section: 'about', group: '', label: 'GitHub', keywords: 'source code repository' },
+  // Search (N7): every chat starts from these; a chat changes them from the message field.
+  { id: 'search-beta', section: 'search', group: 'Experimental', label: 'Beta search features', hint: 'When off, these rules are paused for new searches. Your lists are kept.', keywords: 'only only these sites prefer preferred preferred sites beta experimental web search' },
+  { id: 'search-never', section: 'search', group: 'Never search', label: 'Blocked sites', hint: 'Always, in every chat. Links from these sites are removed before the agent sees them.', keywords: 'web search block blocked forbid never sites domains internet' },
+  { id: 'search-only', section: 'search', group: 'Search only', label: 'Only these sites', hint: 'Links from other sites are removed. A chat can change this from the message field.', keywords: 'web search allow allowed only list sites domains internet' },
+  { id: 'search-prefer', section: 'search', group: 'Prefer', label: 'Preferred sites', hint: 'A hint to the agent, shown on the search card. It may still search elsewhere.', keywords: 'web search prefer preferred favourite favorite sites scholar arxiv internet' },
 ];
 
 const fold = (text: string) => text.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase();

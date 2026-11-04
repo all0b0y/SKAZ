@@ -1,6 +1,6 @@
 [project]
 name = "skaz"
-version = "0.3.1"
+version = "0.3.2"
 description = "SKAZ local backend: audio ingestion, ASR, temporal agent, notes"
 requires-python = ">=3.11"
 dependencies = [
@@ -10,7 +10,7 @@ dependencies = [
     "httpx>=0.27",
     "cryptography>=43",
     "websockets>=15.0,<18",
-    "pypdf>=6.20.1",
+    "pypdf>=6.21.2",
     "readability-lxml>=0.9",
     "fsrs==6.3.2",
 ]

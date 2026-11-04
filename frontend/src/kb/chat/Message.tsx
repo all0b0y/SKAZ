@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { copyToClipboard } from '../../lib/clipboard';
-import type { KbCitation, KbMessage, KbMessageInput, KbMessagePart } from '../../api/kb/types.gen';
+import type { KbAnswerBlockPart, KbCitation, KbMessage, KbMessageInput, KbMessagePart, KbWikiFixPart } from '../../api/kb/types.gen';
 import { Button, Icon, IconButton, useCopied, useIconPlay } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
 import { quoteAttrs } from '../ui/Selection';
 import { inputPieces, quoteLabel } from '../composer/editor';
 import { useOpenDocument } from '../state/document';
-import { useServices } from '../state/context';
+import { useAgentUpdates, useServices } from '../state/context';
+import { updateWait } from '../state/agentUpdates';
 import { InlineMarkdown } from './Markdown';
 import { ConnectionBlock, InlinePart } from './parts';
 import { FoldedSourcesRow, SourcesProvider } from '../cite/SourceMarks';
@@ -18,8 +19,22 @@ import { StudyInChat } from '../study/StudyBlock';
 import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
+import { KnowledgeNotice, usesGeneralKnowledge } from './KnowledgeNotice';
+import { NotFromSources } from '../searchRules/NotFromSources';
+import { splitWindow, TimeWindowChip } from '../searchRules/TimeWindow';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
-import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
+import { ThoughtLine } from './ThoughtLine';
+import { isMemoryPart } from '../me/api';
+import type { KbMemoryPart } from '../../api/kb/types.gen';
+import { MemoryChip } from '../me/MemoryChip';
+import { AnswerBlock } from './blocks/AnswerBlock';
+import { AnswerBlocks, composeBlocks } from './blocks/compose';
+import { AnswerSelectScope } from './select/context';
+import { DiagramFixProvider } from '../ui/markdown/Diagram';
+import { useDiagramFix } from './diagramFix';
+import { SelectionChip } from './select/SelectionChip';
+import { WikiFixCard } from './select/WikiFixCard';
+import { UnclearClearRow, useLastUnclearAnswer } from '../study/Unclear';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -32,7 +47,10 @@ type Block =
   | { kind: 'permission'; part: KbPermissionPart }
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
-  | { kind: 'web'; part: KbWebSearchPart };
+  | { kind: 'web'; part: KbWebSearchPart }
+  | { kind: 'memory'; part: KbMemoryPart }
+  | { kind: 'answer'; part: KbAnswerBlockPart }
+  | { kind: 'fix'; part: KbWikiFixPart };
 
 /**
  * Text/cite/page parts flow inline in one Markdown run; a connection is its own block. Citations
@@ -53,7 +71,28 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
     pendingSpace = null;
   };
   for (const part of parts) {
-    if (part.type === 'tool') continue;
+    if (part.type === 'tool' || part.type === 'knowledge') continue;
+    if (isMemoryPart(part)) {
+      // N6 decision 7: an agent's edit of «Я» is its own compact line with Undo.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'memory', part });
+      continue;
+    }
+    if (part.type === 'answer_block') {
+      // P1: a ready-made answer block (kb/chat/blocks) is a block of its own.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'answer', part });
+      continue;
+    }
+    if (part.type === 'wiki_fix') {
+      // P2: «Fix in wiki» (kb/chat/select) is a block of its own.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'fix', part });
+      continue;
+    }
     if (part.type === 'web_search') {
       // W-2: an agent's web search is its own block, apart from the material citations.
       flushSpace();
@@ -103,6 +142,7 @@ export function answerCitations(parts: KbMessagePart[]): KbCitation[] {
   return parts.flatMap((p) => {
     if (p.type === 'cite') return [p.citation];
     if (p.type === 'connection') return p.folders.map((f) => f.citation);
+    if (p.type === 'answer_block') return p.sources.flatMap((s) => (s.type === 'cite' ? [s.citation] : [])); // P1
     return [];
   });
 }
@@ -114,16 +154,18 @@ export function plainText(parts: KbMessagePart[]): string {
     if (p.type === 'cite') return p.citation.material_title ?? '';
     if (p.type === 'page') return p.page.title;
     if (p.type === 'connection') return `\n${p.folders.map((f) => `${f.folder_name}: ${f.text}`).join('\n')}\n${p.inference}\n`;
+    if (p.type === 'answer_block') return p.markdown ? `\n\n${p.markdown}\n\n` : ''; // P1: the block's Markdown
     return '';
   }).join('').trim();
 }
 
-function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePart[] }) {
+function Parts({ chatId, parts, working }: { chatId: string; parts: readonly AnyMessagePart[]; working: boolean }) {
   const open = useOpenDocument();
   const { ui } = useServices();
   return (
     <>
-      {toBlocks(parts).map((b, i) => {
+      {composeBlocks(toBlocks(parts)).map((b, i) => {
+        if (b.kind === 'answers') return <AnswerBlocks key={b.parts[0]!.id} parts={b.parts} />; // P1 decision 2
         if (b.kind === 'connection') return <ConnectionBlock key={i} folders={b.part.folders} inference={b.part.inference} page={b.part.page} />;
         if (b.kind === 'permission') {
           const partId = b.part.id;
@@ -134,30 +176,13 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         }
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
-        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} working={working} />;
+        if (b.kind === 'memory') return <MemoryChip key={b.part.edit_id} part={b.part} />;
+        if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
+        if (b.kind === 'fix') return <WikiFixCard key={b.part.id} chatId={chatId} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
-  );
-}
-
-/** SKAZ's web search tool (backend `permissions/web_tool.py` WEB_TOOL). */
-const WEB_TOOL = 'skaz_web_search';
-
-/** What the agent looked at ("Read page Entropy"), folded. */
-function Tools({ parts }: { parts: KbMessagePart[] }) {
-  // W-3b: the skaz_web_search call has its own «Searched the web» line — not repeated here.
-  const tools = parts.filter((p): p is Extract<KbMessagePart, { type: 'tool' }> => p.type === 'tool' && !p.name.endsWith(WEB_TOOL));
-  const [open, setOpen] = useState(false);
-  if (!tools.length) return null;
-  return (
-    <div className="kb-tools">
-      <button type="button" className="kb-tools__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <Icon name="tool" size={13} />Looked at {tools.length} {tools.length === 1 ? 'thing' : 'things'}
-        <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
-      </button>
-      {open && <ul className="kb-tools__list">{tools.map((t, i) => <li key={i}>{t.label}</li>)}</ul>}
-    </div>
   );
 }
 
@@ -196,22 +221,36 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const [copyPlay, replayCopy] = useIconPlay();
   const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
-  const empty = message.parts.filter((p) => p.type !== 'tool').length === 0;
+  const empty = message.parts.filter((p) => p.type !== 'tool' && p.type !== 'knowledge').length === 0;
+  // U1: an answer that waits for its agent's update says so instead of «Writing an answer…».
+  const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
+  // N7-5: «Looking at 2024–2026» on the first line becomes a chip whose menu changes the window.
+  const timed = useMemo(() => splitWindow(message.parts), [message.parts]);
+  // D-12: a diagram of this answer that can't be drawn asks this chat's agent for a fix (diagramFix.ts).
+  const fixDiagram = useDiagramFix(message.id);
+  const lastUnclear = useLastUnclearAnswer(chatId);
   return (
-    <article className="kb-msg kb-msg--assistant" data-state={message.state} aria-label="Answer">
-      <Tools parts={message.parts} />
+    <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
+      {/* Stage 6 B3: the agent's work (thinking line, live timer, a chip per tool call) folds into
+          `N tool calls · M failed` after the answer. */}
+      <ThoughtLine message={message} head={empty && message.state === 'streaming' ? waitingFor ?? 'Writing an answer…' : null} />
+      {usesGeneralKnowledge(message.parts) && <KnowledgeNotice />}
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
-        {empty && message.state === 'streaming' && (
-          // FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
-          <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />Writing an answer…</p>
-        )}
         <SourcesProvider index={sources}>
-          <Parts chatId={chatId} parts={message.parts} />
+          <AnswerSelectScope messageId={message.id}>
+            <DiagramFixProvider value={fixDiagram}>
+              {timed.window && <TimeWindowChip window={timed.window} disabled={message.state === 'streaming'} />}
+              <Parts chatId={chatId} parts={timed.parts as typeof message.parts} working={message.state === 'streaming'} />
+            </DiagramFixProvider>
+          </AnswerSelectScope>
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
+      <NotFromSources chatId={chatId} message={message} />
+      {/* P3-b: «Clear now» under the chat's last answer that read the «Unclear» marks. */}
+      {message.state === 'done' && lastUnclear === message.id && <UnclearClearRow chatId={chatId} />}
       {interrupted && message.failure && (
         <div className="kb-interrupt" role="alert">
           <Icon name="clock" size={16} className="kb-interrupt__icon" />
@@ -272,7 +311,8 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
   }, [editing]);
   const close = () => { refocus.current = true; setEditing(false); };
   return (
-    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef}>
+    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef} data-message-id={message.id}>
+      {input.selection && <SelectionChip selection={input.selection} />}
       {editing && actions ? (
         <QuestionEditor input={input} onCancel={close} onSend={async (next) => {
           const failed = await actions.onEdit(next);
@@ -302,6 +342,9 @@ export function renderInput(input: KbMessageInput): ReactNode {
   });
 }
 
+/** The backend's compaction notice (`chats/live.py` COMPACTED_NOTE, N6-CONTRACT §6). */
+export const COMPACTED_NOTE = 'History compressed';
+
 /** "Switched to Claude Code" and similar records in the conversation; "Study" from a deck page (S12). */
 export function SystemMessage({ chatId, message }: { chatId: string; message: KbMessage }) {
   const studies = message.parts.filter((p): p is KbStudyPart => p.type === 'study');
@@ -313,6 +356,14 @@ export function SystemMessage({ chatId, message }: { chatId: string; message: Kb
     );
   }
   const text = message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
+  if (text === COMPACTED_NOTE) {
+    // N6 decision 13: the agent compacted its session — a thin divider line across the chat.
+    return (
+      <div className="kb-msg kb-msg--divider" role="separator" aria-label={text}>
+        <span>{text}</span>
+      </div>
+    );
+  }
   return (
     <p className="kb-msg kb-msg--system" role="note">
       {message.engine && <EngineBadge engine={message.engine} size={16} />}

@@ -196,7 +196,9 @@ async def test_run_streams_text_tool_calls_results_and_usage(tmp_path: Path) -> 
     assert run["env"]["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1"
     assert run["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
     assert run["env"]["CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK"] == "1"
-    assert "CLAUDE_CONFIG_DIR" not in run["env"]  # the user's own Claude Code login, untouched
+    # N6 decision 14: SKAZ's own Claude Code folder (own sign-in), never the user's ~/.claude.
+    assert run["env"]["CLAUDE_CONFIG_DIR"] == str(engine.config_dir)
+    assert Path(run["env"]["CLAUDE_CONFIG_DIR"]).is_relative_to(tmp_path / "data" / "claude-code")
     assert Path(run["cwd"]).name == "work"
 
     config = fake.records("mcp_config")[0]
@@ -257,7 +259,8 @@ async def test_not_logged_in_output_of_the_real_cli_is_an_auth_failure(tmp_path:
     )
     events = await drain(engine, turn(tools=None))
     assert events == [
-        Failed("run-1", "auth", "Claude Code is not signed in. Sign in to Claude Code and try again.")
+        Failed("run-1", "auth",
+               "Claude Code in SKAZ is not signed in. Sign in to Claude Code in SKAZ and try again.")
     ]
     assert not any(isinstance(event, TextDelta) for event in events)  # CLI error text is not an answer
 
@@ -306,7 +309,7 @@ async def test_status_reads_the_documented_auth_status(tmp_path: Path) -> None:
     assert (
         status.installed and not status.signed_in and not status.incompatible and status.version == "2.1.281"
     )
-    assert status.reason == "Sign in to Claude Code to use it in SKAZ."
+    assert status.reason == "Sign in to Claude Code in SKAZ."
     ready, _ = engine_for(tmp_path / "ready", {"logged_in": True})
     assert (await ready.status()).ready
     missing = ClaudeCodeEngine(tmp_path / "x", locate_cli=lambda name: None)

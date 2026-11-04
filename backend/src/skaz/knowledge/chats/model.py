@@ -12,9 +12,12 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Literal, cast
 
 from ..agents.engine import EngineId, FailureKind
+from ..answer_blocks.part import BlockPart, block_from_json, block_to_json
+from .fix_part import WikiFixPart, fix_from_json, fix_to_json
 
 Role = Literal["user", "assistant", "system"]
 MessageState = Literal["streaming", "done", "interrupted", "failed", "cancelled"]
+ToolStatus = Literal["running", "done", "error", "stopped", "unknown"]
 RefType = Literal["page", "material", "chat"]
 QuoteSource = Literal["page", "material", "chat"]
 #: States after which an answer can be asked again ("Resume" / "Regenerate").
@@ -22,6 +25,11 @@ FINISHED: frozenset[str] = frozenset({"done", "interrupted", "failed", "cancelle
 
 
 # -- parts ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class KnowledgePart:
+    """The assistant disclosed using general knowledge; not an observed search or approval."""
 
 
 @dataclass(frozen=True)
@@ -66,6 +74,13 @@ class ConnectionPart:
 class ToolPart:
     name: str
     label: str
+    #: N8: what the tool read — ``("material" | "page", id)`` — for the chat overview's «Looked at».
+    target: tuple[str, str] | None = None
+    #: Identity is local to this answer, never a global tool id. Older messages have none.
+    call_id: str | None = None
+    status: ToolStatus = "unknown"
+    started_at: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -99,11 +114,28 @@ class WebSearchPart:
     search_id: str
 
 
-Part = (TextPart | CitePart | PagePart | ConnectionPart | ToolPart | PermissionPart | QuestionPart | StudyPart
-        | WebSearchPart)
+@dataclass(frozen=True)
+class MemoryPart:
+    """An agent's change of «Я» in this answer (N6 decision 7): a chip with Undo. Never sent to an agent,
+    never in exports or previews; for the profile the summary carries no content (decision 3)."""
+
+    edit_id: str
+    skill_id: str
+    skill_title: str
+    #: ``create`` / ``append`` / ``replace`` / ``delete``.
+    action: str
+    summary: str
+    undone: bool = False
+
+
+Part = (KnowledgePart | TextPart | CitePart | PagePart | ConnectionPart | ToolPart
+        | PermissionPart | QuestionPart | StudyPart
+        | WebSearchPart | MemoryPart | BlockPart | WikiFixPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
+    if isinstance(part, KnowledgePart):
+        return {"type": "knowledge"}
     if isinstance(part, TextPart):
         return {"type": "text", "text": part.text}
     if isinstance(part, CitePart):
@@ -123,11 +155,26 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
     if isinstance(part, WebSearchPart):
         return {"type": "web_search", "id": part.search_id}
-    return {"type": "tool", "name": part.name, "label": part.label}
+    if isinstance(part, MemoryPart):
+        return {"type": "memory", "edit_id": part.edit_id, "skill_id": part.skill_id,
+                "skill_title": part.skill_title, "action": part.action, "summary": part.summary,
+                "undone": part.undone}
+    if isinstance(part, BlockPart):
+        return block_to_json(part)  # P1: an answer block (``answer_blocks.part``)
+    if isinstance(part, WikiFixPart):
+        return fix_to_json(part)  # P2: «Fix in wiki» (``chats.fix_part``)
+    data: dict[str, Any] = {"type": "tool", "name": part.name, "label": part.label,
+                            "call_id": part.call_id, "status": part.status, "started_at": part.started_at,
+                            "duration_ms": part.duration_ms}
+    if part.target is not None:
+        data["target"] = {"type": part.target[0], "id": part.target[1]}
+    return data
 
 
 def part_from_json(data: Mapping[str, Any]) -> Part | None:
     kind = data.get("type")
+    if kind == "knowledge":
+        return KnowledgePart()
     if kind == "text":
         return TextPart(str(data.get("text", "")))
     if kind == "cite":
@@ -141,7 +188,14 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
                       for side in data.get("sides", []))
         return ConnectionPart(sides, str(data.get("inference", "")), _optional(data.get("page_id")))
     if kind == "tool":
-        return ToolPart(str(data.get("name", "")), str(data.get("label", "")))
+        raw = data.get("target")
+        known = isinstance(raw, Mapping) and raw.get("type") in ("material", "page") and bool(raw.get("id"))
+        target = (str(raw.get("type")), str(raw.get("id"))) if known and isinstance(raw, Mapping) else None
+        return ToolPart(str(data.get("name", "")), str(data.get("label", "")), target,
+                        call_id=_optional(data.get("call_id")),
+                        status=cast(ToolStatus, data.get("status", "unknown")),
+                        started_at=_optional(data.get("started_at")),
+                        duration_ms=int(data["duration_ms"]) if data.get("duration_ms") is not None else None)
     if kind == "permission":
         return PermissionPart(str(data["id"]))
     if kind == "question":
@@ -150,6 +204,15 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
     if kind == "web_search":
         return WebSearchPart(str(data["id"]))
+    if kind == "memory":
+        return MemoryPart(str(data["edit_id"]), str(data.get("skill_id", "")),
+                          str(data.get("skill_title", "")), str(data.get("action", "append")),
+                          str(data.get("summary", "")),
+                          bool(data.get("undone", False)))
+    if kind == "answer_block":
+        return block_from_json(data)
+    if kind == "wiki_fix":
+        return fix_from_json(data)
     return None
 
 
@@ -181,6 +244,48 @@ class Quote:
     message_id: str | None = None
 
 
+#: ``study`` (P3-c): a test question, «Ask the agent» — its block and question by id.
+SelectionKind = Literal["block", "diagram", "study"]
+#: What the user asked with the selection's quick buttons (P2): a plain question, «Explain more»,
+#: «That’s wrong» (the agent rechecks the items against their sources).
+SelectionIntent = Literal["ask", "explain", "wrong"]
+
+
+@dataclass(frozen=True)
+class SelectedItem:
+    id: str
+    #: A short label the user saw (shown in the chip; untrusted like the rest of the message).
+    label: str
+
+
+@dataclass(frozen=True)
+class Selection:
+    """P2: items the user picked in an earlier answer — a block (or a Mermaid diagram) of one message,
+    and items of it, by id. Checked when the question is sent (``chats.selection``)."""
+
+    message_id: str
+    block_id: str
+    kind: SelectionKind
+    title: str | None
+    items: tuple[SelectedItem, ...]
+    intent: SelectionIntent = "ask"
+
+    def to_json(self) -> dict[str, Any]:
+        return {"message_id": self.message_id, "block_id": self.block_id, "kind": self.kind,
+                "title": self.title, "intent": self.intent,
+                "items": [{"id": item.id, "label": item.label} for item in self.items]}
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> Selection:
+        kind = data.get("kind")
+        intent = data.get("intent")
+        return cls(str(data.get("message_id", "")), str(data.get("block_id", "")),
+                   kind if kind in ("diagram", "study") else "block", _optional(data.get("title")),
+                   tuple(SelectedItem(str(item.get("id", "")), str(item.get("label", "")))
+                         for item in data.get("items") or [] if isinstance(item, Mapping)),
+                   intent if intent in ("explain", "wrong") else "ask")
+
+
 @dataclass(frozen=True)
 class OpenContext:
     """What the user had open next to the chat when sending (decision: the agent knows it)."""
@@ -199,8 +304,16 @@ class MessageInput:
     #: Material ids added through "+" (already created by ``/kb/materials/*`` or ``/kb/imports``).
     attachments: tuple[str, ...] = ()
     context: OpenContext = field(default_factory=OpenContext)
+    #: P2: what the user picked in an earlier answer, asked about with this message.
+    selection: Selection | None = None
 
     def to_json(self) -> dict[str, Any]:
+        data = self._json()
+        if self.selection is not None:
+            data["selection"] = self.selection.to_json()
+        return data
+
+    def _json(self) -> dict[str, Any]:
         return {
             "text": self.text,
             "mentions": [{"type": ref.type, "id": ref.id, "title": ref.title} for ref in self.mentions],
@@ -227,6 +340,8 @@ class MessageInput:
             attachments=tuple(str(item) for item in data.get("attachments", [])),
             context=OpenContext(_optional(context.get("page_id")), _optional(context.get("material_id")),
                                 _optional(context.get("study_id"))),
+            selection=(Selection.from_json(data["selection"]) if isinstance(data.get("selection"), Mapping)
+                       else None),
         )
 
 

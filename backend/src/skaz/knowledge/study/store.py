@@ -173,6 +173,11 @@ class StudyStore:
             ).fetchall()
         return [_block(row) for row in rows]
 
+    def block_ids_of_page(self, page_id: str) -> list[str]:
+        with self.db.read() as connection:
+            rows = connection.execute("SELECT id FROM study_blocks WHERE page_id = ?", (page_id,)).fetchall()
+        return [str(row[0]) for row in rows]
+
     def update_block(self, block_id: str, **fields: Any) -> StudyBlock | None:
         if not set(fields) <= _BLOCK_FIELDS:
             raise ValueError("Unknown study block fields")
@@ -271,6 +276,14 @@ class StudyStore:
                     for r in reviews
                 ],
             )
+
+    def last_rating(self, card_id: str) -> int | None:
+        """The card's last grade (1 Again … 4 Easy), for the agent reading «Unclear» marks (P3-b)."""
+        with self.db.read() as connection:
+            row = connection.execute(
+                "SELECT rating FROM study_reviews WHERE card_id = ? ORDER BY id DESC LIMIT 1", (card_id,)
+            ).fetchone()
+        return int(row[0]) if row else None
 
     def new_today(self, local_day: str) -> dict[str, int]:
         """New cards started today, by folder (the S8 limit, per folder — Q14)."""

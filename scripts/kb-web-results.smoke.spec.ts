@@ -42,7 +42,7 @@ async function seed() {
         parts: [
           { type: 'tool', name: 'skaz_web_search', label: 'Used skaz_web_search' },
           { type: 'web_search', id: 'web-t1', engine: 'codex', searcher: 'codex', query: 'TOGAF official source', allowed_domains: [], blocked_domains: [],
-            status: 'allowed', auto: false, reason: null, links: links.map(([title, site], i) => ({ title, site, url: i === 2 ? 'https://news.example.com/signin/togaf' : `https://${site}/togaf/${i}` })) },
+            status: 'allowed', execution: 'done', auto: false, reason: null, links: links.map(([title, site], i) => ({ title, site, url: i === 2 ? 'https://news.example.com/signin/togaf' : `https://${site}/togaf/${i}` })) },
           { type: 'text', text: 'Официальный источник TOGAF — сайт The Open Group: [TOGAF — The Open Group](https://opengroup.org/togaf/0). Сам стандарт лежит в [The TOGAF Standard](https://publications.opengroup.org/togaf/1).' },
         ] },
     ];
@@ -103,7 +103,8 @@ for (const theme of THEMES) {
       const chat = await open(theme, size);
       const fold = chat.getByRole('button', { name: /Searched the web · TOGAF official source · 9 links/ });
       await expect(fold).toHaveAttribute('aria-expanded', 'false');
-      await expect(chat.getByText(/Looked at/)).toHaveCount(0);
+      await expect(chat.getByText('1 tool call', { exact: true })).toBeVisible();
+      await expect(chat.locator('.kb-thought').getByRole('button')).toHaveCount(0);
       await shot(`folded-${tag}`);
 
       await fold.click();

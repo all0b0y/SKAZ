@@ -113,6 +113,9 @@ const quitController = new QuitController({
   },
   stopBackend: () => manager.stop(),
   quit: () => app.quit(),
+  hideWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); },
+  showWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); },
+  relaunch: () => app.relaunch(),
   onShutdownError: (err) => {
     console.error('[main] backend shutdown failed; quitting anyway:', err instanceof Error ? err.message : err);
   },
@@ -283,6 +286,7 @@ if (!ownsInstance) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    if (quitController.onLaunchRequest()) return; // shutting down: relaunch once this process has exited
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -341,6 +345,8 @@ app.whenReady().then(() => {
   });
 
   app.on('activate', () => {
+    // A Dock click while the hidden window is still shutting down reaches THIS process on macOS.
+    if (quitController.onLaunchRequest()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });

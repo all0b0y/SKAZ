@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 import httpx
@@ -14,15 +15,19 @@ from skaz.knowledge.decisions.protocol import Answer, Question, YesNoAnswer
 from skaz.knowledge.markdown.page import parse_page
 from skaz.knowledge.service import KnowledgeService
 
-from .ingest_support import PatternDetector
+from .ingest_support import PatternDetector, ScriptedWiki, add_material, settle
 from .wiki_support import (
     CONNECTIONS,
     DISCREPANCIES,
+    LECTURE_CONCEPTS,
+    LECTURE_NOTES,
     OVERVIEW,
     TwoSources,
     connecting,
     forget_connection_checks,
+    settle_wiki,
     two_sources,
+    wired,
 )
 
 ENTROPY = "Энтропия (entropy)"
@@ -285,6 +290,40 @@ async def test_background_connections_never_start_without_permission(ready: Know
     assert len([item for item in case.ingest.list_jobs() if item.kind == "connections"]) == jobs_before + 1
     # Nothing changed since: no second background run.
     assert await service.tick() is None
+
+
+async def test_background_connections_never_start_while_a_finished_build_is_starting_its_follow_ups(
+    ready: KnowledgeService, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A done build leaves the running ingest jobs a moment before its listeners start its follow-ups
+    (overview, connections of its pages). That moment is not idle: a background run started there ran
+    ahead of the new source's own connections, outside its profile and budget."""
+    wiki = ScriptedWiki(notes=[LECTURE_NOTES], concepts=[LECTURE_CONCEPTS])
+    ingest, service = wired(ready, wiki)
+    ingest.update_settings(background_connections=True)
+    service.idle_after_s = 0.0
+    release = threading.Event()
+    held: list[str] = []
+    real_get = ingest.jobs.get
+
+    def get(job_id: str) -> Any:  # in a disk thread: the loop goes on while the listeners wait
+        record = real_get(job_id)
+        if record is not None and record.kind == "ingest" and record.state == "done" and not held:
+            held.append(job_id)
+            release.wait(5)
+        return record
+
+    monkeypatch.setattr(ingest.jobs, "get", get)
+    try:
+        job = await ingest.request_ingest(add_material(ready, "Физика", "Лекция 8"))
+        await settle(lambda: bool(held))
+        assert job.id not in ingest.active_jobs() and ingest.busy
+        assert await service.tick() is None
+    finally:
+        release.set()
+    await settle_wiki(service, ingest)
+    connections = [item for item in ingest.list_jobs() if item.kind == "connections"]
+    assert len(connections) == 1 and connections[0].state == "done"  # the new source's own run only
 
 
 # -- "Find connections now" without a ready agent (QA A13) --------------------------------

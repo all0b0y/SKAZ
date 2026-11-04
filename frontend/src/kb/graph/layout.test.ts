@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KbGraph } from '../../api/kb/types.gen';
-import { bounds, createSim, fit, pick, placeLabels, settle, showsLabel, step, toScreen, zoomAt, ZOOM_MAX } from './layout';
+import { bounds, createSim, fit, pick, placeLabels, settle, showsLabel, step, toScreen, zoomAt, ZOOM_MAX, ZOOM_MIN } from './layout';
 
 function graph(n: number, edges: Array<[number, number]>, hub: number[] = []): KbGraph {
   return {
@@ -12,6 +12,27 @@ function graph(n: number, edges: Array<[number, number]>, hub: number[] = []): K
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
 describe('Graph force layout (own, no library)', () => {
+  it('a big dense library with hubs stays a graph: finite, bounded, fits above the minimum zoom (bug 2)', () => {
+    // Like the user's wiki (450 concepts + 55 pages); hubs collect hundreds of links.
+    let s = 3;
+    const rnd = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    for (const count of [1500, 6000]) {
+      const edges: Array<[number, number]> = [];
+      for (let i = 0; i < count; i += 1) {
+        const a = Math.floor(rnd() ** 2 * 505);
+        const b = Math.floor(rnd() * 505);
+        if (a !== b) edges.push([a, b]);
+      }
+      const sim = createSim(graph(505, edges, [0, 1, 2, 3, 4]));
+      for (let i = 0; i < 80; i += 1) step(sim);
+      while (step(sim)) { /* the frames the panel animates */ }
+      expect(sim.nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y))).toBe(true);
+      const b = bounds(sim);
+      expect(Math.max(b.maxX - b.minX, b.maxY - b.minY)).toBeLessThan(3000);
+      expect(fit(sim, 900, 700).k).toBeGreaterThan(ZOOM_MIN);
+    }
+  });
+
   it('starts the same way for the same graph and ignores edges to unknown nodes', () => {
     const g = graph(6, [[0, 1], [1, 2], [0, 9]]);
     const a = createSim(g);

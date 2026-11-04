@@ -51,6 +51,23 @@ bundled JavaScript of that binary — no model was called):
 * History: OpenCode keeps every session in ``<XDG_DATA_HOME>/opencode/opencode.db``; SKAZ deletes
   each run's session with ``opencode session delete <id>`` once the ACP process ended and retries
   ids it could not delete at the next start (``opencode-sessions.json``).
+* Live chat sessions (N6, ``.dev/docs/backlog-2026-10-26/N6-CONTRACT.md`` §2, §8): a chat turn with a
+  ``SessionPlan`` keeps its OpenCode session. ``start``: ``session/new`` in the stable folder
+  ``<root>/chat``, prompted with ``agents.history.seed_prompt``; the run config holding the ``skaz``
+  agent's prompt (the instructions) is kept as ``<root>/sessions/<id>.json`` so every later answer
+  runs under the instructions the session started with (OpenCode reads the agent prompt from the
+  config on every model call). ``continue``: ``session/resume`` (1.17.18 ``ACP.resumeSession``:
+  ``session.get`` with ``throwOnError`` — an unknown id is an error —, no history replay; MCP servers
+  re-registered from the request), falling back to ``session/load`` (replays the history, discarded)
+  where ``resume`` is unknown; only the new message is prompted. A refused resume or a missing kept
+  config is ``session_lost``. The session leaves the post-run delete once ``SessionBound`` hands it to
+  SKAZ's chat store; ``delete_session`` runs ``opencode session delete <id>`` ("Session not found" =
+  already gone) and removes the kept config. Compaction: OpenCode compacts by itself
+  (``SessionCompaction``, a ``summary`` assistant message of agent ``compaction``) and publishes
+  ``session.compacted`` on its bus, but its ACP layer forwards only ``permission.asked`` and
+  ``message.part.*`` events, so SKAZ sees no compaction and never emits ``Compacted``. Not verified
+  (no model was run): whether the compaction summary's own text deltas reach the ACP client as
+  ``agent_message_chunk`` (``handlePartDelta`` does not filter ``summary`` messages).
 """
 from __future__ import annotations
 
@@ -63,9 +80,10 @@ import re
 import shutil
 import signal
 import subprocess
+import time
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -96,13 +114,17 @@ from .engine import (
     Failed,
     FailureKind,
     ModelOption,
+    SessionBound,
+    SessionDeleteDeferred,
+    SessionSupport,
     TextDelta,
     ToolCall,
     ToolResult,
-    Usage,
 )
+from .history import seed_prompt
 from .mcp_access import MCP_SERVER_NAME, NO_TOOL_ACCESS, McpAccessProvider
 from .transcript import render_prompt
+from .usage import opencode_usage
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +198,15 @@ OPENCODE_FLAGS: dict[str, str] = {
 SHOWN_ENV = ("PATH", "HOME", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
              "XDG_STATE_HOME", *OPENCODE_FLAGS, "OPENCODE_PERMISSION")
 HISTORY_FILE = "opencode-sessions.json"
+#: The start-up sweep leaves a kept session changed within this many seconds (it may be starting).
+SWEEP_MIN_AGE_S = 600.0
 MAX_DELETE_ATTEMPTS = 5
+#: N6: one OpenCode session per chat, continued with ``session/resume``; OpenCode ACP has no revert.
+OPENCODE_SESSIONS = SessionSupport(live=True, revert=False)
+SESSION_LOST = "OpenCode couldn't continue this chat's conversation."
+#: What ``opencode session delete`` says for an id it doesn't hold (1.17.18 ``Cli.session.delete``).
+SESSION_NOT_FOUND = "Session not found"
+_SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,200}")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _COUNT = re.compile(r"(\d+)\s+credentials?\b")
 _CREDENTIAL_TYPES = frozenset({"api", "oauth", "wellknown"})
@@ -308,6 +338,31 @@ def model_options(models: Sequence[Mapping[str, Any]], credentials: Sequence[str
     return tuple(ModelOption(model_id, label(model_id, name), efforts) for model_id, name, efforts in entries)
 
 
+def opencode_prompt(turn: AgentTurn) -> str:
+    """The prompt text (OpenCode takes the instructions as the agent prompt, not here).
+
+    Stateless: today's ``render_prompt``. A new live session (``start``): ``agents.history.seed_prompt``
+    — the one seed serializer (decision 13). A continued session: only the new message. ``/name``
+    would run an OpenCode command; a request never is one.
+    """
+    plan = turn.session
+    if plan is None:
+        prompt = render_prompt(turn, include_instructions=False, include_schema=True)
+    else:
+        last = turn.messages[-1] if turn.messages else None
+        if last is None or last.role != "user" or not last.content.strip():
+            raise ValueError("A turn must end with a user message.")
+        text = seed_prompt(turn.messages, turn.history_summary) if plan.mode == "start" else last.content
+        if turn.response_schema is not None:
+            schema = json.dumps(turn.response_schema, ensure_ascii=False, sort_keys=True)
+            text = ("Reply with a single JSON value that matches this JSON Schema, and nothing else:\n"
+                    f"{schema}\n\n{text}")
+        prompt = text
+    if prompt.lstrip().startswith("/"):
+        prompt = f"Current request:\n{prompt}"
+    return prompt
+
+
 def run_config_text(instructions: str) -> str:
     """The per-run config file: the ``skaz`` agent's prompt, braces escaped (no ``{env:}``/``{file:}``)."""
     prompt = json.dumps(instructions, ensure_ascii=True).replace("{", "\\u007b").replace("}", "\\u007d")
@@ -410,6 +465,8 @@ class _ActiveRun:
     process: asyncio.subprocess.Process | None = None
     connection: AcpConnection | None = None
     session_id: str | None = None
+    #: The session goes to the post-run delete (stateless runs; a new chat session until handed over).
+    forget: bool = False
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -438,6 +495,9 @@ class OpenCodeEngine:
         self.state_home = self.root / "state"
         self.tmp = self.root / "tmp"
         self.runs_dir = self.root / "runs"
+        #: N6: the stable folder of every live chat session and the run configs they started with.
+        self.chat_dir = self.root / "chat"
+        self.sessions_dir = self.root / "sessions"
         self.policy_file = self.config_home / "opencode" / "opencode.json"
         self.history_file = self.root / HISTORY_FILE
         self.mcp = mcp
@@ -456,6 +516,79 @@ class OpenCodeEngine:
     @property
     def id(self) -> EngineId:
         return "opencode"
+
+    @property
+    def sessions(self) -> SessionSupport:
+        return OPENCODE_SESSIONS
+
+    async def delete_session(self, session_id: str) -> None:
+        """N6: delete a chat's live session (``opencode session delete <id>`` in SKAZ's OpenCode folder,
+        "Session not found" = already gone) and the run config it was kept with. Raises when OpenCode
+        kept it (the caller retries later)."""
+        located = self._locate("opencode")
+        if located is None:
+            raise SessionDeleteDeferred(NOT_INSTALLED)  # not an attempt: tried again later
+        code, out = await disk_call(self._delete_sync, located, session_id)
+        if code != 0 and SESSION_NOT_FOUND not in out:
+            raise RuntimeError(f"OpenCode did not delete the session (exit {code}).")
+        self.forget_session(session_id)
+
+    def forget_session(self, session_id: str) -> None:
+        """SKAZ's own traces of a chat session: its kept instructions and its post-run delete entry
+        (after a deletion, or when SKAZ gave the session up)."""
+        kept = self._kept_config(session_id)
+        if kept is not None:
+            kept.unlink(missing_ok=True)
+        history = self._read_history()
+        if history.pop(session_id, None) is not None:
+            self._write_history(history)
+
+    async def sweep_sessions(self, known: Callable[[str], bool]) -> None:
+        """App start: a kept chat session no chat holds and no deletion waits for (SKAZ quit between
+        the handover and the record) is deleted from OpenCode's store like a run's leftover (retried
+        with them) and its kept instructions go. One changed within ``SWEEP_MIN_AGE_S``, or one a run
+        holds now, is left for the next start."""
+        if not self.sessions_dir.is_dir():
+            return
+        active = {run.session_id for run in self._runs.values()}
+        cutoff = time.time() - SWEEP_MIN_AGE_S
+        orphans: list[str] = []
+        for entry in sorted(self.sessions_dir.glob("*.json")):
+            session_id = entry.stem
+            if not _SESSION_ID.fullmatch(session_id) or known(session_id) or session_id in active:
+                continue
+            try:
+                if entry.stat().st_mtime >= cutoff:
+                    continue
+            except OSError:
+                continue
+            orphans.append(session_id)
+        for session_id in orphans:
+            self._remember(session_id)  # stays on the post-run delete list until OpenCode lets it go
+            kept = self._kept_config(session_id)
+            if kept is not None:
+                kept.unlink(missing_ok=True)
+        if orphans:
+            await self._forget(orphans)
+
+    def _kept_config(self, session_id: str) -> Path | None:
+        """Where a live chat session's run config is kept (``None`` for an id unfit as a file name)."""
+        return self.sessions_dir / f"{session_id}.json" if _SESSION_ID.fullmatch(session_id) else None
+
+    def _keep(self, session_id: str, run_config: Path) -> None:
+        """A chat's session is SKAZ's chat store's from now on: its instructions are kept for the
+        answers to come and it leaves the post-run delete list."""
+        kept = self._kept_config(session_id)
+        if kept is None:
+            raise ValueError("OpenCode replied in an unexpected format.")
+        self.sessions_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = kept.with_suffix(".tmp")
+        temporary.write_text(run_config.read_text(encoding="utf-8"), encoding="utf-8")
+        temporary.chmod(0o600)
+        os.replace(temporary, kept)
+        history = self._read_history()
+        if history.pop(session_id, None) is not None:
+            self._write_history(history)
 
     # -- folder and environment ----------------------------------------------
 
@@ -629,22 +762,23 @@ class OpenCodeEngine:
     def _remember(self, session_id: str) -> None:
         self._write_history({**self._read_history(), session_id: 0})
 
-    def _delete_sync(self, located: Located, session_id: str) -> int:
-        """``opencode session delete <id>`` in a worker thread (cancel-safe, unlike ``run_capture``)."""
+    def _delete_sync(self, located: Located, session_id: str) -> tuple[int, str]:
+        """``opencode session delete <id>`` in a worker thread (cancel-safe, unlike ``run_capture``):
+        exit code and output (read only for "Session not found"; never logged)."""
         argv = [str(located.binary), "session", "delete", session_id]
         refuse_sudo(argv)
         process = subprocess.Popen(argv, env=self.environment(located), cwd=str(self.home),
                                    start_new_session=True, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         CHILDREN.add(process, group=True)
         try:
-            process.wait(timeout=self._status_timeout)
+            out, _ = process.communicate(timeout=self._status_timeout)
         except subprocess.TimeoutExpired:
             kill_group(process.pid)
-            process.wait()
+            out, _ = process.communicate()
         finally:
             CHILDREN.discard(process)
-        return process.returncode
+        return process.returncode, out.decode(errors="replace")
 
     async def _forget(self, session_ids: Sequence[str]) -> None:
         located = self._locate("opencode")
@@ -654,10 +788,10 @@ class OpenCodeEngine:
         tries = self._read_history()
         for session_id in session_ids:
             try:
-                code = await disk_call(self._delete_sync, located, session_id)
+                code, out = await disk_call(self._delete_sync, located, session_id)
             except (OSError, subprocess.SubprocessError):
-                code = 1
-            if code == 0:
+                code, out = 1, ""
+            if code == 0 or SESSION_NOT_FOUND in out:
                 done.add(session_id)
                 continue
             tries[session_id] = tries.get(session_id, 0) + 1
@@ -785,14 +919,25 @@ class OpenCodeEngine:
                 # "other", not "incompatible": the agent needs no update, the model is the problem.
                 yield Failed(run_id, "other", FREE_TIER_NOTE)
                 return
-            prompt = render_prompt(turn, include_instructions=False, include_schema=True)
-            if prompt.lstrip().startswith("/"):
-                prompt = f"Current request:\n{prompt}"  # ``/name`` would run an OpenCode command
+            plan = turn.session
+            prompt = opencode_prompt(turn)
             self.prepare()
             work.mkdir(mode=0o700, parents=True, exist_ok=True)
-            run_config = work / "skaz-run.json"
-            run_config.write_text(run_config_text(turn.instructions.strip() or "Answer the request."),
-                                  encoding="utf-8")
+            if plan is not None and plan.mode != "start":
+                # A continued session runs under the instructions it started with (rule 1 of N6 §2).
+                kept = self._kept_config(plan.session_id or "")
+                if plan.mode == "revert" or kept is None or not kept.is_file():
+                    yield Failed(run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
+                    return
+                run_config = kept
+            else:
+                run_config = work / "skaz-run.json"
+                run_config.write_text(run_config_text(turn.instructions.strip() or "Answer the request."),
+                                      encoding="utf-8")
+            folder = work
+            if plan is not None:
+                folder = self.chat_dir  # one stable folder for every chat session (its ``directory``)
+                folder.mkdir(mode=0o700, parents=True, exist_ok=True)
             servers: list[dict[str, Any]] = []
             if turn.tools:
                 assert self.mcp is not None
@@ -800,14 +945,18 @@ class OpenCodeEngine:
                 granted = True
                 servers.append({"type": "http", "name": MCP_SERVER_NAME, "url": access.url,
                                 "headers": [{"name": "Authorization", "value": f"Bearer {access.token}"}]})
-            async with self._acp(located, work, run_config, active) as connection:
-                events = self._session(turn, prompt, servers, work, credentials, connection, active)
+            async with self._acp(located, folder, run_config, active) as connection:
+                events = self._session(turn, prompt, servers, folder, run_config, credentials, connection,
+                                       active)
                 async for event in events:
                     yield event
         except _Refused as refusal:
             failure = refusal.failure
-            yield Failed(run_id, "cancelled" if active.cancel.is_set() else failure.kind,
-                         "The answer was stopped." if active.cancel.is_set() else failure.message)
+            stopped = active.cancel.is_set()
+            yield Failed(run_id, "cancelled" if stopped else failure.kind,
+                         "The answer was stopped." if stopped else failure.message,
+                         unsent=failure.unsent and not stopped,
+                         session_lost=failure.session_lost and not stopped)
         except (OSError, TimeoutError) as error:
             logger.warning("OpenCode run %s couldn't start: %s", run_id, type(error).__name__)
             yield Failed(run_id, "other", "SKAZ couldn't start OpenCode.")
@@ -818,25 +967,32 @@ class OpenCodeEngine:
             if granted and self.mcp is not None:
                 self.mcp.revoke(run_id)
             shutil.rmtree(work, ignore_errors=True)
-            if active.session_id:  # the ACP process has ended here
+            if active.session_id and active.forget:  # the ACP process has ended here
                 self._in_background(self._forget([active.session_id]))
 
     async def _session(self, turn: AgentTurn, prompt: str, servers: list[dict[str, Any]], work: Path,
-                       credentials: Sequence[str], connection: AcpConnection,
+                       run_config: Path, credentials: Sequence[str], connection: AcpConnection,
                        active: _ActiveRun) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
-        try:
-            session = await connection.request("session/new", {"cwd": str(work), "mcpServers": servers},
-                                               timeout=self._start_timeout)
-        except AcpError as error:
-            kind, message = classify_error(error.details(), error.code)
-            raise _Refused(Failed(run_id, kind, message)) from error
-        except (AcpClosed, TimeoutError) as error:
-            raise _Refused(Failed(run_id, "other", "OpenCode stopped while starting.")) from error
-        session_id = str(session.get("sessionId") or "")
-        active.session_id = session_id or None
-        if session_id:
-            self._remember(session_id)  # OpenCode stores the session from ``session/new`` on
+        plan = turn.session
+        if plan is not None and plan.mode != "start" and plan.session_id:
+            session = await self._resume(run_id, plan.session_id, servers, work, connection)
+            session_id = plan.session_id
+            active.session_id = session_id
+        else:
+            try:
+                session = await connection.request("session/new", {"cwd": str(work), "mcpServers": servers},
+                                                   timeout=self._start_timeout)
+            except AcpError as error:
+                kind, message = classify_error(error.details(), error.code)
+                raise _Refused(Failed(run_id, kind, message)) from error
+            except (AcpClosed, TimeoutError) as error:
+                raise _Refused(Failed(run_id, "other", "OpenCode stopped while starting.")) from error
+            session_id = str(session.get("sessionId") or "")
+            active.session_id = session_id or None
+            if session_id:
+                active.forget = True
+                self._remember(session_id)  # OpenCode stores the session from ``session/new`` on
         options = session.get("configOptions")
         mode = _config_option(options, "mode")
         if mode is None or mode.get("currentValue") != SKAZ_AGENT:
@@ -845,6 +1001,15 @@ class OpenCodeEngine:
         if active.cancel.is_set():
             yield Failed(run_id, "cancelled", "The answer was stopped.")
             return
+        if plan is not None:
+            if not session_id:
+                raise _Refused(Failed(run_id, "incompatible", "OpenCode replied in an unexpected format."))
+            if plan.mode == "start":
+                # The chat's store holds the session from here (``SessionBound`` is recorded at once):
+                # its instructions are kept and it leaves the post-run delete.
+                self._keep(session_id, run_config)
+                active.forget = False
+            yield SessionBound(run_id, session_id, f"turn-{uuid.uuid4().hex}")
         watcher = asyncio.create_task(self._stop_after_cancel(active))
         try:
             request = asyncio.create_task(connection.request(
@@ -886,10 +1051,34 @@ class OpenCodeEngine:
             else:
                 raw_usage = reply.get("usage")
                 usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
-                yield Completed(run_id, Usage(usage.get("inputTokens"), usage.get("outputTokens")))
+                yield Completed(run_id, opencode_usage(usage))
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
+
+    async def _resume(self, run_id: str, session_id: str, servers: list[dict[str, Any]], work: Path,
+                      connection: AcpConnection) -> dict[str, Any]:
+        """``session/resume`` of a chat's live session with this answer's SKAZ MCP server (``session/load``
+        where resume is unknown; the history it replays before its reply is discarded). A refusal is
+        ``session_lost`` — nothing was sent."""
+        lost = Failed(run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
+        params = {"sessionId": session_id, "cwd": str(work), "mcpServers": servers}
+        try:
+            try:
+                session = await connection.request("session/resume", params, timeout=self._start_timeout)
+            except AcpError as error:
+                if error.code != METHOD_NOT_FOUND:
+                    raise
+                session = await connection.request("session/load", params, timeout=self._start_timeout)
+                connection.discard_notifications()
+        except AcpError as error:
+            raise _Refused(lost) from error
+        except (AcpClosed, TimeoutError) as error:
+            stopped = Failed(run_id, "other", "OpenCode stopped while starting.", unsent=True)
+            raise _Refused(stopped) from error
+        if not isinstance(session.get("configOptions"), list):
+            raise _Refused(lost)
+        return session
 
     async def _select(self, turn: AgentTurn, options: object, credentials: Sequence[str], session_id: str,
                       connection: AcpConnection) -> None:

@@ -10,17 +10,22 @@ line, append-only) and never edit another area's module.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
 from . import (
+    agent_sessions,
+    agent_usage,
+    chat_summaries,
     chats,
     core,
     decisions,
     ingest,
+    search_rules,
     service,
     speech,
     study,
+    study_items,
     web_search,
     wiki2,
     wiki_connections,
@@ -44,7 +49,7 @@ class SchemaError(RuntimeError):
 #: Registry order is application order. Append new area modules at the end.
 MODULES: tuple[SchemaModule, ...] = (
     core, service, ingest, decisions, speech, wiki2, chats, study, wiki_execution, wiki_connections,
-    web_search,
+    web_search, agent_usage, chat_summaries, agent_sessions, study_items, search_rules,
 )
 
 _VERSIONS_SQL = """
@@ -75,11 +80,16 @@ def apply_schemas(connection: sqlite3.Connection, modules: Sequence[SchemaModule
                 f"The knowledge database was written by a newer SKAZ ({module.NAME} v{stored})."
             )
         elif stored < module.VERSION:
-            upgrades: Mapping[int, str] = getattr(module, "UPGRADES", {})
+            upgrades: Mapping[int, str | Callable[[sqlite3.Connection], None]] = getattr(
+                module, "UPGRADES", {})
             for version in range(stored + 1, module.VERSION + 1):
                 if version not in upgrades:
                     raise SchemaError(f"No upgrade path for {module.NAME} to v{version}.")
-                connection.executescript(upgrades[version])
+                step = upgrades[version]
+                if callable(step):  # an idempotent step (e.g. adds only missing columns, Q1 n78 L-3)
+                    step(connection)
+                else:
+                    connection.executescript(step)
         else:
             continue
         connection.execute(

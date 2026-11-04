@@ -32,6 +32,7 @@ from ..markdown.page import (
 )
 from ..markdown.text import format_timestamp, name_key, normalize_text
 from .checks import CheckedBlock
+from .merged import take_material
 
 #: Navigation sections written by code (not model statements), labelled in the wiki language.
 NAV_TITLES: dict[str, dict[str, str]] = {
@@ -340,17 +341,67 @@ class ConceptUpdate:
     related: list[PageRef]
 
 
-def strip_material(document: PageDocument, material_id: str) -> tuple[PageDocument, int]:
-    """Remove this material's agent blocks (re-ingest); returns the document and how many went."""
+#: Paragraphs of a folder overview ("What was covered") summarise several materials at once.
+OVERVIEW_PREFIX = "c-ov-"
+
+
+def confirms_alone(part: Block) -> bool:
+    """Whether what remains after dropping one source can stand as the same claim: a plain statement
+    from sources, not a synthesis over several (a folder overview paragraph, a connection, an
+    explanation — QA C18)."""
+    return part.kind == "from_source" and not part.id.startswith(OVERVIEW_PREFIX)
+
+
+def without_citation_links(body: str, rel_dir: str | None) -> str:
+    """``body`` without the citation wikilinks into the material folder ``rel_dir``."""
+    if not rel_dir:
+        return body
+    link = re.compile(r"[ \t]?\[\[" + re.escape(rel_dir) + r"/[^\]|#\n]*#\^seg-\d+\|[^\]\n]*\]\]")
+    return link.sub("", body).strip()
+
+
+def strip_material(document: PageDocument, material_id: str,
+                   rel_dir: str | None = None) -> tuple[PageDocument, int]:
+    """Remove this material's agent blocks (re-ingest); returns the document and how many changed.
+
+    N2 (a repeat strengthens): a plain statement that rests on other sources too — another source's
+    statement this material repeated, or this material's own that others repeated — stays on those
+    sources without this material's citation (marker and link). ``rel_dir`` names the material's
+    links; without it such a statement goes with the material, as before. A merged repeat (marker
+    ``merged``) comes apart exactly (``ingest.merged``): this material's merged paragraph comes off
+    another's statement; this material's own statement goes and the repeats merged into it come
+    back as their sources' own paragraphs.
+    """
     prefix = block_prefix(material_id)
+    present = {block.id for block in document.blocks()}
     parts: list[Part] = []
-    removed = 0
+    changed = 0
     for part in document.parts:
-        if _is_agent(part) and isinstance(part, Block) and part.id.startswith(prefix):
-            removed += 1
-            continue
+        if _is_agent(part) and isinstance(part, Block):
+            # A repeat merged into a statement (N2): this material's share comes off exactly; when the
+            # statement is this material's own, the repeats come back as their own paragraphs.
+            unmerged = take_material(part, material_id, author=part.id.startswith(prefix), present=present)
+            restored = unmerged.restored if unmerged is not None else ()
+            block = unmerged.block if unmerged is not None else part
+            cites_it = any(cite.material_id == material_id for cite in block.cites)
+            others = tuple(cite for cite in block.cites if cite.material_id != material_id)
+            if cites_it and others and rel_dir and confirms_alone(block):
+                body = without_citation_links(block.body, rel_dir)
+                parts.append(Block.create(block.id, block.kind, body, cites=others, owner="agent",
+                                          attrs=block.attrs))
+                parts.extend(restored)
+                changed += 1
+                continue
+            if block.id.startswith(prefix) and (cites_it or not block.cites):
+                parts.extend(restored)
+                changed += 1
+                continue
+            if unmerged is not None:
+                parts.extend([block, *restored])
+                changed += 1
+                continue
         parts.append(_protect(part))
-    return replace(document, parts=parts), removed
+    return replace(document, parts=parts), changed
 
 
 def is_empty_orphan(document: PageDocument) -> bool:
@@ -374,13 +425,14 @@ def cites_material(document: PageDocument, material_id: str) -> bool:
 
 def merge_concept(document: PageDocument, update: ConceptUpdate | None, *, material_id: str,
                   folders_of: Callable[[Sequence[str]], tuple[str, ...]],
-                  folders_body: Callable[[PageMeta], str | None]) -> PageDocument:
+                  folders_body: Callable[[PageMeta], str | None],
+                  rel_dir: str | None = None) -> PageDocument:
     """Drop this material's previous agent blocks, add the new ones, refresh meta and navigation.
 
     ``folders`` of a concept page are derived from its sources (where the
     concept occurs, decision 10); ``aliases`` only grow.
     """
-    document, _removed = strip_material(document, material_id)
+    document, _removed = strip_material(document, material_id, rel_dir)
     meta = document.meta
     language = meta.language or "en"
     parts = list(document.parts)

@@ -206,19 +206,38 @@ def _level(part: Part) -> int:
     return part.level if isinstance(part, Heading) else 7
 
 
-def update_block(kb: KnowledgeService, page_id: str, block_id: str, text: str) -> None:
+class BlockChanged(KnowledgeError):
+    """``update_block(expected=…)``: the block is no longer the text the caller saw — nothing written."""
+
+    status_code = 409
+
+
+def _same_text(a: str, b: str) -> bool:
+    return " ".join(a.split()) == " ".join(b.split())
+
+
+def update_block(kb: KnowledgeService, page_id: str, block_id: str, text: str, *,
+                 expected: str | None = None) -> None:
+    """Replace a block's text as the user's edit. ``expected``: the block's readable text the caller
+    showed (P2 «Fix in wiki»); it is compared with the file actually being rewritten, inside the
+    library write — a block that changed (or became the user's note) raises ``BlockChanged``."""
     clean = clean_user_text(text)
     library, path = page_path(kb, page_id)
 
     def build(document: PageDocument) -> PageDocument:
         ordinal = _unmarked_ordinal(block_id)
         if ordinal is not None:
+            if expected is not None:
+                raise BlockChanged("This part of the page changed.")  # proposals name marked blocks only
             return _replace_unmarked(document, ordinal, clean, keep_links=True)
         index = _block_index(document, block_id)
         if index is None:
             raise NotFound("Block not found.")
         block = document.parts[index]
         assert isinstance(block, Block)
+        if expected is not None and (block.owner == "user" or not _same_text(readable_text(block.body),
+                                                                              expected)):
+            raise BlockChanged("The block changed since.")
         body = relink(block.body, clean)
         if body == block.body:
             return document  # saved unchanged: the block stays the agent's, byte for byte

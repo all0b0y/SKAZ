@@ -144,7 +144,8 @@ const repoRoot = process.cwd();
 const ROUTE = /["'](GET|POST|PUT|PATCH|DELETE) (\/kb\/[^"'\s]*)["']/g;
 const routesIn = (text: string) => [...text.matchAll(ROUTE)].map((m) => `${m[1]} ${m[2]}`);
 
-const backendRoutes = new Set(routesIn(readFileSync(`${repoRoot}/frontend/src/api/kb/types.gen.ts`, 'utf8')));
+const generatedRoutes = new Set(routesIn(readFileSync(`${repoRoot}/frontend/src/api/kb/types.gen.ts`, 'utf8')));
+const backendRoutes = generatedRoutes;
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -158,7 +159,7 @@ function sourceFiles(dir: string): string[] {
 const uiRoutes = new Set(sourceFiles(`${repoRoot}/frontend/src/kb`).flatMap((file) => routesIn(readFileSync(file, 'utf8'))));
 
 /** A concrete request path for a route template: a sample value per path parameter. */
-const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox', name: 'index', block_id: 'st-1' };
+const SAMPLE: Record<string, string> = { seg: '3', engine: 'codex', provider: 'soniox', name: 'index', block_id: 'st-1', version: '2' };
 function instance(route: string): { method: string; path: string } {
   const space = route.indexOf(' ');
   return { method: route.slice(0, space), path: route.slice(space + 1).replace(/\{([^}]+)\}/g, (_, name: string) => SAMPLE[name] ?? 'x1') };
@@ -198,13 +199,15 @@ describe('Electron IPC policy — /kb rules match the real backend routes (I1)',
 });
 
 describe('Electron IPC policy — restored capabilities (F2)', () => {
-  it('lets Codex and OpenCode sign out and the local speech model be deleted — nothing wider', () => {
+  it('lets Codex, OpenCode and Claude Code sign out and the local speech model be deleted — nothing wider', () => {
     expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/codex/logout' })).toBeNull();
     expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/opencode/logout' })).toBeNull();
+    // Migrated (N6 batch B5): Claude Code in SKAZ has its own sign-in (decision 14), so it signs out here.
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/agents/claude_code/logout' })).toBeNull();
     expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/settings/speech/local-model' })).toBeNull();
     for (const [method, path] of [
-      // Claude Code uses this Mac's own sign-in; Hermes signs out per provider (Accounts & keys v3).
-      ['POST', '/kb/agents/claude_code/logout'], ['POST', '/kb/agents/hermes/logout'], ['GET', '/kb/agents/codex/logout'],
+      // Hermes signs out per provider (Accounts & keys v3).
+      ['POST', '/kb/agents/hermes/logout'], ['GET', '/kb/agents/claude_code/logout'], ['GET', '/kb/agents/codex/logout'],
       ['DELETE', '/kb/settings/speech'], ['DELETE', '/kb/settings/speech/local-model/x'], ['POST', '/kb/settings/speech/local-model'],
       ['DELETE', '/kb/decisions/local'],
     ] as const) {
@@ -284,6 +287,24 @@ describe('Electron IPC policy — web search the user approves (W-2)', () => {
   });
 });
 
+describe('Electron IPC policy — search rules (N7)', () => {
+  it('lets Settings → Search and a chat\'s panel read and save the rules — one id segment, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/settings/search' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/settings/search', body: { never: ['pinterest.com'] } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'GET', path: '/kb/chats/c1/search-rules' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/chats/c1/search-rules', body: { as_global: true } })).toBeNull();
+    expect(validateBridgeRequest({ method: 'DELETE', path: '/kb/chats/c1/search-rules' })).toBeNull();
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/chats/c1/search-rules/everywhere-once' })).toBeNull();
+    for (const [method, path] of [
+      ['POST', '/kb/settings/search'], ['DELETE', '/kb/settings/search'], ['PUT', '/kb/settings/search/x'],
+      ['POST', '/kb/chats/c1/search-rules'], ['GET', '/kb/chats/a/b/search-rules'],
+      ['GET', '/kb/chats/c1/search-rules/everywhere-once'], ['POST', '/kb/chats/c1/search-rules/other'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
 describe('Electron IPC policy — SKAZ skills (0.3.1 H)', () => {
   it('lets Settings → Skills read the list and switch a skill — one id segment, nothing wider', () => {
     expect(validateBridgeRequest({ method: 'GET', path: '/kb/settings/skills' })).toBeNull();
@@ -304,9 +325,11 @@ describe('Electron IPC policy — flashcards and tests (0.3.1 S)', () => {
     for (const [method, path] of [
       ['GET', '/kb/study/st-1a2b'], ['PATCH', '/kb/study/st-1a2b'], ['POST', '/kb/study/st-1a2b/grade'],
       ['POST', '/kb/study/st-1a2b/mark'], ['POST', '/kb/study/st-1a2b/answer'], ['POST', '/kb/study/st-1a2b/check-open'],
+      ['POST', '/kb/study/st-1a2b/pass'], ['POST', '/kb/study/st-1a2b/recheck'], ['POST', '/kb/study/st-1a2b/count'],
       ['POST', '/kb/study/st-1a2b/finish'], ['POST', '/kb/study/st-1a2b/retake'], ['POST', '/kb/study/st-1a2b/save'],
       ['GET', '/kb/study/decks/pg-1'], ['POST', '/kb/study/decks/pg-1/marks'], ['POST', '/kb/study/decks/pg-1/study'],
       ['GET', '/kb/study/settings'], ['PATCH', '/kb/study/settings'],
+      ['GET', '/kb/study/unclear'], ['POST', '/kb/study/unclear/clear'],
     ] as const) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
     }
@@ -315,6 +338,82 @@ describe('Electron IPC policy — flashcards and tests (0.3.1 S)', () => {
       ['POST', '/kb/study/st-1a2b/delete'], ['POST', '/kb/study/a/b/grade'], ['POST', '/kb/study/../chats/c1/grade'],
       ['POST', '/kb/study/x/grade'], ['PATCH', '/kb/study/decks/pg-1'], ['DELETE', '/kb/study/decks/pg-1'],
       ['POST', '/kb/study/decks/pg-1/save'], ['POST', '/kb/study'], ['GET', '/kb/study'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — «Я» (Me, N6)', () => {
+  it('lets Settings → Me and the chat chip reach exactly the contract routes', () => {
+    for (const [method, path] of [
+      ['GET', '/kb/me'], ['PUT', '/kb/me'], ['POST', '/kb/me/skills'],
+      ['GET', '/kb/me/skills/profile'], ['PUT', '/kb/me/skills/how-to-work'], ['DELETE', '/kb/me/skills/my-sources-2'],
+      ['GET', '/kb/me/skills/search/versions'], ['POST', '/kb/me/skills/profile/versions/12/restore'],
+      ['POST', '/kb/me/edits/me_edit-1a2b/undo'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
+    }
+    expect(validateBridgeRequest({ method: 'PUT', path: '/kb/me/skills/profile', body: { text: 'x'.repeat(2_200) } })).toBeNull();
+  });
+
+  it('refuses neighbours: other methods, list-wide deletes, uppercase or multi-segment ids, non-digit versions', () => {
+    for (const [method, path] of [
+      ['DELETE', '/kb/me'], ['POST', '/kb/me'], ['PATCH', '/kb/me'], ['GET', '/kb/me/skills'], ['DELETE', '/kb/me/skills'],
+      ['POST', '/kb/me/skills/profile'], ['PATCH', '/kb/me/skills/profile'], ['GET', '/kb/me/skills/Profile'],
+      ['GET', '/kb/me/skills/a/b'], ['GET', '/kb/me/skills/../keys'], ['PUT', '/kb/me/skills/%2e%2e'],
+      ['GET', '/kb/me/skills/profile/versions/3'], ['POST', '/kb/me/skills/profile/versions/x/restore'],
+      ['POST', '/kb/me/skills/profile/versions'], ['GET', '/kb/me/skills/profile/versions/3/restore'],
+      ['GET', '/kb/me/edits/e1/undo'], ['POST', '/kb/me/edits/e1'], ['POST', '/kb/me/edits/E1/undo'],
+      ['POST', '/kb/me/edits/a/b/undo'], ['POST', `/kb/me/edits/${'e'.repeat(65)}/undo`],
+      ['GET', `/kb/me/skills/${'s'.repeat(49)}`], ['GET', '/kb/me/export'], ['GET', '/kb/me/text'],
+    ] as const) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+
+  it('every «Я» route of the contract is a generated backend route', () => {
+    // Migrated from the pre-merge stand-in list (N6 batch B5): types.gen.ts now carries /kb/me, so the
+    // contract routes (N6-ME-API.md) must all be real backend routes.
+    for (const route of [
+      'GET /kb/me', 'PUT /kb/me', 'GET /kb/me/skills/{skill_id}', 'PUT /kb/me/skills/{skill_id}', 'DELETE /kb/me/skills/{skill_id}',
+      'POST /kb/me/skills', 'GET /kb/me/skills/{skill_id}/versions', 'POST /kb/me/skills/{skill_id}/versions/{version}/restore',
+      'POST /kb/me/edits/{edit_id}/undo',
+    ]) {
+      expect(backendRoutes.has(route), route).toBe(true);
+    }
+  });
+});
+
+describe('Electron IPC policy — agent updates (U1)', () => {
+  it('lets the update offer, its switch, Check for updates and the per-agent buttons through — nothing wider', () => {
+    const allowed: Array<[string, string]> = [
+      ['GET', '/kb/agents/updates'], ['PUT', '/kb/agents/updates/settings'],
+      ['POST', '/kb/agents/updates/check-now'], ['POST', '/kb/agents/updates/seen'],
+      ['POST', '/kb/agents/codex/update'], ['POST', '/kb/agents/claude_code/update/cancel'],
+      ['POST', '/kb/agents/hermes/update/skip'], ['POST', '/kb/agents/opencode/update/rollback'],
+    ];
+    for (const [method, path] of allowed) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).toBeNull();
+    }
+    const refused: Array<[string, string]> = [
+      ['POST', '/kb/agents/gemini/update'], ['GET', '/kb/agents/codex/update'], ['POST', '/kb/agents/codex/update/run'],
+      ['POST', '/kb/agents/updates'], ['DELETE', '/kb/agents/updates'], ['GET', '/kb/agents/updates/settings'],
+      ['POST', '/kb/agents/updates/check'], ['POST', '/kb/agents/codex/update/../install'],
+    ];
+    for (const [method, path] of refused) {
+      expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
+    }
+  });
+});
+
+describe('Electron IPC policy — «Fix in wiki» (P2)', () => {
+  it('lets the user apply one proposed fix of one answer — one id segment each, nothing wider', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/chats/c1/messages/m1/wiki-fixes/fix-1/apply' })).toBeNull();
+    for (const [method, path] of [
+      ['GET', '/kb/chats/c1/messages/m1/wiki-fixes/fix-1/apply'], ['POST', '/kb/chats/c1/messages/m1/wiki-fixes/fix-1'],
+      ['POST', '/kb/chats/c1/messages/m1/wiki-fixes/a/b/apply'], ['POST', '/kb/chats/c1/messages/m1/wiki-fixes/../apply/x'],
+      ['DELETE', '/kb/chats/c1/messages/m1/wiki-fixes/fix-1/apply'], ['POST', '/kb/chats/c1/wiki-fixes/fix-1/apply'],
     ] as const) {
       expect(validateBridgeRequest({ method, path }), `${method} ${path}`).not.toBeNull();
     }

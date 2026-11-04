@@ -86,18 +86,26 @@ W2_EMPTY_ANSWERS: dict[str, str] = {
 }
 
 
+def match_answer(choice: int) -> Callable[[AgentTurn], str]:
+    """A concept-match answer giving ``choice`` to every item of the batch prompt it answers."""
+    def answer(turn: AgentTurn) -> str:
+        items = re.findall(r"^Item (\d+):$", turn.messages[0].content, re.M)
+        return json.dumps({"choices": [{"item": int(item), "choice": choice} for item in items]})
+    return answer
+
+
 class ScriptedWiki:
     """Answers by schema: queued JSON strings per kind; optional gate before every answer."""
 
     def __init__(self, *, notes: Sequence[str] = (), concepts: Sequence[str] = (),
                  matches: Sequence[int] = (), gate: asyncio.Event | None = None,
-                 answers: Mapping[str, Sequence[str]] | None = None,
+                 answers: Mapping[str, Sequence[str | Callable[[AgentTurn], str]]] | None = None,
                  models: Sequence[ModelOption] | None = None, usage: Usage | None = None) -> None:
         #: Queued answers; a callable is authored from the turn it answers (e.g. a batch prompt).
         self.queues: dict[str, list[str | Callable[[AgentTurn], str]]] = {
             prompts.NOTES_SCHEMA_TITLE: list(notes),
             prompts.CONCEPTS_SCHEMA_TITLE: list(concepts),
-            prompts.MATCH_SCHEMA_TITLE: [json.dumps({"choice": choice}) for choice in matches],
+            prompts.MATCH_SCHEMA_TITLE: [match_answer(choice) for choice in matches],
         }
         # W2 answers (recognition check, disagreements, connections, overviews, recheck) by schema title.
         for title, queued in (answers or {}).items():
@@ -120,7 +128,7 @@ class ScriptedWiki:
         elif title in W2_EMPTY_ANSWERS:
             text = W2_EMPTY_ANSWERS[title]
         else:
-            text = json.dumps({"choice": 0})
+            text = match_answer(0)(turn)  # concept match: a new page for every item
         items: list[ScriptItem] = []
         if self.gate is not None:
             items.append(Gate(self.gate))

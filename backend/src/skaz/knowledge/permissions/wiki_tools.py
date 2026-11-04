@@ -37,6 +37,7 @@ from ..chats.resolve import MaterialReader
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id
 from ..ingest.checks import MIN_QUOTE_CHARS, clean_text, clean_title
+from ..ingest.merged import merged_of, with_merged
 from ..ingest.pages import SourceRef, insert_into_section, spaced
 from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..library.fsio import write_atomic
@@ -548,6 +549,19 @@ def _agent_block(parts: Sequence[Part], block_id: str) -> tuple[int, Block]:
     return index, block
 
 
+def _keep_merged(old: Block, new: Block) -> Block:
+    """``new`` (the agent's replacement of ``old``) with ``old``'s merged repeats (N2) whose sources it
+    still cites: when the statement's own source goes later, each such repeat comes back in its own
+    words instead of its citation staying under the agent's (Q1 n2 × wiki edit). A repeat whose source
+    the new wording no longer cites is dropped with it."""
+    cited = {cite.material_id for cite in new.cites}
+    kept = [item for item in merged_of(old) if {cite.material_id for cite in item.added_cites} & cited]
+    if not kept:
+        return new
+    return Block.create(new.id, new.kind, new.body, cites=new.cites, owner=new.owner,
+                        attrs=with_merged(new.attrs, kept))
+
+
 def _apply_changes(document: PageDocument, built: Sequence[tuple[ChangeIn, Block | None]],
                    language: str) -> tuple[PageDocument, list[dict[str, Any]]]:
     """The page with the agent's changes, and the card's list of them; refuses touching the user's notes."""
@@ -562,6 +576,7 @@ def _apply_changes(document: PageDocument, built: Sequence[tuple[ChangeIn, Block
         elif change.op == "replace":
             assert change.block_id is not None and block is not None
             index, old = _agent_block(parts, change.block_id)
+            block = _keep_merged(old, block)
             parts[index] = block
             changes.append(_change("replace", block, readable_text(old.body), readable_text(block.body)))
         else:

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from typing import Annotated, TypeVar, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from ...native_io import disk_call
 from ..errors import KnowledgeError
@@ -112,11 +112,14 @@ async def resume_recording(material_id: str, speech: SpeechDep) -> KbSpeechMater
 
 
 @router.post("/kb/imports", status_code=201)
-async def start_import(body: KbImportCreate, speech: SpeechDep) -> KbSpeechMaterial:
+async def start_import(body: KbImportCreate, speech: SpeechDep, response: Response) -> KbSpeechMaterial:
+    """201 = a new import; 200 = the same video/file is already in the library (N2)."""
     view = await speech_call(speech.start_import(ImportInput(
         path=body.path, url=body.url, folder_id=body.folder_id, title=body.title, translate=body.translate,
         language=body.language, allow_duplicate=body.allow_duplicate, to_wiki=body.to_wiki,
     )))
+    if view.already_in_library:
+        response.status_code = 200
     return material_view(view)
 
 

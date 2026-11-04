@@ -60,6 +60,7 @@ async def _added(sources: SourceService, result: IntakeResult) -> KbMaterialAdde
         failure_reason=result.failure,
         video=None,
         video_failure_reason=None,
+        already_in_library=result.existing,
     )
 
 
@@ -131,10 +132,13 @@ async def add_text(payload: KbAddText, request: Request) -> KbMaterialAdded:
 
 
 @router.post("/kb/materials/file", status_code=201)
-async def add_file(payload: KbAddFile, request: Request) -> KbMaterialAdded:
+async def add_file(payload: KbAddFile, request: Request, response: Response) -> KbMaterialAdded:
+    """201 = a new material; 200 = the same file is already in the library (N2, ``already_in_library``)."""
     sources = get_sources(request)
     result = await kb_call(sources.add_file, payload.path, payload.folder_id, payload.title,
                            to_wiki=payload.to_wiki)
+    if result.existing:
+        response.status_code = 200
     return await _added(sources, result)
 
 
@@ -153,17 +157,17 @@ async def _video(speech: SpeechService, payload: KbAddLink, url: str, *,
 
 
 @router.post("/kb/materials/link", status_code=201)
-async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
+async def add_link(payload: KbAddLink, request: Request, response: Response) -> KbMaterialAdded:
     """Articles, PDFs, text — and videos (YouTube, VK Video, RuTube, Vimeo), which go to the speech
-    import and come back ``processing``. A page with an embedded video: ``mode`` text / video / both."""
+    import and come back ``processing``. A page with an embedded video: ``mode`` text / video / both.
+    The same address, DOI or content already in the library: 200 with ``already_in_library`` (N2)."""
     sources = get_sources(request)
     speech = get_speech(request)
     try:
         offline = classify_offline(payload.url)
         if offline is not None and offline.kind == "video":
             view = await _video(speech, payload, offline.url, title=payload.title)
-            return KbMaterialAdded(material=await _summary(sources, view.material_id), excluded_count=0,
-                                   hidden_count=0, failure_reason=None, video=None, video_failure_reason=None)
+            return await _video_added(sources, view, response)
         embedded: LinkInfo | None = None
         if payload.mode != "text":
             info = await sources.classify(payload.url, probe=False)
@@ -173,8 +177,7 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
         if payload.mode == "video":
             assert embedded is not None
             view = await _video(speech, payload, embedded.url, title=payload.title)
-            return KbMaterialAdded(material=await _summary(sources, view.material_id), excluded_count=0,
-                                   hidden_count=0, failure_reason=None, video=None, video_failure_reason=None)
+            return await _video_added(sources, view, response)
         result = await sources.add_link(payload.url, payload.folder_id, payload.title,
                                         to_wiki=payload.to_wiki)
     except KnowledgeError as error:
@@ -185,6 +188,8 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
             detail=f"SKAZ couldn't use the library folder: {error.strerror or error}.",
         ) from error
     added = await _added(sources, result)
+    if result.existing:
+        response.status_code = 200
     if embedded is None:
         return added
     # Mode "both": the article is added; the video follows, and its own refusal doesn't undo the article.
@@ -192,7 +197,17 @@ async def add_link(payload: KbAddLink, request: Request) -> KbMaterialAdded:
         view = await _video(speech, payload, embedded.url, title=None, avoid_title=result.title)
     except KnowledgeError as error:
         return added.model_copy(update={"video_failure_reason": error.message})
-    return added.model_copy(update={"video": await _summary(sources, view.material_id)})
+    return added.model_copy(update={"video": await _summary(sources, view.material_id),
+                                    "video_already_in_library": view.already_in_library})
+
+
+async def _video_added(sources: SourceService, view: SpeechView, response: Response) -> KbMaterialAdded:
+    # N2: the same video already in the library answers 200 with that material; nothing is imported.
+    if view.already_in_library:
+        response.status_code = 200
+    return KbMaterialAdded(material=await _summary(sources, view.material_id), excluded_count=0,
+                           hidden_count=0, failure_reason=None, video=None, video_failure_reason=None,
+                           already_in_library=view.already_in_library)
 
 
 @router.post(

@@ -67,6 +67,34 @@ start. The user's ``~/.hermes`` is never touched (``HERMES_HOME`` is SKAZ's).
 An id is given up after ``MAX_DELETE_ATTEMPTS`` failed deletions or
 ``HISTORY_TTL_S`` (logged by id only); ``prune`` still removes ended ACP sessions.
 
+Live chat sessions (N6, ``.dev/docs/backlog-2026-10-26/N6-CONTRACT.md`` §2, §8): a chat turn with a
+``SessionPlan`` keeps its Hermes session. ``start`` opens it with ``session/new`` and prompts the
+instructions plus ``agents.history.seed_prompt`` (Hermes takes instructions in the prompt text, so
+they are fixed in the session's first message); ``continue`` opens the chat's session with
+``session/load`` in the per-answer ACP process and prompts only the new message. Checked in the
+source of v0.22.1+179.gb51e8b8 (read only): ``acp_adapter/gateway_server.py`` ``_resume`` (load and
+resume share it) replays the history as ``session/update`` before its reply — SKAZ discards those —,
+re-binds a changed editor MCP config (new per-answer URL/token, equal schemas keep the manifest:
+``gateway/session_local_mcp.py`` ``prepare_editor_mcp``) and fails a missing session with an error;
+the in-process server (0.21) answers ``session/load`` of a missing id with ``null`` while its
+``session/resume`` silently opens a NEW session (``acp_adapter/server.py``), so SKAZ uses ``load``
+and treats an error or an empty reply as ``session_lost``. A chat session leaves the post-run delete
+list once ``SessionBound`` hands it to SKAZ's chat store (``hermes-chat-sessions.json`` lists it);
+``delete_session`` removes it with ``hermes sessions delete <id> --yes``, which deletes a local
+session's whole compression lineage (``hermes_state_sessions.py`` ``delete_session`` →
+``owned_lineage_ids``). The start-up ``prune --source acp --yes`` deletes EVERY ended ACP session
+(any filter drops the 90-day cutoff, ``sessions_cmd.py`` ``_cmd_prune_or_archive``) and a chat's
+session is ended between answers (the last viewer leaving ends it, ``gateway/session_acp_lifecycle.py``
+``end_idle_acp_session``), so the sweep first pins the chat sessions (``hermes sessions pin``: Hermes'
+keep flag, set on the whole compression lineage; prune skips pinned sessions and their continuations)
+and prunes only when every chat session is pinned or gone — a Hermes without ``pin`` gets no prune.
+A session SKAZ gives up deleting is unpinned and leaves the list (``forget_session``).
+Hermes' own compression is not reported over ACP (the gateway projects no compaction event and
+``usage_update`` carries only ``size``/``used``; the session counters' ``compression_count`` stays in
+the gateway), so Hermes never emits ``Compacted``. The prompt reply's usage is the gateway agent's
+session-cumulative counters (``acp_adapter/gateway_session_meta.py`` ``turn_usage``): a continued
+session reports the difference to its last answer (:func:`turn_usage_delta`).
+
 The user's installation (review C1): a ``HERMES_HOME`` outside ``~/.hermes`` makes
 Hermes build its own tool store there and re-point the user's shared launcher at
 it. Every invocation therefore also gets ``HERMES_RUNTIME_DIR`` = the user's own
@@ -127,16 +155,20 @@ from .engine import (
     Failed,
     FailureKind,
     ModelOption,
+    SessionBound,
+    SessionDeleteDeferred,
+    SessionSupport,
     TextDelta,
     ToolCall,
     ToolResult,
-    Usage,
 )
 from .hermes_gateway import GatewayDaemon, find_gateway
 from .hermes_launchers import LauncherTampered, LauncherWatch, launcher_files, user_store
+from .history import seed_prompt
 from .mcp_access import MCP_SERVER_NAME, MCP_TOOL_PREFIX, NO_TOOL_ACCESS, McpAccessProvider, tool_name
 from .registry import FirstRun
 from .transcript import render_prompt
+from .usage import hermes_usage
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +211,22 @@ CHECKED_FILE = "hermes-checked.json"
 LEGACY_PREPARED_FILE = "hermes-prepared.json"
 #: Session ids SKAZ created in its Hermes folder and has not deleted yet.
 HISTORY_FILE = "hermes-sessions.json"
+#: N6: live chat sessions SKAZ's chat store holds (deleted only by ``delete_session``), each with the
+#: session-cumulative usage of its last answer.
+CHAT_SESSIONS_FILE = "hermes-chat-sessions.json"
+#: The one working folder of every live chat session: a stable ``cwd`` (Hermes 0.22 moves a session
+#: whose folder changed, ``gateway_server.py`` ``_moved``).
+CHAT_DIR = "chat"
+#: N6: one Hermes session per chat, continued with ``session/load``; Hermes ACP has no revert.
+HERMES_SESSIONS = SessionSupport(live=True, revert=False)
+SESSION_LOST = "Hermes couldn't continue this chat's conversation."
+#: The prompt reply's usage fields (``acp_adapter/gateway_session_meta.py`` ``turn_usage``).
+USAGE_FIELDS = ("inputTokens", "outputTokens", "totalTokens", "thoughtTokens", "cachedReadTokens",
+                "cachedWriteTokens")
+#: Hermes 0.22's notice that a session's editor MCP tools were re-frozen (``gateway_server.py``
+#: ``_tools_changed_notice``), sent as agent text; never part of an answer or a ``/tools`` listing.
+_TOOLS_CHANGED = re.compile(r"Editor MCP tools changed \(servers: [^)]*\); "
+                            r"the new tool list applies from the next turn\.\n?")
 #: Review Low: an id Hermes refuses to delete this many times (one try per run end / app start) is
 #: given up, and so is one older than the TTL — never retried on every start forever.
 MAX_DELETE_ATTEMPTS = 5
@@ -332,11 +380,62 @@ def _tool_output(update: Mapping[str, Any]) -> str:
     return raw if isinstance(raw, str) else (json.dumps(raw, ensure_ascii=False) if raw is not None else "")
 
 
+def hermes_prompt(turn: AgentTurn) -> str:
+    """The text SKAZ prompts Hermes with (Hermes takes the instructions in the prompt text).
+
+    Stateless (``session is None``): today's ``render_prompt``. A new live session (``start``): the
+    instructions, then ``agents.history.seed_prompt`` — the one seed serializer (decision 13). A
+    continued session: only the new message; the session holds the rest. Text starting with ``/``
+    would run a Hermes command (/reset, /model); a request never is one.
+    """
+    plan = turn.session
+    if plan is None:
+        prompt = render_prompt(turn, include_instructions=True, include_schema=True)
+    else:
+        last = turn.messages[-1] if turn.messages else None
+        if last is None or last.role != "user" or not last.content.strip():
+            raise ValueError("A turn must end with a user message.")
+        parts: list[str] = []
+        if plan.mode == "start" and turn.instructions.strip():
+            parts.append(f"Instructions from SKAZ:\n{turn.instructions.strip()}")
+        if turn.response_schema is not None:
+            parts.append("Reply with a single JSON value that matches this JSON Schema, and nothing else:\n"
+                         + json.dumps(turn.response_schema, ensure_ascii=False, sort_keys=True))
+        if plan.mode == "start":
+            seed = seed_prompt(turn.messages, turn.history_summary)
+            parts.append(seed if len(turn.messages) > 1 or not parts else f"Current user message:\n{seed}")
+        else:
+            parts.append(f"Current user message:\n{last.content}" if parts else last.content)
+        prompt = "\n\n".join(parts)
+    if prompt.lstrip().startswith("/"):
+        prompt = f"Current request:\n{prompt}"
+    return prompt
+
+
+def turn_usage_delta(usage: Mapping[str, Any], before: Mapping[str, Any] | None) -> dict[str, Any]:
+    """This answer's share of a live session's cumulative usage.
+
+    Hermes 0.22 reports the gateway agent's session counters, which keep growing while the gateway
+    keeps that agent (``gateway/session_usage.py``). ``before`` is what the session's previous answer
+    reported under the same gateway process; when any counter went down the agent was rebuilt
+    (counters start at zero again) and the reply already is this answer's own usage.
+    """
+    if not before:
+        return dict(usage)
+    shared = [key for key in USAGE_FIELDS
+              if isinstance(usage.get(key), int) and isinstance(before.get(key), int)]
+    if not shared or any(int(usage[key]) < int(before[key]) for key in shared):
+        return dict(usage)
+    return {**usage, **{key: int(usage[key]) - int(before[key]) for key in shared}}
+
+
 @dataclass
 class _ActiveRun:
     process: asyncio.subprocess.Process | None = None
     connection: AcpConnection | None = None
     session_id: str | None = None
+    #: The session goes to the post-run delete (stateless runs; a new chat session until handed over).
+    forget: bool = False
     #: The request was handed to Hermes (``session/prompt``): a failure after it may have been paid.
     prompted: bool = False
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
@@ -436,6 +535,7 @@ class HermesEngine:
         self.home = ensure_private_home(root / "hermes-home", home=user_home)
         self.checked_marker = root / CHECKED_FILE
         self.history_file = root / HISTORY_FILE
+        self.chat_sessions_file = root / CHAT_SESSIONS_FILE
         self._gate = first_run_gate
         self.policy_dir = root / "hermes-policy"
         self.runs_dir = root / "hermes-runs"
@@ -459,6 +559,38 @@ class HermesEngine:
     @property
     def id(self) -> EngineId:
         return "hermes"
+
+    @property
+    def sessions(self) -> SessionSupport:
+        return HERMES_SESSIONS
+
+    async def delete_session(self, session_id: str) -> None:
+        """N6: delete a chat's live session from SKAZ's Hermes folder (``hermes sessions delete <id>
+        --yes``); "No session '<id>'" means it is already gone. Raises when Hermes kept it (a running
+        turn, a lost turn to discard, Hermes missing): the caller retries later."""
+        located = self._locate("hermes")
+        if located is None:
+            raise SessionDeleteDeferred(NOT_INSTALLED)
+        if self.repair_unfinished():
+            raise SessionDeleteDeferred(REPAIR_NOTE)  # any Hermes command would restart the repair
+        code, out = await disk_call(self._cli, located, "sessions", "delete", session_id, "--yes")
+        if code != 0 and f"No session '{session_id}'" not in out:
+            raise RuntimeError(f"Hermes did not delete the session (exit {code}).")
+        self._release_chat(session_id)
+        if session_id in self.pending_history():
+            self._write_history([item for item in self.pending_history() if item != session_id])
+
+    async def forget_session(self, session_id: str) -> None:
+        """SKAZ gave the session up (its deletion kept failing): it leaves SKAZ's lists here and loses
+        the keep flag the start-up sweep gave it (best effort), so a later ``prune`` can take it once it
+        has ended."""
+        located = self._locate("hermes")
+        if located is not None and not self.repair_unfinished():
+            with contextlib.suppress(OSError, subprocess.SubprocessError, LauncherTampered):
+                await disk_call(self._cli, located, "sessions", "unpin", session_id)
+        self._release_chat(session_id)
+        if session_id in self.pending_history():
+            self._write_history([item for item in self.pending_history() if item != session_id])
 
     # -- folder and environment ----------------------------------------------
 
@@ -721,6 +853,65 @@ class HermesEngine:
     def _remember(self, session_id: str) -> None:
         self._write_history([*self.pending_history(), session_id])
 
+    # -- N6: live chat sessions (SKAZ's chat store deletes them, never the post-run delete) ---------
+
+    def _read_chats(self) -> dict[str, dict[str, Any]]:
+        try:
+            raw = json.loads(self.chat_sessions_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        sessions = raw.get("sessions") if isinstance(raw, dict) else None
+        if not isinstance(sessions, dict):
+            return {}
+        return {str(key): value if isinstance(value, dict) else {} for key, value in sessions.items()}
+
+    def _write_chats(self, sessions: Mapping[str, Mapping[str, Any]]) -> None:
+        self.chat_sessions_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        temporary = self.chat_sessions_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"sessions": dict(sessions)}) + "\n", encoding="utf-8")
+        os.replace(temporary, self.chat_sessions_file)
+
+    def chat_sessions(self) -> list[str]:
+        """Live chat sessions SKAZ keeps in its Hermes folder (until ``delete_session``)."""
+        return list(self._read_chats())
+
+    def _adopt(self, session_id: str) -> None:
+        """A chat's session is SKAZ's chat store's from now on: off the post-run delete list."""
+        chats = self._read_chats()
+        if session_id not in chats:
+            chats[session_id] = {}
+            self._write_chats(chats)
+        pending = self.pending_history()
+        if session_id in pending:
+            self._write_history([item for item in pending if item != session_id])
+
+    def _release_chat(self, session_id: str) -> None:
+        chats = self._read_chats()
+        if chats.pop(session_id, None) is not None:
+            self._write_chats(chats)
+
+    def gateway_pid(self) -> int | None:
+        """The running gateway of SKAZ's Hermes folder (0.22), ``None`` without one (0.21: in-process
+        ACP, a new agent per process). Blocking: call it off the event loop."""
+        daemon = find_gateway(self.home)
+        return daemon.pid if daemon is not None else None
+
+    async def _session_usage(self, session_id: str, usage: Mapping[str, Any]) -> dict[str, Any]:
+        """This answer's usage in a live session (:func:`turn_usage_delta`); remembers the counters
+        with the gateway that reported them (another gateway process = an agent counting from zero)."""
+        gateway: int | None = None
+        with contextlib.suppress(OSError):
+            gateway = await disk_call(self.gateway_pid)
+        chats = self._read_chats()
+        entry = chats.get(session_id, {})
+        last = entry.get("usage") if entry.get("gateway") == gateway and gateway is not None else None
+        own = turn_usage_delta(usage, last if isinstance(last, dict) else None)
+        counters = {key: usage[key] for key in USAGE_FIELDS if isinstance(usage.get(key), int)}
+        chats[session_id] = {**entry, "gateway": gateway, "usage": counters}
+        with contextlib.suppress(OSError):
+            self._write_chats(chats)
+        return own
+
     def _expired(self, session_id: str) -> bool:
         first = self._read_history().get("first_seen")
         seen = first.get(session_id) if isinstance(first, dict) else None
@@ -780,9 +971,33 @@ class HermesEngine:
         await self._forget([item for item in self.pending_history() if item not in running])
         if self._runs:
             return  # prune refuses while another Hermes process holds the store; next start
+        if not await self._pin_chats(located):
+            # N6: prune deletes every ENDED ACP session, and a chat's live session is ended between
+            # answers (its last viewer left): without Hermes' keep flag on them, no prune.
+            return
         with contextlib.suppress(OSError, subprocess.SubprocessError, LauncherTampered):
-            # Ended ACP sessions SKAZ does not know by id (e.g. a compressed continuation).
+            # Ended ACP sessions SKAZ does not know by id (e.g. a compressed continuation of a stateless
+            # run). Pinned sessions — the chats' — and their continuations are skipped by prune itself.
             await disk_call(self._cli, located, "sessions", "prune", "--source", "acp", "--yes")
+
+    async def _pin_chats(self, located: Located) -> bool:
+        """Hermes' durable keep flag on every chat session SKAZ keeps (``hermes sessions pin``; it
+        covers the session's compression lineage, and ``prune`` skips pinned sessions and their
+        continuations — v0.22.1+179 ``hermes_state_maintenance._not_pinned_sql``). ``True`` when every
+        chat session is pinned or Hermes no longer has it; ``False`` (no prune) otherwise — e.g. a
+        Hermes without ``pin``."""
+        chats = self.chat_sessions()
+        if not chats:
+            return True
+        try:
+            code, out = await disk_call(self._cli, located, "sessions", "pin", *chats)
+        except (OSError, subprocess.SubprocessError, LauncherTampered):
+            return False
+        if code == 0:
+            return True
+        settled = (f"Pinned session '{session_id}'" in out or f"No session '{session_id}'" in out
+                   for session_id in chats)
+        return code == 1 and all(settled)
 
     def _cli(self, located: Located, *args: str) -> tuple[int, str]:
         """A short Hermes command in SKAZ's folder, in a worker thread.
@@ -955,7 +1170,9 @@ class HermesEngine:
 
     async def _events(self, turn: AgentTurn, active: _ActiveRun) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
-        work = self.runs_dir / uuid.uuid4().hex
+        live = turn.session is not None
+        # A live session keeps one stable folder; a stateless run gets its own, removed afterwards.
+        work = self.runs_dir / (CHAT_DIR if live else uuid.uuid4().hex)
         granted = False
         try:
             if turn.tools and self.mcp is None:
@@ -981,10 +1198,11 @@ class HermesEngine:
                 yield Failed(run_id, "incompatible", f"This Hermes Agent version can't be used. Update to "
                                                      f"{dotted(MIN_HERMES_VERSION)} or newer.")
                 return
-            prompt = render_prompt(turn, include_instructions=True, include_schema=True)
-            if prompt.lstrip().startswith("/"):
-                # Hermes runs text starting with "/" as its own command (/reset, /model); requests never are.
-                prompt = f"Current request:\n{prompt}"
+            if turn.session is not None and turn.session.mode == "revert":
+                # Never planned (``sessions.revert`` is False): a new seeded session is the honest answer.
+                yield Failed(run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
+                return
+            prompt = hermes_prompt(turn)
             servers: list[dict[str, Any]] = []
             if turn.tools:
                 assert self.mcp is not None
@@ -997,10 +1215,11 @@ class HermesEngine:
                     yield event
         except _Refused as refused:
             failure = refused.failure
+            stopped = active.cancel.is_set()
             # Refusals happen while Hermes starts, before the request is sent (``_Refused``).
-            yield Failed(run_id, "cancelled" if active.cancel.is_set() else failure.kind,
-                         "The answer was stopped." if active.cancel.is_set() else failure.message,
-                         unsent=True)
+            yield Failed(run_id, "cancelled" if stopped else failure.kind,
+                         "The answer was stopped." if stopped else failure.message,
+                         unsent=True, session_lost=failure.session_lost and not stopped)
         except (OSError, ValueError) as error:
             yield Failed(run_id, "other", "SKAZ couldn't start Hermes Agent." if isinstance(error, OSError)
                          else str(error), unsent=not active.prompted)
@@ -1008,25 +1227,33 @@ class HermesEngine:
             self._runs.pop(run_id, None)
             if granted and self.mcp is not None:
                 self.mcp.revoke(run_id)
-            shutil.rmtree(work, ignore_errors=True)
-            if active.session_id:  # the ACP process has ended here (``_acp`` closed it)
+            if not live:
+                shutil.rmtree(work, ignore_errors=True)
+            if active.session_id and active.forget:  # the ACP process has ended here (``_acp`` closed it)
                 self._in_background(self._forget([active.session_id]))
 
     async def _session(self, turn: AgentTurn, prompt: str, servers: list[dict[str, Any]], work: Path,
                        connection: AcpConnection, active: _ActiveRun) -> AsyncIterator[AgentEvent]:
         run_id = turn.run_id
-        try:
-            session = await connection.request("session/new", {"cwd": str(work), "mcpServers": servers},
-                                               timeout=self._start_timeout)
-        except AcpError as error:
-            kind, message = classify_error(error.details())
-            raise _Refused(Failed(run_id, kind, message)) from error
-        except (AcpClosed, TimeoutError) as error:
-            raise _Refused(Failed(run_id, "other", "Hermes Agent stopped while starting.")) from error
-        session_id = str(session.get("sessionId") or "")
-        active.session_id = session_id
-        if session_id:
-            self._remember(session_id)  # before any prompt: Hermes saves the session from the first one
+        plan = turn.session
+        if plan is not None and plan.mode != "start" and plan.session_id:
+            session = await self._load(run_id, plan.session_id, servers, work, connection)
+            session_id = plan.session_id
+            active.session_id = session_id
+        else:
+            try:
+                session = await connection.request("session/new", {"cwd": str(work), "mcpServers": servers},
+                                                   timeout=self._start_timeout)
+            except AcpError as error:
+                kind, message = classify_error(error.details())
+                raise _Refused(Failed(run_id, kind, message)) from error
+            except (AcpClosed, TimeoutError) as error:
+                raise _Refused(Failed(run_id, "other", "Hermes Agent stopped while starting.")) from error
+            session_id = str(session.get("sessionId") or "")
+            active.session_id = session_id
+            if session_id:
+                active.forget = True
+                self._remember(session_id)  # before any prompt: Hermes saves the session from the first one
         await self._select_model(turn, session, connection, session_id, active.requests)
         listing = await self._local_command(connection, session_id, "/tools")
         if not tools_listing_allowed(listing):
@@ -1034,6 +1261,14 @@ class HermesEngine:
         if active.cancel.is_set():
             yield Failed(run_id, "cancelled", "The answer was stopped.")
             return
+        if plan is not None:
+            if not session_id:
+                raise _Refused(Failed(run_id, "incompatible", "Hermes replied in an unexpected format."))
+            # The chat's store holds the session from here (``SessionBound`` is recorded at once): it
+            # leaves the post-run delete and is deleted with the chat (``delete_session``).
+            self._adopt(session_id)
+            active.forget = False
+            yield SessionBound(run_id, session_id, f"turn-{uuid.uuid4().hex}")
         watcher = asyncio.create_task(self._stop_after_cancel(active))
         try:
             active.prompted = True  # from here the request may have reached the model
@@ -1062,10 +1297,31 @@ class HermesEngine:
             else:
                 raw_usage = reply.get("usage")
                 usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
-                yield Completed(run_id, Usage(usage.get("inputTokens"), usage.get("outputTokens")))
+                if plan is not None and usage:
+                    usage = await self._session_usage(session_id, usage)
+                yield Completed(run_id, hermes_usage(usage))
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
+
+    async def _load(self, run_id: str, session_id: str, servers: list[dict[str, Any]], work: Path,
+                    connection: AcpConnection) -> dict[str, Any]:
+        """``session/load`` of a chat's live session with this answer's SKAZ MCP server; any refusal or
+        an empty reply (0.21: ``null`` for an unknown id) is ``session_lost`` — nothing was sent. The
+        history Hermes replays before its reply is discarded."""
+        lost = Failed(run_id, "other", SESSION_LOST, unsent=True, session_lost=True)
+        try:
+            session = await connection.request(
+                "session/load", {"sessionId": session_id, "cwd": str(work), "mcpServers": servers},
+                timeout=self._start_timeout)
+        except AcpError as error:
+            raise _Refused(lost) from error
+        except (AcpClosed, TimeoutError) as error:
+            raise _Refused(Failed(run_id, "other", "Hermes Agent stopped while starting.")) from error
+        connection.discard_notifications()
+        if not session:
+            raise _Refused(lost)
+        return session
 
     async def _select_model(self, turn: AgentTurn, session: Mapping[str, Any], connection: AcpConnection,
                             session_id: str, requests: _Requests) -> None:
@@ -1095,7 +1351,9 @@ class HermesEngine:
         async for method, params in _until(connection, request):
             update = params.get("update") or {}
             if method == "session/update" and update.get("sessionUpdate") == "agent_message_chunk":
-                parts.append(_chunk_text(update))
+                text = _chunk_text(update)
+                if not _TOOLS_CHANGED.fullmatch(text):
+                    parts.append(text)
         with contextlib.suppress(AcpError, AcpClosed, TimeoutError):
             request.result()
         return "".join(parts)
@@ -1110,7 +1368,7 @@ class HermesEngine:
             kind = update.get("sessionUpdate")
             if kind == "agent_message_chunk":
                 text = _chunk_text(update)
-                if text:
+                if text and not _TOOLS_CHANGED.fullmatch(text):
                     yield TextDelta(run_id, text)
             elif kind == "tool_call":
                 call_id = str(update.get("toolCallId") or "")

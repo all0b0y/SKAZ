@@ -13,7 +13,7 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from ...native_io import disk_call
 from ..agents.engine import AgentEngine
+from ..agents.update_gate import holding
 from ..corrections.check import NotSpeech, RecognitionChecker, RecognitionOff
 from ..corrections.model import apply_to_text
 from ..corrections.service import CorrectionChange, CorrectionService
@@ -77,6 +78,8 @@ EXPORT_FAILED = "export_failed"
 AGENT_CHECK_S = 30.0
 #: Background "Find connections": only after this long without wiki work, and only when the wiki changed.
 IDLE_AFTER_S = 300.0
+#: How often a waiting folder overview looks whether the folder's imports have finished.
+OVERVIEW_POLL_S = 1.0
 
 
 class AgentNotReady(KnowledgeError):
@@ -157,6 +160,11 @@ class WikiService:
         self._background_signature: str | None = None
         self._loop_task: asyncio.Task[None] | None = None
         self._post_tasks: set[asyncio.Task[None]] = set()
+        #: Folders whose overview waits for the rest of a batch import (one waiter each).
+        self._overview_waiting: set[str] = set()
+        #: Post-ingest follow-ups that haven't looked up their material's folder yet.
+        self._post_starting = 0
+        self.overview_poll_s = OVERVIEW_POLL_S
         self._connections_start = asyncio.Lock()
         self._writer = WikiWriter(kb, ingest.write_lock)
         self.gone = GoneMaterials(kb, self.graph, language=lambda: ingest.settings().language,
@@ -246,18 +254,20 @@ class WikiService:
 
     # -- ingest seams ---------------------------------------------------------
 
-    async def on_concept_updated(self, page_id: str, new_block_ids: Sequence[str]) -> None:
-        """W1 ``ConceptUpdateHook``: compare the new statements with other sources on the page."""
+    async def on_concepts_updated(self, updates: Mapping[str, Sequence[str]]) -> None:
+        """W1 ``ConceptUpdateHook``: compare the new statements with other sources, pages in batches."""
         self._touch()
 
         async def log(_message: str) -> None:
-            # The message names pages and materials: the log gets the page id only.
-            logger.info("discrepancy check on page %s: one step logged", page_id)
+            # The message names pages and materials: the log gets the page count only.
+            logger.info("discrepancy check on %d page(s): one step logged", len(updates))
 
-        await self.discrepancies.check_page(page_id, list(new_block_ids), self._caller("disc"), log)
+        await self.discrepancies.check_pages(
+            [(page_id, list(block_ids)) for page_id, block_ids in updates.items()], self._caller("disc"), log)
 
     def _after_ingest(self, material_id: str, _job: JobRecord) -> None:
         self._touch()
+        self._post_starting += 1  # until its folder is known: a waiting overview waits for it too
         task = asyncio.get_running_loop().create_task(self._post_ingest(material_id))
         self._post_tasks.add(task)
         task.add_done_callback(self._post_tasks.discard)
@@ -265,18 +275,56 @@ class WikiService:
 
     async def _post_ingest(self, material_id: str) -> None:
         """Around the new source: its folder's overview and connections of its concept pages (decision 5)."""
-        record = await disk_call(self.kb.material_repo.get, material_id)
-        if record is None:
-            return
-        pages = [
-            page.id
-            for page in await disk_call(lambda: self.kb.pages(kind="concept"))
-            if material_id in page.sources
-        ]
-        with contextlib.suppress(KnowledgeError):
-            await self.write_overview(record.folder_id)
+        try:
+            record = await disk_call(self.kb.material_repo.get, material_id)
+            if record is None:
+                return
+            pages = [
+                page.id
+                for page in await disk_call(lambda: self.kb.pages(kind="concept"))
+                if material_id in page.sources
+            ]
+            self._overview_after_batch(record.folder_id)
+        finally:
+            self._post_starting -= 1
         if pages:
             await self._connections_when_free(pages)
+
+    def _overview_after_batch(self, folder_id: str) -> None:
+        """One overview of the folder once the materials still being added to it are finished.
+
+        A batch import used to write the overview after every material (and skip a material that
+        finished while one was being written); now the first finished material waits for the rest of
+        the folder's queue — however those jobs end — and one overview covers them all.
+        """
+        if folder_id in self._overview_waiting:
+            return  # the waiting overview will include this material too
+        self._overview_waiting.add(folder_id)
+        task = asyncio.get_running_loop().create_task(self._overview_when_settled(folder_id))
+        self._post_tasks.add(task)
+        task.add_done_callback(self._post_tasks.discard)
+        task.add_done_callback(_log_failure)
+
+    async def _overview_when_settled(self, folder_id: str) -> None:
+        try:
+            while True:
+                pending = await disk_call(self._ingest_pending_in, folder_id)
+                # Read after the await: a material finishing meanwhile has counted itself in by now.
+                writing = self.jobs.running("folder_overview", folder_id)
+                if not (pending or writing or self._post_starting > 0):
+                    break
+                await asyncio.sleep(self.overview_poll_s)
+        finally:
+            self._overview_waiting.discard(folder_id)
+        with contextlib.suppress(KnowledgeError):
+            await self.write_overview(folder_id)
+
+    def _ingest_pending_in(self, folder_id: str) -> bool:
+        """A material of the folder is queued, running, or just finished with its follow-ups not yet told."""
+        if self.ingest.jobs.pending_in_folder(folder_id):
+            return True
+        return any(record is not None and record.folder_id == folder_id
+                   for record in map(self.kb.material_repo.get, self.ingest.active_materials()))
 
     async def _connections_when_free(self, pages: Sequence[str]) -> None:
         """Connections of a new source's pages: after a connection run already going, never skipped (C1-a).
@@ -358,24 +406,30 @@ class WikiService:
 
             async def work(job: JobContext) -> None:
                 caller = self._caller("links")
-                pages = (
-                    scope
-                    if scope is not None
-                    else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
-                )
-                await job.count(parts_total=len(pages), parts_done=0)
-                found = 0
-                for done, page_id in enumerate(pages, start=1):
+                async with holding(caller.engine):  # U1: an agent update waits for the whole job
+                    pages = (
+                        scope
+                        if scope is not None
+                        else [page.id for page in await disk_call(lambda: self.kb.pages(kind="concept"))]
+                    )
+                    await job.count(parts_total=len(pages), parts_done=0)
                     await job.step("checking_discrepancies")
-                    found += await self.discrepancies.check_page(page_id, None, caller, job.log)
-                    await job.count(parts_done=done)
-                await job.step("finding_connections")
+                    finished = 0
 
-                async def count(values: dict[str, int]) -> None:
-                    await job.count(**values)
+                    async def page_done() -> None:
+                        nonlocal finished
+                        finished += 1
+                        await job.count(parts_done=finished)
 
-                outcome = await self.connections.find(scope, caller, job.log, count,
-                                                      profile=_profile_key(caller))
+                    found = await self.discrepancies.check_pages([(page_id, None) for page_id in pages],
+                                                                 caller, job.log, page_done)
+                    await job.step("finding_connections")
+
+                    async def count(values: dict[str, int]) -> None:
+                        await job.count(**values)
+
+                    outcome = await self.connections.find(scope, caller, job.log, count,
+                                                          profile=_profile_key(caller))
                 await job.count(blocks_written=outcome.written)
                 await disk_call(self.graph.refresh)
                 await job.log(
@@ -393,7 +447,9 @@ class WikiService:
             raise WikiBusy("The overview of this folder is already being written.")
 
         async def work(job: JobContext) -> None:
-            await self.overviews.write(folder_id, self._caller("overview"), job.log)
+            caller = self._caller("overview")
+            async with holding(caller.engine):  # U1: an agent update waits for the whole job
+                await self.overviews.write(folder_id, caller, job.log)
             await disk_call(self.graph.refresh)
             await disk_call(self._refresh_index)
 
@@ -406,7 +462,9 @@ class WikiService:
         self._touch()
 
         async def work(job: JobContext) -> None:
-            await self.rechecks.run(page_id, block_id, self._caller("recheck"), job.log)
+            caller = self._caller("recheck")
+            async with holding(caller.engine):  # U1: an agent update waits for the whole job
+                await self.rechecks.run(page_id, block_id, caller, job.log)
 
         return await self.jobs.start("recheck", page_id, "rechecking", work)
 
@@ -716,8 +774,11 @@ class WikiService:
             after_user_edit(self.kb.db, page_id, before)
         return self._edited(page_id)
 
-    def update_block(self, page_id: str, block_id: str, text: str) -> PageDetail:
-        return self._user_edit(page_id, lambda: update_block(self.kb, page_id, block_id, text))
+    def update_block(self, page_id: str, block_id: str, text: str, *,
+                     expected: str | None = None) -> PageDetail:
+        """``expected`` (P2 «Fix in wiki»): checked inside the write — ``BlockChanged`` when it differs."""
+        return self._user_edit(page_id, lambda: update_block(self.kb, page_id, block_id, text,
+                                                             expected=expected))
 
     def add_note(
         self, page_id: str, text: str, *, after_block_id: str | None, section: str | None
@@ -784,7 +845,7 @@ class WikiService:
         """Start background "Find connections" when the user allowed it, SKAZ is idle and the wiki changed."""
         if not (await disk_call(self.ingest.settings)).background_connections:  # a database read
             return None
-        if self.ingest.active_jobs() or self.busy:
+        if self.ingest.busy or self.busy:  # ingest.busy: also a finished build about to start follow-ups
             self._touch()
             return None
         if self.clock() - self._last_activity < self.idle_after_s:

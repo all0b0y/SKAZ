@@ -31,7 +31,7 @@
   position: relative;
   flex: none;
   width: min(440px, calc(100vw - 48px));
-  margin: 0 auto 24px;
+  margin: 0 auto var(--kb-sp-24);
   -webkit-app-region: no-drag;
   animation: skaz-loading-fade 0.3s ease both;
 }

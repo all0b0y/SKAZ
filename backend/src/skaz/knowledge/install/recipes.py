@@ -5,7 +5,8 @@ Commands and URLs were checked on 2026-10-15 in each vendor's own documentation:
 * Claude Code — https://code.claude.com/docs/en/setup ("Native Install
   (Recommended)", macOS/Linux/WSL): ``curl -fsSL https://claude.ai/install.sh | bash``.
   Installs to ``~/.local/bin/claude`` (launcher) and ``~/.local/share/claude``;
-  no administrator rights. Re-running it installs the latest version (update).
+  no administrator rights. Updates use the agent's own command (``claude update``), never the
+  installer again: it would put a second copy next to an npm/brew install (M1).
 * Codex CLI — https://github.com/openai/codex (README) and
   https://developers.openai.com/codex/cli: ``curl -fsSL https://chatgpt.com/codex/install.sh | sh``.
 * OpenCode — https://opencode.ai/docs/ ("Install"): ``curl -fsSL https://opencode.ai/install | bash``
@@ -40,7 +41,9 @@ from typing import Literal
 
 from ..agents.engine import EngineId
 
-Action = Literal["install", "update", "first_check", "repair"]
+#: ``upgrade``: an offered newer version with the agent's own update command (U1 decision 2);
+#: ``rollback``: back to ``{version}`` where the agent's own command can (decision 6).
+Action = Literal["install", "update", "first_check", "repair", "upgrade", "rollback"]
 CHECKED_ON = "2026-10-15"
 
 
@@ -85,16 +88,28 @@ HERMES_ACP_EXTRA = ("{install_dir}/scripts/run-in-hermes-env", "python", "-c",
 
 
 def _claude(action: Action) -> tuple[Step, ...]:
+    # ``claude update|upgrade``: "Check for updates and install if available". "Needs an update" uses it
+    # too (M1): the official installer would put a second copy next to an npm/brew install.
+    if action in ("update", "upgrade"):
+        return (Step("Update Claude Code", ("{binary}", "update")),)
+    if action == "rollback":  # ``claude install [stable|latest|<version>]``
+        return (Step("Install the earlier Claude Code", ("{binary}", "install", "{version}")),)
     return (Step("Run the official Claude Code installer", _shell(CLAUDE_INSTALL)),)
 
 
 def _codex(action: Action) -> tuple[Step, ...]:
+    # ``codex update``: "Update Codex to the latest version" (npm, brew, installer) — for "Needs an update"
+    # too (M1), never the official installer next to an npm/brew install.
+    if action in ("update", "upgrade"):
+        return (Step("Update Codex", ("{binary}", "update")),)
     return (Step("Run the official Codex installer", _shell(CODEX_INSTALL)),)
 
 
 def _opencode(action: Action) -> tuple[Step, ...]:
-    if action == "update":  # OpenCode's own upgrade of the install it made (``opencode upgrade``)
+    if action in ("update", "upgrade"):  # OpenCode's own upgrade of its install (``opencode upgrade``)
         return (Step("Update OpenCode", ("{binary}", "upgrade")),)
+    if action == "rollback":  # ``opencode upgrade [target]``: "… to the latest or a specific version"
+        return (Step("Install the earlier OpenCode", ("{binary}", "upgrade", "{version}")),)
     return (Step("Run the official OpenCode installer", _shell(OPENCODE_INSTALL)),)
 
 
@@ -116,8 +131,14 @@ def _hermes(action: Action) -> tuple[Step, ...]:
         return (HERMES_FIRST_CHECK,)
     if action == "repair":
         return (HERMES_REPAIR, Step("Check ACP support", ("{binary}", "acp", "--check"), env=SKAZ_HERMES_ENV))
-    first = (Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL)) if action == "install"
-             else Step("Update Hermes Agent", ("{binary}", "update")))
+    if action == "install":
+        first = Step("Run the official Hermes Agent installer", _shell(HERMES_INSTALL))
+    else:
+        # U1 decision 8 (and, by the user's decision, the legacy "Needs an update" too): Hermes' own
+        # gateways keep running (``--no-gateway-restart`` "stops nothing; you manage the gateways",
+        # /docs/getting-started/updating); they keep the old code until restarted. SKAZ's own Hermes
+        # gateway is stopped by SKAZ after a good offered update/rollback (``agents/hub.py``).
+        first = Step("Update Hermes Agent", ("{binary}", "update", "--no-gateway-restart"))
     return (
         first,
         Step("Add ACP support to Hermes Agent", HERMES_ACP_EXTRA, cwd="{install_dir}"),

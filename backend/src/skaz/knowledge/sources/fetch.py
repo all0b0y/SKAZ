@@ -37,12 +37,13 @@ import asyncio
 import ipaddress
 import re
 import socket
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
+from ...native_io import disk_call
 from ...version import app_version
 from ..errors import KnowledgeError
 
@@ -58,6 +59,8 @@ USER_AGENT = (
 Resolver = Callable[[str], Awaitable[list[str]]]
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 AddressPolicy = Callable[[IPAddress], bool]
+UrlGuard = Callable[[str], Awaitable[None]]
+BodyWriter = Callable[[bytes], int]
 NOT_PUBLIC = "SKAZ only opens public websites, not addresses on this computer or network."
 FAKE_IP = ipaddress.ip_network("198.18.0.0/15")
 VPN_HIDDEN = (
@@ -243,26 +246,33 @@ class SafeFetcher:
         self,
         url: str,
         *,
-        max_bytes: int = MAX_PAGE_BYTES,
+        max_bytes: int | None = MAX_PAGE_BYTES,
         allow_partial: bool = False,
         accept: str = "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.5",
         total_seconds: float | None = None,
         pin_address: bool = False,
         allow_vpn_fake_ip: bool = False,
+        url_guard: UrlGuard | None = None,
+        write_body: BodyWriter | None = None,
+        content_types: Collection[str] | None = None,
     ) -> Fetched:
         """``allow_vpn_fake_ip``: only for a request started by the user's own click on ``url`` (see the
         module note); its redirects are held to the same rules."""
+        if max_bytes is None and write_body is None:
+            raise ValueError("An uncapped response requires a streaming body writer.")
         try:
             async with asyncio.timeout(TOTAL_SECONDS if total_seconds is None else total_seconds):
                 return await self._fetch(
-                    url, max_bytes, allow_partial, accept, pin_address, allow_vpn_fake_ip
+                    url, max_bytes, allow_partial, accept, pin_address, allow_vpn_fake_ip, url_guard,
+                    write_body=write_body, content_types=content_types,
                 )
         except TimeoutError as error:
             raise FetchFailed("The website took too long to answer. Try again later.") from error
 
     async def _fetch(
-        self, url: str, max_bytes: int, allow_partial: bool, accept: str, pin_address: bool,
-        allow_vpn_fake_ip: bool,
+        self, url: str, max_bytes: int | None, allow_partial: bool, accept: str, pin_address: bool,
+        allow_vpn_fake_ip: bool, url_guard: UrlGuard | None, *,
+        write_body: BodyWriter | None = None, content_types: Collection[str] | None = None,
     ) -> Fetched:
         current = self.check(url)
         headers = {"User-Agent": USER_AGENT, "Accept": accept, "Accept-Language": "en,ru;q=0.9"}
@@ -274,6 +284,8 @@ class SafeFetcher:
             headers=headers,
         ) as client:
             for _hop in range(MAX_REDIRECTS + 1):
+                if url_guard is not None:
+                    await url_guard(current)
                 checked = await self._check_host(current, allow_vpn_fake_ip)
                 client.cookies.clear()
                 target, pinned_headers, extensions = current, dict[str, str](), dict[str, object]()
@@ -289,7 +301,8 @@ class SafeFetcher:
                                 raise FetchFailed("The website sent a broken redirect.")
                             current = self.check(urljoin(current, location))
                             continue
-                        return await self._read(response, current, max_bytes, allow_partial)
+                        return await self._read(response, current, max_bytes, allow_partial,
+                                                write_body=write_body, content_types=content_types)
                 except httpx.TimeoutException as error:
                     raise FetchFailed("The website took too long to answer. Try again later.") from error
                 except httpx.HTTPError as error:
@@ -299,7 +312,9 @@ class SafeFetcher:
             raise FetchFailed("The link redirects too many times.")
 
     @staticmethod
-    async def _read(response: httpx.Response, url: str, max_bytes: int, allow_partial: bool) -> Fetched:
+    async def _read(response: httpx.Response, url: str, max_bytes: int | None, allow_partial: bool, *,
+                    write_body: BodyWriter | None = None,
+                    content_types: Collection[str] | None = None) -> Fetched:
         status = response.status_code
         if status in (401, 403):
             raise FetchFailed("This page needs a sign-in or blocks automatic access.")
@@ -316,20 +331,34 @@ class SafeFetcher:
         raw_type = response.headers.get("content-type", "")
         content_type = raw_type.split(";", 1)[0].strip().lower()
         charset = response.charset_encoding
+        if content_types is not None and content_type not in content_types:
+            raise FetchFailed("This format cannot be read as a web page. Add the file as a material instead.")
+        if max_bytes is None and write_body is None:
+            raise ValueError("An uncapped response requires a streaming body writer.")
         declared = response.headers.get("content-length")
-        too_big = FetchFailed(f"The page is larger than {max_bytes // (1024 * 1024)} MB.")
-        if declared and declared.isdigit() and int(declared) > max_bytes and not allow_partial:
+        too_big = FetchFailed(
+            f"The page is larger than {max_bytes // (1024 * 1024)} MB."
+            if max_bytes is not None else "The response exceeded its limit.")
+        if (max_bytes is not None and declared and declared.isdigit()
+                and int(declared) > max_bytes and not allow_partial):
             raise too_big
         chunks: list[bytes] = []
         size = 0
         truncated = False
-        async for chunk in response.aiter_bytes():
+        async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
             size += len(chunk)
-            if size > max_bytes:
+            stop = max_bytes is not None and size > max_bytes
+            if stop:
                 if not allow_partial:
                     raise too_big
-                chunks.append(chunk[: len(chunk) - (size - max_bytes)])
+                assert max_bytes is not None
+                chunk = chunk[:len(chunk) - (size - max_bytes)]
                 truncated = True
+            if write_body is not None:
+                # Join a pending disk write on cancellation before its owner closes the file.
+                await disk_call(write_body, chunk)
+            else:
+                chunks.append(chunk)
+            if stop:
                 break
-            chunks.append(chunk)
         return Fetched(url, status, content_type, charset, b"".join(chunks), truncated)

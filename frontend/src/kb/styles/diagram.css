@@ -27,8 +27,8 @@
 }
 .kb-diagram {
   position: relative;
-  margin: 8px 0;
-  padding: 10px 12px;
+  margin: var(--kb-sp-8) 0;
+  padding: var(--kb-sp-10) var(--kb-sp-12);
   border: 1px solid var(--kb-line);
   border-radius: var(--kb-r-sm);
   background: var(--kb-pane);
@@ -37,11 +37,16 @@
 }
 .kb-diagram__canvas { overflow-x: auto; min-width: 0; }
 .kb-diagram__canvas:has(> svg) { cursor: zoom-in; }
-/* ⤢ Open full size (chat-actions v1): a small tool in the corner, on every drawn diagram. */
+/* ⤢ Open full size (chat-actions v1): a small tool in the corner of every drawn diagram, shown on hover
+   or keyboard focus only (bug 6, 2026-10-26); always shown where there is no hover (touch). */
 .kb-diagram__tools {
-  position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; padding: 1px;
+  position: absolute; top: 6px; right: 6px; display: flex; gap: var(--kb-sp-2); padding: 1px;
   background: var(--kb-pane); border: 1px solid var(--kb-line); border-radius: var(--kb-r-sm); color: var(--kb-muted);
+  opacity: 0;
 }
+.kb-diagram:hover .kb-diagram__tools, .kb-diagram:focus-within .kb-diagram__tools { opacity: 1; }
+@media (hover: none) { .kb-diagram__tools { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) { .kb-diagram__tools { transition: opacity 120ms ease; } }
 
 /* The viewer: the whole window but the title bar strip, a bar on top, the drawing on the canvas. */
 .kb-modal.kb-dviewer {
@@ -50,12 +55,12 @@
 }
 .kb-dviewer__body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .kb-dviewer__bar {
-  display: flex; align-items: center; gap: 4px; height: 44px; flex: none; padding: 0 10px 0 16px;
+  display: flex; align-items: center; gap: var(--kb-sp-4); height: 44px; flex: none; padding: 0 var(--kb-sp-10) 0 var(--kb-sp-16);
   border-bottom: 1px solid var(--kb-line); background: var(--kb-pane);
 }
 .kb-dviewer__title { flex: 1; min-width: 0; font-size: var(--t-base); font-weight: 600; }
 .kb-dviewer__pct { min-width: 46px; text-align: center; color: var(--kb-muted); font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
-.kb-dviewer__actual { margin: 0 2px; }
+.kb-dviewer__actual { margin: 0 var(--kb-sp-2); }
 .kb-dviewer__canvas {
   --pele-bg: var(--kb-bg);
   position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--kb-bg);
@@ -67,19 +72,19 @@
 .kb-dviewer__drawing > svg { display: block; max-width: none; }
 .kb-dviewer__hint {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); margin: 0;
-  padding: 4px 12px; border: 1px solid var(--kb-line); border-radius: 999px; background: var(--kb-pane);
+  padding: var(--kb-sp-4) var(--kb-sp-12); border: 1px solid var(--kb-line); border-radius: 999px; background: var(--kb-pane);
   color: var(--kb-muted); font-size: var(--t-xs); white-space: nowrap; pointer-events: none;
 }
 .kb-diagram__canvas > svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
-.kb-diagram__error { display: flex; align-items: flex-start; gap: 6px; color: var(--kb-danger); font-size: var(--t-sm); overflow-wrap: anywhere; }
-.kb-diagram__error > svg { flex: none; margin-top: 2px; }
+.kb-diagram__error { display: flex; align-items: flex-start; gap: var(--kb-sp-6); color: var(--kb-danger); font-size: var(--t-sm); overflow-wrap: anywhere; }
+.kb-diagram__error > svg { flex: none; margin-top: var(--kb-sp-2); }
 .kb-diagram__source {
-  margin: 8px 0 0; max-height: 240px; overflow: auto; padding: 8px 10px;
+  margin: var(--kb-sp-8) 0 0; max-height: 240px; overflow: auto; padding: var(--kb-sp-8) var(--kb-sp-10);
   background: var(--kb-accent-soft); border-radius: var(--kb-r-sm);
   font-family: var(--kb-font-mono); font-size: var(--t-xs); white-space: pre;
 }
-.kb-diagram__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
-.kb-diagram--preview { margin: 8px 0 0; }
+.kb-diagram__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kb-sp-8); margin-top: var(--kb-sp-8); min-width: 0; }
+.kb-diagram--preview { margin: var(--kb-sp-8) 0 0; }
 .kb-diagram-previews { display: flex; flex-direction: column; min-width: 0; }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,14 +4,15 @@ import type { KbMessageInput, KbQuote } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Icon, IconButton, useIconPlay } from '../ui';
 import { Tooltip } from '../ui/Tooltip';
-import { agentOf, startingChoice } from '../state/agents';
-import { isAnswering, type AgentChoice } from '../state/chats';
+import { agentOf, answeringModel, startingChoice } from '../state/agents';
+import { isAnswering, isLocal, type AgentChoice } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
+import { ChatSearchButton } from '../searchRules/ChatSearchPanel';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
-import { clearEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
+import { clearEditor, fillEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
 import { MentionPopup, useMentions, type MentionOption } from './MentionPopup';
 import { isLongPaste, PastedCard, pastedName } from './PastedText';
 import { QuickQuestions } from './QuickQuestions';
@@ -20,6 +21,9 @@ import { ingestWhenReady } from '../materials/ingestWhenReady';
 import { AgentFix } from '../chat/AgentFix';
 import { useOpenStudy } from '../study/useStudy';
 import { StudyContextChip } from '../study/StudyBlock';
+import { useSelection, useSelectionStore } from '../chat/select/context';
+import { QUICK_TEXT, type QuickAsk } from '../chat/select/SelectionBar';
+import { SelectionPanel } from '../chat/select/WhereFrom';
 
 const NEW_CHAT = 'new';
 
@@ -86,9 +90,13 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const recPhase = useRecording((s) => s.phase);
   const recId = useRecording((s) => s.materialId);
   const recTitle = useRecording((s) => s.title);
+  // P2: items picked in an answer (chat/select): the field asks about them.
+  const { selection, clear: clearSelection } = useSelection();
+  const selectionStore = useSelectionStore();
 
   const agent = choice ? agentOf(agents, choice.engine) : undefined;
-  const model = agent?.models.find((m) => m.id === choice?.model);
+  // Bug 5: "as set in the agent" (no model) still offers effort — the levels of the model that answers.
+  const model = answeringModel(agent, choice?.model);
   const agentReady = agent?.state === 'ready';
   const unavailable = `${agent?.name ?? 'The agent'} can’t answer now${agent?.reason ? `: ${agent.reason}` : '.'}`;
   /** The error is the agent's (not installed, signed out…): it comes with the way to fix it (QA D6). */
@@ -146,6 +154,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     for (const item of items) {
       if (item.kind === 'quote') insertToken(root, { kind: 'quote', quote: item.quote });
       else if (item.kind === 'mention') insertToken(root, { kind: 'mention', ref: item.ref });
+      else if (item.kind === 'selection') selectionStore?.getState().set(item.selection); // P3-c: the chip
       else insertText(root, item.text);
     }
     refresh();
@@ -198,7 +207,9 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
       const source = item.source as 'file' | 'link' | 'text';
       saveMaterial(source, item.value, inboxId).then(
-        (added) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready } : a))),
+        (added) => setAttachments((list) => list.map((a) => (a.key === key
+          ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { alreadyInLibrary: true } : {}) }
+          : a))),
         (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
       );
     }
@@ -241,13 +252,15 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     refresh();
   };
 
-  const submit = async () => {
+  /** `quick`: a quick ask of the selection bar (P2) — its words, then what was typed, if anything. */
+  const submit = async (quick?: QuickAsk) => {
     const root = editorRef.current;
     if (!root || sending) return;
     const value = serialize(root);
+    const text = quick ? (value.text.trim() ? `${QUICK_TEXT[quick]}: ${value.text.trim()}` : QUICK_TEXT[quick]) : value.text;
     // Long pastes are cards until now: they become pasted-text materials only with the message.
     const unsaved = attachments.filter((a) => a.text !== undefined && !a.materialId);
-    if (!value.text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
+    if (!text.trim() && !value.mentions.length && !value.quotes.length && !unsaved.length
       && !attachments.some((a) => a.state === 'ready' && a.materialId)) return;
     if (attachments.some((a) => a.state === 'adding')) { setError('Wait until attachments are saved.'); return; }
     const deleted = [...markGone(root, gone), ...attachments.filter((a) => a.materialId && gone.has(a.materialId)).map((a) => a.name)];
@@ -278,17 +291,21 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       if (failed) { setSending(false); setError(`The pasted text couldn’t be saved: ${failed.error}`); return; }
     }
     const ready = list.filter((a) => a.state === 'ready' && a.materialId);
-    const input: KbMessageInput = { text: value.text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!) };
+    const input: KbMessageInput = { text, mentions: value.mentions, quotes: value.quotes, attachments: ready.map((a) => a.materialId!),
+      ...(selection ? { selection: { ...selection, intent: quick ?? 'ask' } } : {}) };
     sendingFrom.current = draftKey.current;
     // The arrow moves as the message goes (it is replaced by Stop once the answer starts, so not after the reply).
     replaySend();
+    // Bug 7: the message shows in the chat at once, so it leaves the field at once; a refusal puts it back.
+    clearEditor(root);
     const result = await chats.getState().send(input, openContext());
     sendingFrom.current = null;
     setSending(false);
-    if (!result.ok) { setError(result.error); return; }
+    if (!result.ok) { fillEditor(root, { ...input, text: value.text }); setError(result.error); return; }
+    if (input.selection) clearSelection(); // asked: the next question starts with nothing picked
     // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
     for (const a of ready) {
-      if (a.source !== 'existing' && a.inWiki) {
+      if (a.source !== 'existing' && !a.alreadyInLibrary && a.inWiki) {
         ingestWhenReady(client, a.materialId!, a.materialReady, (text) => {
           setError(`“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${text} You can add it from Materials later.`);
         });
@@ -329,6 +346,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
     }
     if (popupOpen && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setMention(null); return; }
+    if (selection && event.key === 'Escape') { event.preventDefault(); clearSelection(); return; }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void submit();
@@ -402,6 +420,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
 
   const mentionDrop = useMentionDrop();
   const placeholderShown = empty && dictation.phase === 'idle';
+  const hint = selection ? 'Ask about the selection…' : placeholder;
   // A query of several words stays a mention only while something matches; otherwise it is just text.
   const popupOpen = mention !== null && (!mention.query.includes(' ') || mentions.loading || mentions.options.length > 0);
   const canSend = !empty || attachments.some((a) => a.state === 'ready' || a.text !== undefined);
@@ -414,6 +433,10 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       {study && chatId && <StudyContextChip chatId={chatId} part={study} />}
       <div className="kb-composer" data-testid="composer" {...mentionDrop.handlers}>
         {mentionDrop.overlay}
+        {selection && (
+          <SelectionPanel selection={selection} onClear={clearSelection} onQuick={(ask) => void submit(ask)}
+            disabledReason={!agentReady ? unavailable : blocked ? 'The agent is still answering' : sending ? 'Sending…' : null} />
+        )}
         {popupOpen && (
           <MentionPopup id={listId} options={mentions.options} active={active} loading={mentions.loading} error={mentions.error}
             onPick={pickMention} onHover={setActive} />
@@ -423,7 +446,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
           onRemove={(key) => { if (lastPaste.current === key) lastPaste.current = null; setAttachments((list) => list.filter((a) => a.key !== key)); }}
           renderName={(a) => (a.text !== undefined ? <PastedCard attachment={a} text={a.text} onPasteAsText={() => pasteAsText(a.key)} /> : null)} />
         <div className="kb-editor-wrap">
-          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{placeholder}</span>}
+          {placeholderShown && <span className="kb-editor__placeholder" aria-hidden="true">{hint}</span>}
           <div
             ref={editorRef}
             className="kb-editor"
@@ -432,7 +455,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
             role="textbox"
             aria-multiline="true"
             aria-label="Message"
-            aria-placeholder={placeholder}
+            aria-placeholder={hint}
             aria-controls={popupOpen ? listId : undefined}
             aria-activedescendant={popupOpen && mentions.options.length ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"
@@ -454,6 +477,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         )}
         <div className="kb-composer__bar">
           <AttachButton onAdd={addAttachments} disabled={false} />
+          <ChatSearchButton chatId={chatId} />
           <span className="kb-composer__spacer" />
           {dictation.phase === 'recording' && (
             <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>
@@ -466,7 +490,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               else services.agents.getState().noteLastChoice(next.engine, next.model, next.effort);
             }} />
           {choice && model && (
-            <EffortPicker efforts={model.efforts} value={choice.effort}
+            <EffortPicker efforts={model.efforts} value={choice.effort ?? model.default_effort}
               onChange={async (effort) => {
                 const res = await chats.getState().setAgent(chatId, { ...choice, effort });
                 if (!res.ok) setError(res.error);
@@ -483,7 +507,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
               <button type="button" className="kb-iconbtn kb-iconbtn--md" aria-label="Dictate" aria-disabled="true"><Icon name="mic" size={16} /></button>
             </Tooltip>
           )}
-          {answering && streaming && chatId && !(questionWaits && canSend) ? (
+          {answering && streaming && chatId && !isLocal(streaming.id) && !(questionWaits && canSend) ? (
             <Tooltip text="Stop the answer" placement="top">
               <button type="button" className="kb-send is-stop" aria-label="Stop the answer"
                 onClick={async () => { const r = await chats.getState().stop(chatId, streaming.id); if (!r.ok) setError(r.error); }}>

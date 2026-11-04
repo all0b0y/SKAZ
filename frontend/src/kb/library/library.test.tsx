@@ -252,9 +252,10 @@ describe('Selecting and dragging materials in the side panel (0.3.1 F3/F4)', () 
     await user.click(within(rowOf('Lecture 8')).getByRole('button'));
     await user.keyboard('{/Meta}');
     const bar = within(panel).getByRole('toolbar', { name: '2 selected' });
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(
+    expect(within(bar).getAllByRole('button').filter((b) => b.classList.contains('kb-selbar__btn')).map((b) => b.getAttribute('aria-label'))).toEqual(
       ['Move to…', 'Ask in chat', 'More actions', 'Delete', 'Clear selection'],
     );
+    expect(within(bar.querySelector('.kb-selbar__sets') as HTMLElement).getAllByRole('button')).toHaveLength(4);
     await user.click(within(bar).getByRole('button', { name: 'Move to…' }));
     await user.click(await screen.findByRole('menuitem', { name: /Physics/ }));
     expect(await screen.findByTestId('toast')).toHaveTextContent('Moved 1 material to «Physics»');

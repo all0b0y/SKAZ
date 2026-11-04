@@ -22,6 +22,27 @@ const sentBody = (calls: Array<{ method: string; path: string; body?: unknown }>
 describe('Message field', () => {
   beforeEach(() => { capture.stop.mockClear(); capture.cancel.mockClear(); });
 
+  it('↑/↓ in the @ list keep the highlighted reference on screen (bug 8, 2026-10-26)', async () => {
+    const scrolled: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) { scrolled.push(this.id); };
+    try {
+      const user = userEvent.setup();
+      renderKb({ world: chatWorld() });
+      const input = await ready();
+      await user.click(input);
+      await user.keyboard('Explain @e');
+      const popup = await screen.findByTestId('mention-popup');
+      await waitFor(() => expect(within(popup).getAllByRole('option').length).toBeGreaterThan(1));
+      await user.keyboard('{ArrowDown}');
+      const active = within(popup).getAllByRole('option').find((o) => o.getAttribute('aria-selected') === 'true')!;
+      expect(active.id).toMatch(/-1$/);
+      await waitFor(() => expect(scrolled).toContain(active.id));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('@ suggests Wiki · Materials · Chats; the choice becomes a token and is sent as a mention', async () => {
     const user = userEvent.setup();
     const { fake } = renderKb({ world: chatWorld() });
@@ -80,6 +101,21 @@ describe('Message field', () => {
     await user.click(within(await screen.findByRole('menu', { name: 'Agent and model' })).getByRole('menuitemradio', { name: 'Sonnet 5.5' }));
     expect(await screen.findByText('Model changed to claude-sonnet-5-5', {}, { timeout: 3000 })).toBeInTheDocument();
     expect(notes().filter((t) => /effort/i.test(t))).toEqual([]);
+  });
+
+  it('a chat on the agent’s own model shows that model and offers its effort (bug 5)', async () => {
+    const user = userEvent.setup();
+    const w = chatWorld();
+    Object.assign(w.chats.find((c) => c.id === 'c1')!, { engine: 'codex', model: null, effort: null });
+    const { fake } = renderKb({ world: w });
+    await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
+    const picker = await screen.findByTestId('agent-picker');
+    await waitFor(() => expect(picker).toHaveTextContent('Codex · GPT-5.6-luna'));
+    await user.click(screen.getByRole('button', { name: 'Effort: Medium' }));
+    await user.click(within(await screen.findByRole('menu', { name: 'Effort' })).getByRole('menuitemradio', { name: 'High' }));
+    await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
+      method: 'PATCH', path: '/kb/chats/c1', body: { engine: 'codex', model: null, effort: 'high' } })));
+    expect(await screen.findByRole('button', { name: 'Effort: High' })).toBeInTheDocument();
   });
 
   it('an agent that can’t answer is refused with its reason; nothing is swapped silently', async () => {
@@ -231,6 +267,30 @@ describe('Message field', () => {
     await user.click(input);
     await user.keyboard('Check{Enter}');
     await waitFor(() => expect(fake.calls.some((c) => /\/kb\/materials\/m-new\d+\/ingest/.test(c.path))).toBe(true));
+  });
+
+  it('"+" → Link already in the library: the chip says so, keeps its link icon and is not added to the wiki again (Q1 n2 L2)', async () => {
+    const user = userEvent.setup();
+    const { fake } = renderKb({ world: chatWorld() });
+    const input = await ready();
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => {
+      const res = await original(req);
+      if (req.path !== '/kb/materials/link' || !res.ok) return res;
+      return { ...res, status: 200, data: { ...(res.data as object), already_in_library: true } };
+    }) as typeof original;
+    await user.click(screen.getByRole('button', { name: 'Add a file, link or text' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Link…' }));
+    await user.type(await screen.findByLabelText('Link to an article or a video'), 'https://blog.example/boiling');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    const chips = await screen.findByRole('list', { name: 'Attachments' });
+    expect(await within(chips).findByText('Already in your library')).toBeInTheDocument();
+    expect(chips.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(within(chips).queryByRole('checkbox', { name: 'In wiki' })).not.toBeInTheDocument();
+    await user.click(input);
+    await user.keyboard('Summarise it{Enter}');
+    await waitFor(() => expect(sentBody(fake.calls)).toMatchObject({ attachments: [expect.any(String)] }));
+    expect(fake.calls.some((c) => /\/ingest$/.test(c.path))).toBe(false);
   });
 
   it('"+" → Link refuses anything but http(s)', async () => {

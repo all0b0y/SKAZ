@@ -209,7 +209,8 @@ async def test_sign_out_route_for_each_agent(
     signed_out = await kb_client.post("/kb/agents/opencode/logout")
     assert signed_out.status_code == 200, signed_out.text
     assert signed_out.json()["id"] == "opencode" and signed_out.json()["signed_in"] is False
-    # Claude Code in SKAZ uses this Mac's own Claude Code sign-in: SKAZ never signs it out.
+    # Claude Code (N6 decision 14) signs out of SKAZ's own folder: test_f2_restored_api.py covers the route;
+    # this stand-in has no ``logout``, so SKAZ refuses honestly instead of claiming a sign-out.
     claude = await kb_client.post("/kb/agents/claude_code/logout")
     assert claude.status_code == 409 and "Claude Code" in claude.json()["detail"]
     hermes = await kb_client.post("/kb/agents/hermes/logout")
@@ -220,10 +221,12 @@ async def test_sign_out_route_for_each_agent(
 async def test_registry_refuses_sign_out_where_it_isnt_skaz_own(
     service: KnowledgeService, tmp_path: Path,
 ) -> None:
+    # Migrated (N6 batch B5): Claude Code is no longer refused (its own sign-in in SKAZ, decision 14);
+    # Hermes still signs in per provider.
     registry = hub_for(service, tmp_path).registry
     with pytest.raises(EngineUnavailable) as refused:
-        await registry.logout("claude_code")
-    assert "this Mac" in refused.value.message
+        await registry.logout("hermes")
+    assert "provider" in refused.value.message
 
 
 # -- Hermes: named keys, removing a whole provider ---------------------------------------------

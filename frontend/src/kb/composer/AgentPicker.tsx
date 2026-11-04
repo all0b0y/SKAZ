@@ -6,7 +6,7 @@ import { Popover } from '../ui/Popover';
 import { EngineBadge } from '../ui/EngineBadge';
 import { ProviderIcon } from '../ui/ProviderIcon';
 import { agentShown, favoritesOf, matchesModel, modelName, ownProvider, sectionsOf, shownInPicker } from './modelCatalog';
-import { ENGINE_ORDER, ENGINE_NAME } from '../state/agents';
+import { answeringModel, ENGINE_ORDER, ENGINE_NAME } from '../state/agents';
 import type { AgentChoice } from '../state/chats';
 import { useAgents, useServices, useUi } from '../state/context';
 
@@ -126,9 +126,12 @@ export function AgentPicker({ choice, onChoose, existingChat, lastOf, settings }
   const openEditModels = useUi((s) => s.openEditModels);
   const current = choice ? agents?.agents.find((a) => a.id === choice.engine) : undefined;
   const currentModel = choice?.model ? current?.models.find((m) => m.id === choice.model) : undefined;
+  // Bug 5: "as set in the agent" names the model that answers — «Codex · GPT-…», not just «Codex».
+  const defaultModel = !choice?.model && current?.id !== 'hermes' ? answeringModel(current, null) : undefined;
   const modelLabel = choice?.model
     ? (currentModel ? modelName(currentModel) : choice.model)
-    : current?.id === 'hermes' ? 'As set in Hermes' : choice ? ENGINE_NAME[choice.engine] : 'No agent';
+    : current?.id === 'hermes' ? 'As set in Hermes'
+      : choice ? (defaultModel ? `${ENGINE_NAME[choice.engine]} · ${modelName(defaultModel)}` : ENGINE_NAME[choice.engine]) : 'No agent';
 
   const last = lastOf ?? lastOfAgent(agents);
   const pick = (engine: EngineId, model: string | null) => {

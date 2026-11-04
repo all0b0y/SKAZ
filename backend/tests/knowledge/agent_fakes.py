@@ -151,6 +151,22 @@ if args == ["model"]:
     sys.exit(0)
 if args[:1] == ["sessions"]:  # documented session management: `hermes sessions delete <id> --yes`, `prune`
     record("sessions", args=args[1:], home=os.environ.get("HERMES_HOME"))
+    if args[1:2] == ["delete"] and args[2] in SCENARIO.get("missing_sessions", []):
+        # sessions_cmd._not_found
+        print("No session '" + args[2] + "'. Run: hermes sessions list to find the id.")
+        sys.exit(1)
+    if args[1:2] == ["pin"]:  # sessions_cmd._cmd_pin (v0.22.1+179): one line per id, exit 1 if any unknown
+        if SCENARIO.get("no_pin"):  # an older Hermes: argparse refuses the subcommand
+            sys.stderr.write("hermes sessions: error: argument: invalid choice: 'pin'\n")
+            sys.exit(2)
+        failures = 0
+        for session_id in args[2:]:
+            if session_id in SCENARIO.get("missing_sessions", []):
+                print("No session '" + session_id + "'. Run: hermes sessions list to find the id.")
+                failures += 1
+            else:
+                print("Pinned session '" + session_id + "'.")
+        sys.exit(1 if failures else SCENARIO.get("sessions_exit", 0))
     sys.exit(SCENARIO.get("sessions_exit", 0))
 if args[:1] in (["auth"], ["config"], ["fallback"]):
     # Short commands answered from the scenario by their argv ("auth list", "config get model.provider
@@ -193,6 +209,19 @@ while True:
             send({"jsonrpc": "2.0", "id": ident, "error": SCENARIO["session_new_error"]})
         else:
             send({"jsonrpc": "2.0", "id": ident, "result": SCENARIO["session_new"]})
+    elif method == "session/load":
+        # N6: Hermes 0.22 ``gateway_server.py`` ``_resume``: the history is replayed as session/update
+        # BEFORE the reply; a missing session is an error (0.21's in-process server answers null).
+        loaded = params["sessionId"]
+        for body in SCENARIO.get("load_replay", []):
+            update(loaded, body)
+        if "session_load_error" in SCENARIO:
+            send({"jsonrpc": "2.0", "id": ident, "error": SCENARIO["session_load_error"]})
+        elif SCENARIO.get("session_load_null"):
+            send({"jsonrpc": "2.0", "id": ident, "result": None})
+        else:
+            send({"jsonrpc": "2.0", "id": ident, "result": {
+                key: value for key, value in SCENARIO["session_new"].items() if key != "sessionId"}})
     elif method == "session/set_model":
         # Hermes 0.22 (acp_adapter/gateway_server.py set_session_model/_model_confirmer): a guarded
         # target is confirmed through session/request_permission while set_model is in flight; a

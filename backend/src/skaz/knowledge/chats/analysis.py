@@ -23,16 +23,21 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
+from ..answer_blocks import md
+from ..answer_blocks.md import Refs
+from ..answer_blocks.part import BlockPart, MaterialSource, PageSource
+from ..answer_blocks.text import block_markdown
 from ..errors import KnowledgeError, NameRejected, NameTaken
 from ..ids import new_id
 from ..ingest.checks import clean_text, clean_title
 from ..ingest.pages import PageRef, SourceRef, spaced
 from ..markdown.page import Block, BlockKind, Cite, Heading, PageDocument, PageMeta
 from ..markdown.page import Part as PagePiece
+from ..markdown.text import format_timestamp
 from ..service import KnowledgeService
 from ..sources.guard.detector import detect_instruction
 from ..store.records import PageRecord
@@ -242,8 +247,16 @@ def _settle(chunks: list[Chunk]) -> list[Chunk]:
     return out
 
 
-def paragraphs(parts: Sequence[Part]) -> list[Chunk | ConnectionPart]:
-    """The answer in reading order: Markdown blocks with their chips in place, and connections."""
+#: How the agent's own items of an answer block read on a saved page (FIX-1 F2.4: never silently dropped).
+AGENT_MARK = "(agent’s knowledge)"
+#: The recording time of a fragment (``"43:20"``), for a timeline moment without a date.
+TimeOf = Callable[[str, int], str | None]
+
+
+def paragraphs(parts: Sequence[Part], time_of: TimeOf | None = None) -> list[Chunk | ConnectionPart]:
+    """The answer in reading order: Markdown blocks with their chips in place, and connections.
+    An answer block (P1) comes as its Markdown (tables, lists, paragraphs) with its sources as chips,
+    the agent's own items marked so, and undated timeline moments with their recording time."""
     out: list[Chunk | ConnectionPart] = []
     chips: list[Chip] = []
     stream: list[str] = []
@@ -264,6 +277,31 @@ def paragraphs(parts: Sequence[Part]) -> list[Chunk | ConnectionPart]:
             flush()
             chips = []
             out.append(part)
+        elif isinstance(part, BlockPart):
+            # P1: a drawn answer block, through the serializer Copy and the export use; its sources
+            # become chips, so they turn into wiki links like the answer's own citations.
+            flush()
+            chips = []
+            labels: list[str] = []
+            times: list[str | None] = []
+            for source in part.sources:
+                time = None
+                if isinstance(source, MaterialSource):
+                    chips.append(CitePart(source.material_id, source.seg, source.quote))
+                    time = time_of(source.material_id, source.seg) if time_of is not None else None
+                elif isinstance(source, PageSource):
+                    chips.append(PagePart(source.page_id, source.block_id, source.title, source.kind))
+                else:  # a web result: its link, as the copied block has it
+                    labels.append(md.link(source.title or source.url, source.url))
+                    times.append(None)
+                    continue
+                labels.append(f"{_SLOT_OPEN}{len(chips) - 1}{_SLOT_CLOSE}")
+                times.append(time)
+            markdown = block_markdown(part, Refs(labels, times, agent=AGENT_MARK, cells=False))
+            if markdown:
+                stream.append(f"\n\n{markdown}\n\n")
+            flush()
+            chips = []
     flush()
     return out
 
@@ -352,6 +390,11 @@ class AnalysisWriter:
             return None
         self.cited.setdefault(material_id, None)
         return source.link(seg)
+
+    def _time(self, material_id: str, seg: int) -> str | None:
+        source = self._source(material_id)
+        start = source.start_ms.get(seg) if source is not None else None
+        return format_timestamp(start) if start is not None else None
 
     def _checked(self, material_id: str, seg: int, quote: str | None) -> Cite | None:
         checked = self.reader.checked_quote(material_id, seg, quote)
@@ -508,7 +551,7 @@ class AnalysisWriter:
         out: list[PagePiece] = []
         for section in sections:
             body: list[PagePiece] = []
-            for item in paragraphs(section.parts):
+            for item in paragraphs(section.parts, self._time):
                 built = (self._connection_block(item) if isinstance(item, ConnectionPart)
                          else self._chunk_block(item))
                 if built is not None:

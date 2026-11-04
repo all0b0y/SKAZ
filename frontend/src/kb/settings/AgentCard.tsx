@@ -3,8 +3,11 @@ import type { KbAgent } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { Button, Icon, IconButton, Menu, Modal, type MenuItem } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { useAgents, useServices } from '../state/context';
 import { WebSearchNote } from '../chat/webSearch';
+import { AgentUpdateOffer } from './AgentUpdates';
+import { InstallSummary } from './InstallProgress';
 
 const ACCOUNT: Record<EngineId, string> = {
   codex: 'ChatGPT subscription',
@@ -40,7 +43,18 @@ const SIGN_OUT: Partial<Record<EngineId, { body: string; done: string }>> = {
       + 'you sign in again. Nothing in your library is deleted. OpenCode outside SKAZ is not changed.',
     done: 'Signed out of OpenCode in SKAZ. OpenCode outside SKAZ is not changed.',
   },
+  // N6 decision 14: Claude Code in SKAZ has its own sign-in (SKAZ's own Claude Code folder).
+  claude_code: {
+    body: 'SKAZ’s own Claude Code signs out. Chats and wiki updates on Claude Code stop until you sign in again. '
+      + 'Nothing in your library is deleted. Claude Code in Terminal and other apps stays signed in.',
+    done: 'Signed out of Claude Code in SKAZ. Claude Code in other apps stays signed in.',
+  },
 };
+
+/** The signed-out Claude Code card: its sign-in in SKAZ is separate (N6 decision 14). */
+const CLAUDE_OWN_SIGN_IN = 'Claude Code in SKAZ has its own sign-in, separate from Claude Code in Terminal and other apps.';
+
+const HERMES_SERVICES_NOTE = 'Running Hermes services keep the old version until you restart them.';
 
 /**
  * One agent with its real state (v21): Connected / Not installed / Not signed in / Needs an
@@ -67,7 +81,8 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   useEffect(() => {
     if (!taskId) return undefined;
     if (install && install.task.state !== 'running') return undefined;
-    return store.getState().followInstall(agent.id, taskId);
+    store.getState().followInstall(agent.id, taskId);
+    return undefined; // Observation belongs to the store, not the mounted card.
   }, [store, agent.id, taskId, install?.task.state]);
 
   const act = async (what: 'install' | 'update' | 'first_check' | 'repair' | 'login' | 'check' | 'cancel' | 'logout') => {
@@ -105,7 +120,6 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   const action = agent.action;
   const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again'
     : action === 'first_check' ? 'Check' : action === 'repair' ? 'Repair' : null;
-  const finished = install && install.task.state !== 'running' ? install.task : null;
 
   const status = (
     <span className={`kb-status kb-status--${tone(agent.state)}`}>
@@ -154,35 +168,19 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
     <>
       {agent.reason && agent.state !== 'ready' && agent.state !== 'not_installed' && variant === 'card' && <p className="kb-agentcard__reason">{agent.reason}</p>}
       {variant === 'card' && agent.installed && <WebSearchNote agent={agent} />}
+      {agent.id === 'claude_code' && agent.state === 'signed_out' && <p className="kb-agentcard__note" role="note">{CLAUDE_OWN_SIGN_IN}</p>}
+      {agent.installed && !running && <AgentUpdateOffer engine={agent.id} />}
+      {/* User decision (FIX-1 F3.9): "Needs an update" of Hermes runs `hermes update --no-gateway-restart` too. */}
+      {agent.id === 'hermes' && action === 'update' && !running && (
+        <p className="kb-agentcard__note" role="note">{HERMES_SERVICES_NOTE}</p>
+      )}
       {firstCheck && agent.first_run && (
         <p className="kb-agentcard__note" role="note">
           <Icon name="shield" size={13} />
           {agent.first_run.note || 'SKAZ checks Hermes once with its own Hermes folder. Nothing starts until you press Check.'}
         </p>
       )}
-      {(running || finished) && install && (
-        <div className="kb-installlog">
-          <div className="kb-installlog__head">
-            {running ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" /> : <Icon name={finished?.state === 'succeeded' ? 'check' : 'error'} size={13} />}
-            <span role="status">
-              {running ? (install.task.action === 'update' ? 'Updating…' : install.task.action === 'first_check' ? 'Checking…'
-                : install.task.action === 'repair' ? 'Repairing…' : 'Installing…')
-                : finished?.state === 'succeeded' ? `Done${finished.version ? ` · ${finished.version}` : ''}`
-                  : finished?.state === 'cancelled' ? 'Cancelled' : `Failed${finished?.reason ? `: ${finished.reason}` : ''}`}
-            </span>
-          </div>
-          <pre className="kb-installlog__lines" aria-label="Install log" tabIndex={0}>
-            {install.task.dropped > 0 && `… ${install.task.dropped} earlier lines\n`}
-            {install.lines.map((l) => l.text).join('\n')}
-          </pre>
-          {finished?.state === 'failed' && (
-            <p className="kb-agentcard__manual">
-              Install it yourself: <code>{finished.install.manual_command}</code>{' '}
-              <a className="kb-md__link" href={finished.install.docs_url} target="_blank" rel="noreferrer noopener">instructions</a>
-            </p>
-          )}
-        </div>
-      )}
+      <InstallSummary engine={agent.id} />
       {message && (
         <p className={message.error ? 'kb-inline-error kb-inline-error--flat' : 'kb-agentcard__msg'} role={message.error ? 'alert' : 'status'}>
           {message.text}
@@ -190,7 +188,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       )}
       {!message && signIn && (
         <p className={`kb-agentcard__msg kb-signin kb-signin--${signIn.state}`} role="status">
-          {signIn.state === 'waiting' && <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />}
+          {signIn.state === 'waiting' && <StippleRing className="kb-spinner kb-spinner--inline" />}
           {signIn.state === 'signed_in' && <Icon name="check" size={13} />}
           <span>
             {signIn.message}
@@ -236,13 +234,10 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   );
 }
 
-/** ⋯ next to Check: Sign out… where SKAZ signs the agent out in its own folder; why not for Claude Code
- *  (this Mac's own sign-in); Hermes signs out per provider, so only Check again. */
+/** ⋯ next to Check: Sign out… where SKAZ signs the agent out in its own folder (Codex, OpenCode, Claude
+ *  Code); Hermes signs out per provider, so only Check again. */
 function moreItems(agent: KbAgent): MenuItem[] {
   if (agent.id === 'hermes') return [{ id: 'check', label: 'Check again', icon: 'retry', onSelect: () => {} }];
-  if (agent.id === 'claude_code') {
-    return [{ id: 'signout', label: 'Sign out…', disabled: true, note: 'in Claude Code itself', onSelect: () => {} }];
-  }
   return [{ id: 'signout', label: 'Sign out…', danger: true, onSelect: () => {} }];
 }
 

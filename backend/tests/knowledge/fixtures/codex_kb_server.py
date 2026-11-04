@@ -3,6 +3,13 @@
 Usage: ``python codex_kb_server.py <log.jsonl>``. Every message received is
 appended to the log. The turn's behaviour is picked by ``case:<name>`` in the
 user input text. Not a model: it proves protocol handling, not answer quality.
+
+N6 live threads: ``thread/resume`` answers with the given thread (a thread id containing ``gone``
+or ``locked`` is refused, like a deleted thread or one with an active writer), ``thread/revert``
+refuses ``beforeTurnId`` ``turn-missing``, ``thread/delete`` refuses ids containing ``locked`` (held)
+or ``gone`` (unknown; ``thread/read`` of a ``gone`` id fails too). ``case:refuse_turn`` makes ``turn/start``
+fail after ``thread/start`` succeeded.
+A resumed thread's turn id is ``turn-r<pid>`` (a new turn of the same thread).
 """
 from __future__ import annotations
 
@@ -101,6 +108,11 @@ def start_turn() -> None:
     elif mode == "hang":
         event("item/started", item={"id": "h1", "type": "agentMessage", "phase": "final_answer", "text": ""})
         event("item/agentMessage/delta", itemId="h1", delta="Working")
+    elif mode == "compact":  # Codex compacted the conversation during the turn (spike 2026-10-26)
+        event("item/started", item={"id": "k1", "type": "contextCompaction"})
+        event("item/completed", item={"id": "k1", "type": "contextCompaction"})
+        answer("k2", "After compaction")
+        complete()
     elif mode == "crash":
         sys.exit(9)
     elif mode == "websearch":  # W-3b: the clean search run (ThreadItem webSearch of codex-cli 0.160.0)
@@ -138,10 +150,37 @@ for line in sys.stdin:
         send({"id": identity, "result": {"userAgent": "fixture"}})
     elif method == "thread/start":
         send({"id": identity, "result": {"thread": {"id": THREAD}}})
+    elif method == "thread/resume":
+        wanted = str(message["params"]["threadId"])
+        if "gone" in wanted or "locked" in wanted:
+            send({"id": identity, "error": {"code": -32600, "message": f"PRIVATE no thread {wanted}"}})
+        else:
+            THREAD, TURN = wanted, f"turn-r{os.getpid()}"
+            send({"id": identity, "result": {"thread": {"id": THREAD, "turns": []}}})
+    elif method == "thread/revert":
+        if message["params"].get("beforeTurnId") == "turn-missing":
+            send({"id": identity, "error": {"code": -32600, "message": "PRIVATE no such turn"}})
+        else:
+            send({"id": identity, "result": {}})
+    elif method == "thread/delete":
+        wanted = str(message["params"].get("threadId"))
+        if "locked" in wanted or "gone" in wanted:
+            send({"id": identity, "error": {"code": -32600, "message": f"PRIVATE can't delete {wanted}"}})
+        else:
+            send({"id": identity, "result": {}})
+    elif method == "thread/read":
+        wanted = str(message["params"].get("threadId"))
+        if "gone" in wanted:
+            send({"id": identity, "error": {"code": -32600, "message": f"PRIVATE no thread {wanted}"}})
+        else:
+            send({"id": identity, "result": {"thread": {"id": wanted, "turns": []}}})
     elif method == "turn/start":
         text = message["params"]["input"][0]["text"]
         found = re.findall(r"case:([a-z_]+)", text)
         mode = found[-1] if found else "stream"
+        if mode == "refuse_turn":  # e.g. a model the account can't use: the thread exists, no turn
+            send({"id": identity, "error": {"code": -32600, "message": "PRIVATE model not allowed"}})
+            continue
         send({"id": identity, "result": {"turn": {"id": TURN, "status": "inProgress"}}})
         start_turn()
     elif method == "turn/interrupt":

@@ -128,8 +128,21 @@ class Resolver:
     def tool(self, name: str, arguments: Mapping[str, Any]) -> ToolPart:
         short = tool_name(name)
         labeller = _TOOL_LABELS.get(short)
-        label = labeller(self, arguments) if labeller is not None else f"Used {short}"
-        return ToolPart(short, _clip(label, 160))
+        label = labeller(self, arguments) if labeller is not None else tool_label(short)
+        return ToolPart(short, _clip(label, 160), self.target(short, arguments))
+
+    def target(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, str] | None:
+        """N8: the material or page a read tool opened (only ids the library has), for «Looked at»."""
+        if name in _MATERIAL_TOOLS:
+            material_id = arguments.get("material_id")
+            if isinstance(material_id, str) and self.kb.material_repo.get(material_id) is not None:
+                return ("material", material_id)
+        if name == "skaz_read_page":
+            page_id = arguments.get("page_id")
+            record = self.kb.page_repo.get(page_id) if isinstance(page_id, str) else None
+            if record is not None:
+                return ("page", record.id)
+        return None
 
     def page_title(self, arguments: Mapping[str, Any]) -> str:
         page_id = arguments.get("page_id")
@@ -176,6 +189,47 @@ def _recent_label(resolver: Resolver, arguments: Mapping[str, Any]) -> str:
     return f"Read {span}{resolver.material_title(arguments)}"
 
 
+#: N8: read tools whose ``material_id`` names what the agent looked at.
+_MATERIAL_TOOLS = frozenset({"skaz_read_material", "skaz_recent_speech", "skaz_get_fragment"})
+
+#: Argument-free titles also project old generic labels without modifying saved history.
+_TOOL_ACTIONS: dict[str, str] = {
+    "skaz_wiki_index": "Browse Wiki Index",
+    "skaz_read_page": "Read Wiki Page",
+    "skaz_search": "Search Library",
+    "skaz_read_material": "Read Material",
+    "skaz_list_materials": "List Materials",
+    "skaz_list_folders": "List Folders",
+    "skaz_recent_speech": "Read Recent Speech",
+    "skaz_get_fragment": "Read Source Passage",
+    "skaz_answer_blocks": "Look Up Answer Blocks",
+    "skaz_wiki_create_page": "Create Wiki Page",
+    "skaz_wiki_edit_page": "Edit Wiki Page",
+    "skaz_wiki_rename_page": "Rename Wiki Page",
+    "skaz_wiki_delete_page": "Delete Wiki Page",
+    "skaz_wiki_propose_fix": "Propose Wiki Fix",
+    "skaz_study_make_deck": "Create Flashcards",
+    "skaz_study_make_test": "Create Practice Test",
+    "skaz_study_read": "Read Flashcards or Test",
+    "skaz_study_show": "Show Flashcards or Test",
+    "skaz_study_unclear": "Read Unclear Study Items",
+    "skaz_me_edit": "Edit Me Profile or Skill",
+    "skaz_me_skill": "Read Me Skill",
+    "skaz_ask_user": "Ask Question",
+    "skaz_web_search": "Search Web",
+    "skaz_web_read": "Read Web Page",
+    "WebSearch": "Search Web",
+}
+
+
+def tool_label(name: str, existing: str | None = None) -> str:
+    """Human action, keeping contextual labels and protocol identifiers separate."""
+    short = tool_name(name)
+    if existing and existing not in {name, short, f"Used {name}", f"Used {short}"}:
+        return existing
+    return _TOOL_ACTIONS.get(short, "Use Tool")
+
+
 _TOOL_LABELS: dict[str, Callable[[Resolver, Mapping[str, Any]], str]] = {
     "skaz_wiki_index": lambda _r, _a: "Looked through the wiki index",
     "skaz_read_page": lambda r, a: f"Read page {r.page_title(a)}",
@@ -185,4 +239,5 @@ _TOOL_LABELS: dict[str, Callable[[Resolver, Mapping[str, Any]], str]] = {
     "skaz_list_folders": lambda _r, _a: "Listed folders",
     "skaz_recent_speech": _recent_label,
     "skaz_get_fragment": lambda r, a: f"Read a passage of {r.material_title(a)}",
+    "skaz_answer_blocks": lambda _r, _a: "Looked up answer blocks",
 }

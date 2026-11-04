@@ -19,7 +19,7 @@ const LINKS = [
 function webPart(id: string, extra: Partial<KbWebSearchPart> = {}): KbWebSearchPart {
   return {
     type: 'web_search', id, engine: 'claude_code', query: 'second law of thermodynamics history', allowed_domains: [], blocked_domains: [],
-    status: 'pending', auto: false, reason: null, links: [], ...extra,
+    status: 'pending', auto: false, reason: null, links: [], execution: null, ...extra,
   };
 }
 
@@ -39,8 +39,8 @@ function webWorld(): FakeWorld {
     chat('c22', 'Hermes — web', 3, [webPart('web-5', { engine: 'hermes', searcher: 'claude_code', query: 'entropy definition' })], true),
     chat('c23', 'Codex — web', 4, [webPart('web-6', { engine: 'codex', searcher: 'codex', query: 'entropy definition' })], true),
     chat('c21', 'Clausius — searched', 2, [
-      webPart('web-2', { status: 'allowed', links: LINKS }),
-      webPart('web-3', { status: 'allowed', auto: true, query: 'Clausius 1850 paper' }),
+      webPart('web-2', { status: 'allowed', execution: 'done', links: LINKS }),
+      webPart('web-3', { status: 'allowed', execution: 'done', auto: true, query: 'Clausius 1850 paper' }),
       webPart('web-4', { status: 'denied', query: 'my lecture notes' }),
       { type: 'text', text: 'Clausius stated it in 1850.' },
     ], false),
@@ -85,7 +85,7 @@ describe('Web search card in the chat', () => {
     expect(within(card).getAllByRole('button').map((b) => b.textContent)).toEqual(['Deny', 'Allow in this chat', 'Allow once']);
     await user.click(within(card).getByRole('button', { name: 'Allow once' }));
     expect(webCalls(fake)).toContainEqual(['POST', '/kb/web-searches/web-1/decide', { decision: 'allow' }]);
-    expect(await within(centre()).findByRole('group', { name: 'Searched the web: second law of thermodynamics history' })).toBeInTheDocument();
+    expect(await within(centre()).findByRole('group', { name: 'Search approved: second law of thermodynamics history' })).toBeInTheDocument();
   });
 
   it('W-3b: a query of Codex, Hermes or OpenCode says whose own search runs it, in a separate run', async () => {
@@ -179,15 +179,18 @@ describe('Web search card in the chat', () => {
     expect(within(web).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 
-  it('the agent\'s skaz_web_search call is not repeated in «Looked at»: the search card says it', async () => {
+  it('counts the web call once but keeps its details only in its own card', async () => {
     const world = webWorld();
     const msg = world.chats.find((c) => c.id === 'c21')!.messages[1]!;
-    msg.parts = [{ type: 'tool', name: 'skaz_web_search', label: 'Used skaz_web_search' }, ...msg.parts] as typeof msg.parts;
+    const card = msg.parts[0] as KbWebSearchPart;
+    msg.parts = [{ type: 'tool', name: 'skaz_web_search', label: 'Used skaz_web_search' },
+      { ...card, searcher: 'claude_code' }];
     const user = userEvent.setup();
     renderKb({ world });
     await user.click(await within(side()).findByRole('button', { name: /Clausius — searched/ }));
     await within(centre()).findByRole('button', { name: /2 links/ });
-    expect(within(centre()).queryByText(/Looked at/)).not.toBeInTheDocument();
+    expect(within(centre()).getByText('1 tool call', { exact: true })).toBeInTheDocument();
+    expect(within(centre()).queryByRole('list', { name: 'Tool calls' })).not.toBeInTheDocument();
   });
 
   it('the header chip shows the grant and revokes it', async () => {

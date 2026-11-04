@@ -200,6 +200,16 @@ class JobRepository:
         return next((job for job in self.list_all(material_id=material_id)
                      if job.kind in QUEUED_KINDS and job.state in ("queued", "running")), None)
 
+    def pending_in_folder(self, folder_id: str) -> bool:
+        """A queued or running ingest of a material in this folder (a batch import is still going)."""
+        kinds = ", ".join(f"'{kind}'" for kind in QUEUED_KINDS)
+        with self.db.read() as connection:
+            row = connection.execute(
+                f"SELECT 1 FROM jobs JOIN materials ON materials.id = jobs.target_id "
+                f"WHERE jobs.kind IN ({kinds}) AND jobs.state IN ('queued', 'running') "
+                "AND materials.folder_id = ? LIMIT 1", (folder_id,)).fetchone()
+        return row is not None
+
     def claim_next(self) -> JobRecord | None:
         """Start the oldest queued ingest job: ``queued`` → ``running`` in one write; ``None`` if none."""
         kinds = ", ".join(f"'{kind}'" for kind in QUEUED_KINDS)

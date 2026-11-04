@@ -69,6 +69,8 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/events$/ },
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/(?:stop|regenerate|resume|save|edit)$/ },
+  // P2: «Fix in wiki» under an answer — the agent's checked proposal, written as the user's edit.
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/messages\/[^/]+\/wiki-fixes\/[^/]+\/apply$/ },
   { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/(?:save|read)$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/export$/ },
   { method: 'GET', pattern: /^\/kb\/mentions$/ },
@@ -95,6 +97,12 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes|opencode)\/(?:check|install|login)$/ },
   { method: 'GET', pattern: /^\/kb\/agents\/install\/[^/]+$/ },
   { method: 'POST', pattern: /^\/kb\/agents\/install\/[^/]+\/cancel$/ },
+  // U1: agent updates — what SKAZ's own checks found, the switch, Check for updates, the seen dot;
+  // per agent (fixed list): Update (after current work if busy), its Cancel, Skip this version, Roll back.
+  { method: 'GET', pattern: /^\/kb\/agents\/updates$/ },
+  { method: 'PUT', pattern: /^\/kb\/agents\/updates\/settings$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/updates\/(?:check-now|seen)$/ },
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|claude_code|hermes|opencode)\/update(?:\/(?:cancel|skip|rollback))?$/ },
   { method: 'GET', pattern: /^\/kb\/decisions$/ },
   { method: 'PUT', pattern: /^\/kb\/decisions\/provider$/ },
   { method: 'POST', pattern: /^\/kb\/decisions\/local\/(?:download|cancel)$/ },
@@ -132,9 +140,9 @@ const ROUTES: readonly Route[] = [
   // G: the live panel's text after the material (open monologue + words still being recognised).
   { method: 'GET', pattern: /^\/kb\/recordings\/[^/]+\/live$/ },
   // F2: sign out of SKAZ's own Codex profile; delete the downloaded Whisper model (after a confirmation).
-  // Accounts & keys v3: OpenCode signs out of SKAZ's own OpenCode folder too (Claude Code uses this
-  // Mac's own sign-in and Hermes signs out per provider, so neither has a sign-out here).
-  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|opencode)\/logout$/ },
+  // Accounts & keys v3: OpenCode signs out of SKAZ's own OpenCode folder too, and (N6 decision 14) Claude
+  // Code of SKAZ's own CLAUDE_CONFIG_DIR. Hermes signs out per provider, so it has no sign-out here.
+  { method: 'POST', pattern: /^\/kb\/agents\/(?:codex|opencode|claude_code)\/logout$/ },
   { method: 'DELETE', pattern: /^\/kb\/settings\/speech\/local-model$/ },
   // B20: "Check recognition again" of a recording (a backend job on the chosen agent).
   { method: 'POST', pattern: /^\/kb\/materials\/[^/]+\/recognition-check$/ },
@@ -154,6 +162,14 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/web-searches\/[^/]+\/decide$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
   { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
+  // N7: the user's search rules — Settings → Search, and one chat's changes from the composer panel
+  // (Save / Save as global / Reset to Settings, and «Search everywhere once» clicked on a card).
+  { method: 'GET', pattern: /^\/kb\/settings\/search$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/search$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'PUT', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/search-rules\/everywhere-once$/ },
   // 0.3.1 K1/K3: Hermes' providers in SKAZ's folder. Adding and signing in again open Hermes' own
   // command in Terminal (no key passes through SKAZ); remove / priority carry no secret.
   { method: 'GET', pattern: /^\/kb\/agents\/hermes\/providers$/ },
@@ -171,10 +187,24 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/study\/settings$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/settings$/ },
   { method: 'GET', pattern: /^\/kb\/study\/decks\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/study\/unclear$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/unclear\/clear$/ },
   { method: 'POST', pattern: /^\/kb\/study\/decks\/[^/]+\/(?:marks|study)$/ },
   { method: 'GET', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
-  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|mark|answer|check-open|finish|retake|save|rename)$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|pass|mark|answer|check-open|recheck|count|finish|retake|save|rename)$/ },
+  // N6 «Я» (Me, N6-ME-API.md): the master switch; one skill read / edited / deleted / created; its
+  // versions and a restore; Undo of an agent's edit from its chat chip. Skill ids are one lowercase
+  // segment, a version is digits, an edit id `[a-z0-9_-]{1,64}`. No route here lists «Я» for an agent.
+  { method: 'GET', pattern: /^\/kb\/me$/ },
+  { method: 'PUT', pattern: /^\/kb\/me$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/skills$/ },
+  { method: 'GET', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}$/ },
+  { method: 'PUT', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}$/ },
+  { method: 'DELETE', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}$/ },
+  { method: 'GET', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}\/versions$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/skills\/[a-z0-9-]{1,48}\/versions\/\d{1,9}\/restore$/ },
+  { method: 'POST', pattern: /^\/kb\/me\/edits\/[a-z0-9_-]{1,64}\/undo$/ },
 ];
 
 /**

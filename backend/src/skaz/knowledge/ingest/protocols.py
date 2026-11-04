@@ -12,7 +12,7 @@
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -40,8 +40,10 @@ class IdentityTextLayer:
 
 
 class ConceptUpdateHook(Protocol):
-    async def on_concept_updated(self, page_id: str, new_block_ids: Sequence[str]) -> None:
-        """A concept page that already existed got new blocks from another material."""
+    async def on_concepts_updated(self, updates: Mapping[str, Sequence[str]]) -> None:
+        """Concept pages that already existed got new blocks from one material: page id → block ids.
+
+        Called once per material, so the checks of all its pages can share agent calls."""
         ...
 
 

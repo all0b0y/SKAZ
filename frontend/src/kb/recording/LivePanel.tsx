@@ -9,6 +9,7 @@ import { languageName } from '../material/MaterialView';
 import { Transcript } from '../material/Transcript';
 import { isLive } from './recordingStore';
 import { connectionText } from './connection';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { EMPTY_LIVE, lastSeg, liveAfter, type LiveText } from './liveText';
 import { useLiveMaterial } from './useLiveMaterial';
 
@@ -77,7 +78,7 @@ export function LivePanel({ materialId }: { materialId: string }) {
 
   const failed = failure && failure.materialId === materialId ? failure : null;
   const status = !mine ? null
-    : reconnect ? <span className="kb-live__status kb-live__status--warn" role="status"><span className="kb-spinner kb-spinner--inline" aria-hidden="true" />{reconnect.short}</span>
+    : reconnect ? <span className="kb-live__status kb-live__status--warn" role="status"><StippleRing className="kb-spinner kb-spinner--inline" />{reconnect.short}</span>
     : phase === 'recording' ? <span className="kb-live__status">Recording</span>
       : phase === 'paused' || phase === 'pausing' ? <span className="kb-live__status"><span className="kb-pzd" aria-hidden="true" />Paused</span>
         : phase === 'finishing' ? <span className="kb-live__status"><Spinner label="Finishing" size="sm" />Finishing…</span>

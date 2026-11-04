@@ -15,6 +15,7 @@ import { FailedMaterial } from './FailedMaterial';
 import { isWithoutSpeech, NoSpeech } from './NoSpeech';
 import { DeleteDialog, MoveDialog, RenameDialog, type MaterialDialog } from './MaterialDialogs';
 import { StatusChips } from './StatusChips';
+import { OverlapLine } from './OverlapLine';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
 import { useLiveMaterial } from '../recording/useLiveMaterial';
 import { useRecognitionRecheck } from './RecognitionRecheck';
@@ -229,6 +230,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <h2 className="kb-doc__title">{material.title}</h2>
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} />
+              <OverlapLine overlap={material.overlap} />
               <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />
             </div>
             {continuable && (

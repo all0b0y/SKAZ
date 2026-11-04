@@ -9,8 +9,10 @@ from dataclasses import replace
 from typing import Any, cast
 
 from ..agents.engine import EngineId
+from ..ids import utc_now_ms
 from ..index.search import fts_query
 from ..logsafe import error_note
+from ..permissions.search_rules import ChatRules
 from ..store.database import KnowledgeDatabase
 from .model import (
     Chat,
@@ -32,6 +34,9 @@ _CHAT_COLUMNS = frozenset({
     "updated_at",
 })
 RESTART_REASON = "SKAZ was closed before the answer finished."
+#: Bug 1 (2026-10-26): tests and decks opened from the wiki live beside the chat only. Their blocks
+#: belong to this one SKAZ-owned thread, which is never listed, counted or found as a chat.
+WIKI_STUDY_CHAT_ID = "chat-wiki-study"
 
 
 def _chat(row: sqlite3.Row) -> Chat:
@@ -71,7 +76,7 @@ class ChatRepository:
 
     # -- chats ----------------------------------------------------------------
 
-    def create(self, chat: Chat) -> None:
+    def create(self, chat: Chat, *, search_rules: ChatRules | None = None) -> None:
         with self.db.write() as connection:
             connection.execute(
                 "INSERT INTO chat_threads(id, title, title_auto, pinned, engine, model, effort, "
@@ -82,6 +87,13 @@ class ChatRepository:
                  chat.last_preview, chat.created_at, chat.updated_at),
             )
             self._index_title(connection, chat.id, chat.title)
+            if search_rules is not None and not search_rules.is_default:
+                data = search_rules.to_json()
+                if search_rules.sources_only or search_rules.sources or search_rules.excluded:
+                    data["sources_since"] = utc_now_ms()
+                connection.execute(
+                    "INSERT INTO chat_search_rules(chat_id, rules, updated_at) VALUES (?, ?, ?)",
+                    (chat.id, _dump(data), chat.created_at))
 
     def get(self, chat_id: str) -> Chat | None:
         with self.db.read() as connection:
@@ -91,8 +103,8 @@ class ChatRepository:
     def list_all(self, *, pinned_only: bool = False, recording_only: bool = False,
                  folder_id: str | None = None, ids: Iterable[str] | None = None,
                  limit: int | None = None) -> list[Chat]:
-        clauses: list[str] = []
-        args: list[Any] = []
+        clauses: list[str] = ["id != ?"]
+        args: list[Any] = [WIKI_STUDY_CHAT_ID]
         if pinned_only:
             clauses.append("pinned = 1")
         if recording_only:
@@ -106,7 +118,7 @@ class ChatRepository:
                 return []
             clauses.append(f"id IN ({','.join('?' * len(wanted))})")
             args.extend(wanted)
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        where = f" WHERE {' AND '.join(clauses)}"
         sql = f"SELECT * FROM chat_threads{where} ORDER BY updated_at DESC, rowid DESC"
         if limit is not None:
             sql += " LIMIT ?"
@@ -116,7 +128,8 @@ class ChatRepository:
 
     def count(self) -> int:
         with self.db.read() as connection:
-            return int(connection.execute("SELECT COUNT(*) FROM chat_threads").fetchone()[0])
+            return int(connection.execute("SELECT COUNT(*) FROM chat_threads WHERE id != ?",
+                                          (WIKI_STUDY_CHAT_ID,)).fetchone()[0])
 
     def search(self, query: str) -> set[str]:
         """Chats whose title or messages contain every word of ``query`` (prefix match)."""
@@ -130,7 +143,7 @@ class ChatRepository:
             except sqlite3.OperationalError as error:
                 log.warning("Chat search failed: %s", error_note(error))
                 return set()
-        return {row[0] for row in rows}
+        return {row[0] for row in rows} - {WIKI_STUDY_CHAT_ID}
 
     def update(self, chat_id: str, **values: Any) -> None:
         if not values:

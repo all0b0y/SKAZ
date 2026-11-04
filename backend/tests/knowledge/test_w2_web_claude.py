@@ -26,7 +26,16 @@ from pathlib import Path
 from typing import Any
 
 from skaz.knowledge.agents.claude_code import ClaudeCodeEngine
-from skaz.knowledge.agents.engine import AgentTurn, Completed, Failed, TextDelta, ToolSpec, TurnMessage
+from skaz.knowledge.agents.engine import (
+    AgentTurn,
+    Completed,
+    Failed,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+    TurnMessage,
+)
 from skaz.knowledge.agents.web import (
     CLAUDE_BLOCKED,
     WebLink,
@@ -53,6 +62,8 @@ class RecordingGate:
         self.allow = allow
         self.asked: list[WebQuery] = []
         self.links: list[tuple[str, tuple[WebLink, ...]]] = []
+        self.starts: list[str] = []
+        self.errors: list[str] = []
 
     async def approve(self, query: WebQuery) -> WebVerdict:
         self.asked.append(query)
@@ -60,8 +71,13 @@ class RecordingGate:
             return WebVerdict(True, search_id=f"web-{len(self.asked)}")
         return WebVerdict(False, "The user didn't allow this web search.", search_id=f"web-{len(self.asked)}")
 
-    async def results(self, search_id: str, links: Sequence[WebLink]) -> None:
+    async def started(self, search_id: str) -> None:
+        self.starts.append(search_id)
+
+    async def results(self, search_id: str, links: Sequence[WebLink], *, is_error: bool = False) -> None:
         self.links.append((search_id, tuple(links)))
+        if is_error:
+            self.errors.append(search_id)
 
 
 def web_use(use_id: str = "toolu_web", query: str = QUERY) -> dict[str, Any]:
@@ -150,9 +166,28 @@ async def test_an_allowed_query_is_sent_exactly_and_its_links_are_recorded(tmp_p
         "response": {"behavior": "allow", "updatedInput": {"query": QUERY}}}}
     assert gate.links == [("web-1", (WebLink(LINKS[0]["title"], LINKS[0]["url"]),
                                      WebLink(LINKS[1]["title"], LINKS[1]["url"])))]
-    # The web search is the web card's business, not a "Looked at" tool chip.
-    assert events == [TextDelta("run-1", "Let me look this up."), TextDelta("run-1", "Found it."),
-                      Completed("run-1", events[-1].usage)]
+    # Actual events count the call; the renderer keeps web details in their own card, not a duplicate chip.
+    assert gate.starts == ["web-1"]
+    (call,) = [event for event in events if isinstance(event, ToolCall)]
+    (result,) = [event for event in events if isinstance(event, ToolResult)]
+    assert (call.call_id, call.name) == ("toolu_web", "WebSearch")
+    assert result.call_id == call.call_id and result.is_error is False
+    assert [event for event in events if isinstance(event, TextDelta)] == [
+        TextDelta("run-1", "Let me look this up."), TextDelta("run-1", "Found it.")]
+    assert isinstance(events[-1], Completed)
+
+
+async def test_native_search_error_is_reported_to_its_card_and_tool_activity(tmp_path: Path) -> None:
+    error = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "toolu_web", "is_error": True,
+         "content": "PRIVATE-SDK-DIAGNOSTIC"}]}, "tool_use_result": None, **MAIN}
+    engine, _fake = engine_for(tmp_path, [web_use(), {"__ask__": can_use()}, error, RESULT])
+    gate = RecordingGate()
+    events = await drain(engine, turn(gate))
+    assert gate.starts == ["web-1"] and gate.errors == ["web-1"]
+    (result,) = [event for event in events if isinstance(event, ToolResult)]
+    assert result.call_id == "toolu_web" and result.is_error
+    assert gate.links == [("web-1", ())]
 
 
 async def test_a_denied_query_is_refused_before_it_is_sent(tmp_path: Path) -> None:
@@ -223,18 +258,18 @@ async def test_stop_while_the_user_decides_ends_the_run(tmp_path: Path) -> None:
     class Waiting(RecordingGate):
         def __init__(self) -> None:
             super().__init__()
-            self.started = asyncio.Event()
+            self.approval_waiting = asyncio.Event()
             self.release = asyncio.Event()
 
         async def approve(self, query: WebQuery) -> WebVerdict:
-            self.started.set()
+            self.approval_waiting.set()
             await self.release.wait()  # SKAZ's Stop cancels the waiting request (broker.cancel_run)
             return WebVerdict(False, "The web search was cancelled.")
 
     engine, _fake = engine_for(tmp_path, [web_use(), {"__ask__": can_use()}, ANSWER, RESULT])
     gate = Waiting()
     task = asyncio.create_task(drain(engine, turn(gate)))
-    await asyncio.wait_for(gate.started.wait(), 5)
+    await asyncio.wait_for(gate.approval_waiting.wait(), 5)
     await engine.interrupt("run-1")
     gate.release.set()
     events = await asyncio.wait_for(task, 10)

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -112,13 +114,27 @@ async def test_server_action_is_denied_not_confused_with_response(tmp_path: Path
         }
 
 
+@pytest.mark.parametrize("present", [False, True])
+def test_environment_probe_reports_only_presence(tmp_path: Path, present: bool) -> None:
+    env = {"SKAZ_TEST_PARENT_SECRET": "AUTHORED CANARY"} if present else {}
+    result = subprocess.run(
+        (sys.executable, str(FIXTURE)),
+        input=json.dumps({"id": 1, "method": "fixture/env"}) + "\n",
+        text=True, capture_output=True, cwd=tmp_path, env=env, timeout=5, check=True,
+    )
+    reply = json.loads(result.stdout)
+    assert reply == {"id": 1, "result": present}
+    assert reply["result"] is present
+    assert "AUTHORED CANARY" not in result.stdout + result.stderr
+
+
 @pytest.mark.asyncio
 async def test_parent_environment_and_stderr_are_not_exposed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("SKAZ_TEST_PARENT_SECRET", "PRIVATE PARENT VALUE")
     async with CodexRpc((sys.executable, str(FIXTURE)), cwd=tmp_path, env={}) as client:
-        assert await client.request("fixture/env", {}) is None
+        assert await client.request("fixture/env", {}) is False
         assert await client.request("fixture/stderr", {}) == "ok"
     captured = capfd.readouterr()
     assert "PRIVATE" not in captured.out + captured.err

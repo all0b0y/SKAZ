@@ -80,6 +80,10 @@ export function MentionPopup({ id, options, active, loading, error, onPick, onHo
   onPick: (option: MentionOption) => void;
   onHover: (index: number) => void;
 }) {
+  // Bug 8 (2026-10-26): ↑/↓ move the highlight; the highlighted row stays on screen (as in ⌘K, L5).
+  useEffect(() => {
+    document.getElementById(`${id}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [id, active, options]);
   let lastGroup = '';
   return (
     <div className="kb-mentions" data-testid="mention-popup">

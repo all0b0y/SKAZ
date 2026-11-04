@@ -10,17 +10,21 @@
 import type { BridgeRequest, JsonResponse } from '../../api/bridge';
 import type { NativeAudioMeta, NativeOpened, NativeSaved, NativeStopped } from '../../api/nativeLive';
 import type {
-  KbAbout, KbAgents, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
+  KbAbout, KbAgents, KbAgentUpdates, KbBlock, KbChat, KbCitation, KbChatEvent, KbChatSummary, KbCorrection, KbDecisions, KbDeletePreview,
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard, KbStudyReview,
   KbWebSearchPart,
 } from '../../api/kb/types.gen';
+import { agentUpdateRoutes } from './fakeAgentUpdates';
 import {
   isWaitingPart, partsOf, type AnyMessagePart, type KbChatEventP, type KbChatSummaryP, type KbPermissionEndpoints,
   type KbPermissionPart, type KbQuestionPart,
 } from '../api/permissions';
+import { meRoutes, type FakeMe } from './fakeMe';
+import { defaultReview, p3StudyRoutes, scoreOf } from './fakeStudyP3';
+import { applyFakeChatRules, searchRulesRoutes } from './fakeSearchRules';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -36,6 +40,8 @@ export interface FakeExcluded {
 export interface FakeWorld {
   /** The backend's full-text index fails (L1): search answers `degraded`. */
   searchDegraded?: boolean;
+  /** P2: the wiki block changed since a fix was proposed — «Fix in wiki» turns it stale. */
+  wikiFixStale?: boolean;
   library: KbLibrary;
   folders: KbFolder[];
   materials: KbMaterial[];
@@ -95,6 +101,8 @@ export interface FakeWorld {
   missing?: string[];
   /** Every request served, for assertions. */
   log: Array<{ method: string; path: string; body?: unknown }>;
+  /** U1: what SKAZ's agent update checks found (absent = nothing yet). */
+  agentUpdates?: KbAgentUpdates;
   seq: number;
   /** Wiki/index.md and Wiki/log.md (absent = just their headings). */
   wikiFiles?: Partial<Record<'index' | 'log', { text: string; links: KbBlockLink[] }>>;
@@ -111,6 +119,9 @@ export interface FakeWorld {
   permissionGrants?: Record<string, string[]>;
   /** W-2: chats whose web search is allowed without a question → since when (ISO). */
   webGrants?: Record<string, string>;
+  /** N7: Settings → Search (absent = no rules) and one chat's changes. */
+  searchSettings?: import('../../api/kb/types.gen').KbSearchSettings;
+  chatSearchRules?: Record<string, import('./fakeSearchRules').FakeChatRules>;
   /** D (decision 9): what «Save to wiki» left out, by answer id (one answer) or chat id (whole chat). */
   saveWarnings?: Record<string, string>;
   /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
@@ -122,7 +133,13 @@ export interface FakeWorld {
   /** 0.3.1 S: new cards per day and folder (absent = 20, the backend's default). */
   studyNewPerDay?: number;
   /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
-  judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean };
+  judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean; checked_by?: string };
+  /** P3-a: the agent's review of an open answer (absent with `judge` absent = `defaultReview`). */
+  review?: KbStudyReview;
+  /** P3-a «I did say this»: what the agent says on a recheck (absent = it still misses the idea). */
+  recheck?: { status: 'covered' | 'partial' | 'missing'; note: string };
+  /** N6 «Я» (Me): skills, versions and agent edits (absent = the three built-ins, empty, on). */
+  me?: FakeMe;
 }
 
 /** A failed request: HTTP status + the backend's plain-English `detail`. */
@@ -302,6 +319,9 @@ function pushEvent(world: FakeWorld, chatId: string, event: Omit<KbChatEvent, 's
   if (c) c.cursor = seq;
   list.push({ ...event, seq });
 }
+
+/** SKAZ's own thread of the blocks opened from the wiki (bug 1): the backend's `WIKI_STUDY_CHAT_ID`. */
+export const WIKI_STUDY_CHAT = 'chat-wiki-study';
 
 function touchList(world: FakeWorld, c: KbChat): void {
   world.listCursor += 1;
@@ -616,6 +636,7 @@ function markCards(cards: KbStudyCard[], ids: string[], mark: string): void {
     if (mark === 'hard') { c.marked_hard = true; c.group = 'hard'; }
     if (mark === 'unhard') { c.marked_hard = false; c.group = c.state === 'new' ? 'new' : 'learning'; }
     if (mark === 'known') { c.marked_hard = false; c.group = 'known'; c.state = 'review'; }
+    if (mark === 'unclear' || mark === 'clear') c.unclear = mark === 'unclear'; // P3-b: never FSRS
   }
 }
 
@@ -624,6 +645,7 @@ function deckView(w: FakeWorld, pageId: string): KbDeckView {
   const counts = { new: 0, learning: 0, known: 0, hard: 0 };
   for (const c of deck.cards) counts[c.group] += 1;
   deck.groups = counts;
+  deck.unclear = deck.cards.filter((c) => c.unclear).length;
   return structuredClone(deck);
 }
 
@@ -651,6 +673,7 @@ const WEB_ROUTES: FakeRoutes = {
     const found = findWebSearch(w, path.search_id);
     if (found.part.status !== 'pending') fail(409, 'This request was already answered.');
     found.part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    found.part.execution = null; // A permission response does not run or finish a search.
     if (body.decision === 'allow_chat') (w.webGrants ??= {})[found.chat.id] = new Date().toISOString();
     updated(w, found);
     return structuredClone(found.part);
@@ -676,23 +699,30 @@ const STUDY_ROUTES: FakeRoutes = {
     return deckView(w, path.page_id);
   }],
   'POST /kb/study/decks/{page_id}/study': [200, (w, { path, body }) => {
+    // Bug 1 (2026-10-26), as the backend: the block belongs to SKAZ's own wiki-study thread (never
+    // listed), not to the open chat; opened again, an unfinished one goes on where it stopped.
     const deck = deckView(w, path.page_id);
     const mode = body.mode ?? 'due';
     const live = deck.cards.filter((c) => !c.suspended && (!body.card_ids || body.card_ids.includes(c.id)));
     const cards = mode === 'hard' ? live.filter((c) => c.group === 'hard') : mode === 'new' ? live.filter((c) => c.group === 'new') : live;
-    let chat: KbChat;
-    if (body.chat_id) chat = findChat(w, body.chat_id);
-    else {
+    let chat = w.chats.find((c) => c.id === WIKI_STUDY_CHAT);
+    if (!chat) {
       chat = {
-        id: `c-study-${++w.seq}`, title: `Study · ${deck.title}`, pinned: false, engine: 'codex', model: 'gpt-5.6-luna', effort: 'medium',
+        id: WIKI_STUDY_CHAT, title: 'Studied from the wiki', pinned: false, engine: 'codex', model: null, effort: null,
         created_at: clock(w), updated_at: clock(w), last_preview: '', recording_material_id: null, folder_ids: [], state: 'idle', unread: false,
         messages: [], cursor: 0,
       };
-      w.chats.unshift(chat);
+      w.chats.push(chat);
       w.chatEvents[chat.id] = [];
     }
     for (const other of w.chats.flatMap((c) => c.messages.flatMap((m) => partsOf(m).filter((p) => p.type === 'study')))) {
       if ((other as KbStudyPart).place !== 'chat') (other as KbStudyPart).place = 'chat';
+    }
+    const again = chat.messages.flatMap((m) => partsOf(m)).map((p) => p as unknown as KbStudyPart)
+      .find((p) => p.type === 'study' && p.save.page_id === path.page_id && p.mode === mode && !body.card_ids && p.position < p.total);
+    if (again) {
+      again.place = 'panel';
+      return { chat_id: chat.id, study: structuredClone(again) };
     }
     const id = `st-${++w.seq}`;
     const messageId = `${chat.id}-s${w.seq}`;
@@ -704,7 +734,6 @@ const STUDY_ROUTES: FakeRoutes = {
     const message = chatMessage(messageId, (chat.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [part as unknown as KbMessage['parts'][number]]);
     chat.messages.push(message);
     pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) });
-    touchList(w, chat);
     return { chat_id: chat.id, study: structuredClone(part) };
   }],
   'GET /kb/study/{block_id}': [200, (w, { path }) => structuredClone(findStudy(w, path.block_id).part)],
@@ -747,6 +776,9 @@ const STUDY_ROUTES: FakeRoutes = {
   'POST /kb/study/{block_id}/mark': [200, (w, { path, body }) => {
     const found = findStudy(w, path.block_id);
     markCards(found.part.cards, body.item_ids, body.mark);
+    if (body.mark === 'unclear' || body.mark === 'clear') {
+      for (const q of found.part.questions) if (body.item_ids.includes(q.id)) q.unclear = body.mark === 'unclear';
+    }
     return studyChanged(w, found);
   }],
   'POST /kb/study/{block_id}/answer': [200, (w, { path, body }) => {
@@ -775,21 +807,30 @@ const STUDY_ROUTES: FakeRoutes = {
     if (!text) fail(409, 'Write an answer first.');
     q.response = { choices: [], text, checked: false, score: null, verdict: null, missing: null, comment: null, checking: true, error: null };
     const answered = studyChanged(w, found);
-    const judge = w.judge ?? { verdict: 'partly' as const, missing: 'It doesn’t say the entropies add up.', comment: 'Close: the idea of joining systems is there.' };
+    if (!w.judge) {
+      // P3-a: the review arrives later, as an update of the block (key ideas, model answer…).
+      const review = structuredClone(w.review ?? defaultReview(q));
+      q.response = { choices: [], text, checked: true, ...scoreOf(review), missing: null, comment: null,
+        checked_by: null, checking: false, error: null, review };
+      studyChanged(w, found);
+      return answered;
+    }
+    const judge = w.judge;
     if (!judge.hold) {
       // The verdict arrives later, as an update of the block: the request never waits for it.
       q.response = { choices: [], text, checked: true, score: { right: 1, partly: 0.5, wrong: 0 }[judge.verdict], verdict: judge.verdict,
-        missing: judge.missing || null, comment: judge.comment || null, checking: false, error: null };
+        missing: judge.missing || null, comment: judge.comment || null, checked_by: judge.checked_by ?? null, checking: false, error: null };
       studyChanged(w, found);
     }
     return answered;
   }],
   'POST /kb/study/{block_id}/finish': [200, (w, { path }) => {
     const found = findStudy(w, path.block_id);
-    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null }));
+    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null, status: q.response?.status ?? null }));
     found.part.result = {
       correct: rows.reduce((n, r) => n + (r.score ?? 0), 0), total: rows.length,
-      mistakes: rows.filter((r) => (r.score ?? 0) < 1).length, partly: rows.filter((r) => r.score === 0.5).length, rows,
+      mistakes: rows.filter((r) => (r.status ? r.status !== 'got' : (r.score ?? 0) < 1)).length,
+      partly: rows.filter((r) => r.status === 'almost' || (!r.status && r.score === 0.5)).length, rows,
     };
     return studyChanged(w, found);
   }],
@@ -1099,7 +1140,8 @@ const ROUTES: FakeRoutes = {
   // -- chats --
   'GET /kb/chats': [200, (w, { query }) => {
     const text = typeof query.q === 'string' ? query.q.trim() : '';
-    let list = (text ? w.chats.filter((c) => chatMatches(c, text)) : w.chats).map(chatSummary);
+    const chats = w.chats.filter((c) => c.id !== WIKI_STUDY_CHAT); // never listed (bug 1)
+    let list = (text ? chats.filter((c) => chatMatches(c, text)) : chats).map(chatSummary);
     if (query.filter === 'pinned') list = list.filter((c) => c.pinned);
     if (query.filter === 'recording') list = list.filter((c) => c.recording_material_id);
     if (query.folder_id) list = list.filter((c) => c.folder_ids.includes(query.folder_id!));
@@ -1120,6 +1162,7 @@ const ROUTES: FakeRoutes = {
       pinned: false, engine: a!.id, model: body?.model ?? a!.current_model, effort: body?.effort ?? 'medium', created_at: at, updated_at: at,
       last_preview: '', recording_material_id: recording, folder_ids: [], state: 'idle', unread: false, messages: [], cursor: 0,
     };
+    if (body?.search_rules) applyFakeChatRules(w, c.id, body.search_rules, fail);
     w.chats.push(c);
     w.chatEvents[c.id] = [];
     touchList(w, c);
@@ -1178,7 +1221,8 @@ const ROUTES: FakeRoutes = {
     supersedeQuestions(w, c);
     if (c.state === 'answering') fail(409, 'The agent is still answering in this chat.');
     const user = chatMessage(`${c.id}-u${++w.seq}`, (c.messages.at(-1)?.seq ?? 0) + 1, 'user', clock(w), [{ type: 'text', text: body.text }], {
-      input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [] },
+      input: { text: body.text, mentions: body.mentions ?? [], quotes: body.quotes ?? [], attachments: body.attachments ?? [],
+        ...(body.selection ? { selection: body.selection } : {}) },
     });
     c.messages.push(user);
     pushEvent(w, c.id, { type: 'message', message_id: user.id, message: structuredClone(user) });
@@ -1200,6 +1244,17 @@ const ROUTES: FakeRoutes = {
     return structuredClone(msg);
   }],
   'POST /kb/chats/{chat_id}/messages/{message_id}/regenerate': [202, (w, { path }) => answerAgain(w, path.chat_id, path.message_id, false)],
+  // P2 «Fix in wiki» (chats/wiki_fix.py): written only on this click, while the card still waits.
+  'POST /kb/chats/{chat_id}/messages/{message_id}/wiki-fixes/{fix_id}/apply': [200, (w, { path }) => {
+    const c = findChat(w, path.chat_id);
+    const part = findMessage(c, path.message_id).parts.find((p) => p.type === 'wiki_fix' && p.id === path.fix_id);
+    if (!part || part.type !== 'wiki_fix') return fail(404, 'This fix is no longer in the answer.');
+    if (part.status === 'proposed') {
+      part.status = w.wikiFixStale ? 'stale' : 'applied';
+      pushEvent(w, c.id, { type: 'part_update', message_id: path.message_id, part: structuredClone(part) });
+    }
+    return structuredClone(part);
+  }],
   // As chats/service.py `edit`: the question changes in place, everything after it goes, a new answer starts.
   'POST /kb/chats/{chat_id}/messages/{message_id}/edit': [202, (w, { path, body }) => {
     const c = findChat(w, path.chat_id);
@@ -1541,12 +1596,13 @@ const ROUTES: FakeRoutes = {
     if (pool.credentials.length === 0 && !pool.free_tier) w.hermesProviders.providers = w.hermesProviders.providers.filter((p) => p !== pool);
     return structuredClone(w.hermesProviders);
   }],
-  // Accounts & keys v3: Codex and OpenCode sign out of SKAZ's own folders; Claude Code and Hermes refuse.
+  // Accounts & keys v3: Codex, OpenCode and (N6 decision 14) Claude Code sign out of SKAZ's own folders;
+  // Hermes refuses (it signs in per provider).
   'POST /kb/agents/{engine}/logout': [200, (w, { path }) => {
     const a = findAgent(w, path.engine);
-    if (a.id === 'claude_code') fail(409, 'Claude Code in SKAZ uses the Claude Code sign-in of this Mac, so SKAZ doesn’t sign it out.');
     if (a.id === 'hermes') fail(409, 'Hermes signs in per provider. Open a provider under Hermes Agent and choose Remove… to sign Hermes out of it.');
-    const reason = a.id === 'codex' ? 'Sign in with ChatGPT to use Codex.' : 'Sign in to a model provider to use OpenCode.';
+    const reason = a.id === 'codex' ? 'Sign in with ChatGPT to use Codex.'
+      : a.id === 'claude_code' ? 'Sign in to Claude Code in SKAZ.' : 'Sign in to a model provider to use OpenCode.';
     Object.assign(a, { state: 'signed_out', signed_in: false, reason, action: 'login', models: [], current_model: null });
     return structuredClone(a);
   }],
@@ -1686,7 +1742,31 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const AGENT_UPDATE_ROUTES = agentUpdateRoutes(fail);
+const SEARCH_RULES_ROUTES = searchRulesRoutes(fail);
+
+/**
+ * N6 «Я» routes (fakeMe.ts, typed by types.gen.ts). Undo marks the chat's memory
+ * part `undone` and sends the whole message again, as the backend does (`message` feed event).
+ */
+const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
+  for (const chat of w.chats) {
+    for (const message of chat.messages) {
+      const part = (message.parts as ReadonlyArray<{ type: string; edit_id?: string; undone?: boolean }>)
+        .find((p) => p.type === 'memory' && p.edit_id === editId);
+      if (!part) continue;
+      part.undone = true;
+      pushEvent(w, chat.id, { type: 'message', message_id: message.id, message: structuredClone(message) } as Omit<KbChatEvent, 'seq'>);
+      touchList(w, chat);
+      return;
+    }
+  }
+});
+
+/** P3 study routes (fakeStudyP3.ts): «I did say this», «counted by you». */
+const P3_STUDY_ROUTES: FakeRoutes = p3StudyRoutes({ findStudy, studyChanged: studyChanged as never, fail });
+
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES), ...Object.entries(SEARCH_RULES_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1697,7 +1777,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES), ...Object.keys(SEARCH_RULES_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;

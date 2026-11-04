@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render } from '@testing-library/react';
 import { MarkdownView } from './Markdown';
 import { answerFootnotes } from '../../../lib/answerFootnotes';
@@ -10,6 +12,33 @@ function view(pieces: ReadonlyArray<string | number>) {
 }
 
 describe('Shared Markdown renderer (H4)', () => {
+  it('headings: four visible levels, each at least the body size and larger than the next (bug 3)', () => {
+    const style = document.createElement('style');
+    const read = (file: string) => readFileSync(resolve(__dirname, `../../styles/${file}`), 'utf8');
+    style.textContent = `${read('tokens.css')}\n${read('chat.css')}`;
+    document.head.appendChild(style);
+    document.documentElement.setAttribute('data-kb-ui', '');
+    try {
+      const root = render(<MarkdownView className="kb-md" pieces={['# One\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\nBody text.']} />).container;
+      const tags = [...root.querySelectorAll('h3, h4, h5, h6')].map((h) => h.tagName.toLowerCase());
+      expect(tags).toEqual(['h3', 'h4', 'h5', 'h6', 'h6']);
+      // jsdom keeps custom properties unresolved: read each heading's token, then the token's value.
+      const rootStyle = getComputedStyle(document.documentElement);
+      const px = (el: Element) => {
+        const value = getComputedStyle(el).fontSize;
+        const token = /var\((--[\w-]+)\)/.exec(value)?.[1];
+        return parseFloat(token ? rootStyle.getPropertyValue(token) : value);
+      };
+      const sizes = ['h3', 'h4', 'h5', 'h6'].map((t) => px(root.querySelector(t)!));
+      const body = parseFloat(rootStyle.getPropertyValue('--t-base'));
+      expect(sizes).toEqual([22, 19, 16.5, 15]);
+      expect(Math.min(...sizes)).toBeGreaterThan(body);
+    } finally {
+      style.remove();
+      document.documentElement.removeAttribute('data-kb-ui');
+    }
+  });
+
   it('closes bold that ends in punctuation right before a source chip', () => {
     const root = view(['Для совпавшей части можно избежать обработки. **Но каждый новый токен всё равно нужно вычислять.**', 0, ' Дальше.']);
     const strong = root.querySelector('strong');

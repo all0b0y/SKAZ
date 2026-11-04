@@ -60,8 +60,13 @@ class ConceptsOut(_Model):
     more: bool = False
 
 
-class MatchOut(_Model):
+class MatchChoiceOut(_Model):
+    item: int
     choice: int
+
+
+class MatchOut(_Model):
+    choices: list[MatchChoiceOut]
 
 
 def _json(text: str) -> Any:

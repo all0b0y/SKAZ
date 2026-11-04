@@ -27,6 +27,12 @@ export interface QuitDeps {
   quit: () => void;
   /** Report a shutdown failure (optional). The app still quits afterwards. */
   onShutdownError?: (error: unknown) => void;
+  /** Take the window off the screen at once (the user's 200 ms rule); only when no audio is at risk. */
+  hideWindow?: () => void;
+  /** Bring the window back, e.g. before the warning about a failed save. */
+  showWindow?: () => void;
+  /** Start a fresh SKAZ once this process has exited (Electron's app.relaunch). */
+  relaunch?: () => void;
 }
 
 type Phase = 'idle' | 'saving' | 'draining' | 'settled';
@@ -36,11 +42,26 @@ export class QuitController {
   private authorized = false;
   private deciding = false;
   private pending: Promise<void> | null = null;
+  private relaunchWanted = false;
+  private relaunched = false;
 
   constructor(private readonly deps: QuitDeps) {}
 
   get isShuttingDown(): boolean {
     return this.phase === 'saving' || this.phase === 'draining';
+  }
+
+  /**
+   * A launch arrived (Dock click, a second launch) — wire to 'activate' and 'second-instance'. While running
+   * it is not consumed (false: show the window as before). While shutting down the window is already off
+   * the screen, so the launch must not be lost: a fresh SKAZ starts only after THIS process — backend
+   * included — has exited, because a second backend can't open the database and queue while the old one
+   * still holds them. Returns true when consumed.
+   */
+  onLaunchRequest(): boolean {
+    if (this.phase === 'settled') { this.doRelaunch(); return true; }
+    if (this.isShuttingDown) { this.relaunchWanted = true; return true; }
+    return false;
   }
 
   /** Wire to app 'before-quit'. Returns true when the caller must preventDefault. */
@@ -91,12 +112,17 @@ export class QuitController {
   private beginSave(): void {
     if (this.phase !== 'idle') return;
     this.phase = 'saving';
+    // Nothing at risk: the window leaves now; saving and stopping the backend finish unseen.
+    const hidden = !this.deps.hasUnsentAudio();
+    if (hidden) this.deps.hideWindow?.();
     this.pending = (async () => {
       let saved = false;
       try { saved = await this.deps.saveBeforeQuit!(); } catch { /* explicit discard gate below */ }
+      if (!saved && hidden) this.deps.showWindow?.();
       if (!saved && !this.deps.confirmDiscard()) {
         this.phase = 'idle';
         this.authorized = false;
+        this.relaunchWanted = false; // the user stays: the window is back, nothing to relaunch
         return;
       }
       this.authorized = true;
@@ -130,6 +156,14 @@ export class QuitController {
 
   private finishAndQuit(): void {
     this.phase = 'settled';
+    // stopBackend has settled: the backend has exited (or was killed after its grace).
+    if (this.relaunchWanted) this.doRelaunch();
     this.deps.quit();
+  }
+
+  private doRelaunch(): void {
+    if (this.relaunched) return;
+    this.relaunched = true;
+    this.deps.relaunch?.();
   }
 }

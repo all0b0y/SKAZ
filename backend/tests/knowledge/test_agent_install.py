@@ -98,6 +98,90 @@ async def finished(task: InstallTask) -> InstallTask:
     raise AssertionError("task did not finish")
 
 
+async def test_stages_follow_real_subprocess_and_verification_boundaries(tmp_path: Path) -> None:
+    from skaz.knowledge.api.agents import task_view
+
+    executor = FakeExecutor([HANG])
+    checking, release_check = asyncio.Event(), asyncio.Event()
+
+    async def verify(engine: EngineId) -> EngineStatus:
+        checking.set()
+        await release_check.wait()
+        return EngineStatus(engine, installed=True, version="2.1.300")
+
+    async def resolve(_engine: EngineId) -> dict[str, str]:
+        return {}
+
+    installs = InstallManager(tmp_path / "install", executor=executor, verify=verify, resolve=resolve,
+                              env={"PATH": "/usr/bin:/bin"})
+    task = installs.start("claude_code", "install")
+    try:
+        for _ in range(100):
+            if executor.steps:
+                break
+            await asyncio.sleep(0.01)
+        first = task_view(task, 0).model_dump()
+        assert [(s["label"], s["state"]) for s in first["stages"]] == [
+            (RECIPES["claude_code"].plan("install")[0].label, "running"), ("Check Claude Code", "pending")]
+        executor.steps[0]._stop.set()  # Scripted external process exits successfully.
+        await asyncio.wait_for(checking.wait(), 2)
+        during_check = task_view(task, first["cursor"]).model_dump()
+        assert [s["state"] for s in during_check["stages"]] == ["done", "running"]
+        assert during_check["cursor"] > first["cursor"]  # A stage-only transition wakes cursor polling.
+        release_check.set()
+        await installs.finished(task.id)
+        final = task_view(task, 0).model_dump()
+        assert final["state"] == "succeeded" and [s["state"] for s in final["stages"]] == ["done", "done"]
+    finally:
+        await installs.aclose()
+
+
+async def test_manual_command_preserves_the_actual_argv_with_spaces(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shlex
+
+    from skaz.knowledge.api.agents import task_view
+
+    async def resolve(_engine: EngineId) -> dict[str, str]:
+        return {"binary": "/Users/me/Local Tools/claude"}
+
+    executor = FakeExecutor([([], 0)])
+    installs, _ = manager(tmp_path, executor)
+    monkeypatch.setattr(installs, "_resolve", resolve)
+    task = await finished(installs.start("claude_code", "update"))
+    command = task_view(task, 0).model_dump()["manual_command"]
+    assert command and shlex.split(command) == executor.started[0]["argv"]
+
+
+async def test_manual_command_replays_cwd_and_explicit_env_without_copying_parent_env(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+    from dataclasses import replace
+
+    from skaz.knowledge.api.agents import task_view
+    from skaz.knowledge.install.recipes import Step
+
+    working = tmp_path / "scoped install's directory"
+    working.mkdir()
+    probe = ("import json,os,sys; print(json.dumps(dict(cwd=os.getcwd(), "
+             "scope=os.environ.get('SKAZ_INSTALL_SCOPE'), args=sys.argv[1:])))")
+    literal = "literal argument with spaces and ' quote"
+    step = Step("Harmless scoped probe", (sys.executable, "-c", probe, literal), cwd=str(working),
+                env=(("SKAZ_INSTALL_SCOPE", "only this step's scope"),))
+    monkeypatch.setitem(RECIPES, "codex", replace(RECIPES["codex"], plan=lambda _action: (step,)))
+    executor = FakeExecutor([([], 1)])
+    installs, _ = manager(tmp_path, executor)
+    task = await finished(installs.start("codex", "update"))
+    assert task.state == "failed"
+    command = task_view(task, 0).model_dump()["manual_command"]
+    assert command and "PATH=" not in command  # never copy the inherited environment/possible secrets
+    # Execute ONLY this authored Python probe, never a real installer or agent command.
+    result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True,
+                            env={"PATH": os.defpath}, timeout=10)
+    assert json.loads(result.stdout) == {"cwd": str(working.resolve()),
+                                        "scope": "only this step's scope", "args": [literal]}
+
+
 async def test_success_runs_the_official_installer_then_checks_the_version(tmp_path: Path) -> None:
     executor = FakeExecutor([(["Downloading Claude Code...", "\x1b[32m✔\x1b[0m Installed 2.1.300"], 0)])
     installs, verified = manager(tmp_path, executor)
@@ -109,12 +193,14 @@ async def test_success_runs_the_official_installer_then_checks_the_version(tmp_p
         "set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash",
     ]
     assert [line.text for line in task.lines] == [
+        "Run the official Claude Code installer…",
         "$ /bin/bash -c set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash",
         "Downloading Claude Code...",
         "✔ Installed 2.1.300",
+        "Check Claude Code…",
         "Claude Code 2.1.300 is ready.",
     ]
-    assert [line.seq for line in task.after(2)] == [3, 4]
+    assert [line.seq for line in task.after(2)] == [3, 4, 5, 6]
     assert verified == ["claude_code"]
     env = executor.started[0]["env"]
     assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / "install" / "no-sudo")
@@ -126,12 +212,42 @@ async def test_network_failure_has_a_plain_reason_and_manual_command(tmp_path: P
     installs, verified = manager(tmp_path, executor)
     task = await finished(installs.start("claude_code", "install"))
     assert task.state == "failed" and verified == []
+    assert [stage.state for stage in task.stages] == ["error", "pending"]
     assert task.reason == (
         "Run the official Claude Code installer failed. SKAZ couldn't download the installer. "
         "Check the internet connection and try again."
     )
     assert task.recipe.manual_command == "curl -fsSL https://claude.ai/install.sh | bash"
     assert task.recipe.docs_url == "https://code.claude.com/docs/en/setup"
+
+
+async def test_cancel_before_the_task_gets_a_turn_does_not_stay_running(tmp_path: Path) -> None:
+    executor = FakeExecutor([HANG])
+    installs, verified = manager(tmp_path, executor)
+    task = installs.start("codex", "install")
+    await installs.cancel(task.id)
+    assert task.state == "cancelled" and executor.started == [] and verified == []
+    assert all(stage.state == "pending" for stage in task.stages)
+
+
+async def test_unexpected_output_failure_stops_the_process_and_has_a_safe_terminal_error(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def broken_lines(self: FakeStep) -> AsyncIterator[str]:
+        yield "Preparing"
+        raise RuntimeError("PRIVATE-INSTALL-DIAGNOSTIC")
+
+    monkeypatch.setattr(FakeStep, "lines", broken_lines)
+    executor = FakeExecutor([HANG])
+    installs, _ = manager(tmp_path, executor)
+    task = installs.start("codex", "install")
+    try:
+        await finished(task)
+        assert task.state == "failed" and executor.steps[0].terminated
+        assert [stage.state for stage in task.stages] == ["error", "pending"]
+        assert "PRIVATE-INSTALL-DIAGNOSTIC" not in (task.reason or "")
+        assert all("PRIVATE-INSTALL-DIAGNOSTIC" not in line.text for line in task.lines)
+    finally:
+        await installs.aclose()
 
 
 async def test_cancel_stops_the_running_step(tmp_path: Path) -> None:
@@ -145,6 +261,7 @@ async def test_cancel_stops_the_running_step(tmp_path: Path) -> None:
     assert installs.start("codex", "install") is task  # a second click joins the running task, no queue
     await installs.cancel(task.id)
     assert task.state == "cancelled" and executor.steps[0].terminated and verified == []
+    assert [stage.state for stage in task.stages] == ["stopped", "pending"]
     assert task.lines[-1].text == "Cancelled."
 
 
@@ -173,13 +290,33 @@ async def test_outdated_after_install_is_a_failure_with_update_reason(tmp_path: 
     assert task.state == "failed" and "can't find Claude Code" in (task.reason or "")
 
 
+@pytest.mark.parametrize(("engine", "argv"), [
+    ("codex", ["/Users/me/.local/bin/codex", "update"]),
+    ("claude_code", ["/Users/me/.local/bin/claude", "update"]),
+    ("opencode", ["/Users/me/.local/bin/opencode", "upgrade"]),
+])
+async def test_update_of_an_outdated_agent_runs_its_own_command_not_the_installer(
+        tmp_path: Path, engine: EngineId, argv: list[str]) -> None:
+    """M1 follow-up (U1): "Needs an update" uses the agent's own update command, like the offered
+    update — the official curl installer would put a second copy next to an npm/brew install."""
+    assert RECIPES[engine].plan("update") == RECIPES[engine].plan("upgrade")
+    executor = FakeExecutor([([], 0)])
+    installs, _ = manager(tmp_path, executor)
+    task = await finished(installs.start(engine, "update"))
+    assert task.state == "succeeded"
+    assert [step["argv"] for step in executor.started] == [argv]
+    assert not any("curl" in part for part in executor.started[0]["argv"])
+
+
 async def test_hermes_procedure_adds_the_acp_extra_and_checks_it(tmp_path: Path) -> None:
     executor = FakeExecutor([([], 0), ([], 0), (["Hermes ACP check OK"], 0)])
     installs, _ = manager(tmp_path, executor)
     task = await finished(installs.start("hermes", "update"))
     assert task.state == "succeeded"
     assert [step["argv"] for step in executor.started] == [
-        ["/Users/me/.local/bin/hermes", "update"],
+        # User decision (FIX-1 F3.9, migrated from a plain `hermes update`): "Needs an update" leaves the
+        # user's running Hermes services alone too, like the offered update (U1 decision 8).
+        ["/Users/me/.local/bin/hermes", "update", "--no-gateway-restart"],
         [
             "/Users/me/.hermes/hermes-agent/scripts/run-in-hermes-env",
             "python",

@@ -6,6 +6,8 @@ import { KIND_ICON, folderTone } from './materialMeta';
 import { NameField } from './NameField';
 import { SelectionCheckbox, hasDragFiles, hasDragItems, markItemsDropped, readDragItems, useItemsDrag, type ListSelection } from '../ui/listSelection';
 import { useMaterialBatch, useMaterialSelection, type DragRowProps } from '../materials/materialBatch';
+import { useListEntrance } from '../fx/listEntrance';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 const RECENT = 5;
 
@@ -88,7 +90,7 @@ function MaterialRow({ material, tone, meta, sel, drag }: {
   const current = useUi((s) => s.docMaterialId === material.id);
   const reason = sel.reasonOf(material.id);
   return (
-    <li {...sel.rowProps(material.id)} {...drag}>
+    <li {...sel.rowProps(material.id)} {...drag} data-entrance={material.id}>
       <div role="gridcell">
         <button
           type="button"
@@ -138,6 +140,10 @@ function Overview() {
   const setAddOpen = useUi((s) => s.setAddMaterialOpen);
   const showCenter = useUi((s) => s.showCenter);
   const allOpen = useUi((s) => s.center === 'materials');
+  const host = useRef<HTMLDivElement | null>(null);
+  // AnimatedList (stage 6): the rows enter once, on the first load; a material or folder added later fades in alone.
+  useListEntrance('materials', host, contentLoad === 'ready' || contentLoad === 'error',
+    [...materials.map((m) => m.id), ...folders.map((f) => `folder:${f.id}`)]);
 
   const userFolders = folders.filter((f) => !f.system);
   const toneOf = (folderId: string) => {
@@ -147,8 +153,8 @@ function Overview() {
   const systemName = (folderId: string) => folders.find((f) => f.id === folderId && f.system)?.name;
 
   return (
-    <div className="kb-side__scroll">
-      <button type="button" className="kb-row kb-row--action" aria-haspopup="dialog" onClick={() => setAddOpen(true)}>
+    <div className="kb-side__scroll" ref={host}>
+      <button type="button" className="kb-row kb-row--action" aria-haspopup="dialog" data-entrance="" onClick={() => setAddOpen(true)}>
         <Icon name="plus" size={16} className="kb-row__icon" />
         <span className="kb-row__text">Add material</span>
       </button>
@@ -162,15 +168,20 @@ function Overview() {
         </div>
       )}
 
-      <h3 className="kb-subhead" id="kb-recent">Recent</h3>
-      {materials.length === 0 ? (
-        <p className="kb-side__note">{contentLoad === 'loading' ? 'Loading…' : 'No materials yet.'}</p>
-      ) : (
+      <h3 className="kb-subhead" id="kb-recent" data-entrance="">Recent</h3>
+      {materials.length === 0 && contentLoad === 'loading' && <p className="kb-side__note" data-entrance="">Loading…</p>}
+      {materials.length === 0 && contentLoad !== 'loading' && (
+        // The panel's own empty state has the halftone art like the others (FIX2 S-L3).
+        <div data-entrance="">
+          <EmptyState icon="materials" title="No materials yet" compact art={<HalftoneArt id="library" compact />} />
+        </div>
+      )}
+      {materials.length > 0 && (
         <MaterialList items={materials.slice(0, RECENT)} labelledBy="kb-recent" resetKey="recent"
           toneOf={(m) => toneOf(m.folder_id)} metaOf={(m) => systemName(m.folder_id)} />
       )}
 
-      <div className="kb-subhead kb-subhead--row">
+      <div className="kb-subhead kb-subhead--row" data-entrance="">
         <h3 className="kb-subhead__text" id="kb-folders">Folders</h3>
         <IconButton icon="folderPlus" label="New folder" size="sm" onClick={() => setCreating(true)} disabled={creating} />
       </div>
@@ -188,7 +199,7 @@ function Overview() {
           onDone={() => setCreating(false)}
         />
       )}
-      <button type="button" className={`kb-row kb-row--all${allOpen ? ' is-current' : ''}`} data-testid="all-materials"
+      <button type="button" className={`kb-row kb-row--all${allOpen ? ' is-current' : ''}`} data-testid="all-materials" data-entrance=""
         aria-current={allOpen ? 'true' : undefined} onClick={() => showCenter(allOpen ? 'chat' : 'materials')}>
         <span className="kb-row__text">All materials · {materials.length}</span>
       </button>
@@ -223,7 +234,7 @@ function FolderRow({ folder, tone, materialsHere }: { folder: KbFolder; tone?: s
   };
 
   return (
-    <li className="kb-folder">
+    <li className="kb-folder" data-entrance={`folder:${folder.id}`}>
       <div className="kb-folder__line">
         <button type="button" className={`kb-row kb-row--folder${drop.className}`} onClick={() => void store.getState().openFolder(folder.id)}
           title={drop.reason ?? undefined} {...drop.handlers}>
@@ -297,7 +308,7 @@ function FolderView({ folderId }: { folderId: string }) {
         </div>
       )}
       {load === 'ready' && items.length === 0 && (
-        <EmptyState icon="folder" title="No materials in this folder" compact />
+        <EmptyState icon="folder" title="No materials in this folder" compact art={<HalftoneArt id="folder" compact />} />
       )}
       {items.length > 0 && (
         <MaterialList items={items} labelledBy="kb-folder-title" resetKey={folderId} toneOf={() => tone} />

@@ -322,8 +322,8 @@ async def test_concept_from_second_material_merges_via_decision_layer(ready: Kno
     updated: list[tuple[str, list[str]]] = []
 
     class Hook:
-        async def on_concept_updated(self, page_id: str, new_block_ids: list[str]) -> None:
-            updated.append((page_id, list(new_block_ids)))
+        async def on_concepts_updated(self, updates: dict[str, list[str]]) -> None:
+            updated.extend((page_id, list(block_ids)) for page_id, block_ids in updates.items())
 
     decisions = FakeDecisions(lambda question: ChoiceAnswer(
         option=question.options[0], probabilities={}, confidence=0.95)

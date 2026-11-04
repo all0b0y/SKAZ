@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { chatWorld, docWorld } from '../test/fakeBridge';
 import { block, chatMessage, type FakeWorld } from '../test/fakeKb';
+import type { KbQuote } from '../../api/kb/types.gen';
 import { diagramFixRequest } from './diagramFix';
+import { diagramId } from './select/model';
 
 const BROKEN = 'flowchart LR\n  A[Loss] --> ';
 const GOOD = 'flowchart LR\n  A[Boltzmann] --> B[Shannon]';
@@ -28,9 +30,15 @@ describe('D: diagrams in chat answers and wiki pages', () => {
     expect(sent()).toHaveLength(0);
     await user.click(button);
     await waitFor(() => expect(sent()).toHaveLength(1));
-    const body = sent()[0]!.body as { text: string };
+    // FIX-2 (migrated: the source and the error were part of the user's text): the request names the
+    // stored diagram by its id; the backend reads its source from the answer and gives it to the agent
+    // as data, with the error the app reported.
+    const body = sent()[0]!.body as { text: string; quotes: KbQuote[] };
     expect(body.text).toContain('```mermaid');
-    expect(body.text).toContain(BROKEN);
+    expect(body.text).not.toContain('A[Loss]');
+    const shown = within(chat).getByRole('alert').textContent!.replace('Couldn’t draw this diagram: ', '');
+    expect(body.text).not.toContain(shown);
+    expect(body.quotes).toEqual([{ source: 'chat', id: 'c1', message_id: 'c1-a2', block_id: diagramId(BROKEN), text: shown }]);
     // Decision 10: in the answer language — the wiki language the user chose (English in the fixtures).
     expect(body.text).toContain('Reply in English.');
     // Asked once: the button is spent, a second press can't send the same request again.
@@ -79,7 +87,7 @@ describe('D: diagrams in chat answers and wiki pages', () => {
       world.wiki = { ...world.wiki, wiki_language: 'ru', wiki_language_chosen: true };
       const text = await askFix(world);
       expect(text).toContain('Reply in Russian.');
-      expect(text).toContain(BROKEN);
+      expect(text).not.toContain('A[Loss]');
     });
 
     it('no language chosen yet: the reply follows the language of the user’s previous question', async () => {
@@ -89,8 +97,9 @@ describe('D: diagrams in chat answers and wiki pages', () => {
     });
 
     it('nothing to go by: English', () => {
-      expect(diagramFixRequest(BROKEN, 'Parse error', { language: null, hasQuestion: false })).toBe(
-        `The diagram in your answer can’t be drawn (Parse error). Please send a corrected Mermaid diagram. Reply in English.\n\n\`\`\`mermaid\n${BROKEN}\n\`\`\``);
+      expect(diagramFixRequest({ language: null, hasQuestion: false })).toBe(
+        'The diagram in your answer can’t be drawn. Please send it again as a corrected ```mermaid diagram;'
+        + ' its source and the error are attached. Reply in English.');
     });
   });
 

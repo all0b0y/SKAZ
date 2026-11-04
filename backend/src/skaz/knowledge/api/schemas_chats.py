@@ -7,13 +7,17 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
+from ..chats.model import ToolStatus
 from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
+from .schemas_blocks import KbAnswerBlockPart
+from .schemas_search import KbChatSearchRulesUpdate
 from .schemas_study import KbStudyPart
 from .schemas_web import KbWebSearchPart
+from .schemas_wiki_fix import KbWikiFixPart
 
 KbChatState = Literal["idle", "answering"]
 KbChatFilter = Literal["all", "pinned", "recording"]
@@ -54,7 +58,40 @@ class KbQuote(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class KbSelectedItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: The item's id in its block (``node:<id>`` / ``edge:<from>-><to>`` in a Mermaid flowchart).
+    id: str = Field(min_length=1, max_length=200)
+    #: A short label the user saw (the chip shows it).
+    label: str = Field(max_length=300)
+
+
+class KbSelection(BaseModel):
+    """P2: items picked in an earlier answer of this chat — one block (an answer block, or a Mermaid
+    diagram ``mmd-…``) of one message, items by id. Checked against the stored answer when sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_id: str = Field(min_length=1, max_length=200)
+    block_id: str = Field(min_length=1, max_length=200)
+    #: ``study`` (P3-c): «Ask the agent» on a test question — ``block_id`` is the test block, the one
+    #: item its question.
+    kind: Literal["block", "diagram", "study"]
+    #: The block's own title (set by SKAZ from the stored block; ignored when sent).
+    title: str | None = Field(default=None, max_length=300)
+    items: list[KbSelectedItem] = Field(min_length=1, max_length=20)
+    #: ``explain`` / ``wrong``: the «Explain more» / «That’s wrong» buttons; ``ask``: a typed question.
+    intent: Literal["ask", "explain", "wrong"] = "ask"
+
+
 # -- message parts ---------------------------------------------------------------
+
+
+class KbKnowledgePart(BaseModel):
+    """Informational declaration, no approval, execution state or invented duration."""
+
+    type: Literal["knowledge"]
 
 
 class KbTextPart(BaseModel):
@@ -91,12 +128,23 @@ class KbConnectionPart(BaseModel):
     page: KbPageRef | None
 
 
+class KbToolTarget(BaseModel):
+    type: Literal["material", "page"]
+    id: str
+
+
 class KbToolPart(BaseModel):
     type: Literal["tool"]
     #: SKAZ tool name (``skaz_read_page``…).
     name: str
     #: What the agent looked at, e.g. "Read page Entropy" (library titles: show as text).
     label: str
+    #: N8: the material or wiki page it read (the chat overview's «Looked at»); ``None``: no one item.
+    target: KbToolTarget | None = None
+    call_id: str | None = None
+    status: ToolStatus = "unknown"
+    started_at: str | None = None
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class KbPermissionSummary(BaseModel):
@@ -169,9 +217,24 @@ class KbQuestionPart(BaseModel):
     answer: str | None
 
 
-class KbMessagePart(RootModel[Annotated[KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart
+class KbMemoryPart(BaseModel):
+    """An agent's change of «Я» (N6): «Remembered: …» / «Updated skill "…"» with Undo
+    (``POST /kb/me/edits/{edit_id}/undo``); ``undone`` once it was undone."""
+
+    type: Literal["memory"]
+    edit_id: str
+    skill_id: str
+    skill_title: str
+    action: Literal["create", "append", "replace", "delete"]
+    summary: str
+    undone: bool
+
+
+class KbMessagePart(RootModel[Annotated[KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart
+                                        | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
-                                        | KbWebSearchPart,
+                                        | KbWebSearchPart | KbMemoryPart
+                                        | KbAnswerBlockPart | KbWikiFixPart,
                                         Field(discriminator="type")]]):
     pass
 
@@ -193,6 +256,8 @@ class KbMessageInput(BaseModel):
     quotes: list[KbQuote]
     #: Material ids attached with "+" (created by /kb/materials/* or /kb/imports first).
     attachments: list[str]
+    #: P2: the items picked in an earlier answer this question is about (the chip «📍 …»).
+    selection: KbSelection | None = None
 
 
 class KbMessage(BaseModel):
@@ -247,6 +312,15 @@ class KbChatCreate(_Request):
     model: str | None = Field(default=None, max_length=200)
     effort: str | None = Field(default=None, max_length=50)
     recording_material_id: str | None = Field(default=None, max_length=200)
+    #: Rules chosen in the draft composer, committed with the chat before its first answer.
+    search_rules: KbChatSearchRulesUpdate | None = None
+
+    @field_validator("search_rules")
+    @classmethod
+    def initial_rules_are_local(cls, value: KbChatSearchRulesUpdate | None) -> KbChatSearchRulesUpdate | None:
+        if value is not None and value.as_global:
+            raise ValueError("Save global search settings separately before creating a chat.")
+        return value
 
 
 class KbChatLastChoice(_Request):
@@ -281,6 +355,8 @@ class KbSend(_Request):
     attachments: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list,
                                                                                   max_length=MAX_ITEMS)
     context: KbOpenContext = Field(default_factory=KbOpenContext)
+    #: P2: the items picked in an earlier answer of this chat that the question is about.
+    selection: KbSelection | None = None
 
 
 class KbMessageEdit(_Request):

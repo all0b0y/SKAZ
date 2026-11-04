@@ -34,6 +34,26 @@ vi.mock('./logFile', () => ({
 afterEach(() => {
   children.length = 0;
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
+describe('BackendManager checkout provenance', () => {
+  it.each([false, true])('pins development imports without passing a shell PYTHONPATH to packaged code (packaged=%s)', async (packaged) => {
+    const { app } = await import('electron');
+    const { BackendManager } = await import('./backend');
+    Object.assign(app, { isPackaged: packaged });
+    vi.stubEnv('PYTHONPATH', '/a-different-checkout/src');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ status: 'ok' }) })));
+    const manager = new BackendManager({ repoRoot: '/release-checkout', dataDir: '/tmp/skaz-restart-test' });
+    try {
+      await manager.start();
+      if (packaged) expect(spawnEnvs.at(-1)).not.toHaveProperty('PYTHONPATH');
+      else expect(spawnEnvs.at(-1)?.PYTHONPATH).toBe('/release-checkout/backend/src');
+    } finally {
+      children.at(-1)?.emit('exit', 0, null);
+      Object.assign(app, { isPackaged: false });
+    }
+  });
 });
 
 describe('BackendManager.restart', () => {

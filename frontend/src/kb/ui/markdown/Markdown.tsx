@@ -126,7 +126,8 @@ function render(node: SyntaxNode, ctx: Ctx): ReactNode {
     case 'Paragraph': return <p key={key}>{inner()}</p>;
     case 'ATXHeading1': case 'SetextHeading1': return <h3 key={key}>{inner()}</h3>;
     case 'ATXHeading2': case 'SetextHeading2': return <h4 key={key}>{inner()}</h4>;
-    case 'ATXHeading3': case 'ATXHeading4': case 'ATXHeading5': case 'ATXHeading6': return <h5 key={key}>{inner()}</h5>;
+    case 'ATXHeading3': return <h5 key={key}>{inner()}</h5>;
+    case 'ATXHeading4': case 'ATXHeading5': case 'ATXHeading6': return <h6 key={key}>{inner()}</h6>;
     case 'Emphasis': return <em key={key}>{inner()}</em>;
     case 'StrongEmphasis': return <strong key={key}>{inner()}</strong>;
     case 'Strikethrough': return <del key={key}>{inner()}</del>;

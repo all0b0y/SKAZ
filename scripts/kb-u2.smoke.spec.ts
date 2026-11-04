@@ -281,7 +281,11 @@ for (const theme of THEMES) {
       await expect(dialog.getByText('Not installed')).toBeVisible();
       await check(`ob-agent-${tag}`);
       await dialog.locator('[data-engine="hermes"]').getByRole('button', { name: 'Install' }).click();
-      await expect(dialog.getByLabel('Install log')).toContainText('Downloading Hermes Agent');
+      const progress = page.getByRole('dialog', { name: 'Install Hermes Agent', exact: true });
+      await expect(progress).toBeVisible();
+      await expect(progress.getByLabel('Install log')).toHaveCount(0);
+      await progress.getByRole('button', { name: 'Show output' }).click();
+      await expect(progress.getByLabel('Install log')).toContainText('Downloading Hermes Agent');
       await check(`ob-agent-installing-${tag}`);
     });
   }

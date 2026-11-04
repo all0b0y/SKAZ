@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -16,12 +18,15 @@ from typing import Any
 import httpx
 import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, EngineId, ModelOption, ToolCall
+from skaz.knowledge.agents.engine import AgentTurn, EngineId, ModelOption, ToolCall, ToolResult
 from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.agents.tools import TOOL_NAMES
+from skaz.knowledge.answer_blocks.registry import BLOCKS
 from skaz.knowledge.chats.model import Message, TextPart
 from skaz.knowledge.chats.service import ChatService
 from skaz.knowledge.markdown.page import Heading, parse_page, render_page
+from skaz.knowledge.me.prompt import ME_TOOL_NAMES
+from skaz.knowledge.permissions.search_rules import ChatRules
 from skaz.knowledge.permissions.wiki_tools import WIKI_TOOL_NAMES
 from skaz.knowledge.study.tools import STUDY_TOOL_NAMES
 from tests.knowledge.chat_support import (
@@ -82,6 +87,161 @@ async def test_chat_routes_require_the_token(kb_app: Any) -> None:
         assert (await anonymous.get("/kb/chats")).status_code == 401
         assert (await anonymous.post("/kb/chats", json={})).status_code == 401
         assert (await anonymous.get("/kb/mentions")).status_code == 401
+
+
+async def test_new_chat_has_its_draft_search_rules_before_the_first_answer(env: Env) -> None:
+    enabled = await env.client.put("/kb/settings/search", json={"beta": True})
+    assert enabled.status_code == 200 and enabled.json()["beta"] is True
+    response = await env.client.post("/kb/chats", json={"search_rules": {
+        "sources_only": True, "sources": [env.library.lecture],
+        "web": {"only_on": True, "only": ["arxiv.org"]}}})
+    assert response.status_code == 201, response.text
+    chat_id = response.json()["id"]
+    rules = (await env.client.get(f"/kb/chats/{chat_id}/search-rules")).json()
+    assert rules["sources_only"] is True
+    assert [source["id"] for source in rules["sources"]] == [env.library.lecture]
+    assert rules["active"]["only"] == ["arxiv.org"]
+    await env.answered(chat_id, "A controlled source-scoped question")
+    turn = env.agents.engines["codex"].turns[0]
+    sent = turn.instructions + "\n".join(message.content for message in turn.messages)
+    assert "Use only these sources: " + env.library.lecture in sent
+    assert "Search only these sites: arxiv.org." in sent
+
+
+async def test_initial_rules_default_beta_off_keeps_never_and_sources_and_restores_hidden_lists(
+        env: Env) -> None:
+    settings = await env.client.get("/kb/settings/search")
+    assert settings.status_code == 200 and settings.json()["beta"] is False
+    saved = await env.client.put("/kb/settings/search", json={"never": ["quora.com"]})
+    assert saved.status_code == 200
+    chat = await env.chat(search_rules={
+        "sources_only": True, "sources": [env.library.lecture],
+        "web": {"never": ["pinterest.com"], "only_on": True,
+                "only": ["arxiv.org"], "prefer": ["acm.org"]}})
+    url = f"/kb/chats/{chat['id']}/search-rules"
+    rules = (await env.client.get(url)).json()
+    assert rules["settings"]["beta"] is False
+    assert rules["active"]["only"] == [] and rules["active"]["prefer"] == []
+    assert rules["active"]["never"] == ["quora.com", "pinterest.com"]
+    assert rules["web"]["only"] == ["arxiv.org"] and rules["web"]["prefer"] == ["acm.org"]
+    assert rules["sources_only"] is True
+    assert [source["id"] for source in rules["sources"]] == [env.library.lecture]
+    await env.answered(chat["id"], "A controlled question with Beta disabled")
+    turn = env.agents.engines["codex"].turns[0]
+    sent = turn.instructions + "\n".join(message.content for message in turn.messages)
+    assert "Use only these sources: " + env.library.lecture in sent
+    assert "Never search these sites: quora.com, pinterest.com." in sent
+    assert "Search only these sites" not in sent and "Prefer these sites" not in sent
+    enabled = await env.client.put("/kb/settings/search", json={"beta": True})
+    assert enabled.status_code == 200
+    restored = (await env.client.get(url)).json()
+    assert restored["active"]["only"] == ["arxiv.org"]
+    assert restored["active"]["prefer"] == ["acm.org"]
+    assert restored["active"]["never"] == rules["active"]["never"]
+    assert restored["sources"] == rules["sources"]
+
+
+@pytest.mark.parametrize("rules", [
+    {"web": {"only_on": True, "only": ["not a site"]}},
+    {"sources": [""]},
+    {"as_global": True, "web": {"never": ["example.org"]}},
+    {"unexpected": "not an input field"},
+])
+async def test_invalid_initial_rules_do_not_create_a_chat(env: Env, rules: dict[str, Any]) -> None:
+    before = env.chats.repo.count()
+    response = await env.client.post("/kb/chats", json={"search_rules": rules})
+    assert response.status_code == 422, response.text
+    assert env.chats.repo.count() == before
+
+
+async def test_initial_rules_preserve_global_never_and_normalise_library_choices(env: Env) -> None:
+    settings = {"never": ["quora.com"], "prefer": ["arxiv.org"], "beta": True}
+    assert (await env.client.put("/kb/settings/search", json=settings)).status_code == 200
+    chat = await env.chat(search_rules={
+        "sources_only": True, "sources": [env.library.lecture, env.library.textbook, env.library.lecture],
+        "excluded": [env.library.lecture, env.library.lecture],
+        "web": {"never": ["quora.com", "pinterest.com"], "only_on": True,
+                "only": ["https://www.Example.org/path"]}, "as_global": False})
+    rules = (await env.client.get(f"/kb/chats/{chat['id']}/search-rules")).json()
+    assert rules["active"]["never"] == ["quora.com", "pinterest.com"]
+    assert rules["active"]["only"] == ["example.org"]
+    assert [source["id"] for source in rules["sources"]] == [env.library.textbook]
+    assert [source["id"] for source in rules["excluded"]] == [env.library.lecture]
+    assert rules["sources_since"] is not None
+    assert (await env.client.get("/kb/settings/search")).json() == {
+        "never": ["quora.com"], "only_on": False, "only": [], "prefer": ["arxiv.org"], "beta": True}
+
+
+async def test_initial_rules_insert_failure_rolls_back_the_chat_and_its_fts(env: Env) -> None:
+    db = env.runtime.kb.db
+    before = env.chats.repo.count()
+    with db.read() as connection:
+        fts_before = connection.execute("SELECT count(*) FROM chat_fts").fetchone()[0]
+    with db.write() as connection:
+        connection.execute("CREATE TRIGGER fail_initial_rules BEFORE INSERT ON chat_search_rules "
+                           "BEGIN SELECT RAISE(ABORT, 'controlled rules write failure'); END")
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="controlled rules write failure"):
+            await env.chats.create(initial_search_rules=ChatRules(sources_only=True,
+                                                                  sources=(env.library.lecture,)))
+    finally:
+        with db.write() as connection:
+            connection.execute("DROP TRIGGER fail_initial_rules")
+    assert env.chats.repo.count() == before
+    with db.read() as connection:
+        assert connection.execute("SELECT count(*) FROM chat_fts").fetchone()[0] == fts_before
+        assert connection.execute("SELECT count(*) FROM chat_search_rules").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("engine", ["codex", "claude_code", "hermes", "opencode"])
+async def test_general_knowledge_is_one_persisted_notice_not_an_approval(env: Env, engine: EngineId) -> None:
+    env.agents.scripts[engine] = lambda _turn: text(
+        "⟦know", "ledge⟧", "A general explanation outside the material. ",
+        "⟦knowledge⟧", "A second general example.")
+    chat = await env.chat(engine=engine)
+    message = await env.answered(chat["id"], "Explain a topic missing from my materials")
+    assert message["state"] == "done"
+    assert chips(message, "knowledge") == [{"type": "knowledge"}]
+    assert not chips(message, "permission") and not chips(message, "question")
+    assert not chips(message, "tool") and not chips(message, "web_search")
+    assert "⟦knowledge⟧" not in all_text(message)
+    restored = await env.message(chat["id"], message["id"])
+    assert chips(restored, "knowledge") == [{"type": "knowledge"}]
+
+
+@pytest.mark.parametrize("engine", ["codex", "claude_code", "hermes", "opencode"])
+async def test_every_engine_gets_a_concrete_block_choice_guide_and_valid_examples(
+        env: Env, engine: EngineId) -> None:
+    chat = await env.chat(engine=engine)
+    await env.answered(chat["id"], "Compare two approaches")
+    rules = env.agents.engines[engine].turns[-1].instructions
+    assert "Default to the matching ready-made block" in rules
+    assert "compare" in rules and "cause_chain" in rules and "definition" in rules
+    assert "⟦knowledge⟧" in rules
+    assert "skaz_web_read" in rules
+    assert "Ask for permission to use general knowledge" not in rules
+    examples = re.findall(r"```skaz-block\n(.*?)\n```", rules, re.DOTALL)
+    assert len(examples) >= 3
+    assert {json.loads(example)["type"] for example in examples} >= {"compare", "definition", "steps"}
+    # Validate the exact input schemas, without treating illustrative source ids as issued evidence.
+    for example in examples:
+        data = json.loads(example)
+        BLOCKS[data["type"]].schema.model_validate(data)
+
+
+async def test_a_knowledge_notice_alone_does_not_count_as_an_answer(env: Env) -> None:
+    env.agents.scripts["codex"] = lambda _turn: text("⟦knowledge⟧")
+    chat = await env.chat()
+    message = await env.answered(chat["id"], "Explain")
+    assert message["state"] == "failed"
+    assert chips(message, "knowledge") == [{"type": "knowledge"}]
+
+
+async def test_uncited_text_does_not_fabricate_a_report_of_using_general_knowledge(env: Env) -> None:
+    env.agents.scripts["codex"] = lambda _turn: text("Which part would you like to discuss?")
+    chat = await env.chat()
+    message = await env.answered(chat["id"], "Hello")
+    assert not chips(message, "knowledge")
 
 
 async def test_create_read_rename_pin_and_delete(env: Env) -> None:
@@ -423,6 +583,7 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
         ToolCall("", "c1", "skaz_search", {"query": "энтропия"}),
         ToolCall("", "c2", "mcp__skaz__skaz_read_page", {"page_id": lib.concept}),
         ToolCall("", "c3", "skaz_read_material", {"material_id": lib.lecture}),
+        ToolResult("", "c1", "{}"), ToolResult("", "c2", "{}"), ToolResult("", "c3", "{}"),
         *text("Готово."),
     ]
     chat = await env.chat()
@@ -430,12 +591,22 @@ async def test_tool_calls_become_tool_parts_and_turns_carry_the_skaz_tools(env: 
     tools = [(part["name"], part["label"]) for part in chips(message, "tool")]
     assert tools == [("skaz_search", "Searched “энтропия”"), ("skaz_read_page", "Read page Энтропия"),
                      ("skaz_read_material", "Read Лекция 8")]
+    # N8: confirmed reads keep their target (a call without a result is not evidence it was read).
+    assert [part["status"] for part in chips(message, "tool")] == ["done", "done", "done"]
+    assert [part["target"] for part in chips(message, "tool")] == [
+        None, {"type": "page", "id": lib.concept}, {"type": "material", "id": lib.lecture}]
     turn = env.agents.engines["codex"].turns[-1]
     # 0.3.1 P: the read tools, the four wiki tools that ask the user first and SKAZ's question tool;
-    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first).
+    # W-3b: Codex searches the web only through SKAZ's tool (each query asked first);
+    # N6 «Я»: the Me tools are in every chat turn (refused at call time when Me is off). Since batch B5 the
+    # runtime registers them right after the chat service is built (no lazy attach on the first turn), so
+    # they come before the study, ask and web tools. P2: the «Fix in wiki» proposal (shown to the user,
+    # written only on their click) comes last.
     assert turn.tools is not None
-    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *STUDY_TOOL_NAMES,
-                                                             "skaz_ask_user", "skaz_web_search")
+    assert tuple(spec.name for spec in turn.tools) == (*TOOL_NAMES, *WIKI_TOOL_NAMES, *ME_TOOL_NAMES,
+                                                       *STUDY_TOOL_NAMES, "skaz_ask_user", "skaz_web_search",
+                                                       "skaz_web_read",
+                                                       "skaz_wiki_propose_fix")
     assert "⟦m:<material_id>:<seg>|<exact words>⟧" in turn.instructions
     assert "skaz-connection" in turn.instructions
     assert "analysis" in turn.instructions and "never as evidence" in turn.instructions

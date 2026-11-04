@@ -1,4 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MarkdownView } from './Markdown';
@@ -33,6 +35,24 @@ const pct = (dialog: HTMLElement) => Number(within(dialog).getByRole('status', {
 const viewerSvg = (dialog: HTMLElement) => dialog.querySelector('.kb-dviewer__canvas svg') as SVGSVGElement;
 
 describe('Diagram: Open full size', () => {
+  it('⤢ is hidden until the diagram is hovered or focused (bug 6, 2026-10-26)', async () => {
+    const css = readFileSync(resolve(__dirname, '../../styles/diagram.css'), 'utf8');
+    expect(css).toMatch(/\.kb-diagram:hover \.kb-diagram__tools, \.kb-diagram:focus-within \.kb-diagram__tools \{ opacity: 1; \}/);
+    expect(css).toMatch(/@media \(hover: none\) \{ \.kb-diagram__tools \{ opacity: 1; \} \}/);
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+    try {
+      const { figure } = await drawn();
+      const tools = figure.querySelector('.kb-diagram__tools') as HTMLElement;
+      expect(getComputedStyle(tools).opacity).toBe('0');
+      act(() => within(figure).getByRole('button', { name: 'Open full size' }).focus());
+      expect(getComputedStyle(tools).opacity).toBe('1');
+    } finally {
+      style.remove();
+    }
+  });
+
   it('⤢ on the diagram opens it over the window: Diagram · − % + · Fit · 100% · Copy · Close, and a hint', async () => {
     canvasSize();
     const { user, figure } = await drawn();

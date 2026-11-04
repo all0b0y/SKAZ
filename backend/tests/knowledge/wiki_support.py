@@ -142,9 +142,13 @@ async def ingest_done(ingest: IngestService, material_id: str) -> str:
 
 
 async def settle_wiki(service: WikiService, ingest: IngestService) -> None:
-    """Wait for the jobs ingest started around the new source (overview, connections)."""
+    """Wait for the jobs ingest started around the new source (overview, connections).
+
+    ``ingest.busy``, not ``active_jobs()``: a done build leaves ``active_jobs()`` a moment before
+    its listeners start the follow-ups, which then ran on into the test's next step.
+    """
     for _ in range(500):
-        if not service.busy and not ingest.active_jobs():
+        if not service.busy and not ingest.busy:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("wiki jobs did not finish")

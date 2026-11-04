@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "scripts" / "gen-kb-types.py"
@@ -22,6 +27,28 @@ def test_types_gen_ts_is_fresh() -> None:
     expected = module.render()
     current = module.OUTPUT.read_text(encoding="utf-8") if module.OUTPUT.exists() else ""
     assert current == expected, f"frontend/src/api/kb/types.gen.ts is stale. Run: {module.COMMAND}"
+
+
+def test_generator_uses_its_checkout_not_an_installed_or_foreign_package(tmp_path: Path) -> None:
+    foreign = tmp_path / "foreign"
+    package = foreign / "skaz"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("raise RuntimeError('FOREIGN-SKAZ-MUST-NOT-LOAD')\n")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--check"], cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(foreign)}, capture_output=True, text=True, timeout=45,
+        check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_generator_refuses_an_already_loaded_foreign_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import skaz
+
+    monkeypatch.setattr(skaz, "__file__", str(tmp_path / "other-checkout" / "skaz" / "__init__.py"))
+    with pytest.raises(RuntimeError, match="different checkout"):
+        generator().load_openapi()
 
 
 def test_generator_covers_only_kb_routes_and_their_schemas() -> None:

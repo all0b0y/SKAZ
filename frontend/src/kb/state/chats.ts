@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbSavedAnalysis } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
+import type { KbChatSearchRules } from '../api/searchRules';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
@@ -32,6 +33,8 @@ export interface ChatsData {
   chats: Record<string, OpenChat>;
   /** Agent/model/effort picked for the new chat before its first message. */
   draftAgent: AgentChoice | null;
+  /** Search and source choices for New chat, kept in memory until its first send. */
+  draftSearchRules: KbChatSearchRules | null;
   /** How the user answered a permission request in this window (to say «Allowed in this chat»). */
   decisions: Record<string, KbPermissionDecision['decision']>;
 }
@@ -62,6 +65,7 @@ export interface ChatsActions {
   /** Change agent/model/effort; on an existing chat the backend records it (409 = not available). */
   setAgent: (chatId: string | null, choice: AgentChoice) => Promise<ActionResult>;
   setDraftAgent: (choice: AgentChoice | null) => void;
+  setDraftSearchRules: (rules: KbChatSearchRules | null) => void;
   /** A material or page was deleted: mark it gone in every loaded chat (see `forgetInChat`). */
   forget: (gone: Gone) => void;
   /** Answer an agent's permission request (0.3.1 P); the card shows the returned part. */
@@ -87,6 +91,28 @@ function summaryOf(chat: KbChat): KbChatSummary {
 /** True while an answer in this chat is still being written. */
 export function isAnswering(chat: Pick<KbChat, 'messages'> | null): boolean {
   return !!chat && chat.messages.some((m) => m.role === 'assistant' && m.state === 'streaming');
+}
+
+/**
+ * Bug 7 (2026-10-26): a question shows the moment it is sent — your message and an answer that is
+ * starting, under local ids — and gives way to the backend's copies when they come.
+ */
+export const LOCAL_ID = 'local-';
+export const isLocal = (id: string) => id.startsWith(LOCAL_ID);
+function withoutLocal(messages: KbMessage[]): KbMessage[] {
+  return messages.some((m) => isLocal(m.id)) ? messages.filter((m) => !isLocal(m.id)) : messages;
+}
+let localSeq = 0;
+function localPair(chat: KbChat, input: KbMessageInput): [KbMessage, KbMessage] {
+  const seq = chat.messages.reduce((top, m) => Math.max(top, m.seq), 0);
+  const now = new Date().toISOString();
+  localSeq += 1;
+  const base = { created_at: now, engine: chat.engine, model: chat.model, failure: null, saved_page_id: null };
+  return [
+    { ...base, id: `${LOCAL_ID}u${localSeq}`, seq: seq + 1, role: 'user', state: 'done',
+      parts: input.text ? [{ type: 'text', text: input.text }] : [], input },
+    { ...base, id: `${LOCAL_ID}a${localSeq}`, seq: seq + 2, role: 'assistant', state: 'streaming', parts: [], input: null },
+  ];
 }
 
 function upsertMessage(messages: KbMessage[], message: KbMessage): KbMessage[] {
@@ -133,14 +159,16 @@ export function forgetInChat(chat: KbChat, gone: Gone): KbChat {
   return changed ? { ...chat, messages } : chat;
 }
 
-/** The message with the part replaced by the part with the same id (null = no such part). */
+/** Replace a part by its identity; tool call ids are local to one explicitly addressed answer. */
 export function replacePart(messages: KbMessage[], part: AnyMessagePart, messageId?: string | null): KbMessage[] | null {
-  const id = 'id' in part ? part.id : null;
-  if (!id) return null;
+  const tool = part.type === 'tool';
+  const id = tool ? part.call_id : 'id' in part ? part.id : null;
+  if (!id || (tool && !messageId)) return null;
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i]!;
     if (messageId && m.id !== messageId) continue;
-    const at = partsOf(m).findIndex((p) => 'id' in p && p.id === id);
+    const at = partsOf(m).findIndex((p) => tool ? p.type === 'tool' && p.call_id === id
+      : p.type === part.type && 'id' in p && p.id === id);
     if (at < 0) continue;
     const parts = m.parts.slice();
     parts[at] = part as KbMessage['parts'][number];
@@ -180,6 +208,8 @@ export function applyEvents(chat: KbChat, events: KbChatEvent[]): KbChat {
       continue;
     }
     if ((e.type === 'message' || e.type === 'state') && e.message) {
+      // The backend's copy of a question just sent replaces the one shown at once (bug 7).
+      if (e.message.role === 'user') messages = withoutLocal(messages);
       messages = upsertMessage(messages, e.message);
       continue;
     }
@@ -230,7 +260,8 @@ export function createChatsStore(client: KbClient): ChatsStore {
     const merge = (id: string, messages: KbMessage[], created?: KbMessage) => {
       const open = get().chats[id];
       if (!open?.chat) return;
-      let next = open.chat.messages;
+      // The backend's copy of a question replaces the one shown at once in the same update (bug 7).
+      let next = messages.some((m) => m.role === 'user') ? withoutLocal(open.chat.messages) : open.chat.messages;
       for (const m of messages) next = upsertMessage(next, m);
       if (created && !next.some((m) => m.id === created.id)) next = upsertMessage(next, created);
       const chat = { ...open.chat, messages: next, state: isAnswering({ messages: next }) ? 'answering' as const : 'idle' as const };
@@ -271,6 +302,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
       currentId: null,
       chats: {},
       draftAgent: null,
+      draftSearchRules: null,
       decisions: {},
 
       loadList: async () => {
@@ -338,24 +370,47 @@ export function createChatsStore(client: KbClient): ChatsStore {
         let id = options.newChat ? null : get().currentId;
         if (!id) {
           const draft = get().draftAgent;
+          const rules = options.newChat ? null : get().draftSearchRules;
           try {
             const chat = await client.call('POST /kb/chats', {
-              body: draft ? { engine: draft.engine, model: draft.model, effort: draft.effort } : {},
+              body: { ...(draft ? { engine: draft.engine, model: draft.model, effort: draft.effort } : {}),
+                ...(rules ? { search_rules: { web: rules.web, sources_only: rules.sources_only,
+                  sources: rules.sources.map((s) => s.id), excluded: rules.excluded.map((s) => s.id), as_global: false } } : {}) },
             });
             putChat(chat);
             id = chat.id;
             // A chat asked from ⌘K leaves New chat's own agent choice alone.
-            set({ currentId: id, draftAgent: options.newChat ? get().draftAgent : null });
+            set({ currentId: id, draftAgent: options.newChat ? get().draftAgent : null,
+              draftSearchRules: options.newChat || get().draftSearchRules !== rules ? get().draftSearchRules : null });
           } catch (error) {
             return { ok: false, error: errorText(error) };
           }
         }
         const chatId = id;
+        let settled = false;
+        // A microtask, not now: the click that sent it finishes its own render first (the Send arrow,
+        // Resend's turn), then the question shows — still before the next frame.
+        queueMicrotask(() => {
+          const shown = get().chats[chatId]?.chat;
+          if (settled || !shown) return;
+          const messages = [...withoutLocal(shown.messages), ...localPair(shown, input)];
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...s.chats[chatId]!, chat: { ...shown, messages, state: 'answering' } } } }));
+        });
+        const dropLocal = () => {
+          const open = get().chats[chatId];
+          if (!open?.chat) return;
+          const messages = withoutLocal(open.chat.messages);
+          if (messages === open.chat.messages) return;
+          const chat = { ...open.chat, messages, state: isAnswering({ messages }) ? 'answering' as const : 'idle' as const };
+          set((s) => ({ chats: { ...s.chats, [chatId]: { ...open, chat } } }));
+        };
         try {
           const res = await client.call('POST /kb/chats/{chat_id}/messages', {
             path: { chat_id: chatId },
-            body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context },
+            body: { text: input.text, mentions: input.mentions, quotes: input.quotes, attachments: input.attachments, context,
+              ...(input.selection ? { selection: input.selection } : {}) },
           });
+          settled = true;
           // Q-A2: a message of your own closes a waiting question (its part_update confirms it).
           supersedeQuestions(chatId);
           merge(chatId, [res.user], res.assistant);
@@ -363,11 +418,14 @@ export function createChatsStore(client: KbClient): ChatsStore {
           set((s) => ({ list: [...s.list].sort(byUpdated) }));
           return { ok: true, value: chatId };
         } catch (error) {
+          settled = true;
+          dropLocal(); // the field gets the text back (Composer)
           return { ok: false, error: errorText(error) };
         }
       },
 
       stop: (chatId, messageId) => act(async () => {
+        if (isLocal(messageId)) return; // not started on the backend yet: nothing to stop there
         const m = await client.call('POST /kb/chats/{chat_id}/messages/{message_id}/stop', { path: { chat_id: chatId, message_id: messageId } });
         merge(chatId, [m]);
       }),
@@ -448,6 +506,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
         });
       },
       setDraftAgent: (choice) => set({ draftAgent: choice }),
+      setDraftSearchRules: (rules) => set({ draftSearchRules: rules }),
       decide: (chatId, partId, body) => act(async () => {
         const part = await decidePermission(client, partId, body);
         set((s) => ({ decisions: { ...s.decisions, [partId]: body.decision } }));

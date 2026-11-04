@@ -1,5 +1,6 @@
+import { useReducedMotion } from '../../ui/motionLevel';
 import { useEffect, useRef, useState } from 'react';
-import { useReducedMotion } from 'motion/react';
+
 import { FxCanvas } from '../FxCanvas';
 import { drawLensDots } from './draw';
 import { chipLens, lensDots, stepHover, stipplePoints, type Pt } from './stipple';

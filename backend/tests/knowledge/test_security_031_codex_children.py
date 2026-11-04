@@ -1,7 +1,8 @@
 """Security review 0.3.1, S-08: Codex app-server processes (chat, wiki, and the W-3b search run) are
 registered with the backend's child registry, so quitting SKAZ (``_Server.handle_exit`` →
-``CHILDREN.signal_all``) stops them too — not only their stdin closing. Codex keeps its own process
-group (no ``start_new_session``): it is signalled as a single process.
+``CHILDREN.signal_all``) stops them too — not only their stdin closing. Codex runs in its own process
+group (``start_new_session``, N6 decision 19): the whole group is signalled, so the npm shim's native
+child goes too.
 
 Real subprocess boundary (the fixture server of ``tests/test_codex_rpc.py``), no Codex CLI.
 """

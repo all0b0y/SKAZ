@@ -11,7 +11,7 @@ export interface AddMaterialPreset {
   unreadable: number;
 }
 
-export type SettingsSection = 'conn' | 'models' | 'rec' | 'wiki' | 'skills' | 'storage' | 'privacy' | 'look' | 'about';
+export type SettingsSection = 'conn' | 'models' | 'rec' | 'wiki' | 'skills' | 'me' | 'storage' | 'privacy' | 'look' | 'about' | 'search';
 
 /**
  * Transient UI state of the window (not persisted): what is open right now.
