@@ -4,9 +4,9 @@
 
 # SKAZ
 
-### Clases, reuniones y documentos convertidos en una wiki a la que puedes preguntar
+### Convierte la información en conocimiento que puedas seguir ampliando
 
-Graba o añade una fuente · pregunta con citas exactas · una wiki que se mantiene al día sola
+Organiza y conecta · comprende y aprende · repasa y explora
 
 [![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2c2e31)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
@@ -23,16 +23,18 @@ Graba o añade una fuente · pregunta con citas exactas · una wiki que se manti
 
 <br><br>
 
-[**Instalación**](#-instalación) · [**Funciones**](#-funciones) · [**Privacidad**](#-privacidad-y-datos) · [**Cómo funciona**](#-cómo-funciona) · [**Contribuir**](../../CONTRIBUTING.md)
+[**Instalación**](#-instalación) · [**Cómo usarlo**](#-de-la-información-al-conocimiento) · [**Funciones**](#-funciones) · [**Privacidad**](#-privacidad-y-datos) · [**Cómo funciona**](#-cómo-funciona) · [**Contribuir**](../../CONTRIBUTING.md)
 
 </div>
 
 ---
 
-SKAZ es una app para macOS para todo lo que escuchas y lees. Graba una clase o una reunión, o
-añade un PDF, un artículo, un enlace de vídeo o un archivo. SKAZ guarda cada fuente en tu propia
-carpeta de archivos Markdown, construye una wiki a partir de ellas y responde a tus preguntas con
-enlaces al momento o la página exactos.
+SKAZ es una app para macOS que te ayuda a organizar información, comprenderla y volver a lo que
+has aprendido. Reúne archivos, artículos, notas, vídeos o contenido hablado en una base de
+conocimiento conectada. Haz preguntas con referencias a tus fuentes, aprende con tarjetas y
+tests, repasa lo estudiado y amplía lo que sabes con nuevas fuentes.
+
+Tus materiales y tu wiki se guardan como archivos Markdown en la carpeta que tú elijas.
 
 > [!WARNING]
 > **Alfa / acceso anticipado.** Habrá errores y cambios incompatibles, también en los datos
@@ -42,30 +44,60 @@ enlaces al momento o la página exactos.
 
 ## 💡 Por qué SKAZ
 
-Una clase, la reunión de la semana pasada, un capítulo que leíste: acaban en sitios distintos y
-nada los conecta. SKAZ los mantiene juntos. Cada fuente recibe sus apuntes y páginas de conceptos
-en una sola wiki, así que la misma idea de una clase y de un libro termina en la misma página.
-Pregunta *«¿qué dijo sobre la segunda ley?»* y sigue la nota al pie hasta el segundo en que se dijo.
+Guardar información no basta para comprenderla, recordarla o utilizarla. Una buena explicación
+queda enterrada en un chat, las notas pierden su contexto y cuesta retomar un tema que antes
+entendías.
+
+SKAZ reúne fuentes, una wiki conectada, preguntas y estudio en un mismo lugar. Sigue una idea a
+través de distintos materiales, trabaja una explicación, comprueba lo que has entendido y vuelve
+a la fuente cuando necesites refrescarlo. Añade otra perspectiva sin empezar desde cero.
 
 La IA puede equivocarse. Las citas ayudan a comprobar una respuesta; no garantizan que sea correcta.
+
+## 🧭 De la información al conocimiento
+
+### 1. Reúne
+
+Empieza con un PDF, un artículo, un texto propio, un vídeo o un archivo de audio. También puedes
+capturar contenido hablado en directo. Son distintas formas de alimentar la misma biblioteca,
+no flujos separados.
+
+### 2. Organiza y comprende
+
+Convierte los materiales en apuntes y páginas de conceptos conectadas. Pide explicaciones,
+compara ideas y sigue las citas hasta el pasaje, la página o el instante original. Las afirmaciones
+apoyadas en fuentes, las conexiones deducidas por el agente y sus explicaciones se marcan por separado.
+
+### 3. Aprende y repasa
+
+Pide tarjetas o un test a partir de un material, una página de la wiki o un chat. Guarda barajas y
+tests en la wiki, repasa las tarjetas guardadas con repetición espaciada FSRS y vuelve a los temas
+difíciles. La idea es mantener el conocimiento a mano, no dejarlo en un documento que no abrirás
+nunca más.
+
+### 4. Amplía lo que sabes
+
+Busca fuentes adicionales mediante una búsqueda web que tú apruebas. Elige qué resultados añadir
+a la biblioteca, relaciónalos con tus materiales y sigue explorando. Los resultados web se mantienen
+separados de las citas de tu propia biblioteca.
 
 ## 👀 Míralo en acción
 
 <table>
 <tr>
+<td width="50%"><img src="../images/tour-wiki.webp" alt="Una página de concepto de la wiki y sus conexiones"><br><b>Conecta lo que sabes</b><br>Los apuntes y las páginas de conceptos reúnen ideas relacionadas. Distingue lo que dice una fuente de lo que dedujo el agente.</td>
+<td width="50%"><img src="../images/tour-ask.webp" alt="Una respuesta con notas al pie"><br><b>Resuelve tus dudas</b><br>Pregunta sobre tus materiales, sigue una explicación y abre sus referencias para comprobar el contexto.</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/tour-cards.webp" alt="Tarjetas y un test hechos a partir de una clase"><br><b>Refresca lo aprendido</b><br>Crea tarjetas o un test a partir de tus materiales. Guarda una baraja y vuelve a repasarla con repetición espaciada.</td>
+<td width="50%"><img src="../images/tour-web.webp" alt="Aprobar una búsqueda web y añadir una página encontrada a la biblioteca"><br><b>Encuentra otra perspectiva</b><br>Aprueba una consulta web, revisa los resultados y decide qué fuentes añadir a la biblioteca.</td>
+</tr>
+<tr>
+<td width="50%"><img src="../images/tour-diagram.webp" alt="Un diagrama en una respuesta, abierto a tamaño completo"><br><b>Visualiza las relaciones</b><br>Las respuestas pueden incluir diagramas, generados en tu Mac. Ábrelos a tamaño completo para explorar los detalles.</td>
+<td width="50%"><img src="../images/tour-edit.webp" alt="Un agente pide permiso antes de editar una página de la wiki"><br><b>Mantén el control</b><br>Revisa las ediciones que propone el agente antes de permitirlas. Tus propias notas siguen siendo tuyas.</td>
+</tr>
+<tr>
 <td width="50%"><img src="../images/tour-record.webp" alt="Grabar una clase en una carpeta"><br><b>Graba en una carpeta</b><br>Elige la carpeta, pulsa Record y la transcripción aparece mientras se habla, por hablante y con la hora.</td>
-<td width="50%"><img src="../images/tour-ask.webp" alt="Una respuesta con notas al pie"><br><b>Respuestas con citas</b><br>Cada afirmación lleva una nota al pie. Ábrela y SKAZ salta a la cita en la fuente.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-edit.webp" alt="Un agente pide permiso antes de editar una página de la wiki"><br><b>Los agentes preguntan primero</b><br>Un agente cambia la wiki solo a través de SKAZ, y ves el cambio antes de que ocurra: Allow o Deny.</td>
-<td width="50%"><img src="../images/tour-cards.webp" alt="Tarjetas y un test hechos a partir de una clase"><br><b>Tarjetas y tests</b><br>Pide tarjetas o un test sobre una clase. Cada respuesta se apoya en una cita comprobada; las tarjetas vuelven con repetición espaciada.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-web.webp" alt="Aprobar una búsqueda web y añadir una página encontrada a la biblioteca"><br><b>Búsqueda web, con tu permiso</b><br>Ves la consulta exacta antes de enviarla. Una página encontrada entra en la biblioteca con un clic.</td>
-<td width="50%"><img src="../images/tour-diagram.webp" alt="Un diagrama en una respuesta, abierto a tamaño completo"><br><b>Diagramas</b><br>Las respuestas pueden dibujar un diagrama, generado en tu Mac. Ábrelo a tamaño completo y amplía.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="Una página de concepto de la wiki y sus conexiones"><br><b>Una wiki que se escribe sola</b><br>Páginas de conceptos de todas tus fuentes, conectadas entre sí, marcadas con lo que es cita y lo que dedujo el agente.</td>
 <td width="50%"><img src="../images/tour-theme.webp" alt="Cambiar al tema oscuro"><br><b>Claro y oscuro</b><br>Sigue a tu Mac, o elige un tema en <b>Settings → Appearance</b>.</td>
 </tr>
 </table>
@@ -78,15 +110,15 @@ preparados, no reconocimiento de voz, resultados de IA ni búsquedas reales.</su
 
 | | |
 |---|---|
+| 📚 **Tus fuentes, juntas** | PDF, archivos de texto y Markdown, texto pegado, artículos web, archivos de audio y vídeo, y enlaces de vídeo de YouTube, VK Video, RuTube y Vimeo. Usa solo material que tengas permiso para procesar. |
+| 🧠 **Una base de conocimiento conectada** | Apuntes de las fuentes, páginas de conceptos compartidas entre carpetas y análisis guardados forman una sola wiki. Las afirmaciones apoyadas en fuentes, las conexiones deducidas y las explicaciones del agente se marcan por separado. Si las fuentes discrepan, se muestran ambas versiones y decides tú. |
+| 💬 **Comprende con fuentes** | Pregunta sobre toda la biblioteca, compara ideas o vuelve a una explicación. Las citas abren el pasaje, la página o el instante correspondiente. Usa **@** para señalar una página, un material o un chat. Las respuestas pueden incluir diagramas con un visor a tamaño completo. |
+| 🃏 **Aprende y repasa** | Crea tarjetas y tests a partir de una página, un material o un chat, con respuestas correctas respaldadas por citas comprobadas. Guarda barajas y tests en la wiki; las tarjetas guardadas usan **repetición espaciada FSRS**. Repasa lo que toca, practica las tarjetas difíciles o retoma un tema. |
+| 🌐 **Explora más allá de tu biblioteca** | Busca fuentes adicionales desde un chat. Ves la consulta exacta y eliges Allow once, Allow in this chat o Deny; a la búsqueda solo se envía la consulta. Revisa los resultados y añade una página elegida a la biblioteca con un clic. |
+| 🗂️ **Conserva el acceso a lo que sabes** | Tus materiales y tu wiki son una carpeta de archivos `.md`. Ábrela en **Obsidian** o exporta a Markdown con notas al pie que remiten a las fuentes. Tus propias ediciones de la wiki están protegidas frente al agente. |
 | 🎙️ **Grabación en vivo** | Micrófono y, si quieres, el sonido del Mac (Zoom, vídeos; requiere macOS 14.2+ y permiso del sistema). Reconocimiento con **Soniox** (en la nube y en streaming, separación de hablantes, traducción) o **Whisper en este ordenador** (funciona sin conexión). SKAZ nunca cambia de servicio sin avisar. |
-| 📚 **Cualquier fuente** | PDF, documentos, archivos de texto y Markdown, audio y vídeo, artículos web (limpios), texto pegado de cualquier longitud y enlaces de vídeo de YouTube, VK Video, RuTube y Vimeo. Usa solo material que tengas permiso para procesar. |
-| 🧠 **Una wiki viva** | Apuntes de cada fuente, una página por concepto para todas las carpetas y análisis guardados. Cada afirmación está marcada: cita de una fuente, conexión deducida por el agente o explicación del agente. Cuando las fuentes no coinciden, se muestran ambas versiones y decides tú. |
-| 💬 **Chats con notas al pie** | Pregunta sobre toda la biblioteca; el agente sabe qué está abierto y si hay una grabación en curso. Las notas abren el momento exacto de una grabación o la página de un documento. Señala una página, un material o un chat con **@**. Las respuestas pueden incluir diagramas con un visor a tamaño completo. |
-| 🃏 **Tarjetas y tests** | Pide tarjetas o un test sobre una página, un material o un chat. Cada respuesta correcta se apoya en una cita comprobada. Las tarjetas se repasan con repetición espaciada FSRS; las barajas y los tests se pueden guardar en la wiki. |
-| 🌐 **Búsqueda web, con tu permiso** | Antes de que nada salga de tu Mac ves la consulta exacta y eliges Allow once, Allow in this chat o Deny. Solo se envía la consulta. Una página encontrada se puede añadir a la biblioteca con un clic. |
 | 🤖 **Tu agente** | **Codex**, **Claude Code**, **Hermes Agent** u **OpenCode**, con tu propia suscripción o clave; SKAZ puede instalarlos por ti. Los agentes leen la biblioteca con herramientas de SKAZ y cambian páginas de la wiki solo cuando lo permites, con Undo; tus propias notas nunca se tocan. Elige un modelo por chat y marca tus favoritos con una estrella. Las pequeñas decisiones de organización pueden ir a un modelo local o a OpenRouter. |
 | ✍️ **Corrección del reconocimiento** | Una revisión opcional encuentra posibles errores de reconocimiento, corrige los seguros y solo resalta los dudosos. Toda corrección se puede deshacer. |
-| 🗂️ **Archivos normales** | La biblioteca es una carpeta de archivos `.md`. Ábrela en **Obsidian** o exporta todo a Markdown con las fuentes como notas al pie. Tus propias ediciones de la wiki están protegidas frente al agente. |
 | 🔄 **Actualizaciones** | SKAZ consulta las versiones de GitHub al iniciar y una vez al día e instala una actualización verificada desde **Settings → About**. |
 
 ## 📦 Instalación
@@ -121,11 +153,15 @@ No desactives las protecciones de macOS de forma global.
 
 1. **Agente.** Elige Codex, Claude Code, Hermes Agent u OpenCode e inicia sesión con tu propia cuenta.
    SKAZ puede instalar el agente por ti. Se aplican las condiciones, límites y cargos del proveedor.
-2. **Voz.** Añade una clave de Soniox y permite enviar audio a Soniox, o elige **Whisper on this
-   computer** y descarga un modelo de voz (se muestra su tamaño antes; no hace falta clave).
+2. **Voz (opcional).** Si trabajas con audio, añade una clave de Soniox y permite enviar audio a
+   Soniox, o elige **Whisper on this computer** y descarga un modelo de voz (se muestra su tamaño
+   antes; no hace falta clave). Los materiales de texto no necesitan reconocimiento de voz.
 3. **Biblioteca.** Elige dónde se guarda; SKAZ sugiere una carpeta en Documentos.
-4. **Úsalo.** Pulsa **Record** (la carpeta se elige al lado) o **+ Material** para añadir un
-   archivo, un enlace o texto. Pregunta en el chat; abre **Wiki** para leer lo que SKAZ construyó.
+4. **Empieza con un material.** Usa **+ Material** para añadir un archivo, un enlace o texto.
+   Pregunta en el chat y abre **Wiki** para explorar sus apuntes y conceptos. Usa **Record**
+   cuando quieras capturar voz; la carpeta se elige al lado.
+5. **Vuelve a lo aprendido.** Pide tarjetas o un test, guárdalos en la wiki y vuelve para repasar
+   o profundizar en una explicación.
 
 Todo se puede cambiar después en **Settings**.
 
@@ -154,12 +190,15 @@ Consulta la [política de seguridad](../../SECURITY.md) para limitaciones y el c
 
 ## 🧩 Cómo funciona
 
+El reconocimiento de voz es una vía de entrada. Materiales, wiki, respuestas y estudio comparten la misma biblioteca.
+
 ```text
-Micrófono / audio del sistema / archivos / enlaces → Electron → Python ── Soniox | Whisper en este Mac
-                                                      ↓          ↓
-                                                  React UI   Biblioteca: Materials/*.md, Wiki/*.md
-                                                                 ↕  herramientas de SKAZ (cambios solo con tu permiso)
-                                                      Codex | Claude Code | Hermes Agent | OpenCode
+Archivos / texto / enlaces / voz → Electron + React ↔ Python
+                                                       ├─ Soniox | Whisper local (solo voz)
+                                                       ├─ Materials/*.md + Wiki/*.md
+                                                       └─ herramientas SKAZ ↔ tu agente
+                                                                                ↓
+                                                          Respuestas · conexiones · tarjetas · tests
 ```
 
 | Capa | Tecnología |
