@@ -10,7 +10,8 @@ from packaging.version import Version
 @pytest.mark.parametrize(
     ("distribution", "minimum", "optional"),
     [
-        ("pypdf", "6.21.2", False),
+        ("certifi", "2026.10.19", False),
+        ("pypdf", "6.21.4", False),
         ("filelock", "4.2.1", True),
         ("opentelemetry-api", "1.45.1", True),
     ],
