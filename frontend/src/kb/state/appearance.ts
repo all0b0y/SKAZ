@@ -1,6 +1,8 @@
 /**
- * Appearance knobs and presets (DESIGN-SYSTEM.md, decisions 4–6, 12–17). A preset is a saved
- * combination of the look knobs; it never touches theme, text size or sounds. Pure: no React.
+ * Appearance knobs and presets (DESIGN-SYSTEM.md, decisions 4–6, 12–17, 32). A preset is a saved
+ * combination of base, accent and density; it never touches theme, text size, motion or sounds —
+ * motion is the user's own knob (decision 32: a preset that silently set «calm» stilled the main
+ * screen). Pure: no React.
  */
 
 export type BasePref = 'milk' | 'paper' | 'slate' | 'sand';
@@ -26,15 +28,15 @@ export const SOUNDS: ReadonlyArray<{ value: SoundsPref; label: string }> = [
   { value: 'off', label: 'Off' }, { value: 'subtle', label: 'Subtle' },
 ];
 
-export interface Look { base: BasePref; accent: AccentPref; density: DensityPref; motion: MotionPref }
+export interface Look { base: BasePref; accent: AccentPref; density: DensityPref }
 
 export type PresetId = 'skaz' | 'lecture' | 'focus' | 'slate';
 
 export const PRESETS: ReadonlyArray<{ id: PresetId; label: string; note: string; look: Look }> = [
-  { id: 'skaz', label: 'SKAZ', note: 'The default look', look: { base: 'milk', accent: 'ink', density: 'comfortable', motion: 'full' } },
-  { id: 'lecture', label: 'Lecture', note: 'Long reading, warm and roomy', look: { base: 'sand', accent: 'clay', density: 'spacious', motion: 'calm' } },
-  { id: 'focus', label: 'Focus', note: 'Dense, highest contrast', look: { base: 'paper', accent: 'ink', density: 'compact', motion: 'calm' } },
-  { id: 'slate', label: 'Slate', note: 'Cool and composed', look: { base: 'slate', accent: 'slate', density: 'comfortable', motion: 'full' } },
+  { id: 'skaz', label: 'SKAZ', note: 'The default look', look: { base: 'milk', accent: 'ink', density: 'comfortable' } },
+  { id: 'lecture', label: 'Lecture', note: 'Long reading, warm and roomy', look: { base: 'sand', accent: 'clay', density: 'spacious' } },
+  { id: 'focus', label: 'Focus', note: 'Dense, highest contrast', look: { base: 'paper', accent: 'ink', density: 'compact' } },
+  { id: 'slate', label: 'Slate', note: 'Cool and composed', look: { base: 'slate', accent: 'slate', density: 'comfortable' } },
 ];
 
 export const DEFAULT_LOOK: Look = PRESETS[0]!.look;
@@ -42,7 +44,7 @@ export const DEFAULT_LOOK: Look = PRESETS[0]!.look;
 /** The preset these knobs make, or 'custom' once any knob differs from every preset. */
 export function presetOf(look: Look): PresetId | 'custom' {
   const hit = PRESETS.find((p) => p.look.base === look.base && p.look.accent === look.accent
-    && p.look.density === look.density && p.look.motion === look.motion);
+    && p.look.density === look.density);
   return hit ? hit.id : 'custom';
 }
 

@@ -9,6 +9,7 @@ import { isAnswering, isLocal, type AgentChoice } from '../state/chats';
 import { partsOf } from '../api/permissions';
 import { useAgents, useChats, useComposerBus, useLibrary, useRecording, useServices, useSettings, useUi } from '../state/context';
 import { AgentPicker, EffortPicker } from './AgentPicker';
+import { ChatSearchButton } from '../searchRules/ChatSearchPanel';
 import { addMaterial, attachmentKey, AttachButton, AttachmentChips, isSpeechFile, type Attachment } from './Attach';
 import { DICTATION_MAX_S, startCapture, type Capture } from './dictation';
 import { clearEditor, fillEditor, insertText, insertToken, isEmpty, markGone, mentionAtCaret, serialize, type MentionMatch } from './editor';
@@ -20,7 +21,7 @@ import { ingestWhenReady } from '../materials/ingestWhenReady';
 import { AgentFix } from '../chat/AgentFix';
 import { useOpenStudy } from '../study/useStudy';
 import { StudyContextChip } from '../study/StudyBlock';
-import { useSelection } from '../chat/select/context';
+import { useSelection, useSelectionStore } from '../chat/select/context';
 import { QUICK_TEXT, type QuickAsk } from '../chat/select/SelectionBar';
 import { SelectionPanel } from '../chat/select/WhereFrom';
 
@@ -91,6 +92,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
   const recTitle = useRecording((s) => s.title);
   // P2: items picked in an answer (chat/select): the field asks about them.
   const { selection, clear: clearSelection } = useSelection();
+  const selectionStore = useSelectionStore();
 
   const agent = choice ? agentOf(agents, choice.engine) : undefined;
   // Bug 5: "as set in the agent" (no model) still offers effort — the levels of the model that answers.
@@ -152,6 +154,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     for (const item of items) {
       if (item.kind === 'quote') insertToken(root, { kind: 'quote', quote: item.quote });
       else if (item.kind === 'mention') insertToken(root, { kind: 'mention', ref: item.ref });
+      else if (item.kind === 'selection') selectionStore?.getState().set(item.selection); // P3-c: the chip
       else insertText(root, item.text);
     }
     refresh();
@@ -204,7 +207,9 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
       }
       const source = item.source as 'file' | 'link' | 'text';
       saveMaterial(source, item.value, inboxId).then(
-        (added) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready } : a))),
+        (added) => setAttachments((list) => list.map((a) => (a.key === key
+          ? { ...a, state: 'ready', materialId: added.id, materialReady: added.ready, ...(added.existing ? { alreadyInLibrary: true } : {}) }
+          : a))),
         (e: unknown) => setAttachments((list) => list.map((a) => (a.key === key ? { ...a, state: 'failed', error: errorText(e) } : a))),
       );
     }
@@ -300,7 +305,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
     if (input.selection) clearSelection(); // asked: the next question starts with nothing picked
     // "In wiki" (decision 15): new materials were held out of the wiki; the ticked ones go in now.
     for (const a of ready) {
-      if (a.source !== 'existing' && a.inWiki) {
+      if (a.source !== 'existing' && !a.alreadyInLibrary && a.inWiki) {
         ingestWhenReady(client, a.materialId!, a.materialReady, (text) => {
           setError(`“${a.name}” is saved to Materials but couldn’t go to the wiki yet: ${text} You can add it from Materials later.`);
         });
@@ -472,6 +477,7 @@ export function Composer({ chatId, placeholder }: { chatId: string | null; place
         )}
         <div className="kb-composer__bar">
           <AttachButton onAdd={addAttachments} disabled={false} />
+          <ChatSearchButton chatId={chatId} />
           <span className="kb-composer__spacer" />
           {dictation.phase === 'recording' && (
             <span className="kb-dictating" role="status"><span className="kb-dictating__dot" aria-hidden="true" />Listening</span>

@@ -1,4 +1,4 @@
-import { useReducedMotion } from '../ui/motionLevel';
+import { useMotionLevel, useReducedMotion, useStillIndicators } from '../ui/motionLevel';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { useStore } from 'zustand';
@@ -15,12 +15,15 @@ import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
+import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
 import { isAnswering, type ChatsData, type ChatsStore } from '../state/chats';
 import { DitherStage } from '../fx/dither/DitherStage';
 import { ChatBackdrop } from '../fx/backdrop/ChatBackdrop';
 import { SelectionProvider } from './select/context';
+import { useFollowSwitch } from './switchMotion';
+import { ScrollEdges } from './ScrollEdges';
 
 /** What waits for the user in this chat, for the message field's hint (P4, Q-A2): nothing blocks typing. */
 function waitingHint(chat: KbChat | null): string | null {
@@ -117,13 +120,20 @@ export function ChatView({ hidden }: { hidden: boolean }) {
   const [actionError, setActionError] = useState<{ id: string; text: string } | null>(null);
   const agents = useAgents((s) => s.agents);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
   const stick = useRef(true);
   const reduced = useReducedMotion() ?? false;
+  // Decision 32: the main field is still only at «off» or the system's reduced motion; at «calm» it
+  // keeps answering clicks and only its background drift stops.
+  const fieldStill = useStillIndicators();
+  const fieldCalm = useMotionLevel() === 'calm';
   const { leaving, bornHere } = useFirstMessageLeave(chats, reduced);
 
   const chat = open?.chat ?? null;
   const questionActions = useQuestionActions(currentId, chat);
   const title = chat?.title ?? summary?.title ?? 'New chat';
+  // Decision 25: switching chats, the thread follows the tab's direction; the title crossfades.
+  useFollowSwitch(currentId, hidden, scrollRef, titleRef);
 
   useEffect(() => {
     if (!currentId) return undefined;
@@ -192,15 +202,16 @@ export function ChatView({ hidden }: { hidden: boolean }) {
             return null;
           }} />
         ) : (
-          <h1 className="kb-head__title">{title}</h1>
+          <h1 className="kb-head__title" ref={titleRef}>{title}</h1>
         )}
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         <span className="kb-head__spacer" />
         {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
+        {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
       </header>
       {notice && <p className="kb-notice" role="status">{notice}</p>}
-      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={reduced}>
+      <DitherStage className="kb-chat__stage" show={showField} leaving={leavingHere} active={!hidden} reduced={fieldStill} calm={fieldCalm}>
       {showBackdrop && <ChatBackdrop working={isAnswering(chat)} active={!hidden} reduced={reduced} />}
       <div className="kb-chat__scroll" ref={scrollRef} role="log" aria-label="Conversation" aria-live="off"
         onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
@@ -228,6 +239,8 @@ export function ChatView({ hidden }: { hidden: boolean }) {
           </div>
         )}
       </div>
+      {/* Stage 6 B2 GradualBlur: soft edges under the title bar and above the composer (only over a thread). */}
+      <ScrollEdges scrollRef={scrollRef} show={showBackdrop} />
       </DitherStage>
       {showField && (
         // FX §5: what the empty chat is for, on a solid plate above the field — never on the canvas.

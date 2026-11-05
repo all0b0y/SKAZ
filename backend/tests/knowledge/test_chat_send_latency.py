@@ -12,8 +12,8 @@ from typing import Any
 
 from skaz.knowledge.agents.engine import EngineStatus
 from skaz.knowledge.agents.fake import FakeEngine
-from tests.knowledge.chat_support import install, text
-from tests.knowledge.test_chats_api import Env, env, finished  # noqa: F401 - the chat API world
+from tests.knowledge.chat_support import finished, install, text
+from tests.knowledge.test_chats_api import Env, env  # noqa: F401 - the chat API world
 
 
 class SlowCheck(FakeEngine):

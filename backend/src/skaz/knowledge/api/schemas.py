@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..markdown.page import BlockKind, Owner, PageKind
 from ..markdown.source import FragmentRole, MaterialKind, MaterialStatus
+from .schemas_overlap import KbMaterialOverlap
 
 KbLibraryState = Literal["not_configured", "ready", "unavailable"]
 
@@ -150,6 +151,9 @@ class KbMaterial(KbMaterialSummary):
     failure_reason: str | None = None
     #: A failed or interrupted import that ``POST /kb/imports/{id}/retry`` can start again (QA E10).
     can_retry: bool = False
+    #: N2: how much of it the wiki already had ("About N% of this is already in your wiki …"); ``null``
+    #: while none of its statements is in the wiki.
+    overlap: KbMaterialOverlap | None = None
 
 
 class KbPageSummary(BaseModel):

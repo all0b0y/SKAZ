@@ -26,6 +26,7 @@ export function QuickQuestions({ disabledReason, onAsk, onPrefill }: {
       {QUICK_QUESTIONS.map((q) => {
         const chip = (
           <button type="button" className="kb-quick__chip" aria-disabled={disabled || undefined}
+            title={disabled ? undefined : q.label}
             aria-describedby={disabled ? reasonId : undefined}
             onClick={() => {
               if (disabled) return;

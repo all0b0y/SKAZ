@@ -9,6 +9,7 @@ import { useProblems } from './shell/problems';
 import type { SettingsSection } from './state/ui';
 import { EditModelsModal } from './composer/EditModels';
 import { SettingsModal } from './settings/SettingsModal';
+import { InstallProgressModal } from './settings/InstallProgress';
 import { LibrarySetupModal, Onboarding } from './onboarding/Onboarding';
 import { CommandK } from './search/CommandK';
 import { DecisionModal } from './notifications/DecisionModal';
@@ -165,11 +166,13 @@ function useLiveData() {
   const { chats, notifications, agents, settings } = useServices();
   const ready = useLibrary((s) => s.library?.state === 'ready');
   useEffect(() => {
+    agents.getState().startMonitoring();
     void agents.getState().refresh();
     const s = settings.getState();
     void s.loadHealth();
     void s.loadWiki();
     void s.loadSpeech();
+    return () => agents.getState().stopMonitoring();
   }, [agents, settings]);
   // Agents are checked again when the window comes back (throttled per agent in the store;
   // nothing runs while the window is hidden — there is no timer, only this event).
@@ -209,6 +212,7 @@ function Workspace() {
       <Onboarding open={!onboardingDone && !settingsOpen} onFinish={() => prefs.getState().set({ onboardingDone: true })} />
       <LibrarySetupModal open={librarySetupOpen && onboardingDone} onClose={() => setLibrarySetupOpen(false)} />
       <AddMaterialModal />
+      <InstallProgressModal />
       <ToastHost />
       <UiSounds />
     </>

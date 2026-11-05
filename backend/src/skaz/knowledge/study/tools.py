@@ -7,21 +7,32 @@ may go on asking about anything (S5). Saving to the wiki is the user's decision 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import Field
 
 from ...native_io import disk_call
+from ..agents.prompting import untrusted_block
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, _Args
+from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
+from ..permissions.source_scope import UNCLEAR_LEFT_OUT, ChatSourceScopes
 from ..permissions.store import RunRef
 from .checks import CardIn, QuestionIn
 from .scheduling import Mode
 from .service import StudyService
+from .unclear import scoped_unclear_items
 
 NOT_IN_CHAT = "Flashcards and tests are only possible in a chat with the user."
-STUDY_TOOL_NAMES = ("skaz_study_make_deck", "skaz_study_make_test", "skaz_study_read", "skaz_study_show")
+STUDY_TOOL_NAMES = (
+    "skaz_study_make_deck",
+    "skaz_study_make_test",
+    "skaz_study_read",
+    "skaz_study_show",
+    "skaz_study_unclear",
+)
 MAX_CARDS = 60
 MAX_QUESTIONS = 40
 
@@ -56,10 +67,20 @@ class ReadArgs(_Args):
     page_id: str = Field(min_length=1, max_length=120, description="A deck or test page id.")
 
 
+class UnclearArgs(_Args):
+    page_id: str | None = Field(
+        default=None, max_length=120, description="Optional: only the marks of this deck or test page."
+    )
+
+
 class StudyTools:
     def __init__(self, study: StudyService, runs: Callable[[str], RunRef | None]) -> None:
         self.study = study
         self.runs = runs
+        #: N7-4: the chat's sources (set by the runtime to the registry's hook). ``skaz_study_unclear``
+        #: narrows its items itself before it wraps them as untrusted text — the registry's narrowing
+        #: can't read a wrapped payload, nor an unanswered question's stripped source (Q1 n78 H-1 × p3).
+        self.scope: ChatSourceScopes | None = None
 
     def _ref(self, context: ToolContext | None) -> RunRef:
         ref = self.runs(context.run_id) if context is not None else None
@@ -89,7 +110,8 @@ class StudyTools:
                 "Make a test (choice, multi, short or open questions, as the user asked) and show it in the "
                 "chat. Every right answer needs a citation with a verbatim quote; wrong options are yours "
                 "and are shown as made up by you. Choice and short answers are checked by SKAZ; open "
-                "answers are checked by you later." + shown,
+                "answers are checked by you later against the open question's key ideas: give 2–6 of them, "
+                "each with a verbatim citation (the points a full answer covers)." + shown,
                 MakeTestArgs,
                 run=self._run(self._make_test),
                 timeout_s=60.0,
@@ -109,6 +131,19 @@ class StudyTools:
                 ShowArgs,
                 run=self._run(self._show),
                 timeout_s=60.0,
+            ),
+            SkazTool(
+                "skaz_study_unclear",
+                "Read the cards and test questions the user marked «Unclear» (they want to talk them "
+                "through), in this chat's folders — or the whole library when the chat has none: each "
+                "with its text, type, options, right answer, the user's last answer, the source with its "
+                "quote and where it is. A test question the user has not answered yet comes without its "
+                "answer, which option is right or its source (answered: false): explain what it asks, "
+                "never the answer. Read-only: you never change marks. Go through them one at a time; "
+                "at the end tell the user they can clear the marks with «Clear now» under your answer.",
+                UnclearArgs,
+                run=self._run(self._unclear),
+                timeout_s=30.0,
             ),
         )
 
@@ -148,7 +183,28 @@ class StudyTools:
         }
 
     async def _read(self, _ref: RunRef | None, args: ReadArgs) -> dict[str, Any]:
-        return {"status": "ok", "text": await disk_call(self.study.agent_summary, args.page_id)}
+        # A page's text is the user's library: data, never instructions (Q1 p3 M4).
+        text = await disk_call(self.study.agent_summary, args.page_id)
+        return {"status": "ok", "text": untrusted_block("study page", text)}
+
+    async def _unclear(self, ref: RunRef | None, args: UnclearArgs) -> dict[str, Any]:
+        assert ref is not None
+        chat = await disk_call(ChatRepository(self.study.kb.db).get, ref.chat_id)
+        folders = tuple(chat.folder_ids) if chat is not None else ()
+        sources = await disk_call(self.scope.for_chat, ref.chat_id) if self.scope is not None else None
+        items, left_out = await disk_call(scoped_unclear_items, self.study, folders, args.page_id, sources)
+        scope = "this chat's folders" if folders else "the whole library"
+        # Material quotes, question texts and the user's answers are data, never instructions (Q1 p3 M4):
+        # an interactive tool's payload is not wrapped by the registry, so the items are wrapped here.
+        body = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+        listed = untrusted_block("unclear items", body)
+        result: dict[str, Any] = {"status": "ok", "scope": scope, "count": len(items), "items": listed}
+        if left_out:
+            result["left_out"] = left_out
+            result["scope_note"] = UNCLEAR_LEFT_OUT.format(count=left_out)
+        elif not items:
+            result["note"] = f"Nothing is marked Unclear in {scope}."
+        return result
 
     async def _show(self, ref: RunRef | None, args: ShowArgs) -> dict[str, Any]:
         assert ref is not None

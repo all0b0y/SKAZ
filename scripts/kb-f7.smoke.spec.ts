@@ -159,8 +159,10 @@ test('side materials and all materials', async () => {
 test('wiki side pages', async () => {
   await rail('Wiki').click();
   const side = page.getByRole('region', { name: 'Wiki' });
-  await side.getByRole('button', { name: /^Concepts/ }).click();
-  const grid = side.getByRole('grid').first();
+  // Kind sections fold in place (decision 24 «Wiki»); Concepts is open unless a stored choice folded it.
+  const concepts = side.getByRole('button', { name: /^Concepts/ });
+  if ((await concepts.getAttribute('aria-expanded')) !== 'true') await concepts.click();
+  const grid = side.getByRole('grid', { name: 'Concepts' });
   await expect(grid.getByRole('row').nth(1)).toBeVisible();
   await round('wiki-pages', grid, grid.getByRole('row').first().getByRole('button').first());
 });

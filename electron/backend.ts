@@ -21,6 +21,7 @@ const HEALTH_INTERVAL_MS = 300;
  * rest of its shutdown ≥ 1 s; backend/tests/knowledge/test_shutdown.py checks the two stay in step.
  */
 const SHUTDOWN_GRACE_MS = 4_000;
+const KILL_WAIT_MS = 1_000;
 /** Added to start failures in development only, where the backend runs from the repo. */
 const DEV_START_HINT = 'Development build: make sure the Python backend is installed (uv sync in backend/).';
 
@@ -205,6 +206,8 @@ export class BackendManager {
       cwd,
       env: {
         ...backendEnvironment(process.env, app.isPackaged),
+        // A shared editable venv can point at another checkout. Trust this dev source, not the shell.
+        ...(!app.isPackaged ? { PYTHONPATH: path.join(this.repoRoot, 'backend', 'src') } : {}),
         SKAZ_TOKEN: token,
         SKAZ_DATA_DIR: this.dataDir,
         // Settings → About shows the app's version, not the backend package's (QA A21).
@@ -312,12 +315,16 @@ export class BackendManager {
   private terminate(child: ChildProcess | null): Promise<void> {
     if (!child || child.exitCode !== null) return Promise.resolve();
     return new Promise<void>((resolve) => {
+      let last: ReturnType<typeof setTimeout> | undefined;
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
-        resolve();
+        // Wait for the kill to land too: a relaunch may start a new backend only once this one is gone and
+        // its database and queue locks are free. The extra second is a last resort, never the normal path.
+        last = setTimeout(resolve, KILL_WAIT_MS);
       }, SHUTDOWN_GRACE_MS);
       child.once('exit', () => {
         clearTimeout(timer);
+        clearTimeout(last);
         resolve();
       });
       child.kill('SIGTERM');

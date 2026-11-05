@@ -312,12 +312,20 @@ async def test_an_open_answer_is_judged_without_blocking_and_shown_as_the_agents
     block = await _test(runtime, library)
     open_id = study.questions(block)[3].id
     release = asyncio.Event()
-    seen: list[tuple[str, list[str]]] = []
+    seen: list[str] = []
 
-    async def judge(_block: StudyBlock, question: Any, text: str) -> Mapping[str, Any]:
-        seen.append((text, [c.quote for c in question.cites]))
+    async def judge(call: Any) -> Mapping[str, Any]:
+        seen.append(call.data)
         await release.wait()
-        return {"verdict": "partly", "missing": "Не сказано о системе.", "comment": "Почти."}
+        # P3-a: the open question was made without key ideas, so the first check builds them.
+        return {
+            "ideas": [{"text": "Энтропия — мера беспорядка системы.", "source": 1, "quote": ENTROPY},
+                      {"text": "В изолированной системе она растёт.", "source": 1,
+                       "quote": "она растёт в изолированной системе"}],
+            "points": [{"idea": 1, "status": "partial", "yours": "Беспорядок", "why": "", "basis": "agent",
+                        "source": 0, "quote": ""}],
+            "model_answer": [], "also_right": [], "comment": "Почти.",
+        }
 
     study.judge = judge
     block = await study.check_open(block.id, open_id, "Беспорядок")
@@ -327,8 +335,9 @@ async def test_an_open_answer_is_judged_without_blocking_and_shown_as_the_agents
     release.set()
     await study.settle()
     entry = study.attempt(study.get(block.id)).answers["items"][open_id]
-    assert (entry["verdict"], entry["score"], entry["missing"]) == ("partly", 0.5, "Не сказано о системе.")
-    assert seen == [("Беспорядок", [ENTROPY])]
+    # SKAZ counts the share from the key ideas: ½ of one idea of two = 0.25 → «Almost there».
+    assert (entry["status"], entry["verdict"], entry["score"]) == ("almost", "partly", 0.25)
+    assert len(seen) == 1 and "Беспорядок" in seen[0] and ENTROPY in seen[0]
 
     async def broken(*_args: Any) -> Mapping[str, Any]:
         raise RuntimeError("engine down")
@@ -555,7 +564,10 @@ async def test_test_api_answers_finishes_and_retakes(world: Any, kb_client: http
     open_id = part["questions"][3]["id"]
 
     async def judge(*_args: Any) -> Mapping[str, Any]:
-        return {"verdict": "wrong", "missing": "Нет слова «система».", "comment": "Не совсем."}
+        return {"ideas": [{"text": "Мера беспорядка.", "source": 1, "quote": ENTROPY},
+                          {"text": "Растёт в изолированной.", "source": 1,
+                           "quote": "она растёт в изолированной системе"}],
+                "points": [], "model_answer": [], "also_right": [], "comment": "Начните с беспорядка."}
 
     runtime.kb_study.judge = judge
     checking = (
@@ -565,6 +577,7 @@ async def test_test_api_answers_finishes_and_retakes(world: Any, kb_client: http
     await runtime.kb_study.settle()
     judged = (await kb_client.get(f"/kb/study/{block.id}")).json()["questions"][3]["response"]
     assert (judged["verdict"], judged["score"], judged["checking"]) == ("wrong", 0.0, False)
+    assert judged["status"] == "not_yet" and len(judged["review"]["ideas"]) == 2
     runtime.kb_study.judge = None
     refused = await kb_client.post(
         f"/kb/study/{block.id}/check-open", json={"item_id": open_id, "text": "Хаос"}

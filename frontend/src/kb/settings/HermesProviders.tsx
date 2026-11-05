@@ -5,6 +5,7 @@ import type {
 import { errorText } from '../api/client';
 import { Button, Icon, IconButton, Menu, Modal, type MenuItem } from '../ui';
 import { ProviderIcon } from '../ui/ProviderIcon';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { useAgents, useServices } from '../state/context';
 
 /** While a Terminal window SKAZ opened is still running, the list is read again this often. */
@@ -149,7 +150,7 @@ function useHermesProviders() {
 function TerminalLine({ launch, terminal }: { launch: Launch | null; terminal: KbHermesTerminal }) {
   return (
     <div className="kb-hproviders__terminal" role="status">
-      <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
+      <StippleRing className="kb-spinner kb-spinner--inline" />
       <span><b>Finish in Terminal.</b> {terminalText(launch, terminal)} SKAZ checks as soon as Terminal finishes.</span>
     </div>
   );
@@ -231,7 +232,7 @@ export function HermesProviders() {
               <span className="kb-hchip" data-adding="true" data-provider={pending.provider ?? undefined}>
                 <ProviderIcon provider={pending.provider ?? ''} name={pending.name} size={16} />
                 <span className="kb-hchip__name">{pending.name}</span>
-                <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
+                <StippleRing className="kb-spinner kb-spinner--inline" />
               </span>
             </li>
           )}

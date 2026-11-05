@@ -61,16 +61,11 @@ export function createAgentUpdatesStore(client: KbClient, agents?: AgentsStore,
     let starts = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    /** An update started by the backend (now or after current work): the agent card follows its log. */
-    const follow = async (view: KbAgentUpdates) => {
+    /** An update started by the backend joins the store-owned reader, even with Settings closed. */
+    const follow = (view: KbAgentUpdates) => {
       if (!agents) return;
       for (const a of view.agents) {
-        if (!a.task_id) continue;
-        if (agents.getState().installs[a.engine]?.task.id === a.task_id) continue;
-        try {
-          const task = await client.call('GET /kb/agents/install/{task_id}', { path: { task_id: a.task_id } });
-          agents.setState((s) => ({ installs: { ...s.installs, [a.engine]: { task, lines: task.lines } } }));
-        } catch { /* the next read tries again */ }
+        if (a.task_id) agents.getState().followInstall(a.engine, a.task_id);
       }
     };
     const put = (view: KbAgentUpdates) => {

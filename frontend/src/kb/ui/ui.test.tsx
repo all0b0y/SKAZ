@@ -8,6 +8,7 @@ import {
   Banner, Button, Chip, EmptyState, Icon, ICON_NAMES, ICON_STROKE, Menu, Modal, Popover, Segmented, Spinner, Switch, TextField,
 } from './index';
 import { boundaryFor, placePopup } from './geometry';
+import { MotionProvider } from './motion';
 
 // Where each concept's glyph comes from (animated-icons spec §3).
 const HUGE_CONCEPTS = ['chats', 'materials', 'bell', 'copy', 'retry', 'close', 'web', 'quote', 'mic', 'settings', 'search', 'more', 'pencil', 'chevronDown', 'stop'];
@@ -133,6 +134,19 @@ function ModalHarness({ onClose }: { onClose?: () => void }) {
 }
 
 describe('Modal', () => {
+  it('revives an exiting layer when reopened before its exit animation finishes', () => {
+    const body = (open: boolean) => <MotionProvider><Modal open={open} onClose={() => {}} title="Quick reopen"><button type="button">Inside</button></Modal></MotionProvider>;
+    const view = render(body(true));
+    const layer = screen.getByRole('dialog', { name: 'Quick reopen' }).closest('.kb-modal-layer');
+    expect(layer).not.toBeNull();
+    view.rerender(body(false));
+    expect(layer).toBeInTheDocument();
+    expect(layer).toHaveAttribute('inert');
+    view.rerender(body(true));
+    expect(layer).not.toHaveAttribute('inert');
+    expect(within(screen.getByRole('dialog', { name: 'Quick reopen' })).getByRole('button', { name: 'Close' })).toHaveFocus();
+  });
+
   it('moves focus inside, traps Tab in both directions, closes on Escape and returns focus', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -287,6 +301,43 @@ describe('Switch and Segmented', () => {
       await user.keyboard(key);
       expect(screen.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true');
       expect(screen.getByRole('radio', { name })).toHaveFocus();
+    }
+  });
+
+  it('Segmented indicator animates in local button coordinates without vertical drift when its container moves', async () => {
+    const user = userEvent.setup();
+    const frames: Keyframe[][] = [];
+    const origAnimate = Element.prototype.animate;
+    Element.prototype.animate = vi.fn(function (this: Element, kf: Keyframe[] | PropertyIndexedKeyframes | null) {
+      if (this.classList.contains('kb-seg__ind') && Array.isArray(kf)) frames.push(kf);
+      return { cancel: () => {}, finish: () => {}, play: () => {}, pause: () => {} } as unknown as Animation;
+    });
+    try {
+      function Harness() {
+        const [v, setV] = useState<'all' | 'only'>('all');
+        return (
+          <Segmented label="Library sources" value={v} onChange={setV}
+            options={[{ value: 'all', label: 'All sources' }, { value: 'only', label: 'Only these' }]} />
+        );
+      }
+      render(<Harness />);
+      const allBtn = screen.getByRole('radio', { name: 'All sources' });
+      const onlyBtn = screen.getByRole('radio', { name: 'Only these' });
+      Object.defineProperty(allBtn, 'offsetLeft', { configurable: true, get: () => 2 });
+      Object.defineProperty(allBtn, 'offsetTop', { configurable: true, get: () => 2 });
+      Object.defineProperty(allBtn, 'offsetWidth', { configurable: true, get: () => 88 });
+      Object.defineProperty(onlyBtn, 'offsetLeft', { configurable: true, get: () => 92 });
+      Object.defineProperty(onlyBtn, 'offsetTop', { configurable: true, get: () => 2 });
+      Object.defineProperty(onlyBtn, 'offsetWidth', { configurable: true, get: () => 84 });
+
+      await user.click(onlyBtn);
+      expect(frames).toHaveLength(1);
+      expect(frames[0]).toEqual([
+        { transform: 'translate(-90px, 0px)', width: '88px' },
+        { transform: 'translate(0px, 0px)', width: '84px' },
+      ]);
+    } finally {
+      Element.prototype.animate = origAnimate;
     }
   });
 });

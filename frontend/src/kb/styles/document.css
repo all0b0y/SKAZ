@@ -171,7 +171,7 @@
 }
 .kb-pst--wrap > .kb-icon { flex: none; margin-top: var(--kb-sp-2); }
 .kb-pst.is-link:hover { border-color: var(--kb-muted); }
-.kb-spinner--xs { width: 10px; height: 10px; border-width: 1.5px; }
+.kb-spinner--xs { width: 10px; height: 10px; }
 .kb-mat__note { font-size: var(--t-sm); color: var(--kb-muted); }
 /* Header of a material: title, one muted meta line, one row of status chips (same height, so
    their words share a baseline), then the excluded-fragments line. */
@@ -385,3 +385,29 @@
   cursor: pointer;
 }
 .kb-legend__link:focus-visible { outline: 2px solid var(--kb-text); outline-offset: 2px; border-radius: var(--kb-r-2xs); }
+
+/*
+ * Stage 6 B6 — PixelTransition (decision 30, demo motion-v1 B6; fx/pixel): when the agent rewrites the
+ * open wiki page, dither cells (pane colour, accent fringe) cover the old text and uncover the new one
+ * on a canvas over the panel's visible body; calm = a plain crossfade (120 ms out, 160 ms in); off =
+ * instant. Then a quiet «Updated by the agent» pill in the header says it in words.
+ */
+.kb-pxstage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.kb-pxcover { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; image-rendering: pixelated; }
+.kb-pxstage .kb-doc__article { transition: opacity 120ms linear; }
+.kb-pxstage[data-px='fade-out'] .kb-doc__article { opacity: 0; }
+.kb-pxstage[data-px='fade-in'] .kb-doc__article { animation: kb-fx-fade 160ms ease-out both; }
+.kb-pxpill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kb-sp-4);
+  height: 22px;
+  padding: 0 var(--kb-sp-8);
+  border-radius: var(--kb-r-pill);
+  background: var(--kb-accent-soft);
+  color: var(--kb-text);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  animation: kb-fx-fade 200ms ease-out both;
+}

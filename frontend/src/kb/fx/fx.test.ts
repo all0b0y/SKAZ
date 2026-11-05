@@ -5,7 +5,11 @@ import { burnOut, emptyMask, FIELD_ALPHA, fieldAlpha, fieldCellOn, fieldLevel, m
 import { generateNodes, MAIN_NODES, nodeCells } from './dither/nodes';
 import { connectBurst, drawOverlay, edgeIntensity, MAIN_BURST, ovLine, ovNode, type FxEdge } from './dither/graph';
 import { DitherScene, fitMask, needsRelayout, RELAYOUT_DH } from './dither/scene';
-import { CONNECT_EDGES, CONNECT_NODES, CONNECT_STILL_T, connectState } from './indicators/connect';
+import {
+  CONNECT_EDGES, CONNECT_NODES, CONNECT_STILL_T, MARK_EDGES, MARK_END, MARK_NODES, connectState, connectStateOf,
+  drawConnect, drawConnectGraph, drawMarkResolve, markResolve,
+} from './indicators/connect';
+import CONNECT_GOLDEN from './connect.golden.json';
 
 const filled = (cols: number, rows: number, cell: number, v: number): FieldMask => {
   const m = emptyMask(cols, rows, cell);
@@ -352,5 +356,59 @@ describe('fx/indicators connect', () => {
     expect(s.progress.slice(0, 5)).toEqual([1, 1, 1, 1, 1]);
     expect(s.current[5]).toBe(true);
     expect(s.lit.filter(Boolean)).toHaveLength(CONNECT_NODES.length - 1);
+  });
+});
+
+/** A 2D context that records every fill (style + rect) instead of drawing. */
+function recordingCtx() {
+  const ops: string[] = [];
+  const ctx = {
+    fillStyle: '',
+    fillRect(x: number, y: number, w: number, h: number) { ops.push(`${String(ctx.fillStyle)} ${x},${y},${w},${h}`); },
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, ops };
+}
+
+describe('fx/indicators connect, generalised (decision 26)', () => {
+  const colors = { ink: [10, 20, 30], accent: [200, 100, 50] } as const;
+
+  it('the thinking indicator paints exactly the fills of the painter before the generalisation (golden, FIX1 R10)', () => {
+    // connect.golden.json: every fillRect (style + rect) of `drawConnect` as it was at df5486d (before
+    // decision 26), recorded with these colours at these times. Regenerate only on purpose.
+    const times = [0, 0.4, 1.1, CONNECT_STILL_T, 3.7];
+    expect(Object.keys(CONNECT_GOLDEN)).toEqual(times.map(String));
+    for (const t of times) {
+      const a = recordingCtx();
+      drawConnect(a.ctx, t, colors);
+      expect(a.ops, `t=${t}`).toEqual(CONNECT_GOLDEN[String(t) as keyof typeof CONNECT_GOLDEN]);
+      const b = recordingCtx();
+      drawConnectGraph(b.ctx, t, colors, CONNECT_NODES, CONNECT_EDGES);
+      expect(b.ops, `t=${t}`).toEqual(CONNECT_GOLDEN[String(t) as keyof typeof CONNECT_GOLDEN]);
+    }
+  });
+
+  it('the chat-row mark: three nodes, two edges, a cycle of 4 beats; the 2-px grid and 4-px nodes of the indicator', () => {
+    const mid = connectStateOf(1.5 / 2.2, MARK_NODES, MARK_EDGES);
+    expect(mid.progress).toEqual([1, expect.closeTo(0.5, 9)]);
+    expect(mid.lit).toEqual([true, true, false]);
+    expect(connectStateOf(4 / 2.2 + 0.1, MARK_NODES, MARK_EDGES).progress[0]).toBeCloseTo(connectStateOf(0.1, MARK_NODES, MARK_EDGES).progress[0]!, 9);
+    const r = recordingCtx();
+    drawConnectGraph(r.ctx, 1.5 / 2.2, colors, MARK_NODES, MARK_EDGES);
+    // Nodes last: lit ones in the accent, the far one in ink.
+    expect(r.ops.slice(-3)).toEqual(['rgba(200,100,50,0.950) 1.5,7.5,4,4', 'rgba(200,100,50,0.950) 11.5,2.5,4,4', 'rgba(10,20,30,0.550) 21.5,7.5,4,4']);
+  });
+
+  it('answer ready: the nodes pull into the dot point over 0.5 s (ease-out) and fade out between 0.45 and 0.6 s', () => {
+    expect(markResolve(0).nodes).toEqual(MARK_NODES.map(([x, y]) => [x, y]));
+    expect(markResolve(0).alpha).toBeCloseTo(0.9, 9);
+    const half = markResolve(0.25);
+    expect(half.mix).toBeCloseTo(1 - 0.5 ** 3, 9);
+    expect(markResolve(0.5).nodes.every(([x, y]) => x === MARK_END[0] && y === MARK_END[1])).toBe(true);
+    expect(markResolve(0.45).alpha).toBeCloseTo(0.9, 9);
+    expect(markResolve(0.525).alpha).toBeCloseTo(0.45, 9);
+    expect(markResolve(0.6).alpha).toBe(0);
+    const done = recordingCtx();
+    drawMarkResolve(done.ctx, 0.7, colors);
+    expect(done.ops).toEqual([]);
   });
 });

@@ -93,6 +93,27 @@
   min-width: 0;
 }
 .kb-amc:hover { border-color: var(--kb-muted); }
+/* SpotlightCard (stage 6, B9; fx/spotlight.ts): a faint light under the pointer on CARD surfaces only,
+   never list rows; a MOUSE only — the card is lit by `data-spot-lit`, set on a mouse's pointer over/out
+   (not :hover, which a pen or a tap leaves stuck; FIX2 C-L7). full: a 160-px radial light of --kb-text
+   at 7 % that follows the pointer; calm / off: a flat 3.5 % tint on the lit card. Opacity 0.2 s. */
+.kb-spot { position: relative; isolation: isolate; }
+.kb-spot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+[data-spotlight='follow'] .kb-spot::before {
+  background: radial-gradient(160px circle at var(--kb-spot-x, 50%) var(--kb-spot-y, 50%),
+    color-mix(in srgb, var(--kb-text) 7%, transparent), transparent 70%);
+}
+[data-spotlight='flat'] .kb-spot::before { background: color-mix(in srgb, var(--kb-text) 3.5%, transparent); }
+.kb-spot[data-spot-lit]::before { opacity: 1; }
 .kb-amc.is-current { border-color: var(--kb-accent); }
 .kb-amc__top { display: flex; align-items: center; gap: var(--kb-sp-6); min-width: 0; color: var(--kb-muted); }
 .kb-amc__title { font-weight: 600; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

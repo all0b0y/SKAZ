@@ -23,7 +23,7 @@ import type { BlockData, BlockItemData } from './sources';
  */
 interface Renderer<B extends BlockData> {
   name: string;
-  View: ComponentType<{ block: B }>;
+  View: ComponentType<{ block: B; blockId: string }>;
   /** Every drawn item, in reading order (their sources make the chip row). */
   items: (block: B) => BlockItemData[];
 }

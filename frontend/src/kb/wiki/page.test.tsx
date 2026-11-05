@@ -224,10 +224,10 @@ describe('Wiki page (v7–v8, decisions 20–22)', () => {
     const side = await screen.findByRole('region', { name: 'Wiki' });
     const concepts = await within(side).findByRole('button', { name: /Concepts/ });
     expect(concepts).toHaveTextContent('22');
-    await user.click(concepts);
+    // Sections fold in place (decision 24 «Wiki»): Concepts is open, its pages are right there.
+    expect(concepts).toHaveAttribute('aria-expanded', 'true');
     await user.click(within(side).getByRole('button', { name: 'Entropy' }));
     expect(await screen.findByRole('heading', { level: 2, name: 'Entropy' })).toBeInTheDocument();
-    await user.click(within(side).getByRole('button', { name: 'Wiki' }));
     expect(within(side).getByRole('heading', { name: 'Recently opened' })).toBeInTheDocument();
   });
 });

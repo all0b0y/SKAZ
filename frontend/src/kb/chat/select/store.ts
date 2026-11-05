@@ -6,6 +6,8 @@ export interface SelectionState {
   /** Pick or unpick one item; an item of another block starts a new selection. */
   toggle: (target: SelectionTarget, item: SelectedItem) => void;
   clear: () => void;
+  /** Put a whole selection at once (P3-c: «Ask the agent» on a test question). */
+  set: (selection: Selection) => void;
 }
 
 export type SelectionStore = StoreApi<SelectionState>;
@@ -25,6 +27,7 @@ export function createSelectionStore(): SelectionStore {
       set({ selection: items.length ? { ...now, items } : null });
     },
     clear: () => { if (get().selection) set({ selection: null }); },
+    set: (selection) => set({ selection }),
   }));
 }
 

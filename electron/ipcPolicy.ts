@@ -162,6 +162,14 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/web-searches\/[^/]+\/decide$/ },
   { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
   { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/web-search$/ },
+  // N7: the user's search rules — Settings → Search, and one chat's changes from the composer panel
+  // (Save / Save as global / Reset to Settings, and «Search everywhere once» clicked on a card).
+  { method: 'GET', pattern: /^\/kb\/settings\/search$/ },
+  { method: 'PUT', pattern: /^\/kb\/settings\/search$/ },
+  { method: 'GET', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'PUT', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'DELETE', pattern: /^\/kb\/chats\/[^/]+\/search-rules$/ },
+  { method: 'POST', pattern: /^\/kb\/chats\/[^/]+\/search-rules\/everywhere-once$/ },
   // 0.3.1 K1/K3: Hermes' providers in SKAZ's folder. Adding and signing in again open Hermes' own
   // command in Terminal (no key passes through SKAZ); remove / priority carry no secret.
   { method: 'GET', pattern: /^\/kb\/agents\/hermes\/providers$/ },
@@ -179,10 +187,12 @@ const ROUTES: readonly Route[] = [
   { method: 'GET', pattern: /^\/kb\/study\/settings$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/settings$/ },
   { method: 'GET', pattern: /^\/kb\/study\/decks\/[^/]+$/ },
+  { method: 'GET', pattern: /^\/kb\/study\/unclear$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/unclear\/clear$/ },
   { method: 'POST', pattern: /^\/kb\/study\/decks\/[^/]+\/(?:marks|study)$/ },
   { method: 'GET', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
   { method: 'PATCH', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+$/ },
-  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|mark|answer|check-open|finish|retake|save|rename)$/ },
+  { method: 'POST', pattern: /^\/kb\/study\/st-[A-Za-z0-9_-]+\/(?:grade|pass|mark|answer|check-open|recheck|count|finish|retake|save|rename)$/ },
   // N6 «Я» (Me, N6-ME-API.md): the master switch; one skill read / edited / deleted / created; its
   // versions and a restore; Undo of an agent's edit from its chat chip. Skill ids are one lowercase
   // segment, a version is digits, an edit id `[a-z0-9_-]{1,64}`. No route here lists «Я» for an agent.

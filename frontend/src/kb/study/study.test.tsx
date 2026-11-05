@@ -51,42 +51,60 @@ const requests = (fake: { calls: Array<{ method: string; path: string; body?: un
   fake.calls.filter((c) => c.path.startsWith(prefix)).map((c) => `${c.method} ${c.path}`);
 
 describe('Flashcards in the chat (variant C)', () => {
-  it('flips to the answer from the source with the agent explanation apart, grades with intervals, and moves on', async () => {
+  it('P3-d: the top card of the pile flips to the answer with the agent explanation apart; I know this = Good and the card leaves the pile', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
-    expect(within(deck).getByText('1 / 3')).toBeInTheDocument();
-    expect(within(deck).getByText('How did Boltzmann write entropy?')).toBeInTheDocument();
+    expect(within(deck).getByText('3 left')).toBeInTheDocument();
+    expect(within(deck).getByRole('region', { name: 'Question' })).toHaveTextContent('How did Boltzmann write entropy?');
+    expect(within(deck).queryByRole('region', { name: 'Answer' })).toBeNull();
+    // Decision 14: no grade grid, no intervals; decision 15: no «Not yet» words.
     expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull();
+    expect(within(deck).queryByText(/Not yet|Again|Easy|next in/)).toBeNull();
+    expect(within(deck).getByRole('button', { name: 'Skip — back to the pile (→)' })).toBeInTheDocument();
+    expect(within(deck).getByRole('button', { name: 'Bring back the last card (←)' })).toBeDisabled();
 
-    await user.click(within(deck).getByRole('button', { name: /Show answer/ }));
-    const grades = await within(deck).findByRole('group', { name: 'How well did you know it?' });
-    expect(within(deck).getByText('Answer · from source')).toBeInTheDocument();
-    expect(within(deck).getByText('S = k·ln W')).toBeInTheDocument();
-    expect(within(deck).getByText(/Like counting the ways/)).toBeInTheDocument();
-    expect(within(grades).getByRole('button', { name: 'Good, next in 10m' })).toBeInTheDocument();
+    await user.click(within(deck).getByText('How did Boltzmann write entropy?'));
+    const answer = await within(deck).findByRole('region', { name: 'Answer' });
+    expect(answer).toHaveTextContent('S = k·ln W');
+    expect(within(answer).getByText(/Like counting the ways/)).toBeInTheDocument();
 
-    await user.click(within(grades).getByRole('button', { name: 'Good, next in 10m' }));
-    await waitFor(() => expect(within(deck).getByText('2 / 3')).toBeInTheDocument());
-    expect(within(deck).getByText('Why a logarithm?')).toBeInTheDocument();
-    expect(requests(fake)).toEqual(['PATCH /kb/study/st-deck', 'POST /kb/study/st-deck/grade']);
-    expect(fake.calls.find((c) => c.path.endsWith('/grade'))?.body).toEqual({ item_id: 'c-1', grade: 'good' });
+    await user.click(within(deck).getByRole('button', { name: /I know this/ }));
+    await waitFor(() => expect(within(deck).getByText('2 left')).toBeInTheDocument());
+    expect(within(deck).getByRole('region', { name: 'Question' })).toHaveTextContent('Why a logarithm?');
+    expect(requests(fake)).toEqual(['PATCH /kb/study/st-deck', 'POST /kb/study/st-deck/pass']);
+    expect(fake.calls.find((c) => c.path.endsWith('/pass'))?.body).toEqual({ action: 'know', item_id: 'c-1' });
+    expect(fake.calls.filter((c) => c.path.endsWith('/grade') || c.path.endsWith('/mark'))).toEqual([]); // not «hide» any more
   });
 
-  it('keys work on the focused block: Space flips, 2 grades Hard, ← goes back; "I know this" hides the card', async () => {
+  it('P3-d keys on the focused block: Space flips, → skips (under the pile, comes back), ← brings it back, K knows; the pass ends with All done', async () => {
     const { user, fake } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
+    const top = () => within(deck).getByRole('region', { name: 'Question' });
     deck.focus();
     await user.keyboard(' ');
-    await within(deck).findByRole('group', { name: 'How well did you know it?' });
-    await user.keyboard('2');
-    await waitFor(() => expect(within(deck).getByText('2 / 3')).toBeInTheDocument());
-    expect(fake.calls.find((c) => c.path.endsWith('/grade'))?.body).toEqual({ item_id: 'c-1', grade: 'hard' });
-    await user.click(within(deck).getByRole('button', { name: /I know this/ }));
-    await waitFor(() => expect(within(deck).getByText('3 / 3')).toBeInTheDocument());
-    expect(fake.calls.find((c) => c.path.endsWith('/mark'))?.body).toEqual({ item_ids: ['c-2'], mark: 'hide' });
+    await within(deck).findByRole('region', { name: 'Answer' });
+    await user.keyboard('{ArrowRight}');
+    await waitFor(() => expect(top()).toHaveTextContent('Why a logarithm?'));
+    expect(within(deck).getByText('3 left')).toBeInTheDocument(); // skipped, still on the pile
+    expect(fake.calls.filter((c) => c.path.endsWith('/pass')).map((c) => c.body)).toEqual([{ action: 'skip', item_id: 'c-1' }]);
     deck.focus();
     await user.keyboard('{ArrowLeft}');
-    await waitFor(() => expect(within(deck).getByText('2 / 3')).toBeInTheDocument());
+    await waitFor(() => expect(top()).toHaveTextContent('How did Boltzmann write entropy?'));
+    for (const key of ['k', '{Enter}', 'K']) {
+      deck.focus();
+      await user.keyboard(key);
+      await waitFor(() => expect(within(deck).queryAllByRole('button', { name: /I know this/ }).every((b) => !b.hasAttribute('disabled'))).toBe(true));
+    }
+    const done = await within(deck).findByRole('status');
+    expect(done).toHaveTextContent('All done');
+    // Q1 p3 L5: the pass ends only when every card is known, so «N come back» counts the cards that got
+    // Again on a skip in this pass (the schedule brings them back sooner), never an always-zero rest.
+    expect(done).toHaveTextContent('3 known · 1 comes back sooner by the schedule');
+    expect(within(deck).getByText('done')).toBeInTheDocument();
+    await user.click(within(done).getByRole('button', { name: 'Go through again' }));
+    await waitFor(() => expect(within(deck).getByText('3 left')).toBeInTheDocument());
+    expect(fake.calls.filter((c) => c.path.endsWith('/pass')).map((c) => (c.body as { action: string }).action))
+      .toEqual(['skip', 'back', 'know', 'know', 'know', 'restart']);
   });
 
   it('Save to wiki: Deny keeps it in the chat and says so; Save to wiki still works later and links the page', async () => {
@@ -134,7 +152,7 @@ describe('Flashcards in the chat (variant C)', () => {
     expect(field).toHaveFocus();
     await user.keyboard(' x');
     expect(field).toHaveValue('Lecture 8 x');
-    expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull(); // not flipped
+    expect(within(deck).queryByRole('region', { name: 'Answer' })).toBeNull(); // not flipped
     await user.keyboard('{Escape}');
     expect(within(deck).queryByRole('textbox', { name: 'Deck name' })).toBeNull();
     const back = within(deck).getByRole('button', { name: 'Rename: Lecture 8' });
@@ -142,7 +160,7 @@ describe('Flashcards in the chat (variant C)', () => {
 
     await user.keyboard(' ');
     field = await within(deck).findByRole('textbox', { name: 'Deck name' }); // Space activates the title: rename, no flip
-    expect(within(deck).queryByRole('group', { name: 'How well did you know it?' })).toBeNull();
+    expect(within(deck).queryByRole('region', { name: 'Answer' })).toBeNull();
     await user.keyboard('{Escape}');
     within(deck).getByRole('button', { name: 'Rename: Lecture 8' }).focus();
     await user.keyboard('{F2}');
@@ -184,7 +202,7 @@ describe('Flashcards in the chat (variant C)', () => {
     deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(within(deck).queryByRole('progressbar')).toBeNull();
     await user.click(within(deck).getByRole('button', { name: 'Expand' }));
-    expect(within(deck).getByText('1 / 3')).toBeInTheDocument();
+    expect(within(deck).getByText('3 left')).toBeInTheDocument();
   });
 
   it('U2 (decision 5): a folded deck opened beside the chat is open there; the thread keeps a folded "Open beside the chat" row; back in the chat the fold is kept', async () => {
@@ -197,7 +215,7 @@ describe('Flashcards in the chat (variant C)', () => {
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const beside = within(panel).getByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(within(beside).getByRole('progressbar', { name: 'Progress' })).toBeInTheDocument();
-    expect(within(beside).getByText('1 / 3')).toBeInTheDocument();
+    expect(within(beside).getByText('3 left')).toBeInTheDocument();
     expect(within(beside).queryByRole('button', { name: /^(Collapse|Expand)$/ })).toBeNull();
     await waitFor(() => expect(beside).toHaveFocus()); // keyboard focus follows the block
 
@@ -373,28 +391,35 @@ describe('A test in the chat', () => {
 
     await user.click(within(test).getByRole('radio', { name: 'S = k·W²' }));
     await user.click(within(test).getByRole('button', { name: 'Check' }));
-    expect(await within(test).findByText('Not quite.')).toBeInTheDocument();
+    expect(await within(test).findByText('Not yet.')).toBeInTheDocument();
     expect(within(test).getByRole('radio', { name: /S = k·ln W.*Correct · from source/ })).toBeInTheDocument();
+    expect(within(test).getByRole('radio', { name: /S = k·W².*Your pick · Codex made this one up/ })).toBeInTheDocument();
     expect(within(test).getByRole('radio', { name: /S = W \/ k.*made up by Codex/ })).toBeInTheDocument();
 
     await user.click(within(test).getByRole('button', { name: 'Next question' }));
     await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'w');
     await user.click(within(test).getByRole('button', { name: 'Check' }));
-    expect(await within(test).findByText('Correct.')).toBeInTheDocument();
+    expect(await within(test).findByText('Got it.')).toBeInTheDocument();
 
     await user.click(within(test).getByRole('button', { name: 'Next question' }));
     await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Because joined systems add up.');
     await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
     // The verdict comes as an update of the block (the chat's event feed), not in the answer to the click.
-    expect(await within(test).findByText('Codex’s opinion · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
-    expect(within(test).getByText('Partly right.')).toBeInTheDocument();
+    // P3-a: the compact result — soft status, SKAZ's count of the key ideas, what is still missing.
+    expect(await within(test).findByText('Almost there', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(within(test).getByLabelText('Codex’s opinion · not a fact')).toBeInTheDocument();
+    expect(within(test).getByText('· 1½ of 3 key ideas')).toBeInTheDocument();
+    expect(within(test).getByText(/Still to add: Joining two systems.*; A logarithm turns/)).toBeInTheDocument();
+    expect(within(test).queryByRole('heading', { name: 'How it could look' })).toBeNull(); // the report only on demand
     expect(within(test).getByText(/Think of what happens/)).toBeInTheDocument();
     expect(requests(fake).filter((r) => r.includes('check-open'))).toHaveLength(1);
 
     await user.click(within(test).getByRole('button', { name: 'See result' }));
     expect(await within(test).findByText('1.5 of 3')).toBeInTheDocument();
-    expect(within(test).getByText(/One open answer is half-right/)).toBeInTheDocument();
-    await user.click(within(test).getByRole('button', { name: 'Retake mistakes · 2' }));
+    expect(within(test).getByText(/One open answer is almost there, in the agent’s opinion/)).toBeInTheDocument();
+    expect(within(test).getByLabelText('almost there')).toBeInTheDocument();
+    expect(within(test).getByLabelText('not yet')).toBeInTheDocument();
+    await user.click(within(test).getByRole('button', { name: 'Practice the tricky ones · 2' }));
     await waitFor(() => expect(within(test).getByText('1 / 2')).toBeInTheDocument());
     expect(fake.calls.find((c) => c.path.endsWith('/retake'))?.body).toEqual({ mistakes_only: true });
   });
@@ -424,7 +449,7 @@ describe('A test in the chat', () => {
     expect(fake.calls.filter((c) => c.path.endsWith('/answer'))).toEqual([]); // picking sends nothing; Check does
 
     await user.click(within(test).getByRole('button', { name: 'Check' }));
-    expect(await within(test).findByText('Not quite.')).toBeInTheDocument();
+    expect(await within(test).findByText('Not yet.')).toBeInTheDocument();
     expect(fake.calls.find((c) => c.path.endsWith('/answer'))?.body).toEqual({ item_id: 'q-1', choices: ['w0'] });
     test.focus();
     await user.keyboard('b'); // checked: keys pick nothing any more
@@ -441,7 +466,52 @@ describe('A test in the chat', () => {
     await user.click(within(test).getByRole('button', { name: 'Next question' }));
     await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Logs add.');
     await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
-    expect(await within(test).findByText('Opinion of Codex · GPT-5.6-luna · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(await within(test).findByLabelText('Opinion of Codex · GPT-5.6-luna · not a fact', {}, { timeout: 5000 })).toBeInTheDocument();
+    // Checked before key ideas existed: the old verdict word, softened.
+    expect(within(test).getByText('Got it')).toBeInTheDocument();
+  });
+
+  it('P3-a: Full review — also right, your answer, how it could look, why it matters; I did say this, Count it', async () => {
+    const { user, fake } = await openChat(/Lecture 8 — test/);
+    const test = await screen.findByRole('region', { name: 'Test: Lecture 8 check' });
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.click(within(test).getByRole('button', { name: 'Next question' }));
+    await user.type(await within(test).findByRole('textbox', { name: 'Your answer' }), 'Because joined systems add up.');
+    await user.click(within(test).getByRole('button', { name: 'Ask the agent to check' }));
+    await user.click(await within(test).findByRole('button', { name: 'Full review' }, { timeout: 5000 }));
+    const report = within(test).getByLabelText('Full review');
+    const headings = within(report).getAllByRole('heading').map((h) => h.textContent);
+    expect(headings).toEqual(['Also right in your answer', 'Your answer', 'How it could look', 'Why it matters']);
+    expect(within(report).getByText('Codex’s opinion · not a fact')).toBeInTheDocument();
+    expect(within(report).getByText('their arrangements multiply,')).toHaveClass('kb-st-rv__add');
+    expect(within(report).getByText(/Underlined — what would round your answer out/)).toBeInTheDocument();
+    expect(within(report).getByText('You were close: «joined systems».')).toBeInTheDocument();
+    expect(within(report).getAllByText(/agent’s knowledge/).length).toBeGreaterThan(0);
+
+    // «I did say this» on the missing idea: select words of the answer, then Recheck.
+    const notes = within(report).getAllByRole('listitem').filter((li) => li.closest('ol'));
+    const missing = notes.find((li) => li.textContent?.includes('A logarithm turns the product'))!;
+    await user.click(within(missing).getByRole('button', { name: 'I did say this' }));
+    await user.click(within(missing).getByRole('button', { name: 'Recheck' }));
+    expect(within(missing).getByRole('alert')).toHaveTextContent('Select the words in your answer first.');
+    const yours = within(report).getByText('Because joined systems add up.');
+    const range = document.createRange();
+    range.setStart(yours.firstChild!, 8);
+    range.setEnd(yours.firstChild!, 29);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    await user.click(within(missing).getByRole('button', { name: 'Recheck' }));
+    await waitFor(() => expect(fake.calls.find((c) => c.path.endsWith('/recheck'))?.body)
+      .toEqual({ item_id: 'q-3', idea_id: 'k3', words: 'joined systems add up' }));
+    expect(await within(test).findByText(/what the logarithm does is still to add/)).toBeInTheDocument();
+
+    // The agent didn't agree: the user may count it themselves; SKAZ recounts (2½ of 3 → Got it).
+    const after = within(within(test).getByLabelText('Full review')).getAllByRole('listitem')
+      .find((li) => li.textContent?.includes('A logarithm turns the product'))!;
+    await user.click(within(after).getByRole('button', { name: 'Count it' }));
+    expect(await within(test).findByText('counted by you')).toBeInTheDocument();
+    expect(within(test).getAllByText('Got it').length).toBeGreaterThan(0);
+    expect(fake.calls.find((c) => c.path.endsWith('/count'))?.body).toEqual({ item_id: 'q-3', idea_id: 'k3', counted: true });
   });
 
   it('the chat stays free while the agent checks an open answer', async () => {
@@ -479,7 +549,7 @@ describe('The deck page (S12)', () => {
     await user.click(screen.getByRole('button', { name: 'Hard first' }));
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const deck = within(panel).getByRole('region', { name: 'Flashcards: Thermodynamics' });
-    expect(within(deck).getByText('1 / 1')).toBeInTheDocument();
+    expect(within(deck).getByText('1 left')).toBeInTheDocument();
     expect(within(deck).getByText(/Practice: doesn’t change your schedule/)).toBeInTheDocument();
     expect(fake.calls.find((c) => c.path === '/kb/study/decks/p-deck/study')?.body).toEqual({ mode: 'hard', card_ids: null });
     // No chat is made or opened for it, and there is no chat to take it back into: × only.

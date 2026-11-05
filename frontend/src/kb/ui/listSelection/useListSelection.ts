@@ -1,7 +1,8 @@
 import {
   useCallback, useEffect, useMemo, useRef, useState,
-  type KeyboardEvent, type MouseEvent, type FocusEvent, type RefObject,
+  type KeyboardEvent, type MouseEvent, type FocusEvent, type RefObject, type PointerEvent as ReactPointerEvent, type DragEvent as ReactDragEvent,
 } from 'react';
+import { onScrollbar, usePointerSelection, type PointerFeedback } from './pointerSelection';
 
 /**
  * Selecting several rows of one list (0.3.1 F2/F4/F5, contract in PLAN-0.3.1 «Контракт F2–F5»).
@@ -41,6 +42,8 @@ export interface RowSelectionProps {
   'data-sel-id': string;
   role: 'row';
   'aria-selected': boolean;
+  onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+  onDragStartCapture: (event: ReactDragEvent<HTMLElement>) => void;
   onClickCapture: (event: MouseEvent<HTMLElement>) => void;
   onContextMenu: (event: MouseEvent<HTMLElement>) => void;
   onFocus: (event: FocusEvent<HTMLElement>) => void;
@@ -48,6 +51,12 @@ export interface RowSelectionProps {
 
 export interface ListSelection {
   selected: ReadonlySet<string>;
+  feedback: PointerFeedback | null;
+  selecting: boolean;
+  choose: (ids?: readonly string[]) => void;
+  toggleSet: (ids: readonly string[]) => void;
+  available: readonly string[];
+  reference: string | null;
   /** Selected ids in list order. */
   ordered: string[];
   focus: string | null;
@@ -63,12 +72,15 @@ export interface ListSelection {
     ref: (el: HTMLElement | null) => void;
     onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
     onKeyUp: (event: KeyboardEvent<HTMLElement>) => void;
+    onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+    tabIndex: -1;
     'data-sel-list': '';
     'data-selecting'?: true;
   };
   /** On each list/table of rows. */
   gridProps: { role: 'grid'; 'aria-multiselectable': true };
   listRef: RefObject<HTMLElement | null>;
+  controlsRef: RefObject<HTMLDivElement>;
   shortcutsOpen: boolean;
   setShortcutsOpen: (open: boolean) => void;
 }
@@ -78,7 +90,9 @@ const TEXT_ENTRY = 'input, textarea, select, [contenteditable=""], [contentedita
 
 function rowElement(list: HTMLElement | null, id: string): HTMLElement | null {
   if (!list) return null;
-  return Array.from(list.querySelectorAll<HTMLElement>('[data-sel-id]')).find((el) => el.getAttribute('data-sel-id') === id) ?? null;
+  return Array.from(list.querySelectorAll<HTMLElement>('[data-sel-id]')).find((el) =>
+    el.getAttribute('data-sel-id') === id && el.closest('[data-sel-list]') === list
+    && !el.closest('[inert], [hidden], [aria-hidden="true"]')) ?? null;
 }
 
 /** Presses here are not "outside" the list: its bar, its menus and windows, a tooltip, a toast. */
@@ -96,15 +110,6 @@ function trackPointer() {
   document.addEventListener('pointerout', (event) => { if (!event.relatedTarget) hovered = null; }, true);
 }
 
-/** A press on the scroll bar of a scrolling element (not on its content). */
-function onScrollbar(el: Element, event: PointerEvent): boolean {
-  if (!(el instanceof HTMLElement)) return false;
-  const scrolls = el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth;
-  if (!scrolls || !el.clientWidth) return false;
-  const r = el.getBoundingClientRect();
-  return event.clientX - r.left - el.clientLeft >= el.clientWidth || event.clientY - r.top - el.clientTop >= el.clientHeight;
-}
-
 function focusTarget(row: HTMLElement): HTMLElement {
   return row.querySelector<HTMLElement>('button:not([data-sel-ignore] button), a[href], [tabindex="0"]') ?? row;
 }
@@ -114,29 +119,34 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
   const opts = useRef(options);
   opts.current = options;
   const [selected, setSelected] = useState<ReadonlySet<string>>(EMPTY);
+  const [choosing, setChoosing] = useState(false);
+  const [reference, setReference] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const anchor = useRef<string | null>(null);
   const listRef = useRef<HTMLElement | null>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
   const setListRef = useCallback((el: HTMLElement | null) => { listRef.current = el; }, []);
-  const idsKey = ids.join('\n');
 
   const reasonOf = useCallback((id: string) => opts.current.reasonNotSelectable?.(id) ?? null, []);
   const can = useCallback((id: string) => reasonOf(id) === null, [reasonOf]);
+  const available = ids.filter(can);
+  const availableKey = JSON.stringify(available);
 
   // Rows that left the list (deleted, moved out, filtered) leave the selection too.
   useEffect(() => {
-    const present = new Set(idsKey ? idsKey.split('\n') : []);
+    const present = new Set<string>(JSON.parse(availableKey));
     setSelected((s) => {
       const keep = [...s].filter((id) => present.has(id) && can(id));
       return keep.length === s.size ? s : new Set(keep);
     });
-  }, [idsKey, can]);
+  }, [availableKey, can]);
   // Another folder or filter: start over.
   const firstReset = useRef(true);
   useEffect(() => {
     if (firstReset.current) { firstReset.current = false; return; }
     setSelected(EMPTY);
+    setChoosing(false);
     anchor.current = null;
   }, [resetKey]);
 
@@ -145,6 +155,15 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
   selectedRef.current = selected;
   const focusRef = useRef(focus);
   focusRef.current = focus;
+  const pointer = usePointerSelection({
+    listRef, ids, selected, can, resetKey,
+    onChange: (next, id, from) => {
+      selectedRef.current = next;
+      setSelected(next);
+      setFocus(id);
+      anchor.current = from;
+    },
+  });
 
   const toggle = useCallback((id: string) => {
     if (!can(id)) return;
@@ -160,7 +179,30 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     if (!ok.length) return;
     setSelected((s) => (ok.every((id) => s.has(id)) ? s : new Set([...s, ...ok])));
   }, [can]);
-  const clear = useCallback(() => { setSelected(EMPTY); setShortcutsOpen(false); }, []);
+  const clear = useCallback(() => {
+    pointer.reset();
+    setSelected(EMPTY);
+    setChoosing(false);
+    setShortcutsOpen(false);
+  }, [pointer.reset]);
+  const choose = useCallback((chosen?: readonly string[]) => {
+    setChoosing(true);
+    if (chosen !== undefined) setSelected(new Set(chosen.filter((id) => opts.current.ids.includes(id) && can(id))));
+    const current = focusRef.current;
+    const id = current && opts.current.ids.includes(current) && can(current) ? current : opts.current.ids.find(can);
+    const row = id ? rowElement(listRef.current, id) : null;
+    if (row) focusTarget(row).focus({ preventScroll: true });
+  }, [can]);
+  const toggleSet = useCallback((chosen: readonly string[]) => {
+    setChoosing(true);
+    const allowed = [...new Set(chosen)].filter((id) => opts.current.ids.includes(id) && can(id));
+    setSelected((s) => {
+      const next = new Set(s);
+      const remove = allowed.length > 0 && allowed.every((id) => s.has(id));
+      for (const id of allowed) { if (remove) next.delete(id); else next.add(id); }
+      return next;
+    });
+  }, [can]);
   const selectAll = useCallback(() => {
     setSelected(new Set(opts.current.ids.filter(can)));
   }, [can]);
@@ -204,7 +246,11 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
   }, [selectAllHere]);
 
   // While something is selected: a press outside the rows clears; Esc clears from anywhere.
-  const selecting = selected.size > 0;
+  const selecting = choosing || selected.size > 0;
+  useEffect(() => {
+    if (!selecting) setReference(null);
+    else setReference((value) => value ?? focusRef.current ?? opts.current.ids.find(can) ?? null);
+  }, [selecting, can]);
   useEffect(() => {
     if (!selecting) return undefined;
     const onDown = (event: PointerEvent) => {
@@ -243,7 +289,14 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     'data-sel-id': id,
     role: 'row',
     'aria-selected': selected.has(id),
+    onPointerDownCapture: (event) => pointer.rowDown(id, event),
+    onDragStartCapture: pointer.dragStart,
     onClickCapture: (event) => {
+      if (pointer.consumeClick(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const target = event.target as HTMLElement;
       if (target.closest('[data-sel-ignore]')) return;
       const onBox = Boolean(target.closest('[data-sel-box]'));
@@ -256,7 +309,7 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
         setFocus(id);
         return;
       }
-      if (mod || onBox || event.shiftKey || now.size > 0) {
+      if (mod || onBox || event.shiftKey || now.size > 0 || choosing) {
         event.preventDefault();
         event.stopPropagation();
         setFocus(id);
@@ -269,7 +322,7 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     },
     onContextMenu: (event) => {
       const handler = opts.current.onContextMenu;
-      if (!handler) return;
+      if ((event.target as Element).closest(`[data-sel-ignore], ${TEXT_ENTRY}`) || (!handler && !can(id))) return;
       event.preventDefault();
       setFocus(id);
       const now = selectedRef.current;
@@ -277,7 +330,7 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
       if (now.has(id)) list = opts.current.ids.filter((x) => now.has(x));
       else if (can(id)) { setSelected(new Set([id])); anchor.current = id; list = [id]; }
       else list = [];
-      handler(list, { x: event.clientX, y: event.clientY });
+      handler?.(list, { x: event.clientX, y: event.clientY });
     },
     onFocus: () => setFocus(id),
   });
@@ -303,7 +356,7 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
       return true;
     };
     if (key === 'Escape') {
-      if (selectedRef.current.size || shortcutsOpen) {
+      if (selecting || shortcutsOpen) {
         event.preventDefault();
         event.stopPropagation();
         clear();
@@ -350,6 +403,12 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
 
   return {
     selected,
+    feedback: pointer.feedback,
+    selecting,
+    choose,
+    toggleSet,
+    available,
+    reference,
     ordered,
     focus,
     toggle,
@@ -358,9 +417,10 @@ export function useListSelection(options: ListSelectionOptions): ListSelection {
     targets,
     reasonOf,
     rowProps,
-    listProps: { ref: setListRef, onKeyDown, onKeyUp, 'data-sel-list': '', ...(selected.size ? { 'data-selecting': true as const } : {}) },
+    listProps: { ref: setListRef, onKeyDown, onKeyUp, onPointerDownCapture: pointer.emptyDown, tabIndex: -1, 'data-sel-list': '', ...(selecting ? { 'data-selecting': true as const } : {}) },
     gridProps: { role: 'grid', 'aria-multiselectable': true },
     listRef,
+    controlsRef,
     shortcutsOpen,
     setShortcutsOpen,
   };

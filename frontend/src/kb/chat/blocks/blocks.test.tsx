@@ -61,14 +61,14 @@ const drawing: KbAnswerBlockPart = {
   type: 'answer_block', id: 'blk-wait', state: 'drawing', block: null, sources: [], hidden: 0, error: null, raw: null, ...PLACE,
 };
 
-async function openAnswer(parts: KbAnswerBlockPart[]) {
+async function openAnswer(parts: KbAnswerBlockPart[], keepStorage = false) {
   const user = userEvent.setup();
   const world = chatWorld();
   const c1 = world.chats.find((c) => c.id === 'c1')!;
   c1.messages.push(chatMessage('c1-a2', 3, 'assistant', new Date().toISOString(),
     [{ type: 'text', text: 'In short:\n' }, ...parts, { type: 'text', text: 'That is all.' }]));
   c1.cursor = 3;
-  const r = renderKb({ world });
+  const r = renderKb({ world, keepStorage });
   await user.click(await within(screen.getByRole('region', { name: 'Chats' })).findByRole('button', { name: /Why is there a logarithm/ }));
   const chat = screen.getByRole('region', { name: 'Chat' });
   await within(chat).findByText('That is all.');
@@ -96,6 +96,25 @@ describe('P1: answer blocks in a chat answer', () => {
     expect(within(stepsBlock).queryByRole('note')).toBeNull();
     expect(within(stepsBlock).getAllByRole('listitem').map((li) => li.querySelector('b')?.textContent)).toEqual([
       'Count the microstates', 'Take the logarithm']);
+  });
+
+  it('preserves row-label column resizing after reopening the merged answer', async () => {
+    const { user, chat, unmount } = await openAnswer([compare]);
+    const table = within(chat).getByRole('region', { name: 'Comparison' });
+    expect(within(table).getByRole('columnheader', { name: 'Row label' })).toBeInTheDocument();
+    expect(within(table).getByRole('rowheader', { name: 'Boltzmann' })).toBeInTheDocument();
+    const handle = within(table).getByRole('separator', { name: 'Resize Row label column' });
+    handle.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(handle).toHaveAttribute('aria-valuenow', '160');
+    const saved: unknown = JSON.parse(localStorage.getItem('skaz.kb.compare-widths') ?? '[]');
+    expect(saved).toEqual([[expect.any(String), [160, 144, 144, 144]]]);
+    unmount();
+
+    const reopened = await openAnswer([compare], true);
+    const restored = within(reopened.chat).getByRole('separator', { name: 'Resize Row label column' });
+    expect(restored).toHaveAttribute('aria-valuenow', '160');
+    expect(JSON.parse(localStorage.getItem('skaz.kb.compare-widths') ?? '[]')).toEqual(saved);
   });
 
   it('hovering an item lights its chip; hovering a chip lights its items; a chip opens its source', async () => {

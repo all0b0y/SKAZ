@@ -19,8 +19,11 @@ import { StudyInChat } from '../study/StudyBlock';
 import type { KbStudyPart } from '../study/api';
 import type { KbWebSearchPart } from '../api/webSearch';
 import { WebSearchCard } from './webSearch';
+import { KnowledgeNotice, usesGeneralKnowledge } from './KnowledgeNotice';
+import { NotFromSources } from '../searchRules/NotFromSources';
+import { splitWindow, TimeWindowChip } from '../searchRules/TimeWindow';
 import { QuestionActionsRow, QuestionEditor, type QuestionActions } from './QuestionActions';
-import { ConnectIndicator } from '../fx/indicators/ConnectIndicator';
+import { ThoughtLine } from './ThoughtLine';
 import { isMemoryPart } from '../me/api';
 import type { KbMemoryPart } from '../../api/kb/types.gen';
 import { MemoryChip } from '../me/MemoryChip';
@@ -31,6 +34,7 @@ import { DiagramFixProvider } from '../ui/markdown/Diagram';
 import { useDiagramFix } from './diagramFix';
 import { SelectionChip } from './select/SelectionChip';
 import { WikiFixCard } from './select/WikiFixCard';
+import { UnclearClearRow, useLastUnclearAnswer } from '../study/Unclear';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -67,7 +71,7 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
     pendingSpace = null;
   };
   for (const part of parts) {
-    if (part.type === 'tool') continue;
+    if (part.type === 'tool' || part.type === 'knowledge') continue;
     if (isMemoryPart(part)) {
       // N6 decision 7: an agent's edit of «Я» is its own compact line with Undo.
       flushSpace();
@@ -155,7 +159,7 @@ export function plainText(parts: KbMessagePart[]): string {
   }).join('').trim();
 }
 
-function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePart[] }) {
+function Parts({ chatId, parts, working }: { chatId: string; parts: readonly AnyMessagePart[]; working: boolean }) {
   const open = useOpenDocument();
   const { ui } = useServices();
   return (
@@ -172,33 +176,13 @@ function Parts({ chatId, parts }: { chatId: string; parts: readonly AnyMessagePa
         }
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
-        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} />;
+        if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} working={working} />;
         if (b.kind === 'memory') return <MemoryChip key={b.part.edit_id} part={b.part} />;
         if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
         if (b.kind === 'fix') return <WikiFixCard key={b.part.id} chatId={chatId} part={b.part} />;
         return <InlineMarkdown key={i} pieces={b.pieces} slot={(index, key) => <InlinePart key={key} part={b.slots[index]!} />} />;
       })}
     </>
-  );
-}
-
-/** SKAZ's web search tool (backend `permissions/web_tool.py` WEB_TOOL). */
-const WEB_TOOL = 'skaz_web_search';
-
-/** What the agent looked at ("Read page Entropy"), folded. */
-function Tools({ parts }: { parts: KbMessagePart[] }) {
-  // W-3b: the skaz_web_search call has its own «Searched the web» line — not repeated here.
-  const tools = parts.filter((p): p is Extract<KbMessagePart, { type: 'tool' }> => p.type === 'tool' && !p.name.endsWith(WEB_TOOL));
-  const [open, setOpen] = useState(false);
-  if (!tools.length) return null;
-  return (
-    <div className="kb-tools">
-      <button type="button" className="kb-tools__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <Icon name="tool" size={13} />Looked at {tools.length} {tools.length === 1 ? 'thing' : 'things'}
-        <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
-      </button>
-      {open && <ul className="kb-tools__list">{tools.map((t, i) => <li key={i}>{t.label}</li>)}</ul>}
-    </div>
   );
 }
 
@@ -237,30 +221,36 @@ export function AssistantMessage({ chatId, message, actions }: { chatId: string;
   const [copyPlay, replayCopy] = useIconPlay();
   const [regenPlay, replayRegen] = useIconPlay();
   const open = useOpenDocument();
-  const empty = message.parts.filter((p) => p.type !== 'tool').length === 0;
+  const empty = message.parts.filter((p) => p.type !== 'tool' && p.type !== 'knowledge').length === 0;
   // U1: an answer that waits for its agent's update says so instead of «Writing an answer…».
   const waitingFor = useAgentUpdates((s) => (empty && message.state === 'streaming' ? updateWait(s.view, message.engine, message.id) : null));
   const interrupted = message.state === 'interrupted' || message.state === 'failed';
   const sources = useMemo(() => indexSources(answerCitations(message.parts)), [message.parts]);
+  // N7-5: «Looking at 2024–2026» on the first line becomes a chip whose menu changes the window.
+  const timed = useMemo(() => splitWindow(message.parts), [message.parts]);
   // D-12: a diagram of this answer that can't be drawn asks this chat's agent for a fix (diagramFix.ts).
   const fixDiagram = useDiagramFix(message.id);
+  const lastUnclear = useLastUnclearAnswer(chatId);
   return (
     <article className="kb-msg kb-msg--assistant" data-state={message.state} data-message-id={message.id} aria-label="Answer">
-      <Tools parts={message.parts} />
+      {/* Stage 6 B3: the agent's work (thinking line, live timer, a chip per tool call) folds into
+          `N tool calls · M failed` after the answer. */}
+      <ThoughtLine message={message} head={empty && message.state === 'streaming' ? waitingFor ?? 'Writing an answer…' : null} />
+      {usesGeneralKnowledge(message.parts) && <KnowledgeNotice />}
       <div className="kb-msg__body" {...quoteAttrs({ source: 'chat', id: chatId, message_id: message.id })}>
-        {empty && message.state === 'streaming' && (
-          // FX §7: «Connecting nodes» beside the words; the canvas is decorative, the text is the status.
-          <p className="kb-msg__wait" role="status"><ConnectIndicator className="kb-msg__think" />{waitingFor ?? 'Writing an answer…'}</p>
-        )}
         <SourcesProvider index={sources}>
           <AnswerSelectScope messageId={message.id}>
             <DiagramFixProvider value={fixDiagram}>
-              <Parts chatId={chatId} parts={message.parts} />
+              {timed.window && <TimeWindowChip window={timed.window} disabled={message.state === 'streaming'} />}
+              <Parts chatId={chatId} parts={timed.parts as typeof message.parts} working={message.state === 'streaming'} />
             </DiagramFixProvider>
           </AnswerSelectScope>
         </SourcesProvider>
       </div>
       <FoldedSourcesRow index={sources} foldKey={`sources:${chatId}/${message.id}`} />
+      <NotFromSources chatId={chatId} message={message} />
+      {/* P3-b: «Clear now» under the chat's last answer that read the «Unclear» marks. */}
+      {message.state === 'done' && lastUnclear === message.id && <UnclearClearRow chatId={chatId} />}
       {interrupted && message.failure && (
         <div className="kb-interrupt" role="alert">
           <Icon name="clock" size={16} className="kb-interrupt__icon" />
@@ -321,7 +311,7 @@ export function UserMessage({ message, actions }: { message: KbMessage; actions?
   }, [editing]);
   const close = () => { refocus.current = true; setEditing(false); };
   return (
-    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef}>
+    <article className={`kb-msg kb-msg--user${editing ? ' is-editing' : ''}`} aria-label="Your question" ref={articleRef} data-message-id={message.id}>
       {input.selection && <SelectionChip selection={input.selection} />}
       {editing && actions ? (
         <QuestionEditor input={input} onCancel={close} onSend={async (next) => {

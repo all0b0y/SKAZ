@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { KbJob } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { Button, Icon, Modal } from '../ui';
+import { StippleStrip } from '../fx/stipple/StippleStrip';
 import { useServices } from '../state/context';
 
 type Phase =
@@ -74,7 +75,7 @@ export function ExportRow() {
       {phase.kind === 'running' ? (
         <span className="kb-progress-row">
           <span className="kb-progress" role="progressbar" aria-label="Exporting" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
-            <i style={{ width: `${pct ?? 10}%` }} />
+            <StippleStrip value={pct === null ? null : pct / 100} />
           </span>
           <span className="kb-muted">Exporting{progress && progress.parts_total ? ` · ${progress.parts_done} of ${progress.parts_total}` : '…'}</span>
         </span>

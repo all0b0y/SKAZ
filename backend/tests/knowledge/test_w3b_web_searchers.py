@@ -177,3 +177,14 @@ async def test_claude_code_may_not_search_anything_but_the_approved_query(tmp_pa
     (answer,) = [json.loads(item["line"]) for item in fake.records("control_response")]
     assert answer["response"]["response"]["behavior"] == "deny"
     assert outcome.links == () and outcome.error == "Claude Code didn't run the search."
+
+
+async def test_claude_searcher_accepts_the_exact_preapproved_generated_query_over_raw_limit(
+        tmp_path: Path) -> None:
+    query = f"({'meaning ' * 50}) site:scholar.google.com -site:blocked.example.org"
+    assert len(query) > 400
+    engine, fake = claude(tmp_path, [web_use(query), {"__ask__": can_use(query), "__then__": LINKS}, RESULT])
+    outcome = await EngineSearch().search(engine, query)
+    (answer,) = [json.loads(item["line"]) for item in fake.records("control_response")]
+    assert answer["response"]["response"] == {"behavior": "allow", "updatedInput": {"query": query}}
+    assert outcome.error is None and outcome.links

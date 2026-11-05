@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeckPage, TestPage } from '../study/DeckPage';
 import { useMakeStudy } from '../study/makeFrom';
 import type { KbBlock, KbJob, KbPage } from '../../api/kb/types.gen';
@@ -24,6 +24,9 @@ import { DeletePageDialog, RenamePageDialog, type PageDialog } from './PageDialo
 import { DiagramPreviews } from '../ui/markdown/Diagram';
 import { WikiTermsButton } from './WikiTermsButton';
 import { ClaimLabel } from './ClaimLabel';
+import { useMotionLevel } from '../ui/motionLevel';
+import { usePixelSwap } from '../fx/pixel/usePixelSwap';
+import { PixelCover } from '../fx/pixel/PixelCover';
 
 const NO_CITES: never[] = [];
 const PAGE_GONE = 'Page was removed from the wiki.';
@@ -328,6 +331,11 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
   );
 }
 
+/** What a reader sees of a page's content: a change here is a change worth showing. */
+function pageContent(page: KbPage): string {
+  return JSON.stringify([page.title, page.blocks.map((b) => [b.id, b.kind, b.text])]);
+}
+
 /** Wiki page in the right panel (v7–v8, decisions 20–22). */
 const FINDER_FAILED = 'Finder couldn’t show this page. It may have been moved or deleted.';
 
@@ -360,6 +368,18 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const page = state.value;
   useScrollTarget(bodyRef.current, target.block_id ?? null, nonce, state.load === 'ready');
 
+  /*
+   * Stage 6 B6 PixelTransition: only when the agent changed THIS open page — a re-check the user asked
+   * for finished («done») and the page read again came back with different content. The flag lives
+   * until the next page value lands (then it is spent either way); the user's own edits clear it.
+   */
+  const agentChanged = useRef(false);
+  useEffect(() => { agentChanged.current = false; }, [page]);
+  const plays = useCallback((shown: KbPage | null, next: KbPage | null) => agentChanged.current && !!shown && !!next
+    && shown.id === next.id && pageContent(shown) !== pageContent(next), []);
+  const swap = usePixelSwap(page, plays, useMotionLevel());
+  const shown = swap.shown;
+
   useInterval(Object.keys(jobs).length > 0, 1500, () => {
     for (const [blockId, jobId] of Object.entries(jobs)) {
       client.call('GET /kb/jobs/{job_id}', { path: { job_id: jobId } }).then((job: KbJob) => {
@@ -368,6 +388,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         // A failed or stopped re-check says why next to the block (never a silent return).
         const failed = recheckFailure(job);
         if (failed) setFailures((f) => ({ ...f, [blockId]: failed }));
+        if (job.state === 'done') agentChanged.current = true; // the agent may have rewritten the block
         reload();
       }, (error: unknown) => {
         setJobs((j) => { const next = { ...j }; delete next[blockId]; return next; });
@@ -379,6 +400,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
   const pathOf = (block: KbBlock) => ({ page_id: target.id, block_id: block.id });
   const actions: BlockActions = {
     edit: async (block, text) => {
+      agentChanged.current = false;
       try { set(await client.call('PUT /kb/wiki/pages/{page_id}/blocks/{block_id}', { path: pathOf(block), body: { text } })); return null; }
       catch (error) { return errorText(error); }
     },
@@ -391,6 +413,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
       } catch (error) { return errorText(error); }
     },
     remove: async (block) => {
+      agentChanged.current = false;
       try { set(await client.call('DELETE /kb/wiki/pages/{page_id}/blocks/{block_id}', { path: pathOf(block) })); return null; }
       catch (error) { return errorText(error); }
     },
@@ -399,17 +422,18 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
     dismissFailure: (blockId) => setFailures((f) => { const next = { ...f }; delete next[blockId]; return next; }),
   };
   const addNote = async (text: string) => {
+    agentChanged.current = false;
     try { set(await client.call('POST /kb/wiki/pages/{page_id}/blocks', { path: { page_id: target.id }, body: { text } })); return null; }
     catch (error) { return errorText(error); }
   };
 
-  const kind = page?.kind ?? 'concept';
+  const kind = shown?.kind ?? 'concept';
   return (
     <>
       <header className="kb-head kb-head--doc">
         <span className="kb-doc__type">
           <Icon name={PAGE_KIND_ICON[kind]} size={14} />
-          <span>{page ? PAGE_KIND_LABEL[kind] : 'Wiki page'}</span>
+          <span>{shown ? PAGE_KIND_LABEL[kind] : 'Wiki page'}</span>
         </span>
         <span className="kb-head__spacer" />
         <PanelFrameButtons
@@ -447,6 +471,7 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
           )}
         </PanelFrameButtons>
       </header>
+      <div className="kb-pxstage" data-px={swap.phase === 'idle' ? undefined : swap.phase}>
       <div className="kb-doc__body" ref={bodyRef}>
         {state.load === 'loading' && !page && <div className="kb-doc__wait"><Spinner label="Opening the page" /></div>}
         {state.load === 'error' && (
@@ -457,23 +482,32 @@ export function PageView({ target, nonce }: { target: DocTarget; nonce: number }
         )}
         {obsidian.message && <p className="kb-page__notice">{obsidian.message}</p>}
         {finderError && <p className="kb-page__notice" role="alert">{finderError}</p>}
-        {page && (
-          <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={page.kind}>
-            <h2 className="kb-doc__title">{page.title}</h2>
+        {shown && (
+          <article className={`kb-doc__article kb-page${expanded ? ' is-wide' : ''}`} data-page-kind={shown.kind}>
+            <h2 className="kb-doc__title">{shown.title}</h2>
             <div className="kb-page__meta">
-              {page.folder_names.map((name, i) => <FolderTag key={name} name={name} tone={tone(page.folders[i])} />)}
+              {shown.folder_names.map((name, i) => <FolderTag key={name} name={name} tone={tone(shown.folders[i])} />)}
               <span className="kb-doc__meta">
-                {[plural(page.folder_names.length, 'folder'), plural(page.sources.length, 'source'),
-                  page.updated_at ? `updated ${relativeTime(page.updated_at)}` : ''].filter(Boolean).join(' · ')}
+                {[plural(shown.folder_names.length, 'folder'), plural(shown.sources.length, 'source'),
+                  shown.updated_at ? `updated ${relativeTime(shown.updated_at)}` : ''].filter(Boolean).join(' · ')}
               </span>
+              {swap.played > 0 && (
+                // B6: after the agent's change, said in words (the only cue at motion «off»). In the meta
+                // row, beside «updated …», where a narrow panel has room (the header has its buttons).
+                <span key={swap.played} className="kb-pxpill" role="status" aria-label="Updated by the agent">
+                  <Icon name="check" size={12} />Updated by the agent
+                </span>
+              )}
             </div>
-            {page.kind === 'deck' ? <DeckPage page={page} />
-              : page.kind === 'test' ? <TestPage page={page} />
-                : <PageBody page={page} actions={actions} noteOpen={noteOpen} setNoteOpen={setNoteOpen} addNote={addNote} />}
+            {shown.kind === 'deck' ? <DeckPage page={shown} />
+              : shown.kind === 'test' ? <TestPage page={shown} />
+                : <PageBody page={shown} actions={actions} noteOpen={noteOpen} setNoteOpen={setNoteOpen} addNote={addNote} />}
           </article>
         )}
         {page && <RenamePageDialog page={page} open={dialog === 'rename'} onClose={() => setDialog(null)} onDone={set} />}
         {page && <DeletePageDialog page={page} open={dialog === 'delete'} onClose={() => setDialog(null)} />}
+      </div>
+      {(swap.phase === 'cover' || swap.phase === 'reveal') && <PixelCover phase={swap.phase} phaseAt={swap.phaseAt} rewindFrom={swap.rewindFrom} />}
       </div>
     </>
   );

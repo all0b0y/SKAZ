@@ -99,11 +99,15 @@ async def test_open_answers_are_checked_by_the_default_agent_with_its_last_model
 
     def judge(turn: AgentTurn) -> Any:
         turns.append(turn)
-        return text('{"verdict": "right", "missing": "", "comment": "Да."}')
+        # P3-a: an old test's first check builds its key ideas; the one idea is covered → «Got it».
+        return text('{"ideas": [{"text": "Энтропия — мера беспорядка.", "source": 1, '
+                    '"quote": "мера беспорядка системы"}], "points": [{"idea": 1, "status": "covered", '
+                    '"yours": "", "why": "", "basis": "agent", "source": 0, "quote": ""}], '
+                    '"model_answer": [], "also_right": [], "comment": "Да."}')
 
     models = (ModelOption("fast", "Fast", ("low", "high"), "low"),
               ModelOption("deep", "Deep", ("medium", "xhigh")))
-    engines: dict[str, Any] = {engine: FakeEngine(engine, script=judge, models=models)  # type: ignore[arg-type]
+    engines: dict[str, Any] = {engine: FakeEngine(engine, script=judge, models=models)
                                for engine in ("codex", "claude_code", "hermes", "opencode")}
     registry = EngineRegistry(engines, runtime.kb.settings, cache_s=0.0)  # type: ignore[arg-type]
     runtime.kb_agents.registry = registry
@@ -123,3 +127,4 @@ async def test_open_answers_are_checked_by_the_default_agent_with_its_last_model
     response = next(q for q in (await kb_client.get(f"/kb/study/{block['id']}")).json()["questions"]
                     if q["id"] == open_question["id"])["response"]
     assert response["verdict"] == "right" and response["checked_by"] == "Codex · Deep"
+    assert (response["status"], response["score"]) == ("got", 1.0)

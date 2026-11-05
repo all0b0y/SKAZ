@@ -64,6 +64,9 @@ class KbSpeechMaterial(BaseModel):
     error: str | None
     #: How much audio there is, in ms (``null``: not known yet).
     duration_ms: int | None = None
+    #: N2: the same video link or media file is already in the library: this is that material,
+    #: nothing was imported and no transcription started. HTTP 200 instead of 201.
+    already_in_library: bool = False
 
 
 class KbSpeechDefaults(BaseModel):

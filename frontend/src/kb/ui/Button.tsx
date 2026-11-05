@@ -1,6 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Icon, type IconName } from './Icon';
 import { Tooltip } from './Tooltip';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import type { Placement } from './geometry';
 
 export type ButtonVariant = 'fill' | 'outline' | 'quiet' | 'danger';
@@ -34,7 +35,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       aria-busy={busy || undefined}
       {...rest}
     >
-      {busy ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
+      {busy ? <StippleRing className="kb-spinner kb-spinner--inline" />
         : icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} play={iconPlay} /> : null}
       {children !== undefined && <span className="kb-btn__label">{children}</span>}
     </button>

@@ -1,6 +1,6 @@
 /* 0.3.1 F2–F5: selecting several rows, the selection bar, shortcuts, drag and drop, toasts.
    Mockups: .dev/ui-redesign/study/lib-v1 (table, variant A) and lib-v2 (side lists, compact bar).
-   Only transform/opacity animate; selection is shown by a tick and a tint, not by colour alone. */
+   Selection is shown by a round tick only; open/current surfaces keep their own paint. */
 
 /* The row's box (F7-a): no box and no room for it until the list is selecting; then it opens on
    every row of that list at once, pushing the row's content aside (the one width animation here:
@@ -48,15 +48,15 @@
 [data-selecting] .kb-amt col.kb-amt__c-sel,
 .kb-amt:has(.kb-selbox--all:focus-visible) col.kb-amt__c-sel { width: 34px; }
 
-/* Selected rows: a tint plus the ticked box. */
+/* Selection never overrides the open row's bridge or the ordinary hover surface. */
 [data-sel-id] { user-select: none; }
-li[aria-selected='true'] > [role='gridcell'] > .kb-row,
-li[aria-selected='true'] .kb-row { background: color-mix(in srgb, var(--kb-text) 10%, transparent); }
-tr[aria-selected='true'] > td { background: color-mix(in srgb, var(--kb-text) 8%, transparent); }
-.kb-allchats__row[aria-selected='true'] { background: color-mix(in srgb, var(--kb-text) 8%, transparent); }
+/* The root is a pointer's programmatic focus target; rows and controls own keyboard focus rings. */
+[data-sel-list]:focus { outline: none; }
+.kb-selslot .kb-selbox { border-radius: var(--kb-r-pill); }
 tr[data-sel-id]:focus-within > td:first-child { box-shadow: inset 2px 0 0 var(--kb-text); }
 [data-sel-dragging] > td, li[data-sel-dragging] .kb-row { opacity: 0.45; }
 [role='gridcell'] { min-width: 0; }
+.kb-amg [role='gridcell'] { height: 100%; }
 .kb-row--dim .kb-row__text { color: var(--kb-muted); }
 .kb-row__why { flex: none; color: var(--kb-muted); font-size: var(--t-xs); }
 
@@ -110,6 +110,66 @@ tr[data-sel-id]:focus-within > td:first-child { box-shadow: inset 2px 0 0 var(--
 }
 .kb-selbar--compact .kb-selbar__count { flex: 1; }
 .kb-selbar--compact .kb-selbar__btn { width: 28px; height: 28px; padding: 0; justify-content: center; border-radius: var(--kb-r-sm); }
+
+/* Selection controls occupy the actual header; the list DOM stays in place. */
+.kb-selection-header__normal { display: contents; }
+.kb-selection-header__normal[hidden] { display: none; }
+.kb-selection-header__slot:empty { display: none; }
+.kb-selection-header__slot { min-width: 0; }
+.kb-head[data-selection-active] { height: auto; min-height: var(--kb-head-h); padding-block: var(--kb-sp-4); }
+.kb-head[data-selection-active] .kb-selection-header__slot { flex: 1; width: 100%; }
+.kb-selection-controls { position: relative; min-width: 0; }
+.kb-selection-barhost[aria-hidden='true'] { position: absolute; pointer-events: none; }
+.kb-selection-entry > button {
+  display: inline-flex; align-items: center; gap: var(--kb-sp-4); height: 26px;
+  padding: 0 var(--kb-sp-8); border: 0; border-radius: var(--kb-r-pill);
+  color: var(--kb-muted); background: none; font-size: var(--t-sm);
+  opacity: 0; transition: opacity 140ms ease;
+}
+[data-selection-surface]:hover .kb-selection-entry > button,
+[data-selection-surface]:focus-within .kb-selection-entry > button,
+.kb-selection-entry:focus-within > button,
+.kb-selection-entry > button[aria-expanded='true'] { opacity: 1; }
+.kb-selection-entry > button:hover { background: var(--kb-accent-soft); color: var(--kb-text); }
+.kb-selection-header__slot .kb-selbar {
+  position: static; width: 100%; max-width: none; margin: 0; padding: 0;
+  flex-wrap: wrap; gap: var(--kb-sp-4); border-radius: 0; box-shadow: none;
+  background: none; color: var(--kb-text);
+}
+.kb-selection-header__slot .kb-selbar__btn {
+  height: 26px; min-width: 26px; color: var(--kb-muted-strong); background: none;
+}
+.kb-selection-header__slot .kb-selbar--compact .kb-selbar__btn { width: 26px; }
+.kb-selection-header__slot .kb-selbar__btn:hover:not(:disabled) { background: var(--kb-accent-soft); color: var(--kb-text); }
+.kb-selection-header__slot .kb-selbar__btn.is-danger { color: var(--kb-danger); }
+.kb-selection-header__slot .kb-selbar__btn.is-danger:hover:not(:disabled) { background: var(--kb-danger-soft); }
+.kb-selection-header__slot .kb-selbar__btn:focus-visible { outline-color: var(--kb-text); }
+.kb-selbar__hint { flex-basis: 100%; font-size: var(--t-xs); line-height: 1.4; }
+.kb-selbar__hint kbd { font: inherit; }
+.kb-selection-header__slot .kb-selbar__hint { color: var(--kb-muted-strong); transition: color 140ms ease; }
+.kb-selection-header__slot .kb-selbar__hint[data-last-use='true'] { color: var(--kb-muted); }
+.kb-selbar__sets { display: flex; align-items: center; gap: var(--kb-sp-4); flex-basis: 100%; min-width: 0; max-width: 100%; overflow-x: auto; padding-block: var(--kb-sp-4); }
+.kb-selset {
+  display: inline-flex; flex: none; align-items: center; gap: var(--kb-sp-4); height: 22px;
+  padding: 0 var(--kb-sp-8); border: 1px solid var(--kb-line); border-radius: var(--kb-r-pill);
+  background: none; color: var(--kb-muted-strong); font-size: var(--t-xs); white-space: nowrap;
+}
+.kb-selset[aria-pressed='true'] { color: var(--kb-on-fill); background: var(--kb-fill); border-color: var(--kb-fill); }
+.kb-selset:disabled { opacity: 0.4; cursor: default; }
+.kb-selset:focus-visible { outline: 2px solid var(--kb-text); outline-offset: -2px; }
+
+/* Gesture geometry is viewport-relative and clipped by the pointer module, never over the bridge. */
+.kb-selection-band { position: fixed; z-index: 45; pointer-events: none; border: 1px solid color-mix(in srgb, var(--kb-text) 45%, transparent); background: color-mix(in srgb, var(--kb-text) 7%, transparent); border-radius: var(--kb-r-xs); }
+.kb-selection-hold { position: fixed; z-index: 45; width: 34px; height: 34px; translate: -50% -50%; pointer-events: none; }
+.kb-selection-hold circle { fill: none; stroke-width: 2; }
+.kb-selection-hold__bg { stroke: color-mix(in srgb, var(--kb-text) 12%, transparent); }
+.kb-selection-hold__fg { stroke: var(--kb-text); stroke-linecap: round; transform: rotate(-90deg); transform-origin: 17px 17px; }
+.kb-selection-hold[data-phase='pending']:not([data-motion='off']) .kb-selection-hold__fg { animation-name: kb-selection-hold-progress; animation-timing-function: linear; animation-fill-mode: forwards; }
+.kb-selection-hold[data-phase='pending'][data-motion='full'] { animation-name: kb-selection-hold-enter; animation-fill-mode: forwards; }
+.kb-selection-hold[data-phase='pending'][data-motion='calm'] { animation-name: kb-selection-hold-fade; animation-fill-mode: forwards; }
+@keyframes kb-selection-hold-progress { 0%, 20% { stroke-dashoffset: 81.7; } 100% { stroke-dashoffset: 0; } }
+@keyframes kb-selection-hold-enter { 0%, 18% { opacity: 0; transform: scale(0.6); } 45%, 100% { opacity: 1; transform: scale(1); } }
+@keyframes kb-selection-hold-fade { 0%, 18% { opacity: 0; } 40%, 100% { opacity: 1; } }
 
 /* ⌘/ list. */
 .kb-shortcuts { padding: var(--kb-sp-10) var(--kb-sp-12); font-size: var(--t-sm); }

@@ -17,9 +17,9 @@ Organize and connect · understand and learn · revisit and explore
 
 <br>
 
-<a href="docs/images/skaz-intro.mp4"><img src="docs/images/skaz-intro.webp" alt="SKAZ — read, save and collect" width="880"></a>
+<img src="docs/images/skaz-tour.webp" alt="SKAZ 0.3.1 — A tour of SKAZ: recording a lecture, asking about it with a footnote, allowing an agent edit, studying cards made from the lecture" width="880">
 
-<sub>Silent introduction · <a href="docs/images/skaz-intro.mp4">MP4, 3 s</a></sub>
+<sub>SKAZ 0.3.1 tour · earlier interface, not 0.3.2 · authored demo data · <a href="docs/images/skaz-tour.mp4">The whole tour in Full HD (MP4, 80 s)</a></sub>
 
 <br><br>
 
@@ -121,6 +121,8 @@ click a recording to open its full-size MP4.</sub>
 
 ## ✨ Features
 
+**Updated for 0.3.2.** The tour and loops above show the earlier 0.3.1 interface, not 0.3.2.
+
 | | |
 |---|---|
 | 📚 **Bring your sources together** | PDFs, text and Markdown files, pasted text, web articles, audio and video files, and video links from YouTube, VK Video, RuTube and Vimeo. Use only material you are allowed to process. |
@@ -130,9 +132,18 @@ click a recording to open its full-size MP4.</sub>
 | 🌐 **Explore beyond your library** | Search for additional sources from a chat. You see the exact query and choose Allow once, Allow in this chat or Deny; only the query is sent to the search. Review the results and add a chosen page to the library with one click. |
 | 🗂️ **Keep your knowledge accessible** | Your materials and wiki are a folder of `.md` files. Open it in **Obsidian**, or export as plain Markdown with source footnotes. Your own edits to wiki pages are protected from the agent. |
 | 🎙️ **Live recording** | Microphone, optionally with your Mac's sound (Zoom, videos; macOS 14.2+ and OS permission). Recognition with **Soniox** (cloud streaming, speaker separation, translation) or **Whisper on this computer** (works offline). SKAZ never silently switches services. |
+| 📚 **Any source** | PDF, documents, text and Markdown files, audio and video files, web articles (cleaned up), pasted text of any length, and video links from YouTube, VK Video, RuTube and Vimeo. Use only material you are allowed to process. |
+| 🧠 **A living wiki** | Notes for every source, one page per concept across all folders, and saved analyses. Each statement is marked: quoted from a source, a connection the agent inferred, or an agent's explanation. When sources disagree, both versions are shown and you decide. |
+| 💬 **Chats with footnotes** | Ask about the whole library or limit a chat to selected sources in **Search & sources**, with per-chat exclusions. Footnotes open the exact moment of a recording or the page of a document. Point at a page, a material or a chat with **@**. |
+| 🧱 **Structured answers** | Comparisons with resizable columns, timelines, steps, definitions, concept cards, key numbers and diagrams. Source links stay with the items they support. Copy a block as Markdown or select an item to ask about it. |
+| 🃏 **Cards and tests** | Ask for flashcards or a test on a page, a material or a chat. Every correct answer is backed by a checked quote. Cards are reviewed with FSRS spaced repetition; decks and tests can be saved to the wiki. |
+| 🌐 **Web search, with your OK** | See the exact query before it is sent and choose Allow once, Allow in this chat or Deny. Search results show the site rules in force; adding a page to the library remains your choice. |
+| 🧪 **Search Beta** | Enable **Beta search features** in **Settings → Search** for **Only these sites** (a restriction) and **Prefer** (a hint). Off by default; turning it off pauses these rules for new searches but keeps your lists. **Never** and library source filters stay active. |
+| 📖 **Read web pages** | The agent can read public pages from approved search results without importing them first. Long pages are read in bounded parts from the same snapshot. **Add to library** is a separate action; reading alone does not add a material. |
 | 🤖 **Your agent** | **Codex**, **Claude Code**, **Hermes Agent** or **OpenCode**, with your own subscription or key; SKAZ can install them for you. Agents read the library through SKAZ's tools and change wiki pages only after you allow it, with Undo; your own notes are never touched. Pick a model per chat and star favorites. Small filing decisions can run on a local model or through OpenRouter. |
 | ✍️ **Recognition fixes** | An optional check finds likely recognition errors, fixes the confident ones and only highlights the doubtful ones. Every fix can be undone. |
 | 🔄 **Updates** | SKAZ checks GitHub releases at start and once a day and installs a verified update from **Settings → About**. |
+| 🎨 **Appearance** | Choose the light/dark base, accent, density, motion and optional interface sounds in **Settings → Appearance**. Presets give you a starting point; the controls remain independent. |
 
 ## 📦 Install
 
@@ -191,7 +202,8 @@ Every choice can be changed later in **Settings**.
 | Live audio | Not kept as an archive for playback. Temporary audio may be used for processing or recovery. |
 | Speech recognition | **Soniox:** audio is sent after your consent, which you can take back at any time. **Whisper on this computer:** audio never leaves your Mac. |
 | Agent | Your question and the parts of the library it reads go to the agent you chose; its retention and training policies apply. |
-| Web search | Only a query you approved, sent to the search of the agent named on the card — no chat history, no library text. Adding a found page makes one request to that address. |
+| Web search | Only the approved query goes to the search service of the agent named on the card, not the full chat history or library context. |
+| Web-page reading | Reading or importing a page contacts that website. Extracted text may be sent to your selected agent. Reading alone does not save it as a library material. |
 | Keys | An encrypted local file in SKAZ's app folder, with its encryption key beside it. File permissions are the main boundary — not protection from processes running as your user. |
 | Activity log | Kept without conversation text or keys. |
 | Backend | Python, loopback-only, with a fresh token on every launch. |

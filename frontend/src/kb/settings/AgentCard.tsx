@@ -3,9 +3,11 @@ import type { KbAgent } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
 import { Button, Icon, IconButton, Menu, Modal, type MenuItem } from '../ui';
 import { EngineBadge } from '../ui/EngineBadge';
+import { StippleRing } from '../fx/stipple/StippleWork';
 import { useAgents, useServices } from '../state/context';
 import { WebSearchNote } from '../chat/webSearch';
 import { AgentUpdateOffer } from './AgentUpdates';
+import { InstallSummary } from './InstallProgress';
 
 const ACCOUNT: Record<EngineId, string> = {
   codex: 'ChatGPT subscription',
@@ -79,7 +81,8 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   useEffect(() => {
     if (!taskId) return undefined;
     if (install && install.task.state !== 'running') return undefined;
-    return store.getState().followInstall(agent.id, taskId);
+    store.getState().followInstall(agent.id, taskId);
+    return undefined; // Observation belongs to the store, not the mounted card.
   }, [store, agent.id, taskId, install?.task.state]);
 
   const act = async (what: 'install' | 'update' | 'first_check' | 'repair' | 'login' | 'check' | 'cancel' | 'logout') => {
@@ -117,7 +120,6 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
   const action = agent.action;
   const label = action === 'install' ? 'Install' : action === 'update' ? 'Update' : action === 'login' ? 'Sign in' : action === 'check' ? 'Check again'
     : action === 'first_check' ? 'Check' : action === 'repair' ? 'Repair' : null;
-  const finished = install && install.task.state !== 'running' ? install.task : null;
 
   const status = (
     <span className={`kb-status kb-status--${tone(agent.state)}`}>
@@ -178,30 +180,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
           {agent.first_run.note || 'SKAZ checks Hermes once with its own Hermes folder. Nothing starts until you press Check.'}
         </p>
       )}
-      {(running || finished) && install && (
-        <div className="kb-installlog">
-          <div className="kb-installlog__head">
-            {running ? <span className="kb-spinner kb-spinner--inline" aria-hidden="true" /> : <Icon name={finished?.state === 'succeeded' ? 'check' : 'error'} size={13} />}
-            <span role="status">
-              {running ? (install.task.action === 'update' || install.task.action === 'upgrade' ? 'Updating…'
-                : install.task.action === 'rollback' ? 'Rolling back…' : install.task.action === 'first_check' ? 'Checking…'
-                : install.task.action === 'repair' ? 'Repairing…' : 'Installing…')
-                : finished?.state === 'succeeded' ? `Done${finished.version ? ` · ${finished.version}` : ''}`
-                  : finished?.state === 'cancelled' ? 'Cancelled' : `Failed${finished?.reason ? `: ${finished.reason}` : ''}`}
-            </span>
-          </div>
-          <pre className="kb-installlog__lines" aria-label="Install log" tabIndex={0}>
-            {install.task.dropped > 0 && `… ${install.task.dropped} earlier lines\n`}
-            {install.lines.map((l) => l.text).join('\n')}
-          </pre>
-          {finished?.state === 'failed' && finished.action !== 'upgrade' && finished.action !== 'rollback' && (
-            <p className="kb-agentcard__manual">
-              Install it yourself: <code>{finished.install.manual_command}</code>{' '}
-              <a className="kb-md__link" href={finished.install.docs_url} target="_blank" rel="noreferrer noopener">instructions</a>
-            </p>
-          )}
-        </div>
-      )}
+      <InstallSummary engine={agent.id} />
       {message && (
         <p className={message.error ? 'kb-inline-error kb-inline-error--flat' : 'kb-agentcard__msg'} role={message.error ? 'alert' : 'status'}>
           {message.text}
@@ -209,7 +188,7 @@ export function AgentCard({ agent, variant = 'card' }: { agent: KbAgent; variant
       )}
       {!message && signIn && (
         <p className={`kb-agentcard__msg kb-signin kb-signin--${signIn.state}`} role="status">
-          {signIn.state === 'waiting' && <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />}
+          {signIn.state === 'waiting' && <StippleRing className="kb-spinner kb-spinner--inline" />}
           {signIn.state === 'signed_in' && <Icon name="check" size={13} />}
           <span>
             {signIn.message}

@@ -5,7 +5,7 @@ import { DEFAULT_PREFS, PREFS_KEY, createPrefsStore, readPrefs } from './prefs';
 describe('appearance presets', () => {
   it('the default look is the SKAZ preset', () => {
     expect(presetOf(DEFAULT_LOOK)).toBe('skaz');
-    expect(presetOf({ base: DEFAULT_PREFS.base, accent: DEFAULT_PREFS.accent, density: DEFAULT_PREFS.density, motion: DEFAULT_PREFS.motion })).toBe('skaz');
+    expect(presetOf({ base: DEFAULT_PREFS.base, accent: DEFAULT_PREFS.accent, density: DEFAULT_PREFS.density })).toBe('skaz');
   });
 
   it('recognises every preset and turns into custom when one knob moves', () => {
@@ -27,7 +27,8 @@ describe('appearance prefs', () => {
     expect(readPrefs(storage)).toMatchObject({ base: 'sand', accent: 'ink', density: 'spacious', motion: 'off', sounds: 'subtle' });
     const store = createPrefsStore(storage);
     store.getState().set({ ...presetLook('slate') });
-    expect(JSON.parse(data.get(PREFS_KEY)!)).toMatchObject({ base: 'slate', accent: 'slate', density: 'comfortable', motion: 'full', sounds: 'subtle' });
+    // Decision 32: a preset keeps the user's motion («off» stays «off»).
+    expect(JSON.parse(data.get(PREFS_KEY)!)).toMatchObject({ base: 'slate', accent: 'slate', density: 'comfortable', motion: 'off', sounds: 'subtle' });
   });
 
   it('sounds are off by default', () => {

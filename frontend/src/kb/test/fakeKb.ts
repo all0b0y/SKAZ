@@ -14,7 +14,7 @@ import type {
   KbDictation, KbEndpoints, KbFolder, KbFragment, KbGraph, KbInstallTask, KbJob, KbKeys, KbLibrary, KbLinkInfo,
   KbMaterial, KbMaterialAdded, KbMaterialGuard, KbMaterialSummary, KbMessage, KbNotification, KbPage, KbPageRef,
   KbPageSummary, KbPrivacy, KbRef, KbRoute, KbSearchResults, KbSettingsHealth, KbSkillEngine, KbSkills, KbSpeechMaterial, KbSpeechSettings,
-  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard,
+  KbWikiSettings, KbRecognitionSettings, KbBlockLink, KbHermesProviders, KbAgent, KbDeckView, KbStudyPart, KbStudyCard, KbStudyReview,
   KbWebSearchPart,
 } from '../../api/kb/types.gen';
 import { agentUpdateRoutes } from './fakeAgentUpdates';
@@ -23,6 +23,8 @@ import {
   type KbPermissionPart, type KbQuestionPart,
 } from '../api/permissions';
 import { meRoutes, type FakeMe } from './fakeMe';
+import { defaultReview, p3StudyRoutes, scoreOf } from './fakeStudyP3';
+import { applyFakeChatRules, searchRulesRoutes } from './fakeSearchRules';
 
 // ---- The world -------------------------------------------------------------------------------
 
@@ -117,6 +119,9 @@ export interface FakeWorld {
   permissionGrants?: Record<string, string[]>;
   /** W-2: chats whose web search is allowed without a question → since when (ISO). */
   webGrants?: Record<string, string>;
+  /** N7: Settings → Search (absent = no rules) and one chat's changes. */
+  searchSettings?: import('../../api/kb/types.gen').KbSearchSettings;
+  chatSearchRules?: Record<string, import('./fakeSearchRules').FakeChatRules>;
   /** D (decision 9): what «Save to wiki» left out, by answer id (one answer) or chat id (whole chat). */
   saveWarnings?: Record<string, string>;
   /** 0.3.1 P: permissions whose Undo the backend refuses (page changed since) → the reason. */
@@ -129,6 +134,10 @@ export interface FakeWorld {
   studyNewPerDay?: number;
   /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
   judge?: { verdict: 'right' | 'partly' | 'wrong'; missing: string; comment: string; hold?: boolean; checked_by?: string };
+  /** P3-a: the agent's review of an open answer (absent with `judge` absent = `defaultReview`). */
+  review?: KbStudyReview;
+  /** P3-a «I did say this»: what the agent says on a recheck (absent = it still misses the idea). */
+  recheck?: { status: 'covered' | 'partial' | 'missing'; note: string };
   /** N6 «Я» (Me): skills, versions and agent edits (absent = the three built-ins, empty, on). */
   me?: FakeMe;
 }
@@ -627,6 +636,7 @@ function markCards(cards: KbStudyCard[], ids: string[], mark: string): void {
     if (mark === 'hard') { c.marked_hard = true; c.group = 'hard'; }
     if (mark === 'unhard') { c.marked_hard = false; c.group = c.state === 'new' ? 'new' : 'learning'; }
     if (mark === 'known') { c.marked_hard = false; c.group = 'known'; c.state = 'review'; }
+    if (mark === 'unclear' || mark === 'clear') c.unclear = mark === 'unclear'; // P3-b: never FSRS
   }
 }
 
@@ -635,6 +645,7 @@ function deckView(w: FakeWorld, pageId: string): KbDeckView {
   const counts = { new: 0, learning: 0, known: 0, hard: 0 };
   for (const c of deck.cards) counts[c.group] += 1;
   deck.groups = counts;
+  deck.unclear = deck.cards.filter((c) => c.unclear).length;
   return structuredClone(deck);
 }
 
@@ -662,6 +673,7 @@ const WEB_ROUTES: FakeRoutes = {
     const found = findWebSearch(w, path.search_id);
     if (found.part.status !== 'pending') fail(409, 'This request was already answered.');
     found.part.status = body.decision === 'deny' ? 'denied' : 'allowed';
+    found.part.execution = null; // A permission response does not run or finish a search.
     if (body.decision === 'allow_chat') (w.webGrants ??= {})[found.chat.id] = new Date().toISOString();
     updated(w, found);
     return structuredClone(found.part);
@@ -764,6 +776,9 @@ const STUDY_ROUTES: FakeRoutes = {
   'POST /kb/study/{block_id}/mark': [200, (w, { path, body }) => {
     const found = findStudy(w, path.block_id);
     markCards(found.part.cards, body.item_ids, body.mark);
+    if (body.mark === 'unclear' || body.mark === 'clear') {
+      for (const q of found.part.questions) if (body.item_ids.includes(q.id)) q.unclear = body.mark === 'unclear';
+    }
     return studyChanged(w, found);
   }],
   'POST /kb/study/{block_id}/answer': [200, (w, { path, body }) => {
@@ -792,7 +807,15 @@ const STUDY_ROUTES: FakeRoutes = {
     if (!text) fail(409, 'Write an answer first.');
     q.response = { choices: [], text, checked: false, score: null, verdict: null, missing: null, comment: null, checking: true, error: null };
     const answered = studyChanged(w, found);
-    const judge = w.judge ?? { verdict: 'partly' as const, missing: 'It doesn’t say the entropies add up.', comment: 'Close: the idea of joining systems is there.' };
+    if (!w.judge) {
+      // P3-a: the review arrives later, as an update of the block (key ideas, model answer…).
+      const review = structuredClone(w.review ?? defaultReview(q));
+      q.response = { choices: [], text, checked: true, ...scoreOf(review), missing: null, comment: null,
+        checked_by: null, checking: false, error: null, review };
+      studyChanged(w, found);
+      return answered;
+    }
+    const judge = w.judge;
     if (!judge.hold) {
       // The verdict arrives later, as an update of the block: the request never waits for it.
       q.response = { choices: [], text, checked: true, score: { right: 1, partly: 0.5, wrong: 0 }[judge.verdict], verdict: judge.verdict,
@@ -803,10 +826,11 @@ const STUDY_ROUTES: FakeRoutes = {
   }],
   'POST /kb/study/{block_id}/finish': [200, (w, { path }) => {
     const found = findStudy(w, path.block_id);
-    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null }));
+    const rows = found.part.questions.map((q) => ({ id: q.id, score: q.response?.score ?? null, status: q.response?.status ?? null }));
     found.part.result = {
       correct: rows.reduce((n, r) => n + (r.score ?? 0), 0), total: rows.length,
-      mistakes: rows.filter((r) => (r.score ?? 0) < 1).length, partly: rows.filter((r) => r.score === 0.5).length, rows,
+      mistakes: rows.filter((r) => (r.status ? r.status !== 'got' : (r.score ?? 0) < 1)).length,
+      partly: rows.filter((r) => r.status === 'almost' || (!r.status && r.score === 0.5)).length, rows,
     };
     return studyChanged(w, found);
   }],
@@ -1138,6 +1162,7 @@ const ROUTES: FakeRoutes = {
       pinned: false, engine: a!.id, model: body?.model ?? a!.current_model, effort: body?.effort ?? 'medium', created_at: at, updated_at: at,
       last_preview: '', recording_material_id: recording, folder_ids: [], state: 'idle', unread: false, messages: [], cursor: 0,
     };
+    if (body?.search_rules) applyFakeChatRules(w, c.id, body.search_rules, fail);
     w.chats.push(c);
     w.chatEvents[c.id] = [];
     touchList(w, c);
@@ -1718,6 +1743,7 @@ function serveLegacy(w: FakeWorld, req: BridgeRequest): unknown {
 interface Compiled { method: string; pattern: RegExp; names: string[]; entry: Entry<KbRoute> }
 
 const AGENT_UPDATE_ROUTES = agentUpdateRoutes(fail);
+const SEARCH_RULES_ROUTES = searchRulesRoutes(fail);
 
 /**
  * N6 «Я» routes (fakeMe.ts, typed by types.gen.ts). Undo marks the chat's memory
@@ -1737,7 +1763,10 @@ const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
   }
 });
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+/** P3 study routes (fakeStudyP3.ts): «I did say this», «counted by you». */
+const P3_STUDY_ROUTES: FakeRoutes = p3StudyRoutes({ findStudy, studyChanged: studyChanged as never, fail });
+
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES), ...Object.entries(SEARCH_RULES_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1748,7 +1777,7 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES), ...Object.keys(SEARCH_RULES_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
 const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;

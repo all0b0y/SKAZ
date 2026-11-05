@@ -29,10 +29,14 @@ _METHODS = ("get", "post", "put", "patch", "delete")
 
 
 def load_openapi() -> dict[str, Any]:
-    try:
-        import skaz  # noqa: F401
-    except ImportError:
-        sys.path.insert(0, str(REPO / "backend" / "src"))
+    # A shared editable venv may point at another worktree; this script owns its source checkout.
+    sys.path.insert(0, str(REPO / "backend" / "src"))
+    import skaz
+
+    expected = (REPO / "backend" / "src" / "skaz").resolve()
+    if skaz.__file__ is None or Path(skaz.__file__).resolve().parent != expected:
+        raise RuntimeError("SKAZ is already loaded from a different checkout; "
+                           "run this generator in a fresh process.")
     from skaz.app import create_app
     from skaz.config import AppConfig
     from skaz.secrets import MemorySecretStore

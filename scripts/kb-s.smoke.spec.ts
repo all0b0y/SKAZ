@@ -100,33 +100,39 @@ test.afterAll(async () => {
 });
 
 for (const theme of THEMES) {
-  test(`cards in the chat: stack, flip up, grades with intervals — 1440 ${theme}`, async () => {
+  test(`cards in the chat (P3-d): the pile, flip up, I know this, skip under the pile — 1440 ${theme}`, async () => {
     await open(theme, 'no-preference');
     await chats().getByRole('button', { name: /Lecture 8 — cards/ }).click();
     const deck = page.getByRole('region', { name: 'Flashcards: Lecture 8' });
     await expect(deck.getByText('How did Boltzmann write entropy?')).toBeVisible();
+    await expect(deck.getByText('3 left')).toBeVisible();
     await check(`cards-question-${theme}`);
-    // The stack: two cards peek out behind the current one, inside the block.
-    const card = deck.locator('.kb-st-card');
-    const scene = await deck.locator('.kb-st-scene').boundingBox();
+    // The pile: the top card with the edges of the rest below it, inside the block.
+    const card = deck.locator('.kb-st-pc.is-top');
+    const pile = await deck.locator('.kb-st-deck').boundingBox();
     const box = await deck.boundingBox();
-    expect(scene && box && scene.x >= box.x && scene.x + scene.width <= box.x + box.width).toBe(true);
+    expect(pile && box && pile.x >= box.x && pile.x + pile.width <= box.x + box.width).toBe(true);
+    await expect(deck.locator('.kb-st-pc')).toHaveCount(3);
     // Card A: 560 px wide, 3:2, centred in the block.
     const sheet = (await card.boundingBox())!;
     expect(Math.round(sheet.width)).toBe(560);
     expect(Math.abs(sheet.width / sheet.height - 1.5)).toBeLessThan(0.02);
     expect(Math.abs((sheet.x - box!.x) - (box!.x + box!.width - sheet.x - sheet.width))).toBeLessThan(2);
-    await deck.getByRole('button', { name: /Show answer/ }).click();
+    await card.click();
     await expect(card).toHaveClass(/is-back/);
     // The real flip: rotateX on the card (0.42 s), the answer face upright after it.
     await page.waitForTimeout(500);
-    const transform = await card.evaluate((el) => getComputedStyle(el).transform);
+    const transform = await card.locator('.kb-st-pc__in').evaluate((el) => getComputedStyle(el).transform);
     expect(transform).not.toBe('none');
-    await expect(deck.getByRole('button', { name: 'Good, next in 10m' })).toBeVisible();
-    await notClipped(deck.locator('.kb-st-face--back'));
+    await notClipped(deck.locator('.kb-st-pc.is-top .kb-st-pf--back'));
     await check(`cards-answer-${theme}`);
-    await deck.getByRole('button', { name: 'Good, next in 10m' }).click();
-    await expect(deck.getByText('2 / 3')).toBeVisible();
+    await deck.getByRole('button', { name: /I know this/ }).click();
+    await expect(deck.getByText('2 left')).toBeVisible();
+    await deck.getByRole('button', { name: 'Skip — back to the pile (→)' }).click();
+    await expect(deck.getByText('2 left')).toBeVisible();
+    await expect(deck.getByText('Why a logarithm?')).toBeHidden();
+    await page.waitForTimeout(900); // the riffle in
+    await check(`cards-skipped-${theme}`);
   });
 
   test(`the block beside the chat: placeholder, Agent sees, Bring back — 1440 ${theme}`, async () => {
@@ -149,9 +155,9 @@ for (const theme of THEMES) {
     expect(panelWidth).toBeLessThan(480);
     expect(await fitsBeside(beside)).toBeLessThan(560);
     await check(`cards-beside-${theme}`);
-    await beside.getByRole('button', { name: /Show answer/ }).click();
-    await expect(beside.getByRole('button', { name: 'Good, next in 10m' })).toBeVisible();
-    await notClipped(beside.locator('.kb-st-face--back'));
+    await beside.locator('.kb-st-pc.is-top').click();
+    await expect(beside.getByRole('region', { name: 'Answer' })).toBeVisible();
+    await notClipped(beside.locator('.kb-st-pc.is-top .kb-st-pf--back'));
     await fitsBeside(beside);
     await check(`cards-beside-answer-${theme}`);
     await page.getByRole('group', { name: 'Flashcards: Lecture 8' }).getByRole('button', { name: 'Bring back' }).click();
@@ -173,7 +179,7 @@ for (const theme of THEMES) {
     await fitsBeside(t);
     await check(`test-beside-${theme}`);
     await t.getByRole('button', { name: 'Check', exact: true }).click();
-    await expect(t.getByText('Not quite.')).toBeVisible();
+    await expect(t.getByText('Not yet.')).toBeVisible();
     await fitsBeside(t);
     await check(`test-beside-checked-${theme}`);
     await t.getByRole('button', { name: 'Smaller — back into the chat' }).click();
@@ -188,7 +194,7 @@ for (const theme of THEMES) {
     expect(Math.round(sheet.width)).toBe(560);
     await t.getByRole('radio', { name: 'S = k·W²' }).click();
     await t.getByRole('button', { name: 'Check', exact: true }).click();
-    await expect(t.getByText('Not quite.')).toBeVisible();
+    await expect(t.getByText('Not yet.')).toBeVisible();
     await check(`test-choice-${theme}`);
     await t.getByRole('button', { name: 'Next question' }).click();
     await t.getByRole('textbox', { name: 'Your answer' }).fill('W');
@@ -196,8 +202,14 @@ for (const theme of THEMES) {
     await t.getByRole('button', { name: 'Next question' }).click();
     await t.getByRole('textbox', { name: 'Your answer' }).fill('Because joined systems add up.');
     await t.getByRole('button', { name: 'Ask the agent to check' }).click();
-    await expect(t.getByText('Codex’s opinion · not a fact')).toBeVisible({ timeout: 10_000 });
+    // P3-a: the compact review (soft status, key ideas), the full report on demand.
+    await expect(t.getByText('Almost there')).toBeVisible({ timeout: 10_000 });
+    await expect(t.getByText('· 1½ of 3 key ideas')).toBeVisible();
     await check(`test-open-${theme}`);
+    await t.getByRole('button', { name: 'Full review' }).click();
+    await expect(t.getByRole('heading', { name: 'How it could look' })).toBeVisible();
+    await check(`test-open-review-${theme}`);
+    await t.getByRole('button', { name: 'Full review' }).click();
     await t.getByRole('button', { name: 'See result' }).click();
     await expect(t.getByText('1.5 of 3')).toBeVisible();
     await check(`test-result-${theme}`);

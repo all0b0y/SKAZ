@@ -9,6 +9,9 @@ import { useLibrary, useRecording, useServices, useUi } from '../state/context';
 import { isLive, type LiveView, type RecErrorWhen, type RecOptions } from './recordingStore';
 import { speechServiceName } from './connection';
 import { SpeechBars } from '../fx/indicators/SpeechBars';
+import { StippleRing } from '../fx/stipple/StippleWork';
+import { useMotionLevel } from '../ui/motionLevel';
+import { useVoicePill, type PillShape } from './voicePill';
 
 const TARGETS = ['en', 'ru', 'de', 'fr', 'es', 'it', 'pt', 'uk', 'zh', 'ja'];
 const VIEW_OPTIONS: ReadonlyArray<{ value: LiveView; label: string }> = [
@@ -163,8 +166,20 @@ function StartErrorPopover({ anchorRef }: { anchorRef: RefObject<HTMLButtonEleme
   );
 }
 
-/** Title-bar recording control: "Record | Folder ▾" → capsule "▮▮▮ 12:41 | Folder" (decisions 26–28). */
+/**
+ * Title-bar recording control: "Record | Folder ▾" → capsule "▮▮▮ 12:41 | Folder" (decisions 26–28).
+ * One slot holds every phase, so the pill can swell into the capsule and back (VoicePill, stage 6).
+ */
 export function RecordControls() {
+  const phase = useRecording((s) => s.phase);
+  const level = useMotionLevel();
+  const slot = useRef<HTMLSpanElement | null>(null);
+  const shape: PillShape = phase === 'finishing' ? 'finishing' : isLive(phase) ? 'live' : 'idle';
+  useVoicePill(slot, shape, level);
+  return <span className="kb-voicepill" ref={slot}><RecordBody /></span>;
+}
+
+function RecordBody() {
   const { recording } = useServices();
   const phase = useRecording((s) => s.phase);
   const elapsed = useRecording((s) => s.elapsedMs);
@@ -284,7 +299,7 @@ export function RecordControls() {
         <button ref={recordRef} type="button" className="kb-capsule kb-capsule--go" aria-disabled={!ready || phase === 'starting' || undefined}
           onClick={() => { if (ready && phase === 'idle') startFromButton(); }}>
           {phase === 'starting' && !mic.held
-            ? <span className="kb-spinner kb-spinner--inline kb-spinner--onfill" aria-hidden="true" />
+            ? <StippleRing className="kb-spinner kb-spinner--inline kb-spinner--onfill" />
             : <Icon name="mic" size={14} play={mic.play} />}
           <span className="kb-capsule__main">Record</span>
         </button>

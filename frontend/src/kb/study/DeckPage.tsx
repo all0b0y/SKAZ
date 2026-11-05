@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
 import type { KbPage } from '../../api/kb/types.gen';
 import { Banner, Button, Icon, IconButton, Spinner } from '../ui';
-import { SelectionCheckbox, useListSelection } from '../ui/listSelection';
+import { SelectionCheckbox, SelectionFeedback, useListSelection } from '../ui/listSelection';
 import { errorText } from '../api/client';
 import { useServices } from '../state/context';
 import { useAskAbout } from '../document/parts';
 import { GroupChip } from './CardStack';
 import { studyApi, type KbDeckView, type StudyMark, type StudyMode } from './api';
+import { DiscussUnclear, useUnclearCount } from './Unclear';
 
 const GROUPS: Array<{ key: keyof KbDeckView['groups']; label: string }> = [
   { key: 'new', label: 'New' }, { key: 'learning', label: 'Learning' }, { key: 'known', label: 'Known' }, { key: 'hard', label: 'Hard' },
@@ -89,6 +90,7 @@ export function DeckPage({ page }: { page: KbPage }) {
         <Button size="sm" variant="fill" icon="deck" busy={busy === 'study'} disabled={!!busy} onClick={() => void start('study', 'due')}>Study</Button>
         <Button size="sm" icon="hard" busy={busy === 'hard'} disabled={!!busy || deck.groups.hard === 0} onClick={() => void start('hard', 'hard')}>Hard first</Button>
         <Button size="sm" icon="chats" onClick={() => askAbout({ type: 'page', id: page.id, title: page.title })}>Ask in chat</Button>
+        <DiscussUnclear count={deck.unclear ?? 0} chatId={null} page={{ id: page.id, title: page.title }} />
       </div>
       {error && <p className="kb-inline-error" role="alert">{error}</p>}
       <ul className="kb-deck__list" aria-label="Cards" {...sel.gridProps} {...sel.listProps} onKeyDown={onKeyDown}>
@@ -98,9 +100,10 @@ export function DeckPage({ page }: { page: KbPage }) {
             <span className="kb-deck__q" role="gridcell" tabIndex={-1}>
               {card.question}<small>{card.answer}</small>
             </span>
+            {card.unclear && <span className="kb-deck__unc" title="Marked Unclear"><Icon name="help" size={13} label="Unclear" /></span>}
             <span role="gridcell">
               {card.suspended ? (
-                <span className="kb-deck__hidden"><Icon name="hidden" size={13} />Not shown
+                <span className="kb-deck__hidden" data-sel-ignore><Icon name="hidden" size={13} />Not shown
                   <Button size="sm" onClick={() => void mark([card.id], 'unhide')}>Show again</Button></span>
               ) : (
                 <>
@@ -108,6 +111,9 @@ export function DeckPage({ page }: { page: KbPage }) {
                   <span className="kb-deck__marks" data-sel-ignore>
                     <Button size="sm" onClick={() => void mark([card.id], card.marked_hard ? 'unhard' : 'hard')}>{card.marked_hard ? 'Not hard' : 'Hard'}</Button>
                     <Button size="sm" onClick={() => void mark([card.id], 'known')}>Known</Button>
+                    <Button size="sm" aria-pressed={!!card.unclear} onClick={() => void mark([card.id], card.unclear ? 'clear' : 'unclear')}>
+                      {card.unclear ? 'Clear unclear' : 'Unclear'}
+                    </Button>
                     <IconButton icon="hidden" size="sm" label="Don’t show" onClick={() => void mark([card.id], 'hide')} />
                   </span>
                 </>
@@ -116,6 +122,7 @@ export function DeckPage({ page }: { page: KbPage }) {
           </li>
         ))}
       </ul>
+      <SelectionFeedback feedback={sel.feedback} />
     </div>
   );
 }
@@ -126,6 +133,7 @@ export function TestPage({ page }: { page: KbPage }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const questions = page.blocks.filter((b) => b.kind === 'from_source');
+  const unclear = useUnclearCount(page.id);
   return (
     <div className="kb-deck">
       <p className="kb-deck__meta">Test · {questions.length} {questions.length === 1 ? 'question' : 'questions'}</p>
@@ -133,6 +141,7 @@ export function TestPage({ page }: { page: KbPage }) {
         <Button size="sm" variant="fill" icon="test" busy={busy} onClick={async () => { setBusy(true); setError(await study(page.id, 'all')); setBusy(false); }}>
           Take the test
         </Button>
+        <DiscussUnclear count={unclear} chatId={null} page={{ id: page.id, title: page.title }} />
       </div>
       {error && <p className="kb-inline-error" role="alert">{error}</p>}
       <ol className="kb-deck__list" aria-label="Questions">

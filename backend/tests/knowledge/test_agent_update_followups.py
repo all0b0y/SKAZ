@@ -39,7 +39,9 @@ async def test_wiki_follow_up_jobs_hold_their_agent_for_the_whole_job(ready: Kno
         service.discrepancies.check_pages = first_step  # type: ignore[method-assign]
         job = await service.find_connections()
     else:
-        service.rechecks.target = lambda *_: None  # type: ignore[method-assign]
+        def unchecked_target(*_: Any, **__: Any) -> Any:
+            return None
+        service.rechecks.target = unchecked_target  # type: ignore[method-assign]
         service.rechecks.run = first_step  # type: ignore[method-assign]
         job = await service.recheck("page", "block")
     await service.jobs.wait(job.id)

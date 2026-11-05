@@ -162,6 +162,12 @@ class KbInstallLine(BaseModel):
     at: str
 
 
+class KbInstallStage(BaseModel):
+    #: A real recipe step or the final installed-agent check, never a simulated Download stage.
+    label: str
+    state: Literal["pending", "running", "done", "error", "stopped"]
+
+
 class KbInstallTask(BaseModel):
     id: str
     engine: KbEngineId
@@ -178,6 +184,9 @@ class KbInstallTask(BaseModel):
     install: KbAgentInstallInfo
     started_at: str
     finished_at: str | None
+    stages: list[KbInstallStage] = []
+    #: The last attempted step, with its exact argv safely quoted for Terminal.
+    manual_command: str | None = None
 
 
 class KbAgentLogin(_Request):

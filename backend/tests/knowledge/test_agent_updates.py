@@ -13,7 +13,15 @@ from typing import Any
 
 import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, EngineId, EngineStatus, Failed, TextDelta, TurnMessage
+from skaz.knowledge.agents.engine import (
+    AgentEngine,
+    AgentTurn,
+    EngineId,
+    EngineStatus,
+    Failed,
+    TextDelta,
+    TurnMessage,
+)
 from skaz.knowledge.agents.fake import FakeEngine, Gate
 from skaz.knowledge.agents.registry import EngineRegistry
 from skaz.knowledge.agents.update_gate import UpdateGate, guard, holding
@@ -441,7 +449,8 @@ async def test_a_refusing_command_shows_its_output_and_the_terminal_command(tmp_
     failure = agent(await world.updates.view(), "claude_code").failure
     assert failure.reason == "Claude Code wasn't updated: it is still 2.1.281."
     assert failure.command == "brew upgrade claude-code"
-    assert failure.output == ("Claude is managed by Homebrew.", "To update, run: brew upgrade claude-code",
+    assert failure.output == ("Update Claude Code…", "Claude is managed by Homebrew.",
+                              "To update, run: brew upgrade claude-code", "Check Claude Code…",
                               "Claude Code 2.1.281 is ready.")
     assert failure.rollback == "none"
 
@@ -777,8 +786,9 @@ async def test_codex_engine_forgets_its_status_on_reset(tmp_path: Path) -> None:
 
     connection = Connection()
     codex = CodexEngine(connection, None)
-    engines = {engine: FakeEngine(engine, status=status(engine, None, False))
-               for engine in ("claude_code", "hermes", "opencode")}
+    engines: dict[EngineId, AgentEngine] = {
+        engine: FakeEngine(engine, status=status(engine, None, False))
+        for engine in ("claude_code", "hermes", "opencode")}
     registry = EngineRegistry({"codex": codex, **engines}, Settings())
     assert (await registry.view("codex")).status.version == "0.160.0"
     connection.version = "codex-cli 0.164.0"

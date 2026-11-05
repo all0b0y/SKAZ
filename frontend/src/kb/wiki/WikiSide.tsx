@@ -4,7 +4,9 @@ import type { PageKind } from '../api/names';
 import { Banner, Button, EmptyState, Icon, Spinner } from '../ui';
 import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
-import { useLibrary, useServices, useUi } from '../state/context';
+import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
+import { WIKI_KINDS, type WikiKind } from '../state/prefs';
+import { ActiveTab, type TabVariant } from '../ui/ActiveTab';
 import type { WikiFileName } from '../state/document';
 import { errorText } from '../api/client';
 import { Snippet } from '../ui/Highlight';
@@ -12,6 +14,8 @@ import { SelectionCheckbox, type ListSelection } from '../ui/listSelection';
 import { usePageSelection } from './pageBatch';
 import type { DragRowProps } from '../materials/materialBatch';
 import { WikiTermsButton } from './WikiTermsButton';
+import { useListEntrance } from '../fx/listEntrance';
+import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 
 interface Hit {
   key: string;
@@ -111,17 +115,24 @@ const FILES: ReadonlyArray<{ name: WikiFileName; label: string }> = [
   { name: 'log', label: 'Log' },
 ];
 
-const SECTIONS: ReadonlyArray<{ kind: PageKind; label: string }> = [
-  { kind: 'concept', label: 'Concepts' },
-  { kind: 'note', label: 'Notes' },
-  { kind: 'analysis', label: 'Analyses' },
-  { kind: 'folder', label: 'Folder overviews' },
-  { kind: 'deck', label: 'Decks' },
-  { kind: 'test', label: 'Tests' },
-];
+const LABEL: Record<WikiKind, string> = {
+  concept: 'Concepts',
+  note: 'Notes',
+  analysis: 'Analyses',
+  folder: 'Folder overviews',
+  deck: 'Decks',
+  test: 'Tests',
+};
+
+/**
+ * How the page open in the document panel is marked in the lists: a soft tile moved by a plain
+ * crossfade (DESIGN-SYSTEM.md decision 28: the bridge is for chats only — it runs toward the centre
+ * sheet, while a page opens in the document panel on the right).
+ */
+export const PAGE_TAB: TabVariant = 'soft';
 
 /** How pages of each kind appear, said where the list is empty (QA C24). */
-const EMPTY_HINT: Record<PageKind, string> = {
+const EMPTY_HINT: Record<WikiKind, string> = {
   concept: 'Concepts appear as materials are added to the wiki.',
   note: 'Each material added to the wiki gets its notes here.',
   analysis: 'Save a chat answer to the wiki (“Save to wiki” under the answer) to keep it here.',
@@ -130,14 +141,19 @@ const EMPTY_HINT: Record<PageKind, string> = {
   test: 'Ask an agent for a test from your materials, then “Save to wiki” in the block.',
 };
 
+/** The page open in the document panel, if any. */
+function useOpenPageId(): string | null {
+  return useUi((s) => (s.right?.kind === 'doc' && s.right.target.type === 'page' ? s.right.target.id : null));
+}
+
 function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection; drag: DragRowProps }) {
   const openDocument = useUi((s) => s.openDocument);
   const current = useUi((s) => s.right?.kind === 'doc' && s.right.target.type === 'page' && s.right.target.id === page.id);
   return (
-    <li {...sel.rowProps(page.id)} {...drag}>
+    <li {...sel.rowProps(page.id)} {...drag} data-entrance={page.id}>
       <div role="gridcell">
-        <button type="button" className={`kb-row${current ? ' is-current' : ''}`} aria-current={current ? 'true' : undefined}
-          onClick={() => openDocument({ type: 'page', id: page.id })}>
+        <button type="button" className={`kb-row kb-row--tabbed${current ? ' is-current' : ''}`} aria-current={current ? 'true' : undefined}
+          data-tab-key={page.id} onClick={() => openDocument({ type: 'page', id: page.id })}>
           <SelectionCheckbox checked={sel.selected.has(page.id)} />
           <Icon name={PAGE_KIND_ICON[page.kind]} size={16} className="kb-row__icon" />
           <span className="kb-row__text">{page.title}</span>
@@ -148,28 +164,75 @@ function PageRow({ page, sel, drag }: { page: KbPageSummary; sel: ListSelection;
 }
 
 /** Pages that can be selected several at once (0.3.1 F4): compact bar, ⌘/ keys, drag to the chat field. */
-function PageList({ pages, labelledBy, resetKey }: { pages: KbPageSummary[]; labelledBy: string; resetKey?: unknown }) {
-  const openDocument = useUi((s) => s.openDocument);
-  const { sel, overlays, dragProps } = usePageSelection({ pages, resetKey, onOpen: (id) => openDocument({ type: 'page', id }) });
+type PageSelection = Pick<ReturnType<typeof usePageSelection>, 'sel' | 'dragProps'>;
+
+function PageList({ pages, labelledBy, sel, dragProps }: {
+  pages: KbPageSummary[]; labelledBy: string;
+} & PageSelection) {
+  const host = useRef<HTMLDivElement | null>(null);
+  const openId = useOpenPageId();
   return (
-    <div className="kb-sellist" {...sel.listProps}>
+    <div className="kb-sellist kb-tabhost" ref={host}>
+      <ActiveTab host={host} activeKey={openId} variant={PAGE_TAB} />
       <ul className="kb-list" {...sel.gridProps} aria-labelledby={labelledBy}>
         {pages.map((p) => <PageRow key={p.id} page={p} sel={sel} drag={dragProps(p)} />)}
       </ul>
-      {overlays}
     </div>
   );
 }
 
-/** Side panel "Wiki" (v39): sections with counts, the graph, recently opened pages. */
+/**
+ * One kind of page as a section that folds in place (decisions 24 «Wiki», 27): a header row —
+ * chevron, name, count — over that kind's flat page list. The fold is kept per kind in prefs. A
+ * folded body stays mounted (the rows keep their identity) but is inert. An open section with no
+ * pages says how pages of its kind appear — unless the whole wiki is empty (`wikiEmpty`): then the
+ * panel's one «The wiki is empty» says it (FIX1 R6).
+ */
+function KindSection({ kind, pages, wikiEmpty, sel, dragProps }: {
+  kind: WikiKind; pages: KbPageSummary[]; wikiEmpty: boolean;
+} & PageSelection) {
+  const { prefs } = useServices();
+  const open = usePrefs((s) => s.wikiOpen[kind]);
+  const labelId = `kb-wiki-kind-${kind}`;
+  const bodyId = `kb-wiki-body-${kind}`;
+  const label = LABEL[kind];
+  return (
+    // A plain group, not a <section aria-labelledby>: six region landmarks inside the Wiki region would
+    // be noise (FIX1 R8); the header button and the grid (aria-labelledby) carry the kind's name.
+    <div className="kb-wfold" data-kind={kind}>
+      <h3 className="kb-wfold__head" data-entrance="">
+        <button type="button" className="kb-row kb-wfold__toggle" data-sel-keep="" aria-expanded={open} aria-controls={bodyId}
+          onClick={() => prefs.getState().setWikiOpen(kind, !open)}>
+          <Icon name="chevronRight" size={14} className={`kb-wfold__chev${open ? ' is-open' : ''}`} />
+          <span className="kb-row__text kb-wfold__label" id={labelId}>{label}</span>
+          <span className="kb-row__count">{pages.length}</span>
+        </button>
+      </h3>
+      <div className={`kb-fold${open ? ' is-open' : ''}`} id={bodyId} data-open={open ? 'true' : 'false'}>
+        <div className="kb-fold__in" {...(open ? {} : { inert: '' })}>
+          {pages.length === 0 ? (
+            !wikiEmpty && <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
+          ) : (
+            <PageList pages={pages} labelledBy={labelId} sel={sel} dragProps={dragProps} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const byTitle = (a: KbPageSummary, b: KbPageSummary) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+
+/** Side panel "Wiki" (v39): search, kind sections that fold in place, the graph, Index / Log, recently opened pages. */
 export function WikiSide() {
   const { client } = useServices();
+  const openDocument = useUi((s) => s.openDocument);
+  const openKinds = usePrefs((s) => s.wikiOpen);
   const openGraph = useUi((s) => s.openGraph);
   const graphOpen = useUi((s) => s.right?.kind === 'graph');
   const recent = useUi((s) => s.recentPages);
   const openWikiFile = useUi((s) => s.openWikiFile);
   const fileOpen = useUi((s) => (s.right?.kind === 'wikifile' ? s.right.name : null));
-  const [kind, setKind] = useState<PageKind | null>(null);
   const { state, reload } = useLoad('wiki-pages', () => client.call('GET /kb/wiki/pages'));
   // A page renamed or deleted (or anything else that reloads the library) shows here too.
   const revision = useLibrary((s) => s.revision);
@@ -177,6 +240,17 @@ export function WikiSide() {
   useEffect(() => { if (seen.current !== revision) { seen.current = revision; reload(); } }, [revision, reload]);
   const pages = state.value ?? [];
   const byId = new Map(pages.map((p) => [p.id, p]));
+  const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
+  const visible = [...WIKI_KINDS.flatMap((kind) => openKinds[kind]
+    ? pages.filter((p) => p.kind === kind).sort(byTitle) : []), ...recentPages];
+  const unique = [...new Map(visible.map((p) => [p.id, p])).values()];
+  const sets = [{ id: 'all', label: 'All', ids: unique.map((p) => p.id) },
+    ...WIKI_KINDS.filter((kind) => openKinds[kind]).map((kind) => ({ id: kind, label: LABEL[kind],
+      ids: unique.filter((p) => p.kind === kind).map((p) => p.id) }))];
+  const { sel, overlays, dragProps } = usePageSelection({ pages: unique, sets,
+    onOpen: (id) => openDocument({ type: 'page', id }) });
+  // AnimatedList (stage 6): the rows enter once, on the first load; a page added later fades in alone.
+  useListEntrance('wiki', sel.listRef, state.value !== null, pages.map((p) => p.id));
 
   if (state.load === 'loading' && !state.value) return <div className="kb-side__wait"><Spinner label="Reading the wiki" /></div>;
   if (state.load === 'error' && !state.value) {
@@ -187,54 +261,26 @@ export function WikiSide() {
     );
   }
 
-  if (kind) {
-    const list = pages.filter((p) => p.kind === kind).sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
-    const label = SECTIONS.find((s) => s.kind === kind)!.label;
-    return (
-      <div className="kb-side__scroll">
-        <button type="button" className="kb-row kb-row--back" onClick={() => setKind(null)}>
-          <Icon name="chevronLeft" size={16} className="kb-row__icon" />
-          <span className="kb-row__text">Wiki</span>
-        </button>
-        <h3 className="kb-subhead kb-subhead--folder" id="kb-wiki-kind"><Icon name={PAGE_KIND_ICON[kind]} size={14} /><span className="kb-subhead__text">{label}</span></h3>
-        {list.length === 0 ? (
-          <EmptyState icon="wiki" title={`No ${label.toLowerCase()} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
-        ) : (
-          <PageList pages={list} labelledBy="kb-wiki-kind" resetKey={kind} />
-        )}
-      </div>
-    );
-  }
-
-  const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
   return (
-    <div className="kb-side__scroll">
+    <div className="kb-side__scroll" {...sel.listProps}>
       <WikiSearch />
-      <div className="kb-subhead kb-subhead--row">
+      <div className="kb-subhead kb-subhead--row" data-entrance="">
         <h3 className="kb-subhead__text" id="kb-wiki-sections">Sections</h3>
         <WikiTermsButton size="sm" placement="bottom-start" />
       </div>
-      <ul className="kb-list" aria-labelledby="kb-wiki-sections">
-        {SECTIONS.map((s) => {
-          const n = pages.filter((p) => p.kind === s.kind).length;
-          return (
-            <li key={s.kind}>
-              <button type="button" className="kb-row" onClick={() => setKind(s.kind)}>
-                <Icon name={PAGE_KIND_ICON[s.kind]} size={16} className="kb-row__icon" />
-                <span className="kb-row__text">{s.label}</span>
-                <span className="kb-row__count">{n}</span>
-              </button>
-            </li>
-          );
-        })}
-        <li>
+      {WIKI_KINDS.map((kind) => (
+        <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)}
+          wikiEmpty={pages.length === 0} sel={sel} dragProps={dragProps} />
+      ))}
+      <ul className="kb-list kb-wiki-more" aria-label="More of the wiki">
+        <li data-entrance="">
           <button type="button" className={`kb-row${graphOpen ? ' is-current' : ''}`} onClick={() => openGraph()} aria-current={graphOpen ? 'true' : undefined}>
             <Icon name="graph" size={16} className="kb-row__icon" />
             <span className="kb-row__text">Graph of connections</span>
           </button>
         </li>
         {FILES.map((f) => (
-          <li key={f.name}>
+          <li key={f.name} data-entrance="">
             <button type="button" className={`kb-row${fileOpen === f.name ? ' is-current' : ''}`} aria-current={fileOpen === f.name ? 'true' : undefined}
               title="SKAZ keeps Index and Log — they can’t be selected" onClick={() => openWikiFile(f.name)}>
               <Icon name="text" size={16} className="kb-row__icon" />
@@ -245,12 +291,13 @@ export function WikiSide() {
       </ul>
       {recentPages.length > 0 && (
         <>
-          <h3 className="kb-subhead" id="kb-wiki-recent">Recently opened</h3>
-          <PageList pages={recentPages} labelledBy="kb-wiki-recent" />
+          <h3 className="kb-subhead" id="kb-wiki-recent" data-entrance="">Recently opened</h3>
+          <PageList pages={recentPages} labelledBy="kb-wiki-recent" sel={sel} dragProps={dragProps} />
         </>
       )}
+      {overlays}
       {pages.length === 0 && (
-        <EmptyState icon="wiki" title="The wiki is empty" compact field>
+        <EmptyState icon="wiki" title="The wiki is empty" compact art={<HalftoneArt id="wiki" compact />}>
           Concepts, notes and analyses appear as materials are added to the wiki.
         </EmptyState>
       )}

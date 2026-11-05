@@ -32,7 +32,9 @@ export type RightView =
   /** 0.3.1 P: an agent's permission request reviewed beside the chat (the part lives in the chat). */
   | { kind: 'review'; chatId: string; partId: string }
   /** 0.3.1 S (W2): a deck or test block beside the chat (the block is a part of its chat's message). */
-  | { kind: 'study'; chatId: string; studyId: string };
+  | { kind: 'study'; chatId: string; studyId: string }
+  /** N8: the chat overview — Links · Used · Created of one chat. */
+  | { kind: 'overview'; chatId: string };
 
 /** What the centre column shows: the open chat, or a full-width list (decisions v16, 25). */
 export type CenterView = 'chat' | 'allChats' | 'materials';
@@ -68,6 +70,8 @@ export interface NavActions {
   openReview: (chatId: string, partId: string) => void;
   /** A study block beside the chat (it left the thread: one place at a time, A-4). */
   openStudy: (chatId: string, studyId: string) => void;
+  /** N8: the chat overview beside the chat. */
+  openOverview: (chatId: string) => void;
   /** Close the right panel, whatever it shows. */
   closeDoc: () => void;
   toggleDocExpanded: () => void;
@@ -86,6 +90,7 @@ function samePlace(a: RightView, b: RightView): boolean {
   if (a.kind === 'wikifile' && b.kind === 'wikifile') return a.name === b.name;
   if (a.kind === 'review' && b.kind === 'review') return a.partId === b.partId;
   if (a.kind === 'study' && b.kind === 'study') return a.studyId === b.studyId;
+  if (a.kind === 'overview' && b.kind === 'overview') return a.chatId === b.chatId;
   return true;
 }
 
@@ -142,6 +147,7 @@ export function createNavSlice(set: SetNav): NavState & NavActions {
     openWikiFile: (name) => set(show({ kind: 'wikifile', name })),
     openReview: (chatId, partId) => set(show({ kind: 'review', chatId, partId })),
     openStudy: (chatId, studyId) => set(show({ kind: 'study', chatId, studyId })),
+    openOverview: (chatId) => set(show({ kind: 'overview', chatId })),
     closeDoc: () => set({ right: null, docMaterialId: null, docExpanded: false, docHistory: [] }),
     toggleDocExpanded: () => set((s) => ({ docExpanded: s.right ? !s.docExpanded : false })),
     showCenter: (view) => set({ center: view }),

@@ -99,7 +99,7 @@ class ScriptedWiki:
 
     def __init__(self, *, notes: Sequence[str] = (), concepts: Sequence[str] = (),
                  matches: Sequence[int] = (), gate: asyncio.Event | None = None,
-                 answers: Mapping[str, Sequence[str]] | None = None,
+                 answers: Mapping[str, Sequence[str | Callable[[AgentTurn], str]]] | None = None,
                  models: Sequence[ModelOption] | None = None, usage: Usage | None = None) -> None:
         #: Queued answers; a callable is authored from the turn it answers (e.g. a batch prompt).
         self.queues: dict[str, list[str | Callable[[AgentTurn], str]]] = {

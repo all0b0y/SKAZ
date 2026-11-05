@@ -1,5 +1,15 @@
-import { useId, useRef, type ReactNode } from 'react';
-import { m } from 'motion/react';
+import { useId, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { springEasing } from './ActiveTab';
+import { useMotionLevel } from './motionLevel';
+
+/** SquishSwitch (stage 6, B10, the motion6 demo): the knob's travel at «full». */
+export const SQUISH_MS = 300;
+const SQUISH_EASING = 'cubic-bezier(0.3, 0.7, 0.3, 1)';
+const SEG_SPRING = springEasing(0.26, 0);
+/** Knob geometry of ui.css .kb-switch: 14 px round, 12 px of travel, 20 px at the stretch. */
+const KNOB = 14;
+const KNOB_STRETCH = 20;
+const TRAVEL = 12;
 
 export interface SwitchProps {
   checked: boolean;
@@ -10,8 +20,29 @@ export interface SwitchProps {
   describedBy?: string;
 }
 
-/** On/off toggle. A native button with role="switch": Space and Enter toggle, Tab reaches it. */
+/**
+ * On/off toggle. A native button with role="switch": Space and Enter toggle, Tab reaches it.
+ * At motion «full» the knob stretches while it travels (14 → 20 → 14 px, anchored on the near edge,
+ * 0.3 s); at «calm» it is the plain CSS slide, at «off» the colour changes at once.
+ */
 export function Switch({ checked, onChange, label, disabled = false, describedBy }: SwitchProps) {
+  const level = useMotionLevel();
+  const knob = useRef<HTMLSpanElement | null>(null);
+  const was = useRef(checked);
+  useLayoutEffect(() => {
+    if (was.current === checked) return;
+    was.current = checked;
+    const el = knob.current;
+    if (level !== 'full' || !el || typeof el.animate !== 'function') return;
+    const from = checked ? 0 : TRAVEL;
+    const to = checked ? TRAVEL : 0;
+    el.getAnimations?.().forEach((a) => a.cancel());
+    el.animate([
+      { transform: `translateX(${from}px)`, width: `${KNOB}px` },
+      { transform: `translateX(${Math.min(from, to)}px)`, width: `${KNOB_STRETCH}px`, offset: 0.45 },
+      { transform: `translateX(${to}px)`, width: `${KNOB}px` },
+    ], { duration: SQUISH_MS, easing: SQUISH_EASING });
+  }, [checked, level]);
   return (
     <button
       type="button"
@@ -23,7 +54,7 @@ export function Switch({ checked, onChange, label, disabled = false, describedBy
       className={`kb-switch${checked ? ' is-on' : ''}`}
       onClick={() => onChange(!checked)}
     >
-      <span className="kb-switch__knob" aria-hidden="true" />
+      <span ref={knob} className="kb-switch__knob" aria-hidden="true" />
     </button>
   );
 }
@@ -47,8 +78,30 @@ export interface SegmentedProps<T extends string> {
 
 /** One-of-N choice (radiogroup). Arrow keys move and select, like native radios. */
 export function Segmented<T extends string>({ value, options, onChange, label, disabled = false, size = 'md' }: SegmentedProps<T>) {
+  const level = useMotionLevel();
   const group = useId();
   const buttons = useRef(new Map<T, HTMLButtonElement>());
+  const ind = useRef<HTMLSpanElement | null>(null);
+  const was = useRef(value);
+  useLayoutEffect(() => {
+    const prev = was.current;
+    if (prev === value) return;
+    was.current = value;
+    const el = ind.current;
+    const fromBtn = buttons.current.get(prev);
+    const toBtn = buttons.current.get(value);
+    if (level !== 'full' || !el || !fromBtn || !toBtn || typeof el.animate !== 'function') return;
+    const fromW = fromBtn.offsetWidth;
+    const toW = toBtn.offsetWidth;
+    if (!fromW || !toW) return;
+    const dx = fromBtn.offsetLeft - toBtn.offsetLeft;
+    const dy = fromBtn.offsetTop - toBtn.offsetTop;
+    el.getAnimations?.().forEach((a) => a.cancel());
+    el.animate([
+      { transform: `translate(${dx}px, ${dy}px)`, width: `${fromW}px` },
+      { transform: 'translate(0px, 0px)', width: `${toW}px` },
+    ], { duration: SEG_SPRING.duration, easing: SEG_SPRING.easing });
+  }, [value, level]);
   const enabled = options.filter((o) => !o.disabled && !disabled);
   const move = (dir: 1 | -1, from: T) => {
     if (enabled.length === 0) return;
@@ -83,7 +136,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, d
               if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); move(-1, o.value); }
             }}
           >
-            {selected && <m.span layoutId={`${group}-indicator`} className="kb-seg__ind" aria-hidden="true" />}
+            {selected && <span ref={ind} className="kb-seg__ind" aria-hidden="true" />}
             <span className="kb-seg__text">{o.label}</span>
           </button>
         );

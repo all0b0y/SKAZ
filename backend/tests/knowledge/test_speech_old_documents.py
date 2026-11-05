@@ -144,7 +144,7 @@ def test_recording_and_import_leave_the_old_documents_folder_unchanged(
     # An import that is cancelled: its technical session is deleted.
     soniox.hold_all = True
     held = tmp_path / "Held.m4a"
-    held.write_bytes(b"\x00\x01" * 2048)
+    held.write_bytes(b"\x00\x01" * 2048 + b"held")  # other bytes: the same file would be a duplicate (N2)
     cancelled = http.post("/kb/imports", headers=AUTH, json={"path": str(held)}).json()
     wait(http, lambda: imported(http, cancelled["material_id"])["import_stage"] == "processing",
          "the second import to run")

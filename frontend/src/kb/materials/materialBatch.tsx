@@ -8,10 +8,11 @@ import { NameField } from '../library/NameField';
 import { useLibrary, useServices } from '../state/context';
 import {
   BatchDeleteDialog, ContextMenu, SelectionBar, ShortcutsPopover, countOf, endItemsDrag, namesList, resultText, runOneByOne,
-  startItemsDrag, useListSelection, type BatchResult, type ListSelection, type SelectionAction,
+  startItemsDrag, useListSelection, type BatchResult, type ListSelection, type SelectionAction, type SelectionSet,
 } from '../ui/listSelection';
 import type { MenuItem } from '../ui/Popover';
 import { useExportItems } from '../document/exportItems';
+import { KIND_LABEL } from '../library/materialMeta';
 
 /**
  * Batch actions on materials (0.3.1 F2/F3/F4), shared by the All materials table and the side
@@ -281,7 +282,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
   });
   function openMove(ids: string[]) {
     // Next to the bar's "Move to…", else the list itself.
-    const fromBar = sel.listRef.current?.querySelector<HTMLElement>('[data-sel-bar] [data-action="move"]');
+    const fromBar = sel.controlsRef.current?.querySelector<HTMLElement>('[data-action="move"]');
     setAnchor(fromBar ?? sel.listRef.current);
     setMoveIds(ids);
   }
@@ -300,6 +301,29 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
     cards: () => { make('cards', pick(ids()).map((m) => ({ type: 'material' as const, id: m.id, title: m.title }))); sel.clear(); },
     test: () => { make('test', pick(ids()).map((m) => ({ type: 'material' as const, id: m.id, title: m.title }))); sel.clear(); },
   });
+  const basis = useRef<KbMaterialSummary | null>(null);
+  const wasSelecting = useRef(false);
+  if (!sel.selecting || !wasSelecting.current) basis.current = byId.get(sel.reference ?? sel.focus ?? '') ?? rows[0] ?? null;
+  wasSelecting.current = sel.selecting;
+  const reference = basis.current;
+  const folders = useLibrary((s) => s.folders);
+  const folderName = reference?.folder_name || folders.find((f) => f.id === reference?.folder_id)?.name || '';
+  const week = new Date();
+  const now = week.getTime();
+  week.setHours(0, 0, 0, 0);
+  week.setDate(week.getDate() - (week.getDay() + 6) % 7);
+  const sets: SelectionSet[] = [
+    { id: 'all', label: 'All', ids: rows.map((m) => m.id) },
+    { id: 'kind', label: reference ? `Same kind as focused · ${KIND_LABEL[reference.kind]}` : 'Same kind',
+      shortLabel: reference ? KIND_LABEL[reference.kind] : 'Same kind',
+      ids: rows.filter((m) => m.kind === reference?.kind).map((m) => m.id) },
+    { id: 'week', label: 'This week', ids: rows.filter((m) => {
+      const created = Date.parse(m.created_at);
+      return created >= week.getTime() && created <= now;
+    }).map((m) => m.id) },
+    { id: 'folder', label: folderName ? `In this folder · ${folderName}` : 'In this folder',
+      shortLabel: folderName || 'Folder', ids: rows.filter((m) => m.folder_id === reference?.folder_id).map((m) => m.id) },
+  ];
   const barActions = materialActions(selectedList, run(() => sel.ordered))[variant];
   const menuItems = menu ? materialActions(pick(menu.ids), run(() => menu.ids)).menu : [];
 
@@ -318,7 +342,7 @@ export function useMaterialSelection({ rows, resetKey, variant, onOpen }: {
 
   const overlays = (
     <>
-      <SelectionBar count={sel.selected.size} variant={variant} actions={barActions.bar} more={barActions.more} onClear={sel.clear} />
+      <SelectionBar selection={sel} sets={sets} hintKey="list-selection" count={sel.selected.size} variant={variant} actions={barActions.bar} more={barActions.more} onClear={sel.clear} />
       <MoveToMenu open={moveIds !== null} onClose={() => setMoveIds(null)} anchorRef={anchor} count={moveIds?.length ?? 0}
         onPick={(folderId) => { const list = pick(moveIds ?? []); setMoveIds(null); void batch.move(list, folderId).then(keepSkipped); }} />
       <DeleteMaterialsDialog list={pick(deleteIds ?? [])} open={deleteIds !== null} onClose={() => setDeleteIds(null)} onDone={keepSkipped} />

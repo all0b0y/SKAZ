@@ -16,9 +16,9 @@ export function PresetGallery() {
   const base = usePrefs((s) => s.base);
   const accent = usePrefs((s) => s.accent);
   const density = usePrefs((s) => s.density);
-  const motion = usePrefs((s) => s.motion);
-  const current = presetOf({ base, accent, density, motion });
-  const otherDefaults = usePrefs((s) => s.theme === DEFAULT_PREFS.theme && s.textSize === DEFAULT_PREFS.textSize && s.sounds === DEFAULT_PREFS.sounds);
+  const current = presetOf({ base, accent, density });
+  const otherDefaults = usePrefs((s) => s.theme === DEFAULT_PREFS.theme && s.textSize === DEFAULT_PREFS.textSize
+    && s.sounds === DEFAULT_PREFS.sounds && s.motion === DEFAULT_PREFS.motion);
   const isDefault = current === 'skaz' && otherDefaults;
   return (
     <section className="kb-sgroup kb-looks" aria-label="Presets">
@@ -26,7 +26,7 @@ export function PresetGallery() {
         <h4 className="kb-sgroup__title">Presets</h4>
         <span className="kb-looks__current" data-testid="look-current">{current === 'custom' ? 'Custom' : PRESETS.find((p) => p.id === current)!.label}</span>
         <Button size="sm" variant="quiet" disabled={isDefault}
-          onClick={() => prefs.getState().set({ ...DEFAULT_LOOK, theme: DEFAULT_PREFS.theme, textSize: DEFAULT_PREFS.textSize, sounds: DEFAULT_PREFS.sounds })}>
+          onClick={() => prefs.getState().set({ ...DEFAULT_LOOK, theme: DEFAULT_PREFS.theme, textSize: DEFAULT_PREFS.textSize, motion: DEFAULT_PREFS.motion, sounds: DEFAULT_PREFS.sounds })}>
           Reset to default
         </Button>
       </div>

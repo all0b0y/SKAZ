@@ -292,7 +292,9 @@ async def test_a_missing_or_updating_agent_costs_no_attempt(env: Env) -> None:
     assert (await env.client.delete(f"/kb/chats/{chat['id']}")).status_code == 204
     await deletions_done(env)
     for hours in range(1, MAX_DELETE_ATTEMPTS + 3):
-        env.chats.sessions.clock = lambda hours=hours: later(60 * 24 * hours)
+        def clock(hours: int = hours) -> datetime:
+            return later(60 * 24 * hours)
+        env.chats.sessions.clock = clock
         await env.chats.delete_sessions()
     assert [item.attempts for item in env.chats.sessions.pending()] == [0]
     # The agent is being updated / repaired (U1 gate): not even tried.
@@ -313,7 +315,9 @@ async def test_a_given_up_session_drops_the_agents_local_traces(env: Env) -> Non
     assert (await env.client.delete(f"/kb/chats/{chat['id']}")).status_code == 204
     await deletions_done(env)
     for day in range(1, MAX_DELETE_ATTEMPTS + 1):
-        env.chats.sessions.clock = lambda day=day: later(60 * 24 * day)
+        def clock(day: int = day) -> datetime:
+            return later(60 * 24 * day)
+        env.chats.sessions.clock = clock
         await env.chats.delete_sessions()
     assert pending(env) == [] and engine(env).forgotten == ["codex-session-1"]
     assert len(engine(env).delete_calls) == MAX_DELETE_ATTEMPTS

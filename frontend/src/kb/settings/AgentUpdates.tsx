@@ -4,6 +4,7 @@ import { Button, Icon, Switch } from '../ui';
 import { useAgentUpdates, useServices } from '../state/context';
 import { updateOf } from '../state/agentUpdates';
 import { relativeTime } from '../document/text';
+import { StippleRing } from '../fx/stipple/StippleWork';
 
 /**
  * U1 on an agent's card (Settings → Accounts & keys): "Update available · X → Y" with what the update
@@ -13,7 +14,7 @@ import { relativeTime } from '../document/text';
  * The running update's log is the card's own install log.
  */
 export function AgentUpdateOffer({ engine }: { engine: EngineId }) {
-  const { agentUpdates } = useServices();
+  const { agentUpdates, agents } = useServices();
   const update = useAgentUpdates((s) => updateOf(s.view, engine));
   const pending = useAgentUpdates((s) => s.pending[engine]);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +26,7 @@ export function AgentUpdateOffer({ engine }: { engine: EngineId }) {
       : what === 'skip' ? await s.skip(engine, update.latest ?? '')
         : what === 'cancel' ? await s.cancel(engine) : await s.rollback(engine);
     if (!r.ok) setError(r.error);
+    else if (what === 'update' || what === 'rollback') agents.getState().showInstall(engine, 'update');
   };
   const failure = update.phase === 'idle' ? update.failure : null;
   const offer = update.available && update.phase === 'idle';
@@ -33,39 +35,24 @@ export function AgentUpdateOffer({ engine }: { engine: EngineId }) {
     <div className="kb-agentupdate" data-testid={`agent-update-${engine}`}>
       {update.phase === 'queued' && (
         <p className="kb-agentcard__msg" role="status">
-          <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
+          <StippleRing className="kb-spinner kb-spinner--inline" />
           Updates after current work. New answers from {update.name} wait meanwhile.{' '}
+          <Button size="sm" variant="quiet" onClick={() => agents.getState().showInstall(engine, 'update')}>Details</Button>
           <Button size="sm" variant="quiet" busy={pending === 'cancel'} onClick={() => void run('cancel')}>Cancel</Button>
         </p>
       )}
       {update.phase === 'updating' && (
         // Until the card's own install log takes over (it follows the task once the backend started it).
         <p className="kb-agentcard__msg" role="status">
-          <span className="kb-spinner kb-spinner--inline" aria-hidden="true" />
+          <StippleRing className="kb-spinner kb-spinner--inline" />
           {update.action === 'rollback' ? 'Rolling back…' : 'Updating…'} New answers from {update.name} wait meanwhile.
+          <Button size="sm" variant="quiet" onClick={() => agents.getState().showInstall(engine, 'update')}>Details</Button>
         </p>
       )}
       {failure && (
         <div className="kb-agentupdate__failure">
           <p className="kb-inline-error kb-inline-error--flat" role="alert">{failure.reason}</p>
-          {failure.output.length > 0 && (
-            <pre className="kb-installlog__lines" aria-label={`${update.name} update output`} tabIndex={0}>{failure.output.join('\n')}</pre>
-          )}
-          {failure.command && (
-            <p className="kb-agentcard__manual">Run it yourself in Terminal: <code>{failure.command}</code></p>
-          )}
-          {failure.rollback === 'skaz' && failure.previous && (
-            <span className="kb-agentupdate__acts">
-              <Button size="sm" busy={pending === 'rollback'} onClick={() => void run('rollback')}>Roll back to {failure.previous}</Button>
-              {engine === 'claude_code' && <span className="kb-agentcard__note">Claude Code may update itself again.</span>}
-            </span>
-          )}
-          {failure.rollback === 'manual' && (
-            <p className="kb-agentcard__manual">
-              SKAZ can’t roll {update.name} back. Roll back manually{failure.previous ? ` to ${failure.previous}` : ''}:{' '}
-              <a className="kb-md__link" href={failure.docs_url} target="_blank" rel="noreferrer noopener">instructions</a>
-            </p>
-          )}
+          <Button size="sm" variant="quiet" onClick={() => agents.getState().showInstall(engine, 'update')}>Details</Button>
         </div>
       )}
       {offer && (

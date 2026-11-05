@@ -41,6 +41,7 @@ class WebEngine:
 
     engine_id: EngineId = "claude_code"
     queries: Callable[[AgentTurn], Sequence[str]] = field(default=lambda _turn: ["entropy definition"])
+    report_results: bool = True
     verdicts: list[tuple[str, bool, str]] = field(default_factory=list)
     turns: list[AgentTurn] = field(default_factory=list)
     _cancels: dict[str, asyncio.Event] = field(default_factory=dict)
@@ -72,7 +73,7 @@ class WebEngine:
                 if self._cancels[turn.run_id].is_set():
                     yield Failed(turn.run_id, "cancelled", "The answer was stopped.")
                     return
-                if verdict.allowed and verdict.search_id:
+                if verdict.allowed and verdict.search_id and self.report_results:
                     await turn.web.results(verdict.search_id, LINKS)
             yield TextDelta(turn.run_id, "Готово.")
             yield Completed(turn.run_id)
@@ -139,6 +140,7 @@ async def test_allow_once_shows_the_exact_query_first_then_the_links(env: Env) -
     assert (part["engine"], part["query"], part["status"], part["auto"]) == (
         "claude_code", "entropy definition", "pending", False)
     assert part["links"] == []
+    assert part["call_id"] == "toolu_0"  # Native SDK identity, durable, not the SKAZ tool-name constant.
     listed = (await env.client.get("/kb/chats")).json()
     assert next(c for c in listed if c["id"] == chat_id)["waiting_for_user"] is True
 
@@ -200,6 +202,18 @@ async def test_allow_in_this_chat_covers_this_chat_only_and_survives_a_restart(e
     assert (third["query"], third["status"]) == ("third query", "pending")
     await env.decide(third["id"], "deny")
     await finished(env.runtime.kb_chats)
+
+
+async def test_answer_end_without_search_result_is_unknown_not_stopped_or_done(env: Env) -> None:
+    env.claude.report_results = False
+    chat_id = await env.chat()
+    await env.send(chat_id)
+    part = await env.pending(chat_id)
+    await env.decide(part["id"], "allow")
+    await finished(env.runtime.kb_chats)
+    (done,) = await env.parts(chat_id)
+    assert done["status"] == "allowed" and done["execution"] == "unknown"
+    assert done["started_at"] is None and done["duration_ms"] is None
 
 
 async def test_stop_cancels_a_waiting_query(env: Env) -> None:

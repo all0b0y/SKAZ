@@ -115,6 +115,28 @@
 .kb-agentupdates { display: inline-flex; align-items: center; gap: var(--kb-sp-10); flex-wrap: wrap; justify-content: flex-end; }
 .kb-agentcard__manual code { font-family: var(--kb-font-mono); background: var(--kb-accent-soft); padding: 0 var(--kb-sp-4); border-radius: var(--kb-r-2xs); color: var(--kb-text); }
 .kb-agentcard__foot { display: flex; gap: var(--kb-sp-6); justify-content: flex-end; }
+/* N9: a compact row + one independent progress window, never an inline terminal screen. */
+.kb-install-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--kb-sp-4) var(--kb-sp-8); align-items: center; align-self: stretch; font-size: var(--t-sm); min-width: 0; text-align: left; }
+.kb-install-summary > [role='status'] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-install-summary > .kb-stipstrip { grid-column: 1 / -1; }
+.kb-install-progress { width: min(520px, calc(100vw - 48px)); max-height: 86vh; }
+.kb-install-progress__body { min-height: 0; overflow-y: auto; padding: var(--kb-sp-16) var(--kb-sp-20); display: flex; flex-direction: column; align-items: stretch; gap: var(--kb-sp-12); line-height: 1.5; }
+.kb-install-progress__body > * { flex-shrink: 0; }
+.kb-install-progress__body > p { margin: 0; }
+.kb-install-progress__stage { display: flex; justify-content: center; padding: var(--kb-sp-8) 0; }
+.kb-install-progress__stage .kb-stipwork { width: 56px; height: 56px; }
+.kb-install-progress__now { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: var(--kb-sp-8); font-weight: 600; text-align: center; }
+.kb-install-progress__steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--kb-sp-6); font-size: var(--t-sm); }
+.kb-install-progress__steps li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: var(--kb-sp-8); align-items: center; }
+.kb-install-progress__steps [data-state='running'] { font-weight: 600; }
+.kb-install-progress__steps [data-state='error'] { color: var(--kb-danger); }
+.kb-install-progress__pending { width: 6px; height: 6px; border: 1px solid var(--kb-muted); border-radius: var(--kb-r-pill); justify-self: center; }
+.kb-install-progress__fold { display: inline-flex; align-items: center; align-self: flex-start; gap: var(--kb-sp-6); color: var(--kb-muted); font-size: var(--t-sm); }
+.kb-install-progress__manual { display: flex; align-items: flex-start; flex-wrap: wrap; gap: var(--kb-sp-8); min-width: 0; font-size: var(--t-sm); }
+.kb-install-progress__manual > p, .kb-install-progress__manual > code { flex: 0 0 100%; margin: 0; }
+.kb-install-progress__manual > code { padding: var(--kb-sp-8); background: var(--kb-accent-soft); border-radius: var(--kb-r-sm); font-family: var(--kb-font-mono); overflow-wrap: anywhere; min-width: 0; }
+.kb-install-progress__foot { display: flex; flex-wrap: wrap; justify-content: flex-end; flex: none; gap: var(--kb-sp-8); padding: var(--kb-sp-12) var(--kb-sp-16); border-top: 1px solid var(--kb-line); }
+
 .kb-installlog { display: flex; flex-direction: column; gap: var(--kb-sp-4); }
 .kb-installlog__head { display: inline-flex; align-items: center; gap: var(--kb-sp-6); font-size: var(--t-sm); font-weight: 600; }
 .kb-installlog__lines {

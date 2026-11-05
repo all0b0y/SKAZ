@@ -5,7 +5,7 @@ import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fakeBridge';
 import { materialWiki } from '../test/fakeKb';
 import { addedLabel } from './AllMaterials';
-import { fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
+import { addedNote, fileItem, itemMeta, NOT_A_LINK, pasteItem, speechBlock, wikiDefault, type LinkItem } from './addItems';
 import type { KbKeys, KbSpeechSettings } from '../../api/kb/types.gen';
 
 async function ready() {
@@ -15,6 +15,44 @@ async function ready() {
 }
 
 describe('All materials (v11, decision 25)', () => {
+  it('puts the selection bar in the header without remounting list rows', async () => {
+    const user = userEvent.setup();
+    await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const table = await within(center).findByRole('grid');
+    const item = within(table).getByRole('button', { name: 'Lecture 8 — entropy' });
+    const before = item.closest('tr');
+    await user.keyboard('{Meta>}');
+    await user.click(item);
+    await user.keyboard('{/Meta}');
+    const bar = within(center).getByRole('toolbar', { name: '1 selected' });
+    expect(bar.closest('header')).toBe(center.querySelector('header'));
+    expect(within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')).toBe(before);
+    await user.click(within(bar).getByRole('button', { name: 'Clear selection' }));
+    expect(within(table).getByRole('button', { name: 'Lecture 8 — entropy' }).closest('tr')).toBe(before);
+  });
+
+  it('cards have the same selection and drag contract without opening a document', async () => {
+    const user = userEvent.setup();
+    const { services } = await ready();
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    await within(center).findByRole('grid');
+    await user.click(within(center).getByRole('radio', { name: 'Cards' }));
+    const grid = within(center).getByRole('grid', { name: 'Materials' });
+    const item = within(grid).getByRole('button', { name: /Lecture 8 — entropy/ });
+    const row = item.closest('[data-sel-id]');
+    const opened = services.ui.getState().right;
+    await user.keyboard('{Meta>}');
+    await user.click(item);
+    await user.keyboard('{/Meta}');
+    expect(row).toHaveAttribute('aria-selected', 'true');
+    expect(row).toHaveAttribute('draggable', 'true');
+    expect(within(center).getByRole('toolbar', { name: '1 selected' }).closest('header')).toBe(center.querySelector('header'));
+    expect(services.ui.getState().right).toBe(opened);
+  });
+
   it('opens over the centre as a table with type, name, folder, added and the wiki state', async () => {
     const user = userEvent.setup();
     await ready();
@@ -48,7 +86,7 @@ describe('All materials (v11, decision 25)', () => {
     const names = within(center).getAllByRole('row').slice(1).map((r) => r.querySelector('.kb-amt__open')!.textContent);
     expect(names).toEqual([...names].sort((a, b) => a!.localeCompare(b!)));
     await user.click(within(center).getByRole('radio', { name: 'Cards' }));
-    expect(within(center).getByRole('list', { name: 'Materials' })).toBeInTheDocument();
+    expect(within(center).getByRole('grid', { name: 'Materials' })).toBeInTheDocument();
     await user.click(within(center).getByRole('button', { name: /Cross-entropy explained/ }));
     expect(await screen.findByRole('heading', { level: 2, name: 'Cross-entropy explained' })).toBeInTheDocument();
     await user.click(within(center).getByRole('button', { name: 'Close all materials' }));
@@ -322,6 +360,69 @@ describe('+ Material (v11, decisions 15–16)', () => {
     expect(within(dialog).getByText('notes.pdf')).toBeInTheDocument();
   });
 
+  it('a file already in the library is not added again: the row says so and opens it (N2)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files: [new File(['y'], 'notes.pdf', { type: 'application/pdf' })], getData: () => '' } });
+    const there = fake.world.materials.find((m) => m.title === 'Lecture 8 — entropy')!;
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => {
+      if (req.path !== '/kb/materials/file') return original(req);
+      const res = await original(req);
+      if (!res.ok) return res;
+      const data = res.data as { material: { id: string; title: string } };
+      return { ...res, status: 200, data: { ...data, material: { ...data.material, id: there.id, title: there.title }, already_in_library: true } };
+    }) as typeof original;
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    const note = await within(dialog).findByTestId('already-in-library');
+    expect(note).toHaveTextContent('This is already in your library · Open it');
+    expect(within(dialog).getByRole('button', { name: 'Add' })).toBeDisabled(); // nothing left to add
+    await user.click(within(note).getByRole('button', { name: 'Open it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add material' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('heading', { level: 2, name: 'Lecture 8 — entropy' })).toBeInTheDocument();
+  });
+
+  it('a speech file already in the library is not imported again (Q1 n2 M1)', async () => {
+    const user = userEvent.setup();
+    const { fake, services } = await ready();
+    services.bridge.droppedMediaFile = (file: File) => ({ path: `/Users/me/${file.name}`, name: file.name, url: `skaz-media://${file.name}` });
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    fireEvent.drop(within(dialog).getByTestId('drop-zone'), { dataTransfer: { files: [new File(['x'], 'talk.m4a', { type: 'audio/mp4' })], getData: () => '' } });
+    const there = fake.world.materials.find((m) => m.title === 'Lecture 8 — entropy')!;
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => (req.path === '/kb/imports'
+      ? { ok: true, status: 200, data: { material_id: there.id, session_id: 's-x', kind: 'audio', title: there.title, folder_id: 'inbox', status: 'ready', fragment_count: 3, created_at: '2026-10-01T10:00:00Z', recording_state: null, import_state: 'completed', import_stage: null, error: null, already_in_library: true } }
+      : original(req))) as typeof original;
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    const note = await within(dialog).findByTestId('already-in-library');
+    expect(note).toHaveTextContent('This is already in your library · Open it');
+  });
+
+  it('mode "both" tells the truth about each part: the article already there, the video added (Q1 n2 M1)', async () => {
+    const user = userEvent.setup();
+    const { fake } = await ready();
+    await user.click(screen.getByTestId('add-material'));
+    const dialog = await screen.findByRole('dialog', { name: 'Add material' });
+    await user.type(within(dialog).getByRole('textbox', { name: 'Link or any text' }), 'https://blog.example/embed{Enter}');
+    await user.click(await within(dialog).findByRole('radio', { name: 'Both' }));
+    const there = fake.world.materials.find((m) => m.title === 'Lecture 8 — entropy')!;
+    const original = fake.bridge.request;
+    fake.bridge.request = (async (req) => {
+      if (req.path !== '/kb/materials/link') return original(req);
+      const res = await original(req);
+      if (!res.ok) return res;
+      const data = res.data as { material: { id: string; title: string } };
+      return { ...res, status: 200, data: { ...data, material: { ...data.material, id: there.id, title: there.title }, already_in_library: true, video: { ...data.material, title: 'Embedded talk' }, video_already_in_library: false } };
+    }) as typeof original;
+    await user.click(within(dialog).getByRole('button', { name: 'Add' }));
+    const note = await within(dialog).findByTestId('already-in-library');
+    expect(note).toHaveTextContent('The article is already in your library; the video was added · Open it');
+  });
+
   it('without a ready wiki agent "Add to wiki" starts off and says where to connect one (QA B4)', async () => {
     const user = userEvent.setup();
     const world = docWorld();
@@ -527,5 +628,29 @@ describe('Selecting several materials in the table (0.3.1 F2/F4/F5)', () => {
       path: '/Users/me/Documents/Out', overwrite: false,
       items: [{ type: 'material', id: 'm-ce' }, { type: 'material', id: 'm-txt' }],
     });
+  });
+});
+
+describe('addedNote (N2, Q1 n2 M1): what the Add list says after an add', () => {
+  const a = { materialId: 'a', ready: true };
+  const v = { materialId: 'v', ready: false, part: 'video' as const };
+  it('says nothing when everything was new', () => {
+    expect(addedNote([a])).toBeNull();
+    expect(addedNote([a, v])).toBeNull();
+  });
+  it('one material already there', () => {
+    expect(addedNote([{ ...a, existing: { title: 'A' } }])).toEqual({ openId: 'a', text: 'This is already in your library' });
+  });
+  it('one already there that failed says so — opening it offers Retry (Q1 n2 L4)', () => {
+    expect(addedNote([{ ...a, ready: false, existing: { title: 'A', failed: true } }]))
+      .toEqual({ openId: 'a', text: 'This is already in your library, but it failed to process' });
+  });
+  it('mode both: each part told as it is', () => {
+    const old = { ...a, existing: { title: 'A' } };
+    expect(addedNote([old, { ...v, existing: { title: 'V' } }])).toEqual({ openId: 'a', text: 'The article and the video are already in your library' });
+    expect(addedNote([old, v])).toEqual({ openId: 'a', text: 'The article is already in your library; the video was added' });
+    expect(addedNote([{ ...old, videoFailure: 'Private video.' }])).toEqual({ openId: 'a', text: 'The article is already in your library; the video wasn’t added: Private video.' });
+    expect(addedNote([a, { ...v, existing: { title: 'V' } }])).toEqual({ openId: 'v', text: 'The article was added; the video is already in your library' });
+    expect(addedNote([{ ...a, videoFailure: 'Private video.' }])).toEqual({ openId: 'a', text: 'The article was added; the video wasn’t added: Private video.' });
   });
 });

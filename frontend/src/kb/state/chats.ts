@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { KbChat, KbChatEvent, KbChatSummary, KbMessage, KbMessageInput, KbOpenContext, KbSavedAnalysis } from '../../api/kb/types.gen';
 import type { EngineId } from '../api/names';
+import type { KbChatSearchRules } from '../api/searchRules';
 import { errorText, type KbClient } from '../api/client';
 import type { ActionResult, Load } from './library';
 import { longPoll } from './poll';
@@ -32,6 +33,8 @@ export interface ChatsData {
   chats: Record<string, OpenChat>;
   /** Agent/model/effort picked for the new chat before its first message. */
   draftAgent: AgentChoice | null;
+  /** Search and source choices for New chat, kept in memory until its first send. */
+  draftSearchRules: KbChatSearchRules | null;
   /** How the user answered a permission request in this window (to say «Allowed in this chat»). */
   decisions: Record<string, KbPermissionDecision['decision']>;
 }
@@ -62,6 +65,7 @@ export interface ChatsActions {
   /** Change agent/model/effort; on an existing chat the backend records it (409 = not available). */
   setAgent: (chatId: string | null, choice: AgentChoice) => Promise<ActionResult>;
   setDraftAgent: (choice: AgentChoice | null) => void;
+  setDraftSearchRules: (rules: KbChatSearchRules | null) => void;
   /** A material or page was deleted: mark it gone in every loaded chat (see `forgetInChat`). */
   forget: (gone: Gone) => void;
   /** Answer an agent's permission request (0.3.1 P); the card shows the returned part. */
@@ -155,14 +159,16 @@ export function forgetInChat(chat: KbChat, gone: Gone): KbChat {
   return changed ? { ...chat, messages } : chat;
 }
 
-/** The message with the part replaced by the part with the same id (null = no such part). */
+/** Replace a part by its identity; tool call ids are local to one explicitly addressed answer. */
 export function replacePart(messages: KbMessage[], part: AnyMessagePart, messageId?: string | null): KbMessage[] | null {
-  const id = 'id' in part ? part.id : null;
-  if (!id) return null;
+  const tool = part.type === 'tool';
+  const id = tool ? part.call_id : 'id' in part ? part.id : null;
+  if (!id || (tool && !messageId)) return null;
   for (let i = 0; i < messages.length; i += 1) {
     const m = messages[i]!;
     if (messageId && m.id !== messageId) continue;
-    const at = partsOf(m).findIndex((p) => 'id' in p && p.id === id);
+    const at = partsOf(m).findIndex((p) => tool ? p.type === 'tool' && p.call_id === id
+      : p.type === part.type && 'id' in p && p.id === id);
     if (at < 0) continue;
     const parts = m.parts.slice();
     parts[at] = part as KbMessage['parts'][number];
@@ -296,6 +302,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
       currentId: null,
       chats: {},
       draftAgent: null,
+      draftSearchRules: null,
       decisions: {},
 
       loadList: async () => {
@@ -363,14 +370,18 @@ export function createChatsStore(client: KbClient): ChatsStore {
         let id = options.newChat ? null : get().currentId;
         if (!id) {
           const draft = get().draftAgent;
+          const rules = options.newChat ? null : get().draftSearchRules;
           try {
             const chat = await client.call('POST /kb/chats', {
-              body: draft ? { engine: draft.engine, model: draft.model, effort: draft.effort } : {},
+              body: { ...(draft ? { engine: draft.engine, model: draft.model, effort: draft.effort } : {}),
+                ...(rules ? { search_rules: { web: rules.web, sources_only: rules.sources_only,
+                  sources: rules.sources.map((s) => s.id), excluded: rules.excluded.map((s) => s.id), as_global: false } } : {}) },
             });
             putChat(chat);
             id = chat.id;
             // A chat asked from ⌘K leaves New chat's own agent choice alone.
-            set({ currentId: id, draftAgent: options.newChat ? get().draftAgent : null });
+            set({ currentId: id, draftAgent: options.newChat ? get().draftAgent : null,
+              draftSearchRules: options.newChat || get().draftSearchRules !== rules ? get().draftSearchRules : null });
           } catch (error) {
             return { ok: false, error: errorText(error) };
           }
@@ -495,6 +506,7 @@ export function createChatsStore(client: KbClient): ChatsStore {
         });
       },
       setDraftAgent: (choice) => set({ draftAgent: choice }),
+      setDraftSearchRules: (rules) => set({ draftSearchRules: rules }),
       decide: (chatId, partId, body) => act(async () => {
         const part = await decidePermission(client, partId, body);
         set((s) => ({ decisions: { ...s.decisions, [partId]: body.decision } }));

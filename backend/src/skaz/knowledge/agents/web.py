@@ -69,6 +69,15 @@ class WebVerdict:
     message: str = ""
     #: SKAZ's request id: the search's links are recorded on it.
     search_id: str | None = None
+    #: N7: the domain filters to send instead of the agent's own (``None``: as the agent asked) —
+    #: the user's Never / «only these sites» rules for an engine that filters by domain.
+    allowed_domains: tuple[str, ...] | None = None
+    blocked_domains: tuple[str, ...] | None = None
+    #: N7 (Q1 n78 M-2): the user's rules snapshot taken when the query was asked
+    #: (``permissions.search_rules.ActiveRules``; ``None``: none) — results are screened with it.
+    rules: object | None = None
+    #: The effective query shown on the approval card (None when the original was unchanged).
+    effective_query: str | None = None
 
 
 class WebSearchGate(Protocol):
@@ -76,7 +85,10 @@ class WebSearchGate(Protocol):
 
     async def approve(self, query: WebQuery) -> WebVerdict: ...
 
-    async def results(self, search_id: str, links: Sequence[WebLink]) -> None: ...
+    async def started(self, search_id: str) -> object: ...
+
+    async def results(self, search_id: str, links: Sequence[WebLink], *,
+                      is_error: bool = False) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -196,14 +208,45 @@ def site_of(url: str) -> str:
     return (urlsplit(url).hostname or "").removeprefix("www.")
 
 
+#: Dots a browser reads as ``.`` in a host (IDNA's label separators).
+_DOTS = str.maketrans({"\u3002": ".", "\uff0e": ".", "\uff61": "."})
+#: Authority characters a browser (WHATWG URL) parses differently from ``urlsplit``: ``\`` is ``/`` for
+#: http(s), userinfo hides the real host behind ``@``, percent-escapes are decoded in hosts.
+_AMBIGUOUS_AUTHORITY = frozenset("\\@%")
+
+
+def link_host(url: str) -> str:
+    """The host a browser would open for an http(s) ``url``, lower-case and in IDNA (punycode) form —
+    the form the user's site lists are stored in (Q1 n78 H-3); ``""`` when there is none or the
+    authority is ambiguous (``\\``, ``@``, ``%``, spaces)."""
+    try:
+        parts = urlsplit(url.strip())
+        host = parts.hostname or ""
+    except ValueError:
+        return ""
+    if not host or any(char in _AMBIGUOUS_AUTHORITY or char.isspace() for char in parts.netloc):
+        return ""
+    host = unicodedata.normalize("NFKC", host).translate(_DOTS).lower().rstrip(".")
+    try:
+        host = host.encode("idna").decode("ascii").lower()
+    except (UnicodeError, ValueError):
+        return ""
+    return host
+
+
 def clean_links(links: Sequence[WebLink]) -> tuple[WebLink, ...]:
-    """http(s) links only, each once, at most ``MAX_LINKS``; titles trimmed."""
+    """http(s) links with a clear host only (``link_host``), each once, at most ``MAX_LINKS``; titles
+    trimmed."""
     out: list[WebLink] = []
     seen: set[str] = set()
     for link in links:
         url = link.url.strip()
-        parts = urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.hostname or url in seen or len(url) > 4096:
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            continue
+        if (parts.scheme not in ("http", "https") or not link_host(url) or url in seen
+                or len(url) > 4096):
             continue
         seen.add(url)
         out.append(WebLink((link.title or "").strip()[:300] or site_of(url), url))

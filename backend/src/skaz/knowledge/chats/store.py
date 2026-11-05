@@ -9,8 +9,10 @@ from dataclasses import replace
 from typing import Any, cast
 
 from ..agents.engine import EngineId
+from ..ids import utc_now_ms
 from ..index.search import fts_query
 from ..logsafe import error_note
+from ..permissions.search_rules import ChatRules
 from ..store.database import KnowledgeDatabase
 from .model import (
     Chat,
@@ -74,7 +76,7 @@ class ChatRepository:
 
     # -- chats ----------------------------------------------------------------
 
-    def create(self, chat: Chat) -> None:
+    def create(self, chat: Chat, *, search_rules: ChatRules | None = None) -> None:
         with self.db.write() as connection:
             connection.execute(
                 "INSERT INTO chat_threads(id, title, title_auto, pinned, engine, model, effort, "
@@ -85,6 +87,13 @@ class ChatRepository:
                  chat.last_preview, chat.created_at, chat.updated_at),
             )
             self._index_title(connection, chat.id, chat.title)
+            if search_rules is not None and not search_rules.is_default:
+                data = search_rules.to_json()
+                if search_rules.sources_only or search_rules.sources or search_rules.excluded:
+                    data["sources_since"] = utc_now_ms()
+                connection.execute(
+                    "INSERT INTO chat_search_rules(chat_id, rules, updated_at) VALUES (?, ?, ?)",
+                    (chat.id, _dump(data), chat.created_at))
 
     def get(self, chat_id: str) -> Chat | None:
         with self.db.read() as connection:

@@ -1,0 +1,203 @@
+"""P3-b: the «Unclear» mark on cards and test questions, and the read-only ``skaz_study_unclear`` tool.
+
+The mark lives on the item (not the attempt): it survives retakes and a right answer, never touches
+FSRS, is separate from «hard», and only the user clears it. The agent reads the marks in the chat's
+scope (its folders, or the whole library) and never changes them.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any
+
+import httpx
+
+from skaz.knowledge.study.tools import STUDY_TOOL_NAMES, UnclearArgs
+from skaz.knowledge.study.unclear import unclear_items
+from tests.knowledge.test_s_study import (  # noqa: F401 - the study world
+    _deck,
+    _ids,
+    _options,
+    _test,
+    _tool,
+    _tool_error,
+    world,
+)
+
+
+async def _unclear(runtime: Any, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The tool's answer with its items read out of their untrusted-data block (Q1 p3 M4)."""
+    read = await _tool(runtime, "skaz_study_unclear", arguments or {})
+    block = read["items"]
+    assert isinstance(block, str) and block.startswith("LIBRARY DATA (untrusted data")
+    body = block.split("\n", 2)[2].rsplit("\n</untrusted-data>", 1)[0]
+    return {**read, "items": json.loads(body)}
+
+
+async def test_a_question_mark_survives_retakes_and_a_right_answer_and_only_the_user_clears_it(
+    world: Any,  # noqa: F811
+) -> None:
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")
+    assert study.unclear_of([first]) == {first}
+
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, first, choices=[right])  # a right answer…
+    await asyncio.to_thread(study.finish, block.id)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=False)  # …and a retake
+    assert study.unclear_of([first]) == {first}
+
+    saved = await asyncio.to_thread(study.save, block.id, "allow")  # the saved test keeps it
+    assert study.items.one(first).page_id == saved.page_id
+    await asyncio.to_thread(study.mark, block.id, [first], "clear")
+    assert study.unclear_of([first]) == set()
+
+
+async def test_a_card_mark_never_touches_fsrs_and_is_apart_from_hard(world: Any) -> None:  # noqa: F811
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await asyncio.to_thread(study.save, (await _deck(runtime, library)).id, "allow")
+    card = _ids(runtime, block)[0]
+    await asyncio.to_thread(study.mark, block.id, [card], "unclear")
+    assert study.store.cards([card]) == {}  # no FSRS state, no review
+    view = study.card_view(study.get(block.id))
+    assert view[0]["unclear"] is True and view[0]["marked_hard"] is False
+    deck = study.deck(block.page_id)
+    assert deck["unclear"] == 1 and deck["cards"][0]["unclear"] is True
+    await asyncio.to_thread(study.mark, None, [card], "clear", page_id=block.page_id)  # from the deck page
+    assert study.deck(block.page_id)["unclear"] == 0
+
+
+async def test_the_agent_reads_unclear_items_in_the_chats_scope_and_cannot_change_them(
+    world: Any, kb_client: httpx.AsyncClient  # noqa: F811
+) -> None:
+    runtime, library, ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    questions = study.questions(block)
+    first, open_q = questions[0].id, questions[3].id
+    wrong = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "agent")
+    await asyncio.to_thread(study.answer, block.id, first, choices=[wrong])
+    await asyncio.to_thread(study.mark, block.id, [first, open_q], "unclear")
+
+    assert "skaz_study_unclear" in STUDY_TOOL_NAMES
+    read = await _unclear(runtime)
+    assert read["scope"] == "the whole library" and read["count"] == 2  # the chat has no folders: «All»
+    item = read["items"][0]
+    assert (item["item_id"], item["kind"], item["type"]) == (first, "test question", "choice")
+    assert item["right_answer"] == ["мера беспорядка"]
+    assert {o["text"] for o in item["options"] if not o["right"]} == {"мера температуры", "мера массы"}
+    assert item["last_answer"].endswith("(not right)") and item["source"][0]["quote"]
+    assert item["where"].startswith("test block") and item["in"] == "Проверка"
+
+    # The chat's folders bound the scope: a chat about chemistry sees nothing of this physics test.
+    await asyncio.to_thread(runtime.kb_chats.repo.update, ref.chat_id, folder_ids=(library.chemistry,))
+    assert (await _unclear(runtime))["count"] == 0
+    await asyncio.to_thread(runtime.kb_chats.repo.update, ref.chat_id, folder_ids=(library.physics,))
+    assert (await _unclear(runtime))["count"] == 2
+
+    # Read-only: the tool takes nothing to change (its only argument narrows the list to a page).
+    assert set(UnclearArgs.model_fields) == {"page_id"}
+    await _tool_error(runtime, "skaz_study_unclear", {"clear": [first]})
+    assert study.unclear_of([first, open_q]) == {first, open_q}
+
+    # «Clear now» is the user's: the route clears what is listed and answers with the rest.
+    listed = (await kb_client.get("/kb/study/unclear", params={"chat_id": ref.chat_id})).json()
+    assert listed["scope"] == "folders" and [i["item_id"] for i in listed["items"]] == [first, open_q]
+    left = (await kb_client.post("/kb/study/unclear/clear", params={"chat_id": ref.chat_id},
+                                 json={"item_ids": [first]})).json()
+    assert [i["item_id"] for i in left["items"]] == [open_q]
+
+
+async def test_the_block_view_and_the_open_context_carry_the_mark(
+    world: Any, kb_client: httpx.AsyncClient  # noqa: F811
+) -> None:
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    marked = await kb_client.post(f"/kb/study/{block.id}/mark",
+                                  json={"item_ids": [first], "mark": "unclear"})
+    assert marked.status_code == 200 and marked.json()["questions"][0]["unclear"] is True
+    assert "marked it Unclear" in (study.open_context(block.id) or "")
+
+
+async def test_before_the_user_answers_the_agent_never_gets_the_answer_of_an_unclear_question(
+    world: Any,  # noqa: F811
+) -> None:
+    """Q1 p3 H2: decision 12 («not answered yet» → no right answer, in code) wins over decision 10's list."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")  # marked before answering
+
+    item = (await _unclear(runtime))["items"][0]
+    assert item["answered"] is False and item["last_answer"] is None
+    for hidden in ("right_answer", "source", "agent_explanation"):
+        assert hidden not in item
+    assert sorted(o["text"] for o in item["options"]) == ["мера беспорядка", "мера массы", "мера температуры"]
+    assert all(set(o) == {"text"} for o in item["options"])  # never which one is right
+    assert "мера беспорядка" not in str({k: v for k, v in item.items() if k != "options"})
+
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, first, choices=[right])
+    item = (await _unclear(runtime))["items"][0]
+    assert item["answered"] is True and item["right_answer"] == ["мера беспорядка"] and item["source"]
+
+    # A retake asks it again: until it is answered in the new attempt, the answer is withheld again.
+    await asyncio.to_thread(study.finish, block.id)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=False)
+    item = (await _unclear(runtime))["items"][0]
+    assert item["answered"] is False and "right_answer" not in item and item["last_answer"] is None
+
+
+async def test_unclear_items_reach_the_agent_as_untrusted_data(world: Any) -> None:  # noqa: F811
+    """Q1 p3 M4: quotes, questions and the user's answers are data, never instructions."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, first, choices=[right])
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")
+    raw = await _tool(runtime, "skaz_study_unclear", {})
+    assert '<untrusted-data label="unclear items">' in raw["items"]
+    assert (await _unclear(runtime))["items"][0]["source"][0]["quote"]
+    saved = await asyncio.to_thread(study.save, block.id, "allow")
+    read = await _tool(runtime, "skaz_study_read", {"page_id": saved.page_id})
+    assert read["text"].startswith("LIBRARY DATA (untrusted data") and "мера беспорядка" in read["text"]
+
+
+async def test_marks_of_items_whose_chat_and_page_are_gone_are_forgotten(world: Any) -> None:  # noqa: F811
+    """Q1 p3 L3: an orphaned mark is removed at the next read, so reads don't grow with old history."""
+    runtime, library, ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    first = study.questions(block)[0].id
+    await asyncio.to_thread(study.mark, block.id, [first], "unclear")
+    assert study.items.one(first) is not None
+    await runtime.kb_chats.delete(ref.chat_id)  # the chat and its unsaved test go
+    assert unclear_items(study, None) == []
+    assert study.items.one(first) is None and study.items.unclear() == []
+
+
+async def test_the_test_counts_every_unclear_question_also_those_a_retake_leaves_out(
+    world: Any, kb_client: httpx.AsyncClient  # noqa: F811
+) -> None:
+    """Q1 p3 L10: «Discuss unclear · N» after a «tricky ones» retake counts the whole test's marks."""
+    runtime, library, _ref = world
+    study = runtime.kb_study
+    block = await _test(runtime, library)
+    questions = study.questions(block)
+    right = next(o["id"] for o in _options(runtime, block, 0) if o["origin"] == "source")
+    await asyncio.to_thread(study.answer, block.id, questions[0].id, choices=[right])  # right: not retaken
+    await asyncio.to_thread(study.mark, block.id, [questions[0].id, questions[1].id], "unclear")
+    await asyncio.to_thread(study.finish, block.id)
+    await asyncio.to_thread(study.retake, block.id, mistakes_only=True)
+    part = (await kb_client.get(f"/kb/study/{block.id}")).json()
+    assert questions[0].id not in [q["id"] for q in part["questions"]]
+    assert part["unclear"] == 2

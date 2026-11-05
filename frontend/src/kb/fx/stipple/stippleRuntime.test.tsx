@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import { ChipStipple } from './ChipStipple';
 import { StippleStrip } from './StippleStrip';
+import { StippleGlobe, StippleRing } from './StippleWork';
 
 /** A recording 2D context: enough surface for FxCanvas and the stipple painters. */
 function fakeCtx() {
@@ -41,7 +42,37 @@ function sized(w: number, h: number) {
 }
 
 describe('stipple runtime: loops stop when nothing changes, light backing stores', () => {
-  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  it.each([['ring', StippleRing], ['globe', StippleGlobe]] as const)('%s paints through FxCanvas and releases its loop on unmount', (_name, Indicator) => {
+    const ctx = sized(24, 24);
+    const { queue, run } = frames();
+    const { unmount } = render(<Indicator />);
+    expect(queue.size).toBe(1);
+    run(100);
+    expect(ctx.arc).toHaveBeenCalled();
+    unmount();
+    expect(queue.size).toBe(0);
+  });
+  it('an observed globe completion releases its loop after one finite glow', () => {
+    vi.useFakeTimers();
+    sized(24, 24);
+    const { queue, run } = frames();
+    const { rerender } = render(<StippleGlobe />);
+    run(100);
+    rerender(<StippleGlobe complete />);
+    expect(queue.size).toBe(1);
+    act(() => vi.advanceTimersByTime(1100));
+    expect(queue.size).toBe(0);
+  });
+
+  it('loading an already completed globe paints once and allocates no loop', () => {
+    const ctx = sized(24, 24);
+    const { queue } = frames();
+    render(<StippleGlobe complete />);
+    expect(ctx.arc).toHaveBeenCalled();
+    expect(queue.size).toBe(0);
+  });
+
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
   it('chip: once the dots have settled the loop stops, though the chip stays on (a pinned popover)', () => {
     const ctx = sized(96, 76);

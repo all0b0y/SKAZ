@@ -1,8 +1,9 @@
 """``/kb/study``: decks and tests in chats, FSRS grades, test answers, saving, deck pages (0.3.1 S)."""
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -12,33 +13,47 @@ from ..errors import KnowledgeError
 from ..markdown.page import Cite
 from ..study.service import StudyService
 from ..study.store import StudyBlock
+from ..study.unclear import unclear_items
 from .schemas import KbCitation
 from .schemas_study import (
     KbDeckStudy,
     KbDeckStudyResult,
     KbDeckView,
+    KbStudyAlsoRight,
     KbStudyAnswerIn,
     KbStudyCard,
+    KbStudyCountIn,
     KbStudyGradeIn,
     KbStudyGroups,
+    KbStudyIdeaRecheck,
+    KbStudyIdeaReview,
     KbStudyIntervals,
     KbStudyMarkIn,
+    KbStudyModelPiece,
     KbStudyMove,
     KbStudyOption,
     KbStudyPart,
+    KbStudyPassIn,
+    KbStudyPile,
     KbStudyQuestion,
+    KbStudyRecheckIn,
     KbStudyRenameIn,
     KbStudyResponse,
     KbStudyResult,
     KbStudyResultRow,
     KbStudyRetake,
+    KbStudyReview,
     KbStudySave,
     KbStudySaveIn,
     KbStudySettings,
     KbStudySettingsPatch,
+    KbStudyUnclearClear,
+    KbStudyUnclearItem,
+    KbStudyUnclearList,
 )
 
 router = APIRouter(prefix="/kb/study", tags=["kb"])
+CHECK_STOPPED = "The check stopped before the agent answered. Try again."
 
 
 async def get_study(request: Request) -> StudyService:
@@ -68,13 +83,48 @@ def _card(row: dict[str, Any], citation: CitationFn) -> KbStudyCard:
                    for cite in cast(tuple[Cite, ...], row["cites"])],
         explanation=row["explanation"], group=row["group"], state=row["state"], suspended=row["suspended"],
         marked_hard=row["marked_hard"], intervals=KbStudyIntervals(**intervals), graded=row["graded"],
-        due=row["due"],
+        due=row["due"], unclear=bool(row.get("unclear")),
     )
 
 
 def _option(option: dict[str, str]) -> KbStudyOption:
     return KbStudyOption(id=option["id"], text=option["text"],
                          origin="agent" if option["origin"] == "agent" else "source")
+
+
+def _cites(cites: Any, citation: CitationFn) -> list[KbCitation]:
+    return [citation(str(c["material_id"]), int(c["seg"]), c.get("quote")) for c in cites or []]
+
+
+def _review(given: dict[str, Any], citation: CitationFn,
+            rechecking: Callable[[str], bool] = lambda _idea: False) -> KbStudyReview | None:
+    """The stored review of an open answer (P3-a), its quotes as citations.
+
+    ``rechecking`` says whether a recheck of an idea really runs: a stored flag whose task is gone
+    (the app quit meanwhile) would show «Rechecking…» forever (Q1 p3 M3).
+    """
+    review = given.get("review")
+    if not isinstance(review, dict):
+        return None
+    ideas = []
+    for idea in review.get("ideas") or []:
+        recheck = idea.get("recheck")
+        ideas.append(KbStudyIdeaReview(
+            id=idea["id"], text=idea["text"], citations=_cites(idea.get("cites"), citation),
+            status=idea.get("status", "missing"), yours=idea.get("yours"), why=idea.get("why"),
+            why_basis=idea.get("why_basis"), why_citations=_cites(idea.get("why_cites"), citation),
+            by_user=bool(idea.get("by_user")),
+            recheck=KbStudyIdeaRecheck(status=recheck.get("status"), note=recheck.get("note"),
+                                       words=str(recheck.get("words") or "")) if recheck else None,
+            rechecking=bool(idea.get("rechecking")) and rechecking(str(idea["id"]))))
+    return KbStudyReview(
+        ideas=ideas,
+        model_answer=[KbStudyModelPiece(text=p["text"], idea=p.get("idea"), added=bool(p.get("added")))
+                      for p in review.get("model") or []],
+        also_right=[KbStudyAlsoRight(text=a["text"], basis=a.get("basis", "agent"),
+                                     citations=_cites(a.get("cites"), citation))
+                    for a in review.get("also") or []],
+        comment=review.get("comment"))
 
 
 def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> KbStudyPart:
@@ -92,24 +142,35 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         items = (attempt.answers.get("items") if attempt else None) or {}
         by_id = {q.id: q for q in study.questions(block)}
         order = [item_id for item_id in study._test_order(block) if item_id in by_id]
+        # Every question of the test, also those a «tricky ones» retake leaves out (Q1 p3 L10).
+        marked = study.unclear_of(list(by_id))
+        unclear = len(marked)
         for item_id in order:
             question = by_id[item_id]
             given = items.get(item_id)
+            # A stored «checking» whose task is gone (the app quit mid-check, Q1 p3 M3) is a stopped check.
+            running = functools.partial(study.running, attempt.id if attempt else "", item_id)
+            stopped = bool(given and given.get("checking")) and not running()
             response = KbStudyResponse(
                 choices=list(given.get("choices") or []), text=given.get("text"),
                 checked=bool(given.get("checked")),
                 score=given.get("score"), verdict=given.get("verdict"), missing=given.get("missing"),
                 comment=given.get("comment"), checked_by=given.get("checked_by"),
-                checking=bool(given.get("checking")), error=given.get("error"),
+                checking=bool(given.get("checking")) and not stopped,
+                error=CHECK_STOPPED if stopped else given.get("error"),
+                status=given.get("status"),
+                review=_review(given, citation, running),
             ) if given else None
             questions.append(KbStudyQuestion(
                 id=question.id, type=question.type, question=question.question,
                 options=[_option(option) for option in study.options(block, question)],
                 answers=list(question.answers),
                 citations=[citation(c.material_id, c.seg, c.quote) for c in question.cites],
-                explanation=question.explanation, response=response))
+                explanation=question.explanation, response=response, unclear=question.id in marked))
         groups = {"new": 0, "learning": 0, "known": 0, "hard": 0}
         total = len(questions)
+    if block.kind == "deck":
+        unclear = sum(1 for card in cards if card.unclear)
     result = study.result(block) if block.kind == "test" else None
     return KbStudyPart(
         type="study", id=block.id, kind=block.kind, title=block.title, engine=block.engine,
@@ -121,8 +182,16 @@ def study_part(study: StudyService, block: StudyBlock, citation: CitationFn) -> 
         result=KbStudyResult(correct=result["correct"], total=result["total"], mistakes=result["mistakes"],
                              partly=result["partly"],
                              rows=[KbStudyResultRow(**row) for row in result["rows"]]) if result else None,
-        chat_id=block.chat_id, message_id=block.message_id,
+        chat_id=block.chat_id, message_id=block.message_id, pile=_pile(study, block), unclear=unclear,
     )
+
+
+def _pile(study: StudyService, block: StudyBlock) -> KbStudyPile | None:
+    if block.kind != "deck":
+        return None
+    current = study.pile(block)
+    return KbStudyPile(queue=current.queue, known=len(current.known), again=len(current.again),
+                       can_back=bool(current.thrown))
 
 
 def _presenter(request: Request) -> CitationFn:
@@ -149,6 +218,32 @@ async def change_study_settings(body: KbStudySettingsPatch, study: StudyDep) -> 
         raise _http(error) from error
 
 
+@router.get("/unclear")
+async def read_unclear(study: StudyDep, chats: ChatsDep, chat_id: str | None = None,
+                       page_id: str | None = None) -> KbStudyUnclearList:
+    """P3-b: what is marked «Unclear» in a chat's scope (its folders, or the whole library) or on a page."""
+    folders: tuple[str, ...] = ()
+    if chat_id is not None:
+        chat = await disk_call(chats.repo.get, chat_id)
+        folders = tuple(chat.folder_ids) if chat is not None else ()
+    found = await disk_call(unclear_items, study, folders, page_id)
+    scope: Literal["folders", "library", "page"] = (
+        "page" if page_id is not None else "folders" if folders else "library")
+    return KbStudyUnclearList(scope=scope, items=[
+        KbStudyUnclearItem(item_id=item["item_id"],
+                           kind="card" if item["kind"] == "flashcard" else "question",
+                           question=item["question"], title=item["in"], page_id=item["page_id"])
+        for item in found])
+
+
+@router.post("/unclear/clear")
+async def clear_unclear(body: KbStudyUnclearClear, study: StudyDep, chats: ChatsDep,
+                        chat_id: str | None = None) -> KbStudyUnclearList:
+    """«Clear now»: the user clears marks after talking them through (the agent never changes marks)."""
+    await disk_call(study.clear_unclear, body.item_ids)
+    return await read_unclear(study, chats, chat_id=chat_id)
+
+
 @router.get("/decks/{page_id}")
 async def read_deck(page_id: str, study: StudyDep, request: Request) -> KbDeckView:
     try:
@@ -158,7 +253,7 @@ async def read_deck(page_id: str, study: StudyDep, request: Request) -> KbDeckVi
     citation = _presenter(request)
     cards = await disk_call(lambda: [_card(row, citation) for row in deck["cards"]])
     return KbDeckView(page_id=deck["page_id"], title=deck["title"], cards=cards,
-                      groups=KbStudyGroups(**deck["groups"]), due=deck["due"])
+                      groups=KbStudyGroups(**deck["groups"]), due=deck["due"], unclear=deck["unclear"])
 
 
 @router.post("/decks/{page_id}/marks")
@@ -211,6 +306,12 @@ async def grade_card(block_id: str, body: KbStudyGradeIn, study: StudyDep, reque
     return await _act(request, study, lambda: study.grade(block_id, body.item_id, body.grade))
 
 
+@router.post("/{block_id}/pass")
+async def study_pass(block_id: str, body: KbStudyPassIn, study: StudyDep, request: Request) -> KbStudyPart:
+    """P3-d: one step of a pass — «I know this», a skip, ← back, or «Go through again»."""
+    return await _act(request, study, lambda: study.study_pass(block_id, body.action, body.item_id))
+
+
 @router.post("/{block_id}/mark")
 async def mark_cards(block_id: str, body: KbStudyMarkIn, study: StudyDep, request: Request) -> KbStudyPart:
     def run() -> StudyBlock:
@@ -235,6 +336,24 @@ async def check_open_answer(block_id: str, body: KbStudyAnswerIn, study: StudyDe
     except KnowledgeError as error:
         raise _http(error) from error
     return await _view(study, request, block)
+
+
+@router.post("/{block_id}/recheck")
+async def recheck_idea(block_id: str, body: KbStudyRecheckIn, study: StudyDep,
+                       request: Request) -> KbStudyPart:
+    """«I did say this» (P3-a 6a): the agent rechecks ONE key idea; its answer arrives as a block update."""
+    try:
+        block = await study.recheck_idea(block_id, body.item_id, body.idea_id, body.words)
+    except KnowledgeError as error:
+        raise _http(error) from error
+    return await _view(study, request, block)
+
+
+@router.post("/{block_id}/count")
+async def count_idea(block_id: str, body: KbStudyCountIn, study: StudyDep, request: Request) -> KbStudyPart:
+    """«Count it»: the user counts a key idea as said («counted by you»); the score is recomputed."""
+    return await _act(request, study, lambda: study.count_idea(block_id, body.item_id, body.idea_id,
+                                                               body.counted))
 
 
 @router.post("/{block_id}/finish")

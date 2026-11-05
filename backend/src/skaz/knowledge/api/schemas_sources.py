@@ -104,6 +104,11 @@ class KbMaterialAdded(BaseModel):
     video: KbMaterialSummary | None
     #: Mode ``both``: why the video could not be added (the article was added).
     video_failure_reason: str | None
+    #: N2: the same DOI, address or file is already in the library: ``material`` is that one, nothing
+    #: new was stored and no ingest started ("This is already in your library · Open it"). HTTP 200.
+    already_in_library: bool = False
+    #: Mode ``both``: ``video`` is the video already in the library (nothing was imported).
+    video_already_in_library: bool = False
 
 
 class KbLinkInfo(BaseModel):

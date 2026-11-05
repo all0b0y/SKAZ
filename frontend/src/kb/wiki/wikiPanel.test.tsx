@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
-import { docWorld } from '../test/fakeBridge';
+import { baseWorld, docWorld } from '../test/fakeBridge';
 
 async function wikiPanel() {
   const r = renderKb({ world: docWorld() });
@@ -70,12 +70,63 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
   async function concepts() {
     const user = userEvent.setup();
     const r = await wikiPanel();
-    await user.click(screen.getByRole('button', { name: /^Concepts/ }));
+    // Concepts is the section open by default (decision 24 «Wiki»).
+    expect(screen.getByRole('button', { name: /^Concepts/ })).toHaveAttribute('aria-expanded', 'true');
     const grid = await screen.findByRole('grid', { name: 'Concepts' });
     const rowOf = (name: string) => within(grid).getByRole('button', { name: new RegExp(`^${name}`) }).closest('[role="row"]') as HTMLElement;
     const tick = async (...names: string[]) => { for (const n of names) await user.click(rowOf(n).querySelector('[data-sel-box]')!); };
     return { ...r, user, grid, rowOf, tick };
   }
+
+  it('shares one Wiki selection across groups and deduplicates Recent without remounting rows', async () => {
+    const user = userEvent.setup();
+    const { fake } = await wikiPanel();
+    const side = screen.getByRole('region', { name: 'Wiki' });
+    const concept = fake.world.pages.find((p) => p.kind === 'concept')!;
+    const other = fake.world.pages.find((p) => p.kind !== 'concept')!;
+    expect(other).toBeDefined();
+    const otherGroup = side.querySelector<HTMLElement>(`[data-kind="${other.kind}"]`)!;
+    await user.click(otherGroup.querySelector('button')!);
+    const conceptsGrid = within(side).getByRole('grid', { name: 'Concepts' });
+    const first = within(conceptsGrid).getByRole('button', { name: concept.title });
+    const firstRow = first.closest('[data-sel-id]');
+    await user.click(first);
+    const recent = await within(side).findByRole('grid', { name: 'Recently opened' });
+    await user.keyboard('{Meta>}');
+    await user.click(first);
+    await user.click(within(otherGroup).getByRole('button', { name: other.title }));
+    await user.keyboard('{/Meta}');
+    const bar = within(side).getByRole('toolbar', { name: '2 selected' });
+    expect(within(side).getAllByRole('toolbar')).toHaveLength(1);
+    expect(bar.closest('header')).toBe(side.querySelector('header'));
+    const duplicate = within(recent).getByRole('button', { name: concept.title });
+    expect(duplicate.closest('[data-sel-id]')).toHaveAttribute('aria-selected', 'true');
+    expect(within(conceptsGrid).getByRole('button', { name: concept.title }).closest('[data-sel-id]')).toBe(firstRow);
+    await user.keyboard('{Meta>}');
+    await user.click(duplicate);
+    await user.keyboard('{/Meta}');
+    expect(within(side).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
+    expect(firstRow).toHaveAttribute('aria-selected', 'false');
+    expect(within(side).getByRole('button', { name: 'Index' }).closest('[data-sel-id]')).toBeNull();
+  });
+
+  it('Choose focuses the visible Recent copy, never its inert kind-group duplicate', async () => {
+    const user = userEvent.setup();
+    const { fake } = await wikiPanel();
+    const side = screen.getByRole('region', { name: 'Wiki' });
+    const concept = fake.world.pages.find((p) => p.kind === 'concept')!;
+    const grid = within(side).getByRole('grid', { name: 'Concepts' });
+    await user.click(within(grid).getByRole('button', { name: concept.title }));
+    const recent = await within(side).findByRole('grid', { name: 'Recently opened' });
+    await user.click(within(side).getByRole('button', { name: /^Concepts/ }));
+    expect(grid.closest('[inert]')).not.toBeNull();
+    const visibleCopy = within(recent).getByRole('button', { name: concept.title });
+    await user.click(within(side).getByRole('button', { name: 'Select items' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Choose…' }));
+    expect(visibleCopy).toHaveFocus();
+    await user.keyboard(' ');
+    expect(within(side).getByRole('toolbar', { name: '1 selected' })).toBeInTheDocument();
+  });
 
   it('Index and Log can’t be selected and say why', async () => {
     await wikiPanel();
@@ -89,7 +140,7 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
       .map((r) => r.textContent ?? '');
     await tick(titles[0]!, titles[1]!);
     const bar = screen.getByRole('toolbar', { name: '2 selected' });
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Ask in chat', 'Export .md', 'More actions', 'Delete', 'Clear selection']);
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Ask in chat', 'Export .md', 'More actions', 'Delete', 'Clear selection', 'All', 'Concepts']);
     await user.click(within(bar).getByRole('button', { name: 'Ask in chat' }));
     expect(services.ui.getState().center).toBe('chat');
     const input = await screen.findByTestId('message-input');
@@ -109,5 +160,88 @@ describe('Selecting several wiki pages (0.3.1 F4)', () => {
     await user.click(await within(dialog).findByRole('button', { name: 'Delete 2' }));
     expect(await screen.findByTestId('toast')).toHaveTextContent('Deleted 2 pages');
     expect(fake.calls.filter((c) => c.method === 'DELETE')).toHaveLength(2);
+  });
+});
+
+describe('Wiki kind sections fold in place (decisions 24 «Wiki», 27)', () => {
+  const side = () => screen.getByRole('region', { name: 'Wiki' });
+
+  it('each kind is a header row with a chevron and a count; Concepts open, the rest folded; no drill-in, no back step', async () => {
+    await wikiPanel();
+    const heads = ['Concepts', 'Notes', 'Analyses', 'Folder overviews', 'Decks', 'Tests']
+      .map((name) => within(side()).getByRole('button', { name: new RegExp(`^${name}\\s*\\d+$`) }));
+    expect(heads.map((h) => h.getAttribute('aria-expanded'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false']);
+    expect(heads[0]).toHaveTextContent('22');
+    expect(heads[0]!.querySelector('.kb-wfold__chev')).toHaveClass('is-open');
+    expect(within(side()).queryByRole('button', { name: 'Wiki' })).not.toBeInTheDocument();
+    // A folded body is inert: its rows are out of the tab order and the accessibility tree.
+    const notes = document.getElementById(heads[1]!.getAttribute('aria-controls')!)!;
+    expect(notes.querySelector('.kb-fold__in')).toHaveAttribute('inert');
+    // Graph, Index and Log stay below the sections.
+    expect(within(side()).getByRole('button', { name: 'Graph of connections' })).toBeInTheDocument();
+  });
+
+  it('a header folds and unfolds its section in place; the choice is kept in prefs', async () => {
+    const user = userEvent.setup();
+    const { services } = await wikiPanel();
+    const concepts = within(side()).getByRole('button', { name: /^Concepts/ });
+    const grid = screen.getByRole('grid', { name: 'Concepts' });
+    await user.click(concepts);
+    expect(concepts).toHaveAttribute('aria-expanded', 'false');
+    expect(services.prefs.getState().wikiOpen.concept).toBe(false);
+    // Folding keeps the rows mounted (the same list node), only inert.
+    expect(grid.isConnected).toBe(true);
+    await user.click(within(side()).getByRole('button', { name: /^Analyses/ }));
+    expect(services.prefs.getState().wikiOpen).toMatchObject({ concept: false, analysis: true });
+    await user.click(concepts);
+    expect(screen.getByRole('grid', { name: 'Concepts' })).toBe(grid);
+  });
+
+  it('an open section with no pages says how pages of that kind appear', async () => {
+    const user = userEvent.setup();
+    await wikiPanel();
+    const empty = ['Concepts', 'Notes', 'Analyses', 'Folder overviews', 'Decks', 'Tests']
+      .map((name) => within(side()).getByRole('button', { name: new RegExp(`^${name}\\s*\\d+$`) }))
+      .find((h) => h.textContent!.endsWith('0'));
+    expect(empty, 'the doc world has a kind with no pages').toBeTruthy();
+    await user.click(empty!);
+    const body = document.getElementById(empty!.getAttribute('aria-controls')!)!;
+    expect(within(body).getByText(/yet$/)).toBeInTheDocument();
+  });
+
+  it('an empty wiki says only «The wiki is empty»: no per-kind hint in the open section (FIX1 R6)', async () => {
+    renderKb({ world: baseWorld(), prefs: { section: 'wiki' } });
+    expect(await within(await screen.findByRole('region', { name: 'Wiki' })).findByText('The wiki is empty')).toBeInTheDocument();
+    const concepts = within(side()).getByRole('button', { name: /^Concepts\s*0$/ });
+    expect(concepts).toHaveAttribute('aria-expanded', 'true');
+    const body = document.getElementById(concepts.getAttribute('aria-controls')!)!;
+    expect(within(body).queryByText(/yet$/)).not.toBeInTheDocument();
+    expect(within(side()).queryByText(/^No \w+ yet$/)).not.toBeInTheDocument();
+  });
+
+  it('the kind sections add no landmarks inside the Wiki region; each list keeps its name (FIX1 R8)', async () => {
+    await wikiPanel();
+    expect(within(side()).queryAllByRole('region')).toEqual([]);
+    expect(screen.getByRole('grid', { name: 'Concepts' })).toBeInTheDocument();
+  });
+
+  it('opening another page never remounts the list: same row nodes, a soft tile moves', async () => {
+    const user = userEvent.setup();
+    await wikiPanel();
+    const grid = screen.getByRole('grid', { name: 'Concepts' });
+    const [first, second] = within(grid).getAllByRole('row').map((r) => r.querySelector('button.kb-row') as HTMLElement);
+    const rowsBefore = [...grid.querySelectorAll('[data-tab-key]')];
+    await user.click(first!);
+    expect(first).toHaveClass('is-current');
+    const tab = grid.parentElement!.querySelector('[data-testid="active-tab"]')!;
+    expect(tab).toHaveClass('kb-tab--soft');
+    expect(tab).toHaveAttribute('data-tab-for', first!.dataset.tabKey);
+    await user.click(second!);
+    expect(first!.isConnected).toBe(true);
+    expect([...screen.getByRole('grid', { name: 'Concepts' }).querySelectorAll('[data-tab-key]')]).toEqual(rowsBefore);
+    expect(screen.getByRole('grid', { name: 'Concepts' })).toBe(grid);
+    expect(first).not.toHaveClass('is-current');
+    expect(second).toHaveClass('is-current');
+    expect(tab).toHaveAttribute('data-tab-for', second!.dataset.tabKey);
   });
 });
