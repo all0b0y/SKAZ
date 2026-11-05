@@ -17,9 +17,9 @@
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="SKAZ 0.3.1 — SKAZ 导览：录下一堂课、带脚注地就内容提问、允许智能体修改、学习由课程生成的卡片" width="880">
+<a href="../images/skaz-intro.mp4"><img src="../images/skaz-intro.webp" alt="SKAZ — 阅读、保存与收集" width="880"></a>
 
-<sub>SKAZ 0.3.1 导览 · 旧版界面，并非 0.3.2 · 预先编写的演示数据 · <a href="../images/skaz-tour.mp4">完整导览，全高清（MP4，80 秒）</a></sub>
+<sub>无声开场 · <a href="../images/skaz-intro.mp4">MP4，3 秒</a></sub>
 
 <br><br>
 
@@ -113,7 +113,6 @@ AI 可能出错。引用能帮你核实答案，但不能保证答案正确。
 
 ## ✨ 功能
 
-**已按 0.3.2 更新。** 上方导览和动画展示的是 0.3.1 的旧版界面，并非 0.3.2。
 
 | | |
 |---|---|

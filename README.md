@@ -17,9 +17,9 @@ Organize and connect · understand and learn · revisit and explore
 
 <br>
 
-<img src="docs/images/skaz-tour.webp" alt="SKAZ 0.3.1 — A tour of SKAZ: recording a lecture, asking about it with a footnote, allowing an agent edit, studying cards made from the lecture" width="880">
+<a href="docs/images/skaz-intro.mp4"><img src="docs/images/skaz-intro.webp" alt="SKAZ — read, save and collect" width="880"></a>
 
-<sub>SKAZ 0.3.1 tour · earlier interface, not 0.3.2 · authored demo data · <a href="docs/images/skaz-tour.mp4">The whole tour in Full HD (MP4, 80 s)</a></sub>
+<sub>Silent introduction · <a href="docs/images/skaz-intro.mp4">MP4, 3 s</a></sub>
 
 <br><br>
 
@@ -121,7 +121,6 @@ click a recording to open its full-size MP4.</sub>
 
 ## ✨ Features
 
-**Updated for 0.3.2.** The tour and loops above show the earlier 0.3.1 interface, not 0.3.2.
 
 | | |
 |---|---|

@@ -17,9 +17,9 @@ Sammeln und verknüpfen · verstehen und lernen · wiederholen und weiterdenken
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="SKAZ 0.3.1 — Rundgang durch SKAZ: eine Vorlesung aufnehmen, mit Fußnote danach fragen, eine Änderung des Agenten erlauben, Karteikarten aus der Vorlesung lernen" width="880">
+<a href="../images/skaz-intro.mp4"><img src="../images/skaz-intro.webp" alt="SKAZ — lesen, speichern und sammeln" width="880"></a>
 
-<sub>SKAZ-0.3.1-Rundgang · frühere Oberfläche, nicht 0.3.2 · vorbereitete Demodaten · <a href="../images/skaz-tour.mp4">Der ganze Rundgang in Full HD (MP4, 80 s)</a></sub>
+<sub>Intro ohne Ton · <a href="../images/skaz-intro.mp4">MP4, 3 s</a></sub>
 
 <br><br>
 
@@ -123,7 +123,6 @@ klicke auf eine Aufnahme, um ihre MP4 in voller Größe zu öffnen.</sub>
 
 ## ✨ Funktionen
 
-**Für 0.3.2 aktualisiert.** Der Rundgang und die Animationen oben zeigen die frühere Oberfläche von 0.3.1, nicht die von 0.3.2.
 
 | | |
 |---|---|

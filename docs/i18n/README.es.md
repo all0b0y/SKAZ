@@ -17,9 +17,9 @@ Organiza y conecta · comprende y aprende · repasa y explora
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="SKAZ 0.3.1 — Recorrido por SKAZ: grabar una clase, preguntar sobre ella con una nota al pie, permitir la edición de un agente, estudiar tarjetas hechas a partir de la clase" width="880">
+<a href="../images/skaz-intro.mp4"><img src="../images/skaz-intro.webp" alt="SKAZ — lee, guarda y reúne" width="880"></a>
 
-<sub>Recorrido de SKAZ 0.3.1 · interfaz anterior, no la de 0.3.2 · datos de demostración preparados · <a href="../images/skaz-tour.mp4">El recorrido completo en Full HD (MP4, 80 s)</a></sub>
+<sub>Introducción sin sonido · <a href="../images/skaz-intro.mp4">MP4, 3 s</a></sub>
 
 <br><br>
 
@@ -123,7 +123,6 @@ haz clic en una grabación para abrir su MP4 a tamaño completo.</sub>
 
 ## ✨ Funciones
 
-**Actualizado para 0.3.2.** El recorrido y las animaciones anteriores muestran la interfaz de 0.3.1, no la de 0.3.2.
 
 | | |
 |---|---|
