@@ -4,9 +4,9 @@
 
 # SKAZ
 
-### Vorlesungen, Meetings und Dokumente als Wiki, das du fragen kannst
+### Aus Informationen wird Wissen, auf dem du aufbauen kannst
 
-Aufnehmen oder Quelle hinzufügen · fragen mit genauen Belegen · ein Wiki, das sich selbst aktuell hält
+Sammeln und verknüpfen · verstehen und lernen · wiederholen und weiterdenken
 
 [![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2c2e31)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
@@ -23,16 +23,18 @@ Aufnehmen oder Quelle hinzufügen · fragen mit genauen Belegen · ein Wiki, das
 
 <br><br>
 
-[**Installation**](#-installation) · [**Funktionen**](#-funktionen) · [**Datenschutz**](#-datenschutz-und-daten) · [**Aufbau**](#-aufbau) · [**Mitmachen**](../../CONTRIBUTING.md)
+[**Installation**](#-installation) · [**So nutzt du SKAZ**](#-von-informationen-zu-wissen) · [**Funktionen**](#-funktionen) · [**Datenschutz**](#-datenschutz-und-daten) · [**Aufbau**](#-aufbau) · [**Mitmachen**](../../CONTRIBUTING.md)
 
 </div>
 
 ---
 
-SKAZ ist eine macOS-App für alles, was du hörst und liest. Nimm eine Vorlesung oder ein Meeting
-auf oder füge ein PDF, einen Artikel, einen Videolink oder eine Datei hinzu. SKAZ legt jede Quelle
-in deinem eigenen Ordner mit Markdown-Dateien ab, baut daraus ein Wiki und beantwortet Fragen mit
-Links auf die genaue Stelle oder Seite.
+SKAZ ist eine macOS-App, mit der du Informationen ordnest, Zusammenhänge verstehst und Gelerntes
+wieder aufgreifst. Bringe Dateien, Artikel, Notizen, Videos oder gesprochene Inhalte in einer
+vernetzten Wissensbasis zusammen. Stelle Fragen mit Verweisen auf deine Quellen, lerne mit
+Karteikarten und Tests, wiederhole Gelerntes und erweitere dein Wissen mit neuen Quellen.
+
+Deine Materialien und dein Wiki liegen als Markdown-Dateien in einem Ordner deiner Wahl.
 
 > [!WARNING]
 > **Alpha / Early Access.** Rechne mit Fehlern und inkompatiblen Änderungen, auch an gespeicherten
@@ -41,38 +43,83 @@ Links auf die genaue Stelle oder Seite.
 
 ## 💡 Warum SKAZ
 
-Eine Vorlesung, das Meeting von letzter Woche, ein gelesenes Kapitel: Sie landen an verschiedenen
-Orten, und nichts verbindet sie. SKAZ hält sie zusammen. Jede Quelle bekommt Notizen und
-Begriffsseiten in einem Wiki, sodass dieselbe Idee aus Vorlesung und Lehrbuch auf einer Seite
-landet. Frag *„Was hat sie zum zweiten Hauptsatz gesagt?"* und folge der Fußnote zu der Sekunde,
-in der es gesagt wurde.
+<p align="center"><a href="../images/skaz-forget.mp4"><img src="../images/skaz-forget.webp" alt="Gelesenes verblasst — Wörter verschwinden von einer Buchseite" width="880"></a></p>
+
+Informationen zu speichern heißt noch nicht, sie zu verstehen, zu behalten oder nutzen zu können.
+Eine hilfreiche Erklärung verschwindet im Chat, Notizen verlieren ihren Kontext, und der Einstieg
+in ein früher vertrautes Thema fällt zunehmend schwer.
+
+SKAZ bringt Quellen, ein vernetztes Wiki, Fragen und Lernen an einem Ort zusammen. Verfolge eine
+Idee durch verschiedene Materialien, arbeite eine Erklärung durch, prüfe dein Verständnis und
+kehre zum Auffrischen zur Quelle zurück. Neue Perspektiven ergänzen dein vorhandenes Wissen,
+und du musst nicht jedes Mal bei null anfangen.
 
 KI kann sich irren. Belege helfen, eine Antwort zu prüfen; sie garantieren nicht, dass sie stimmt.
 
+## 🧭 Von Informationen zu Wissen
+
+### 1. Sammeln
+
+Beginne mit einem PDF, einem Artikel, eigenem Text, einem Video oder einer Audiodatei. Gesprochene
+Inhalte kannst du auch live aufnehmen. Das sind verschiedene Wege in dieselbe Bibliothek,
+keine getrennten Arbeitsabläufe.
+
+### 2. Ordnen und verstehen
+
+Mache aus Materialien Quellennotizen und verknüpfte Begriffsseiten. Lass dir Zusammenhänge erklären,
+vergleiche Ideen und folge Belegen zur Passage, Seite oder Zeitmarke. Quellenbasierte Aussagen,
+vom Agenten erschlossene Verbindungen und seine Erklärungen sind getrennt gekennzeichnet.
+
+### 3. Lernen und wiederholen
+
+Bitte um Karteikarten oder einen Test zu einem Material, einer Wiki-Seite oder einem Chat.
+Speichere Stapel und Tests im Wiki, wiederhole gespeicherte Karten mit dem FSRS-Algorithmus und
+kehre zu schwierigen Themen zurück. Nützliches Wissen soll verfügbar bleiben, statt in einem
+Dokument zu liegen, das du nie wieder öffnest.
+
+### 4. Wissen erweitern
+
+Suche mit einer von dir erlaubten Websuche nach weiteren Quellen. Wähle aus, welche Ergebnisse
+in die Bibliothek kommen, verknüpfe sie mit deinen Materialien und forsche weiter. Web-Ergebnisse
+bleiben von Belegen aus deiner eigenen Bibliothek getrennt.
+
 ## 👀 So sieht es aus
 
-<table>
-<tr>
-<td width="50%"><img src="../images/tour-record.webp" alt="Eine Vorlesung in einen Ordner aufnehmen"><br><b>In einen Ordner aufnehmen</b><br>Ordner wählen, Record drücken – das Transkript erscheint beim Sprechen, nach Sprecher und Zeit.</td>
-<td width="50%"><img src="../images/tour-ask.webp" alt="Eine Antwort mit Fußnoten"><br><b>Antworten mit Belegen</b><br>Jede Aussage hat eine Fußnote. Öffne sie, und SKAZ springt zum Zitat in der Quelle.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-edit.webp" alt="Ein Agent fragt, bevor er eine Wiki-Seite ändert"><br><b>Agenten fragen zuerst</b><br>Ein Agent ändert das Wiki nur über SKAZ, und du siehst die Änderung, bevor sie passiert: Allow oder Deny.</td>
-<td width="50%"><img src="../images/tour-cards.webp" alt="Karteikarten und ein Test aus einer Vorlesung"><br><b>Karteikarten und Tests</b><br>Bitte um Karten oder einen Test zu einer Vorlesung. Jede Antwort ist durch ein geprüftes Zitat belegt; Karten kommen mit verteilter Wiederholung zurück.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-web.webp" alt="Eine Websuche erlauben und eine gefundene Seite in die Bibliothek aufnehmen"><br><b>Websuche, mit deinem OK</b><br>Du siehst die genaue Anfrage, bevor sie gesendet wird. Eine gefundene Seite kommt mit einem Klick in die Bibliothek.</td>
-<td width="50%"><img src="../images/tour-diagram.webp" alt="Ein Diagramm in einer Antwort, in voller Größe geöffnet"><br><b>Diagramme</b><br>Antworten können ein Diagramm zeichnen, gerendert auf deinem Mac. Öffne es in voller Größe und zoome hinein.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="Eine Begriffsseite im Wiki und ihre Verbindungen"><br><b>Ein Wiki, das sich selbst schreibt</b><br>Begriffsseiten aus all deinen Quellen, miteinander verbunden und gekennzeichnet: was zitiert ist und was der Agent gefolgert hat.</td>
-<td width="50%"><img src="../images/tour-theme.webp" alt="Wechsel zum dunklen Design"><br><b>Hell und dunkel</b><br>Folgt deinem Mac, oder wähle ein Design unter <b>Settings → Appearance</b>.</td>
-</tr>
-</table>
+<p align="center"><a href="../images/skaz-read.mp4"><img src="../images/skaz-read.webp" alt="Du liest so viel — Informationen werden zum Ausgangspunkt für Wissen" width="880"></a></p>
 
-<sub>Erstellt aus der eigenen Oberfläche von SKAZ 0.3.1 (ihrem HTML und CSS) mit <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
-Vorlesung, Folien, Antworten, Karten und Web-Ergebnisse sind vorbereitete Demodaten, keine echte
-Spracherkennung, keine echten KI-Ausgaben und keine echte Suche.</sub>
+### Quellen sammeln
+
+Füge ein PDF, Webartikel und eigene Texte derselben Bibliothek hinzu.
+
+<a href="../images/demo-collect.mp4"><img src="../images/demo-collect.webp" alt="Ebbinghaus' Buch, Artikel und Text zu einer SKAZ-Bibliothek hinzufügen" width="880"></a>
+
+### Wissen verknüpfen
+
+Erkunde Quellennotizen und verknüpfte Begriffsseiten. Erkenne, was aus einer Quelle stammt und was der Agent erschlossen hat.
+
+<a href="../images/demo-connect.mp4"><img src="../images/demo-connect.webp" alt="Verknüpfte Wiki-Seiten über Gedächtnis und zeitlich verteilte Wiederholung erkunden" width="880"></a>
+
+### Fragen durchgehen
+
+Frage zu deinen Materialien und folge einer Erklärung mit Quellenverweisen.
+
+<a href="../images/demo-ask.mp4"><img src="../images/demo-ask.webp" alt="Nach der Vergessenskurve fragen und eine Antwort mit Quellenverweisen lesen" width="880"></a>
+
+### Die Quelle prüfen
+
+Öffne einen Beleg an der zitierten Passage und lies den ursprünglichen Zusammenhang.
+
+<a href="../images/demo-source.mp4"><img src="../images/demo-source.webp" alt="Einen Beleg an der zitierten Passage in Ebbinghaus' Buch öffnen" width="880"></a>
+
+### Gelerntes auffrischen
+
+Erstelle Karten aus deinen Materialien, decke eine Antwort auf und prüfe dein Wissen.
+
+<a href="../images/demo-learn.mp4"><img src="../images/demo-learn.webp" alt="Eine Karte zum Gedächtnis wiederholen und die Antwort aufdecken" width="880"></a>
+
+<sub>Aufnahmen von SKAZ 0.3.2 in einem isolierten Demoprofil. Notizen, Agentenantworten und Karten sind
+vorbereitete Demodaten, keine live erzeugten KI-Ausgaben. Alle Animationen und MP4s sind ohne Ton;
+klicke auf eine Aufnahme, um ihre MP4 in voller Größe zu öffnen.</sub>
 
 ## ✨ Funktionen
 
@@ -80,6 +127,12 @@ Spracherkennung, keine echten KI-Ausgaben und keine echte Suche.</sub>
 
 | | |
 |---|---|
+| 📚 **Quellen zusammenbringen** | PDFs, Text- und Markdown-Dateien, eingefügter Text, Webartikel, Audio- und Videodateien sowie Videolinks von YouTube, VK Video, RuTube und Vimeo. Verwende nur Material, das du verarbeiten darfst. |
+| 🧠 **Eine vernetzte Wissensbasis** | Quellennotizen, gemeinsame Begriffsseiten über Ordner hinweg und gespeicherte Analysen bilden ein Wiki. Quellenbasierte Aussagen, erschlossene Verbindungen und Erklärungen des Agenten sind getrennt gekennzeichnet. Bei widersprüchlichen Quellen werden beide Fassungen gezeigt, und du entscheidest. |
+| 💬 **Verstehen mit Quellen** | Frage zur ganzen Bibliothek, vergleiche Ideen oder greife eine Erklärung wieder auf. Belege öffnen die passende Passage, Dokumentseite oder Zeitmarke. Mit **@** verweist du auf eine Seite, ein Material oder einen Chat. Antworten können Diagramme mit einer Ansicht in voller Größe enthalten. |
+| 🃏 **Lernen und wiederholen** | Erstelle Karteikarten und Tests aus einer Seite, einem Material oder einem Chat; richtige Antworten sind durch geprüfte Quellenzitate belegt. Speichere Stapel und Tests im Wiki. Gespeicherte Karten verwenden **FSRS für zeitlich verteilte Wiederholung**. Wiederhole fällige Inhalte, übe schwierige Karten oder greife ein Thema wieder auf. |
+| 🌐 **Über die Bibliothek hinaus** | Suche im Chat nach weiteren Quellen. Du siehst die genaue Anfrage und wählst Allow once, Allow in this chat oder Deny; an die Suche geht nur die Anfrage. Prüfe die Ergebnisse und füge eine ausgewählte Seite mit einem Klick zur Bibliothek hinzu. |
+| 🗂️ **Dein Wissen bleibt zugänglich** | Materialien und Wiki liegen in einem Ordner mit `.md`-Dateien. Öffne ihn in **Obsidian** oder exportiere als Markdown mit Quellenfußnoten. Deine eigenen Änderungen an Wiki-Seiten sind vor dem Agenten geschützt. |
 | 🎙️ **Live-Aufnahme** | Mikrofon, auf Wunsch zusammen mit dem Ton des Macs (Zoom, Videos; macOS 14.2+ und Systemberechtigung nötig). Erkennung mit **Soniox** (Cloud-Streaming, Sprechertrennung, Übersetzung) oder **Whisper auf diesem Computer** (funktioniert offline). SKAZ wechselt den Dienst nie stillschweigend. |
 | 📚 **Jede Quelle** | PDF, Dokumente, Text- und Markdown-Dateien, Audio- und Videodateien, Webartikel (bereinigt), eingefügter Text beliebiger Länge und Videolinks von YouTube, VK Video, RuTube und Vimeo. Verwende nur Material, das du verarbeiten darfst. |
 | 🧠 **Ein lebendiges Wiki** | Notizen zu jeder Quelle, eine Seite pro Begriff über alle Ordner hinweg und gespeicherte Analysen. Jede Aussage ist gekennzeichnet: Zitat aus einer Quelle, vom Agenten gefolgerte Verbindung oder Erklärung des Agenten. Widersprechen sich Quellen, werden beide Fassungen gezeigt, und du entscheidest. |
@@ -91,7 +144,6 @@ Spracherkennung, keine echten KI-Ausgaben und keine echte Suche.</sub>
 | 📖 **Webseiten lesen** | Der Agent kann öffentliche Seiten aus genehmigten Suchergebnissen lesen, ohne sie zuerst zu importieren. Lange Seiten werden in begrenzten Teilen desselben Snapshots gelesen. **Add to library** ist eine eigene Aktion; Lesen allein fügt kein Material hinzu. |
 | 🤖 **Dein Agent** | **Codex**, **Claude Code**, **Hermes Agent** oder **OpenCode**, mit deinem eigenen Abo oder Schlüssel; SKAZ kann sie für dich installieren. Agenten lesen die Bibliothek über SKAZ-Werkzeuge und ändern Wiki-Seiten nur, wenn du es erlaubst, mit Undo; deine eigenen Notizen bleiben unberührt. Wähle ein Modell pro Chat und markiere Favoriten mit einem Stern. Kleine Ablageentscheidungen können ein lokales Modell oder OpenRouter übernehmen. |
 | ✍️ **Erkennungskorrekturen** | Eine optionale Prüfung findet wahrscheinliche Erkennungsfehler, korrigiert die sicheren und markiert die zweifelhaften nur. Jede Korrektur lässt sich rückgängig machen. |
-| 🗂️ **Normale Dateien** | Die Bibliothek ist ein Ordner mit `.md`-Dateien. Öffne ihn in **Obsidian** oder exportiere alles als Markdown mit Quellen als Fußnoten. Deine eigenen Änderungen an Wiki-Seiten sind vor dem Agenten geschützt. |
 | 🔄 **Updates** | SKAZ prüft GitHub-Releases beim Start und einmal am Tag und installiert ein geprüftes Update über **Settings → About**. |
 | 🎨 **Darstellung** | Helle/dunkle Basis, Akzent, Dichte, Bewegung und optionale Oberflächentöne unter **Settings → Appearance**. Voreinstellungen bieten einen Ausgangspunkt; die Regler bleiben unabhängig. |
 
@@ -127,15 +179,17 @@ Lieber den aktuellen Code ausführen? Siehe [Entwicklungs-Setup](../../CONTRIBUT
 ### 🚀 Erster Start
 
 1. **Agent.** Wähle Codex, Claude Code, Hermes Agent oder OpenCode und melde dich mit deinem eigenen Konto
-   an. SKAZ kann den Agenten für dich installieren. Es gelten Bedingungen, Limits und Kosten des
-   Anbieters.
-2. **Sprache.** Füge einen Soniox-Schlüssel hinzu und erlaube das Senden von Audio an Soniox –
-   oder wähle **Whisper on this computer** und lade ein Sprachmodell (die Größe wird vorher
-   angezeigt; kein Schlüssel nötig).
+   an. SKAZ kann den Agenten für dich installieren. Es gelten Bedingungen, Limits und Kosten des Anbieters.
+2. **Spracherkennung (optional).** Wenn du mit Audio arbeitest, füge einen Soniox-Schlüssel hinzu
+   und erlaube das Senden von Audio an Soniox. Alternativ wählst du **Whisper on this computer**
+   und lädst ein Sprachmodell (Größe vorher sichtbar, kein Schlüssel nötig). Textmaterialien
+   brauchen keine Spracherkennung.
 3. **Bibliothek.** Wähle, wo sie liegt; SKAZ schlägt einen Ordner in „Dokumente" vor.
-4. **Loslegen.** Drücke **Record** (der Ordner wird daneben gewählt) oder **+ Material**, um
-   eine Datei, einen Link oder Text hinzuzufügen. Frag im Chat; öffne **Wiki**, um zu lesen, was
-   SKAZ aufgebaut hat.
+4. **Mit einem Material beginnen.** Füge über **+ Material** eine Datei, einen Link oder Text hinzu.
+   Frage im Chat und öffne **Wiki**, um Notizen und Begriffe zu erkunden. Mit **Record** nimmst
+   du gesprochene Inhalte auf; den Ordner wählst du daneben.
+5. **Gelerntes wieder aufgreifen.** Bitte um Karteikarten oder einen Test, speichere sie im Wiki
+   und kehre zum Wiederholen oder für eine ausführlichere Erklärung zurück.
 
 Alles lässt sich später unter **Settings** ändern.
 
@@ -165,12 +219,15 @@ Einschränkungen und Meldeweg stehen in der [Sicherheitsrichtlinie](../../SECURI
 
 ## 🧩 Aufbau
 
+Spracherkennung ist ein Eingabeweg. Materialien, Wiki, Antworten und Lernen nutzen dieselbe Bibliothek.
+
 ```text
-Mikrofon / Systemton / Dateien / Links → Electron → Python ── Soniox | Whisper auf diesem Mac
-                                           ↓          ↓
-                                       React UI   Bibliothek: Materials/*.md, Wiki/*.md
-                                                      ↕  SKAZ-Werkzeuge (Änderungen nur mit deinem OK)
-                                           Codex | Claude Code | Hermes Agent | OpenCode
+Dateien / Text / Links / Sprache → Electron + React ↔ Python
+                                                        ├─ Soniox | lokales Whisper (nur Sprache)
+                                                        ├─ Materials/*.md + Wiki/*.md
+                                                        └─ SKAZ-Werkzeuge ↔ gewählter Agent
+                                                                                 ↓
+                                                           Antworten · Verbindungen · Karten · Tests
 ```
 
 | Schicht | Technik |

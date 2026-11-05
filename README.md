@@ -4,9 +4,9 @@
 
 # SKAZ
 
-### Lectures, meetings and documents, turned into a wiki you can ask
+### Turn information into knowledge you can build on
 
-Record or add a source · ask with exact citations · a wiki that keeps itself up to date
+Organize and connect · understand and learn · revisit and explore
 
 [![Release](https://img.shields.io/github/v/release/all0b0y/SKAZ?include_prereleases&label=release&color=2c2e31)](https://github.com/all0b0y/SKAZ/releases/latest)
 ![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-111111)
@@ -23,15 +23,18 @@ Record or add a source · ask with exact citations · a wiki that keeps itself u
 
 <br><br>
 
-[**Install**](#-install) · [**Features**](#-features) · [**Privacy**](#-privacy-and-data) · [**How it works**](#-how-it-works) · [**Contributing**](CONTRIBUTING.md)
+[**Install**](#-install) · [**Workflow**](#-from-information-to-knowledge) · [**Features**](#-features) · [**Privacy**](#-privacy-and-data) · [**How it works**](#-how-it-works) · [**Contributing**](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-SKAZ is a macOS app for what you listen to and read. Record a lecture or a meeting, or add a PDF,
-an article, a video link or a file. SKAZ keeps every source in your own folder of Markdown files,
-builds a wiki from it, and answers questions with links to the exact moment or page.
+SKAZ is a macOS app for organizing information, understanding it and keeping what you learn
+within reach. Bring files, articles, notes, videos or recorded speech into a connected knowledge
+base. Ask questions with references to your sources, learn with flashcards and tests, revisit
+what you studied, and explore new sources to build on what you know.
+
+Your materials and wiki live as plain Markdown files in a folder you choose.
 
 > [!WARNING]
 > **Alpha / early access.** Expect bugs and breaking changes, including changes to stored
@@ -40,38 +43,81 @@ builds a wiki from it, and answers questions with links to the exact moment or p
 
 ## 💡 Why SKAZ
 
-A lecture, last week's meeting, a chapter you read: they end up in different places, and nothing
-connects them. SKAZ keeps them together. Every source gets notes and concept pages in one wiki,
-so the same idea from a lecture and a textbook lands on one page. Ask *"what did she say about the
-second law?"* and follow the footnote back to the second it was said.
+<p align="center"><a href="docs/images/skaz-forget.mp4"><img src="docs/images/skaz-forget.webp" alt="You forget most of it by tomorrow — words disappear from a book page" width="880"></a></p>
+
+Saving information does not make it easy to understand, remember or use. A useful explanation
+gets buried in a chat, notes lose their context, and a topic you once understood becomes hard to
+pick up again.
+
+SKAZ brings your sources, a connected wiki, questions and study into the same place. Follow an
+idea across materials, work through an explanation, test your understanding and return to the
+source when you need a refresher. Add another perspective without leaving what you already know
+behind.
 
 AI can be wrong. Citations help you check an answer; they don't guarantee it is correct.
 
+## 🧭 From information to knowledge
+
+### 1. Collect
+
+Start with a PDF, an article, your own text, a video or an audio file. You can also capture spoken
+information live. These are different ways into the same library, not separate workflows.
+
+### 2. Organize and understand
+
+Turn materials into source notes and connected concept pages. Ask for an explanation, compare
+ideas and follow citations back to the passage, page or timestamp. Source-backed statements,
+connections inferred by the agent and its explanations are marked separately.
+
+### 3. Learn and revisit
+
+Ask for flashcards or a test based on a material, a wiki page or a chat. Save decks and tests to
+the wiki, review saved cards with FSRS spaced repetition, and revisit difficult topics. The goal
+is to keep useful knowledge available, not leave it in a document you never open again.
+
+### 4. Explore further
+
+Ask for additional sources through a web search you approve. Choose which results to add to the
+library, connect them to your existing materials and continue exploring. Web results remain
+separate from citations to your own library.
+
 ## 👀 See it in action
 
-<table>
-<tr>
-<td width="50%"><img src="docs/images/tour-record.webp" alt="Recording a lecture into a folder"><br><b>Record into a folder</b><br>Pick the folder, press Record, and the transcript appears as people speak, by speaker and time.</td>
-<td width="50%"><img src="docs/images/tour-ask.webp" alt="An answer with footnotes, opened at the quoted moment"><br><b>Ask with citations</b><br>Every claim has a footnote. Open it and SKAZ jumps to the quote in the source.</td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/tour-edit.webp" alt="An agent asks before editing a wiki page"><br><b>Agents ask first</b><br>An agent changes the wiki only through SKAZ, and you see the change before it happens: Allow or Deny.</td>
-<td width="50%"><img src="docs/images/tour-cards.webp" alt="Flashcards and a test made from a lecture"><br><b>Cards and tests</b><br>Ask for cards or a test on a lecture. Every answer is backed by a checked quote; cards come back with spaced repetition.</td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/tour-web.webp" alt="Approving a web search, then adding a found page to the library"><br><b>Web search, with your OK</b><br>You see the exact query before it is sent. A found page goes into the library with one click.</td>
-<td width="50%"><img src="docs/images/tour-diagram.webp" alt="A diagram in an answer, opened full size"><br><b>Diagrams</b><br>Answers can draw a diagram, rendered on your Mac. Open it full size and zoom in.</td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/tour-wiki.webp" alt="A wiki concept page and its connections"><br><b>A wiki that writes itself</b><br>Concept pages from all your sources, connected to each other, marked with what is quoted and what the agent inferred.</td>
-<td width="50%"><img src="docs/images/tour-theme.webp" alt="Switching to the dark theme"><br><b>Light and dark</b><br>Follows your Mac, or pick a theme in <b>Settings → Appearance</b>.</td>
-</tr>
-</table>
+<p align="center"><a href="docs/images/skaz-read.mp4"><img src="docs/images/skaz-read.webp" alt="You read everything — information becomes the starting point for knowledge" width="880"></a></p>
 
-<sub>Built from SKAZ 0.3.1's own interface (its HTML and CSS) with <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
+### Collect your sources
 
-The lecture, the slides, the answers, the cards and the web results are authored demonstration data,
-not real speech recognition, AI output or search.</sub>
+Add a PDF, web articles and your own text to the same library.
+
+<a href="docs/images/demo-collect.mp4"><img src="docs/images/demo-collect.webp" alt="Adding Ebbinghaus's book, articles and text to a SKAZ library" width="880"></a>
+
+### Connect what you know
+
+Explore source notes and linked concept pages. See what comes from a source and what the agent inferred.
+
+<a href="docs/images/demo-connect.mp4"><img src="docs/images/demo-connect.webp" alt="Exploring connected wiki pages about memory and spaced repetition" width="880"></a>
+
+### Work through a question
+
+Ask about your materials and follow an explanation with references to your sources.
+
+<a href="docs/images/demo-ask.mp4"><img src="docs/images/demo-ask.webp" alt="Asking about the forgetting curve and reading an answer with source references" width="880"></a>
+
+### Check the source
+
+Open a citation at the quoted passage and read the original context.
+
+<a href="docs/images/demo-source.mp4"><img src="docs/images/demo-source.webp" alt="Opening a citation at the quoted passage in Ebbinghaus's book" width="880"></a>
+
+### Refresh what you learned
+
+Make flashcards from your materials, reveal an answer and review what you know.
+
+<a href="docs/images/demo-learn.mp4"><img src="docs/images/demo-learn.webp" alt="Reviewing a flashcard about memory and revealing its answer" width="880"></a>
+
+<sub>Recordings of SKAZ 0.3.2 in an isolated demo profile. The notes, agent answers and cards are
+authored demonstration data, not live AI output. All animations and linked MP4s are silent;
+click a recording to open its full-size MP4.</sub>
 
 ## ✨ Features
 
@@ -79,6 +125,12 @@ not real speech recognition, AI output or search.</sub>
 
 | | |
 |---|---|
+| 📚 **Bring your sources together** | PDFs, text and Markdown files, pasted text, web articles, audio and video files, and video links from YouTube, VK Video, RuTube and Vimeo. Use only material you are allowed to process. |
+| 🧠 **A connected knowledge base** | Source notes, shared concept pages across folders and saved analyses form one wiki. Source-backed statements, inferred connections and agent explanations are marked separately. When sources disagree, both versions are shown and you decide. |
+| 💬 **Understand, with sources** | Ask about the whole library, compare ideas or revisit an explanation. Citations open the relevant passage, document page or timestamp. Use **@** to point at a page, a material or a chat. Answers can include diagrams with a full-size viewer. |
+| 🃏 **Learn and revisit** | Create flashcards and tests from a page, a material or a chat, with correct answers backed by checked source quotes. Save decks and tests to the wiki; saved cards use **FSRS spaced repetition**. Review what is due, practice difficult cards or return to a topic. |
+| 🌐 **Explore beyond your library** | Search for additional sources from a chat. You see the exact query and choose Allow once, Allow in this chat or Deny; only the query is sent to the search. Review the results and add a chosen page to the library with one click. |
+| 🗂️ **Keep your knowledge accessible** | Your materials and wiki are a folder of `.md` files. Open it in **Obsidian**, or export as plain Markdown with source footnotes. Your own edits to wiki pages are protected from the agent. |
 | 🎙️ **Live recording** | Microphone, optionally with your Mac's sound (Zoom, videos; macOS 14.2+ and OS permission). Recognition with **Soniox** (cloud streaming, speaker separation, translation) or **Whisper on this computer** (works offline). SKAZ never silently switches services. |
 | 📚 **Any source** | PDF, documents, text and Markdown files, audio and video files, web articles (cleaned up), pasted text of any length, and video links from YouTube, VK Video, RuTube and Vimeo. Use only material you are allowed to process. |
 | 🧠 **A living wiki** | Notes for every source, one page per concept across all folders, and saved analyses. Each statement is marked: quoted from a source, a connection the agent inferred, or an agent's explanation. When sources disagree, both versions are shown and you decide. |
@@ -90,7 +142,6 @@ not real speech recognition, AI output or search.</sub>
 | 📖 **Read web pages** | The agent can read public pages from approved search results without importing them first. Long pages are read in bounded parts from the same snapshot. **Add to library** is a separate action; reading alone does not add a material. |
 | 🤖 **Your agent** | **Codex**, **Claude Code**, **Hermes Agent** or **OpenCode**, with your own subscription or key; SKAZ can install them for you. Agents read the library through SKAZ's tools and change wiki pages only after you allow it, with Undo; your own notes are never touched. Pick a model per chat and star favorites. Small filing decisions can run on a local model or through OpenRouter. |
 | ✍️ **Recognition fixes** | An optional check finds likely recognition errors, fixes the confident ones and only highlights the doubtful ones. Every fix can be undone. |
-| 🗂️ **Plain files** | The library is a folder of `.md` files. Open it in **Obsidian**, or export everything as plain Markdown with sources as footnotes. Your own edits to wiki pages are protected from the agent. |
 | 🔄 **Updates** | SKAZ checks GitHub releases at start and once a day and installs a verified update from **Settings → About**. |
 | 🎨 **Appearance** | Choose the light/dark base, accent, density, motion and optional interface sounds in **Settings → Appearance**. Presets give you a starting point; the controls remain independent. |
 
@@ -126,11 +177,15 @@ Want to run the current code instead? See the [development setup](CONTRIBUTING.m
 
 1. **Agent.** Choose Codex, Claude Code, Hermes Agent or OpenCode and sign in with your own account.
    SKAZ can install the agent for you. Provider eligibility, limits and charges apply.
-2. **Speech.** Add a Soniox key and allow sending audio to Soniox — or pick **Whisper on this
-   computer** and download a speech model (its size is shown first; no key needed).
+2. **Speech (optional).** If you work with audio, add a Soniox key and allow sending audio to
+   Soniox — or pick **Whisper on this computer** and download a speech model (its size is shown
+   first; no key needed). Text materials do not require speech recognition.
 3. **Library.** Choose where the library lives; SKAZ suggests a folder in Documents.
-4. **Use it.** Press **Record** (the folder is picked next to it) or **+ Material** to add a
-   file, a link or text. Ask in the chat; open **Wiki** to read what SKAZ built.
+4. **Start with a material.** Use **+ Material** to add a file, a link or text. Ask about it in
+   the chat and open **Wiki** to explore its notes and concepts. Use **Record** when you want
+   to capture speech; pick the folder next to it.
+5. **Come back to what you learn.** Ask for flashcards or a test, save them to the wiki and return
+   for a review or a deeper explanation.
 
 Every choice can be changed later in **Settings**.
 
@@ -160,12 +215,15 @@ See the [security policy](SECURITY.md) for limitations and the reporting channel
 
 ## 🧩 How it works
 
+Speech recognition is one input path. Materials, the wiki, answers and study share the same library.
+
 ```text
-Microphone / system audio / files / links → Electron → Python ── Soniox | Whisper on this Mac
-                                              ↓          ↓
-                                          React UI   Library: Materials/*.md, Wiki/*.md
-                                                         ↕  SKAZ tools (changes only with your OK)
-                                              Codex | Claude Code | Hermes Agent | OpenCode
+Files / text / links / speech → Electron + React ↔ Python
+                                                    ├─ Soniox | local Whisper (speech only)
+                                                    ├─ Materials/*.md + Wiki/*.md
+                                                    └─ SKAZ tools ↔ your chosen agent
+                                                                         ↓
+                                                       Answers · connections · cards · tests
 ```
 
 | Layer | Stack |
