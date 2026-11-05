@@ -17,9 +17,9 @@
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="SKAZ 导览：录下一堂课、带脚注地就内容提问、允许智能体修改、学习由课程生成的卡片" width="880">
+<a href="../images/skaz-intro.mp4"><img src="../images/skaz-intro.webp" alt="SKAZ — 阅读、保存与收集" width="880"></a>
 
-<sub>产品导览 · 使用预先编写数据的演示配置 · <a href="../images/skaz-tour.mp4">完整导览，全高清（MP4，80 秒）</a></sub>
+<sub>无声开场 · <a href="../images/skaz-intro.mp4">MP4，3 秒</a></sub>
 
 <br><br>
 
@@ -40,6 +40,8 @@ SKAZ 是一款 macOS 应用，帮助你整理信息、理解内容，并随时�
 > SKAZ 面向 Apple Silicon 上的 macOS；Windows、Linux 和 Intel Mac 未经验证。目前界面仅提供英文。
 
 ## 💡 为什么选择 SKAZ
+
+<p align="center"><a href="../images/skaz-forget.mp4"><img src="../images/skaz-forget.webp" alt="读过的内容逐渐遗忘 — 文字从书页上消失" width="880"></a></p>
 
 保存信息不等于理解、记住并能够运用。一段有用的解释可能埋在聊天记录里，笔记可能失去上下文，
 曾经理解的主题也会变得难以重新拾起。
@@ -74,27 +76,40 @@ AI 可能出错。引用能帮你核实答案，但不能保证答案正确。
 
 ## 👀 实际效果
 
-<table>
-<tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="wiki 概念页面及其关联"><br><b>关联已有知识</b><br>来源笔记和概念页面将相关想法联系起来，并标明哪些内容来自来源、哪些是智能体的推断。</td>
-<td width="50%"><img src="../images/tour-ask.webp" alt="带脚注的回答"><br><b>逐步解答疑问</b><br>就资料提问，阅读解释，并打开来源引用核实上下文。</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-cards.webp" alt="根据一堂课生成的卡片和测验"><br><b>温习学过的内容</b><br>根据资料生成卡片或测验。保存卡组，再通过间隔重复持续复习。</td>
-<td width="50%"><img src="../images/tour-web.webp" alt="批准一次网络搜索，并把找到的页面加入资料库"><br><b>寻找另一种视角</b><br>批准搜索词，查看结果，再决定将哪些来源加入资料库。</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-diagram.webp" alt="回答中的图表，全尺寸打开"><br><b>看清内容之间的关系</b><br>回答可以包含在你的 Mac 上渲染的图表。全尺寸打开，查看其中的细节。</td>
-<td width="50%"><img src="../images/tour-edit.webp" alt="智能体在修改 wiki 页面前先征求同意"><br><b>修改由你掌控</b><br>在允许修改前，先检查智能体提出的 wiki 编辑。你自己的笔记仍由你掌握。</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-record.webp" alt="把一堂课录进文件夹"><br><b>录进文件夹</b><br>选好文件夹，按下 Record，转写随讲话实时出现，按说话人和时间排列。</td>
-<td width="50%"><img src="../images/tour-theme.webp" alt="切换到深色主题"><br><b>浅色与深色</b><br>跟随系统，或在 <b>Settings → Appearance</b> 中选择主题。</td>
-</tr>
-</table>
+<p align="center"><a href="../images/skaz-read.mp4"><img src="../images/skaz-read.webp" alt="你读过很多内容 — 信息是知识的起点" width="880"></a></p>
 
-<sub>使用 <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a> 由 SKAZ 0.3.1 自身的界面（其 HTML 和 CSS）制作。
-课程、幻灯片、回答、卡片和网络结果均为预先编写的演示数据，并非真实的语音识别、AI 输出或搜索。</sub>
+### 收集来源
+
+将 PDF、网页文章和自己的文字加入同一个资料库。
+
+<a href="../images/demo-collect.mp4"><img src="../images/demo-collect.webp" alt="将艾宾浩斯的著作、文章和文字加入 SKAZ 资料库" width="880"></a>
+
+### 关联已有知识
+
+探索来源笔记和相互关联的概念页面，分清哪些内容来自来源、哪些是智能体的推断。
+
+<a href="../images/demo-connect.mp4"><img src="../images/demo-connect.webp" alt="探索关于记忆和间隔重复的关联 wiki 页面" width="880"></a>
+
+### 逐步解答疑问
+
+就资料提问，阅读附有来源引用的解释。
+
+<a href="../images/demo-ask.mp4"><img src="../images/demo-ask.webp" alt="就遗忘曲线提问，并阅读附有来源引用的回答" width="880"></a>
+
+### 核实原始来源
+
+在对应段落打开引用，阅读原文上下文。
+
+<a href="../images/demo-source.mp4"><img src="../images/demo-source.webp" alt="打开艾宾浩斯著作中被引用的原文段落" width="880"></a>
+
+### 温习学过的内容
+
+根据资料制作卡片，揭示答案，检验自己的掌握程度。
+
+<a href="../images/demo-learn.mp4"><img src="../images/demo-learn.webp" alt="复习关于记忆的卡片并查看答案" width="880"></a>
+
+<sub>在独立演示配置中录制的 SKAZ 0.3.2 界面。笔记、智能体回答和卡片均为预先编写的演示数据，
+并非实时 AI 输出。所有动画及 MP4 均无声；点击录屏可打开全尺寸 MP4。</sub>
 
 ## ✨ 功能
 

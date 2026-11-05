@@ -17,9 +17,9 @@ Organize and connect · understand and learn · revisit and explore
 
 <br>
 
-<img src="docs/images/skaz-tour.webp" alt="A tour of SKAZ: recording a lecture, asking about it with a footnote, allowing an agent edit, studying cards made from the lecture" width="880">
+<a href="docs/images/skaz-intro.mp4"><img src="docs/images/skaz-intro.webp" alt="SKAZ — read, save and collect" width="880"></a>
 
-<sub>Product tour · demo profile with authored data · <a href="docs/images/skaz-tour.mp4">The whole tour in Full HD (MP4, 80 s)</a></sub>
+<sub>Silent introduction · <a href="docs/images/skaz-intro.mp4">MP4, 3 s</a></sub>
 
 <br><br>
 
@@ -42,6 +42,8 @@ Your materials and wiki live as plain Markdown files in a folder you choose.
 > Intel Macs are not verified. The interface is English-only for now.
 
 ## 💡 Why SKAZ
+
+<p align="center"><a href="docs/images/skaz-forget.mp4"><img src="docs/images/skaz-forget.webp" alt="You forget most of it by tomorrow — words disappear from a book page" width="880"></a></p>
 
 Saving information does not make it easy to understand, remember or use. A useful explanation
 gets buried in a chat, notes lose their context, and a topic you once understood becomes hard to
@@ -81,29 +83,41 @@ separate from citations to your own library.
 
 ## 👀 See it in action
 
-<table>
-<tr>
-<td width="50%"><img src="docs/images/tour-wiki.webp" alt="A wiki concept page and its connections"><br><b>Connect what you know</b><br>Source notes and concept pages bring related ideas together. See what comes from a source and what the agent inferred.</td>
-<td width="50%"><img src="docs/images/tour-ask.webp" alt="An answer with footnotes, opened at the quoted moment"><br><b>Work through a question</b><br>Ask about your materials, follow an explanation and open its source references to check the context.</td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/tour-cards.webp" alt="Flashcards and a test made from a lecture"><br><b>Refresh what you learned</b><br>Make flashcards or a test from your materials. Save a deck and return to it with spaced repetition.</td>
-<td width="50%"><img src="docs/images/tour-web.webp" alt="Approving a web search, then adding a found page to the library"><br><b>Find another perspective</b><br>Approve a web query, review the results and choose which sources to add to your library.</td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/tour-diagram.webp" alt="A diagram in an answer, opened full size"><br><b>Make relationships visible</b><br>Answers can include diagrams, rendered on your Mac. Open them full size to explore the details.</td>
-<td width="50%"><img src="docs/images/tour-edit.webp" alt="An agent asks before editing a wiki page"><br><b>Stay in control</b><br>Review agent-proposed wiki edits before allowing them. Your own notes stay yours.</td>
-</tr>
-<tr>
-<td width="50%"><img src="docs/images/tour-record.webp" alt="Recording a lecture into a folder"><br><b>Record into a folder</b><br>Pick the folder, press Record, and the transcript appears as people speak, by speaker and time.</td>
-<td width="50%"><img src="docs/images/tour-theme.webp" alt="Switching to the dark theme"><br><b>Light and dark</b><br>Follows your Mac, or pick a theme in <b>Settings → Appearance</b>.</td>
-</tr>
-</table>
+<p align="center"><a href="docs/images/skaz-read.mp4"><img src="docs/images/skaz-read.webp" alt="You read everything — information becomes the starting point for knowledge" width="880"></a></p>
 
-<sub>Built from SKAZ 0.3.1's own interface (its HTML and CSS) with <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
+### Collect your sources
 
-The lecture, the slides, the answers, the cards and the web results are authored demonstration data,
-not real speech recognition, AI output or search.</sub>
+Add a PDF, web articles and your own text to the same library.
+
+<a href="docs/images/demo-collect.mp4"><img src="docs/images/demo-collect.webp" alt="Adding Ebbinghaus's book, articles and text to a SKAZ library" width="880"></a>
+
+### Connect what you know
+
+Explore source notes and linked concept pages. See what comes from a source and what the agent inferred.
+
+<a href="docs/images/demo-connect.mp4"><img src="docs/images/demo-connect.webp" alt="Exploring connected wiki pages about memory and spaced repetition" width="880"></a>
+
+### Work through a question
+
+Ask about your materials and follow an explanation with references to your sources.
+
+<a href="docs/images/demo-ask.mp4"><img src="docs/images/demo-ask.webp" alt="Asking about the forgetting curve and reading an answer with source references" width="880"></a>
+
+### Check the source
+
+Open a citation at the quoted passage and read the original context.
+
+<a href="docs/images/demo-source.mp4"><img src="docs/images/demo-source.webp" alt="Opening a citation at the quoted passage in Ebbinghaus's book" width="880"></a>
+
+### Refresh what you learned
+
+Make flashcards from your materials, reveal an answer and review what you know.
+
+<a href="docs/images/demo-learn.mp4"><img src="docs/images/demo-learn.webp" alt="Reviewing a flashcard about memory and revealing its answer" width="880"></a>
+
+<sub>Recordings of SKAZ 0.3.2 in an isolated demo profile. The notes, agent answers and cards are
+authored demonstration data, not live AI output. All animations and linked MP4s are silent;
+click a recording to open its full-size MP4.</sub>
 
 ## ✨ Features
 

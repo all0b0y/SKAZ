@@ -17,9 +17,9 @@ Organiza y conecta · comprende y aprende · repasa y explora
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="Recorrido por SKAZ: grabar una clase, preguntar sobre ella con una nota al pie, permitir la edición de un agente, estudiar tarjetas hechas a partir de la clase" width="880">
+<a href="../images/skaz-intro.mp4"><img src="../images/skaz-intro.webp" alt="SKAZ — lee, guarda y reúne" width="880"></a>
 
-<sub>Recorrido del producto · perfil de demostración con datos preparados · <a href="../images/skaz-tour.mp4">El recorrido completo en Full HD (MP4, 80 s)</a></sub>
+<sub>Introducción sin sonido · <a href="../images/skaz-intro.mp4">MP4, 3 s</a></sub>
 
 <br><br>
 
@@ -43,6 +43,8 @@ Tus materiales y tu wiki se guardan como archivos Markdown en la carpeta que tú
 > solo está en inglés.
 
 ## 💡 Por qué SKAZ
+
+<p align="center"><a href="../images/skaz-forget.mp4"><img src="../images/skaz-forget.webp" alt="Lo leído se olvida — las palabras desaparecen de la página de un libro" width="880"></a></p>
 
 Guardar información no basta para comprenderla, recordarla o utilizarla. Una buena explicación
 queda enterrada en un chat, las notas pierden su contexto y cuesta retomar un tema que antes
@@ -83,28 +85,41 @@ separados de las citas de tu propia biblioteca.
 
 ## 👀 Míralo en acción
 
-<table>
-<tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="Una página de concepto de la wiki y sus conexiones"><br><b>Conecta lo que sabes</b><br>Los apuntes y las páginas de conceptos reúnen ideas relacionadas. Distingue lo que dice una fuente de lo que dedujo el agente.</td>
-<td width="50%"><img src="../images/tour-ask.webp" alt="Una respuesta con notas al pie"><br><b>Resuelve tus dudas</b><br>Pregunta sobre tus materiales, sigue una explicación y abre sus referencias para comprobar el contexto.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-cards.webp" alt="Tarjetas y un test hechos a partir de una clase"><br><b>Refresca lo aprendido</b><br>Crea tarjetas o un test a partir de tus materiales. Guarda una baraja y vuelve a repasarla con repetición espaciada.</td>
-<td width="50%"><img src="../images/tour-web.webp" alt="Aprobar una búsqueda web y añadir una página encontrada a la biblioteca"><br><b>Encuentra otra perspectiva</b><br>Aprueba una consulta web, revisa los resultados y decide qué fuentes añadir a la biblioteca.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-diagram.webp" alt="Un diagrama en una respuesta, abierto a tamaño completo"><br><b>Visualiza las relaciones</b><br>Las respuestas pueden incluir diagramas, generados en tu Mac. Ábrelos a tamaño completo para explorar los detalles.</td>
-<td width="50%"><img src="../images/tour-edit.webp" alt="Un agente pide permiso antes de editar una página de la wiki"><br><b>Mantén el control</b><br>Revisa las ediciones que propone el agente antes de permitirlas. Tus propias notas siguen siendo tuyas.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-record.webp" alt="Grabar una clase en una carpeta"><br><b>Graba en una carpeta</b><br>Elige la carpeta, pulsa Record y la transcripción aparece mientras se habla, por hablante y con la hora.</td>
-<td width="50%"><img src="../images/tour-theme.webp" alt="Cambiar al tema oscuro"><br><b>Claro y oscuro</b><br>Sigue a tu Mac, o elige un tema en <b>Settings → Appearance</b>.</td>
-</tr>
-</table>
+<p align="center"><a href="../images/skaz-read.mp4"><img src="../images/skaz-read.webp" alt="Lees de todo — la información es el punto de partida del conocimiento" width="880"></a></p>
 
-<sub>Creado a partir de la propia interfaz de SKAZ 0.3.1 (su HTML y CSS) con <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
-La clase, las diapositivas, las respuestas, las tarjetas y los resultados web son datos de demostración
-preparados, no reconocimiento de voz, resultados de IA ni búsquedas reales.</sub>
+### Reúne tus fuentes
+
+Añade un PDF, artículos web y tus propios textos a la misma biblioteca.
+
+<a href="../images/demo-collect.mp4"><img src="../images/demo-collect.webp" alt="Añadir el libro de Ebbinghaus, artículos y texto a una biblioteca de SKAZ" width="880"></a>
+
+### Conecta lo que sabes
+
+Explora apuntes de las fuentes y páginas de conceptos conectadas. Distingue lo que dice una fuente de lo que dedujo el agente.
+
+<a href="../images/demo-connect.mp4"><img src="../images/demo-connect.webp" alt="Explorar páginas de la wiki sobre memoria y repetición espaciada" width="880"></a>
+
+### Resuelve tus dudas
+
+Pregunta sobre tus materiales y sigue una explicación con referencias a tus fuentes.
+
+<a href="../images/demo-ask.mp4"><img src="../images/demo-ask.webp" alt="Preguntar sobre la curva del olvido y leer una respuesta con referencias" width="880"></a>
+
+### Comprueba la fuente
+
+Abre una cita en el pasaje correspondiente y lee el contexto original.
+
+<a href="../images/demo-source.mp4"><img src="../images/demo-source.webp" alt="Abrir una cita en el pasaje correspondiente del libro de Ebbinghaus" width="880"></a>
+
+### Refresca lo aprendido
+
+Crea tarjetas a partir de tus materiales, revela una respuesta y comprueba lo que sabes.
+
+<a href="../images/demo-learn.mp4"><img src="../images/demo-learn.webp" alt="Repasar una tarjeta sobre la memoria y revelar su respuesta" width="880"></a>
+
+<sub>Grabaciones de SKAZ 0.3.2 en un perfil de demostración aislado. Los apuntes, las respuestas del agente y las tarjetas
+son datos de demostración preparados, no resultados de una IA en directo. Todas las animaciones y los MP4 son sin sonido;
+haz clic en una grabación para abrir su MP4 a tamaño completo.</sub>
 
 ## ✨ Funciones
 

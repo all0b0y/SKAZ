@@ -17,9 +17,9 @@ Sammeln und verknüpfen · verstehen und lernen · wiederholen und weiterdenken
 
 <br>
 
-<img src="../images/skaz-tour.webp" alt="Rundgang durch SKAZ: eine Vorlesung aufnehmen, mit Fußnote danach fragen, eine Änderung des Agenten erlauben, Karteikarten aus der Vorlesung lernen" width="880">
+<a href="../images/skaz-intro.mp4"><img src="../images/skaz-intro.webp" alt="SKAZ — lesen, speichern und sammeln" width="880"></a>
 
-<sub>Produkt-Rundgang · Demoprofil mit vorbereiteten Daten · <a href="../images/skaz-tour.mp4">Der ganze Rundgang in Full HD (MP4, 80 s)</a></sub>
+<sub>Intro ohne Ton · <a href="../images/skaz-intro.mp4">MP4, 3 s</a></sub>
 
 <br><br>
 
@@ -42,6 +42,8 @@ Deine Materialien und dein Wiki liegen als Markdown-Dateien in einem Ordner dein
 > Intel-Macs sind nicht geprüft. Die Oberfläche gibt es vorerst nur auf Englisch.
 
 ## 💡 Warum SKAZ
+
+<p align="center"><a href="../images/skaz-forget.mp4"><img src="../images/skaz-forget.webp" alt="Gelesenes verblasst — Wörter verschwinden von einer Buchseite" width="880"></a></p>
 
 Informationen zu speichern heißt noch nicht, sie zu verstehen, zu behalten oder nutzen zu können.
 Eine hilfreiche Erklärung verschwindet im Chat, Notizen verlieren ihren Kontext, und der Einstieg
@@ -83,28 +85,41 @@ bleiben von Belegen aus deiner eigenen Bibliothek getrennt.
 
 ## 👀 So sieht es aus
 
-<table>
-<tr>
-<td width="50%"><img src="../images/tour-wiki.webp" alt="Eine Begriffsseite im Wiki und ihre Verbindungen"><br><b>Wissen verknüpfen</b><br>Quellennotizen und Begriffsseiten führen verwandte Ideen zusammen. Erkenne, was aus einer Quelle stammt und was der Agent erschlossen hat.</td>
-<td width="50%"><img src="../images/tour-ask.webp" alt="Eine Antwort mit Fußnoten"><br><b>Fragen durchgehen</b><br>Frage zu deinen Materialien, folge einer Erklärung und öffne ihre Quellenverweise, um den Kontext zu prüfen.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-cards.webp" alt="Karteikarten und ein Test aus einer Vorlesung"><br><b>Gelerntes auffrischen</b><br>Erstelle Karteikarten oder einen Test aus deinen Materialien. Speichere einen Stapel und wiederhole ihn in zeitlichen Abständen.</td>
-<td width="50%"><img src="../images/tour-web.webp" alt="Eine Websuche erlauben und eine gefundene Seite in die Bibliothek aufnehmen"><br><b>Eine weitere Perspektive finden</b><br>Erlaube eine Webanfrage, prüfe die Ergebnisse und entscheide, welche Quellen du zur Bibliothek hinzufügst.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-diagram.webp" alt="Ein Diagramm in einer Antwort, in voller Größe geöffnet"><br><b>Zusammenhänge sichtbar machen</b><br>Antworten können Diagramme enthalten, die auf deinem Mac gerendert werden. Öffne sie in voller Größe, um Details zu erkunden.</td>
-<td width="50%"><img src="../images/tour-edit.webp" alt="Ein Agent fragt, bevor er eine Wiki-Seite ändert"><br><b>Die Kontrolle behalten</b><br>Prüfe vom Agenten vorgeschlagene Wiki-Änderungen, bevor du sie erlaubst. Deine eigenen Notizen bleiben deine.</td>
-</tr>
-<tr>
-<td width="50%"><img src="../images/tour-record.webp" alt="Eine Vorlesung in einen Ordner aufnehmen"><br><b>In einen Ordner aufnehmen</b><br>Ordner wählen, Record drücken – das Transkript erscheint beim Sprechen, nach Sprecher und Zeit.</td>
-<td width="50%"><img src="../images/tour-theme.webp" alt="Wechsel zum dunklen Design"><br><b>Hell und dunkel</b><br>Folgt deinem Mac, oder wähle ein Design unter <b>Settings → Appearance</b>.</td>
-</tr>
-</table>
+<p align="center"><a href="../images/skaz-read.mp4"><img src="../images/skaz-read.webp" alt="Du liest so viel — Informationen werden zum Ausgangspunkt für Wissen" width="880"></a></p>
 
-<sub>Erstellt aus der eigenen Oberfläche von SKAZ 0.3.1 (ihrem HTML und CSS) mit <a href="https://github.com/heygen-com/hyperframes">HyperFrames</a>.
-Vorlesung, Folien, Antworten, Karten und Web-Ergebnisse sind vorbereitete Demodaten, keine echte
-Spracherkennung, keine echten KI-Ausgaben und keine echte Suche.</sub>
+### Quellen sammeln
+
+Füge ein PDF, Webartikel und eigene Texte derselben Bibliothek hinzu.
+
+<a href="../images/demo-collect.mp4"><img src="../images/demo-collect.webp" alt="Ebbinghaus' Buch, Artikel und Text zu einer SKAZ-Bibliothek hinzufügen" width="880"></a>
+
+### Wissen verknüpfen
+
+Erkunde Quellennotizen und verknüpfte Begriffsseiten. Erkenne, was aus einer Quelle stammt und was der Agent erschlossen hat.
+
+<a href="../images/demo-connect.mp4"><img src="../images/demo-connect.webp" alt="Verknüpfte Wiki-Seiten über Gedächtnis und zeitlich verteilte Wiederholung erkunden" width="880"></a>
+
+### Fragen durchgehen
+
+Frage zu deinen Materialien und folge einer Erklärung mit Quellenverweisen.
+
+<a href="../images/demo-ask.mp4"><img src="../images/demo-ask.webp" alt="Nach der Vergessenskurve fragen und eine Antwort mit Quellenverweisen lesen" width="880"></a>
+
+### Die Quelle prüfen
+
+Öffne einen Beleg an der zitierten Passage und lies den ursprünglichen Zusammenhang.
+
+<a href="../images/demo-source.mp4"><img src="../images/demo-source.webp" alt="Einen Beleg an der zitierten Passage in Ebbinghaus' Buch öffnen" width="880"></a>
+
+### Gelerntes auffrischen
+
+Erstelle Karten aus deinen Materialien, decke eine Antwort auf und prüfe dein Wissen.
+
+<a href="../images/demo-learn.mp4"><img src="../images/demo-learn.webp" alt="Eine Karte zum Gedächtnis wiederholen und die Antwort aufdecken" width="880"></a>
+
+<sub>Aufnahmen von SKAZ 0.3.2 in einem isolierten Demoprofil. Notizen, Agentenantworten und Karten sind
+vorbereitete Demodaten, keine live erzeugten KI-Ausgaben. Alle Animationen und MP4s sind ohne Ton;
+klicke auf eine Aufnahme, um ihre MP4 in voller Größe zu öffnen.</sub>
 
 ## ✨ Funktionen
 
