@@ -36,4 +36,7 @@ export const CHANNELS = {
   updateState: 'app:update-state',
   // macOS full screen hides the traffic lights: the title bar drops the room it keeps for them.
   fullScreen: 'app:full-screen',
+  // Settings → "Closing the window quits SKAZ" (decision 3f′).
+  closeQuitsGet: 'app:close-quits-get',
+  closeQuitsSet: 'app:close-quits-set',
 } as const;

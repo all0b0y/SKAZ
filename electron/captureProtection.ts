@@ -20,6 +20,17 @@ export function hasUnsentAudio(state: CaptureProtectionState): boolean {
   );
 }
 
+/**
+ * The tray menu's line about a recording. With the window closed the recording goes on unseen, so the
+ * menu must not say Idle during it. Null when no recording is going on.
+ */
+export function captureStatusLine(state: CaptureProtectionState): string | null {
+  if (state.failed > 0) return 'Some audio couldn’t be saved';
+  if (state.recorderState === 'recording') return 'Recording';
+  if (state.recorderState === 'paused') return 'Recording paused';
+  return hasUnsentAudio(state) ? 'Saving audio' : null;
+}
+
 export interface QuitWarning {
   message: string;
   detail: string;
