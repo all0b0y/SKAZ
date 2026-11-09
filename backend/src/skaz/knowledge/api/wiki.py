@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from ..corrections.settings import RecognitionSettings
 from ..errors import KnowledgeError
+from ..library.layout import STUDY_KINDS
 from ..markdown.page import PageKind
 from ..store.records import PageRecord
 from ..wiki.links import LinkView
@@ -126,7 +127,9 @@ def page_view(detail: PageDetail) -> KbPage:
 async def list_pages(
     kb: KbDep, kind: PageKind | None = None, folder_id: str | None = None
 ) -> list[KbPageSummary]:
-    return [summary_view(record) for record in await kb_call(kb.pages, kind=kind, folder_id=folder_id)]
+    """Wiki pages. Decks and tests live in ``/kb/study-library`` (N4-7): only asked by their kind here."""
+    pages = await kb_call(kb.pages, kind=kind, folder_id=folder_id)
+    return [summary_view(record) for record in pages if kind is not None or record.kind not in STUDY_KINDS]
 
 
 @router.get("/pages/{page_id}")

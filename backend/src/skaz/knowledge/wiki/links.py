@@ -16,9 +16,13 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from ..library.layout import LEGACY_STUDY_FOLDERS, STUDY_DIR, STUDY_KINDS
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
 
+#: ``Wiki/Decks/`` → ``Study/Decks/``: where a link written before 0.4.0 points now.
+_MOVED_FOLDERS = tuple((f"{folder}/", f"{STUDY_DIR}/{folder.split('/', 1)[1]}/")
+                       for folder in LEGACY_STUDY_FOLDERS)
 _LINK = re.compile(r"\[\[([^\]|#\n]*)(#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]")
 
 
@@ -50,12 +54,16 @@ class LinkResolver:
         self._by_path = {row["rel_path"].removesuffix(".md"): row for row in pages}
         titles: dict[str, list[sqlite3.Row]] = defaultdict(list)
         for row in pages:
-            titles[name_key(row["title"])].append(row)
+            if row["kind"] not in STUDY_KINDS:  # a name means the wiki page, never a deck called the same
+                titles[name_key(row["title"])].append(row)
         self._by_title = {key: rows[0] for key, rows in titles.items() if len(rows) == 1}
         self._materials = {name_key(row["rel_dir"]): row["id"] for row in materials}
 
     def resolve(self, target: str) -> LinkView:
         page = self._by_path.get(target)
+        for old, new in _MOVED_FOLDERS:  # a link written before decks and tests left the wiki (N4-7)
+            if page is None and target.startswith(old):
+                page = self._by_path.get(new + target[len(old):])
         if page is None and target.startswith("Materials/"):
             folder = target.rsplit("/", 1)[0]
             material = self._materials.get(name_key(folder)) or self._materials.get(name_key(target))

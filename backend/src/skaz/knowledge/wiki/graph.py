@@ -99,14 +99,15 @@ class GraphIndex:
 
     def _derive(self) -> list[Edge]:
         with self.db.read() as connection:
-            pages = connection.execute("SELECT id, title, rel_path FROM pages").fetchall()
+            pages = connection.execute("SELECT id, kind, title, rel_path FROM pages").fetchall()
             blocks = connection.execute(
                 "SELECT page_id, block_id, kind, owner, text FROM blocks ORDER BY page_id, ordinal"
             ).fetchall()
         by_path = {row["rel_path"].removesuffix(".md"): row["id"] for row in pages}
         titles: dict[str, list[str]] = defaultdict(list)
         for row in pages:
-            titles[name_key(row["title"])].append(row["id"])
+            if row["kind"] not in ("deck", "test"):  # a name means the wiki page, not a deck called the same
+                titles[name_key(row["title"])].append(row["id"])
         edges: dict[tuple[str, str, str], Edge] = {}
         for row in blocks:
             source = row["page_id"]

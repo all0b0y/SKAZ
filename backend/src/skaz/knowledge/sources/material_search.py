@@ -17,7 +17,7 @@ import sqlite3
 import unicodedata
 from dataclasses import dataclass
 
-from ..index.search import SnippetPart, fts_query
+from ..index.search import WIKI_PAGES_ONLY, SnippetPart, fts_query
 from ..logsafe import error_note
 from ..markdown.text import name_key
 from ..store.database import KnowledgeDatabase
@@ -105,9 +105,12 @@ def _page_titles(connection: sqlite3.Connection, query: str) -> set[str]:
     key = name_key(query.strip())
     if not key:
         return set()
-    found = {row["id"] for row in connection.execute("SELECT id, title FROM pages")
+    found = {row["id"] for row in connection.execute(
+        f"SELECT p.id, p.title FROM pages p WHERE {WIKI_PAGES_ONLY}")
              if key in name_key(row["title"])}
-    found |= {row["page_id"] for row in connection.execute("SELECT page_id, alias_key FROM aliases")
+    found |= {row["page_id"] for row in connection.execute(
+        "SELECT a.page_id, a.alias_key FROM aliases a JOIN pages p ON p.id = a.page_id "
+        f"WHERE {WIKI_PAGES_ONLY}")
               if key in row["alias_key"]}
     return found
 
@@ -124,7 +127,9 @@ def counts(db: KnowledgeDatabase, query: str, *, material_titles: set[str]) -> S
             connection, "SELECT DISTINCT material_id FROM fragments_fts WHERE fragments_fts MATCH ? LIMIT ?",
             (expression, COUNT_CAP))
         block_pages = _distinct(
-            connection, "SELECT DISTINCT page_id FROM blocks_fts WHERE blocks_fts MATCH ? LIMIT ?",
+            connection,
+            "SELECT DISTINCT blocks_fts.page_id FROM blocks_fts JOIN pages p ON p.id = blocks_fts.page_id "
+            f"WHERE blocks_fts MATCH ? AND {WIKI_PAGES_ONLY} LIMIT ?",
             (expression, COUNT_CAP))
         chats = _chat_count(connection, words)
     return SearchCounts(

@@ -41,6 +41,7 @@ from ..ingest.merged import merged_of, with_merged
 from ..ingest.pages import SourceRef, insert_into_section, spaced
 from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..library.fsio import write_atomic
+from ..library.layout import STUDY_KINDS
 from ..library.names import validate_name
 from ..markdown.page import Block, BlockKind, Cite, PageDocument, PageMeta, Part, parse_page
 from ..markdown.text import name_key
@@ -68,6 +69,7 @@ LABELS = {"add": "Added", "replace": "Changed", "remove": "Removed"}
 
 NOT_IN_CHAT = "Wiki changes are only possible in a chat with the user."
 INDEX_LOG = "Wiki/index.md and Wiki/log.md are written by SKAZ; agents can't change them."
+STUDY_PAGES = "Saved decks and tests aren't wiki pages; agents can't change them with the wiki tools."
 USER_NOTE = "Block {block} is the user's own note: it stays untouched. Add a new block instead."
 NAVIGATION = "Block {block} is navigation SKAZ writes itself; leave it."
 INSTRUCTIONS = "{label}: the text reads like instructions to an AI, so SKAZ won't put it in the wiki."
@@ -289,6 +291,8 @@ class WikiEditor:
         record = self.kb.page_repo.get(page_id)
         if record is None:
             raise ToolInputError("Page not found. Use skaz_wiki_index or skaz_search to find its id.")
+        if record.kind in STUDY_KINDS:
+            raise ToolInputError(STUDY_PAGES)
         if record.rel_path in SERVICE_FILES or not record.rel_path.startswith("Wiki/"):
             raise ToolInputError(INDEX_LOG)
         try:

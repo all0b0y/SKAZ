@@ -1,5 +1,7 @@
 """FTS5 search over fragments and blocks (``unicode61 remove_diacritics 2``), plus titles/aliases.
 
+Decks and tests are no part of it (N4-7): left out inside the query, before the ranking's cut.
+
 User input is never passed to FTS5 as query syntax: it is split into word
 tokens, each quoted and prefix-matched, all required. Snippets come back as
 parts (``text``, ``match``) so a client never has to render HTML.
@@ -22,6 +24,8 @@ logger = logging.getLogger(__name__)
 _TOKEN = re.compile(r"\w+")
 _OPEN, _CLOSE = "\x02", "\x03"
 MAX_TOKENS = 12
+#: The pages (alias ``p``) a wiki search may find.
+WIKI_PAGES_ONLY = "p.kind NOT IN ('deck', 'test')"
 
 
 @dataclass(frozen=True)
@@ -123,7 +127,7 @@ def search(db: KnowledgeDatabase, query: str, *, limit: int = 20, only: Collecti
                 "p.title AS title, p.kind AS page_kind, b.kind AS kind, b.owner AS owner "
                 "FROM blocks_fts JOIN pages p ON p.id = blocks_fts.page_id "
                 "JOIN blocks b ON b.page_id = blocks_fts.page_id AND b.block_id = blocks_fts.block_id "
-                f"WHERE blocks_fts MATCH ?{block_sql} ORDER BY rank LIMIT ?",
+                f"WHERE blocks_fts MATCH ? AND {WIKI_PAGES_ONLY}{block_sql} ORDER BY rank LIMIT ?",
                 (expression, *block_params, limit),
             ).fetchall()
         except sqlite3.OperationalError as error:
@@ -153,11 +157,14 @@ def _pages(connection: sqlite3.Connection, query: str, limit: int, only: Collect
     if not key:
         return ()
     hits: dict[str, PageHit] = {}
-    for row in connection.execute("SELECT id, title, kind FROM pages ORDER BY title COLLATE NOCASE"):
+    for row in connection.execute(
+        f"SELECT p.id, p.title, p.kind FROM pages p WHERE {WIKI_PAGES_ONLY} ORDER BY p.title COLLATE NOCASE"
+    ):
         if key in name_key(row["title"]):
             hits[row["id"]] = PageHit(row["id"], row["title"], row["kind"], None)
     for row in connection.execute(
-        "SELECT p.id, p.title, p.kind, a.alias, a.alias_key FROM aliases a JOIN pages p ON p.id = a.page_id"
+        "SELECT p.id, p.title, p.kind, a.alias, a.alias_key FROM aliases a JOIN pages p ON p.id = a.page_id "
+        f"WHERE {WIKI_PAGES_ONLY}"
     ):
         if key in row["alias_key"] and row["id"] not in hits:
             hits[row["id"]] = PageHit(row["id"], row["title"], row["kind"], row["alias"])
