@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from ..api.schemas_areas import (
-        KbAcknowledged,
         KbArea,
         KbAreaCreate,
         KbAreaMap,
@@ -17,10 +16,10 @@ if TYPE_CHECKING:
         KbFactualSignal,
         KbReadMark,
         KbReadMarkUpdate,
-        KbReadMarkValue,
         KbSignalEntity,
         KbSignals,
     )
+    from ..api.schemas_explore_common import KbAcknowledged, KbReadMarkValue
 
 
 @dataclass(frozen=True)

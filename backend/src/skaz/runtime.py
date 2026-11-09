@@ -200,6 +200,18 @@ class Runtime:
         #: New settings (area S3): key checks and the problem list over the existing stores.
         self.kb_keys = KeyChecks(self.kb.settings, self.api_key, self.http)
         self.kb_settings_health = SettingsHealth(self, self.kb_keys)
+        #: OpenAlex map, areas, read marks and factual signals (0.4.0 B4).
+        from .knowledge.areas.service import ExploreAreasService
+
+        self.kb_areas = ExploreAreasService(
+            self.kb,
+            science=lambda: getattr(self, "kb_science", None),
+            decisions=lambda: self.kb_decisions.layer,
+            publication_dates=lambda: getattr(self, "kb_freshness", None),
+            repeat_summaries=lambda: getattr(self, "kb_repeats", None),
+            freshness_marks=lambda: getattr(self, "kb_maintenance", None),
+            explore=lambda: getattr(self, "kb_explore", None),
+        )
 
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)

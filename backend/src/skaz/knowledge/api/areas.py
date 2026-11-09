@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from ..areas.protocols import AreasService
 from .contract_routes import ERROR_RESPONSES, ContractRoute, service_for
 from .schemas_areas import (
-    KbAcknowledged,
     KbArea,
     KbAreaCreate,
     KbAreaMap,
@@ -19,6 +18,7 @@ from .schemas_areas import (
     KbReadMarkUpdate,
     KbSignals,
 )
+from .schemas_explore_common import KbAcknowledged
 
 router = APIRouter(prefix="/kb", tags=["kb-areas"], route_class=ContractRoute, responses=ERROR_RESPONSES)
 
