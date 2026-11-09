@@ -41,9 +41,12 @@ function buildUrl(port: number, path: string, query?: BridgeRequest['query']): s
 /** The backend's plain-English `detail` and, when present, its machine-readable `error_code`. */
 async function readFailure(res: Response): Promise<{ detail: string; code?: string }> {
   try {
-    const body = (await res.json()) as { detail?: unknown; error_code?: unknown };
+    const body = (await res.json()) as { detail?: unknown; error_code?: unknown; code?: unknown };
     const detail = typeof body?.detail === 'string' ? body.detail : `HTTP ${res.status}`;
-    return typeof body?.error_code === 'string' ? { detail, code: body.error_code } : { detail };
+    // 0.4.0 contract routes answer `{"code": …}`; older routes use `error_code`.
+    const code = typeof body?.error_code === 'string' ? body.error_code
+      : typeof body?.code === 'string' ? body.code : undefined;
+    return code === undefined ? { detail } : { detail, code };
   } catch {
     return { detail: `HTTP ${res.status}` };
   }

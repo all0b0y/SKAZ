@@ -15,6 +15,7 @@
     "smoke": "electron-vite build && playwright test",
     "preview": "electron-vite preview",
     "icon": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-icon.mts",
+    "icon:tray": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-tray-icon.mts",
     "build:backend": "backend/.venv/bin/pyinstaller --noconfirm --clean --distpath backend/dist --workpath backend/build/pyinstaller backend/skaz-backend.spec",
     "build:media": "backend/.venv/bin/python scripts/prepare-media-tools.py",
     "dist:mac": "npm run icon && npm run build:media && npm run build:backend && npm run build && electron-builder --mac --config electron-builder.yml"
