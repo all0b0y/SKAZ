@@ -98,6 +98,12 @@ class ExploreAreasService:
         self._finding_exists = finding_exists
         self._new_findings_by_area = new_findings_by_area
 
+    def _ensure_ready(self) -> None:
+        """No library yet → ``not_ready`` (like every 0.4.0 slice), not an empty map that looks like a
+        result."""
+        if self.kb.view().state == "not_configured":
+            raise ContractFailure(503, "not_ready")
+
     # -- Convenience delegation for SignalRecorder & non-colliding AreaDirectory methods --
 
     def record(self, draft: SignalDraft) -> KbFactualSignal:
@@ -280,6 +286,7 @@ class ExploreAreasService:
     # -- AreasService Protocol -----------------------------------------------
 
     async def map(self, parent_id: str | None = None, include_hidden: bool = False) -> KbAreaMap:
+        self._ensure_ready()
         await self._sync_taxonomy_level(parent_id)
         await self._place_pages_at_level(parent_id)
         pub_dates = await self._fetch_publication_dates()
@@ -293,6 +300,7 @@ class ExploreAreasService:
         )
 
     async def create(self, body: KbAreaCreate) -> KbArea:
+        self._ensure_ready()
         pub_dates = await self._fetch_publication_dates()
         finding_counts = await self._fetch_new_findings_counts()
         return await disk_call(
@@ -303,6 +311,7 @@ class ExploreAreasService:
         )
 
     async def update(self, area_id: str, body: KbAreaUpdate) -> KbArea:
+        self._ensure_ready()
         pub_dates = await self._fetch_publication_dates()
         finding_counts = await self._fetch_new_findings_counts()
         return await disk_call(
@@ -314,14 +323,17 @@ class ExploreAreasService:
         )
 
     async def delete(self, area_id: str) -> KbAcknowledged:
+        self._ensure_ready()
         return await disk_call(self.store.delete_area, area_id)
 
     async def opened(self, area_id: str) -> KbAcknowledged:
+        self._ensure_ready()
         return await disk_call(self.store.record_opened, area_id)
 
     async def materials(
         self, area_id: str, cursor: str | None = None, limit: int = 30
     ) -> KbAreaMaterials:
+        self._ensure_ready()
         if limit < 1 or limit > 100:
             raise ContractFailure(422, "invalid_request")
         await disk_call(self.store.get_area_row, area_id)
@@ -406,21 +418,26 @@ class ExploreAreasService:
         )
 
     async def read_mark(self, material_id: str) -> KbReadMark:
+        self._ensure_ready()
         return await disk_call(self.store.get_material_read_mark, material_id)
 
     async def set_read_mark(self, material_id: str, body: KbReadMarkUpdate) -> KbReadMark:
+        self._ensure_ready()
         return await disk_call(self.store.set_material_read_mark, material_id, body)
 
     async def remove_read_mark(self, material_id: str) -> KbReadMark:
+        self._ensure_ready()
         return await disk_call(self.store.remove_material_read_mark, material_id)
 
     async def set_finding_mark(self, finding_id: str, body: KbReadMarkUpdate) -> KbReadMark:
+        self._ensure_ready()
         linked_material_id = await self._verify_finding_exists(finding_id)
         if linked_material_id is not None:
             return await disk_call(self.store.set_material_read_mark, linked_material_id, body)
         return await disk_call(self.store.set_finding_read_mark, finding_id, body)
 
     async def remove_finding_mark(self, finding_id: str) -> KbReadMark:
+        self._ensure_ready()
         has_provider = self._finding_exists is not None or _resolve(self._explore, "finding") is not None
         linked_material_id = await self._verify_finding_exists(finding_id)
         if linked_material_id is not None:
@@ -432,4 +449,5 @@ class ExploreAreasService:
         )
 
     async def signals(self, cursor: str | None = None, limit: int = 50) -> KbSignals:
+        self._ensure_ready()
         return await disk_call(self._signals.list_signals, cursor=cursor, limit=limit)

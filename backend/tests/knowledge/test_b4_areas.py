@@ -728,6 +728,12 @@ async def test_runtime_wires_kb_areas_in_real_app(kb_client: object, kb_app: obj
     assert runtime.kb_areas._decisions() is None
     assert runtime.kb_areas.directory is not None and runtime.kb_areas.recorder is not None
 
+    # No library yet: not_ready, not an empty map that looks like a result.
+    res = await client.get("/kb/explore/map")
+    assert res.status_code == 503
+    assert res.json() == {"code": "not_ready"}
+
+    runtime.kb.connect(None)
     res = await client.get("/kb/explore/map")
     assert res.status_code == 200
     assert res.json()["areas"] == []
