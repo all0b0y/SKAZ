@@ -121,6 +121,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'sounds', section: 'look', group: 'Motion & sound', label: 'Sounds', hint: 'Answer ready, import done, errors. Never while recording the computer’s sound', keywords: 'sound sounds audio notification chime appearance' },
   { id: 'ui-language', section: 'look', group: '', label: 'Interface language', hint: 'Answer and wiki language are set separately', keywords: 'english' },
   // About
+  { id: 'close-quits', section: 'about', group: '', label: 'Closing the window quits SKAZ', hint: 'Off: SKAZ keeps running in the menu bar or tray; quit it from there', keywords: 'tray menu bar background close quit exit window hide' },
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },
   { id: 'updates', section: 'about', group: '', label: 'Updates', hint: 'From GitHub releases, checked at start and once a day', keywords: 'update check new version install download release' },
   { id: 'github', section: 'about', group: '', label: 'GitHub', keywords: 'source code repository' },
