@@ -46,7 +46,6 @@ export interface ResearchState {
   busy: boolean;
   error: string | null;
   chatGrants: Record<string, boolean>;
-  followUps: Record<string, string[]>;
 
   openNewTask: (opts?: {
     prompt?: string;
@@ -73,9 +72,8 @@ export interface ResearchState {
     chatId?: string,
   ) => Promise<KbResearchPermission>;
   loadGrant: (chatId: string) => Promise<KbResearchGrant | null>;
-  revokeGrant: (chatId: string) => Promise<KbResearchGrant | null>;
+  revokeGrant: (chatId: string) => Promise<KbResearchGrant>;
   setChatGrant: (chatId: string, allowed: boolean) => void;
-  sendFollowUp: (taskId: string, text: string) => void;
 }
 
 function mergeTaskList(list: KbResearchTask[], task: KbResearchTask): KbResearchTask[] {
@@ -117,7 +115,28 @@ function getApi(client: KbClient): ResearchApi {
 }
 
 function createResearchStore(client: KbClient): StoreApi<ResearchState> {
-  return createStore<ResearchState>((set, get) => ({
+  return createStore<ResearchState>((set, get) => {
+  // Pause / Continue / Cancel: the server's answer is the new state, nothing is guessed locally.
+  const runTaskAction = async (
+    taskId: string,
+    call: (api: ResearchApi) => Promise<KbResearchTask>,
+  ): Promise<KbResearchTask | null> => {
+    set({ busy: true, error: null });
+    try {
+      const task = await call(getApi(client));
+      set((s) => ({
+        busy: false,
+        tasks: mergeTaskList(s.tasks, task),
+        tasksById: { ...s.tasksById, [task.id]: task },
+      }));
+      return task;
+    } catch (err) {
+      set({ busy: false, error: errorText(err) });
+      void get().loadTask(taskId);
+      return null;
+    }
+  };
+  return {
     mode: 'closed',
     activeTaskId: null,
     tasks: [],
@@ -129,7 +148,6 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
     busy: false,
     error: null,
     chatGrants: {},
-    followUps: {},
 
     openNewTask: (opts) => {
       set((s) => ({
@@ -181,36 +199,8 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
     },
 
     loadTask: async (taskId) => {
-      const api = getApi(client);
       try {
-        let task = await api.research.task(taskId);
-        // If a fake scene only populated `explore.run` (e.g. `no_decision_model`, `daily_limit`),
-        // adopt that run's stop_reason and state when the research task is still the default fixture.
-        if (task.id === 'task-1' && task.run.stop_reason === null) {
-          try {
-            const funnelRun = await api.explore.run(task.run.id);
-            if (funnelRun.stop_reason !== null || funnelRun.state !== 'running') {
-              task = {
-                ...task,
-                id: taskId,
-                run: {
-                  ...task.run,
-                  state: funnelRun.state,
-                  stage: funnelRun.stage,
-                  stop_reason: funnelRun.stop_reason,
-                  budget: funnelRun.budget,
-                  counters: funnelRun.counters,
-                  checkpoint: funnelRun.checkpoint,
-                  decision_choices: funnelRun.decision_choices,
-                  decision_provider: funnelRun.decision_provider,
-                  retry_at: funnelRun.retry_at,
-                },
-              };
-            }
-          } catch {
-            // Ignore when explore.run is unavailable
-          }
-        }
+        const task = await getApi(client).research.task(taskId);
         get().upsertTask(task);
         return task;
       } catch (err) {
@@ -219,26 +209,22 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
       }
     },
 
+    // GET /kb/explore/jobs ~1/s while a task is on screen (CONTRACT "Live state"). The job list is
+    // cheap; the task itself is read again only when its job changed or left the active list.
     pollProgress: async (taskId) => {
       const api = getApi(client);
+      const id = taskId ?? get().activeTaskId;
       try {
         const jobRes = await api.explore.jobs({ active: true });
         set({ jobs: jobRes.jobs });
-      } catch {
-        // Ignore transient polling failures
-      }
-      const id = taskId ?? get().activeTaskId;
-      if (id) {
-        try {
-          const task = await api.research.task(id);
-          // Only overwrite if the returned task matches the requested ID or isn't already customized in store
-          const existing = get().tasksById[id];
-          if (!existing || task.id === id) {
-            get().upsertTask(task);
-          }
-        } catch {
-          // Ignore transient polling failures
+        const known = id ? get().tasksById[id] : undefined;
+        if (id && known) {
+          const job = jobRes.jobs.find((j) => j.id === known.run.id);
+          const unchanged = job !== undefined && job.updated_at === known.run.updated_at && job.state === known.run.state;
+          if (!unchanged) await get().loadTask(id);
         }
+      } catch {
+        // A missed tick is not an error; the next one tries again.
       }
     },
 
@@ -251,15 +237,7 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
       if (!payload.description.trim()) return null;
       set({ busy: true, error: null });
       try {
-        const created = await getApi(client).research.create(payload);
-        const task: KbResearchTask =
-          created.description !== payload.description && created.id === 'task-1'
-            ? {
-                ...created,
-                description: payload.description,
-                area_id: payload.area_id ?? created.area_id,
-              }
-            : created;
+        const task = await getApi(client).research.create(payload);
         set((s) => ({
           busy: false,
           mode: 'task',
@@ -276,140 +254,29 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
       }
     },
 
-    pauseTask: async (taskId) => {
-      const current = get().tasksById[taskId];
-      set({ busy: true, error: null });
-      try {
-        const res = await getApi(client).research.pause(taskId);
-        const task: KbResearchTask =
-          res.id === taskId && res.run.state === 'paused'
-            ? res
-            : {
-                ...(current ?? res),
-                id: taskId,
-                run: {
-                  ...(current?.run ?? res.run),
-                  state: 'paused',
-                  stop_reason: 'user_pause',
-                },
-              };
-        set((s) => ({
-          busy: false,
-          tasks: mergeTaskList(s.tasks, task),
-          tasksById: { ...s.tasksById, [task.id]: task },
-        }));
-        return task;
-      } catch (err) {
-        set({ busy: false, error: errorText(err) });
-        return null;
-      }
-    },
+    pauseTask: async (taskId) => runTaskAction(taskId, (api) => api.research.pause(taskId)),
+
+    cancelTask: async (taskId) => runTaskAction(taskId, (api) => api.research.cancel(taskId)),
 
     resumeTask: async (taskId, decisionChoice) => {
-      const current = get().tasksById[taskId];
-      const wasBudgetOrDone =
-        current?.run.stop_reason === 'budget' ||
-        current?.run.state === 'done' ||
-        current?.run.stop_reason === 'completed';
-      const checkpointId = current?.run.checkpoint?.id ?? 'checkpoint-1';
-      const revision = current?.run.checkpoint?.revision ?? 1;
-      set({ busy: true, error: null });
-      try {
-        const res = await getApi(client).research.resume(taskId, {
-          checkpoint_id: checkpointId,
-          revision,
+      const checkpoint = get().tasksById[taskId]?.run.checkpoint;
+      if (!checkpoint) {
+        set({ error: 'There is no saved point to continue from yet. Try again in a moment.' });
+        return null;
+      }
+      return runTaskAction(taskId, (api) =>
+        api.research.resume(taskId, {
+          checkpoint_id: checkpoint.id,
+          revision: checkpoint.revision,
           decision_choice: decisionChoice ?? null,
-        });
-        const base = current ?? res;
-        const limit = base.run.budget.limit || 30;
-        const task: KbResearchTask =
-          res.id === taskId && res.run.state === 'running' && !wasBudgetOrDone
-            ? res
-            : {
-                ...base,
-                id: taskId,
-                run: {
-                  ...base.run,
-                  state: 'running',
-                  stop_reason: null,
-                  budget: wasBudgetOrDone
-                    ? {
-                        ...base.run.budget,
-                        used: 0,
-                        remaining: limit,
-                        batch: base.run.budget.batch + 1,
-                      }
-                    : base.run.budget,
-                },
-              };
-        set((s) => ({
-          busy: false,
-          tasks: mergeTaskList(s.tasks, task),
-          tasksById: { ...s.tasksById, [task.id]: task },
-        }));
-        return task;
-      } catch (err) {
-        set({ busy: false, error: errorText(err) });
-        return null;
-      }
-    },
-
-    cancelTask: async (taskId) => {
-      const current = get().tasksById[taskId];
-      set({ busy: true, error: null });
-      try {
-        const res = await getApi(client).research.cancel(taskId);
-        const task: KbResearchTask =
-          res.id === taskId && res.run.state === 'cancelled'
-            ? res
-            : {
-                ...(current ?? res),
-                id: taskId,
-                run: {
-                  ...(current?.run ?? res.run),
-                  state: 'cancelled',
-                  stop_reason: 'cancelled',
-                },
-              };
-        set((s) => ({
-          busy: false,
-          tasks: mergeTaskList(s.tasks, task),
-          tasksById: { ...s.tasksById, [task.id]: task },
-        }));
-        return task;
-      } catch (err) {
-        set({ busy: false, error: errorText(err) });
-        return null;
-      }
+        }),
+      );
     },
 
     decidePermission: async (requestId, decision, chatId) => {
-      const res = await getApi(client).research.decide(requestId, { decision });
-      if (decision === 'allow_chat' && chatId) {
+      const updated = await getApi(client).research.decide(requestId, { decision });
+      if (decision === 'allow_chat' && chatId && updated.status === 'allowed') {
         set((s) => ({ chatGrants: { ...s.chatGrants, [chatId]: true } }));
-      }
-      let updated: KbResearchPermission = res;
-      if (res.status === 'pending') {
-        if (decision === 'deny') {
-          updated = {
-            ...res,
-            id: requestId,
-            status: 'denied',
-            task_id: null,
-            task_title: null,
-            task_state: null,
-          };
-        } else {
-          updated = {
-            ...res,
-            id: requestId,
-            status: 'allowed',
-            auto: decision === 'allow_chat',
-            task_id: res.task_id ?? 'task-rag',
-            task_title: res.task_title ?? res.arguments.description,
-            task_state: res.task_state ?? 'running',
-          };
-        }
       }
       if (updated.status === 'allowed' && updated.task_id) {
         void get().loadTask(updated.task_id);
@@ -428,30 +295,18 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
     },
 
     revokeGrant: async (chatId) => {
-      try {
-        const res = await getApi(client).research.revoke_grant(chatId);
-        set((s) => ({ chatGrants: { ...s.chatGrants, [chatId]: false } }));
-        return { ...res, allowed: false };
-      } catch {
-        return null;
-      }
+      // Errors reach the caller (the chip shows them); the grant is gone only if the server says so.
+      const res = await getApi(client).research.revoke_grant(chatId);
+      set((s) => ({ chatGrants: { ...s.chatGrants, [chatId]: res.allowed } }));
+      return res;
     },
 
     setChatGrant: (chatId, allowed) => {
       set((s) => ({ chatGrants: { ...s.chatGrants, [chatId]: allowed } }));
     },
 
-    sendFollowUp: (taskId, text) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      set((s) => ({
-        followUps: {
-          ...s.followUps,
-          [taskId]: [...(s.followUps[taskId] ?? []), trimmed],
-        },
-      }));
-    },
-  }));
+  };
+  });
 }
 
 export function getResearchStore(client: KbClient): StoreApi<ResearchState> {

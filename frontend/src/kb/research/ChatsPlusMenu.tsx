@@ -1,6 +1,6 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Icon, Popover } from '../ui';
-import { useServices } from '../state/context';
+import { useChats, useServices } from '../state/context';
 import { CompassIcon } from './CompassIcon';
 import { getResearchStore, useResearch } from './store';
 
@@ -111,6 +111,12 @@ export function ResearchTaskListSection() {
   const tasks = useResearch((s) => s.tasks);
   const mode = useResearch((s) => s.mode);
   const activeTaskId = useResearch((s) => s.activeTaskId);
+  // Tasks come from GET /kb/research/tasks; read again whenever the chat list moves (new task chat,
+  // rename, delete), which the chat list's own poll already drives.
+  const chatList = useChats((s) => s.list);
+  useEffect(() => {
+    void research.getState().loadTasks();
+  }, [research, chatList]);
 
   if (tasks.length === 0) return null;
 

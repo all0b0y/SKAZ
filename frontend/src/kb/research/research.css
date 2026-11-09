@@ -149,16 +149,6 @@
   overflow-wrap: anywhere;
 }
 
-.kb-research-followup {
-  max-width: 84%;
-  margin: var(--kb-sp-12) 0 0 auto;
-  padding: var(--kb-sp-10) var(--kb-sp-14);
-  border-radius: var(--kb-r-lg);
-  background: var(--kb-bg);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
 .kb-research-assistant-label {
   font-size: var(--t-xs);
   color: var(--kb-muted);

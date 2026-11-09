@@ -93,7 +93,7 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
       <h3 className="kb-research-perm__title">Allow a research task?</h3>
       <p className="kb-research-perm__desc">{current.arguments.description}</p>
       <p className="kb-research-perm__meta">
-        Searches scientific databases using topics and source identifiers. Checks up to 30 candidates against your wiki using your model allowance.
+        Only topics and source identifiers go to scientific databases, never your description or your materials. Up to 30 candidates are checked against your wiki with your model allowance.
       </p>
       {shownError && (
         <p role="alert" className="kb-inline-error">
@@ -138,6 +138,11 @@ export function ResearchGrantChip({ chatId }: { chatId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
+
+  // The grant lives on the server (per chat), so a reopened chat shows its chip again.
+  useEffect(() => {
+    void store.getState().loadGrant(chatId);
+  }, [store, chatId]);
 
   if (!allowed) return null;
 

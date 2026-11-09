@@ -2,7 +2,6 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { StippleGlobe } from '../fx/stipple/StippleWork';
 import { useServices } from '../state/context';
 import type { Section } from '../state/prefs';
-import type { SettingsSection } from '../state/ui';
 import { Button, Icon, Spinner } from '../ui';
 import { CompassIcon } from './CompassIcon';
 import {
@@ -13,7 +12,6 @@ import {
 } from './store';
 
 export const RESEARCH_POLL_MS = 1000;
-const EMPTY_FOLLOWUPS: readonly string[] = [];
 
 export function statusHeadingFor(task: KbResearchTask): string {
   const { state, stop_reason } = task.run;
@@ -57,11 +55,30 @@ export function stopReasonCopyFor(reason: ResearchStopReason): string | null {
       return 'OpenAlex daily limit reached. Add a free OpenAlex key in Settings → Search, or continue tomorrow.';
     case 'provider_unavailable':
       return 'The scientific database did not respond. Your previous findings are kept.';
+    case 'app_exit':
+      return 'SKAZ was closed while this ran. It resumes next time SKAZ starts, or you can continue now.';
     case 'failed':
       return 'The research task stopped because of an error.';
     default:
       return null;
   }
+}
+
+export const DECISION_CHOICE_LABELS = {
+  download_local: 'Download a local model',
+  openrouter_jev: 'Use OpenRouter · Jev (paid)',
+} as const;
+
+/** "Try again after 14:30" / "…after 11 Nov, 02:00", from `retry_at`; null when the server gave none. */
+export function retryCopyFor(retryAt: string | null): string | null {
+  if (!retryAt) return null;
+  const at = new Date(retryAt);
+  if (Number.isNaN(at.getTime())) return null;
+  const sameDay = at.toDateString() === new Date().toDateString();
+  const when = at.toLocaleString(undefined, sameDay
+    ? { hour: '2-digit', minute: '2-digit' }
+    : { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return `Try again after ${when}.`;
 }
 
 export function postProgressCopyFor(task: KbResearchTask): string {
@@ -72,10 +89,21 @@ export function postProgressCopyFor(task: KbResearchTask): string {
   if (state === 'done' || stop_reason === 'budget' || stop_reason === 'completed') {
     return 'This batch is finished. Your findings are ready to explore.';
   }
+  if (state === 'error' || stop_reason === 'failed') {
+    return 'The task stopped before it finished. Findings already kept remain in Explore.';
+  }
   if (state === 'cancelled' || stop_reason === 'cancelled') {
     return 'This research task was cancelled. Any findings already kept remain in Explore.';
   }
   return 'Your findings are kept. Continue whenever you’re ready.';
+}
+
+/**
+ * Opens Explore. The rail section arrives with F1; until its type is merged, the value is set
+ * through one cast here so nothing else in F2 depends on it.
+ */
+function openExploreSection(prefs: ReturnType<typeof useServices>['prefs']): void {
+  prefs.getState().set({ section: 'explore' as unknown as Section });
 }
 
 export interface ResearchTaskViewProps {
@@ -90,7 +118,7 @@ export interface ResearchTaskViewProps {
  * `provider_unavailable`). Polls `GET /kb/explore/jobs` ~1/s while visible and running.
  */
 export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: ResearchTaskViewProps) {
-  const { client, ui, prefs } = useServices();
+  const { client, ui, prefs, chats } = useServices();
   const store = getResearchStore(client);
   const activeTaskId = useResearch((s) => s.activeTaskId);
   const resolvedId = taskId ?? initialTask?.id ?? activeTaskId;
@@ -98,8 +126,9 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
   const task = storedTask ?? initialTask ?? null;
   const busy = useResearch((s) => s.busy);
   const error = useResearch((s) => s.error);
-  const followUps = useResearch((s) => (task ? s.followUps[task.id] ?? EMPTY_FOLLOWUPS : EMPTY_FOLLOWUPS));
   const [followUpText, setFollowUpText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialTask) {
@@ -171,30 +200,44 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
   const used = Math.min(limit, Math.max(0, run.budget.used));
   const isBudgetStop = run.stop_reason === 'budget';
   const isCompleted = run.state === 'done' || run.stop_reason === 'completed';
-  const isCancelled = run.state === 'cancelled' || run.stop_reason === 'cancelled';
-  const isPaused = run.state === 'paused' || (!isRunning && !isCompleted && !isCancelled);
+  const isFailed = run.state === 'error' || run.stop_reason === 'failed';
+  const isPaused = run.state === 'paused';
   const stopCopy = stopReasonCopyFor(run.stop_reason);
+  const retryCopy = run.stop_reason === 'openalex_daily_limit' ? retryCopyFor(run.retry_at) : null;
+  const needsDecisionModel = run.stop_reason === 'decision_model_required';
 
   const handleViewFindings = () => {
-    onOpenFindings?.(task.id);
-    prefs.getState().set({ section: 'explore' as unknown as Section });
+    if (onOpenFindings) onOpenFindings(task.id);
+    else openExploreSection(prefs);
   };
 
-  const handleSendFollowUp = () => {
-    if (!followUpText.trim()) return;
-    store.getState().sendFollowUp(task.id, followUpText);
+  // The task is a chat of its own (`chat_id`): a follow-up is a real message there, and the centre
+  // shows that chat from then on.
+  const handleSendFollowUp = async () => {
+    const text = followUpText.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setSendError(null);
+    chats.getState().open(task.chat_id);
+    const res = await chats.getState().send({ text, mentions: [], quotes: [], attachments: [] }, {});
+    setSending(false);
+    if (!res.ok) {
+      setSendError(res.error);
+      return;
+    }
     setFollowUpText('');
+    store.getState().close();
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      handleSendFollowUp();
+      void handleSendFollowUp();
     }
   };
 
   const openSearchSettings = () => {
-    ui.getState().openSettings('search' as unknown as SettingsSection);
+    ui.getState().openSettings('search');
   };
 
   return (
@@ -217,6 +260,8 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
                 <StippleGlobe className="kb-research-globe" />
               ) : isCompleted ? (
                 <Icon name="check" size={16} />
+              ) : isFailed ? (
+                <Icon name="warning" size={16} />
               ) : (
                 <Icon name="clock" size={16} />
               )}
@@ -240,11 +285,12 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
             {stopCopy && (
               <p className="kb-research-progress__stop" role="status">
                 {stopCopy}
+                {retryCopy && ` ${retryCopy}`}
               </p>
             )}
 
             <div className="kb-research-progress__actions">
-              {isRunning && (
+              {run.state === 'running' && (
                 <>
                   <Button disabled={busy} onClick={() => void store.getState().pauseTask(task.id)}>
                     Pause
@@ -255,66 +301,50 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
                 </>
               )}
 
-              {isPaused && isBudgetStop && (
+              {isPaused && needsDecisionModel && (
                 <>
-                  <Button disabled={busy} onClick={() => void store.getState().resumeTask(task.id)}>
-                    Continue · next 30
+                  {run.decision_choices.map((choice) => (
+                    <Button
+                      key={choice}
+                      disabled={busy}
+                      onClick={() => void store.getState().resumeTask(task.id, choice)}
+                    >
+                      {DECISION_CHOICE_LABELS[choice]}
+                    </Button>
+                  ))}
+                  <Button variant="quiet" onClick={() => ui.getState().openSettings('models')}>
+                    Open Settings → Models
                   </Button>
-                  <Button
-                    variant="quiet"
-                    disabled={busy}
-                    onClick={() => void store.getState().cancelTask(task.id)}
-                  >
-                    Cancel
-                  </Button>
-                  <span className="kb-research-progress__note">
-                    A new batch uses your model allowance.
-                  </span>
                 </>
               )}
 
-              {isPaused && !isBudgetStop && (
+              {isPaused && !needsDecisionModel && (
                 <>
                   <Button disabled={busy} onClick={() => void store.getState().resumeTask(task.id)}>
-                    Continue
+                    {isBudgetStop ? `Continue · next ${limit}` : 'Continue'}
                   </Button>
-                  {run.stop_reason === 'decision_model_required' && (
-                    <Button onClick={() => ui.getState().openSettings('models')}>
-                      Open Settings → Models
-                    </Button>
-                  )}
                   {run.stop_reason === 'science_consent_required' && (
-                    <Button onClick={openSearchSettings}>
-                      Open Settings → Search
-                    </Button>
+                    <Button onClick={openSearchSettings}>Open Settings → Search</Button>
                   )}
                   {run.stop_reason === 'openalex_daily_limit' && (
-                    <Button onClick={openSearchSettings}>
-                      Add key in Settings
-                    </Button>
+                    <Button onClick={openSearchSettings}>Add key in Settings</Button>
                   )}
-                  <Button
-                    variant="quiet"
-                    disabled={busy}
-                    onClick={() => void store.getState().cancelTask(task.id)}
-                  >
-                    Cancel
-                  </Button>
                   <span className="kb-research-progress__note">
-                    {`${run.budget.remaining} candidate checks remain in this batch.`}
+                    {isBudgetStop
+                      ? 'A new batch uses your model allowance.'
+                      : `${run.budget.remaining} candidate checks remain in this batch.`}
                   </span>
                 </>
               )}
 
-              {isCompleted && (
-                <>
-                  <Button disabled={busy} onClick={() => void store.getState().resumeTask(task.id)}>
-                    Continue · next 30
-                  </Button>
-                  <span className="kb-research-progress__note">
-                    A new batch uses your model allowance.
-                  </span>
-                </>
+              {isPaused && (
+                <Button
+                  variant="quiet"
+                  disabled={busy}
+                  onClick={() => void store.getState().cancelTask(task.id)}
+                >
+                  Cancel
+                </Button>
               )}
             </div>
           </section>
@@ -342,12 +372,6 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
             </button>
           </div>
 
-          {followUps.map((msg, i) => (
-            <div key={i} className="kb-research-followup">
-              {msg}
-            </div>
-          ))}
-
           <div className="kb-research-composer kb-research-composer--compact">
             <textarea
               className="kb-research-composer__input"
@@ -357,8 +381,13 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
               onChange={(e) => setFollowUpText(e.target.value)}
               onKeyDown={handleComposerKeyDown}
             />
+            {sendError && (
+              <p role="alert" className="kb-inline-error">
+                {sendError}
+              </p>
+            )}
             <div className="kb-research-composer__actions">
-              <Button disabled={!followUpText.trim()} onClick={handleSendFollowUp}>
+              <Button disabled={!followUpText.trim() || sending} busy={sending} onClick={() => void handleSendFollowUp()}>
                 Send
               </Button>
             </div>
