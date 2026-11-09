@@ -44,7 +44,7 @@ function moveWithFocus(route: ReturnType<typeof useStudyRoute>, part: KbStudyPar
 /**
  * A deck or test block (S5, W2): header (fold chevron in the chat, the title — click it to rename —
  * progress, and one size arrow: ⤢ beside the chat / ⤡ back into the chat), the stack or the test,
- * and the "Save to wiki" row. The same block in the chat or beside it — never in two places.
+ * and the "Save to Study" row. The same block in the chat or beside it — never in two places.
  */
 export function StudyBlock({ chatId, part, where }: { chatId: string; part: KbStudyPart; where: StudyPlace }) {
   const { ui, client } = useServices();
@@ -185,7 +185,7 @@ function SaveRow({ chatId, part }: { chatId: string; part: KbStudyPart }) {
       {status === 'saved' ? (
         <>
           <Icon name="allowed" size={15} />
-          <span>Saved to wiki</span>
+          <span>Saved to Study</span>
           <span className="kb-st-path"><PathText path={part.save.path} /></span>
           {part.save.page_id && (
             <span className="kb-st-sv"><Button size="sm" onClick={() => open({ type: 'page', id: part.save.page_id! })}>Open</Button></span>
@@ -195,7 +195,7 @@ function SaveRow({ chatId, part }: { chatId: string; part: KbStudyPart }) {
         <>
           <Icon name="about" size={15} />
           <span className="kb-st-path">Not saved — this {deck ? 'deck' : 'test'} lives only in this chat{deck ? '; grades are not scheduled' : ''}.</span>
-          <span className="kb-st-sv"><Button size="sm" busy={busy === 'allow'} onClick={() => void decide('allow')}>Save to wiki</Button></span>
+          <span className="kb-st-sv"><Button size="sm" busy={busy === 'allow'} onClick={() => void decide('allow')}>Save to Study</Button></span>
         </>
       ) : (
         <>
@@ -204,7 +204,7 @@ function SaveRow({ chatId, part }: { chatId: string; part: KbStudyPart }) {
           <span className="kb-st-path"><PathText path={part.save.path} /></span>
           <span className="kb-st-sv">
             <Button size="sm" busy={busy === 'deny'} disabled={!!busy} onClick={() => void decide('deny')}>Deny</Button>
-            <Button size="sm" variant="fill" busy={busy === 'allow'} disabled={!!busy} onClick={() => void decide('allow')}>Save to wiki</Button>
+            <Button size="sm" variant="fill" busy={busy === 'allow'} disabled={!!busy} onClick={() => void decide('allow')}>Save to Study</Button>
           </span>
         </>
       )}

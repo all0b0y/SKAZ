@@ -27,7 +27,7 @@ from typing import Any, Literal, get_args
 from .frontmatter import FrontmatterError, render_frontmatter, split_frontmatter
 from .text import block_hash
 
-#: ``deck`` / ``test``: flashcards and tests (0.3.1 S2, S6), in ``Wiki/Decks`` and ``Wiki/Tests``.
+#: ``deck`` / ``test``: flashcards and tests (0.3.1 S2, S6), in ``Study/Decks`` and ``Study/Tests`` (N4-7).
 PageKind = Literal["concept", "note", "folder", "analysis", "deck", "test"]
 BlockKind = Literal["from_source", "connection", "explanation", "user_note"]
 Owner = Literal["agent", "user", "user_edited"]

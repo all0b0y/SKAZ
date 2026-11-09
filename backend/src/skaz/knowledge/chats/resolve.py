@@ -213,6 +213,8 @@ _TOOL_ACTIONS: dict[str, str] = {
     "skaz_study_read": "Read Flashcards or Test",
     "skaz_study_show": "Show Flashcards or Test",
     "skaz_study_unclear": "Read Unclear Study Items",
+    "skaz_study_past_questions": "Read Past Study Questions",
+    "skaz_study_mistakes": "Read Study Mistakes",
     "skaz_me_edit": "Edit Me Profile or Skill",
     "skaz_me_skill": "Read Me Skill",
     "skaz_ask_user": "Ask Question",

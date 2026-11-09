@@ -189,7 +189,7 @@ async def test_grades_wait_in_the_block_and_enter_fsrs_when_the_deck_is_saved(wo
     block = await asyncio.to_thread(study.save, block.id, "allow")
     assert block.save_status == "saved" and block.page_id is not None
     record = runtime.kb.page_repo.get(block.page_id)
-    assert (record.kind, record.rel_path) == ("deck", "Wiki/Decks/Термодинамика.md")
+    assert (record.kind, record.rel_path) == ("deck", "Study/Decks/Термодинамика.md")
     stored = study.store.cards([first, second])
     assert stored[first].page_id == block.page_id and stored[first].state == "learning"
     assert stored[second].marked_hard
@@ -230,8 +230,8 @@ async def test_a_second_deck_with_the_same_title_is_saved_beside_the_first(world
     one = await asyncio.to_thread(study.save, (await _deck(runtime, library)).id, "allow")
     two = await asyncio.to_thread(study.save, (await _deck(runtime, library)).id, "allow")
     paths = {runtime.kb.page_repo.get(b.page_id).rel_path for b in (one, two)}
-    assert paths == {"Wiki/Decks/Термодинамика.md", "Wiki/Decks/Термодинамика (2).md"}
-    assert study.proposed_path(two) == "Wiki/Decks/Термодинамика (2).md"
+    assert paths == {"Study/Decks/Термодинамика.md", "Study/Decks/Термодинамика (2).md"}
+    assert study.proposed_path(two) == "Study/Decks/Термодинамика (2).md"
 
 
 # -- tests: choice / multi / short by code, open by the agent (S4, Q6) ------------------------------------
@@ -378,7 +378,7 @@ async def test_a_saved_test_keeps_wrong_options_apart_and_is_shown_again(world: 
     study = runtime.kb_study
     block = await asyncio.to_thread(study.save, (await _test(runtime, library)).id, "allow")
     text = _page_text(runtime, block.page_id)
-    assert "Wiki/Tests/" in runtime.kb.page_repo.get(block.page_id).rel_path
+    assert "Study/Tests/" in runtime.kb.page_repo.get(block.page_id).rel_path
     assert "Made up by the agent:" in text or "Придумано агентом:" in text
     questions = read_questions(parse_page(text))
     assert [q.type for q in questions] == ["choice", "multi", "short", "open"]
@@ -524,7 +524,7 @@ async def test_study_api_reads_grades_saves_and_settings(world: Any, kb_client: 
         3,
         "pending",
     )
-    assert part["save"]["path"] == "Wiki/Decks/Термодинамика.md"
+    assert part["save"]["path"] == "Study/Decks/Термодинамика.md"
     assert part["cards"][0]["intervals"]["good"] == "10m" and part["cards"][0]["page_id"] is None
     card = part["cards"][0]["id"]
     graded = (
@@ -731,12 +731,12 @@ async def test_a_generated_test_title_with_a_colon_is_saved_at_once_and_keeps_th
     await kb_client.post(f"/kb/study/{block_id}/answer", json={"item_id": first.id, "choices": [right]})
     part = (await kb_client.get(f"/kb/study/{block_id}")).json()
     assert part["title"] == AUDIT_TITLE  # the block shows what the agent wrote until it is a page
-    assert part["save"]["path"] == f"Wiki/Tests/{AUDIT_NAME}.md"
+    assert part["save"]["path"] == f"Study/Tests/{AUDIT_NAME}.md"
     saved = await kb_client.post(f"/kb/study/{block_id}/save", json={"decision": "allow"})
     assert saved.status_code == 200, saved.text
     view = saved.json()
     assert view["save"]["status"] == "saved" and view["title"] == AUDIT_NAME
-    assert runtime.kb.page_repo.get(view["save"]["page_id"]).rel_path == f"Wiki/Tests/{AUDIT_NAME}.md"
+    assert runtime.kb.page_repo.get(view["save"]["page_id"]).rel_path == f"Study/Tests/{AUDIT_NAME}.md"
     items = runtime.kb_study.attempt(runtime.kb_study.get(block_id)).answers["items"]
     assert items[first.id]["score"] == 1.0  # the given answer survives the save
 
@@ -747,7 +747,7 @@ async def test_every_forbidden_character_and_a_long_title_still_give_a_deck_page
     odd = await _deck(runtime, library, title='Энтропия/порядок: что? "хаос" <да> | #тег ^x [[a]]')
     saved = await asyncio.to_thread(study.save, odd.id, "allow")
     assert runtime.kb.page_repo.get(saved.page_id).rel_path == \
-        "Wiki/Decks/Энтропия порядок что хаос да тег x a.md"
+        "Study/Decks/Энтропия порядок что хаос да тег x a.md"
     long_title = "Термодинамика необратимых процессов " * 3  # 108 letters: under the tool's 120, > 200 bytes
     long = await asyncio.to_thread(study.save, (await _deck(runtime, library, title=long_title)).id, "allow")
     stem = Path(runtime.kb.page_repo.get(long.page_id).rel_path).stem
@@ -765,7 +765,7 @@ async def test_rename_before_saving_changes_the_title_without_asking_the_agent(
     renamed = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "  Энтропия: основы  "})
     assert renamed.status_code == 200, renamed.text
     assert renamed.json()["title"] == "Энтропия: основы"
-    assert renamed.json()["save"]["path"] == "Wiki/Decks/Энтропия основы.md"
+    assert renamed.json()["save"]["path"] == "Study/Decks/Энтропия основы.md"
     assert renamed.json()["save"]["status"] == "pending"
     empty = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "   "})
     assert empty.status_code == 422
@@ -786,7 +786,7 @@ async def test_rename_after_saving_moves_the_page_keeps_fsrs_and_links_follow(
     assert renamed.status_code == 200, renamed.text
     assert renamed.json()["title"] == "Энтропия колода"
     record = runtime.kb.page_repo.get(saved.page_id)
-    assert record.rel_path == "Wiki/Decks/Энтропия колода.md"
+    assert record.rel_path == "Study/Decks/Энтропия колода.md"
     assert study.store.cards([card])[card].page_id == saved.page_id  # FSRS stays with the page id
     taken = await kb_client.post(f"/kb/study/{block.id}/rename", json={"title": "Другая колода"})
     assert taken.status_code == 409

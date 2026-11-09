@@ -31,7 +31,7 @@ from typing import TypeVar
 
 from ..errors import LibraryUnavailable, NotFound
 from ..library.fsio import entry_kind
-from ..library.layout import WIKI_SUBDIRS
+from ..library.layout import PAGE_FOLDERS
 from ..library.library import FolderEntry, Library, MaterialFiles
 from ..markdown.page import Block, PageFormatError, PageMeta, UserParagraph, parse_page, render_page
 from ..markdown.text import block_hash
@@ -212,8 +212,8 @@ def _scan(library: Library, known: KnownPaths, result: ScanResult, stop: StopChe
     result.materials = _pick(materials_by_id, known.materials, lambda m: m.rel_dir, result.skipped)
 
     pages_by_id: dict[str, list[ScannedPage]] = defaultdict(list)
-    for subdir in WIKI_SUBDIRS.values():
-        directory = library.wiki_dir / subdir
+    for page_folder in PAGE_FOLDERS:
+        directory = library.root / page_folder
         try:
             if entry_kind(directory) != "dir":
                 continue

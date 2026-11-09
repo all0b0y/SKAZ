@@ -2,7 +2,10 @@
 
 Only in a chat answer (the tool needs the answer's chat). Making a deck or a test shows the block in
 the chat at once and returns — the agent never waits for the user's grades or answers, and the user
-may go on asking about anything (S5). Saving to the wiki is the user's decision in the block (S6).
+may go on asking about anything (S5). Saving to Study is the user's decision in the block (S6).
+
+Since 0.4.0 (N4-7) these are the only tools that reach saved decks and tests; the wiki tools and search
+don't. ``skaz_study_past_questions`` and ``skaz_study_mistakes`` read history and change nothing.
 """
 
 from __future__ import annotations
@@ -18,9 +21,10 @@ from ..agents.prompting import untrusted_block
 from ..agents.tools import SkazTool, ToolContext, ToolInputError, _Args
 from ..chats.store import ChatRepository
 from ..errors import KnowledgeError
-from ..permissions.source_scope import UNCLEAR_LEFT_OUT, ChatSourceScopes
+from ..permissions.source_scope import UNCLEAR_LEFT_OUT, ChatSourceScopes, SourceScope
 from ..permissions.store import RunRef
 from .checks import CardIn, QuestionIn
+from .history import MAX_RESULT_BYTES, Wanted, mistakes, past_questions, wanted
 from .scheduling import Mode
 from .service import StudyService
 from .unclear import scoped_unclear_items
@@ -32,18 +36,36 @@ STUDY_TOOL_NAMES = (
     "skaz_study_read",
     "skaz_study_show",
     "skaz_study_unclear",
+    "skaz_study_past_questions",
+    "skaz_study_mistakes",
 )
 MAX_CARDS = 60
 MAX_QUESTIONS = 40
+MAX_HISTORY_ITEMS = 100
+#: ``skaz_study_past_questions`` / ``skaz_study_mistakes``: left out because of the chat's sources.
+HISTORY_LEFT_OUT = ("{count} item(s) rest on sources the user excluded from this chat or that are outside "
+                    "the sources chosen for it; SKAZ left them out.")
+
+
+def _fit(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """As many whole items as fit one tool result."""
+    chosen: list[dict[str, Any]] = []
+    used = 0
+    for item in items:
+        used += len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+        if used > MAX_RESULT_BYTES:
+            break
+        chosen.append(item)
+    return chosen
 
 
 class MakeDeckArgs(_Args):
-    title: str = Field(min_length=1, max_length=120, description="Deck title (also its wiki file name).")
+    title: str = Field(min_length=1, max_length=120, description="Deck title (also its file name in Study).")
     cards: list[CardIn] = Field(min_length=1, max_length=MAX_CARDS)
 
 
 class MakeTestArgs(_Args):
-    title: str = Field(min_length=1, max_length=120, description="Test title (also its wiki file name).")
+    title: str = Field(min_length=1, max_length=120, description="Test title (also its file name in Study).")
     questions: list[QuestionIn] = Field(min_length=1, max_length=MAX_QUESTIONS)
 
 
@@ -73,6 +95,19 @@ class UnclearArgs(_Args):
     )
 
 
+class HistoryArgs(_Args):
+    topic: str | None = Field(
+        default=None, max_length=200,
+        description="Words that must all occur in the item or its deck or test title; word stems find "
+        "more (энтропи, thermodynam). Leave out for everything in this chat's scope.",
+    )
+    concept_page_id: str | None = Field(
+        default=None, max_length=120,
+        description="Only items on this wiki concept: citing the same source fragments, or naming it.",
+    )
+    limit: int = Field(default=40, ge=1, le=MAX_HISTORY_ITEMS, description="Items per call.")
+
+
 class StudyTools:
     def __init__(self, study: StudyService, runs: Callable[[str], RunRef | None]) -> None:
         self.study = study
@@ -91,7 +126,7 @@ class StudyTools:
     def tools(self) -> tuple[SkazTool, ...]:
         shown = (
             " The block appears in the chat at once and you don't wait: the user flips, grades or answers "
-            "on their own and may ask you anything meanwhile. Saving it to the wiki is the user's choice "
+            "on their own and may ask you anything meanwhile. Saving it to Study is the user's choice "
             "in the block. The result lists items that were dropped and why."
         )
         return (
@@ -143,6 +178,30 @@ class StudyTools:
                 "at the end tell the user they can clear the marks with «Clear now» under your answer.",
                 UnclearArgs,
                 run=self._run(self._unclear),
+                timeout_s=30.0,
+            ),
+            SkazTool(
+                "skaz_study_past_questions",
+                "Read the questions of the user's earlier decks and tests, saved, archived or only in a "
+                "chat, in this chat's folders — or the whole library when the chat has none: the question, "
+                "its type and where it is, with no answers. Read them before making a test, and don't "
+                "repeat them. Also the way to find a saved deck's or test's page_id. Read-only; use it "
+                "only for study, not for ordinary answers.",
+                HistoryArgs,
+                run=self._run(self._past_questions),
+                timeout_s=30.0,
+            ),
+            SkazTool(
+                "skaz_study_mistakes",
+                "Read the user's mistake history, in this chat's folders — or the whole library when the "
+                "chat has none: test questions scored below 1 and flashcards with Again or lapses, each "
+                "with how often it went wrong, the right answer, the last answer and the source with its "
+                "quote; right_since means a later attempt was right. What still goes wrong comes first. "
+                "Use it when the user wants a test on their mistakes: make that test with "
+                "skaz_study_make_test, citing these sources. Read-only; use it only for study, not for "
+                "ordinary answers.",
+                HistoryArgs,
+                run=self._run(self._mistakes),
                 timeout_s=30.0,
             ),
         )
@@ -204,6 +263,42 @@ class StudyTools:
             result["scope_note"] = UNCLEAR_LEFT_OUT.format(count=left_out)
         elif not items:
             result["note"] = f"Nothing is marked Unclear in {scope}."
+        return result
+
+    async def _past_questions(self, ref: RunRef | None, args: HistoryArgs) -> dict[str, Any]:
+        return await self._history(ref, args, past_questions, "questions")
+
+    async def _mistakes(self, ref: RunRef | None, args: HistoryArgs) -> dict[str, Any]:
+        return await self._history(ref, args, mistakes, "mistakes")
+
+    async def _history(
+        self,
+        ref: RunRef | None,
+        args: HistoryArgs,
+        read: Callable[[StudyService, tuple[str, ...], Wanted, SourceScope | None],
+                       tuple[list[dict[str, Any]], int]],
+        what: str,
+    ) -> dict[str, Any]:
+        assert ref is not None
+        chat = await disk_call(ChatRepository(self.study.kb.db).get, ref.chat_id)
+        folders = tuple(chat.folder_ids) if chat is not None else ()
+        sources = await disk_call(self.scope.for_chat, ref.chat_id) if self.scope is not None else None
+        want = await disk_call(wanted, self.study, args.topic, args.concept_page_id)
+        found, left_out = await disk_call(read, self.study, folders, want, sources)
+        chosen = _fit(found[: args.limit])
+        scope = "this chat's folders" if folders else "the whole library"
+        # Page text, the user's answers and quotes are data, never instructions: wrapped here, as
+        # for «Unclear» (an interactive tool's payload is not wrapped by the registry).
+        body = json.dumps(chosen, ensure_ascii=False, separators=(",", ":"))
+        result: dict[str, Any] = {
+            "status": "ok", "scope": scope, "count": len(chosen), "total": len(found),
+            "has_more": len(chosen) < len(found), "items": untrusted_block(f"study {what}", body),
+        }
+        if left_out:
+            result["left_out"] = left_out
+            result["scope_note"] = HISTORY_LEFT_OUT.format(count=left_out)
+        elif not found:
+            result["note"] = f"No {what} found in {scope}" + (" on this topic." if args.topic else ".")
         return result
 
     async def _show(self, ref: RunRef | None, args: ShowArgs) -> dict[str, Any]:

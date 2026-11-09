@@ -1,7 +1,7 @@
-"""External edits of the wiki (Obsidian, Finder): polling ``Wiki/`` every 2 s (API-B2 §2.4).
+"""External edits of the wiki (Obsidian, Finder): polling the page folders every 2 s (API-B2 §2.4).
 
-No new dependency (no FSEvents/watchfiles): one ``scandir`` of the four page
-folders per tick, comparing ``(mtime_ns, size)``. A new or changed page is
+No new dependency (no FSEvents/watchfiles): one ``scandir`` of the page
+folders (``Wiki/`` and ``Study/``) per tick, comparing ``(mtime_ns, size)``. A new or changed page is
 re-read (an edited agent block becomes ``user_edited`` — the scanner's rule)
 and re-indexed — an edit of a known page is a manual edit for connections (a
 connection it deleted is remembered, the page waits for a connection run); a
@@ -17,7 +17,7 @@ from pathlib import Path
 from ..errors import LibraryUnavailable
 from ..index import indexer
 from ..index.scanner import ScannedPage, read_page
-from ..library.layout import WIKI_SUBDIRS
+from ..library.layout import PAGE_FOLDERS
 from ..markdown.page import PageFormatError
 from ..service import KnowledgeService
 from .connections import PairIds, after_user_edit, linked_pages
@@ -35,8 +35,8 @@ class WikiWatcher:
 
     def _take(self, root: Path) -> Snapshot:
         found: Snapshot = {}
-        for subdir in WIKI_SUBDIRS.values():
-            directory = root / "Wiki" / subdir
+        for folder in PAGE_FOLDERS:
+            directory = root / folder
             try:
                 entries = list(os.scandir(directory))
             except FileNotFoundError:
@@ -45,7 +45,7 @@ class WikiWatcher:
                 if entry.name.startswith(".") or not entry.name.endswith(".md") or not entry.is_file():
                     continue
                 stat = entry.stat()
-                found[f"Wiki/{subdir}/{entry.name}"] = (stat.st_mtime_ns, stat.st_size)
+                found[f"{folder}/{entry.name}"] = (stat.st_mtime_ns, stat.st_size)
         return found
 
     def poll(self) -> int:

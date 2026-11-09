@@ -177,13 +177,13 @@ for (const theme of THEMES) {
       }
       // The long title ellipsizes before the size button; it never sits on it.
       expect(overlaps((await deck.getByRole('button', { name: /^Rename: ИТ-аудит/ }).boundingBox())!, grow)).toBe(false);
-      await deck.getByRole('button', { name: 'Save to wiki' }).click();
+      await deck.getByRole('button', { name: 'Save to Study' }).click();
       const error = deck.locator('.kb-st-save .kb-st-error');
       await expect(error).toContainText('Не удалось сохранить');
       // The block's layout animation (the taller 3:2 card) may still be moving the row: measure once it has settled.
-      const box = async () => JSON.stringify([await error.boundingBox(), await deck.getByRole('button', { name: 'Save to wiki' }).boundingBox()]);
+      const box = async () => JSON.stringify([await error.boundingBox(), await deck.getByRole('button', { name: 'Save to Study' }).boundingBox()]);
       await expect.poll(async () => { const a = await box(); await page.waitForTimeout(120); return a === await box(); }, { timeout: 5000 }).toBe(true);
-      const save = (await deck.getByRole('button', { name: 'Save to wiki' }).boundingBox())!;
+      const save = (await deck.getByRole('button', { name: 'Save to Study' }).boundingBox())!;
       const deny = (await deck.getByRole('button', { name: 'Deny' }).boundingBox())!;
       const err = (await error.boundingBox())!;
       expect(overlaps(err, save)).toBe(false);

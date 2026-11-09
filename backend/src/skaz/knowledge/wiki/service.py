@@ -33,6 +33,7 @@ from ..ingest.jobs import JobKind, JobRecord
 from ..ingest.runner import SPEECH_KINDS
 from ..ingest.service import IngestService
 from ..ingest.writer import WikiWriter
+from ..library.layout import STUDY_KINDS
 from ..logsafe import error_note
 from ..markdown.page import PageDocument
 from ..notifications.feed import NotificationFeed, register_material_kinds
@@ -145,6 +146,8 @@ class WikiService:
         self.jobs = WikiJobs(ingest.jobs, profile=ingest.profile)
         self.feed = NotificationFeed(kb)
         self.watcher = WikiWatcher(kb)
+        #: The user deleted this page (N4-8: a deck or test's mistake history goes along).
+        self.page_deleted: list[Callable[[str], None]] = []
         self.recognition = RecognitionChecker(
             kb,
             self.store,
@@ -190,6 +193,9 @@ class WikiService:
         self.kb.after_scan.append(self._after_scan)
 
     def _after_scan(self) -> None:
+        if self.kb.wiki_index_stale:  # decks and tests just left the wiki (N4-7): the index forgets them
+            self.kb.wiki_index_stale = False
+            self._refresh_index()
         try:
             self.store.rebuild_index()
             self.graph.refresh(force=True)
@@ -689,7 +695,7 @@ class WikiService:
             found = []
             for other in ids:
                 record = self.kb.page_repo.get(other)
-                if record is not None:
+                if record is not None and (view.kind in STUDY_KINDS or record.kind not in STUDY_KINDS):
                     found.append(PageRefView(record.id, record.kind, record.title))
             return found
 
@@ -728,7 +734,8 @@ class WikiService:
         with self.ctx.write_lock:
             before = self.kb.page_repo.get(page_id)
             renamed = rename_page(self.kb, self.graph, page_id, title)
-            if before is not None and renamed.stem != Path(before.rel_path).stem:
+            if (before is not None and before.kind not in STUDY_KINDS
+                    and renamed.stem != Path(before.rel_path).stem):
                 append_page_log(self.kb.require(), self.ingest.settings().language,
                                 f"{Path(before.rel_path).stem} → {renamed.stem}", renamed=True)
         self.graph.refresh(force=True)
@@ -744,7 +751,10 @@ class WikiService:
         with self.ctx.write_lock:
             plan = plan_page_delete(self.kb, self.graph, page_id)
             execute_page_delete(self.kb, plan)
-            append_page_log(self.kb.require(), self.ingest.settings().language, plan.page.title)
+            if plan.page.kind not in STUDY_KINDS:  # Wiki/log.md is the wiki's chronicle
+                append_page_log(self.kb.require(), self.ingest.settings().language, plan.page.title)
+            for listener in self.page_deleted:
+                listener(page_id)
             for item in self.kb.notifications():
                 subject = item.subject or {}
                 about = subject.get("id") == page_id or item.payload.get("page_id") == page_id

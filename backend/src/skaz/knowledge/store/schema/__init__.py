@@ -33,6 +33,7 @@ from . import (
     speech,
     study,
     study_items,
+    study_shelf,
     web_search,
     wiki2,
     wiki_connections,
@@ -64,6 +65,7 @@ MODULES: tuple[SchemaModule, ...] = (
     freshness,
     maintenance,
     repeats,
+    study_shelf,
 )
 
 _VERSIONS_SQL = """

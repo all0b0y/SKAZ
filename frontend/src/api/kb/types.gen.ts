@@ -2374,6 +2374,13 @@ export interface KbStudyCountIn {
   counted?: boolean;
 }
 
+/** What the manual delete's confirmation says goes along with the page. */
+export interface KbStudyDeleteWarning {
+  text: string;
+  attempts: number;
+  reviews: number;
+}
+
 export interface KbStudyGradeIn {
   item_id: string;
   grade: "again" | "hard" | "good" | "easy";
@@ -2414,6 +2421,12 @@ export interface KbStudyIntervals {
   hard: string | null;
   good: string | null;
   easy: string | null;
+}
+
+export interface KbStudyLibrary {
+  decks: KbStudyShelfEntry[];
+  tests: KbStudyShelfEntry[];
+  archived: KbStudyShelfEntry[];
 }
 
 export interface KbStudyMarkIn {
@@ -2561,6 +2574,17 @@ export interface KbStudySettings {
 
 export interface KbStudySettingsPatch {
   new_per_day: number;
+}
+
+export interface KbStudyShelfEntry {
+  page_id: string;
+  kind: "deck" | "test";
+  title: string;
+  folders: string[];
+  opened_at: string;
+  archived_at: string | null;
+  archived_by: "auto" | "user" | null;
+  suggest_archive: boolean;
 }
 
 /** «Clear now»: the user clears these marks (the agent never does). */
@@ -4228,6 +4252,48 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: KbWikiSettingsUpdate;
     response: KbWikiSettings;
+    status: 200;
+  };
+  "GET /kb/study-library": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyLibrary;
+    status: 200;
+  };
+  "POST /kb/study-library/{page_id}/archive": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyShelfEntry;
+    status: 200;
+  };
+  "GET /kb/study-library/{page_id}/delete-warning": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyDeleteWarning;
+    status: 200;
+  };
+  "POST /kb/study-library/{page_id}/keep": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyShelfEntry;
+    status: 200;
+  };
+  "POST /kb/study-library/{page_id}/opened": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyShelfEntry;
+    status: 200;
+  };
+  "POST /kb/study-library/{page_id}/unarchive": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbStudyShelfEntry;
     status: 200;
   };
   "GET /kb/study/decks/{page_id}": {

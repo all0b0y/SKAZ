@@ -1,8 +1,8 @@
-"""Decks and tests in chats, FSRS reviews and saving to the wiki (0.3.1 S1–S12, W2, A-2…A-4; Q5–Q9, Q14).
+"""Decks and tests in chats, FSRS reviews and saving to Study (0.3.1 S1–S12, W2, A-2…A-4; Q5–Q9, Q14).
 
 The agent makes a deck or a test with one tool call (A-3); SKAZ checks every right answer against its
 source (S3), shows the block in the chat at once and lets the agent go on talking (S5). The block's
-last row asks "Save to wiki" (S6, decided whenever the user wants — Q5); until then the cards live in
+last row asks "Save to Study" (S6, decided whenever the user wants — Q5); until then the cards live in
 the block and their grades wait to enter FSRS. Saved decks are shown again by the agent or from the
 deck page in a mode (S8, S12). Everything here runs in worker threads (``disk_call``) except the open
 answer check, which waits for an agent.
@@ -32,6 +32,7 @@ from ..ingest.drafts import file_name
 from ..ingest.pages import spaced
 from ..ingest.protocols import IdentityTextLayer, TextLayer
 from ..keyed_locks import KeyedThreadLocks
+from ..library.layout import STUDY_DIR, STUDY_SUBDIRS
 from ..library.names import MAX_NAME_BYTES, numbered_name, validate_name
 from ..markdown.page import Cite, PageDocument, PageMeta, parse_page
 from ..markdown.text import name_key
@@ -94,6 +95,7 @@ from .scheduling import (
     preview,
     review,
 )
+from .shelf import StudyShelf
 from .store import Attempt, BlockKind, Place, Review, Side, StudyBlock, StudyStore
 
 log = logging.getLogger(__name__)
@@ -207,6 +209,17 @@ class StudyService:
         self._loop: asyncio.AbstractEventLoop | None = None
         #: One change at a time per block (C-04); see ``_one_at_a_time``.
         self._block_locks = KeyedThreadLocks()
+        #: N4-8: when decks and tests were last opened; archive rules.
+        self.shelf = StudyShelf(self, lambda: self._clock())
+        if wiki is not None:  # the app's own service (the API's read-only one has no wiki)
+            kb.after_scan.append(self._sweep_shelf)
+            wiki.page_deleted.append(self.store.forget_page_history)
+
+    def _sweep_shelf(self) -> None:
+        try:
+            self.shelf.sweep()
+        except Exception as error:  # the scan itself succeeded; the shelf sweeps again when it is read
+            log.warning("Study shelf sweep failed: %s", type(error).__name__)
 
     # -- helpers ------------------------------------------------------------------------------------
 
@@ -373,8 +386,11 @@ class StudyService:
         """
         pages = [self.kb.page_repo.get(page_id) for page_id in dict.fromkeys(page_ids)]
         if not pages or any(page is None for page in pages):
-            raise NotFound("Page not found. Use skaz_search or the deck's id from the context.")
+            raise NotFound("Page not found. Use skaz_study_past_questions or the deck's id from the context.")
         kinds = {page.kind for page in pages if page is not None}
+        for page in pages:  # shown to the user: it counts as opened (N4-8)
+            if page is not None and page.kind in ("deck", "test"):
+                self.shelf.opened(page.id)
         if kinds == {"test"} and len(pages) == 1:
             page = pages[0]
             assert page is not None
@@ -1206,7 +1222,7 @@ class StudyService:
                           or (row["status"] is None and row["score"] == 0.5)),
         }
 
-    # -- saving to the wiki (S6, Q5) --------------------------------------------------------------------
+    # -- saving to Study (S6, Q5) -----------------------------------------------------------------------
 
     @_one_at_a_time
     def save(self, block_id: str, decision: Literal["allow", "deny"]) -> StudyBlock:
@@ -1214,7 +1230,7 @@ class StudyService:
         if block.origin != "agent":
             raise StudyError("This block shows saved pages already.")
         if block.save_status == "saved":
-            raise StudyError("Already saved to the wiki.")
+            raise StudyError("Already saved to Study.")
         if decision == "deny":
             updated = self.store.update_block(block.id, save_status="denied", updated_at=_now())
             assert updated is not None
@@ -1258,7 +1274,7 @@ class StudyService:
         updated = self.store.update_block(block.id, save_status="saved", page_id=page_id, title=title,
                                           updated_at=_now())
         assert updated is not None
-        log.info("Study block %s saved to the wiki (%s)", block.id, block.kind)
+        log.info("Study block %s saved to Study (%s)", block.id, block.kind)
         self._notify(updated)
         return updated
 
@@ -1267,7 +1283,7 @@ class StudyService:
         """Rename a deck or test without a new agent run (U3-a); a saved one renames its page too."""
         block = self.get(block_id)
         if block.origin != "agent":
-            raise StudyError("Rename this deck from its wiki page.")
+            raise StudyError("Rename this deck from its page.")
         try:
             cleaned = clean_study_title(title)
         except Refused as error:
@@ -1276,7 +1292,7 @@ class StudyService:
             raise NameRejected("The name is empty. Choose another name.")
         if block.page_id is not None:
             if self.wiki is None:
-                raise StudyError("Renaming a wiki page isn't available here.")
+                raise StudyError("Renaming a saved page isn't available here.")
             self.wiki.rename_page(block.page_id, page_file_name(cleaned, block.kind))
             record = self.kb.page_repo.get(block.page_id)
             cleaned = Path(record.rel_path).stem if record is not None else cleaned
@@ -1291,8 +1307,7 @@ class StudyService:
             record = self.kb.page_repo.get(block.page_id)
             if record is not None:
                 return record.rel_path
-        directory = "Wiki/Decks" if block.kind == "deck" else "Wiki/Tests"
-        return f"{directory}/{page_file_name(block.title, block.kind)}.md"
+        return f"{STUDY_DIR}/{STUDY_SUBDIRS[block.kind]}/{page_file_name(block.title, block.kind)}.md"
 
     def _free_title(self, kind: BlockKind, title: str) -> str:
         library = self.kb.require()
@@ -1311,7 +1326,7 @@ class StudyService:
 
     def _write_page(self, block: StudyBlock) -> str:
         if self.wiki is None:
-            raise StudyError("Saving to the wiki isn't available here.")
+            raise StudyError("Saving to Study isn't available here.")
         language = self._language()
         with self.wiki.write_lock:
             title = self._free_title(block.kind, block.title)

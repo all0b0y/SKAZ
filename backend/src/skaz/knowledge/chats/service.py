@@ -1607,8 +1607,10 @@ class ChatService:
         def hit(*names: str | None) -> bool:
             return not words or any(name and all(word in name_key(name) for word in words) for name in names)
 
+        # N4-8: an archived test is hidden from lists, this one too.
+        archived = self.study.shelf.archived_ids() if self.study is not None else set()
         pages = [(page.id, page.kind, page.title) for page in self.kb.page_repo.list_all()
-                 if hit(page.title, page.original, *page.aliases)][:limit]
+                 if page.id not in archived and hit(page.title, page.original, *page.aliases)][:limit]
         materials = [(record.id, record.title) for record in self.kb.materials() if hit(record.title)][:limit]
         chats = [(chat.id, chat.title) for chat in self.repo.list_all() if hit(chat.title)][:limit]
         return MentionResults(tuple(pages), tuple(materials), tuple(chats))

@@ -46,10 +46,8 @@ from .pages import (
 
 MAX_WRITE_ATTEMPTS = 3
 INDEX_TITLES: dict[str, dict[str, str]] = {
-    "en": {"concept": "Concepts", "note": "Notes", "folder": "Folder overviews", "analysis": "Analyses",
-           "deck": "Decks", "test": "Tests"},
-    "ru": {"concept": "Понятия", "note": "Конспекты", "folder": "Обзоры папок", "analysis": "Разборы",
-           "deck": "Колоды", "test": "Тесты"},
+    "en": {"concept": "Concepts", "note": "Notes", "folder": "Folder overviews", "analysis": "Analyses"},
+    "ru": {"concept": "Понятия", "note": "Конспекты", "folder": "Обзоры папок", "analysis": "Разборы"},
 }
 LOG_TEXT: dict[str, dict[str, str]] = {
     "en": {"notes_new": "Notes written", "notes_updated": "Notes rewritten", "added": "concepts added",
@@ -382,7 +380,7 @@ class WikiWriter:
     def _write_index(self, library: Library, language: str) -> None:
         labels = INDEX_TITLES.get(language, INDEX_TITLES["en"])
         lines = ["# Index", ""]
-        for kind in ("concept", "note", "folder", "analysis", "deck", "test"):
+        for kind in ("concept", "note", "folder", "analysis"):  # decks and tests: not the wiki (N4-7)
             pages = self.kb.pages(kind=kind)
             if not pages:
                 continue
@@ -391,9 +389,7 @@ class WikiWriter:
             for page in pages:
                 blocks = self.kb.page_repo.blocks(page.id)
                 first = next((block.text for block in blocks if block.kind == "from_source"), "")
-                # A deck or test: how many cards / questions, not the first card's text.
-                summary = (f"{sum(1 for block in blocks if block.kind == 'from_source')}"
-                           if kind in ("deck", "test") else description(first))
+                summary = description(first)
                 link = f"[[{page.rel_path.removesuffix('.md')}|{page.title}]]"
                 lines.append(f"- {link} — {summary}" if summary else f"- {link}")
             lines.append("")

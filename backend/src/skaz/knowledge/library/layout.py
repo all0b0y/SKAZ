@@ -10,6 +10,8 @@
     <root>/Materials/<Folder>/<Title>/.skaz/material.json
     <root>/Wiki/{Concepts,Notes,Folders,Analyses}/<Title>.md
     <root>/Wiki/index.md, <root>/Wiki/log.md
+    <root>/Study/{Decks,Tests}/<Title>.md     decks and tests: not wiki pages (0.4.0 N4-7)
+    <root>/.skaz/backups/                     backups of one-off moves; SKAZ never deletes them
 """
 from __future__ import annotations
 
@@ -35,9 +37,20 @@ FOLDER_MARKER = Path(SERVICE_DIR) / "folder.json"
 MATERIAL_MANIFEST = Path(SERVICE_DIR) / "material.json"
 WIKI_SUBDIRS: dict[str, str] = {
     "concept": "Concepts", "note": "Notes", "folder": "Folders", "analysis": "Analyses",
-    # 0.3.1 S2/S6: flashcard decks and tests.
-    "deck": "Decks", "test": "Tests",
 }
+STUDY_DIR = "Study"
+#: 0.3.1 S2/S6: flashcard decks and tests; since 0.4.0 (N4-7) outside the wiki.
+STUDY_SUBDIRS: dict[str, str] = {"deck": "Decks", "test": "Tests"}
+STUDY_KINDS: frozenset[str] = frozenset(STUDY_SUBDIRS)
+#: Where 0.3.x kept them. Moved once (``study/migration.py``); still read, so a move that failed and was
+#: rolled back hides nothing (the kind, not the folder, keeps them out of every wiki search).
+LEGACY_STUDY_FOLDERS: tuple[str, ...] = tuple(f"{WIKI_DIR}/{name}" for name in STUDY_SUBDIRS.values())
+#: Every folder holding page files, relative to the root.
+PAGE_FOLDERS: tuple[str, ...] = (
+    *(f"{WIKI_DIR}/{name}" for name in WIKI_SUBDIRS.values()),
+    *(f"{STUDY_DIR}/{name}" for name in STUDY_SUBDIRS.values()),
+    *LEGACY_STUDY_FOLDERS,
+)
 DEFAULT_NAME = "SKAZ"
 FALLBACK_NAME = "SKAZ Library"
 LIBRARY_FORMAT_VERSION = 1

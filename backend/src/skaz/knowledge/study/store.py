@@ -84,6 +84,19 @@ def _card(row: sqlite3.Row) -> CardState:
     )
 
 
+def _attempt(row: sqlite3.Row) -> Attempt:
+    return Attempt(
+        row["id"],
+        row["block_id"],
+        row["page_id"],
+        json.loads(row["answers"] or "{}"),
+        row["correct"],
+        int(row["total"]),
+        row["started_at"],
+        row["finished_at"],
+    )
+
+
 @dataclass(frozen=True)
 class Review:
     card_id: str
@@ -190,6 +203,15 @@ class StudyStore:
             row = connection.execute("SELECT * FROM study_blocks WHERE id = ?", (block_id,)).fetchone()
         return _block(row) if row else None
 
+    def unsaved_blocks(self) -> list[StudyBlock]:
+        """Decks and tests that live only in their chat: made by an agent, no saved page."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM study_blocks WHERE origin = 'agent' AND page_id IS NULL "
+                "ORDER BY created_at, id"
+            ).fetchall()
+        return [_block(row) for row in rows]
+
     def others_away(self, chat_id: str, keep: str) -> list[StudyBlock]:
         """The chat's other blocks that are beside the chat or in a window (A-4: one at a time)."""
         with self.db.read() as connection:
@@ -277,6 +299,14 @@ class StudyStore:
                 ],
             )
 
+    def again_counts(self) -> dict[str, int]:
+        """How many times each card was graded Again (N4-7: the mistake history)."""
+        with self.db.read() as connection:
+            rows = connection.execute(
+                "SELECT card_id, COUNT(*) FROM study_reviews WHERE rating = 1 GROUP BY card_id"
+            ).fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
     def last_rating(self, card_id: str) -> int | None:
         """The card's last grade (1 Again … 4 Easy), for the agent reading «Unclear» marks (P3-b)."""
         with self.db.read() as connection:
@@ -323,19 +353,44 @@ class StudyStore:
             rows = connection.execute(
                 "SELECT * FROM study_attempts WHERE block_id = ? ORDER BY started_at, id", (block_id,)
             ).fetchall()
-        return [
-            Attempt(
-                row["id"],
-                row["block_id"],
-                row["page_id"],
-                json.loads(row["answers"] or "{}"),
-                row["correct"],
-                int(row["total"]),
-                row["started_at"],
-                row["finished_at"],
-            )
-            for row in rows
-        ]
+        return [_attempt(row) for row in rows]
+
+    def all_attempts(self) -> list[Attempt]:
+        with self.db.read() as connection:
+            # ``rowid``: two attempts within one second keep the order they were made in.
+            rows = connection.execute("SELECT * FROM study_attempts ORDER BY started_at, rowid").fetchall()
+        return [_attempt(row) for row in rows]
+
+    # -- a saved page's whole history (N4-8) ----------------------------------------------------
+
+    def history_counts(self, page_id: str) -> tuple[int, int]:
+        """(finished attempts, reviews) of a saved deck or test: what its manual delete takes along."""
+        with self.db.read() as connection:
+            attempts = connection.execute(
+                "SELECT COUNT(*) FROM study_attempts WHERE finished_at IS NOT NULL AND "
+                "(page_id = ? OR block_id IN (SELECT id FROM study_blocks WHERE page_id = ?))",
+                (page_id, page_id),
+            ).fetchone()[0]
+            reviews = connection.execute(
+                "SELECT COUNT(*) FROM study_reviews WHERE page_id = ?", (page_id,)
+            ).fetchone()[0]
+        return int(attempts), int(reviews)
+
+    def forget_page_history(self, page_id: str) -> None:
+        """The user deleted the page: attempts, grades, card states, marks and the shelf row go with it.
+
+        The chat blocks stay (they are part of the chat's messages) without what they recorded.
+        """
+        with self.db.write() as connection:
+            connection.execute(
+                "DELETE FROM study_attempts WHERE page_id = ? "
+                "OR block_id IN (SELECT id FROM study_blocks WHERE page_id = ?)", (page_id, page_id))
+            connection.execute("UPDATE study_blocks SET state = '{}', position = 0 WHERE page_id = ?",
+                               (page_id,))
+            connection.execute("DELETE FROM study_reviews WHERE page_id = ?", (page_id,))
+            connection.execute("DELETE FROM study_cards WHERE page_id = ?", (page_id,))
+            connection.execute("DELETE FROM study_items WHERE page_id = ?", (page_id,))
+            connection.execute("DELETE FROM study_shelf WHERE page_id = ?", (page_id,))
 
 
 def with_place(block: StudyBlock, place: Place) -> StudyBlock:

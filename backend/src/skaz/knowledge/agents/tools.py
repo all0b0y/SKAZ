@@ -32,7 +32,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from ..answer_blocks import registry as answer_blocks
 from ..index.search import SnippetPart, search
-from ..markdown.page import PAGE_KINDS, PageKind
+from ..library.layout import STUDY_KINDS
+from ..markdown.page import PAGE_KINDS
 from ..markdown.source import MATERIAL_KINDS, MaterialKind
 from ..markdown.text import format_timestamp, name_key
 from ..service import KnowledgeService
@@ -49,9 +50,13 @@ DEFAULT_MAX_OUTPUT_BYTES = 32_000
 TEXT_MAX_OUTPUT_BYTES = 48_000
 _SUMMARY_CHARS = 160
 _TRUNCATED = " …[truncated]"
+#: Decks and tests are no wiki pages (N4-7): the study tools read them, these tools never do.
+WikiPageKind = Literal["concept", "note", "folder", "analysis"]
 SearchKind = Literal["recording", "audio", "video", "video_link", "pdf", "book", "web", "text",
-                     "concept", "note", "folder", "analysis", "deck", "test"]
-assert set(get_args(SearchKind)) == set(MATERIAL_KINDS) | set(PAGE_KINDS)
+                     "concept", "note", "folder", "analysis"]
+assert set(get_args(SearchKind)) == set(MATERIAL_KINDS) | (set(PAGE_KINDS) - STUDY_KINDS)
+assert set(get_args(WikiPageKind)) == set(PAGE_KINDS) - STUDY_KINDS
+STUDY_PAGE = "This is a saved deck or test, not a wiki page. Read it with skaz_study_read."
 
 
 class ToolInputError(Exception):
@@ -74,7 +79,7 @@ _FolderRef = Field(default=None, min_length=1, max_length=300,
 
 
 class WikiIndexArgs(_Args):
-    kind: PageKind | None = Field(default=None, description="Only pages of this kind.")
+    kind: WikiPageKind | None = Field(default=None, description="Only pages of this kind.")
     folder: str | None = _FolderRef
     offset: int = Field(default=0, ge=0, le=1_000_000, description="Skip this many pages (pagination).")
     limit: int = Field(default=50, ge=1, le=100, description="Pages per call.")
@@ -351,10 +356,12 @@ def _page(kb: KnowledgeService, args: ReadPageArgs) -> PageRecord:
         record = kb.page_repo.get(args.page_id)
         if record is None:
             raise ToolInputError("Page not found. Use skaz_wiki_index or skaz_search to find its id.")
+        if record.kind in STUDY_KINDS:
+            raise ToolInputError(STUDY_PAGE)
         return record
     key = name_key(args.title or "")
-    matches = [page for page in kb.page_repo.list_all()
-               if name_key(page.title) == key or any(name_key(alias) == key for alias in page.aliases)]
+    matches = [page for page in kb.page_repo.list_all() if page.kind not in STUDY_KINDS
+               and (name_key(page.title) == key or any(name_key(alias) == key for alias in page.aliases))]
     if not matches:
         raise ToolInputError("No page has this title or alias. Use skaz_wiki_index or skaz_search.")
     if len(matches) > 1:
@@ -427,7 +434,7 @@ def _material_brief(record: MaterialRecord, folders: Mapping[str, str]) -> dict[
 def _wiki_index(kb: KnowledgeService, args: WikiIndexArgs) -> dict[str, Any]:
     folder = _folder(kb, args.folder)
     pages = [page for page in kb.page_repo.list_all(kind=args.kind, folder_id=folder.id if folder else None)
-             if _allowed(page.id)]
+             if _allowed(page.id) and page.kind not in STUDY_KINDS]
     window = pages[args.offset: args.offset + args.limit]
     items = []
     for page in window:
