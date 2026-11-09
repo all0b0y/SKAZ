@@ -7,6 +7,10 @@ export interface KbAbout {
   licenses: KbLicense[];
 }
 
+export interface KbAcknowledged {
+  ok?: true;
+}
+
 export interface KbActionItem {
   id: string;
   src: number[];
@@ -214,6 +218,69 @@ export interface KbAnswerBlockPart {
   markdown: string | null;
 }
 
+export interface KbArea {
+  id: string;
+  parent_id: string | null;
+  taxonomy_id: string | null;
+  level: "domain" | "field" | "subfield" | "topic" | "custom";
+  name: string;
+  original_name: string;
+  hidden: boolean;
+  pinned: boolean;
+  topic_ids: string[];
+  has_children: boolean;
+  children_covered: number;
+  children_total: number;
+  pages: number;
+  sources: number;
+  newest_source_year: number | null;
+  recent_activity_at: string | null;
+  new_findings: number;
+  marked_materials: number;
+  wiki_share: number;
+  depth: "empty" | "thin" | "medium" | "dense";
+  gap_reason: string | null;
+}
+
+export interface KbAreaCreate {
+  name: string;
+  topic_ids: string[];
+}
+
+export interface KbAreaMap {
+  parent_id: string | null;
+  breadcrumbs: KbArea[];
+  areas: KbArea[];
+  total_pages: number;
+  total_sources: number;
+  worth_closing: KbArea[];
+}
+
+export interface KbAreaMaterial {
+  material_id: string;
+  title: string;
+  kind: "recording" | "audio" | "video" | "video_link" | "pdf" | "book" | "web" | "text";
+  publication: KbPublicationDate;
+  wiki_pages: number;
+  read_mark: "useful_method" | "changed_my_view" | "already_knew" | "not_for_me" | null;
+  repeat_status: "checked" | "not_checked";
+  repeated_percent: number | null;
+  repeats_source_titles: string[];
+  freshness_mark_ids: string[];
+}
+
+export interface KbAreaMaterials {
+  materials: KbAreaMaterial[];
+  not_checked_count: number;
+  next_cursor: string | null;
+}
+
+export interface KbAreaUpdate {
+  name?: string | null;
+  hidden?: boolean | null;
+  pinned?: boolean | null;
+}
+
 export interface KbBlock {
   id: string;
   kind: "from_source" | "connection" | "explanation" | "user_note";
@@ -418,6 +485,25 @@ export interface KbChatWebSearch {
   granted_at: string | null;
 }
 
+export interface KbCheckNotification {
+  id: string;
+  kind: "explore_finished" | "research_finished" | "weekly_check_started" | "weekly_check_finished";
+  job_id: string;
+  task_id: string | null;
+  created_at: string;
+  message: string;
+}
+
+export interface KbCheckpoint {
+  id: string;
+  revision: number;
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  cursor: string | null;
+  completed_ids: string[];
+  pending_ids: string[];
+  saved_at: string;
+}
+
 export interface KbCitation {
   material_id: string;
   seg: number;
@@ -488,6 +574,12 @@ export interface KbConnectionPart {
   page: KbPageRef | null;
 }
 
+export interface KbContinue {
+  checkpoint_id: string;
+  revision: number;
+  decision_choice?: "download_local" | "openrouter_jev" | null;
+}
+
 export interface KbCorrection {
   id: string;
   material_id: string;
@@ -511,6 +603,18 @@ export interface KbCorrectionChange {
 export interface KbCorrectionCounts {
   applied: number;
   doubtful: number;
+}
+
+export interface KbDateWindow {
+  from_date?: string | null;
+  to_date?: string | null;
+  unknown?: "exclude" | "separate";
+}
+
+export interface KbDatedMaterials {
+  materials: KbAreaMaterial[];
+  unknown_date: KbAreaMaterial[];
+  next_cursor: string | null;
 }
 
 export interface KbDecisionProviderUpdate {
@@ -621,6 +725,61 @@ export interface KbExcludedFragment {
   detected_at: string;
 }
 
+export interface KbExploreJob {
+  id: string;
+  owner: "explore" | "research" | "links" | "weekly" | "repeats";
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  budget: KbRunBudget;
+  counters: KbRunCounters;
+  checkpoint: KbCheckpoint | null;
+  created_at: string;
+  updated_at: string;
+  decision_choices: ("download_local" | "openrouter_jev")[];
+  decision_provider: "local" | "openrouter_jev" | null;
+  retry_at: string | null;
+}
+
+export interface KbExplorePageRef {
+  page_id: string;
+  title: string;
+  block_id?: string | null;
+}
+
+export interface KbExploreRead {
+  area_id?: string | null;
+  task_id?: string | null;
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface KbExploreSnapshot {
+  map: KbAreaMap;
+  findings: KbFindings;
+  signals: KbSignals;
+  tasks: KbResearchTasks;
+}
+
+export interface KbExploreStart {
+  mode: "brief_tour" | "deep_dive" | "notes";
+  add_to_wiki?: boolean;
+}
+
+export interface KbExploring {
+  id: string;
+  finding_id: string;
+  chat_id: string;
+  mode: "brief_tour" | "deep_dive" | "notes";
+  text_kind: "tei" | "arxiv_html" | "open_page" | "abstract_only";
+  material_id: string | null;
+  started_at: string;
+}
+
+export interface KbExploringList {
+  items: KbExploring[];
+}
+
 export interface KbExportItem {
   type: "chat" | "page" | "material";
   id: string;
@@ -662,6 +821,18 @@ export interface KbExportWritten {
   file: string;
 }
 
+export interface KbFactualSignal {
+  id: string;
+  subject: KbSignalEntity;
+  predicate: "read_mark_set" | "read_mark_removed" | "area_opened" | "area_pinned" | "area_hidden" | "research_started" | "research_paused" | "research_completed" | "study_reviewed";
+  object: KbSignalEntity;
+  occurred_at: string;
+  origin: "user_action" | "task_event" | "study_event";
+  value: string | null;
+  evidence_id: string;
+  supersedes_id: string | null;
+}
+
 export interface KbFailure {
   kind: "limit" | "auth" | "incompatible" | "network" | "cancelled" | "other";
   message: string;
@@ -671,6 +842,54 @@ export interface KbFailure {
 export interface KbFavoriteModel {
   engine: "codex" | "claude_code" | "hermes" | "opencode";
   model: string;
+}
+
+export interface KbFinding {
+  id: string;
+  run_id: string;
+  task_id: string | null;
+  area_id: string | null;
+  channel: "continues" | "branches" | "search";
+  label: "new" | "extends" | "contradicts" | "branch" | "covered";
+  work: KbScienceWork;
+  area_path: string[];
+  reason: string;
+  wiki_refs: KbExplorePageRef[];
+  theses: KbThesis[];
+  cites_materials: KbMaterialRef[];
+  shared_source_count: number;
+  repeat_hint: string | null;
+  read_mark: "useful_method" | "changed_my_view" | "already_knew" | "not_for_me" | null;
+  material_id: string | null;
+  text_available: "full_text" | "abstract_only" | "unchecked";
+  created_at: string;
+}
+
+export interface KbFindingGroup {
+  task_id: string | null;
+  task_title: string | null;
+  task_state: "queued" | "running" | "paused" | "done" | "cancelled" | "error" | null;
+  updated_at: string | null;
+  findings: KbFinding[];
+}
+
+export interface KbFindingImport {
+  content: "full_text" | "abstract_only";
+}
+
+export interface KbFindingImported {
+  finding_id: string;
+  material_id: string;
+  content: "full_text" | "abstract_only";
+  to_wiki?: true;
+}
+
+export interface KbFindings {
+  groups: KbFindingGroup[];
+  covered_count: number;
+  next_cursor: string | null;
+  checked_at: string | null;
+  full_text_key_hint_count: number;
 }
 
 export interface KbFolder {
@@ -719,6 +938,67 @@ export interface KbFragmentLocation {
   page: number | null;
   start_ms: number | null;
   label: string;
+}
+
+export interface KbFreshnessAction {
+  action: "replace_version" | "keep_marked";
+}
+
+export interface KbFreshnessActionResult {
+  mark: KbFreshnessMark;
+  ingest_job_id: string | null;
+}
+
+export interface KbFreshnessMark {
+  id: string;
+  material_id: string;
+  kind: "new_version" | "retracted" | "newer_contradicts" | "link_gone";
+  reason: string;
+  evidence_url: string | null;
+  evidence_label: string | null;
+  checked_at: string;
+  replacement_work_id: string | null;
+  version: string | null;
+  current_version: string | null;
+  publication: KbPublicationDate;
+  affected_statements: KbMarkedStatement[];
+  actions: ("replace_version" | "delete_source" | "keep_marked")[];
+  kept_marked: boolean;
+  created_at: string;
+}
+
+export interface KbFreshnessMarks {
+  marks: KbFreshnessMark[];
+  last_link_check: KbLinkObservation | null;
+}
+
+export interface KbFunnelRun {
+  id: string;
+  owner: "explore" | "research" | "links" | "weekly" | "repeats";
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  budget: KbRunBudget;
+  counters: KbRunCounters;
+  checkpoint: KbCheckpoint | null;
+  created_at: string;
+  updated_at: string;
+  decision_choices: ("download_local" | "openrouter_jev")[];
+  decision_provider: "local" | "openrouter_jev" | null;
+  retry_at: string | null;
+  area_id: string | null;
+  task_id: string | null;
+  query: string;
+  channels: ("continues" | "branches" | "search")[];
+  active_area_ids: string[];
+}
+
+export interface KbFunnelStart {
+  area_id?: string | null;
+  query?: string;
+  dates?: KbDateWindow | null;
+  channels?: ("continues" | "branches" | "search")[];
+  candidate_ids?: string[];
 }
 
 export interface KbGlossaryBlock {
@@ -925,6 +1205,25 @@ export interface KbJobProgress {
   notes_sections?: number;
 }
 
+/** One background job for the Explore progress line and the tray status item. */
+export interface KbJobSummary {
+  id: string;
+  owner: "explore" | "research" | "links" | "weekly" | "repeats";
+  title: string;
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  budget: KbRunBudget;
+  task_id: string | null;
+  chat_id: string | null;
+  area_id: string | null;
+  updated_at: string;
+}
+
+export interface KbJobs {
+  jobs: KbJobSummary[];
+}
+
 export interface KbKeyNumber {
   id: string;
   src: number[];
@@ -973,10 +1272,39 @@ export interface KbLibraryConnect {
   path?: string | null;
 }
 
+export interface KbLibraryDateQuery {
+  dates: KbDateWindow;
+  folder_id?: string | null;
+  cursor?: string | null;
+  limit?: number;
+}
+
 export interface KbLicense {
   name: string;
   license: string;
   url: string;
+}
+
+export interface KbLinkCheck {
+  id: string;
+  owner: "explore" | "research" | "links" | "weekly" | "repeats";
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  budget: KbRunBudget;
+  counters: KbRunCounters;
+  checkpoint: KbCheckpoint | null;
+  created_at: string;
+  updated_at: string;
+  decision_choices: ("download_local" | "openrouter_jev")[];
+  decision_provider: "local" | "openrouter_jev" | null;
+  retry_at: string | null;
+  observations: KbLinkObservation[];
+}
+
+export interface KbLinkCheckStart {
+  material_ids?: string[];
+  folder_id?: string | null;
 }
 
 export interface KbLinkInfo {
@@ -991,6 +1319,17 @@ export interface KbLinkInfo {
   supported: boolean;
   note: string | null;
   embedded_video: KbLinkInfo | null;
+}
+
+export interface KbLinkObservation {
+  material_id: string;
+  url: string;
+  outcome: "ok" | "suspected_gone" | "confirmed_gone" | "could_not_check";
+  reason: "http_404" | "http_410" | "no_domain" | "http_403" | "http_429" | "timeout" | "other" | null;
+  status_code: number | null;
+  checked_at: string;
+  first_gone_at: string | null;
+  confirm_after: string | null;
 }
 
 /** Final speech not in the material yet: the open monologue (or one closed a moment ago). */
@@ -1037,6 +1376,15 @@ export interface KbLocalSpeechModel {
   progress: number | null;
   reason: string | null;
   size_bytes: number | null;
+}
+
+/** A wiki claim that uses the marked source: dimmed only when no other source supports it. */
+export interface KbMarkedStatement {
+  page_id: string;
+  title: string;
+  block_id?: string | null;
+  sole_source: boolean;
+  also_supported_by: KbMaterialRef[];
 }
 
 export interface KbMaterial {
@@ -1098,6 +1446,27 @@ export interface KbMaterialOverlap {
   pages: KbOverlapPage[];
   new_sections: string[];
   repeated_sections: string[];
+}
+
+export interface KbMaterialPublication {
+  material_id: string;
+  publication: KbPublicationDate;
+}
+
+export interface KbMaterialRef {
+  material_id: string;
+  title: string;
+}
+
+export interface KbMaterialRepeats {
+  material_id: string;
+  status: "checked" | "not_checked";
+  percent: number | null;
+  repeated: number;
+  total: number;
+  from_materials: KbMaterialRef[];
+  paragraphs: KbParagraphRepeat[];
+  checked_at: string | null;
 }
 
 export interface KbMaterialSummary {
@@ -1286,6 +1655,11 @@ export interface KbNotificationsRead {
   up_to_seq: number;
 }
 
+/** Saved in the secret store, never returned; an empty key deletes it (as ``/keys/{provider}``). */
+export interface KbOpenAlexKeyUpdate {
+  key: string;
+}
+
 export interface KbOpenContext {
   open_page_id?: string | null;
   open_material_id?: string | null;
@@ -1377,6 +1751,25 @@ export interface KbPageSummary {
   language: string;
 }
 
+export interface KbPaidAccess {
+  paid: boolean;
+  alternatives_checked: boolean;
+  free_alternative_ids: string[];
+  suggestion_shown_at: string | null;
+  recommendation: string | null;
+  publisher_url: string | null;
+}
+
+export interface KbParagraphRepeat {
+  paragraph_id: string;
+  fragment_ids: number[];
+  wiki_refs: KbExplorePageRef[];
+  from_materials: KbMaterialRef[];
+  repeated_statements: number;
+  total_statements: number;
+  fully_repeated: boolean;
+}
+
 export interface KbPermissionChange {
   op: "add" | "replace" | "remove";
   block_id: string | null;
@@ -1460,6 +1853,15 @@ export interface KbProsConsBlock {
   cons: KbPoint[];
 }
 
+export interface KbPublicationDate {
+  year: number | null;
+  date: string | null;
+  month?: number | null;
+  precision: "day" | "month" | "year" | "unknown";
+  origin: "openalex" | "arxiv" | "crossref" | "page" | "unknown";
+  evidence_url: string | null;
+}
+
 /** Exactly one: the index of an option, or the user's own answer. */
 export interface KbQuestionAnswer {
   option_index?: number | null;
@@ -1508,6 +1910,17 @@ export interface KbQuoteItem {
   who: string | null;
 }
 
+export interface KbReadMark {
+  material_id: string | null;
+  finding_id: string | null;
+  value: "useful_method" | "changed_my_view" | "already_knew" | "not_for_me" | null;
+  updated_at: string | null;
+}
+
+export interface KbReadMarkUpdate {
+  value: "useful_method" | "changed_my_view" | "already_knew" | "not_for_me";
+}
+
 /** Settings → Models → Recognition check (B20): ``same_as_wiki`` by default, ``off`` skips it. */
 export interface KbRecognitionSettings {
   engine: "same_as_wiki" | "off" | "codex" | "claude_code" | "hermes" | "opencode";
@@ -1543,8 +1956,83 @@ export interface KbRef {
   title: string;
 }
 
+export interface KbRepeatCheck {
+  id: string;
+  owner: "explore" | "research" | "links" | "weekly" | "repeats";
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  budget: KbRunBudget;
+  counters: KbRunCounters;
+  checkpoint: KbCheckpoint | null;
+  created_at: string;
+  updated_at: string;
+  decision_choices: ("download_local" | "openrouter_jev")[];
+  decision_provider: "local" | "openrouter_jev" | null;
+  retry_at: string | null;
+  area_id: string;
+  materials_checked: number;
+  materials_remaining: number;
+}
+
+export interface KbRepeatCheckStart {
+  area_id: string;
+}
+
 export interface KbRescanResult {
   pages_changed: number;
+}
+
+export interface KbResearchCreate {
+  description: string;
+  area_id?: string | null;
+  dates?: KbDateWindow | null;
+}
+
+export interface KbResearchDecide {
+  decision: "allow" | "allow_chat" | "deny";
+}
+
+export interface KbResearchGrant {
+  chat_id: string;
+  kind?: "research_start";
+  allowed: boolean;
+  granted_at: string | null;
+}
+
+/** The ``skaz_research_start`` card and, once allowed, the compact task pointer in the chat. B3 adds this model to the ``KbMessagePart`` union, so ``type`` is its discriminator. */
+export interface KbResearchPermission {
+  type: "research";
+  id: string;
+  kind?: "research_start";
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  chat_id: string;
+  arguments: KbResearchCreate;
+  status: "pending" | "allowed" | "denied" | "cancelled";
+  auto: boolean;
+  reason: string | null;
+  task_id: string | null;
+  task_title: string | null;
+  task_state: "queued" | "running" | "paused" | "done" | "cancelled" | "error" | null;
+  created_at: string;
+}
+
+export interface KbResearchTask {
+  id: string;
+  title: string;
+  description: string;
+  chat_id: string;
+  origin_chat_id: string | null;
+  area_id: string | null;
+  run: KbExploreJob;
+  finding_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KbResearchTasks {
+  tasks: KbResearchTask[];
+  next_cursor: string | null;
 }
 
 export interface KbResolve {
@@ -1568,12 +2056,116 @@ export interface KbRulesInForce {
   everywhere_once: boolean;
 }
 
+/** One batch of a job. Continue starts the next batch; ``total_used`` spans all batches. */
+export interface KbRunBudget {
+  unit: "candidate" | "claim_comparison" | "material" | "link";
+  limit: number;
+  used: number;
+  remaining: number;
+  total_used: number;
+  batch: number;
+  free_only: boolean;
+}
+
+export interface KbRunCounters {
+  checked: number;
+  after_rules: number;
+  decided: number;
+  on_topic: number;
+  novelty_checked: number;
+  new: number;
+  covered: number;
+}
+
 /** The analysis page "Save to wiki" wrote, and what it left out (decision 9, 2026-10-21). */
 export interface KbSavedAnalysis {
   id: string;
   kind: "concept" | "note" | "folder" | "analysis" | "deck" | "test";
   title: string;
   warning: string | null;
+}
+
+export interface KbScienceEgress {
+  id: string;
+  requested_at: string;
+  provider: "openalex" | "arxiv" | "crossref";
+  operation: "search" | "metadata" | "citations" | "full_text" | "alternatives" | "taxonomy";
+  destination_host: string;
+  payload: KbSciencePayload;
+  outcome: "sent" | "succeeded" | "failed" | "rate_limited";
+  status_code: number | null;
+  run_id: string | null;
+}
+
+export interface KbScienceJournal {
+  records: KbScienceEgress[];
+  next_cursor: string | null;
+}
+
+export interface KbScienceLocation {
+  url: string;
+  kind: "tei" | "arxiv_html" | "open_page" | "publisher";
+  open_access: boolean;
+}
+
+export interface KbSciencePayload {
+  topics?: string[];
+  dois?: string[];
+  ids?: string[];
+}
+
+export interface KbScienceResults {
+  works: KbScienceWork[];
+  next_cursor: string | null;
+  stop_reason: "openalex_daily_limit" | "provider_unavailable" | null;
+  retry_at?: string | null;
+}
+
+export interface KbScienceSearch {
+  provider?: "openalex" | "arxiv" | "crossref";
+  payload: KbSciencePayload;
+  dates?: KbDateWindow | null;
+  cursor?: string | null;
+  limit?: number;
+}
+
+export interface KbScienceSettings {
+  enabled: boolean;
+  consent_at: string | null;
+  openalex_key_configured: boolean;
+  full_text_hint_dismissed: boolean;
+}
+
+export interface KbScienceSettingsUpdate {
+  enabled: boolean;
+  consent?: "topics_dois_ids" | null;
+}
+
+export interface KbScienceText {
+  work_id: string;
+  kind: "tei" | "arxiv_html" | "open_page" | "abstract_only";
+  text: string;
+  source_url: string | null;
+  access: KbPaidAccess;
+}
+
+export interface KbScienceWork {
+  id: string;
+  provider: "openalex" | "arxiv" | "crossref";
+  provider_id: string;
+  doi: string | null;
+  arxiv_id: string | null;
+  title: string;
+  authors: string[];
+  publication: KbPublicationDate;
+  venue: string | null;
+  publication_type: string | null;
+  abstract: string | null;
+  topic_ids: string[];
+  referenced_ids: string[];
+  cited_by_count: number;
+  locations: KbScienceLocation[];
+  access: KbPaidAccess;
 }
 
 /** Totals per ⌘K section (not the length of the returned lists). */
@@ -1639,6 +2231,16 @@ export interface KbSettingsSection {
   id: "accounts" | "models" | "speech" | "wiki" | "storage" | "privacy" | "appearance" | "about";
   state: "ok" | "progress" | "warning" | "error";
   problems: KbProblem[];
+}
+
+export interface KbSignalEntity {
+  kind: "user" | "material" | "finding" | "area" | "research_task" | "study_item" | "chat";
+  id: string;
+}
+
+export interface KbSignals {
+  signals: KbFactualSignal[];
+  next_cursor: string | null;
 }
 
 export interface KbSkill {
@@ -1993,6 +2595,12 @@ export interface KbTextPart {
   text: string;
 }
 
+export interface KbThesis {
+  text: string;
+  label: "new" | "extends" | "contradicts" | "branch" | "covered";
+  wiki_refs: KbExplorePageRef[];
+}
+
 export interface KbTimelineBlock {
   kind: "timeline";
   title: string | null;
@@ -2087,6 +2695,42 @@ export interface KbWebSearchPart {
   duration_ms?: number | null;
   execution_error?: string | null;
   call_id?: string | null;
+}
+
+export interface KbWeeklyCheck {
+  id: string;
+  owner: "explore" | "research" | "links" | "weekly" | "repeats";
+  state: "queued" | "running" | "paused" | "done" | "cancelled" | "error";
+  stage: "collect" | "rules" | "decision" | "novelty" | "ready" | "links" | "repeats";
+  stop_reason: "budget" | "user_pause" | "app_exit" | "openalex_daily_limit" | "decision_model_required" | "science_consent_required" | "provider_unavailable" | "completed" | "cancelled" | "failed" | null;
+  budget: KbRunBudget;
+  counters: KbRunCounters;
+  checkpoint: KbCheckpoint | null;
+  created_at: string;
+  updated_at: string;
+  decision_choices: ("download_local" | "openrouter_jev")[];
+  decision_provider: "local" | "openrouter_jev" | null;
+  retry_at: string | null;
+  trigger: "manual" | "scheduled" | "missed_week";
+  candidates_waiting: number;
+  candidate_ids: string[];
+  new_versions: number;
+  retractions: number;
+  newer_contradictions: number;
+  notifications: KbCheckNotification[];
+}
+
+export interface KbWeeklySettings {
+  enabled: boolean;
+  latest_check_id: string | null;
+  candidates_waiting: number;
+  last_completed_at: string | null;
+  next_due_at: string | null;
+  missed: boolean;
+}
+
+export interface KbWeeklySettingsUpdate {
+  enabled: boolean;
 }
 
 export interface KbWikiChoice {
@@ -2487,6 +3131,20 @@ export interface KbEndpoints {
     response: void;
     status: 204;
   };
+  "GET /kb/chats/{chat_id}/research-grant": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbResearchGrant;
+    status: 200;
+  };
+  "DELETE /kb/chats/{chat_id}/research-grant": {
+    path: { chat_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbResearchGrant;
+    status: 200;
+  };
   "POST /kb/chats/{chat_id}/save": {
     path: { chat_id: string };
     query: Record<string, never>;
@@ -2613,6 +3271,181 @@ export interface KbEndpoints {
     response: KbDictation;
     status: 200;
   };
+  "POST /kb/explore/areas": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbAreaCreate;
+    response: KbArea;
+    status: 200;
+  };
+  "PATCH /kb/explore/areas/{area_id}": {
+    path: { area_id: string };
+    query: Record<string, never>;
+    body: KbAreaUpdate;
+    response: KbArea;
+    status: 200;
+  };
+  "DELETE /kb/explore/areas/{area_id}": {
+    path: { area_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbAcknowledged;
+    status: 200;
+  };
+  "GET /kb/explore/areas/{area_id}/materials": {
+    path: { area_id: string };
+    query: { cursor?: string | null; limit?: number };
+    body: never;
+    response: KbAreaMaterials;
+    status: 200;
+  };
+  "POST /kb/explore/areas/{area_id}/opened": {
+    path: { area_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbAcknowledged;
+    status: 200;
+  };
+  "GET /kb/explore/exploring": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbExploringList;
+    status: 200;
+  };
+  "GET /kb/explore/findings": {
+    path: Record<string, never>;
+    query: { area_id?: string | null; task_id?: string | null; include_covered?: boolean; cursor?: string | null; limit?: number };
+    body: never;
+    response: KbFindings;
+    status: 200;
+  };
+  "GET /kb/explore/findings/{finding_id}": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFinding;
+    status: 200;
+  };
+  "POST /kb/explore/findings/{finding_id}/explore": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: KbExploreStart;
+    response: KbExploring;
+    status: 200;
+  };
+  "PUT /kb/explore/findings/{finding_id}/read-mark": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: KbReadMarkUpdate;
+    response: KbReadMark;
+    status: 200;
+  };
+  "DELETE /kb/explore/findings/{finding_id}/read-mark": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbReadMark;
+    status: 200;
+  };
+  "POST /kb/explore/findings/{finding_id}/wiki": {
+    path: { finding_id: string };
+    query: Record<string, never>;
+    body: KbFindingImport;
+    response: KbFindingImported;
+    status: 200;
+  };
+  "GET /kb/explore/jobs": {
+    path: Record<string, never>;
+    query: { active?: boolean };
+    body: never;
+    response: KbJobs;
+    status: 200;
+  };
+  "GET /kb/explore/map": {
+    path: Record<string, never>;
+    query: { parent_id?: string | null; include_hidden?: boolean };
+    body: never;
+    response: KbAreaMap;
+    status: 200;
+  };
+  "POST /kb/explore/read": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbExploreRead;
+    response: KbExploreSnapshot;
+    status: 200;
+  };
+  "POST /kb/explore/repeat-checks": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbRepeatCheckStart;
+    response: KbRepeatCheck;
+    status: 200;
+  };
+  "GET /kb/explore/repeat-checks/{check_id}": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbRepeatCheck;
+    status: 200;
+  };
+  "POST /kb/explore/repeat-checks/{check_id}/continue": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: KbContinue;
+    response: KbRepeatCheck;
+    status: 200;
+  };
+  "POST /kb/explore/repeat-checks/{check_id}/pause": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbRepeatCheck;
+    status: 200;
+  };
+  "POST /kb/explore/runs": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbFunnelStart;
+    response: KbFunnelRun;
+    status: 200;
+  };
+  "GET /kb/explore/runs/{run_id}": {
+    path: { run_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFunnelRun;
+    status: 200;
+  };
+  "POST /kb/explore/runs/{run_id}/cancel": {
+    path: { run_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFunnelRun;
+    status: 200;
+  };
+  "POST /kb/explore/runs/{run_id}/continue": {
+    path: { run_id: string };
+    query: Record<string, never>;
+    body: KbContinue;
+    response: KbFunnelRun;
+    status: 200;
+  };
+  "POST /kb/explore/runs/{run_id}/pause": {
+    path: { run_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFunnelRun;
+    status: 200;
+  };
+  "GET /kb/explore/signals": {
+    path: Record<string, never>;
+    query: { cursor?: string | null; limit?: number };
+    body: never;
+    response: KbSignals;
+    status: 200;
+  };
   "POST /kb/export": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -2661,6 +3494,69 @@ export interface KbEndpoints {
     body: never;
     response: void;
     status: 204;
+  };
+  "POST /kb/freshness/link-checks": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbLinkCheckStart;
+    response: KbLinkCheck;
+    status: 200;
+  };
+  "GET /kb/freshness/link-checks/{check_id}": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbLinkCheck;
+    status: 200;
+  };
+  "POST /kb/freshness/link-checks/{check_id}/continue": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: KbContinue;
+    response: KbLinkCheck;
+    status: 200;
+  };
+  "POST /kb/freshness/link-checks/{check_id}/pause": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbLinkCheck;
+    status: 200;
+  };
+  "POST /kb/freshness/marks/{mark_id}/act": {
+    path: { mark_id: string };
+    query: Record<string, never>;
+    body: KbFreshnessAction;
+    response: KbFreshnessActionResult;
+    status: 200;
+  };
+  "POST /kb/freshness/weekly-checks": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbWeeklyCheck;
+    status: 200;
+  };
+  "GET /kb/freshness/weekly-checks/{check_id}": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbWeeklyCheck;
+    status: 200;
+  };
+  "POST /kb/freshness/weekly-checks/{check_id}/continue": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: KbContinue;
+    response: KbWeeklyCheck;
+    status: 200;
+  };
+  "POST /kb/freshness/weekly-checks/{check_id}/pause": {
+    path: { check_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbWeeklyCheck;
+    status: 200;
   };
   "GET /kb/graph": {
     path: Record<string, never>;
@@ -2774,6 +3670,13 @@ export interface KbEndpoints {
     response: KbMaterialSummary[];
     status: 200;
   };
+  "POST /kb/materials/by-publication": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbLibraryDateQuery;
+    response: KbDatedMaterials;
+    status: 200;
+  };
   "POST /kb/materials/file": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -2851,6 +3754,13 @@ export interface KbEndpoints {
     response: KbMaterialGuard;
     status: 200;
   };
+  "GET /kb/materials/{material_id}/freshness": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFreshnessMarks;
+    status: 200;
+  };
   "POST /kb/materials/{material_id}/ingest": {
     path: { material_id: string };
     query: Record<string, never>;
@@ -2858,12 +3768,47 @@ export interface KbEndpoints {
     response: KbJob;
     status: 202;
   };
+  "GET /kb/materials/{material_id}/publication": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMaterialPublication;
+    status: 200;
+  };
+  "GET /kb/materials/{material_id}/read-mark": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbReadMark;
+    status: 200;
+  };
+  "PUT /kb/materials/{material_id}/read-mark": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: KbReadMarkUpdate;
+    response: KbReadMark;
+    status: 200;
+  };
+  "DELETE /kb/materials/{material_id}/read-mark": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbReadMark;
+    status: 200;
+  };
   "POST /kb/materials/{material_id}/recognition-check": {
     path: { material_id: string };
     query: Record<string, never>;
     body: never;
     response: KbJob;
     status: 202;
+  };
+  "GET /kb/materials/{material_id}/repeats": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbMaterialRepeats;
+    status: 200;
   };
   "GET /kb/me": {
     path: Record<string, never>;
@@ -3033,6 +3978,83 @@ export interface KbEndpoints {
     response: KbSpeechMaterial;
     status: 200;
   };
+  "POST /kb/research/permissions/{request_id}/decide": {
+    path: { request_id: string };
+    query: Record<string, never>;
+    body: KbResearchDecide;
+    response: KbResearchPermission;
+    status: 200;
+  };
+  "GET /kb/research/tasks": {
+    path: Record<string, never>;
+    query: { cursor?: string | null; limit?: number };
+    body: never;
+    response: KbResearchTasks;
+    status: 200;
+  };
+  "POST /kb/research/tasks": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbResearchCreate;
+    response: KbResearchTask;
+    status: 200;
+  };
+  "GET /kb/research/tasks/{task_id}": {
+    path: { task_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbResearchTask;
+    status: 200;
+  };
+  "POST /kb/research/tasks/{task_id}/cancel": {
+    path: { task_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbResearchTask;
+    status: 200;
+  };
+  "POST /kb/research/tasks/{task_id}/continue": {
+    path: { task_id: string };
+    query: Record<string, never>;
+    body: KbContinue;
+    response: KbResearchTask;
+    status: 200;
+  };
+  "POST /kb/research/tasks/{task_id}/pause": {
+    path: { task_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbResearchTask;
+    status: 200;
+  };
+  "GET /kb/science/journal": {
+    path: Record<string, never>;
+    query: { cursor?: string | null; limit?: number };
+    body: never;
+    response: KbScienceJournal;
+    status: 200;
+  };
+  "POST /kb/science/search": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbScienceSearch;
+    response: KbScienceResults;
+    status: 200;
+  };
+  "GET /kb/science/works/{work_id}": {
+    path: { work_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbScienceWork;
+    status: 200;
+  };
+  "POST /kb/science/works/{work_id}/text": {
+    path: { work_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbScienceText;
+    status: 200;
+  };
   "GET /kb/search": {
     path: Record<string, never>;
     query: { q: string; limit?: number };
@@ -3103,6 +4125,34 @@ export interface KbEndpoints {
     response: KbRecognitionSettings;
     status: 200;
   };
+  "GET /kb/settings/science": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbScienceSettings;
+    status: 200;
+  };
+  "PUT /kb/settings/science": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbScienceSettingsUpdate;
+    response: KbScienceSettings;
+    status: 200;
+  };
+  "POST /kb/settings/science/full-text-hint/dismiss": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbScienceSettings;
+    status: 200;
+  };
+  "PUT /kb/settings/science/openalex-key": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbOpenAlexKeyUpdate;
+    response: KbScienceSettings;
+    status: 200;
+  };
   "GET /kb/settings/search": {
     path: Record<string, never>;
     query: Record<string, never>;
@@ -3150,6 +4200,20 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbLocalModelDeleted;
+    status: 200;
+  };
+  "GET /kb/settings/weekly-check": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: never;
+    response: KbWeeklySettings;
+    status: 200;
+  };
+  "PUT /kb/settings/weekly-check": {
+    path: Record<string, never>;
+    query: Record<string, never>;
+    body: KbWeeklySettingsUpdate;
+    response: KbWeeklySettings;
     status: 200;
   };
   "GET /kb/settings/wiki": {
@@ -3395,6 +4459,13 @@ export interface KbEndpoints {
     query: Record<string, never>;
     body: never;
     response: KbPageFile;
+    status: 200;
+  };
+  "GET /kb/wiki/pages/{page_id}/freshness": {
+    path: { page_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbFreshnessMarks;
     status: 200;
   };
 }
