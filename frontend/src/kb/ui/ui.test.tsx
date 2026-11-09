@@ -11,7 +11,7 @@ import { boundaryFor, placePopup } from './geometry';
 import { MotionProvider } from './motion';
 
 // Where each concept's glyph comes from (animated-icons spec §3).
-const HUGE_CONCEPTS = ['chats', 'materials', 'bell', 'copy', 'retry', 'close', 'web', 'quote', 'mic', 'settings', 'search', 'more', 'pencil', 'chevronDown', 'stop'];
+const HUGE_CONCEPTS = ['chats', 'materials', 'bell', 'copy', 'retry', 'close', 'web', 'quote', 'mic', 'settings', 'search', 'more', 'pencil', 'chevronDown', 'stop', 'compass'];
 const ANIMATED_CONCEPTS = ['send', 'newChat', 'check'];
 
 describe('Icon', () => {

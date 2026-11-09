@@ -7,6 +7,7 @@ describe('Renderer prefs of the new interface', () => {
     const store = { getItem: () => JSON.stringify({ theme: 'neon', sideWidth: 9999, rightWidth: 10, section: 'graph', languages: ['ru'], translateTo: 'ru' }) };
     // Languages and translation live in the backend's speech settings (QA A11), not in renderer prefs.
     expect(readPrefs(store)).toEqual({ ...DEFAULT_PREFS, sideWidth: 360, rightWidth: 320, section: 'graph' });
+    expect(readPrefs({ getItem: () => JSON.stringify({ section: 'explore' }) }).section).toBe('explore');
     expect(readPrefs({ getItem: () => '{not json' })).toEqual(DEFAULT_PREFS);
   });
 
