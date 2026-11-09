@@ -1,6 +1,7 @@
 import { SelectionHeader, SelectionHeaderProvider } from '../ui/listSelection';
 import { LibraryPanel } from '../library/LibraryPanel';
 import { ChatList } from '../chat/ChatList';
+import { ChatsPlusMenu } from '../research';
 import { NotificationsFeed } from '../notifications/Feed';
 import { StudyShelf } from '../study/StudyShelf';
 import { GraphSide, WikiSide } from '../wiki/WikiSide';
@@ -47,6 +48,7 @@ export function SidePanel({ width }: { width: number }) {
       <SelectionHeader className="kb-head kb-head--side">
         <h2 className="kb-side__title">{TITLES[section]}</h2>
         <span className="kb-head__spacer" />
+        {section === 'chats' && <ChatsPlusMenu />}
       </SelectionHeader>
       <div className="kb-side__body" data-section={section} ref={body}>
         {section === 'chats' && <ChatList />}

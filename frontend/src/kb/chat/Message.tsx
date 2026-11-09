@@ -35,6 +35,7 @@ import { useDiagramFix } from './diagramFix';
 import { SelectionChip } from './select/SelectionChip';
 import { WikiFixCard } from './select/WikiFixCard';
 import { UnclearClearRow, useLastUnclearAnswer } from '../study/Unclear';
+import { isResearchPart, ResearchPartView, type KbResearchPermission } from '../research';
 
 /** An inline slot: a run of source citations (one claim) or a wiki page chip. */
 export type InlineSlot =
@@ -48,6 +49,7 @@ type Block =
   | { kind: 'question'; part: KbQuestionPart }
   | { kind: 'study'; part: KbStudyPart }
   | { kind: 'web'; part: KbWebSearchPart }
+  | { kind: 'research'; part: KbResearchPermission }
   | { kind: 'memory'; part: KbMemoryPart }
   | { kind: 'answer'; part: KbAnswerBlockPart }
   | { kind: 'fix'; part: KbWikiFixPart };
@@ -98,6 +100,13 @@ export function toBlocks(parts: readonly AnyMessagePart[]): Block[] {
       flushSpace();
       run = null;
       out.push({ kind: 'web', part });
+      continue;
+    }
+    if (isResearchPart(part)) {
+      // F2 (0.4.0): a research task permission card or compact pointer is its own block.
+      flushSpace();
+      run = null;
+      out.push({ kind: 'research', part });
       continue;
     }
     if (part.type === 'connection' || part.type === 'permission' || part.type === 'question' || part.type === 'study') {
@@ -177,6 +186,7 @@ function Parts({ chatId, parts, working }: { chatId: string; parts: readonly Any
         if (b.kind === 'question') return <QuestionBlock key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'study') return <StudyInChat key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'web') return <WebSearchCard key={b.part.id} chatId={chatId} part={b.part} working={working} />;
+        if (b.kind === 'research') return <ResearchPartView key={b.part.id} chatId={chatId} part={b.part} />;
         if (b.kind === 'memory') return <MemoryChip key={b.part.edit_id} part={b.part} />;
         if (b.kind === 'answer') return <AnswerBlock key={b.part.id} part={b.part} />;
         if (b.kind === 'fix') return <WikiFixCard key={b.part.id} chatId={chatId} part={b.part} />;

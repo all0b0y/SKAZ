@@ -13,12 +13,14 @@ import { NEW_CHAT_KEY, sideChats } from './sideOrder';
 import { ChatMark, WaitingMark } from './ChatMark';
 import { useListEntrance } from '../fx/listEntrance';
 import { HalftoneArt } from '../fx/halftone/HalftoneArt';
+import { getResearchStore, ResearchTaskListSection, useResearch } from '../research';
 
 export { WaitingMark };
 
 function useOpenChat() {
-  const { chats, ui } = useServices();
+  const { client, chats, ui } = useServices();
   return (id: string | null) => {
+    getResearchStore(client).getState().close();
     chats.getState().open(id);
     ui.getState().showCenter('chat');
   };
@@ -34,7 +36,8 @@ export function useOpenChatKey(): string | null {
   const currentId = useChats((s) => s.currentId);
   const center = useUi((s) => s.center);
   const docInCenter = useUi((s) => s.right !== null && s.docExpanded);
-  return center === 'chat' && !docInCenter ? currentId ?? NEW_CHAT_KEY : null;
+  const researchMode = useResearch((s) => s.mode);
+  return center === 'chat' && !docInCenter && researchMode === 'closed' ? currentId ?? NEW_CHAT_KEY : null;
 }
 
 /** Left panel → Chats: new chat, pinned, by date (a few), "All chats · N" (decision v2/v16). */
@@ -82,6 +85,7 @@ export function ChatList() {
         <Icon name="newChat" size={16} className="kb-row__icon" play={newPlay} />
         <span className="kb-row__text">New chat</span>
       </button>
+      <ResearchTaskListSection />
       {load === 'loading' && list.length === 0 && <div className="kb-side__wait"><Spinner label="Loading chats" size="sm" /></div>}
       {load === 'error' && list.length === 0 && (
         <div className="kb-side__pad">

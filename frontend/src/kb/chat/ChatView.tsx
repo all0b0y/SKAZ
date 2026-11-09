@@ -15,6 +15,7 @@ import { AssistantMessage, SystemMessage, UserMessage } from './Message';
 import { useQuestionActions } from './useQuestionActions';
 import { partsOf } from '../api/permissions';
 import { WebSearchChip } from './webSearch';
+import { isResearchPart, ResearchGrantChip } from '../research';
 import { ChatOverviewButton } from '../overview/ChatOverviewButton';
 import { savedText } from './saved';
 import type { KbChat } from '../../api/kb/types.gen';
@@ -29,7 +30,7 @@ import { ScrollEdges } from './ScrollEdges';
 function waitingHint(chat: KbChat | null): string | null {
   const parts = chat?.messages.flatMap((m) => partsOf(m)) ?? [];
   if (parts.some((p) => p.type === 'question' && p.status === 'pending')) return 'Pick an option above, or just type…';
-  if (parts.some((p) => (p.type === 'permission' || p.type === 'web_search') && p.status === 'pending')) return 'You can keep typing — the request waits';
+  if (parts.some((p) => (p.type === 'permission' || p.type === 'web_search' || isResearchPart(p)) && p.status === 'pending')) return 'You can keep typing — the request waits';
   return null;
 }
 
@@ -206,6 +207,7 @@ export function ChatView({ hidden }: { hidden: boolean }) {
         )}
         {recording && <span className="kb-tag kb-tag--static">during recording</span>}
         <span className="kb-head__spacer" />
+        {chat && <ResearchGrantChip chatId={chat.id} />}
         {chat && <WebSearchChip chatId={chat.id} messages={chat.messages} />}
         {chat && <ChatOverviewButton chatId={chat.id} />}
         {summary && <ChatMenu chat={summary} onNotice={setNotice} onRename={() => setRenaming(true)} />}
