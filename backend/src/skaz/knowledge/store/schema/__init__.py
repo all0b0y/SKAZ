@@ -16,11 +16,18 @@ from typing import Protocol
 from . import (
     agent_sessions,
     agent_usage,
+    areas,
     chat_summaries,
     chats,
     core,
     decisions,
+    explore,
+    freshness,
     ingest,
+    maintenance,
+    repeats,
+    research,
+    science,
     search_rules,
     service,
     speech,
@@ -50,6 +57,13 @@ class SchemaError(RuntimeError):
 MODULES: tuple[SchemaModule, ...] = (
     core, service, ingest, decisions, speech, wiki2, chats, study, wiki_execution, wiki_connections,
     web_search, agent_usage, chat_summaries, agent_sessions, study_items, search_rules,
+    science,
+    explore,
+    areas,
+    research,
+    freshness,
+    maintenance,
+    repeats,
 )
 
 _VERSIONS_SQL = """

@@ -1,0 +1,695 @@
+[
+  {
+    "area": "science",
+    "method": "GET",
+    "path": "/kb/settings/science",
+    "name": "settings",
+    "body": null,
+    "response": "KbScienceSettings",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "science",
+    "method": "PUT",
+    "path": "/kb/settings/science",
+    "name": "update_settings",
+    "body": "KbScienceSettingsUpdate",
+    "response": "KbScienceSettings",
+    "example": {
+      "enabled": true,
+      "consent": "topics_dois_ids"
+    },
+    "query": []
+  },
+  {
+    "area": "science",
+    "method": "PUT",
+    "path": "/kb/settings/science/openalex-key",
+    "name": "set_key",
+    "body": "KbOpenAlexKeyUpdate",
+    "response": "KbScienceSettings",
+    "example": {
+      "key": "fixture-only"
+    },
+    "query": []
+  },
+  {
+    "area": "science",
+    "method": "POST",
+    "path": "/kb/science/search",
+    "name": "search",
+    "body": "KbScienceSearch",
+    "response": "KbScienceResults",
+    "example": {
+      "payload": {
+        "topics": [
+          "RAG"
+        ]
+      }
+    },
+    "query": []
+  },
+  {
+    "area": "science",
+    "method": "GET",
+    "path": "/kb/science/works/{work_id}",
+    "name": "work",
+    "body": null,
+    "response": "KbScienceWork",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "science",
+    "method": "POST",
+    "path": "/kb/science/works/{work_id}/text",
+    "name": "read_text",
+    "body": null,
+    "response": "KbScienceText",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "science",
+    "method": "GET",
+    "path": "/kb/science/journal",
+    "name": "journal",
+    "body": null,
+    "response": "KbScienceJournal",
+    "example": null,
+    "query": [
+      "cursor: str | None = None",
+      "limit: int = 50"
+    ]
+  },
+  {
+    "area": "science",
+    "method": "POST",
+    "path": "/kb/settings/science/full-text-hint/dismiss",
+    "name": "dismiss_hint",
+    "body": null,
+    "response": "KbScienceSettings",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/runs",
+    "name": "start",
+    "body": "KbFunnelStart",
+    "response": "KbFunnelRun",
+    "example": {},
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/runs/{run_id}",
+    "name": "run",
+    "body": null,
+    "response": "KbFunnelRun",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/runs/{run_id}/pause",
+    "name": "pause",
+    "body": null,
+    "response": "KbFunnelRun",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/runs/{run_id}/continue",
+    "name": "resume",
+    "body": "KbContinue",
+    "response": "KbFunnelRun",
+    "example": {
+      "checkpoint_id": "checkpoint-1",
+      "revision": 1
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/findings",
+    "name": "findings",
+    "body": null,
+    "response": "KbFindings",
+    "example": null,
+    "query": [
+      "area_id: str | None = None",
+      "task_id: str | None = None",
+      "include_covered: bool = False",
+      "cursor: str | None = None",
+      "limit: int = 30"
+    ]
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/findings/{finding_id}",
+    "name": "finding",
+    "body": null,
+    "response": "KbFinding",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/explore",
+    "name": "explore",
+    "body": "KbExploreStart",
+    "response": "KbExploring",
+    "example": {
+      "mode": "brief_tour"
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/findings/{finding_id}/wiki",
+    "name": "add_to_wiki",
+    "body": "KbFindingImport",
+    "response": "KbFindingImported",
+    "example": {
+      "content": "full_text"
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/exploring",
+    "name": "exploring",
+    "body": null,
+    "response": "KbExploringList",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "GET",
+    "path": "/kb/explore/map",
+    "name": "map",
+    "body": null,
+    "response": "KbAreaMap",
+    "example": null,
+    "query": [
+      "parent_id: str | None = None",
+      "include_hidden: bool = False"
+    ]
+  },
+  {
+    "area": "areas",
+    "method": "POST",
+    "path": "/kb/explore/areas",
+    "name": "create",
+    "body": "KbAreaCreate",
+    "response": "KbArea",
+    "example": {
+      "name": "Agent memory",
+      "topic_ids": [
+        "T1"
+      ]
+    },
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "PATCH",
+    "path": "/kb/explore/areas/{area_id}",
+    "name": "update",
+    "body": "KbAreaUpdate",
+    "response": "KbArea",
+    "example": {
+      "pinned": true
+    },
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "GET",
+    "path": "/kb/explore/areas/{area_id}/materials",
+    "name": "materials",
+    "body": null,
+    "response": "KbAreaMaterials",
+    "example": null,
+    "query": [
+      "cursor: str | None = None",
+      "limit: int = 30"
+    ]
+  },
+  {
+    "area": "areas",
+    "method": "GET",
+    "path": "/kb/materials/{material_id}/read-mark",
+    "name": "read_mark",
+    "body": null,
+    "response": "KbReadMark",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "PUT",
+    "path": "/kb/materials/{material_id}/read-mark",
+    "name": "set_read_mark",
+    "body": "KbReadMarkUpdate",
+    "response": "KbReadMark",
+    "example": {
+      "value": "useful_method"
+    },
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "DELETE",
+    "path": "/kb/materials/{material_id}/read-mark",
+    "name": "remove_read_mark",
+    "body": null,
+    "response": "KbReadMark",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "PUT",
+    "path": "/kb/explore/findings/{finding_id}/read-mark",
+    "name": "set_finding_mark",
+    "body": "KbReadMarkUpdate",
+    "response": "KbReadMark",
+    "example": {
+      "value": "already_knew"
+    },
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "DELETE",
+    "path": "/kb/explore/findings/{finding_id}/read-mark",
+    "name": "remove_finding_mark",
+    "body": null,
+    "response": "KbReadMark",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "GET",
+    "path": "/kb/explore/signals",
+    "name": "signals",
+    "body": null,
+    "response": "KbSignals",
+    "example": null,
+    "query": [
+      "cursor: str | None = None",
+      "limit: int = 50"
+    ]
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/research/tasks",
+    "name": "create",
+    "body": "KbResearchCreate",
+    "response": "KbResearchTask",
+    "example": {
+      "description": "Find methods to verify wiki claims"
+    },
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "GET",
+    "path": "/kb/research/tasks",
+    "name": "tasks",
+    "body": null,
+    "response": "KbResearchTasks",
+    "example": null,
+    "query": [
+      "cursor: str | None = None",
+      "limit: int = 30"
+    ]
+  },
+  {
+    "area": "research",
+    "method": "GET",
+    "path": "/kb/research/tasks/{task_id}",
+    "name": "task",
+    "body": null,
+    "response": "KbResearchTask",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/research/tasks/{task_id}/pause",
+    "name": "pause",
+    "body": null,
+    "response": "KbResearchTask",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/research/tasks/{task_id}/continue",
+    "name": "resume",
+    "body": "KbContinue",
+    "response": "KbResearchTask",
+    "example": {
+      "checkpoint_id": "checkpoint-1",
+      "revision": 1
+    },
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/research/tasks/{task_id}/cancel",
+    "name": "cancel",
+    "body": null,
+    "response": "KbResearchTask",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/research/permissions/{request_id}/decide",
+    "name": "decide",
+    "body": "KbResearchDecide",
+    "response": "KbResearchPermission",
+    "example": {
+      "decision": "allow"
+    },
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "GET",
+    "path": "/kb/chats/{chat_id}/research-grant",
+    "name": "grant",
+    "body": null,
+    "response": "KbResearchGrant",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "DELETE",
+    "path": "/kb/chats/{chat_id}/research-grant",
+    "name": "revoke_grant",
+    "body": null,
+    "response": "KbResearchGrant",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "research",
+    "method": "POST",
+    "path": "/kb/explore/read",
+    "name": "read",
+    "body": "KbExploreRead",
+    "response": "KbExploreSnapshot",
+    "example": {},
+    "query": []
+  },
+  {
+    "area": "freshness",
+    "method": "GET",
+    "path": "/kb/materials/{material_id}/publication",
+    "name": "publication",
+    "body": null,
+    "response": "KbMaterialPublication",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "freshness",
+    "method": "POST",
+    "path": "/kb/materials/by-publication",
+    "name": "filter_dates",
+    "body": "KbLibraryDateQuery",
+    "response": "KbDatedMaterials",
+    "example": {
+      "dates": {
+        "from_date": "2024-01-01",
+        "to_date": "2026-12-31"
+      }
+    },
+    "query": []
+  },
+  {
+    "area": "freshness",
+    "method": "POST",
+    "path": "/kb/freshness/link-checks",
+    "name": "check_links",
+    "body": "KbLinkCheckStart",
+    "response": "KbLinkCheck",
+    "example": {
+      "material_ids": [
+        "material-1"
+      ]
+    },
+    "query": []
+  },
+  {
+    "area": "freshness",
+    "method": "GET",
+    "path": "/kb/freshness/link-checks/{check_id}",
+    "name": "link_check",
+    "body": null,
+    "response": "KbLinkCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "freshness",
+    "method": "POST",
+    "path": "/kb/freshness/link-checks/{check_id}/pause",
+    "name": "pause",
+    "body": null,
+    "response": "KbLinkCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "freshness",
+    "method": "POST",
+    "path": "/kb/freshness/link-checks/{check_id}/continue",
+    "name": "resume",
+    "body": "KbContinue",
+    "response": "KbLinkCheck",
+    "example": {
+      "checkpoint_id": "checkpoint-1",
+      "revision": 1
+    },
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "GET",
+    "path": "/kb/settings/weekly-check",
+    "name": "settings",
+    "body": null,
+    "response": "KbWeeklySettings",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "PUT",
+    "path": "/kb/settings/weekly-check",
+    "name": "update_settings",
+    "body": "KbWeeklySettingsUpdate",
+    "response": "KbWeeklySettings",
+    "example": {
+      "enabled": true
+    },
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "POST",
+    "path": "/kb/freshness/weekly-checks",
+    "name": "start",
+    "body": null,
+    "response": "KbWeeklyCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "GET",
+    "path": "/kb/freshness/weekly-checks/{check_id}",
+    "name": "check",
+    "body": null,
+    "response": "KbWeeklyCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "POST",
+    "path": "/kb/freshness/weekly-checks/{check_id}/pause",
+    "name": "pause",
+    "body": null,
+    "response": "KbWeeklyCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "POST",
+    "path": "/kb/freshness/weekly-checks/{check_id}/continue",
+    "name": "resume",
+    "body": "KbContinue",
+    "response": "KbWeeklyCheck",
+    "example": {
+      "checkpoint_id": "checkpoint-1",
+      "revision": 1
+    },
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "GET",
+    "path": "/kb/materials/{material_id}/freshness",
+    "name": "marks",
+    "body": null,
+    "response": "KbFreshnessMarks",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "POST",
+    "path": "/kb/freshness/marks/{mark_id}/act",
+    "name": "act",
+    "body": "KbFreshnessAction",
+    "response": "KbFreshnessActionResult",
+    "example": {
+      "action": "keep_marked"
+    },
+    "query": []
+  },
+  {
+    "area": "repeats",
+    "method": "GET",
+    "path": "/kb/materials/{material_id}/repeats",
+    "name": "material",
+    "body": null,
+    "response": "KbMaterialRepeats",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "repeats",
+    "method": "POST",
+    "path": "/kb/explore/repeat-checks",
+    "name": "start",
+    "body": "KbRepeatCheckStart",
+    "response": "KbRepeatCheck",
+    "example": {
+      "area_id": "area-1"
+    },
+    "query": []
+  },
+  {
+    "area": "repeats",
+    "method": "GET",
+    "path": "/kb/explore/repeat-checks/{check_id}",
+    "name": "check",
+    "body": null,
+    "response": "KbRepeatCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "repeats",
+    "method": "POST",
+    "path": "/kb/explore/repeat-checks/{check_id}/pause",
+    "name": "pause",
+    "body": null,
+    "response": "KbRepeatCheck",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "repeats",
+    "method": "POST",
+    "path": "/kb/explore/repeat-checks/{check_id}/continue",
+    "name": "resume",
+    "body": "KbContinue",
+    "response": "KbRepeatCheck",
+    "example": {
+      "checkpoint_id": "checkpoint-1",
+      "revision": 1
+    },
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "POST",
+    "path": "/kb/explore/runs/{run_id}/cancel",
+    "name": "cancel",
+    "body": null,
+    "response": "KbFunnelRun",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "explore",
+    "method": "GET",
+    "path": "/kb/explore/jobs",
+    "name": "jobs",
+    "body": null,
+    "response": "KbJobs",
+    "example": null,
+    "query": [
+      "active: bool = True"
+    ]
+  },
+  {
+    "area": "areas",
+    "method": "DELETE",
+    "path": "/kb/explore/areas/{area_id}",
+    "name": "delete",
+    "body": null,
+    "response": "KbAcknowledged",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "areas",
+    "method": "POST",
+    "path": "/kb/explore/areas/{area_id}/opened",
+    "name": "opened",
+    "body": null,
+    "response": "KbAcknowledged",
+    "example": null,
+    "query": []
+  },
+  {
+    "area": "maintenance",
+    "method": "GET",
+    "path": "/kb/wiki/pages/{page_id}/freshness",
+    "name": "page_marks",
+    "body": null,
+    "response": "KbFreshnessMarks",
+    "example": null,
+    "query": []
+  }
+]

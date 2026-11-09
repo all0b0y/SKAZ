@@ -1,0 +1,96 @@
+"""Research owns a chat; tool execution is gated separately from ordinary web search (B3)."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+from .schemas_areas import KbAreaMap, KbSignals
+from .schemas_explore import KbFindings
+from .schemas_explore_common import (
+    KbContractRequest,
+    KbDateWindow,
+    KbEntityId,
+    KbExploreJob,
+    KbExploreJobState,
+)
+
+
+class KbResearchCreate(KbContractRequest):
+    description: Annotated[str, Field(min_length=1, max_length=4000)]
+    area_id: KbEntityId | None = None
+    dates: KbDateWindow | None = None
+
+
+class KbResearchTask(BaseModel):
+    id: KbEntityId
+    title: str
+    description: str
+    chat_id: str
+    origin_chat_id: str | None
+    area_id: KbEntityId | None
+    run: KbExploreJob
+    finding_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class KbResearchTasks(BaseModel):
+    tasks: list[KbResearchTask]
+    next_cursor: str | None
+
+
+class KbResearchPermission(BaseModel):
+    """The ``skaz_research_start`` card and, once allowed, the compact task pointer in the chat.
+
+    B3 adds this model to the ``KbMessagePart`` union, so ``type`` is its discriminator.
+    """
+
+    type: Literal["research"]
+    id: KbEntityId
+    kind: Literal["research_start"] = "research_start"
+    engine: Literal["codex", "claude_code", "hermes", "opencode"]
+    chat_id: str
+    arguments: KbResearchCreate
+    status: Literal["pending", "allowed", "denied", "cancelled"]
+    #: Allowed by the chat's "Allow in this chat" (no question was asked).
+    auto: bool
+    #: Cancelled: why.
+    reason: str | None
+    task_id: KbEntityId | None
+    task_title: str | None
+    task_state: KbExploreJobState | None
+    created_at: datetime
+
+
+class KbResearchDecide(KbContractRequest):
+    decision: Literal["allow", "allow_chat", "deny"]
+
+
+class KbResearchGrant(BaseModel):
+    chat_id: str
+    kind: Literal["research_start"] = "research_start"
+    allowed: bool
+    granted_at: datetime | None
+
+
+class KbResearchToolResult(BaseModel):
+    status: Literal["started", "denied", "cancelled"]
+    task: KbResearchTask | None
+    permission_id: KbEntityId
+
+
+class KbExploreRead(KbContractRequest):
+    area_id: KbEntityId | None = None
+    task_id: KbEntityId | None = None
+    cursor: str | None = None
+    limit: Annotated[int, Field(ge=1, le=100)] = 30
+
+
+class KbExploreSnapshot(BaseModel):
+    map: KbAreaMap
+    findings: KbFindings
+    signals: KbSignals
+    tasks: KbResearchTasks
