@@ -3,7 +3,7 @@ import type { KbStudyShelfEntry } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
-import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
+import { useLibrary, useServices, useUi } from '../state/context';
 import { Button, EmptyState, Icon } from '../ui';
 import { studyApi } from './api';
 
@@ -27,6 +27,7 @@ function ShelfRow({ entry, act }: { entry: KbStudyShelfEntry; act: Act }) {
       </button>
       {entry.suggest_archive && (
         <div className="kb-shelf__hint">
+          <span className="kb-shelf__badge">Archive suggested</span>
           <p>All learned and not opened for a long time. Archive it? SKAZ won’t do it by itself.</p>
           <div className="kb-shelf__actions">
             <Button size="sm" onClick={() => void act(() => studyApi.archive(client, entry.page_id))}>Archive</Button>
@@ -59,16 +60,15 @@ function Fold({ id, label, count, open, onToggle, children }: {
 }
 
 /**
- * Saved decks and tests, apart from the wiki's pages (N4-7): decks, tests and what is archived (N4-8).
- * An archived test's questions and mistakes stay with the agent; here it is only hidden. It lives in the
- * side panel until the Study section takes it over. In an empty wiki the panel's one «The wiki is empty»
- * speaks for an empty list too (FIX1 R6).
+ * Study section in the side panel (N4-7, N4-8, F6): saved decks, tests, and what is archived,
+ * kept apart from the wiki's concept/note/analysis/folder pages. An archived test's questions and
+ * mistakes stay with the agent; here it is only hidden.
  */
-export function StudyShelf({ wikiEmpty }: { wikiEmpty: boolean }) {
-  const { client, prefs } = useServices();
+export function StudyShelf({ wikiEmpty = false }: { wikiEmpty?: boolean } = {}) {
+  const { client } = useServices();
   const { state, reload } = useLoad('study-library', () => studyApi.library(client));
-  const decksOpen = usePrefs((s) => s.wikiOpen.deck);
-  const testsOpen = usePrefs((s) => s.wikiOpen.test);
+  const [decksOpen, setDecksOpen] = useState(true);
+  const [testsOpen, setTestsOpen] = useState(true);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const revision = useLibrary((s) => s.revision);
@@ -80,15 +80,14 @@ export function StudyShelf({ wikiEmpty }: { wikiEmpty: boolean }) {
   };
   const shelf = state.value ?? { decks: [], tests: [], archived: [] };
   const list = (entries: KbStudyShelfEntry[], kind: 'deck' | 'test', label: string) => (entries.length === 0
-    ? !wikiEmpty && <EmptyState icon="wiki" title={`No ${label} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
+    ? !wikiEmpty && <EmptyState icon={PAGE_KIND_ICON[kind]} title={`No ${label} yet`} compact>{EMPTY_HINT[kind]}</EmptyState>
     : <ul className="kb-list" aria-label={label}>{entries.map((e) => <ShelfRow key={e.page_id} entry={e} act={act} />)}</ul>);
   return (
-    <>
-      <h3 className="kb-subhead" id="kb-study-shelf">Study</h3>
-      <Fold id="deck" label="Decks" count={shelf.decks.length} open={decksOpen} onToggle={() => prefs.getState().setWikiOpen('deck', !decksOpen)}>
+    <div className="kb-side__scroll">
+      <Fold id="deck" label="Decks" count={shelf.decks.length} open={decksOpen} onToggle={() => setDecksOpen(!decksOpen)}>
         {list(shelf.decks, 'deck', 'decks')}
       </Fold>
-      <Fold id="test" label="Tests" count={shelf.tests.length} open={testsOpen} onToggle={() => prefs.getState().setWikiOpen('test', !testsOpen)}>
+      <Fold id="test" label="Tests" count={shelf.tests.length} open={testsOpen} onToggle={() => setTestsOpen(!testsOpen)}>
         {list(shelf.tests, 'test', 'tests')}
       </Fold>
       {shelf.archived.length > 0 && (
@@ -96,18 +95,25 @@ export function StudyShelf({ wikiEmpty }: { wikiEmpty: boolean }) {
           <ul className="kb-list" aria-label="archived">
             {shelf.archived.map((entry) => (
               <li key={entry.page_id} className="kb-shelf__archived">
-                <span className="kb-row__text">{entry.title}</span>
+                <div className="kb-shelf__archived-text">
+                  <span className="kb-row__text">{entry.title}</span>
+                  <span className="kb-shelf__meta">
+                    {entry.archived_by === 'auto' ? 'Auto-archived after 60 days' : 'Archived by you'}
+                  </span>
+                </div>
                 <Button size="sm" variant="quiet" aria-label={`Bring back ${entry.title}`}
                   onClick={() => void act(() => studyApi.unarchive(client, entry.page_id))}>Bring back</Button>
               </li>
             ))}
           </ul>
+          <p className="kb-side__note">Questions and mistakes stay with the agent; here they are only hidden.</p>
         </Fold>
       )}
+      <p className="kb-side__note">Concepts and terms stay in the wiki — only flashcards and tests live here.</p>
       {(error ?? (state.load === 'error' ? state.error : null)) && (
         <p className="kb-inline-error" role="alert">{error ?? (state.load === 'error' ? state.error : '')}</p>
       )}
-    </>
+    </div>
   );
 }
 

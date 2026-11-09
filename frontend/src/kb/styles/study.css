@@ -369,10 +369,12 @@
   .kb-st-pc.is-back .kb-st-pf--front { opacity: 0; }
 }
 
-/* N4-7, N4-8: saved decks and tests in the side panel. */
+/* N4-7, N4-8, F6: saved decks and tests in the Study side panel. */
 .kb-shelf__hint { margin: var(--kb-sp-2) 0 var(--kb-sp-6) var(--kb-sp-18); font-size: var(--t-xs); color: var(--kb-muted); }
+.kb-shelf__badge { display: inline-block; margin-bottom: var(--kb-sp-2); font-size: var(--t-xs); font-weight: 600; color: var(--kb-warn); }
 .kb-shelf__hint p { margin: 0 0 var(--kb-sp-4); }
 .kb-shelf__actions { display: flex; gap: var(--kb-sp-6); flex-wrap: wrap; }
-.kb-shelf__archived { display: flex; align-items: center; gap: var(--kb-sp-6); padding-left: var(--kb-sp-6); }
-.kb-shelf__archived .kb-row__text { flex: 1; min-width: 0; }
+.kb-shelf__archived { display: flex; align-items: center; gap: var(--kb-sp-6); padding: var(--kb-sp-2) 0 var(--kb-sp-2) var(--kb-sp-6); }
+.kb-shelf__archived-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--kb-sp-2); }
+.kb-shelf__meta { font-size: var(--t-xs); color: var(--kb-muted); }
 .kb-shelf__warning { margin: 0 0 var(--kb-sp-10); font-size: var(--t-sm); font-weight: 600; }

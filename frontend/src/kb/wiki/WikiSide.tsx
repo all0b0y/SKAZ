@@ -6,7 +6,6 @@ import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
 import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
 import { WIKI_KINDS, type WikiKind } from '../state/prefs';
-import { StudyShelf } from '../study/StudyShelf';
 import { ActiveTab, type TabVariant } from '../ui/ActiveTab';
 import type { WikiFileName } from '../state/document';
 import { errorText } from '../api/client';
@@ -273,7 +272,6 @@ export function WikiSide() {
         <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)}
           wikiEmpty={pages.length === 0} sel={sel} dragProps={dragProps} />
       ))}
-      <StudyShelf wikiEmpty={pages.length === 0} />
       <ul className="kb-list kb-wiki-more" aria-label="More of the wiki">
         <li data-entrance="">
           <button type="button" className={`kb-row${graphOpen ? ' is-current' : ''}`} onClick={() => openGraph()} aria-current={graphOpen ? 'true' : undefined}>
