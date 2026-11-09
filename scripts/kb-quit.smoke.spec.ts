@@ -54,8 +54,12 @@ test(`closing the window keeps SKAZ running in the tray, off the screen within $
   const closeWindow = () => app.evaluate(({ BrowserWindow }) => new Promise<number>((resolve) => {
     const win = BrowserWindow.getAllWindows()[0]!;
     const start = performance.now();
-    win.once('hide', () => resolve(Math.round(performance.now() - start)));
+    const done = () => resolve(Math.round(performance.now() - start));
+    // Measured as the quit tests above do: off the screen once hidden (macOS fires 'hide' only after its
+    // fade-out animation, ~270 ms, while the window is already ordered out).
+    win.once('hide', done);
     win.close();
+    if (!win.isVisible()) done();
   }));
   const windows = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((win) => win.isVisible()));
   const backendPhase = (page: Awaited<ReturnType<typeof app.firstWindow>>) => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase);

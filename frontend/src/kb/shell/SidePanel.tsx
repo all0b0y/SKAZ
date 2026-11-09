@@ -3,6 +3,7 @@ import { LibraryPanel } from '../library/LibraryPanel';
 import { ChatList } from '../chat/ChatList';
 import { ChatsPlusMenu } from '../research';
 import { NotificationsFeed } from '../notifications/Feed';
+import { StudyShelf } from '../study/StudyShelf';
 import { GraphSide, WikiSide } from '../wiki/WikiSide';
 import { useLayoutEffect, useRef } from 'react';
 import { usePrefs } from '../state/context';
@@ -17,6 +18,7 @@ const TITLES: Record<Section, string> = {
   chats: 'Chats',
   materials: 'Materials',
   wiki: 'Wiki',
+  study: 'Study',
   graph: 'Graph',
   notifications: 'Notifications',
 };
@@ -52,6 +54,7 @@ export function SidePanel({ width }: { width: number }) {
         {section === 'chats' && <ChatList />}
         {section === 'materials' && <LibraryPanel />}
         {section === 'wiki' && <WikiSide />}
+        {section === 'study' && <StudyShelf />}
         {section === 'graph' && <GraphSide />}
         {section === 'notifications' && <NotificationsFeed />}
       </div>

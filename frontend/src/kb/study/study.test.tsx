@@ -566,7 +566,8 @@ describe('The deck page (S12)', () => {
     await within(centre).findByRole('region', { name: 'Flashcards: Lecture 8' });
     const openChatId = services.chats.getState().currentId;
     act(() => services.ui.getState().openDocument({ type: 'page', id: 'p-deck' }));
-    await user.click(await screen.findByRole('button', { name: 'Study' }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    await user.click(await within(doc).findByRole('button', { name: 'Study' }));
     const panel = await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     const deck = within(panel).getByRole('region', { name: 'Flashcards: Thermodynamics' });
     expect(services.chats.getState().currentId).toBe(openChatId);
@@ -579,7 +580,8 @@ describe('The deck page (S12)', () => {
     expect(within(centre).queryByRole('region', { name: 'Flashcards: Thermodynamics' })).toBeNull();
 
     act(() => services.ui.getState().openDocument({ type: 'page', id: 'p-deck' }));
-    await user.click(await screen.findByRole('button', { name: 'Study' }));
+    const docAgain = await screen.findByRole('complementary', { name: 'Document' });
+    await user.click(await within(docAgain).findByRole('button', { name: 'Study' }));
     await screen.findByRole('complementary', { name: 'Flashcards and tests' });
     expect(fake.calls.filter((c) => c.path === '/kb/study/decks/p-deck/study')).toHaveLength(first + 1);
     const thread = fake.world.chats.find((c) => c.id === 'chat-wiki-study')!;
