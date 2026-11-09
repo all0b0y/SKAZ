@@ -57,9 +57,17 @@ def _write(path: Path, document: PageDocument) -> Path:
     return path
 
 
+def _rel_path(kb: KnowledgeService, page_id: str) -> str:
+    record = kb.page_repo.get(page_id)
+    assert record is not None, page_id
+    return record.rel_path
+
+
 def _concept(root: Path) -> Path:
     meta = PageMeta(skaz_id="pg-concept", kind="concept", title="Entropy", language="en")
-    parts = [Heading(2, "About"), Block.create("c-about", "explanation", "A measure of disorder.")]
+    parts: list[Heading | Block] = [
+        Heading(2, "About"), Block.create("c-about", "explanation", "A measure of disorder.")
+    ]
     return _write(root / "Wiki/Concepts/Entropy.md", PageDocument(meta, spaced(parts)))
 
 
@@ -117,8 +125,8 @@ def test_every_deck_and_test_moves_byte_for_byte_and_a_backup_stays(kb: Knowledg
         assert name not in after
         assert after[name.replace("Wiki/", "Study/", 1)] == data
     # The index follows at once (the scan comes later): same ids at the new paths.
-    assert kb.page_repo.get("pg-deck1").rel_path == "Study/Decks/Thermodynamics.md"
-    assert kb.page_repo.get("pg-test1").rel_path == "Study/Tests/Second law.md"
+    assert _rel_path(kb, "pg-deck1") == "Study/Decks/Thermodynamics.md"
+    assert _rel_path(kb, "pg-test1") == "Study/Tests/Second law.md"
     # The empty old folders go; the concept stays where it is.
     assert not (root / "Wiki/Decks").exists() and not (root / "Wiki/Tests").exists()
     assert (root / "Wiki/Concepts/Entropy.md").is_file()
@@ -332,7 +340,7 @@ def test_a_name_taken_in_study_is_never_replaced(kb: KnowledgeService, old_libra
     assert outcome.status == "moved"
     assert theirs.read_bytes() == data
     assert (root / "Study/Decks/Thermodynamics (2).md").read_bytes() == moved
-    assert kb.page_repo.get("pg-deck1").rel_path == "Study/Decks/Thermodynamics (2).md"
+    assert _rel_path(kb, "pg-deck1") == "Study/Decks/Thermodynamics (2).md"
 
 
 def test_service_data_is_keyed_by_page_id_and_survives_the_move(kb: KnowledgeService,
@@ -364,7 +372,7 @@ def test_the_first_start_moves_them_before_the_scan_and_tells_the_user(tmp_path:
     try:
         kb.start()
         assert kb.view().state == "ready"
-        assert kb.page_repo.get("pg-deck1").rel_path == "Study/Decks/Thermodynamics.md"
+        assert _rel_path(kb, "pg-deck1") == "Study/Decks/Thermodynamics.md"
         assert (root / "Study/Decks/Thermodynamics.md").is_file()
         [note] = [item for item in kb.notifications() if item.kind == "study_moved"]
         assert ".skaz/backups/study-migration-" in note.body
@@ -387,7 +395,7 @@ def test_a_failed_start_leaves_a_working_library_and_tries_again_next_start(
     import skaz.knowledge.study.migration as migration
 
     calls = {"count": 0}
-    real = migration.rename_exclusive
+    real = rename_exclusive
 
     def full(_source: Path, _target: Path) -> None:
         calls["count"] += 1
@@ -400,7 +408,7 @@ def test_a_failed_start_leaves_a_working_library_and_tries_again_next_start(
         # Nothing is half-moved, the library opens and the deck is still found where it was.
         assert kb.view().state == "ready"
         assert deck.read_bytes() == data and not (root / "Study/Decks/Thermodynamics.md").exists()
-        assert kb.page_repo.get("pg-deck1").rel_path == "Wiki/Decks/Thermodynamics.md"
+        assert _rel_path(kb, "pg-deck1") == "Wiki/Decks/Thermodynamics.md"
         [note] = [item for item in kb.notifications() if item.kind == "study_move_failed"]
         assert "No space left on device" in note.body and "Thermodynamics" not in note.body
         # Not on every background rescan of this run: at the next start.
@@ -414,6 +422,6 @@ def test_a_failed_start_leaves_a_working_library_and_tries_again_next_start(
     kb = KnowledgeService(tmp_path / "data", documents_dir=tmp_path / "docs")
     try:
         kb.start()
-        assert kb.page_repo.get("pg-deck1").rel_path == "Study/Decks/Thermodynamics.md"
+        assert _rel_path(kb, "pg-deck1") == "Study/Decks/Thermodynamics.md"
     finally:
         kb.close()

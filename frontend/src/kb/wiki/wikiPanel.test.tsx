@@ -168,9 +168,9 @@ describe('Wiki kind sections fold in place (decisions 24 «Wiki», 27)', () => {
 
   it('each kind is a header row with a chevron and a count; Concepts open, the rest folded; no drill-in, no back step', async () => {
     await wikiPanel();
-    const heads = ['Concepts', 'Notes', 'Analyses', 'Folder overviews', 'Decks', 'Tests']
+    const heads = ['Concepts', 'Notes', 'Analyses', 'Folder overviews']
       .map((name) => within(side()).getByRole('button', { name: new RegExp(`^${name}\\s*\\d+$`) }));
-    expect(heads.map((h) => h.getAttribute('aria-expanded'))).toEqual(['true', 'false', 'false', 'false', 'false', 'false']);
+    expect(heads.map((h) => h.getAttribute('aria-expanded'))).toEqual(['true', 'false', 'false', 'false']);
     expect(heads[0]).toHaveTextContent('22');
     expect(heads[0]!.querySelector('.kb-wfold__chev')).toHaveClass('is-open');
     expect(within(side()).queryByRole('button', { name: 'Wiki' })).not.toBeInTheDocument();
@@ -199,8 +199,11 @@ describe('Wiki kind sections fold in place (decisions 24 «Wiki», 27)', () => {
 
   it('an open section with no pages says how pages of that kind appear', async () => {
     const user = userEvent.setup();
-    await wikiPanel();
-    const empty = ['Concepts', 'Notes', 'Analyses', 'Folder overviews', 'Decks', 'Tests']
+    const world = docWorld();
+    world.pages = world.pages.filter((p) => p.kind !== 'analysis');
+    renderKb({ world, prefs: { section: 'wiki' } });
+    await screen.findByRole('heading', { name: 'Sections', level: 3 });
+    const empty = ['Concepts', 'Notes', 'Analyses', 'Folder overviews']
       .map((name) => within(side()).getByRole('button', { name: new RegExp(`^${name}\\s*\\d+$`) }))
       .find((h) => h.textContent!.endsWith('0'));
     expect(empty, 'the doc world has a kind with no pages').toBeTruthy();

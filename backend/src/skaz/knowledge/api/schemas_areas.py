@@ -9,11 +9,17 @@ from pydantic import BaseModel, Field
 
 from ..markdown.source import MaterialKind
 from .schemas_explore_common import (
-    KbAcknowledged,  # noqa: F401 (the manifest finds each route's response model here)
+    # Re-exported on purpose: the route manifest finds each response model here, and areas/freshness import
+    # these from this module (explicit `X as X` keeps strict mypy's no-implicit-reexport happy).
+    KbAcknowledged as KbAcknowledged,
+)
+from .schemas_explore_common import (
     KbContractRequest,
     KbEntityId,
     KbPublicationDate,
-    KbReadMarkValue,
+)
+from .schemas_explore_common import (
+    KbReadMarkValue as KbReadMarkValue,
 )
 
 

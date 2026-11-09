@@ -125,6 +125,11 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'version', section: 'about', group: '', label: 'Version', keywords: 'about' },
   { id: 'updates', section: 'about', group: '', label: 'Updates', hint: 'From GitHub releases, checked at start and once a day', keywords: 'update check new version install download release' },
   { id: 'github', section: 'about', group: '', label: 'GitHub', keywords: 'source code repository' },
+  // Science & Explore (0.4.0 F4)
+  { id: 'science-enabled', section: 'search', group: 'Scientific sources', label: 'Scientific papers & preprints', hint: 'OpenAlex, arXiv and Crossref. Only topics, DOIs and IDs leave this computer — never your notes, chats or material text.', keywords: 'science openalex arxiv crossref preprints papers articles consent egress privacy research explore' },
+  { id: 'openalex-key', section: 'search', group: 'Scientific sources', label: 'OpenAlex key', hint: 'Optional free key for full text · stored in your secret store', keywords: 'openalex key api token tei full text secret' },
+  { id: 'science-journal', section: 'search', group: 'Scientific sources', label: 'Requests journal', hint: 'What was sent to OpenAlex, arXiv and Crossref — topics, DOIs and IDs only', keywords: 'journal requests egress log history outgoing outbound science openalex arxiv crossref' },
+  { id: 'weekly-check', section: 'search', group: 'Weekly check', label: 'Weekly check', hint: 'Checks scientific sources and your wiki once a week · new versions, retractions, contradictions', keywords: 'weekly check schedule maintenance updates retractions versions contradictions background freshness' },
   // Search (N7): every chat starts from these; a chat changes them from the message field.
   { id: 'search-beta', section: 'search', group: 'Experimental', label: 'Beta search features', hint: 'When off, these rules are paused for new searches. Your lists are kept.', keywords: 'only only these sites prefer preferred preferred sites beta experimental web search' },
   { id: 'search-never', section: 'search', group: 'Never search', label: 'Blocked sites', hint: 'Always, in every chat. Links from these sites are removed before the agent sees them.', keywords: 'web search block blocked forbid never sites domains internet' },

@@ -13,6 +13,7 @@ const ITEMS: ReadonlyArray<{ id: Section; label: string; icon: IconName }> = [
   { id: 'materials', label: 'Materials', icon: 'materials' },
   { id: 'wiki', label: 'Wiki', icon: 'wiki' },
   { id: 'explore', label: 'Explore', icon: 'compass' },
+  { id: 'study', label: 'Study', icon: 'deck' },
   { id: 'notifications', label: 'Notifications', icon: 'bell' },
 ];
 
