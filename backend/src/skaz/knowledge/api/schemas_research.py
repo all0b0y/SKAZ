@@ -54,6 +54,9 @@ class KbResearchPermission(BaseModel):
     engine: Literal["codex", "claude_code", "hermes", "opencode"]
     chat_id: str
     arguments: KbResearchCreate
+    #: What would leave this computer (decision C0-1): the search topics the agent derived from the
+    #: description. The description itself never leaves; the card shows these before Allow.
+    topics: list[str]
     status: Literal["pending", "allowed", "denied", "cancelled"]
     #: Allowed by the chat's "Allow in this chat" (no question was asked).
     auto: bool

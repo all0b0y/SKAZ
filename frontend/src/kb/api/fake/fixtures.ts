@@ -687,6 +687,10 @@ export const contractFixtures = {
     "arguments": {
       "description": "Find methods to verify wiki claims"
     },
+    "topics": [
+      "claim verification methods",
+      "fact-checking knowledge bases"
+    ],
     "status": "pending",
     "auto": false,
     "task_id": null,

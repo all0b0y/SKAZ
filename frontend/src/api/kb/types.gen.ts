@@ -2008,6 +2008,7 @@ export interface KbResearchPermission {
   engine: "codex" | "claude_code" | "hermes" | "opencode";
   chat_id: string;
   arguments: KbResearchCreate;
+  topics: string[];
   status: "pending" | "allowed" | "denied" | "cancelled";
   auto: boolean;
   reason: string | null;
