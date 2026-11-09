@@ -4,6 +4,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeKb } from '../api/fake';
 import { renderKb } from '../test/renderKb';
+import { createFakeBridge } from '../test/fakeBridge';
+import { createServices, KbServicesProvider } from '../state/context';
+import { MotionProvider } from '../ui';
 import { contractFixtures } from '../api/fake/fixtures';
 import { scenes } from '../api/fake/scenes';
 import { auditCss } from '../board/audit';
@@ -353,7 +356,15 @@ describe('F1 — ExploreSection UI & interactions', () => {
     const exploreSpy = vi.spyOn(kb.explore, 'explore');
     const addToWikiSpy = vi.spyOn(kb.explore, 'add_to_wiki');
 
-    const { container, unmount } = render(<ExploreSection clients={kb} initial={{ finding: scenes.find.finding }} />);
+    // The default host is F3's FindingDetail; it needs the app's services (chats, ui) like in KbApp.
+    const services = createServices(createFakeBridge().bridge, null, { capture: null });
+    const { container, unmount } = render(
+      <KbServicesProvider services={services}>
+        <MotionProvider>
+          <ExploreSection clients={kb} initial={{ finding: scenes.find.finding }} />
+        </MotionProvider>
+      </KbServicesProvider>,
+    );
 
     await screen.findByRole('heading', {
       name: /Self-correction in LLMs does not improve factuality without external feedback/i,
@@ -368,10 +379,8 @@ describe('F1 — ExploreSection UI & interactions', () => {
     fireEvent.click(briefTourBtn);
 
     await waitFor(() =>
-      expect(exploreSpy).toHaveBeenCalledWith('finding-contradicts', {
-        mode: 'brief_tour',
-        add_to_wiki: true,
-      }),
+      // Exploring is not adding: Add to wiki is its own action (KbExploreStart.add_to_wiki defaults to false).
+      expect(exploreSpy).toHaveBeenCalledWith('finding-contradicts', { mode: 'brief_tour' }),
     );
 
     // Add to wiki button

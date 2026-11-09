@@ -1,9 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { StippleGlobe } from '../fx/stipple/StippleWork';
 import { useServices } from '../state/context';
-import type { Section } from '../state/prefs';
 import { Button, Icon, Spinner } from '../ui';
-import { CompassIcon } from './CompassIcon';
 import {
   getResearchStore,
   useResearch,
@@ -103,7 +101,7 @@ export function postProgressCopyFor(task: KbResearchTask): string {
  * through one cast here so nothing else in F2 depends on it.
  */
 function openExploreSection(prefs: ReturnType<typeof useServices>['prefs']): void {
-  prefs.getState().set({ section: 'explore' as unknown as Section });
+  prefs.getState().set({ section: 'explore' });
 }
 
 export interface ResearchTaskViewProps {
@@ -358,7 +356,7 @@ export function ResearchTaskView({ taskId, initialTask, onOpenFindings }: Resear
           <p className="kb-research-paragraph">{postProgressCopyFor(task)}</p>
 
           <div className="kb-research-pointer">
-            <CompassIcon size={18} />
+            <Icon name="compass" size={18} />
             <div className="kb-research-pointer__body">
               <p className="kb-research-pointer__title">{task.title}</p>
               <span className="kb-research-pointer__meta">Findings in Explore → New</span>

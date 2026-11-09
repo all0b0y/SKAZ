@@ -11,7 +11,7 @@ import type {
 import type { DocTarget } from '../state/document';
 import type { SettingsSection } from '../state/ui';
 import { Icon } from '../ui';
-import { FindingPreview } from './FindingPreview';
+import { FindingDetail } from './finding';
 import {
   FINDING_LABEL_TEXT,
   MATERIAL_KIND_ICON,
@@ -21,6 +21,7 @@ import {
   type ExploreFindingStart,
   type ExploreResumeBody,
   type FindingHostComponent,
+  type FindingHostProps,
   type FindingToWikiBody,
 } from './types';
 
@@ -122,7 +123,7 @@ export function AreaColumn({
   const [showWhy, setShowWhy] = useState(false);
 
   if (openFinding) {
-    const Host = FindingComponent ?? FindingPreview;
+    const Host = FindingComponent ?? DefaultFindingHost;
     return (
       <aside className="kb-explore-col kb-explore-col--wide" aria-label="Finding details">
         <div className="kb-explore-col__body">
@@ -594,4 +595,10 @@ export function AreaColumn({
       </div>
     </aside>
   );
+}
+
+/** F3's finding view (G1-3A): it loads the finding itself and runs Explore / Add to wiki through the
+ * section's clients (ExploreSection provides them via FindingClientsProvider). */
+function DefaultFindingHost({ finding, onBack }: FindingHostProps) {
+  return <FindingDetail findingId={finding.id} onClose={onBack} />;
 }

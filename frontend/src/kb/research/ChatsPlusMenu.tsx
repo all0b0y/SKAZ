@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Icon, Popover } from '../ui';
 import { useChats, useServices } from '../state/context';
-import { CompassIcon } from './CompassIcon';
 import { getResearchStore, useResearch } from './store';
 
 /**
@@ -93,7 +92,7 @@ export function ChatsPlusMenu() {
               research.getState().openNewTask();
             }}
           >
-            <CompassIcon size={14} />
+            <Icon name="compass" size={14} />
             <span className="kb-menu__label">New research task</span>
           </button>
         </div>
@@ -139,7 +138,7 @@ export function ResearchTaskListSection() {
                 research.getState().openTask(task.id);
               }}
             >
-              <CompassIcon size={14} className="kb-row__icon" />
+              <Icon name="compass" size={14} className="kb-row__icon" />
               <span className="kb-row__text">{task.title}</span>
             </button>
           );

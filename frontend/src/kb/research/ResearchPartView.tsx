@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { errorText } from '../api/client';
 import type { AnyMessagePart } from '../api/permissions';
 import { useServices } from '../state/context';
-import { Button, Popover } from '../ui';
-import { CompassIcon } from './CompassIcon';
+import { Button, Icon, Popover } from '../ui';
 import {
   getResearchStore,
   useResearch,
@@ -56,7 +55,7 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
     const taskState = storedTask?.run.state ?? current.task_state ?? 'running';
     return (
       <div className="kb-research-pointer" data-testid="research-pointer">
-        <CompassIcon size={18} />
+        <Icon name="compass" size={18} />
         <div className="kb-research-pointer__body">
           <p className="kb-research-pointer__title">{title}</p>
           <span className="kb-research-pointer__meta">{`Research task · ${taskState}`}</span>
@@ -177,7 +176,7 @@ export function ResearchGrantChip({ chatId }: { chatId: string }) {
           setOpen((v) => !v);
         }}
       >
-        <CompassIcon size={12} />
+        <Icon name="compass" size={12} />
         <span>Research allowed</span>
       </button>
       <Popover

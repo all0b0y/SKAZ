@@ -1,7 +1,7 @@
 export { AreaColumn, type AreaColumnProps } from './AreaColumn';
 export { ExploreMap, type ExploreMapProps } from './ExploreMap';
 export { ExploreSection } from './ExploreSection';
-export { FindingPreview } from './FindingPreview';
+export { FindingDetail, FindingClientsProvider } from './finding';
 export {
   formatWikiShare,
   isGapArea,

@@ -1,6 +1,5 @@
 import './research.css';
 
-export { CompassIcon, type CompassIconProps } from './CompassIcon';
 export {
   bindResearchApi,
   getResearchStore,

@@ -14,6 +14,7 @@ import type { DocTarget } from '../state/document';
 import type { SettingsSection } from '../state/ui';
 import { Icon } from '../ui';
 import { AreaColumn } from './AreaColumn';
+import { FindingClientsProvider } from './finding';
 import { ExploreMap } from './ExploreMap';
 import './explore.css';
 import { formatWikiShare, isGapArea } from './treemap';
@@ -345,149 +346,155 @@ export function ExploreSection({
     [clients],
   );
 
+  const findingClients = useMemo(
+    () => ({ explore: clients.explore, areas: clients.areas, science: clients.science }),
+    [clients],
+  );
   const isScanning = run?.state === 'running';
   const isJustDone = run?.state === 'done';
 
   return (
-    <main className="kb-explore" data-pane="explore" hidden={hidden}>
-      <header className="kb-explore-head">
-        <nav className="kb-explore-crumbs" aria-label="Explore breadcrumbs">
-          {breadcrumbs.length > 1 && (
-            <button
-              type="button"
-              className="kb-explore-icon-btn"
-              title="Up a level"
-              aria-label="Up a level"
-              onClick={handleUpLevel}
-            >
-              <Icon name="chevronLeft" size={14} />
-            </button>
-          )}
-          {visibleCrumbs.map((crumb, idx) => {
-            const isLast = idx === visibleCrumbs.length - 1;
-            if (isLast) {
-              return (
-                <strong key={`${crumb.id ?? 'root'}-${idx}`} className="kb-explore-crumbs__current">
-                  {crumb.name}
-                </strong>
-              );
-            }
-            return (
-              <span key={`${crumb.id ?? 'root'}-${idx}`} className="kb-explore-crumbs__step">
-                <button
-                  type="button"
-                  className="kb-explore-crumbs__btn"
-                  onClick={() => void navigateToParent(crumb.id)}
-                >
-                  {crumb.name}
-                </button>
-                <Icon name="chevronRight" size={14} />
-              </span>
-            );
-          })}
-        </nav>
-
-        {activeScopeArea && (
-          <span className="kb-explore-head__meta">
-            {formatWikiShare(activeScopeArea.wiki_share)} of your wiki
-          </span>
-        )}
-
-        <div className="kb-explore-head__spacer" />
-
-        <span className="kb-explore-head__meta" title="Findings you took to explore">
-          Exploring · {exploringItems.length}
-        </span>
-      </header>
-
-      <div className="kb-explore-search">
-        {isScanning && run ? (
-          <div className="kb-explore-search__field is-running">
-            <Icon name="retry" size={14} className="kb-explore-spin" />
-            <span className="kb-explore-search__status">
-              Finding what&apos;s new in <strong>{scopeName}</strong> · step{' '}
-              {STAGE_STEP[run.stage] ?? 1} of 5
-            </span>
-            <button
-              type="button"
-              className="kb-explore-search__go"
-              onClick={() => void handleStopSearch()}
-            >
-              Stop
-            </button>
-          </div>
-        ) : (
-          <>
-            <form className="kb-explore-search__field" onSubmit={(e) => void handleStartSearch(e)}>
-              <Icon name="search" size={14} />
-              <span
-                className="kb-explore-search__scope"
-                title="Where to look — follows the area you open"
+    <FindingClientsProvider clients={findingClients}>
+      <main className="kb-explore" data-pane="explore" hidden={hidden}>
+        <header className="kb-explore-head">
+          <nav className="kb-explore-crumbs" aria-label="Explore breadcrumbs">
+            {breadcrumbs.length > 1 && (
+              <button
+                type="button"
+                className="kb-explore-icon-btn"
+                title="Up a level"
+                aria-label="Up a level"
+                onClick={handleUpLevel}
               >
-                in {scopeName}
-              </span>
-              <input
-                type="text"
-                className="kb-explore-search__input"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="What exactly? Optional — e.g. evaluating RAG answers"
-              />
-              <button type="submit" className="kb-explore-search__go">
-                Find what&apos;s new
+                <Icon name="chevronLeft" size={14} />
               </button>
-            </form>
-            {weeklyDay && (
-              <span className="kb-explore-search__week" title="Pinned areas, free steps only">
-                Weekly · {weeklyDay}
-              </span>
             )}
-          </>
-        )}
-      </div>
+            {visibleCrumbs.map((crumb, idx) => {
+              const isLast = idx === visibleCrumbs.length - 1;
+              if (isLast) {
+                return (
+                  <strong key={`${crumb.id ?? 'root'}-${idx}`} className="kb-explore-crumbs__current">
+                    {crumb.name}
+                  </strong>
+                );
+              }
+              return (
+                <span key={`${crumb.id ?? 'root'}-${idx}`} className="kb-explore-crumbs__step">
+                  <button
+                    type="button"
+                    className="kb-explore-crumbs__btn"
+                    onClick={() => void navigateToParent(crumb.id)}
+                  >
+                    {crumb.name}
+                  </button>
+                  <Icon name="chevronRight" size={14} />
+                </span>
+              );
+            })}
+          </nav>
 
-      <div className="kb-explore-body">
-        <ExploreMap
-          areas={map?.areas ?? []}
-          parentPages={currentMapArea?.pages ?? map?.total_pages ?? 0}
-          selectedAreaId={selectedTopic?.id ?? null}
-          scanning={Boolean(isScanning)}
-          activeAreaIds={run?.active_area_ids ?? []}
-          justDone={Boolean(isJustDone)}
-          onSelectArea={(area) => void handleSelectAreaTile(area)}
-        />
+          {activeScopeArea && (
+            <span className="kb-explore-head__meta">
+              {formatWikiShare(activeScopeArea.wiki_share)} of your wiki
+            </span>
+          )}
 
-        <AreaColumn
-          scopeName={scopeName}
-          isRootScope={isRootScope}
-          scopePages={scopePages}
-          sourcesCount={sourcesCount}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          materials={materials}
-          findings={findings}
-          worthClosing={map?.worth_closing ?? []}
-          run={run}
-          repeatCheck={repeatCheck}
-          keyHintDismissed={keyHintDismissed}
-          onDismissKeyHint={() => void handleDismissKeyHint()}
-          onResumeRun={(body) => void handleResumeRun(body)}
-          onCancelRun={() => void handleCancelRun()}
-          onStartRepeats={() => void handleStartRepeats()}
-          onPauseRepeats={() => void handlePauseRepeats()}
-          onResumeRepeats={() => void handleResumeRepeats()}
-          openFinding={openFinding}
-          onOpenFinding={(f) => setOpenFinding(f)}
-          onCloseFinding={() => setOpenFinding(null)}
-          onExploreFinding={handleExploreFinding}
-          onAddToWiki={handleAddToWiki}
-          onSelectWorthClosing={(area) => void handleSelectAreaTile(area)}
-          FindingComponent={FindingComponent}
-          onOpenDocument={handleOpenDocument}
-          onOpenSettings={handleOpenSettings}
-          onOpenWiki={handleOpenWiki}
-        />
-      </div>
-    </main>
+          <div className="kb-explore-head__spacer" />
+
+          <span className="kb-explore-head__meta" title="Findings you took to explore">
+            Exploring · {exploringItems.length}
+          </span>
+        </header>
+
+        <div className="kb-explore-search">
+          {isScanning && run ? (
+            <div className="kb-explore-search__field is-running">
+              <Icon name="retry" size={14} className="kb-explore-spin" />
+              <span className="kb-explore-search__status">
+                Finding what&apos;s new in <strong>{scopeName}</strong> · step{' '}
+                {STAGE_STEP[run.stage] ?? 1} of 5
+              </span>
+              <button
+                type="button"
+                className="kb-explore-search__go"
+                onClick={() => void handleStopSearch()}
+              >
+                Stop
+              </button>
+            </div>
+          ) : (
+            <>
+              <form className="kb-explore-search__field" onSubmit={(e) => void handleStartSearch(e)}>
+                <Icon name="search" size={14} />
+                <span
+                  className="kb-explore-search__scope"
+                  title="Where to look — follows the area you open"
+                >
+                  in {scopeName}
+                </span>
+                <input
+                  type="text"
+                  className="kb-explore-search__input"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="What exactly? Optional — e.g. evaluating RAG answers"
+                />
+                <button type="submit" className="kb-explore-search__go">
+                  Find what&apos;s new
+                </button>
+              </form>
+              {weeklyDay && (
+                <span className="kb-explore-search__week" title="Pinned areas, free steps only">
+                  Weekly · {weeklyDay}
+                </span>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="kb-explore-body">
+          <ExploreMap
+            areas={map?.areas ?? []}
+            parentPages={currentMapArea?.pages ?? map?.total_pages ?? 0}
+            selectedAreaId={selectedTopic?.id ?? null}
+            scanning={Boolean(isScanning)}
+            activeAreaIds={run?.active_area_ids ?? []}
+            justDone={Boolean(isJustDone)}
+            onSelectArea={(area) => void handleSelectAreaTile(area)}
+          />
+
+          <AreaColumn
+            scopeName={scopeName}
+            isRootScope={isRootScope}
+            scopePages={scopePages}
+            sourcesCount={sourcesCount}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            materials={materials}
+            findings={findings}
+            worthClosing={map?.worth_closing ?? []}
+            run={run}
+            repeatCheck={repeatCheck}
+            keyHintDismissed={keyHintDismissed}
+            onDismissKeyHint={() => void handleDismissKeyHint()}
+            onResumeRun={(body) => void handleResumeRun(body)}
+            onCancelRun={() => void handleCancelRun()}
+            onStartRepeats={() => void handleStartRepeats()}
+            onPauseRepeats={() => void handlePauseRepeats()}
+            onResumeRepeats={() => void handleResumeRepeats()}
+            openFinding={openFinding}
+            onOpenFinding={(f) => setOpenFinding(f)}
+            onCloseFinding={() => setOpenFinding(null)}
+            onExploreFinding={handleExploreFinding}
+            onAddToWiki={handleAddToWiki}
+            onSelectWorthClosing={(area) => void handleSelectAreaTile(area)}
+            FindingComponent={FindingComponent}
+            onOpenDocument={handleOpenDocument}
+            onOpenSettings={handleOpenSettings}
+            onOpenWiki={handleOpenWiki}
+          />
+        </div>
+      </main>
+    </FindingClientsProvider>
   );
 }
