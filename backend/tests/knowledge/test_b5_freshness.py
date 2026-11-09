@@ -28,8 +28,7 @@ from skaz.knowledge.areas.protocols import AreaDirectory
 from skaz.knowledge.errors import NotFound
 from skaz.knowledge.freshness import FreshnessService
 from skaz.knowledge.library.layout import SERVICE_DIR
-from skaz.knowledge.library.library import FragmentInput
-from skaz.knowledge.markdown.source import Origin
+from skaz.knowledge.markdown.source import FragmentInput, Origin
 from skaz.knowledge.science.protocols import ScienceClient, ScienceConsentRequired, ScienceRef
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.sources.fetch import SafeFetcher
@@ -849,3 +848,40 @@ async def test_link_check_batch_budget_pause_continue_and_http_routes(
     )
     assert cont_done.status_code == 409
     assert cont_done.json() == {"code": "conflict"}
+
+
+@pytest.mark.parametrize("missing", ["job_store", "mark_writer"])
+async def test_link_check_without_its_stores_is_not_ready_and_starts_nothing(
+    kb_app: Any, kb_client: httpx.AsyncClient, missing: str
+) -> None:
+    # No silent stand-in: without B2's JobStore a check would vanish on restart, without B6's mark writer a
+    # confirmed "gone" would be dropped. The route answers not_ready and no job is created.
+    runtime = kb_app.state.runtime
+    kb: KnowledgeService = runtime.kb
+    kb.connect(None)
+    folder = kb.create_folder("Unwired").id
+    _add_material(kb, title="Link", folder_id=folder, origin={"type": "url", "url": "https://example.org/x"})
+
+    async def fake_resolver(_host: str) -> list[str]:
+        return ["93.184.216.34"]
+
+    requests: list[httpx.Request] = []
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        return httpx.Response(200, text="ok")
+
+    jobs = FakeJobStore()
+    wired: dict[str, Any] = {"job_store": jobs, "mark_writer": FakeMarkWriter()}
+    wired.pop(missing)
+    runtime.kb_freshness = FreshnessService(
+        kb,
+        fetcher=SafeFetcher(transport=httpx.MockTransport(transport), resolver=fake_resolver),
+        **wired,
+    )
+
+    resp = await kb_client.post("/kb/freshness/link-checks", json={"folder_id": folder})
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "not_ready"
+    assert requests == []
+    assert jobs.active() == []

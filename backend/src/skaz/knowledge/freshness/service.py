@@ -3,25 +3,20 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 from ...native_io import disk_call
 from ..api.contract_routes import ContractFailure
 from ..api.schemas_areas import KbAreaMaterial, KbReadMarkValue
 from ..api.schemas_explore_common import (
-    KbCheckpoint,
     KbContinue,
     KbExploreJob,
-    KbJobOwner,
     KbPublicationDate,
     KbRunBudget,
     KbRunCounters,
-    KbRunStage,
-    KbStopReason,
 )
 from ..api.schemas_freshness import (
     KbDatedMaterials,
@@ -72,124 +67,6 @@ class _Conflict(KnowledgeError):
     status_code = 409
 
 
-class _InMemoryJobStore:
-    """Fallback ``JobStore`` when B2's store has not been wired into ``Runtime`` yet."""
-
-    def __init__(self, clock: Callable[[], datetime]) -> None:
-        self._clock = clock
-        self._jobs: dict[str, KbExploreJob] = {}
-        self._completed: dict[tuple[str, str], dict[str, str]] = {}
-
-    def create(
-        self, owner: KbJobOwner, title: str, stage: KbRunStage, budget: KbRunBudget
-    ) -> KbExploreJob:
-        job_id = f"job-{uuid4().hex[:12]}"
-        now = self._clock()
-        job = KbExploreJob(
-            id=job_id,
-            owner=owner,
-            state="running",
-            stage=stage,
-            stop_reason=None,
-            budget=budget,
-            counters=_zero_counters(),
-            checkpoint=None,
-            decision_provider="local",
-            decision_choices=[],
-            retry_at=None,
-            created_at=now,
-            updated_at=now,
-        )
-        self._jobs[job_id] = job
-        return job
-
-    def get(self, job_id: str) -> KbExploreJob | None:
-        return self._jobs.get(job_id)
-
-    def active(self) -> Sequence[KbExploreJob]:
-        return [j for j in self._jobs.values() if j.state in ("queued", "running", "paused")]
-
-    def progress(
-        self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget, counters: KbRunCounters
-    ) -> KbExploreJob:
-        job = self._jobs[job_id]
-        updated = job.model_copy(
-            update={
-                "state": "running",
-                "stop_reason": None,
-                "stage": stage,
-                "budget": budget,
-                "counters": counters,
-                "updated_at": self._clock(),
-            }
-        )
-        self._jobs[job_id] = updated
-        return updated
-
-    def stop(
-        self, job_id: str, reason: KbStopReason, *, retry_at: str | None = None
-    ) -> KbExploreJob:
-        job = self._jobs[job_id]
-        if reason == "completed":
-            state = "done"
-            checkpoint = None
-        elif reason == "cancelled":
-            state = "cancelled"
-            checkpoint = job.checkpoint
-        elif reason == "failed":
-            state = "error"
-            checkpoint = job.checkpoint
-        else:
-            state = "paused"
-            checkpoint = job.checkpoint
-        updated = job.model_copy(
-            update={
-                "state": state,
-                "stop_reason": reason,
-                "checkpoint": checkpoint,
-                "retry_at": retry_at,
-                "updated_at": self._clock(),
-            }
-        )
-        self._jobs[job_id] = updated
-        return updated
-
-    def checkpoint(
-        self,
-        job_id: str,
-        *,
-        stage: KbRunStage,
-        cursor: str | None,
-        completed_ids: Sequence[str],
-        pending_ids: Sequence[str],
-    ) -> KbCheckpoint:
-        job = self._jobs[job_id]
-        rev = (job.checkpoint.revision + 1) if job.checkpoint is not None else 1
-        cp = KbCheckpoint(
-            id=f"cp-{uuid4().hex[:12]}",
-            revision=rev,
-            stage=stage,
-            cursor=cursor,
-            completed_ids=list(completed_ids),
-            pending_ids=list(pending_ids),
-            saved_at=self._clock(),
-        )
-        self._jobs[job_id] = job.model_copy(update={"checkpoint": cp})
-        return cp
-
-    def complete(self, job_id: str, candidate_id: str, stage: KbRunStage, result_json: str) -> None:
-        bucket = self._completed.setdefault((job_id, stage), {})
-        if candidate_id in bucket:
-            raise _Conflict("Work item already completed.")
-        bucket[candidate_id] = result_json
-
-    def completed(self, job_id: str, stage: KbRunStage) -> Collection[str]:
-        return set(self._completed.get((job_id, stage), {}).keys())
-
-    def recover(self) -> Sequence[str]:
-        return []
-
-
 def _parse_cursor(cursor: str | None) -> int:
     if cursor is None:
         return 0
@@ -230,7 +107,6 @@ class FreshnessService:
         self._repeat_summaries = repeat_summaries
         self._fetcher = fetcher or SafeFetcher()
         self._clock = clock or (lambda: datetime.now(UTC))
-        self._fallback_jobs = _InMemoryJobStore(self._clock)
         self._link_batch_limit = max(1, min(link_batch_limit, 500))
         self._runtime = runtime
         self._pause_requested: set[str] = set()
@@ -247,30 +123,25 @@ class FreshnessService:
 
     @property
     def _resolved_job_store(self) -> JobStore:
+        """B2's ``JobStore`` (``runtime.kb_jobs``). No silent stand-in: an in-memory store would lose a
+        check on restart, so until it is wired every job route answers ``not_ready``."""
         if self._job_store is not None:
             return self._job_store
-        if self._runtime is not None:
-            for attr in ("kb_job_store", "kb_jobs"):
-                candidate = getattr(self._runtime, attr, None)
-                if candidate is not None and hasattr(candidate, "create"):
-                    return candidate  # type: ignore[no-any-return]
-            explore = getattr(self._runtime, "kb_explore", None)
-            if explore is not None:
-                for sub in ("job_store", "jobs", "_job_store", "_jobs"):
-                    candidate = getattr(explore, sub, None)
-                    if candidate is not None and hasattr(candidate, "create"):
-                        return candidate  # type: ignore[no-any-return]
-        return self._fallback_jobs
+        candidate = getattr(self._runtime, "kb_jobs", None) if self._runtime is not None else None
+        if candidate is None:
+            raise ContractFailure(503, "not_ready")
+        return candidate  # type: ignore[no-any-return]
 
     @property
-    def _resolved_mark_writer(self) -> FreshnessMarkWriter | None:
+    def _resolved_mark_writer(self) -> FreshnessMarkWriter:
+        """B6's mark writer (``runtime.kb_maintenance``). Without it a confirmed "gone" would be dropped
+        silently, so a link check does not start (``not_ready``)."""
         if self._mark_writer is not None:
             return self._mark_writer
-        if self._runtime is not None:
-            candidate = getattr(self._runtime, "kb_maintenance", None)
-            if candidate is not None and hasattr(candidate, "link_gone"):
-                return candidate  # type: ignore[no-any-return]
-        return None
+        candidate = getattr(self._runtime, "kb_maintenance", None) if self._runtime is not None else None
+        if candidate is None:
+            raise ContractFailure(503, "not_ready")
+        return candidate  # type: ignore[no-any-return]
 
     @property
     def _resolved_mark_reader(self) -> FreshnessMarkReader | None:
@@ -397,6 +268,7 @@ class FreshnessService:
         await disk_call(self._ensure_ready)
         scope_ids, targets = await disk_call(self._resolve_link_targets, body)
         job_store = self._resolved_job_store
+        self._resolved_mark_writer  # noqa: B018 (fail before a job exists, not halfway through)
         initial_budget = KbRunBudget(
             unit="link",
             limit=self._link_batch_limit,
@@ -658,11 +530,10 @@ class FreshnessService:
                 prior_first_gone_at=prior_first_gone,
             )
             await disk_call(self._store.add_observation, job.id, observation)
-            if mark_writer is not None:
-                if mark_action == "link_gone":
-                    await disk_call(mark_writer.link_gone, target.material_id, target.url)
-                elif mark_action == "link_back":
-                    await disk_call(mark_writer.link_back, target.material_id)
+            if mark_action == "link_gone":
+                await disk_call(mark_writer.link_gone, target.material_id, target.url)
+            elif mark_action == "link_back":
+                await disk_call(mark_writer.link_back, target.material_id)
 
             obs_json = json.dumps(observation.model_dump(mode="json"), separators=(",", ":"))
             await disk_call(job_store.complete, job.id, target.material_id, "links", obs_json)
