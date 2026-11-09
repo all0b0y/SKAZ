@@ -92,8 +92,13 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
     <section className="kb-research-perm" aria-label="Research permission">
       <h3 className="kb-research-perm__title">Allow a research task?</h3>
       <p className="kb-research-perm__desc">{current.arguments.description}</p>
+      {current.topics.length > 0 && (
+        <ul className="kb-research-perm__topics" aria-label="Topics that will be searched">
+          {current.topics.map((topic) => <li key={topic}>{topic}</li>)}
+        </ul>
+      )}
       <p className="kb-research-perm__meta">
-        Only topics and source identifiers go to scientific databases, never your description or your materials. Up to 30 candidates are checked against your wiki with your model allowance.
+        Only these topics and source identifiers go to scientific databases, never your description or your materials. Up to 30 candidates are checked against your wiki with your model allowance.
       </p>
       {shownError && (
         <p role="alert" className="kb-inline-error">

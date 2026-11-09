@@ -552,7 +552,13 @@ describe('F2 · 06–08 · Permission card, compact pointer, and denied line in 
     const section = screen.getByRole('region', { name: 'Research permission' });
     expect(within(section).getByRole('heading', { name: 'Allow a research task?' })).toBeInTheDocument();
     expect(within(section).getByText('Find recent evidence for reliable RAG')).toBeInTheDocument();
-    expect(within(section).getByText(/Only topics and source identifiers go to scientific databases, never your description/)).toBeInTheDocument();
+    expect(within(section).getByText(/Only these topics and source identifiers go to scientific databases, never your description/)).toBeInTheDocument();
+    // Decision C0-1: the card lists exactly what would leave this computer.
+    const topics = within(section).getByRole('list', { name: 'Topics that will be searched' });
+    expect(within(topics).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'claim verification methods',
+      'fact-checking knowledge bases',
+    ]);
 
     await user.click(within(section).getByRole('button', { name: 'Allow once' }));
 

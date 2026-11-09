@@ -299,6 +299,12 @@
   margin: 0;
 }
 
+.kb-research-perm__topics {
+  margin: 0;
+  padding-left: var(--kb-sp-18);
+  font-size: var(--t-sm);
+}
+
 .kb-research-perm__meta {
   font-size: var(--t-xs);
   color: var(--kb-muted);
