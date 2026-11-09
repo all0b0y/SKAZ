@@ -200,6 +200,9 @@ class Runtime:
         #: New settings (area S3): key checks and the problem list over the existing stores.
         self.kb_keys = KeyChecks(self.kb.settings, self.api_key, self.http)
         self.kb_settings_health = SettingsHealth(self, self.kb_keys)
+        #: Publication dates, N7-5 library date filter and manual link checks (0.4.0 B5).
+        from .knowledge.freshness import build_freshness_service
+        self.kb_freshness = build_freshness_service(self)
 
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
