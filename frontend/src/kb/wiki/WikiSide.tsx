@@ -6,6 +6,7 @@ import { PAGE_KIND_ICON } from '../document/parts';
 import { useLoad } from '../document/useLoad';
 import { useLibrary, usePrefs, useServices, useUi } from '../state/context';
 import { WIKI_KINDS, type WikiKind } from '../state/prefs';
+import { StudyShelf } from '../study/StudyShelf';
 import { ActiveTab, type TabVariant } from '../ui/ActiveTab';
 import type { WikiFileName } from '../state/document';
 import { errorText } from '../api/client';
@@ -115,13 +116,15 @@ const FILES: ReadonlyArray<{ name: WikiFileName; label: string }> = [
   { name: 'log', label: 'Log' },
 ];
 
-const LABEL: Record<WikiKind, string> = {
+/** Decks and tests are not wiki pages (N4-7): `StudyShelf` lists them. */
+type PageSection = Exclude<WikiKind, 'deck' | 'test'>;
+const PAGE_SECTIONS = WIKI_KINDS.filter((kind): kind is PageSection => kind !== 'deck' && kind !== 'test');
+
+const LABEL: Record<PageSection, string> = {
   concept: 'Concepts',
   note: 'Notes',
   analysis: 'Analyses',
   folder: 'Folder overviews',
-  deck: 'Decks',
-  test: 'Tests',
 };
 
 /**
@@ -132,13 +135,11 @@ const LABEL: Record<WikiKind, string> = {
 export const PAGE_TAB: TabVariant = 'soft';
 
 /** How pages of each kind appear, said where the list is empty (QA C24). */
-const EMPTY_HINT: Record<WikiKind, string> = {
+const EMPTY_HINT: Record<PageSection, string> = {
   concept: 'Concepts appear as materials are added to the wiki.',
   note: 'Each material added to the wiki gets its notes here.',
   analysis: 'Save a chat answer to the wiki (“Save to wiki” under the answer) to keep it here.',
   folder: 'A folder gets its overview once its materials are in the wiki.',
-  deck: 'Ask an agent for flashcards from your materials, then “Save to wiki” in the block.',
-  test: 'Ask an agent for a test from your materials, then “Save to wiki” in the block.',
 };
 
 /** The page open in the document panel, if any. */
@@ -189,7 +190,7 @@ function PageList({ pages, labelledBy, sel, dragProps }: {
  * panel's one «The wiki is empty» says it (FIX1 R6).
  */
 function KindSection({ kind, pages, wikiEmpty, sel, dragProps }: {
-  kind: WikiKind; pages: KbPageSummary[]; wikiEmpty: boolean;
+  kind: PageSection; pages: KbPageSummary[]; wikiEmpty: boolean;
 } & PageSelection) {
   const { prefs } = useServices();
   const open = usePrefs((s) => s.wikiOpen[kind]);
@@ -241,11 +242,11 @@ export function WikiSide() {
   const pages = state.value ?? [];
   const byId = new Map(pages.map((p) => [p.id, p]));
   const recentPages = recent.map((id) => byId.get(id)).filter((p): p is KbPageSummary => Boolean(p));
-  const visible = [...WIKI_KINDS.flatMap((kind) => openKinds[kind]
+  const visible = [...PAGE_SECTIONS.flatMap((kind) => openKinds[kind]
     ? pages.filter((p) => p.kind === kind).sort(byTitle) : []), ...recentPages];
   const unique = [...new Map(visible.map((p) => [p.id, p])).values()];
   const sets = [{ id: 'all', label: 'All', ids: unique.map((p) => p.id) },
-    ...WIKI_KINDS.filter((kind) => openKinds[kind]).map((kind) => ({ id: kind, label: LABEL[kind],
+    ...PAGE_SECTIONS.filter((kind) => openKinds[kind]).map((kind) => ({ id: kind, label: LABEL[kind],
       ids: unique.filter((p) => p.kind === kind).map((p) => p.id) }))];
   const { sel, overlays, dragProps } = usePageSelection({ pages: unique, sets,
     onOpen: (id) => openDocument({ type: 'page', id }) });
@@ -268,10 +269,11 @@ export function WikiSide() {
         <h3 className="kb-subhead__text" id="kb-wiki-sections">Sections</h3>
         <WikiTermsButton size="sm" placement="bottom-start" />
       </div>
-      {WIKI_KINDS.map((kind) => (
+      {PAGE_SECTIONS.map((kind) => (
         <KindSection key={kind} kind={kind} pages={pages.filter((p) => p.kind === kind).sort(byTitle)}
           wikiEmpty={pages.length === 0} sel={sel} dragProps={dragProps} />
       ))}
+      <StudyShelf wikiEmpty={pages.length === 0} />
       <ul className="kb-list kb-wiki-more" aria-label="More of the wiki">
         <li data-entrance="">
           <button type="button" className={`kb-row${graphOpen ? ' is-current' : ''}`} onClick={() => openGraph()} aria-current={graphOpen ? 'true' : undefined}>

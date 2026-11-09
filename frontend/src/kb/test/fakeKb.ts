@@ -24,6 +24,7 @@ import {
 } from '../api/permissions';
 import { meRoutes, type FakeMe } from './fakeMe';
 import { defaultReview, p3StudyRoutes, scoreOf } from './fakeStudyP3';
+import { studyShelfRoutes, type FakeShelfRow } from './fakeStudyShelf';
 import { applyFakeChatRules, searchRulesRoutes } from './fakeSearchRules';
 
 // ---- The world -------------------------------------------------------------------------------
@@ -130,6 +131,8 @@ export interface FakeWorld {
   skillsOff?: string[];
   /** 0.3.1 S: saved decks (the deck page), by page id. */
   decks?: Record<string, KbDeckView>;
+  /** N4-8: where saved decks and tests stand; a page without a row is opened lately, not archived. */
+  studyShelf?: Record<string, FakeShelfRow>;
   /** 0.3.1 S: new cards per day and folder (absent = 20, the backend's default). */
   studyNewPerDay?: number;
   /** 0.3.1 S: what the agent says of an open answer (absent = "partly"); `hold` keeps it checking. */
@@ -481,14 +484,16 @@ function snippet(text: string, q: string) {
 function search(world: FakeWorld, q: string): KbSearchResults {
   const needle = q.toLocaleLowerCase().trim();
   const has = (t: string) => needle.length > 0 && t.toLocaleLowerCase().includes(needle);
-  const pages = world.pages.filter((p) => has(p.title)).map((p) => ({ id: p.id, title: p.title, kind: p.kind, matched_alias: null }));
+  // Decks and tests are no part of a wiki search (N4-7).
+  const wiki = world.pages.filter((p) => p.kind !== 'deck' && p.kind !== 'test');
+  const pages = wiki.filter((p) => has(p.title)).map((p) => ({ id: p.id, title: p.title, kind: p.kind, matched_alias: null }));
   const materials = world.materials.filter((m) => has(m.title)).map((m) => ({
     id: m.id, title: m.title, kind: m.kind, folder_id: m.folder_id, folder_name: folderName(world, m.folder_id), created_at: m.created_at, snippet: snippet(m.title, q),
   }));
   const fragments = world.materials.flatMap((m) => m.fragments.filter((f) => has(f.text)).slice(0, 1).map((f) => ({
     material_id: m.id, material_title: m.title, material_kind: m.kind, seg: f.seg, start_ms: f.start_ms, page: f.page, snippet: snippet(f.text, q),
   }))).slice(0, 5);
-  const blocks = world.pages.flatMap((p) => p.blocks.filter((b) => has(b.text)).slice(0, 1).map((b) => ({
+  const blocks = wiki.flatMap((p) => p.blocks.filter((b) => has(b.text)).slice(0, 1).map((b) => ({
     page_id: p.id, page_title: p.title, page_kind: p.kind, block_id: b.id, kind: b.kind, owner: b.owner, snippet: snippet(b.text, q),
   }))).slice(0, 5);
   return { query: q, pages, blocks, fragments, materials, counts: { wiki: pages.length + blocks.length, materials: materials.length + fragments.length, chats: 0 }, degraded: world.searchDegraded === true };
@@ -729,7 +734,7 @@ const STUDY_ROUTES: FakeRoutes = {
     const part: KbStudyPart = {
       type: 'study', id, kind: 'deck', title: deck.title, engine: chat.engine, origin: 'show', mode, place: 'panel', position: 0, side: 'question',
       total: cards.length, cards: structuredClone(cards), questions: [], groups: deck.groups, held_back: 0,
-      save: { status: 'saved', path: `Wiki/Decks/${deck.title}.md`, page_id: path.page_id }, result: null, chat_id: chat.id, message_id: messageId,
+      save: { status: 'saved', path: `Study/Decks/${deck.title}.md`, page_id: path.page_id }, result: null, chat_id: chat.id, message_id: messageId,
     };
     const message = chatMessage(messageId, (chat.messages.at(-1)?.seq ?? 0) + 1, 'system', clock(w), [part as unknown as KbMessage['parts'][number]]);
     chat.messages.push(message);
@@ -873,7 +878,7 @@ const STUDY_ROUTES: FakeRoutes = {
     const title = body.title.trim();
     if (!title) fail(422, 'The name is empty. Choose another name.');
     const fileName = title.replace(/[/\\:*?"<>|#^[\]]/g, ' ').split(/\s+/).filter(Boolean).join(' ');
-    const dir = part.kind === 'deck' ? 'Wiki/Decks' : 'Wiki/Tests';
+    const dir = part.kind === 'deck' ? 'Study/Decks' : 'Study/Tests';
     if (part.save.status === 'saved') {
       part.title = fileName;
       const page = w.pages.find((p) => p.id === part.save.page_id);
@@ -1036,7 +1041,8 @@ const ROUTES: FakeRoutes = {
   'GET /kb/jobs/{job_id}': [200, (w, { path }) => w.jobs.find((j) => j.id === path.job_id) ?? fail(404, 'Job not found.')],
 
   // -- wiki --
-  'GET /kb/wiki/pages': [200, (w, { query }) => w.pages.filter((p) => (!query.kind || p.kind === query.kind)
+  // Decks and tests are not in the wiki's list unless asked by kind (N4-7).
+  'GET /kb/wiki/pages': [200, (w, { query }) => w.pages.filter((p) => (query.kind ? p.kind === query.kind : p.kind !== 'deck' && p.kind !== 'test')
     && (!query.folder_id || p.folders.includes(query.folder_id))).map(pageSummary)],
   'GET /kb/wiki/pages/{page_id}': [200, (w, { path }) => findPage(w, path.page_id)],
   // B20: rename (links follow), delete with a preview (links unlinked, sources kept).
@@ -1765,8 +1771,9 @@ const ME_ROUTES: FakeRoutes = meRoutes((w, editId) => {
 
 /** P3 study routes (fakeStudyP3.ts): «I did say this», «counted by you». */
 const P3_STUDY_ROUTES: FakeRoutes = p3StudyRoutes({ findStudy, studyChanged: studyChanged as never, fail });
+const STUDY_SHELF_ROUTES: FakeRoutes = studyShelfRoutes(fail);
 
-const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES), ...Object.entries(SEARCH_RULES_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
+const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERMISSION_ROUTES), ...Object.entries(P3_STUDY_ROUTES), ...Object.entries(STUDY_ROUTES), ...Object.entries(STUDY_SHELF_ROUTES), ...Object.entries(WEB_ROUTES), ...Object.entries(ME_ROUTES), ...Object.entries(AGENT_UPDATE_ROUTES), ...Object.entries(SEARCH_RULES_ROUTES)] as Array<[KbRoute, Entry<KbRoute>]>).map(([route, entry]) => {
   const space = route.indexOf(' ');
   const names: string[] = [];
   const source = route.slice(space + 1).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -1777,10 +1784,10 @@ const COMPILED: Compiled[] = ([...Object.entries(ROUTES), ...Object.entries(PERM
 });
 
 /** Routes the fake answers (for the IPC-policy test: each one is a real backend route). */
-export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES), ...Object.keys(SEARCH_RULES_ROUTES)] as KbRoute[];
+export const FAKE_ROUTES = [...Object.keys(ROUTES), ...Object.keys(PERMISSION_ROUTES), ...Object.keys(STUDY_ROUTES), ...Object.keys(STUDY_SHELF_ROUTES), ...Object.keys(WEB_ROUTES), ...Object.keys(ME_ROUTES), ...Object.keys(AGENT_UPDATE_ROUTES), ...Object.keys(SEARCH_RULES_ROUTES)] as KbRoute[];
 
 /** Routes that need a connected library, like the backend's 503. */
-const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study)(\/|$)/;
+const NEEDS_LIBRARY = /^\/kb\/(folders|materials|notifications|chats|search|mentions|imports|wiki|graph|jobs|recordings|links|corrections|study|study-library)(\/|$)/;
 
 const ok = <T,>(data: T, status = 200): JsonResponse<T> => ({ ok: true, status, data });
 const failed = (status: number, detail: string): JsonResponse<never> => ({ ok: false, status, detail });

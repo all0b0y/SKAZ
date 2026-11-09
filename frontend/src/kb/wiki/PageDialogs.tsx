@@ -5,6 +5,7 @@ import { Banner, Button, Modal, Spinner, TextField } from '../ui';
 import { PageChip } from '../document/parts';
 import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';
+import { StudyDeleteWarning } from '../study/StudyShelf';
 
 /** As for materials: a name is at most 200 bytes on disk; the field stops at 200 characters. */
 const MAX_TITLE_CHARS = 200;
@@ -113,6 +114,7 @@ export function DeletePageDialog({ page, open, onClose }: { page: KbPage; open: 
       <div className="kb-modal__body">
         {!preview && !loadError && <div className="kb-doc__wait"><Spinner label="Checking what changes in the wiki" /></div>}
         {loadError && <Banner tone="error" title="Couldn’t check what changes.">{loadError}</Banner>}
+        {(page.kind === 'deck' || page.kind === 'test') && <StudyDeleteWarning pageId={page.id} />}
         {preview && <DeleteSummary preview={preview} />}
         {error && <p className="kb-inline-error" role="alert">{error}</p>}
         <div className="kb-modal__foot">

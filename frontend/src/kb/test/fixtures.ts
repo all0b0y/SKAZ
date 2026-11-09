@@ -603,7 +603,7 @@ export function studyCard(id: string, question: string, answer: string, extra: P
 }
 
 const SAVE_PENDING = (kind: 'deck' | 'test', title: string): KbStudyPart['save'] => (
-  { status: 'pending', path: `Wiki/${kind === 'deck' ? 'Decks' : 'Tests'}/${title}.md`, page_id: null });
+  { status: 'pending', path: `Study/${kind === 'deck' ? 'Decks' : 'Tests'}/${title}.md`, page_id: null });
 
 /** A deck the agent just made in a chat (Codex, three cards, Save to wiki waiting). */
 export function deckPart(id: string, chatId: string, messageId: string, extra: Partial<KbStudyPart> = {}): KbStudyPart {

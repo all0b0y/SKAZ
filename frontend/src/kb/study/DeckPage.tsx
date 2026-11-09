@@ -13,6 +13,12 @@ const GROUPS: Array<{ key: keyof KbDeckView['groups']; label: string }> = [
   { key: 'new', label: 'New' }, { key: 'learning', label: 'Learning' }, { key: 'known', label: 'Known' }, { key: 'hard', label: 'Hard' },
 ];
 
+/** The page is on the screen: it counts as opened (N4-8). A lost note only means it archives a little sooner. */
+function useNoteOpened(pageId: string) {
+  const { client } = useServices();
+  useEffect(() => { void studyApi.opened(client, pageId).catch(() => undefined); }, [client, pageId]);
+}
+
 /**
  * "Study" / "Take the test" from a deck or test page (S12; bug 1, 2026-10-26): the block opens beside
  * the chat only — never in the open chat's thread, and the open chat stays as it is. It belongs to
@@ -41,6 +47,7 @@ export function DeckPage({ page }: { page: KbPage }) {
   const { client } = useServices();
   const askAbout = useAskAbout();
   const study = useStudyFromPage();
+  useNoteOpened(page.id);
   const [deck, setDeck] = useState<KbDeckView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -130,6 +137,7 @@ export function DeckPage({ page }: { page: KbPage }) {
 /** A saved test page (S12): its questions, and "Take the test" as a block beside the chat. */
 export function TestPage({ page }: { page: KbPage }) {
   const study = useStudyFromPage();
+  useNoteOpened(page.id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const questions = page.blocks.filter((b) => b.kind === 'from_source');

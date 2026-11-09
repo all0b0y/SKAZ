@@ -107,15 +107,15 @@ describe('Flashcards in the chat (variant C)', () => {
       .toEqual(['skip', 'back', 'know', 'know', 'know', 'restart']);
   });
 
-  it('Save to wiki: Deny keeps it in the chat and says so; Save to wiki still works later and links the page', async () => {
+  it('Save to Study: Deny keeps it in the chat and says so; Save to Study still works later and links the page', async () => {
     const { user } = await openChat(/Lecture 8 — cards/);
     const deck = await screen.findByRole('region', { name: 'Flashcards: Lecture 8' });
     expect(within(deck).getByText('Codex wants to create')).toBeInTheDocument();
-    expect(within(deck).getByText('Wiki/Decks/Lecture 8.md')).toBeInTheDocument();
+    expect(within(deck).getByText('Study/Decks/Lecture 8.md')).toBeInTheDocument();
     await user.click(within(deck).getByRole('button', { name: 'Deny' }));
     expect(await within(deck).findByText(/lives only in this chat; grades are not scheduled/)).toBeInTheDocument();
-    await user.click(within(deck).getByRole('button', { name: 'Save to wiki' }));
-    expect(await within(deck).findByText('Saved to wiki')).toBeInTheDocument();
+    await user.click(within(deck).getByRole('button', { name: 'Save to Study' }));
+    expect(await within(deck).findByText('Saved to Study')).toBeInTheDocument();
     expect(within(deck).getByRole('button', { name: 'Open' })).toBeInTheDocument();
   });
 
@@ -128,7 +128,7 @@ describe('Flashcards in the chat (variant C)', () => {
     await user.clear(field);
     await user.type(field, 'Lecture 8: entropy{Enter}');
     const renamed = await screen.findByRole('region', { name: 'Flashcards: Lecture 8: entropy' });
-    expect(within(renamed).getByText('Wiki/Decks/Lecture 8 entropy.md')).toBeInTheDocument();
+    expect(within(renamed).getByText('Study/Decks/Lecture 8 entropy.md')).toBeInTheDocument();
     expect(fake.calls.filter((c) => c.path === '/kb/study/st-deck/rename')).toHaveLength(1);
     expect(fake.calls.some((c) => c.path.endsWith('/messages'))).toBe(false);
     await user.click(within(renamed).getByRole('button', { name: 'Rename: Lecture 8: entropy' }));

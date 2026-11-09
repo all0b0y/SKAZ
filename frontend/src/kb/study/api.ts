@@ -4,7 +4,7 @@
 
 import type {
   KbDeckStudy, KbDeckStudyResult, KbDeckView, KbStudyAnswerIn, KbStudyCard, KbStudyMarkIn, KbStudyMove, KbStudyPart,
-  KbStudyQuestion, KbStudySettings,
+  KbStudyLibrary, KbStudyQuestion, KbStudySettings,
 } from '../../api/kb/types.gen';
 import type { KbClient } from '../api/client';
 
@@ -65,6 +65,15 @@ export const studyApi = {
     c.call('POST /kb/study/decks/{page_id}/marks', { path: { page_id: pageId }, body: { item_ids: itemIds, mark } }),
   studyDeck: (c: KbClient, pageId: string, body: KbDeckStudy): Promise<KbDeckStudyResult> =>
     c.call('POST /kb/study/decks/{page_id}/study', { path: { page_id: pageId }, body }),
+  /** N4-7, N4-8: saved decks and tests apart from the wiki's pages, with what is archived. */
+  library: (c: KbClient): Promise<KbStudyLibrary> => c.call('GET /kb/study-library'),
+  /** The user opened the page: its 60 days start again, and an archived one is back in the lists. */
+  opened: (c: KbClient, pageId: string) => c.call('POST /kb/study-library/{page_id}/opened', { path: { page_id: pageId } }),
+  archive: (c: KbClient, pageId: string) => c.call('POST /kb/study-library/{page_id}/archive', { path: { page_id: pageId } }),
+  unarchive: (c: KbClient, pageId: string) => c.call('POST /kb/study-library/{page_id}/unarchive', { path: { page_id: pageId } }),
+  /** «Not now» to the suggestion to archive a learned deck. */
+  keep: (c: KbClient, pageId: string) => c.call('POST /kb/study-library/{page_id}/keep', { path: { page_id: pageId } }),
+  deleteWarning: (c: KbClient, pageId: string) => c.call('GET /kb/study-library/{page_id}/delete-warning', { path: { page_id: pageId } }),
   settings: (c: KbClient): Promise<KbStudySettings> => c.call('GET /kb/study/settings'),
   setSettings: (c: KbClient, newPerDay: number): Promise<KbStudySettings> =>
     c.call('PATCH /kb/study/settings', { body: { new_per_day: newPerDay } }),
