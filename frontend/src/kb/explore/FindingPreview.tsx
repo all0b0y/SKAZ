@@ -135,21 +135,12 @@ export function FindingPreview({
             className="kb-explore-btn"
             onClick={() =>
               void onAddToWiki(finding.id, {
-                content: finding.text_available,
+                content: finding.text_available === 'full_text' ? 'full_text' : 'abstract_only',
               })
             }
           >
             <Icon name="wiki" size={14} />
             <span>Add to wiki</span>
-          </button>
-
-          <button
-            type="button"
-            className="kb-explore-icon-btn"
-            aria-label="More finding actions"
-            title="Already knew this · Not for me · Skip · Open source"
-          >
-            <Icon name="more" size={14} />
           </button>
 
           {menuOpen && (

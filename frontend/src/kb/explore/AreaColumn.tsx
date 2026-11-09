@@ -8,7 +8,6 @@ import type {
   KbFunnelRun,
   KbRepeatCheck,
 } from '../../api/kb/types.gen';
-import type { ExploreFindingStart, ExploreResumeBody, FindingToWikiBody } from '../api/explore';
 import type { DocTarget } from '../state/document';
 import type { SettingsSection } from '../state/ui';
 import { Icon } from '../ui';
@@ -18,7 +17,11 @@ import {
   MATERIAL_KIND_ICON,
   READ_MARK_LABEL,
   STAGE_STEP,
+  weekdayShort,
+  type ExploreFindingStart,
+  type ExploreResumeBody,
   type FindingHostComponent,
+  type FindingToWikiBody,
 } from './types';
 
 export interface AreaColumnProps {
@@ -35,7 +38,7 @@ export interface AreaColumnProps {
   repeatCheck: KbRepeatCheck | null;
   keyHintDismissed: boolean;
   onDismissKeyHint: () => void;
-  onResumeRun: (body?: ExploreResumeBody) => void;
+  onResumeRun: (answer?: ExploreResumeBody) => void;
   onCancelRun: () => void;
   onStartRepeats: () => void;
   onPauseRepeats: () => void;
@@ -45,12 +48,22 @@ export interface AreaColumnProps {
   onOpenFinding: (finding: KbFinding) => void;
   onCloseFinding: () => void;
   onExploreFinding: (findingId: string, body: ExploreFindingStart) => Promise<KbExploring | void>;
-  onAddToWiki: (findingId: string, body?: FindingToWikiBody) => Promise<void>;
+  onAddToWiki: (findingId: string, body: FindingToWikiBody) => Promise<void>;
   onSelectWorthClosing: (area: KbArea) => void;
   FindingComponent?: FindingHostComponent;
   onOpenDocument?: (target: DocTarget) => void;
   onOpenSettings?: (section?: SettingsSection) => void;
+  onOpenWiki?: () => void;
 }
+
+const TASK_STATE_TEXT: Record<NonNullable<KbFindings['groups'][number]['task_state']>, string> = {
+  queued: 'Waiting',
+  running: 'Running',
+  paused: 'Paused',
+  done: 'Completed',
+  cancelled: 'Cancelled',
+  error: 'Stopped',
+};
 
 function formatMaterialSub(m: KbAreaMaterials['materials'][number]): string {
   const parts: string[] = [];
@@ -104,6 +117,7 @@ export function AreaColumn({
   FindingComponent,
   onOpenDocument,
   onOpenSettings,
+  onOpenWiki,
 }: AreaColumnProps) {
   const [showWhy, setShowWhy] = useState(false);
 
@@ -212,6 +226,7 @@ export function AreaColumn({
                         key={choice}
                         type="button"
                         className="kb-explore-btn kb-explore-btn--primary"
+                        disabled={!run.checkpoint}
                         onClick={() => onResumeRun({ decision_choice: choice })}
                       >
                         {choice === 'download_local'
@@ -279,16 +294,8 @@ export function AreaColumn({
                     <button
                       type="button"
                       className="kb-explore-btn kb-explore-btn--primary"
-                      onClick={() =>
-                        onResumeRun(
-                          run.checkpoint
-                            ? {
-                                checkpoint_id: run.checkpoint.id,
-                                revision: run.checkpoint.revision,
-                              }
-                            : undefined,
-                        )
-                      }
+                      disabled={!run.checkpoint}
+                      onClick={() => onResumeRun()}
                     >
                       Continue · next 30
                     </button>
@@ -307,16 +314,8 @@ export function AreaColumn({
                     <button
                       type="button"
                       className="kb-explore-btn kb-explore-btn--primary"
-                      onClick={() =>
-                        onResumeRun(
-                          run.checkpoint
-                            ? {
-                                checkpoint_id: run.checkpoint.id,
-                                revision: run.checkpoint.revision,
-                              }
-                            : undefined,
-                        )
-                      }
+                      disabled={!run.checkpoint}
+                      onClick={() => onResumeRun()}
                     >
                       Continue
                     </button>
@@ -337,6 +336,7 @@ export function AreaColumn({
   const newCount = allFindings.length;
   const coveredCount = findings?.covered_count ?? run?.counters.covered ?? 0;
   const hintCount = findings?.full_text_key_hint_count ?? 0;
+  const checkedDay = weekdayShort(findings?.checked_at);
 
   return (
     <aside className="kb-explore-col" aria-label="Area details">
@@ -443,11 +443,8 @@ export function AreaColumn({
             </div>
 
             <div className="kb-explore-foot">
-              <button type="button" className="kb-explore-link">
+              <button type="button" className="kb-explore-link" onClick={onOpenWiki}>
                 Open in Wiki
-              </button>
-              <button type="button" className="kb-explore-link">
-                All {sourcesCount}
               </button>
             </div>
           </>
@@ -464,7 +461,10 @@ export function AreaColumn({
               </div>
             ) : (
               <div className="kb-explore-cap">
-                <span>Checked Mon · {coveredCount} repeat what you have </span>
+                <span>
+                  {checkedDay ? `Checked ${checkedDay} · ` : ''}
+                  {coveredCount} repeat what you have{' '}
+                </span>
                 <button
                   type="button"
                   className="kb-explore-link"
@@ -507,7 +507,9 @@ export function AreaColumn({
             )}
 
             {groups.length === 0 || newCount === 0 ? (
-              <div className="kb-explore-cap">Nothing new since Mon.</div>
+              <div className="kb-explore-cap">
+                {checkedDay ? `Nothing new since ${checkedDay}.` : 'Nothing new here yet.'}
+              </div>
             ) : (
               <div className="kb-explore-groups">
                 {groups.map((group, gIdx) => (
@@ -520,7 +522,7 @@ export function AreaColumn({
                         <span className="kb-explore-group__title">{group.task_title}</span>
                         {group.task_state && (
                           <span className="kb-explore-group__meta">
-                            {group.task_state === 'running' ? 'Running' : 'Completed'}
+                            {TASK_STATE_TEXT[group.task_state]}
                           </span>
                         )}
                       </div>

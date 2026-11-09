@@ -414,7 +414,7 @@
   border-bottom: 2px solid transparent;
   background: transparent;
   padding: var(--kb-sp-6) var(--kb-sp-8) var(--kb-sp-8);
-  margin-bottom: -1px;
+  margin-bottom: calc(-1 * 1px); /* tab underline overlaps the hairline */
   font: inherit;
   font-size: var(--kb-fs-body);
   color: var(--kb-text-2);

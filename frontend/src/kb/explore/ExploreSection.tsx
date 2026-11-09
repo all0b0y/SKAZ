@@ -9,8 +9,6 @@ import type {
   KbFunnelRun,
   KbRepeatCheck,
 } from '../../api/kb/types.gen';
-import type { ExploreFindingStart, ExploreResumeBody, FindingToWikiBody } from '../api/explore';
-import { createFakeKb } from '../api/fake';
 import { useServices, type KbServices } from '../state/context';
 import type { DocTarget } from '../state/document';
 import type { SettingsSection } from '../state/ui';
@@ -23,6 +21,10 @@ import {
   STAGE_STEP,
   createExploreClients,
   type ExploreClients,
+  type ExploreFindingStart,
+  type ExploreResumeBody,
+  type FindingToWikiBody,
+  weekdayShort,
   type ExploreSectionProps,
 } from './types';
 
@@ -43,6 +45,7 @@ export function ExploreSection({
   hidden = false,
   clients: clientsProp,
   FindingComponent,
+  initial,
   onOpenDocument: onOpenDocumentProp,
   onOpenSettings: onOpenSettingsProp,
 }: ExploreSectionProps) {
@@ -50,8 +53,8 @@ export function ExploreSection({
 
   const clients = useMemo<ExploreClients>(() => {
     if (clientsProp) return clientsProp;
-    if (services?.bridge) return createExploreClients(services.bridge);
-    return createFakeKb('home');
+    if (!services) throw new Error('ExploreSection needs KbServicesProvider or a clients prop');
+    return createExploreClients(services.client);
   }, [clientsProp, services]);
 
   const handleOpenDocument = useCallback(
@@ -76,95 +79,76 @@ export function ExploreSection({
     [onOpenSettingsProp, services],
   );
 
+  const handleOpenWiki = useCallback(() => {
+    services?.prefs.getState().set({ section: 'wiki', sideOpen: true });
+  }, [services]);
+
   const [map, setMap] = useState<KbAreaMap | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<KbArea | null>(null);
   const [activeTab, setActiveTab] = useState<'materials' | 'new'>('new');
   const [materials, setMaterials] = useState<KbAreaMaterials | null>(null);
   const [findings, setFindings] = useState<KbFindings | null>(null);
-  const [run, setRun] = useState<KbFunnelRun | null>(null);
-  const [repeatCheck, setRepeatCheck] = useState<KbRepeatCheck | null>(null);
-  const [openFinding, setOpenFinding] = useState<KbFinding | null>(null);
+  const [run, setRun] = useState<KbFunnelRun | null>(initial?.run ?? null);
+  const [repeatCheck, setRepeatCheck] = useState<KbRepeatCheck | null>(initial?.repeatCheck ?? null);
+  const [openFinding, setOpenFinding] = useState<KbFinding | null>(initial?.finding ?? null);
   const [exploringItems, setExploringItems] = useState<KbExploring[]>([]);
   const [keyHintDismissed, setKeyHintDismissed] = useState(false);
+  const [weeklyDay, setWeeklyDay] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const runRef = useRef<KbFunnelRun | null>(null);
   runRef.current = run;
 
-  // Initial load
+  // Initial load: the top level of the map, the findings, what is already being explored, and a search
+  // that is still running (the section may be opened while one is in progress).
   useEffect(() => {
     let cancelled = false;
     const loadInitial = async () => {
       try {
-        const [mapRes, findingsRes, exploringRes, jobsRes] = await Promise.all([
-          clients.areas.map({ parent_id: null }),
-          clients.explore.findings({}),
+        const mapRes = await clients.areas.map(initial?.parentId ? { parent_id: initial.parentId } : {});
+        const [findingsRes, exploringRes, jobsRes] = await Promise.all([
+          clients.explore.findings(mapRes.parent_id ? { area_id: mapRes.parent_id } : {}),
           clients.explore.exploring(),
           clients.explore.jobs({ active: true }),
         ]);
         if (cancelled) return;
-
         setMap(mapRes);
         setFindings(findingsRes);
         setExploringItems(exploringRes.items);
+        void clients.maintenance
+          .settings()
+          .then((w) => {
+            if (!cancelled) setWeeklyDay(w.enabled ? weekdayShort(w.next_due_at) : null);
+          })
+          .catch(() => undefined);
 
         const exploreJob = jobsRes.jobs.find((j) => j.owner === 'explore');
-        const isSyntheticFixtureJobs =
-          jobsRes.jobs.length === 1 &&
-          jobsRes.jobs[0]?.id === 'run-1' &&
-          jobsRes.jobs[0]?.task_id === 'task-1';
-
         if (exploreJob) {
           const activeRun = await clients.explore.run(exploreJob.id);
           if (!cancelled) setRun(activeRun);
-        } else if (isSyntheticFixtureJobs) {
-          // Probe synthetic scene overrides when using createFakeKb(scene)
-          const [probeRun, probeFinding, probeRepeat] = await Promise.all([
-            clients.explore.run('run-search').catch(() => null),
-            clients.explore.finding('probe').catch(() => null),
-            clients.repeats.check('probe').catch(() => null),
-          ]);
-          if (cancelled) return;
-          if (probeRun && probeRun.id === 'run-search') {
-            setRun(probeRun);
-          }
-          if (probeFinding && probeFinding.id !== 'finding-1') {
-            setOpenFinding(probeFinding);
-          }
-          if (
-            probeRepeat &&
-            probeRepeat.area_id === 'topic-rag' &&
-            probeRepeat.materials_checked === 2
-          ) {
-            setRepeatCheck(probeRepeat);
-          }
         }
 
-        const initialScopeId = mapRes.parent_id;
-        const matRes = await clients.areas
-          .materials(initialScopeId ?? 'root')
-          .catch(() => null);
-        if (cancelled) return;
-        if (matRes) {
-          setMaterials(matRes);
-          // In the 'topic' scene, aiMap is loaded with ragMaterials
-          if (
-            mapRes.parent_id === 'area-ai' &&
-            matRes.materials[0]?.material_id === 'material-beyond' &&
-            mapRes.areas.length > 0 &&
-            !mapRes.areas[0]!.has_children
-          ) {
-            setSelectedTopic(mapRes.areas[0]!);
-            setActiveTab('materials');
-          }
+        const topic = initial?.topicId ? mapRes.areas.find((a) => a.id === initial.topicId) : undefined;
+        const materialsAreaId = topic?.id ?? mapRes.parent_id;
+        // The contract has no "all areas" materials route, so the top level shows none.
+        if (materialsAreaId) {
+          const matRes = await clients.areas.materials(materialsAreaId).catch(() => null);
+          if (cancelled) return;
+          if (matRes) setMaterials(matRes);
+        }
+        if (topic) {
+          setSelectedTopic(topic);
+          setActiveTab('materials');
         }
       } catch {
-        // Ignore bridge errors on initial load
+        // The bridge failed; the section stays empty rather than showing a half state.
       }
     };
     void loadInitial();
     return () => {
       cancelled = true;
     };
+    // `initial` seeds the first load only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clients]);
 
   // Poll explore.jobs({ active: true }) ~1/s while visible
@@ -212,13 +196,13 @@ export function ExploreSection({
         void clients.areas.opened(clickedArea.id);
       }
       const [nextMap, nextFindings, nextMaterials] = await Promise.all([
-        clients.areas.map({ parent_id: parentId }),
+        clients.areas.map(parentId ? { parent_id: parentId } : {}),
         clients.explore.findings(parentId ? { area_id: parentId } : {}),
-        clients.areas.materials(parentId ?? 'root').catch(() => null),
+        parentId ? clients.areas.materials(parentId).catch(() => null) : Promise.resolve(null),
       ]);
       setMap(nextMap);
       setFindings(nextFindings);
-      if (nextMaterials) setMaterials(nextMaterials);
+      setMaterials(nextMaterials);
     },
     [clients],
   );
@@ -284,7 +268,7 @@ export function ExploreSection({
       const trimmed = query.trim();
       const started = await clients.explore.start({
         area_id: scopeId,
-        query: trimmed.length > 0 ? trimmed : null,
+        ...(trimmed.length > 0 ? { query: trimmed } : {}),
       });
       setOpenFinding(null);
       setRun(started);
@@ -299,9 +283,13 @@ export function ExploreSection({
   }, [clients, run]);
 
   const handleResumeRun = useCallback(
-    async (body?: ExploreResumeBody) => {
-      if (!run) return;
-      const resumed = await clients.explore.resume(run.id, body);
+    async (answer?: ExploreResumeBody) => {
+      if (!run?.checkpoint) return;
+      const resumed = await clients.explore.resume(run.id, {
+        checkpoint_id: run.checkpoint.id,
+        revision: run.checkpoint.revision,
+        ...answer,
+      });
       setRun(resumed);
     },
     [clients, run],
@@ -319,6 +307,7 @@ export function ExploreSection({
   }, [clients]);
 
   const handleStartRepeats = useCallback(async () => {
+    if (!scopeId) return;
     const job = await clients.repeats.start({ area_id: scopeId });
     setRepeatCheck(job);
   }, [clients, scopeId]);
@@ -330,8 +319,11 @@ export function ExploreSection({
   }, [clients, repeatCheck]);
 
   const handleResumeRepeats = useCallback(async () => {
-    if (!repeatCheck) return;
-    const resumed = await clients.repeats.resume(repeatCheck.id);
+    if (!repeatCheck?.checkpoint) return;
+    const resumed = await clients.repeats.resume(repeatCheck.id, {
+      checkpoint_id: repeatCheck.checkpoint.id,
+      revision: repeatCheck.checkpoint.revision,
+    });
     setRepeatCheck(resumed);
   }, [clients, repeatCheck]);
 
@@ -347,7 +339,7 @@ export function ExploreSection({
   );
 
   const handleAddToWiki = useCallback(
-    async (findingId: string, body?: FindingToWikiBody) => {
+    async (findingId: string, body: FindingToWikiBody) => {
       await clients.explore.add_to_wiki(findingId, body);
     },
     [clients],
@@ -403,14 +395,9 @@ export function ExploreSection({
 
         <div className="kb-explore-head__spacer" />
 
-        <button
-          type="button"
-          className="kb-explore-btn kb-explore-btn--ghost"
-          title="What you took to explore"
-        >
-          <Icon name="wiki" size={14} />
-          <span>Exploring · {exploringItems.length}</span>
-        </button>
+        <span className="kb-explore-head__meta" title="Findings you took to explore">
+          Exploring · {exploringItems.length}
+        </span>
       </header>
 
       <div className="kb-explore-search">
@@ -450,9 +437,11 @@ export function ExploreSection({
                 Find what&apos;s new
               </button>
             </form>
-            <span className="kb-explore-search__week" title="Pinned areas, free steps only">
-              Weekly · Mon
-            </span>
+            {weeklyDay && (
+              <span className="kb-explore-search__week" title="Pinned areas, free steps only">
+                Weekly · {weeklyDay}
+              </span>
+            )}
           </>
         )}
       </div>
@@ -496,6 +485,7 @@ export function ExploreSection({
           FindingComponent={FindingComponent}
           onOpenDocument={handleOpenDocument}
           onOpenSettings={handleOpenSettings}
+          onOpenWiki={handleOpenWiki}
         />
       </div>
     </main>

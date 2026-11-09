@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeKb } from '../api/fake';
+import { renderKb } from '../test/renderKb';
 import { contractFixtures } from '../api/fake/fixtures';
 import { scenes } from '../api/fake/scenes';
 import { auditCss } from '../board/audit';
@@ -10,6 +11,27 @@ import type { DocTarget } from '../state/document';
 import { ExploreSection } from './ExploreSection';
 import { formatWikiShare, squarify, tileWeight } from './treemap';
 import type { FindingHostProps } from './types';
+
+const CHECKPOINT = contractFixtures.KbFunnelRun.checkpoint!;
+
+describe('F1 — Explore in the shell', () => {
+  afterEach(cleanup);
+
+  it('puts Explore in the rail between Wiki and Study, and opens the section without the side panel', async () => {
+    renderKb();
+    const rail = await screen.findByRole('navigation', { name: 'Sections' });
+    const names = within(rail)
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label') ?? b.textContent ?? '');
+    const order = ['Wiki', 'Explore', 'Study', 'Notifications'].map((n) => names.findIndex((x) => x.startsWith(n)));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+
+    fireEvent.click(within(rail).getByRole('button', { name: /^Explore/ }));
+    await waitFor(() => expect(document.querySelector('[data-pane="explore"]')).toBeTruthy());
+    expect(document.querySelector('[data-pane="side"]')).toBeNull();
+  });
+});
 
 describe('F1 — Explore treemap math (treemap.ts)', () => {
   it('squarifies items preserving total area and staying within bounds', () => {
@@ -163,13 +185,20 @@ describe('F1 — ExploreSection UI & interactions', () => {
     });
 
     const openedDocs: DocTarget[] = [];
-    render(<ExploreSection clients={kb} onOpenDocument={(doc) => openedDocs.push(doc)} />);
+    render(
+      <ExploreSection
+        clients={kb}
+        initial={{ parentId: 'area-ai' }}
+        onOpenDocument={(doc) => openedDocs.push(doc)}
+      />,
+    );
 
-    // In topic scene, Retrieval-augmented generation is selected and Your materials tab is active
+    // The AI field is open; selecting the leaf topic switches to Your materials
+    fireEvent.click(await screen.findByRole('button', { name: /Retrieval-augmented generation/i }));
     await screen.findByText('RAG beyond the basics');
     expect(screen.getByText(/Repeats Lecture 7 · ~80%/i)).toBeTruthy();
     expect(screen.getByText(/you: Useful method/i)).toBeTruthy();
-    expect(screen.getByText(/Not checked for repeats/i)).toBeTruthy();
+    expect(screen.getAllByText(/Not checked for repeats/i).length).toBeGreaterThan(0);
 
     // Clicking a material row opens it in DocPanel
     fireEvent.click(screen.getByText('RAG beyond the basics'));
@@ -258,8 +287,9 @@ describe('F1 — ExploreSection UI & interactions', () => {
   it('renders honest stops for decision_model_required, openalex_daily_limit, and budget pause', async () => {
     // 1. decision_model_required
     const kbNoModel = createFakeKb('no_decision_model');
+    const stopped = { ...structuredClone(scenes.no_decision_model.run), checkpoint: structuredClone(CHECKPOINT) };
     const resumeSpy = vi.spyOn(kbNoModel.explore, 'resume').mockResolvedValue(structuredClone(scenes.searching.run));
-    const { unmount } = render(<ExploreSection clients={kbNoModel} />);
+    const { unmount } = render(<ExploreSection clients={kbNoModel} initial={{ run: stopped }} />);
 
     await screen.findByText(/Choose how to sort candidates by area/i);
     const localBtn = screen.getByRole('button', { name: /Download local model/i });
@@ -267,6 +297,8 @@ describe('F1 — ExploreSection UI & interactions', () => {
     fireEvent.click(localBtn);
     await waitFor(() =>
       expect(resumeSpy).toHaveBeenCalledWith('run-search', {
+        checkpoint_id: 'checkpoint-1',
+        revision: 1,
         decision_choice: 'download_local',
       }),
     );
@@ -274,22 +306,23 @@ describe('F1 — ExploreSection UI & interactions', () => {
 
     // 2. openalex_daily_limit
     const kbLimit = createFakeKb('daily_limit');
-    const { unmount: unmountLimit } = render(<ExploreSection clients={kbLimit} />);
+    const { unmount: unmountLimit } = render(<ExploreSection clients={kbLimit} initial={{ run: scenes.daily_limit.run }} />);
     await screen.findByText(/OpenAlex daily limit reached/i);
     expect(screen.getByText(/2026-11-10/i)).toBeTruthy();
     unmountLimit();
 
     // 3. budget pause (Continue · next 30 + Cancel)
     const kbBudget = createFakeKb('searching');
-    kbBudget.explore.run = async () => ({
+    const budgetRun = {
       ...structuredClone(scenes.searching.run),
-      state: 'paused',
-      stage: 'novelty',
-      stop_reason: 'budget',
-      checkpoint: structuredClone(contractFixtures.KbFunnelRun.checkpoint),
-      budget: { unit: 'candidate', limit: 30, used: 30, remaining: 0, total_used: 30, batch: 1, free_only: false },
-    });
-    const budgetResumeSpy = vi.spyOn(kbBudget.explore, 'resume');
+      state: 'paused' as const,
+      stage: 'novelty' as const,
+      stop_reason: 'budget' as const,
+      checkpoint: structuredClone(CHECKPOINT),
+      budget: { unit: 'candidate' as const, limit: 30, used: 30, remaining: 0, total_used: 30, batch: 1, free_only: false },
+    };
+    kbBudget.explore.run = async () => structuredClone(budgetRun);
+    const budgetResumeSpy = vi.spyOn(kbBudget.explore, 'resume').mockResolvedValue(structuredClone(budgetRun));
     const budgetCancelSpy = vi.spyOn(kbBudget.explore, 'cancel');
     render(<ExploreSection clients={kbBudget} />);
 
@@ -308,7 +341,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
 
   it('renders Done state with Done just now banner and pop badges', async () => {
     const kb = createFakeKb('done');
-    const { container } = render(<ExploreSection clients={kb} />);
+    const { container } = render(<ExploreSection clients={kb} initial={{ run: scenes.done.run }} />);
 
     await screen.findByText(/Done just now/i);
     expect(screen.getByText(/12 repeat what you have/i)).toBeTruthy();
@@ -320,7 +353,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
     const exploreSpy = vi.spyOn(kb.explore, 'explore');
     const addToWikiSpy = vi.spyOn(kb.explore, 'add_to_wiki');
 
-    const { container, unmount } = render(<ExploreSection clients={kb} />);
+    const { container, unmount } = render(<ExploreSection clients={kb} initial={{ finding: scenes.find.finding }} />);
 
     await screen.findByRole('heading', {
       name: /Self-correction in LLMs does not improve factuality without external feedback/i,
@@ -328,10 +361,10 @@ describe('F1 — ExploreSection UI & interactions', () => {
     expect(container.querySelector('.kb-explore-col--wide')).toBeTruthy();
 
     // Open Explore menu and pick Brief tour
-    fireEvent.click(screen.getByRole('button', { name: /^Explore/i }));
-    const briefTourBtn = await screen.findByRole('button', { name: /Brief tour/i });
-    expect(screen.getByRole('button', { name: /Deep dive/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Notes/i })).toBeTruthy();
+    fireEvent.click(within(screen.getByLabelText('Finding details')).getByRole('button', { name: 'Explore' }));
+    const briefTourBtn = await screen.findByRole('menuitem', { name: /Brief tour/i });
+    expect(screen.getByRole('menuitem', { name: /Deep dive/i })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /Notes/i })).toBeTruthy();
     fireEvent.click(briefTourBtn);
 
     await waitFor(() =>
@@ -359,21 +392,57 @@ describe('F1 — ExploreSection UI & interactions', () => {
         </button>
       </div>
     );
-    render(<ExploreSection clients={createFakeKb('find')} FindingComponent={CustomFindingHost} />);
+    render(
+      <ExploreSection
+        clients={createFakeKb('find')}
+        initial={{ finding: scenes.find.finding }}
+        FindingComponent={CustomFindingHost}
+      />,
+    );
     await screen.findByTestId('f3-host');
     expect(screen.getByText(/Hosted: Self-correction in LLMs/i)).toBeTruthy();
+  });
+
+  it('does not offer Continue when a stopped run has no checkpoint, and sends no request', async () => {
+    const kb = createFakeKb('no_decision_model');
+    const resumeSpy = vi.spyOn(kb.explore, 'resume');
+    render(<ExploreSection clients={kb} initial={{ run: scenes.no_decision_model.run }} />);
+    const choice = await screen.findByRole('button', { name: /Download local model/i });
+    expect((choice as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(choice);
+    expect(resumeSpy).not.toHaveBeenCalled();
+  });
+
+  it('asks for consent in Settings → Search when the science integration is off', async () => {
+    const kb = createFakeKb('area');
+    const openSettings = vi.fn();
+    const run = { ...structuredClone(scenes.searching.run), state: 'paused' as const, stop_reason: 'science_consent_required' as const };
+    render(<ExploreSection clients={kb} initial={{ run }} onOpenSettings={openSettings} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Open Settings/i }));
+    expect(openSettings).toHaveBeenCalledWith('search');
+  });
+
+  it('hides the weekly label when the weekly check is off and never asks the contract for "all areas" materials', async () => {
+    const kb = createFakeKb('home');
+    vi.spyOn(kb.maintenance, 'settings').mockResolvedValue({ ...contractFixtures.KbWeeklySettings, enabled: false });
+    const materialsSpy = vi.spyOn(kb.areas, 'materials');
+    render(<ExploreSection clients={kb} />);
+    await screen.findByRole('button', { name: /Physical Sciences/i });
+    expect(screen.queryByText(/^Weekly/)).toBeNull();
+    expect(materialsSpy).not.toHaveBeenCalled();
   });
 
   it('passes CSS token lint with zero violations in explore.css', () => {
     const cssPath = resolve(__dirname, 'explore.css');
     const css = readFileSync(cssPath, 'utf8');
-    const violations = auditCss(css);
+    const audit = auditCss({ 'explore.css': css });
+    const violations = { ...audit, spacing: audit.spacing.filter((entry) => !entry.onGrid) };
     expect(violations).toEqual({
-      hexColors: [],
-      fontSizePx: [],
-      radiusPx: [],
-      rawBoxShadow: [],
-      spacingPx: [],
+      colors: [],
+      fontSizes: [],
+      radii: [],
+      shadows: 0,
+      spacing: [],
     });
   });
 });
