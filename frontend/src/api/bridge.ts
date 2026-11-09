@@ -177,6 +177,10 @@ export interface BridgeApi {
   readonly systemAudioSupported?: boolean;
   /** The window entered or left macOS full screen (sent once on load, then on every change). */
   onFullScreen?(listener: (fullScreen: boolean) => void): () => void;
+  /** "Closing the window quits SKAZ": main holds it, off by default (SKAZ stays in the tray). */
+  getCloseQuits?(): Promise<boolean>;
+  /** Change it. Resolves to the state really in force, which differs from `on` if it couldn't be saved. */
+  setCloseQuits?(on: boolean): Promise<boolean>;
 }
 
 declare global {

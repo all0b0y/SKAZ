@@ -9,7 +9,8 @@ import { launchIsolatedSmoke } from './isolatedSmoke';
 // at risk; saving and stopping the backend then finish unseen, and the process still exits on its own.
 const BUDGET_MS = 200;
 
-for (const how of ['window close', 'Cmd+Q (app.quit)'] as const) {
+// Decision 3f′: closing the window quits only with the setting on; by default it hides into the tray (below).
+for (const how of ['window close, "Closing the window quits SKAZ" on', 'Cmd+Q (app.quit)'] as const) {
   test(`the window is gone within ${BUDGET_MS} ms — ${how}`, async () => {
     test.setTimeout(120_000);
     const { app, close } = await launchIsolatedSmoke('skaz-quit-');
@@ -17,6 +18,8 @@ for (const how of ['window close', 'Cmd+Q (app.quit)'] as const) {
       const page = await app.firstWindow();
       await expect(page.getByTestId('titlebar')).toBeVisible({ timeout: 60_000 });
       await page.waitForTimeout(1_500); // the backend is up and idle
+      const closeQuits = how !== 'Cmd+Q (app.quit)';
+      if (closeQuits) expect(await page.evaluate(() => window.skaz.setCloseQuits!(true))).toBe(true);
       const marks = path.join(fs.realpathSync(os.tmpdir()), `skaz-quit-marks-${process.pid}-${Date.now()}.json`);
       const exited = new Promise<void>((resolve) => app.process().once('exit', () => resolve()));
       await app.evaluate(({ BrowserWindow, app: main }, { mode, file }) => {
@@ -27,9 +30,9 @@ for (const how of ['window close', 'Cmd+Q (app.quit)'] as const) {
         const mark = (k: string) => { out[k] ??= Math.round(performance.now() - start); nodeFs.writeFileSync(file, JSON.stringify(out)); };
         win.once('hide', () => mark('hidden'));
         main.once('will-quit', () => mark('willQuit'));
-        if (mode === 'window close') win.close(); else main.quit();
+        if (mode) win.close(); else main.quit();
         if (!win.isVisible()) mark('hidden');
-      }, { mode: how, file: marks });
+      }, { mode: closeQuits, file: marks });
       await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('SKAZ did not exit within 15 s')), 15_000))]);
       const out = JSON.parse(fs.readFileSync(marks, 'utf8')) as { hidden?: number; willQuit?: number };
       fs.rmSync(marks, { force: true });
@@ -43,6 +46,50 @@ for (const how of ['window close', 'Cmd+Q (app.quit)'] as const) {
   });
 }
 
+// Decision 3f′: by default closing leaves the screen just as fast but quits nothing; the Dock brings the window
+// back, the one-time hint is recorded, and a real quit from the tray state still exits fully.
+test(`closing the window keeps SKAZ running in the tray, off the screen within ${BUDGET_MS} ms; a quit still exits`, async () => {
+  test.setTimeout(120_000);
+  const { app, close, profile } = await launchIsolatedSmoke('skaz-tray-');
+  const closeWindow = () => app.evaluate(({ BrowserWindow }) => new Promise<number>((resolve) => {
+    const win = BrowserWindow.getAllWindows()[0]!;
+    const start = performance.now();
+    win.once('hide', () => resolve(Math.round(performance.now() - start)));
+    win.close();
+  }));
+  const windows = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((win) => win.isVisible()));
+  const backendPhase = (page: Awaited<ReturnType<typeof app.firstWindow>>) => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase);
+  try {
+    const page = await app.firstWindow();
+    await expect.poll(() => backendPhase(page), { timeout: 60_000 }).toBe('ready');
+    let exited = false;
+    const exit = new Promise<void>((resolve) => app.process().once('exit', () => { exited = true; resolve(); }));
+
+    expect(await closeWindow()).toBeLessThanOrEqual(BUDGET_MS);
+    await page.waitForTimeout(1_500);
+    expect(exited, 'closing the window quit SKAZ').toBe(false);
+    expect(await windows(), 'the window should be hidden, not destroyed').toEqual([false]);
+    expect(await backendPhase(page)).toBe('ready');
+
+    // The hint is recorded as shown wherever this system can show one, so it never comes back.
+    const notifications = await app.evaluate(({ Notification }) => Notification.isSupported());
+    const prefs = JSON.parse(fs.readFileSync(path.join(profile, 'tray.json'), 'utf8')) as { closeQuits: boolean; hintShown: boolean };
+    expect(prefs).toEqual({ closeQuits: false, hintShown: notifications });
+
+    // A Dock click brings it back; closing again hides again.
+    await app.evaluate(({ app: main }) => { main.emit('activate'); });
+    await expect.poll(windows).toEqual([true]);
+    expect(await closeWindow()).toBeLessThanOrEqual(BUDGET_MS);
+    expect(exited).toBe(false);
+
+    // Quit in the tray menu and Cmd+Q are both app.quit: from the hidden window it still exits on its own.
+    await app.evaluate(({ app: main }) => { setImmediate(() => main.quit()); });
+    await Promise.race([exit, new Promise((_, reject) => setTimeout(() => reject(new Error('SKAZ did not exit within 15 s')), 15_000))]);
+  } finally {
+    await close().catch(() => undefined);
+  }
+});
+
 // The user's rule: a fast relaunch must find the previous SKAZ fully gone, so the new backend can open the
 // database and queue. A Dock click / second launch during the unseen shutdown reaches the OLD process; it must
 // relaunch only after its backend has exited — and a launch right after the exit must bring a backend up.
@@ -53,6 +100,8 @@ test('a fast relaunch during the shutdown waits for the old backend, then a new 
   try {
     const page = await first.app.firstWindow();
     await expect.poll(() => page.evaluate(async () => (await window.skaz.getBackendStatus()).phase), { timeout: 60_000 }).toBe('ready');
+    // The window close below is this shutdown's trigger, so closing has to quit here (decision 3f′).
+    expect(await page.evaluate(() => window.skaz.setCloseQuits!(true))).toBe(true);
     const backendPid = Number(execFileSync('pgrep', ['-P', String(first.app.process().pid), '-f', 'skaz --port'], { encoding: 'utf8' }).trim().split('\n')[0]);
     expect(backendPid, 'the backend process was not found').toBeGreaterThan(0);
     const marks = path.join(fs.realpathSync(os.tmpdir()), `skaz-relaunch-marks-${process.pid}-${Date.now()}.json`);

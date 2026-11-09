@@ -20,6 +20,7 @@ import { WikiBudgetRow } from './WikiBudgetRow';
 import { ExportRow } from './ExportRow';
 import { ObsidianRow } from '../document/fileActions';
 import { UpdatesRow } from './UpdatesRow';
+import { CloseQuitsRow } from './CloseQuitsRow';
 import { HermesProviders } from './HermesProviders';
 import { AgentUpdatesRow, useAgentUpdatesDot } from './AgentUpdates';
 import { WikiTermsShowButton } from '../wiki/WikiTermsButton';
@@ -132,6 +133,8 @@ function RowControl({ row }: { row: RowDef }) {
       return <VersionRow fallback={appVersion} />;
     case 'updates':
       return <UpdatesRow />;
+    case 'close-quits':
+      return <CloseQuitsRow label={row.label} />;
     case 'github':
       return (
         <a className="kb-link" href="https://github.com/all0b0y/SKAZ" target="_blank" rel="noreferrer noopener">

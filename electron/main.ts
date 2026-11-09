@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences, type Tray } from 'electron';
 import path from 'node:path';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { migrateLegacyProfile, resolveStorageProfile } from './storageProfile';
@@ -8,13 +8,16 @@ import { registerIpc } from './ipc';
 import type { NativeLiveClient } from './nativeLive';
 import { CHANNELS } from './channels';
 import { isAllowedExternalUrl } from './ipcPolicy';
-import { hasUnsentAudio, quitWarning, type CaptureProtectionState } from './captureProtection';
+import { captureStatusLine, hasUnsentAudio, quitWarning, type CaptureProtectionState } from './captureProtection';
 import { displayMediaGrant, isTrustedMediaCheck, isTrustedMediaRequest } from './permissionPolicy';
 import { isTrustedFrame, validateCaptureState } from './ipcSender';
 import { QuitController } from './quitController';
 import { RendererSaveBarrier } from './rendererSaveBarrier';
 import { readDeclinedForever, shouldOfferMoveToApplications, writeDeclinedForever } from './installLocation';
 import { registerUpdates } from './updateRuntime';
+import { TrayBehavior, trayPrefsStore } from './trayBehavior';
+import { registerCloseQuitsIpc, showFirstCloseHint, startTray } from './trayRuntime';
+import { trayStatus } from './trayStatus';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
@@ -44,6 +47,10 @@ const CSP =
 
 let mainWindow: BrowserWindow | null = null;
 let nativeClient: NativeLiveClient | null = null;
+// Module-level so it is never garbage collected: a collected Tray disappears from the menu bar.
+let tray: Tray | null = null;
+// The window was closed into the tray. Tells a hidden window from one that hasn't appeared yet at launch.
+let hiddenToTray = false;
 
 // Resolve every persistent path before the backend, singleton or Chromium session
 // is constructed. Packaged builds ignore development profile flags/env entirely.
@@ -93,6 +100,42 @@ const rendererSave = new RendererSaveBarrier((id) => {
   mainWindow.webContents.send(CHANNELS.prepareQuit, id);
 });
 
+/** Bring the window back from anywhere: the tray, a minimized state, behind other windows. */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return; }
+  hiddenToTray = false;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function hideMainWindowToTray(): void {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  hiddenToTray = true;
+  // Hiding a full screen window on macOS leaves its empty black Space behind: leave full screen first.
+  if (win.isFullScreen()) {
+    win.once('leave-full-screen', () => { if (hiddenToTray && !win.isDestroyed()) win.hide(); });
+    win.setFullScreen(false);
+  } else {
+    win.hide();
+  }
+}
+
+/** Open SKAZ, from the tray or the hint: during a shutdown it counts as a launch, like a Dock click. */
+function openFromTray(): void {
+  if (quitController.onLaunchRequest()) return;
+  showMainWindow();
+  app.focus({ steal: true }); // the user asked for it in the tray: it must not open behind other apps
+}
+
+const trayBehavior = new TrayBehavior({
+  prefs: trayPrefsStore(app.getPath('userData')),
+  trayAvailable: () => tray !== null,
+  hide: hideMainWindowToTray,
+  showHint: () => showFirstCloseHint(openFromTray),
+});
+
 const quitController = new QuitController({
   saveBeforeQuit: () => mainWindow ? rendererSave.request() : Promise.resolve(!hasUnsentAudio(captureState)),
   hasUnsentAudio: () => hasUnsentAudio(captureState),
@@ -108,14 +151,16 @@ const quitController = new QuitController({
       message: warning.message,
       detail: warning.detail,
     };
-    const choice = mainWindow ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
+    // Never a sheet on a hidden window: it would block this process with nothing on the screen.
+    const choice = mainWindow?.isVisible() ? dialog.showMessageBoxSync(mainWindow, options) : dialog.showMessageBoxSync(options);
     return choice === 1;
   },
   stopBackend: () => manager.stop(),
   quit: () => app.quit(),
   hideWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide(); },
-  showWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); },
+  showWindow: () => { if (mainWindow && !mainWindow.isDestroyed()) showMainWindow(); },
   relaunch: () => app.relaunch(),
+  closeToTray: () => trayBehavior.onWindowClose(),
   onShutdownError: (err) => {
     console.error('[main] backend shutdown failed; quitting anyway:', err instanceof Error ? err.message : err);
   },
@@ -230,12 +275,14 @@ function createWindow(): void {
     void mainWindow.loadFile(RENDERER_HTML);
   }
 
-  // Guard against losing unsent audio: route close through the quit controller
-  // so the same single dialog decides, and the backend is only stopped after the
-  // user authorizes the quit.
+  // One authority for closing: by default the quit controller only hides the window into the tray; when
+  // closing quits, the same single dialog guards unsent audio, and the backend is only stopped after the user
+  // authorizes the quit.
   mainWindow.on('close', (event) => {
     if (quitController.onWindowClose()) event.preventDefault();
   });
+  mainWindow.on('show', () => { hiddenToTray = false; }); // whoever showed it (e.g. the update notification)
+  mainWindow.on('session-end', () => trayBehavior.onSessionEnd());
 
   mainWindow.webContents.on('render-process-gone', () => { nativeClient?.abort(); rendererSave.disconnected(); });
   mainWindow.on('closed', () => {
@@ -288,9 +335,7 @@ if (!ownsInstance) {
   app.on('second-instance', () => {
     if (quitController.onLaunchRequest()) return; // shutting down: relaunch once this process has exited
     if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   });
 }
 
@@ -328,7 +373,10 @@ app.whenReady().then(() => {
     });
     if (!trusted) return;
     const validated = validateCaptureState(payload);
-    if (validated) captureState = validated;
+    if (validated) {
+      captureState = validated;
+      trayStatus.set('capture', captureStatusLine(validated));
+    }
   });
   // Updates (B20): GitHub Releases at start and daily; the About row reads and drives it.
   registerUpdates(() => mainWindow, (event) => isTrustedFrame({
@@ -336,6 +384,12 @@ app.whenReady().then(() => {
     expectedId: mainWindow?.webContents.id ?? null,
     isMainFrame: event.senderFrame?.parent === null,
   }));
+  registerCloseQuitsIpc(trayBehavior, (event) => isTrustedFrame({
+    senderId: event.sender.id,
+    expectedId: mainWindow?.webContents.id ?? null,
+    isMainFrame: event.senderFrame?.parent === null,
+  }));
+  tray = startTray(trayStatus, { open: openFromTray, quit: () => app.quit() });
   createWindow();
 
   // Start the backend after the window exists so status events reach the UI.
@@ -348,6 +402,7 @@ app.whenReady().then(() => {
     // A Dock click while the hidden window is still shutting down reaches THIS process on macOS.
     if (quitController.onLaunchRequest()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else if (hiddenToTray) showMainWindow(); // a Dock click brings the window back from the tray
   });
 });
 
@@ -357,4 +412,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   if (quitController.onBeforeQuit()) event.preventDefault();
+});
+
+app.on('will-quit', () => {
+  // Windows would otherwise leave a dead icon in the tray until the pointer passes over it.
+  tray?.destroy();
+  tray = null;
 });

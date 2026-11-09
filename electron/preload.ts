@@ -118,6 +118,12 @@ const api: BridgeApi = {
     ipcRenderer.on(CHANNELS.prepareQuit, handler);
     return () => ipcRenderer.removeListener(CHANNELS.prepareQuit, handler);
   },
+  getCloseQuits(): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.closeQuitsGet) as Promise<boolean>;
+  },
+  setCloseQuits(on: boolean): Promise<boolean> {
+    return ipcRenderer.invoke(CHANNELS.closeQuitsSet, on) as Promise<boolean>;
+  },
   systemAudioSupported: systemAudioSupported(process.platform, process.getSystemVersion()),
   onFullScreen(listener: (fullScreen: boolean) => void): () => void {
     const handler = (_event: unknown, on: unknown): void => listener(on === true);
