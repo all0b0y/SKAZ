@@ -30,6 +30,28 @@ describe('TrayBehavior — closing the window', () => {
     expect(f.hide).toHaveBeenCalledTimes(1);
   });
 
+  it('the hint waits for the deferred tick: the hide comes first and nothing else runs on the close tick', () => {
+    const queued: Array<() => void> = [];
+    const hide = vi.fn();
+    const showHint = vi.fn(() => true);
+    const write = vi.fn(() => true);
+    const tray = new TrayBehavior({
+      prefs: { read: () => ({ closeQuits: false, hintShown: false }), write },
+      trayAvailable: () => true,
+      hide,
+      showHint,
+      defer: (run) => { queued.push(run); },
+    });
+    expect(tray.onWindowClose()).toBe(true);
+    expect(hide).toHaveBeenCalledTimes(1);
+    expect(showHint).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(tray.onWindowClose()).toBe(true); // a second close before the tick: the hint still comes once
+    queued.forEach((run) => run());
+    expect(showHint).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
   it('toggle on: does not take the close', () => {
     const f = behavior({ closeQuits: true });
     expect(f.tray.onWindowClose()).toBe(false);
