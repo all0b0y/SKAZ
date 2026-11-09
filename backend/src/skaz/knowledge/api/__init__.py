@@ -25,6 +25,7 @@ from . import (
     sources,
     speech,
     study,
+    study_library,
     web_search,
     wiki,
 )
@@ -56,4 +57,5 @@ ROUTERS: tuple[APIRouter, ...] = (
     me.router,
     agent_updates.router,
     search_rules.router,
+    study_library.router,
 )

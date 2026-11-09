@@ -1,7 +1,8 @@
-"""Deck and test pages in the wiki (decisions S2, S3, S6; Q7).
+"""Deck and test pages in the Study folder (decisions S2, S3, S6; Q7; N4-7).
 
-``Wiki/Decks/<Title>.md`` (kind ``deck``) and ``Wiki/Tests/<Title>.md`` (kind ``test``) are ordinary
-SKAZ pages: frontmatter plus marked blocks, readable and editable in Obsidian, part of Export.
+``Study/Decks/<Title>.md`` (kind ``deck``) and ``Study/Tests/<Title>.md`` (kind ``test``) use the SKAZ
+page format: frontmatter plus marked blocks, readable and editable in Obsidian, part of Export. They
+are not wiki pages: no wiki search or agent answer tool reads them (``study/history.py`` does).
 
 * A card is a ``from_source`` block ``Question::Answer [[link]] ^c-…`` whose citations were checked
   mechanically (the quote is verbatim in the fragment, layer 4).

@@ -80,7 +80,7 @@ async def test_save_pressed_twice_at_once_writes_one_page(world: Any) -> None:
     results = await _together(lambda: study.save(block.id, "allow"), lambda: study.save(block.id, "allow"))
 
     decks = [page for page in runtime.kb.page_repo.list_all() if page.kind == "deck"]
-    assert [page.rel_path for page in decks] == ["Wiki/Decks/Термодинамика.md"]
+    assert [page.rel_path for page in decks] == ["Study/Decks/Термодинамика.md"]
     saved = [r for r in results if not isinstance(r, BaseException)]
     refused = [r for r in results if isinstance(r, BaseException)]
     assert len(saved) == 1 and saved[0].page_id == decks[0].id
