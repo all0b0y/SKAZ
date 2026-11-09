@@ -722,8 +722,11 @@ async def test_runtime_wires_kb_areas_in_real_app(kb_client: object, kb_app: obj
 
     client = kb_client
     assert isinstance(client, httpx.AsyncClient)
-    runtime = getattr(kb_app, "state").runtime
+    runtime = kb_app.state.runtime  # type: ignore[attr-defined]
     assert getattr(runtime, "kb_areas", None) is not None
+    # The wiring hands over the decider itself (None while none is chosen), not the ``layer`` method.
+    assert runtime.kb_areas._decisions() is None
+    assert runtime.kb_areas.directory is not None and runtime.kb_areas.recorder is not None
 
     res = await client.get("/kb/explore/map")
     assert res.status_code == 200
@@ -746,4 +749,50 @@ async def test_runtime_wires_kb_areas_in_real_app(kb_client: object, kb_app: obj
     assert any(s["predicate"] == "area_opened" and s["object"]["id"] == area_id for s in signals)
 
 
+async def test_placement_never_asks_again_about_off_topic_pages_and_caps_each_call(
+    ready: KnowledgeService,
+) -> None:
+    """Decision cost: a page the model called off-topic is not asked again; one call asks at most 30."""
+    from collections.abc import Sequence
 
+    from skaz.knowledge.areas.service import OFF_TOPIC_OPTION
+    from skaz.knowledge.decisions.protocol import Answer, ChoiceAnswer, Question
+    from skaz.knowledge.markdown.page import Block, PageDocument, PageMeta
+    from skaz.knowledge.science.protocols import TaxonomyNode
+
+    for index in range(35):
+        ready.create_page(
+            PageDocument(
+                meta=PageMeta(skaz_id=f"page-{index:02d}", kind="concept", title=f"Concept {index:02d}"),
+                parts=[Block.create(f"c-{index}", "from_source", "A statement.")],
+            )
+        )
+
+    class Science:
+        async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
+            return [TaxonomyNode("dom-1", None, "domain", "Domain One", 0)] if parent_id is None else []
+
+    class Layer:
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        @property
+        def id(self) -> str:
+            return "local"
+
+        async def ask(self, question: Question) -> Answer:
+            self.asked.append(question.state)
+            return ChoiceAnswer(option=OFF_TOPIC_OPTION, probabilities={}, confidence=0.9)
+
+        async def ask_many(self, questions: Sequence[Question]) -> Sequence[Answer]:
+            return [await self.ask(q) for q in questions]
+
+    layer = Layer()
+    service = ExploreAreasService(ready, science=Science(), decisions=layer)  # type: ignore[arg-type]
+
+    await service.map()
+    assert len(layer.asked) == 30  # one call never asks more than a batch
+    await service.map()
+    assert len(layer.asked) == 35  # the 30 off-topic answers are kept; only the 5 left are asked
+    await service.map()
+    assert len(layer.asked) == 35  # nothing is asked twice

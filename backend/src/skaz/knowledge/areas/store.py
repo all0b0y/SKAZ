@@ -770,7 +770,7 @@ class AreasStore:
         return KbReadMark(material_id=None, finding_id=finding_id, value=None, updated_at=None)
 
     def move_finding_mark_to_material(self, finding_id: str, material_id: str) -> KbReadMark | None:
-        """Open question 5: when a finding with a mark is added to the wiki, the mark moves to the material."""
+        """Open question 5: a finding's mark moves to the material it becomes (one mark per material)."""
         self._require_material(material_id)
         with self.db.read() as conn:
             row = conn.execute(
@@ -781,11 +781,7 @@ class AreasStore:
         if row is None:
             return None
         value = cast(KbReadMarkValue, str(row["value"]))
-        with self.db.write() as conn:
-            conn.execute(
-                "DELETE FROM explore_read_marks WHERE target_kind = 'finding' AND target_id = ?",
-                (finding_id,),
-            )
+        self.remove_finding_read_mark(finding_id)
         return self.set_material_read_mark(material_id, KbReadMarkUpdate(value=value))
 
     # -- Map & KbArea construction -------------------------------------------

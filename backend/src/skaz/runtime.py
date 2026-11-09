@@ -206,7 +206,7 @@ class Runtime:
         self.kb_areas = ExploreAreasService(
             self.kb,
             science=lambda: getattr(self, "kb_science", None),
-            decisions=lambda: self.kb_decisions.layer,
+            decisions=lambda: self.kb_decisions.layer(),
             publication_dates=lambda: getattr(self, "kb_freshness", None),
             repeat_summaries=lambda: getattr(self, "kb_repeats", None),
             freshness_marks=lambda: getattr(self, "kb_maintenance", None),

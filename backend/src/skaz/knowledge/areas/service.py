@@ -40,6 +40,11 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 OFF_TOPIC_OPTION = "None of these: off-topic"
+#: One call to the map asks the decision model about at most this many pages (a batch, as in the funnel).
+PLACEMENT_BATCH = 30
+PLACEMENT_UNDECIDED_STOP = 5
+#: Pages the model called off-topic at a level, kept so the same question is never paid for twice.
+_OFF_TOPIC_KEY = "explore.areas.off_topic"
 _UNKNOWN_PUBLICATION = KbPublicationDate(
     year=None,
     date=None,
@@ -64,7 +69,7 @@ def _resolve(provider: T | Callable[[], T | None] | None, attr: str | None = Non
 
 
 class ExploreAreasService:
-    """Implements ``AreasService`` and exposes ``.directory`` (``AreaDirectory``) and ``.recorder`` (``SignalRecorder``)."""
+    """``AreasService``; ``.directory`` is the ``AreaDirectory`` and ``.recorder`` the ``SignalRecorder``."""
 
     def __init__(
         self,
@@ -173,7 +178,16 @@ class ExploreAreasService:
         by_option = {c.original_name: c.id for c in candidates}
         areas_text = "\n".join(c.original_name for c in candidates)
 
+        level_key = parent_id or ""
+        off_topic = await disk_call(self._off_topic_pages, level_key)
+        asked = 0
+        undecided_in_a_row = 0
+        newly_off_topic: list[str] = []
         for page_id in page_ids:
+            if page_id in off_topic:
+                continue
+            if asked >= PLACEMENT_BATCH:
+                break
             page_text = await disk_call(self._page_prompt_state, page_id)
             if not page_text:
                 continue
@@ -188,11 +202,15 @@ class ExploreAreasService:
                 question="Which area does this wiki page belong to?",
                 options=options,
             )
+            asked += 1
             try:
                 answer = await decisions.ask(question)
             except Exception:
                 answer = Undecided("the decision layer failed")
-            if isinstance(answer, ChoiceAnswer) and answer.option in by_option:
+            undecided_in_a_row = undecided_in_a_row + 1 if isinstance(answer, Undecided) else 0
+            if isinstance(answer, ChoiceAnswer) and answer.option == OFF_TOPIC_OPTION:
+                newly_off_topic.append(page_id)
+            elif isinstance(answer, ChoiceAnswer) and answer.option in by_option:
                 chosen_id = by_option[answer.option]
                 await disk_call(
                     self.store.assign_page,
@@ -200,6 +218,21 @@ class ExploreAreasService:
                     page_id,
                     replace_area_id=parent_id,
                 )
+            if undecided_in_a_row >= PLACEMENT_UNDECIDED_STOP:
+                break  # the model is unavailable or unsure: do not keep asking on this call
+        if newly_off_topic:
+            await disk_call(self._remember_off_topic, level_key, newly_off_topic)
+
+    def _off_topic_pages(self, level_key: str) -> set[str]:
+        raw = self.kb.settings.get(_OFF_TOPIC_KEY, {})
+        pages = raw.get(level_key, []) if isinstance(raw, dict) else []
+        return {str(p) for p in pages} if isinstance(pages, list) else set()
+
+    def _remember_off_topic(self, level_key: str, page_ids: Sequence[str]) -> None:
+        raw = self.kb.settings.get(_OFF_TOPIC_KEY, {})
+        stored: dict[str, list[str]] = dict(raw) if isinstance(raw, dict) else {}
+        stored[level_key] = sorted({*stored.get(level_key, []), *page_ids})
+        self.kb.settings.set(_OFF_TOPIC_KEY, stored)
 
     async def _fetch_publication_dates(
         self, material_ids: Sequence[str] | None = None
