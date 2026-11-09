@@ -134,6 +134,7 @@ const trayBehavior = new TrayBehavior({
   trayAvailable: () => tray !== null,
   hide: hideMainWindowToTray,
   showHint: () => showFirstCloseHint(openFromTray),
+  defer: (run) => { setTimeout(run, 300); },
 });
 
 const quitController = new QuitController({

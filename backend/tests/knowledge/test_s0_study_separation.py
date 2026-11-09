@@ -343,6 +343,7 @@ async def test_an_unanswered_question_is_no_mistake_and_lapses_alone_count(world
     deck = await _saved_deck(runtime, library)
     await _test_block(runtime, library)
     card = study.cards(deck)[1][0].id
+    assert deck.page_id is not None
     # A card forgotten before (its lapses in FSRS, no Again in the log of reviews).
     state, _ = review(CardState(card, deck.page_id), "good", mode="due", at=clock.now)
     study.store.put_cards([CardState(card, deck.page_id, state.fsrs, lapses=3, reps=5)], "n")
@@ -381,7 +382,7 @@ async def test_the_study_tools_are_only_for_a_chat_and_change_nothing(world: Any
 # -- archive (N4-8) --------------------------------------------------------------------------------------
 
 
-def _shelf(runtime: Any) -> dict[str, Any]:
+def _shelf(runtime: Any) -> dict[str | None, Any]:
     return {entry.page_id: entry for entry in runtime.kb_study.shelf.listing()}
 
 

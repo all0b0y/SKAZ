@@ -213,6 +213,10 @@ class Runtime:
             explore=lambda: getattr(self, "kb_explore", None),
         )
 
+        #: Publication dates, N7-5 library date filter and manual link checks (0.4.0 B5).
+        from .knowledge.freshness import build_freshness_service
+        self.kb_freshness = build_freshness_service(self)
+
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
 

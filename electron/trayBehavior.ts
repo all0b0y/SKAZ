@@ -26,6 +26,11 @@ export interface TrayBehaviorDeps {
   hide: () => void;
   /** Show the first-close hint. False when this system can't show one, so a later close tries again. */
   showHint: () => boolean;
+  /**
+   * Run the hint after the hide has reached the screen. Building a Notification and writing tray.json on the
+   * close's own tick pushed the first hide past the 200 ms rule (gate 1 smoke: 275 ms). Default: at once.
+   */
+  defer?: (run: () => void) => void;
 }
 
 export class TrayBehavior {
@@ -57,7 +62,7 @@ export class TrayBehavior {
   onWindowClose(): boolean {
     if (this.prefs.closeQuits || this.sessionEnding || !this.deps.trayAvailable()) return false;
     this.deps.hide();
-    this.offerHint();
+    if (!this.prefs.hintShown) (this.deps.defer ?? ((run) => run()))(() => this.offerHint());
     return true;
   }
 
