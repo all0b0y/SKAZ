@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { usePrefs, useServices, useUi } from '../state/context';
 import { RIGHT_MIN, SIDE_MIN } from '../state/prefs';
 import { AllMaterials } from '../materials/AllMaterials';
+import { ExploreSection } from '../explore';
 import { ChatCenter } from './ChatCenter';
 import { DocPanel } from './DocPanel';
 import { computeLayout, resizeLimits } from './layout';
@@ -44,10 +45,11 @@ export function Shell() {
   const docExpanded = useUi((s) => s.docExpanded);
   const windowWidth = useWindowWidth();
 
+  const isExplore = section === 'explore';
   // The graph asks for a wide panel (v4/v5); it still yields to the centre minimum.
   const wanted = right?.kind === 'graph' ? Math.max(rightWidth, GRAPH_W) : rightWidth;
   const layout = computeLayout({
-    windowWidth, sideOpen, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
+    windowWidth, sideOpen: sideOpen && !isExplore, sideWidth, docOpen: right !== null, docExpanded, rightWidth: wanted,
   });
   const { sideMax, rightMax } = resizeLimits(windowWidth, layout);
   // AnimatedList (FIX2 S-H1): only the side list shown when the app opens may stagger in.
@@ -72,8 +74,9 @@ export function Shell() {
             />
           </>
         )}
-        <ChatCenter hidden={!layout.centerVisible || center === 'materials'} />
-        {center === 'materials' && <AllMaterials hidden={!layout.centerVisible} />}
+        <ChatCenter hidden={!layout.centerVisible || center === 'materials' || isExplore} />
+        {!isExplore && center === 'materials' && <AllMaterials hidden={!layout.centerVisible} />}
+        {isExplore && <ExploreSection hidden={!layout.centerVisible} />}
         {right !== null && (
           <>
             {layout.right !== null && (

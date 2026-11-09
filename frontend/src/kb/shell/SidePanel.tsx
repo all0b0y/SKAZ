@@ -18,6 +18,7 @@ const TITLES: Record<Section, string> = {
   chats: 'Chats',
   materials: 'Materials',
   wiki: 'Wiki',
+  explore: 'Explore',
   study: 'Study',
   graph: 'Graph',
   notifications: 'Notifications',

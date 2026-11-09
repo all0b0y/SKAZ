@@ -9,6 +9,7 @@ import { SquarePenIcon } from '@animateicons/react/lucide/square-pen-icon';
 import { Book01Icon } from '@animateicons/react/huge/book-0-1-icon';
 import { Cancel01Icon } from '@animateicons/react/huge/cancel-0-1-icon';
 import { ChevronDownIcon } from '@animateicons/react/huge/chevron-down-icon';
+import { Compass01Icon } from '@animateicons/react/huge/compass-0-1-icon';
 import { CopyIcon } from '@animateicons/react/huge/copy-icon';
 import { Globe02Icon } from '@animateicons/react/huge/globe-0-2-icon';
 import { Message01Icon } from '@animateicons/react/huge/message-0-1-icon';
@@ -171,6 +172,7 @@ const HUGE = {
   pencil: Pen01Icon,
   chevronDown: ChevronDownIcon,
   stop: StopIcon,
+  compass: Compass01Icon,
 } satisfies Record<string, LibraryIcon>;
 
 /**

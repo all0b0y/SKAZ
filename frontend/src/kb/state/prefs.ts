@@ -12,7 +12,7 @@ import type { PageKind } from '../api/names';
  */
 export type ThemePref = 'system' | 'light' | 'dark';
 export type TextSize = 's' | 'm' | 'l';
-export type Section = 'chats' | 'materials' | 'wiki' | 'study' | 'graph' | 'notifications';
+export type Section = 'chats' | 'materials' | 'wiki' | 'explore' | 'study' | 'graph' | 'notifications';
 
 export const SIDE_MIN = 200;
 export const SIDE_MAX = 360;
@@ -89,7 +89,7 @@ export function readPrefs(storage: Pick<Storage, 'getItem'> | null): Prefs {
   return {
     theme: oneOf(raw.theme, ['system', 'light', 'dark'] as const, DEFAULT_PREFS.theme),
     textSize: oneOf(raw.textSize, ['s', 'm', 'l'] as const, DEFAULT_PREFS.textSize),
-    section: oneOf(raw.section, ['chats', 'materials', 'wiki', 'study', 'graph', 'notifications'] as const, DEFAULT_PREFS.section),
+    section: oneOf(raw.section, ['chats', 'materials', 'wiki', 'explore', 'study', 'graph', 'notifications'] as const, DEFAULT_PREFS.section),
     sideOpen: typeof raw.sideOpen === 'boolean' ? raw.sideOpen : DEFAULT_PREFS.sideOpen,
     sideWidth: clamp(raw.sideWidth, SIDE_MIN, SIDE_MAX, SIDE_DEFAULT),
     rightWidth: clamp(raw.rightWidth, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT),
