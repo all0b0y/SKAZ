@@ -13,6 +13,10 @@
 // preserves the running backend; quit reentry is blocked until the shutdown has
 // actually SETTLED (resolved or rejected); a rejected stop is handled explicitly
 // (reported, then the app still quits) with no unhandled rejection.
+//
+// Tray (decision 3f′): closing the window may only hide it, so a quit can start while the window is hidden. The
+// warning is therefore always preceded by showWindow: a dialog attached to a hidden window is invisible AND
+// blocks the main process, which would hang SKAZ unseen.
 
 export interface QuitDeps {
   /** Stop capture and await durable renderer/backend ACKs before shutdown. */
@@ -33,6 +37,8 @@ export interface QuitDeps {
   showWindow?: () => void;
   /** Start a fresh SKAZ once this process has exited (Electron's app.relaunch). */
   relaunch?: () => void;
+  /** Offer an idle window close to the tray. True when it was taken: the window hid and nothing quits. */
+  closeToTray?: () => boolean;
 }
 
 type Phase = 'idle' | 'saving' | 'draining' | 'settled';
@@ -79,6 +85,8 @@ export class QuitController {
     if (this.phase === 'settled') return false;
     if (this.phase === 'saving' || (this.phase === 'draining' && this.deps.saveBeforeQuit)) return true;
     if (this.phase === 'draining') return false;
+    // Only now: a close during a quit above is that quit's own, and must never become a hide.
+    if (this.deps.closeToTray?.()) return true;
     if (this.deps.saveBeforeQuit) { this.beginSave(); return true; }
     if (!this.deps.hasUnsentAudio()) return false; // nothing to protect → allow
     if (!this.decide()) return true; // cancelled → block, backend preserved
@@ -97,6 +105,7 @@ export class QuitController {
     if (this.deps.hasUnsentAudio()) {
       if (this.deciding) return false; // a decision is already in progress → no duplicate dialog
       this.deciding = true;
+      this.deps.showWindow?.();
       let discard: boolean;
       try {
         discard = this.deps.confirmDiscard();
@@ -114,11 +123,12 @@ export class QuitController {
     this.phase = 'saving';
     // Nothing at risk: the window leaves now; saving and stopping the backend finish unseen.
     const hidden = !this.deps.hasUnsentAudio();
-    if (hidden) this.deps.hideWindow?.();
+    // At risk it stays on screen as ever, or comes back from the tray for the same reason.
+    if (hidden) this.deps.hideWindow?.(); else this.deps.showWindow?.();
     this.pending = (async () => {
       let saved = false;
       try { saved = await this.deps.saveBeforeQuit!(); } catch { /* explicit discard gate below */ }
-      if (!saved && hidden) this.deps.showWindow?.();
+      if (!saved) this.deps.showWindow?.();
       if (!saved && !this.deps.confirmDiscard()) {
         this.phase = 'idle';
         this.authorized = false;
