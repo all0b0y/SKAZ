@@ -31,6 +31,7 @@ import { MeIntro, MeSkills, MeStorageNote, MeSwitchRow } from '../me/MeSection';
 import { SearchRowControl, SearchRowList, SEARCH_ROWS, type SearchRowId } from '../searchRules/SearchSettings';
 import { useSearchSettings } from '../searchRules/sites';
 import { AccentRow, BaseRow, DensityRow, MotionRow, PresetGallery, SoundsRow } from './Appearance';
+import { OpenAlexKeyRow, ScienceJournalRow, ScienceSwitchRow, WeeklyCheckRow } from './SearchSection';
 
 /**
  * The control of one settings row: live backend data where the route exists (S3/W2/B7 via
@@ -80,6 +81,10 @@ function RowControl({ row }: { row: RowDef }) {
     case 'skill-hermes': return <SkillEngineRow skillId="humanizer" engine="hermes" />;
     case 'skill-opencode': return <SkillEngineRow skillId="humanizer" engine="opencode" />;
     case 'me-enabled': return <MeSwitchRow label={row.label} />;
+    case 'science-enabled': return <ScienceSwitchRow label={row.label} />;
+    case 'openalex-key': return <OpenAlexKeyRow label={row.label} />;
+    case 'science-journal': return <ScienceJournalRow />;
+    case 'weekly-check': return <WeeklyCheckRow label={row.label} />;
     case 'search-beta': case 'search-never': case 'search-only': case 'search-prefer': return <SearchRowControl id={row.id as SearchRowId} label={row.label} />;
     // N6 decision 9: a statement, nothing to switch (no "one-off sessions" option).
     case 'p-sessions': return null;
