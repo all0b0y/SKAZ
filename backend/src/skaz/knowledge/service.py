@@ -38,6 +38,7 @@ from .store.repositories import (
     PageRepository,
     SettingsRepository,
 )
+from .study.migration import migrate_study
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,10 @@ class KnowledgeService:
         self.notification_actions = NotificationActions()
         #: Called after every full library scan (W2 rebuilds the corrections index and graph edges).
         self.after_scan: list[Callable[[], None]] = []
+        #: N4-7: libraries whose move of decks and tests failed in this run: tried again at the next
+        #: start, not on every background rescan. ``wiki_index_stale``: ``Wiki/index.md`` still lists them.
+        self._study_move_failed: set[str] = set()
+        self.wiki_index_stale = False
         self._library: Library | None = None
         self._reason: str | None = None
         self._state_lock = threading.RLock()
@@ -305,6 +310,7 @@ class KnowledgeService:
                 raise LibraryUnavailable(SANDBOX_REASON)
             library = Library.open(root, library_id)
             library.ensure_inbox()
+            self._move_study(library)  # before the scan: it reads the pages where they are now
             before = self.material_repo.list_all() if self._indexed_library_id == library_id else []
             result = scan_library(library, indexer.known_paths(self.db), stop=self._closing)
             indexer.replace_index(self.db, result, stop=self._closing)
@@ -330,6 +336,25 @@ class KnowledgeService:
         self._note_unreadable(tuple(result.unreadable))
         for listener in list(self.after_scan):
             listener()
+
+    def _move_study(self, library: Library) -> None:
+        """N4-7: the one-off move of saved decks and tests; a failure never blocks the library."""
+        if library.library_id in self._study_move_failed:
+            return
+        outcome = migrate_study(library, self.db)
+        if outcome.status == "moved":
+            self.wiki_index_stale = True
+            logger.info("moved %d decks and tests to the Study folder", outcome.moved)
+            self.notify("study_moved", "Decks and tests moved to the Study folder",
+                        body=(f"{outcome.moved} saved decks and tests are now in Study, separate from the "
+                              f"wiki. Their progress stays. A backup is in {outcome.backup}."))
+        elif outcome.status == "failed":
+            self._study_move_failed.add(library.library_id)
+            logger.warning("moving decks and tests to the Study folder failed: %s", outcome.reason)
+            kept = f" A backup is in {outcome.backup}." if outcome.backup else ""
+            self.notify("study_move_failed", "SKAZ couldn't move decks and tests to the Study folder",
+                        body=(f"They stay in the wiki folder and keep working, and nothing was lost. "
+                              f"SKAZ tries again at its next start. The reason: {outcome.reason}.{kept}"))
 
     def _note_unreadable(self, paths: tuple[str, ...]) -> None:
         """Remember what the scan left out; tell the user once per newly unreadable entry."""

@@ -66,6 +66,8 @@ from .layout import (
     MATERIALS_DIR,
     SERVICE_DIR,
     STAGING_PATH,
+    STUDY_DIR,
+    STUDY_SUBDIRS,
     WIKI_DIR,
     WIKI_SUBDIRS,
     FolderMarker,
@@ -169,6 +171,8 @@ class Library:
                 FolderMarker(id=INBOX_ID, system=True, created_at=marker.created_at).model_dump()))
             for subdir in WIKI_SUBDIRS.values():
                 (staging / WIKI_DIR / subdir).mkdir(parents=True)
+            for subdir in STUDY_SUBDIRS.values():
+                (staging / STUDY_DIR / subdir).mkdir(parents=True)
             write_atomic(staging / WIKI_DIR / "index.md", b"# Index\n")
             write_atomic(staging / WIKI_DIR / "log.md", b"# Log\n")
             # The marker is written last: a staging folder without it is never a library.
@@ -562,6 +566,8 @@ class Library:
     # -- pages --------------------------------------------------------------
 
     def page_directory(self, kind: str) -> Path:
+        if kind in STUDY_SUBDIRS:
+            return self.root / STUDY_DIR / STUDY_SUBDIRS[kind]
         return self.wiki_dir / WIKI_SUBDIRS[kind]
 
     def create_page(self, document: PageDocument) -> Path:
