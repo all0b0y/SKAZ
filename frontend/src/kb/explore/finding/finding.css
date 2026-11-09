@@ -1,0 +1,149 @@
+/* Finding view (F3, N4 v4 states 09–14). Colours, sizes and spacing come from tokens.css so the
+   theme, text-size and density knobs reach it. Quiet at rest: actions appear on hover, and only the
+   "Contradicts your wiki" signal is in colour. */
+
+.kb-finding {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-12);
+  min-width: 0;
+}
+
+.kb-finding__title {
+  font-size: var(--t-h2);
+  line-height: 1.3;
+  margin: 0;
+}
+
+.kb-finding__meta,
+.kb-finding__muted,
+.kb-finding__refs-label,
+.kb-finding__thesis-meta {
+  color: var(--kb-muted);
+  font-size: var(--t-sm);
+  margin: 0;
+}
+
+.kb-finding__labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8);
+  font-size: var(--t-sm);
+  margin: 0;
+}
+
+.kb-finding__signal {
+  color: var(--kb-warn);
+  font-weight: 500;
+}
+
+.kb-finding__badge {
+  font-size: var(--t-xs);
+  color: var(--kb-muted-strong);
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  padding: 0 var(--kb-sp-8);
+}
+
+.kb-finding__source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8) var(--kb-sp-16);
+  font-size: var(--t-xs);
+  padding: var(--kb-sp-12) 0;
+  border-block: 1px solid var(--kb-line);
+}
+
+.kb-finding__reason,
+.kb-finding__abstract,
+.kb-finding__paid p,
+.kb-finding__hint p,
+.kb-finding__exploring,
+.kb-finding__note {
+  margin: 0;
+}
+
+.kb-finding__heading {
+  font-size: var(--t-md);
+  margin: var(--kb-sp-8) 0 0;
+}
+
+.kb-finding__abstract {
+  color: var(--kb-muted-strong);
+}
+
+.kb-finding__theses {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-12);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.kb-finding__theses p {
+  margin: 0;
+}
+
+.kb-finding__refs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8);
+}
+
+.kb-finding__paid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kb-sp-6);
+}
+
+.kb-finding__marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kb-sp-8);
+}
+
+.kb-finding__mark {
+  font: inherit;
+  font-size: var(--t-sm);
+  color: var(--kb-muted-strong);
+  background: transparent;
+  border: 1px solid var(--kb-line);
+  border-radius: var(--kb-r-pill);
+  padding: var(--kb-sp-4) var(--kb-sp-12);
+  cursor: pointer;
+}
+
+.kb-finding__mark:hover {
+  background: var(--kb-accent-soft);
+}
+
+.kb-finding__mark[aria-pressed='true'] {
+  color: var(--kb-text);
+  background: var(--kb-accent-soft);
+  border-color: var(--kb-accent);
+}
+
+.kb-finding__mark:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.kb-finding__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8);
+}
+
+.kb-finding__exploring,
+.kb-finding__hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--kb-sp-8);
+  font-size: var(--t-sm);
+}
