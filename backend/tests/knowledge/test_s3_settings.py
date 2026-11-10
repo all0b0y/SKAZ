@@ -405,3 +405,16 @@ async def test_an_unreadable_key_never_breaks_the_problem_list(
         found = problem(sections, "accounts", f"key-{provider}-unreadable")
         assert found is not None and found["severity"] == "warning", provider
     assert problem(sections, "accounts", "key-openrouter-unreadable") is None
+
+
+async def test_a_locked_secret_store_shows_problems_instead_of_a_500(
+    api: httpx.AsyncClient, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def locked(_name: str) -> str | None:
+        raise OSError("keychain locked")
+
+    monkeypatch.setattr(secrets, "get", locked)
+    sections = await health(api)
+    ids = {item["id"] for section in sections.values() for item in section["problems"]}
+    assert {"key-openrouter-unreadable", "key-openalex-unreadable"} <= ids
+    assert any(i.startswith("health-") and i.endswith("-unreadable") for i in ids)

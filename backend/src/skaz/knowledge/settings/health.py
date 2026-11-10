@@ -96,8 +96,28 @@ class SettingsHealth:
 
     async def sections(self) -> list[Section]:
         # Settings, keys and the library state are disk/database reads: never on the event loop.
-        problems = [*await self._agents(), *await disk_call(self._key_problems), *await self._decisions(),
-                    *await disk_call(self._speech), *await disk_call(self._library)]
+        # One reader that fails (e.g. a secret store that doesn't answer) is shown as its own problem; it
+        # never turns the whole list into a 500.
+        collectors: tuple[tuple[str, SectionId, Callable[[], Awaitable[list[Problem]]]], ...] = (
+            ("agents", "accounts", self._agents),
+            ("keys", "accounts", lambda: disk_call(self._key_problems)),
+            ("decisions", "models", self._decisions),
+            ("speech", "speech", lambda: disk_call(self._speech)),
+            ("library", "storage", lambda: disk_call(self._library)),
+        )
+        problems: list[Problem] = []
+        for name, section_id, collect in collectors:
+            try:
+                problems += await collect()
+            except Exception as error:
+                logger.warning("settings health: %s couldn't be checked: %s", name, type(error).__name__)
+                problems.append(Problem(
+                    f"health-{name}-unreadable", section_id, "warning",
+                    "SKAZ couldn't check this section",
+                    "Something on this Mac didn't answer while SKAZ checked it (often the secret store).",
+                    "Everything else in Settings keeps working.",
+                    "This section's status until the next check.",
+                ))
         result = []
         for section in SECTIONS:
             mine = tuple(problem for problem in problems if problem.section == section)
