@@ -365,3 +365,25 @@ async def test_settings_routes_require_the_token(app: Any) -> None:
             "/kb/settings/about",
         ):
             assert (await anonymous.get(path)).status_code == 401, path
+
+
+async def test_an_unreadable_secret_store_is_a_problem_not_silently_keyless(
+    api: httpx.AsyncClient, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 0.4.0 B1, user decision B1-6 A: science requests go on without the key, but Settings says so.
+    assert problem(await health(api), "accounts", "key-openalex-unreadable") is None
+
+    real_get = secrets.get
+
+    def broken(name: str) -> str | None:
+        if name == "openalex":
+            raise OSError("keychain locked")
+        return real_get(name)
+
+    monkeypatch.setattr(secrets, "get", broken)
+    found = problem(await health(api), "accounts", "key-openalex-unreadable")
+    assert found is not None and found["severity"] == "warning"
+    assert "without your key" in found["reason"]
+
+    monkeypatch.undo()
+    assert problem(await health(api), "accounts", "key-openalex-unreadable") is None

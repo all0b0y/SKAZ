@@ -115,6 +115,8 @@ class ScienceGateway:
         self.secrets = secrets
         self.store = ScienceStore(kb.db, kb.settings)
         self.now = now
+        #: The secret store couldn't be read at the last try: requests go keyless and Settings says so.
+        self.key_unreadable = False
         self.transport = transport or ScienceTransport(
             self.store, http, self._key, fetcher or SafeFetcher(), now=now
         )
@@ -124,9 +126,19 @@ class ScienceGateway:
     def _key(self) -> str | None:
         try:
             value = self.secrets.get(KEY_NAME)
-        except Exception:  # an unreadable vault is "no key", never a crash
+        except Exception as error:
+            # Requests go on keyless (never a crash), but not silently (user decision B1-6 A): the warning
+            # here and the Settings problem from ``key_unreadable`` say the key isn't being used.
+            self.key_unreadable = True
+            logger.warning("OpenAlex key couldn't be read: %s", type(error).__name__)
             return None
+        self.key_unreadable = False
         return value.strip() or None if isinstance(value, str) else None
+
+    def key_problem(self) -> bool:
+        """Settings → problems: True when the secret store can't be read, so a saved key isn't used."""
+        self._key()
+        return self.key_unreadable
 
     async def _ready(self) -> None:
         view = await disk_call(self.kb.view)

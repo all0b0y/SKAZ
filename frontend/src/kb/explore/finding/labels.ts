@@ -57,6 +57,24 @@ export function publisherUrl(work: KbScienceWork): string | null {
   return work.access.publisher_url ?? work.locations.find((l) => l.kind === 'publisher')?.url ?? null;
 }
 
+/** B1's free copies of a paid work (user decision B1-3 A): ``arxiv:<id>``, ``doi:<doi>``, an open page URL, or
+ * ``openalex-tei:<id>`` (full text SKAZ reads through OpenAlex; no page to open). */
+export interface FreeCopy {
+  url: string | null;
+  label: string;
+}
+
+export function freeCopy(access: KbPaidAccess): FreeCopy | null {
+  const ids = access.free_alternative_ids;
+  if (ids.length === 0) return null;
+  for (const id of ids) {
+    if (id.startsWith('arxiv:')) return { url: `https://arxiv.org/abs/${id.slice(6)}`, label: 'Open the free copy on arXiv' };
+    if (id.startsWith('doi:')) return { url: `https://doi.org/${id.slice(4)}`, label: 'Open the free preprint' };
+    if (/^https?:\/\//.test(id)) return { url: id, label: 'Open the free copy' };
+  }
+  return { url: null, label: 'The full text is free through OpenAlex.' };
+}
+
 export function paidText(access: KbPaidAccess): string {
   return access.recommendation ?? PAID_COPY;
 }

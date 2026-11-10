@@ -67,6 +67,37 @@ describe('paid article (v4 state 14)', () => {
   });
 });
 
+describe('paid article with a free copy (user decision B1-3 A)', () => {
+  it.each([
+    ['arxiv:2401.00001v2', 'https://arxiv.org/abs/2401.00001v2', /Open the free copy on arXiv/],
+    ['doi:10.1000/pre', 'https://doi.org/10.1000/pre', /Open the free preprint/],
+    ['https://repo.example.org/paper', 'https://repo.example.org/paper', /Open the free copy/],
+  ])('shows "Free copy available" and links %s instead of the paid copy', async (id, href, name) => {
+    mount('paid', 'finding-paid', (fake) => {
+      fake.explore.finding = async () => {
+        const f0 = structuredClone(scenes.paid.finding!);
+        f0.work.access = { ...f0.work.access, alternatives_checked: true, free_alternative_ids: [id] };
+        return f0;
+      };
+    });
+    expect(await screen.findByText('Free copy available')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name })).toHaveAttribute('href', href);
+    expect(screen.queryByText(PAID_RECOMMENDATION as string)).toBeNull();
+    expect(screen.queryByText(/This article is paid/)).toBeNull();
+  });
+
+  it('says the text is free through OpenAlex when there is no page to open', async () => {
+    mount('paid', 'finding-paid', (fake) => {
+      fake.explore.finding = async () => {
+        const f0 = structuredClone(scenes.paid.finding!);
+        f0.work.access = { ...f0.work.access, alternatives_checked: true, free_alternative_ids: ['openalex-tei:W1'] };
+        return f0;
+      };
+    });
+    expect(await screen.findByText(/The full text is free through OpenAlex/)).toBeInTheDocument();
+  });
+});
+
 describe('abstract only (v4 state 13)', () => {
   it('names the text boundary and adds the abstract, labelled as such', async () => {
     const { user } = mount('abstract_only', 'finding-abstract', (fake) => {

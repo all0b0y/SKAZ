@@ -26,7 +26,8 @@ import type {
   KbWeeklySettings,
   KbWeeklySettingsUpdate,
 } from '../../api/kb/types.gen';
-import { useServices } from '../state/context';
+import { useOptionalServices, useServices } from '../state/context';
+import type { KbServices } from '../state/context';
 import { Button, Icon, Modal, Switch } from '../ui';
 import { clockOrDate, shortTime } from '../ui/time';
 
@@ -316,6 +317,21 @@ export function ScienceSwitchRow({
 /**
  * Settings → Search → "OpenAlex key": write-only key field with "Configured" state and Remove action.
  */
+/** B1-6 (user decision A): the secret store couldn't be read, so a saved key isn't used — said here too. */
+function KeyUnreadableNotice({ settings }: { settings: KbServices['settings'] }) {
+  const unreadable = useStore(settings, (s) =>
+    (s.health.value?.sections ?? []).some((section) =>
+      section.problems.some((problem) => problem.id === 'key-openalex-unreadable'),
+    ),
+  );
+  if (!unreadable) return null;
+  return (
+    <span className="kb-inline-error kb-inline-error--flat" role="alert">
+      SKAZ couldn’t read your OpenAlex key. Scientific search runs without it, with the smaller keyless limit.
+    </span>
+  );
+}
+
 export function OpenAlexKeyRow({
   label,
   client: clientProp,
@@ -332,6 +348,7 @@ export function OpenAlexKeyRow({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState('');
   const id = useId();
+  const services = useOptionalServices();
 
   useEffect(() => {
     void scienceSettingsStore(client).getState().load();
@@ -415,6 +432,7 @@ export function OpenAlexKeyRow({
 
   return (
     <>
+      {services && <KeyUnreadableNotice settings={services.settings} />}
       {settings.openalex_key_configured ? (
         <>
           <span className="kb-status kb-status--ok">

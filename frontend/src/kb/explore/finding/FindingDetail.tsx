@@ -9,7 +9,7 @@ import { Banner, Button, Chip, Icon, IconButton, Menu, Spinner, type MenuItem } 
 import { useFindingClients } from './clients';
 import {
   EXPLORE_MODES, LABEL_TEXT, MODE_LABEL, OPENALEX_HINT, READ_MARKS, READ_MARK_TEXT, addContent, addLabel, authorLine,
-  hintShown, paidText, publisherUrl, showsAddToWiki, sourceLine, type ExploreMode, type ReadMarkValue,
+  freeCopy, hintShown, paidText, publisherUrl, showsAddToWiki, sourceLine, type ExploreMode, type ReadMarkValue,
 } from './labels';
 import './finding.css';
 
@@ -80,6 +80,7 @@ export function FindingDetail({ findingId, onClose }: FindingDetailProps) {
 
   const { work } = finding;
   const paid = work.access.paid;
+  const free = paid ? freeCopy(work.access) : null;
   const publisher = publisherUrl(work);
   const meta = [authorLine(work), work.publication.year, work.venue].filter(Boolean).join(' · ');
   const extraTheses = finding.theses.filter((t) => t.text !== finding.reason);
@@ -165,7 +166,7 @@ export function FindingDetail({ findingId, onClose }: FindingDetailProps) {
         <span className={finding.label === 'contradicts' ? 'kb-finding__signal' : 'kb-finding__label'}>
           {LABEL_TEXT[finding.label]}
         </span>
-        {paid && <span className="kb-finding__badge">Paid</span>}
+        {paid && <span className="kb-finding__badge">{free ? 'Free copy available' : 'Paid'}</span>}
       </p>
 
       <div className="kb-finding__source">
@@ -208,7 +209,20 @@ export function FindingDetail({ findingId, onClose }: FindingDetailProps) {
 
       {paid ? (
         <div className="kb-finding__paid">
-          <p>{paidText(work.access)}</p>
+          {free ? (
+            <p>
+              Free copy available.{' '}
+              {free.url ? (
+                <a className="kb-link" href={free.url} target="_blank" rel="noreferrer noopener">
+                  {free.label}<Icon name="external" size={12} />
+                </a>
+              ) : (
+                free.label
+              )}
+            </p>
+          ) : (
+            <p>{paidText(work.access)}</p>
+          )}
           {work.access.alternatives_checked && work.access.free_alternative_ids.length === 0 && (
             <p className="kb-finding__muted">No free alternative found.</p>
           )}

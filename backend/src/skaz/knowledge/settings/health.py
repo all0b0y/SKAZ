@@ -163,6 +163,14 @@ class SettingsHealth:
                     _key_stops(status.id),
                     actions=(ProblemAction("check", "Check again", True),),
                 ))
+        if self._runtime.kb_science.key_problem():  # 0.4.0 B1, user decision B1-6 A: never silently keyless
+            problems.append(Problem(
+                "key-openalex-unreadable", "accounts", "warning", "SKAZ couldn't read your OpenAlex key",
+                "The secret store on this Mac didn't answer, so scientific search runs without your key "
+                "and with OpenAlex's smaller keyless daily limit.",
+                "Scientific search keeps working without the key.",
+                "Your key's larger daily limit and OpenAlex full text (TEI).",
+            ))
         return problems
 
     async def _decisions(self) -> list[Problem]:

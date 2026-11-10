@@ -121,6 +121,11 @@ export function KbServicesProvider({ services, bridge, children }: {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
+/** The services when inside ``KbServicesProvider``, else null (components also rendered standalone in tests). */
+export function useOptionalServices(): KbServices | null {
+  return useContext(Ctx);
+}
+
 export function useServices(): KbServices {
   const value = useContext(Ctx);
   if (!value) throw new Error('KbServicesProvider is missing');

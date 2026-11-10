@@ -488,3 +488,43 @@ describe('FakeKbProvider integration with scene (F4)', () => {
     expect(screen.getByText(/14 waiting/)).toBeInTheDocument();
   });
 });
+
+describe('OpenAlex key that SKAZ could not read (user decision B1-6 A)', () => {
+  it('says the key is not being used when the health list has the problem', async () => {
+    const { createServices, KbServicesProvider } = await import('../state/context');
+    const { createFakeBridge } = await import('../test/fakeBridge');
+    const services = createServices(createFakeBridge().bridge, null, { capture: null });
+    services.settings.setState({
+      health: {
+        ...services.settings.getState().health,
+        value: {
+          sections: [
+            {
+              id: 'accounts',
+              state: 'warning',
+              problems: [
+                {
+                  id: 'key-openalex-unreadable',
+                  section: 'accounts',
+                  severity: 'warning',
+                  title: "SKAZ couldn't read your OpenAlex key",
+                  reason: 'r',
+                  still_works: 's',
+                  stopped: 't',
+                  progress: null,
+                  actions: [],
+                },
+              ],
+            },
+          ],
+        },
+      },
+    } as never);
+    render(
+      <KbServicesProvider services={services}>
+        <OpenAlexKeyRow label="OpenAlex key" client={createFakeKb().science} />
+      </KbServicesProvider>,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn’t read your OpenAlex key/);
+  });
+});
