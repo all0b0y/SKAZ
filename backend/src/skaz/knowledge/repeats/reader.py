@@ -30,9 +30,28 @@ from ..wiki.overlap import _merged_into, _Statement, _statements
 from ..wiki.statements import statement_text
 from .store import Evidence, RepeatStore
 
-#: Materials created from here on were added with N2's repeat marks (the merge shipped in 0.3.2; its code
-#: reached ``main`` on 2026-10-27). Earlier ones have no markers, so "no marker" says nothing about them.
-N2_FROM = datetime(2026, 10, 28, tzinfo=UTC)
+#: Per library: when SKAZ 0.4.0 first opened it (user decision, option A). Repeat marks (N2) shipped in
+#: 0.3.2, but a library keeps no record of the version a material was added with, so a material from before
+#: this moment and without marks is "not checked" — never a false "0% repeats". Later ones carry N2's marks.
+MARKS_FROM_KEY = "repeats.marks_from.{library_id}"
+
+
+def stamp_marks_from(kb: KnowledgeService) -> datetime | None:
+    """Record the boundary for the open library the first time 0.4.0 sees it; return it (None: no library)."""
+    view = kb.view()
+    if view.state == "not_configured":
+        return None
+    library = kb.require()
+    key = MARKS_FROM_KEY.format(library_id=library.library_id)
+    raw = kb.settings.get(key)
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    now = datetime.now(UTC)
+    kb.settings.set(key, now.isoformat())
+    return now
 
 
 def text_hash(text: str) -> str:
@@ -66,7 +85,7 @@ def percent_of(repeated: int, total: int) -> int | None:
 class RepeatReader:
     """Implements ``RepeatSummaries`` and the material route's reading side. Blocking."""
 
-    def __init__(self, kb: KnowledgeService, store: RepeatStore, *, n2_from: datetime = N2_FROM) -> None:
+    def __init__(self, kb: KnowledgeService, store: RepeatStore, *, n2_from: datetime | None = None) -> None:
         self._kb = kb
         self._store = store
         self._n2_from = n2_from
@@ -100,7 +119,12 @@ class RepeatReader:
             return True
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
-        return created < self._n2_from
+        boundary = self._n2_from or stamp_marks_from(self._kb)
+        if boundary is None:
+            return True
+        if boundary.tzinfo is None:
+            boundary = boundary.replace(tzinfo=UTC)
+        return created < boundary
 
     def _build(self, material_ids: list[str], *, detailed: bool) -> dict[str, KbMaterialRepeats]:
         evidence = self._store.evidence(material_ids)

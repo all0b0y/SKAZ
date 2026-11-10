@@ -583,3 +583,23 @@ async def test_runtime_wires_kb_repeats_in_the_real_app(kb_client: object, kb_ap
         assert (response.status_code, response.json()) == (503, {"code": "not_ready"}), path
     response = await client.get("/kb/materials/mat-1/repeats")
     assert (response.status_code, response.json()) == (404, {"code": "not_found"})
+
+
+async def test_older_means_before_04_first_opened_this_library_option_a(ready: KnowledgeService) -> None:
+    # User decision (option A): the boundary is when 0.4.0 first opened the library, kept per library. A
+    # material from before it without repeat marks is "not checked" — never a false "checked, 0%".
+    from skaz.knowledge.repeats.reader import MARKS_FROM_KEY, stamp_marks_from
+
+    case = await _case(ready, p_yes=0.05)
+    key = MARKS_FROM_KEY.format(library_id=ready.require().library_id)
+    ready.settings.set(key, FUTURE.isoformat())  # 0.4.0 first opened this library after these materials
+    reader = RepeatReader(ready, RepeatStore(ready.db))
+    assert reader.is_older(case.lecture)
+    ready.settings.set(key, LONG_AGO.isoformat())  # opened before they were added: N2 marks are there
+    assert not reader.is_older(case.lecture)
+
+    # The stamp is written once and then kept.
+    ready.settings.set(key, None)
+    first = stamp_marks_from(ready)
+    assert first is not None and ready.settings.get(key) == first.isoformat()
+    assert stamp_marks_from(ready) == first

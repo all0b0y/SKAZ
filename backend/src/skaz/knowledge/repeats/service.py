@@ -28,7 +28,7 @@ from ..service import KnowledgeService
 from ..wiki.overlap import _statements
 from ..wiki.statements import Statement, page_statements
 from .compare import Unanswered, compare
-from .reader import RepeatReader, text_hash
+from .reader import RepeatReader, stamp_marks_from, text_hash
 from .store import Evidence, Judged, RepeatStore
 
 log = logging.getLogger(__name__)
@@ -77,7 +77,9 @@ class RepeatsService:
     ) -> None:
         self._kb = kb
         self._store = RepeatStore(kb.db)
-        self._reader = RepeatReader(kb, self._store, **({"n2_from": n2_from} if n2_from else {}))
+        self._reader = RepeatReader(kb, self._store, n2_from=n2_from)
+        # Option A: stamp the boundary when 0.4.0 first scans a library, not later on the first repeats read.
+        kb.after_scan.append(self._stamp_marks_from)
         self._areas = areas
         self._decisions = decisions
         self._jobs = jobs
@@ -85,6 +87,9 @@ class RepeatsService:
         self._live: dict[str, _Live] = {}
 
     # -- readiness --------------------------------------------------------------------------
+
+    def _stamp_marks_from(self) -> None:
+        stamp_marks_from(self._kb)
 
     def _ensure_ready(self) -> None:
         if self._kb.view().state == "not_configured":
