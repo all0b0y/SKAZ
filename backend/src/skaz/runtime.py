@@ -239,6 +239,23 @@ class Runtime:
             jobs=self.kb_jobs,
         )
 
+        #: Weekly check, N1 marks and their actions, check notifications (0.4.0 B6), on B2's JobStore and
+        #: funnel (free steps only), B1's client, B4's pinned areas and B5's dates and link answers. B5's link
+        #: checks write their marks here. The app lifespan calls ``on_start``; ``close_knowledge`` ``aclose``.
+        from .knowledge.maintenance import build_maintenance
+
+        self.kb_maintenance = build_maintenance(
+            self.kb,
+            jobs=self.kb_jobs,
+            science=self.kb_science,
+            funnel=self.kb_explore,
+            areas=self.kb_areas.directory,
+            dates=self.kb_freshness,
+            links=self.kb_freshness,
+            sources=self.kb_sources,
+            ingest=self.kb_ingest,
+        )
+
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
 

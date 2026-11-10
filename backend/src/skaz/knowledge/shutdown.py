@@ -66,6 +66,8 @@ class KnowledgeRuntime(Protocol):
     def kb_explore(self) -> _AsyncCloses: ...
     @property
     def kb_repeats(self) -> _AsyncCloses: ...
+    @property
+    def kb_maintenance(self) -> _AsyncCloses: ...
 
 
 def _still_running(runtime: KnowledgeRuntime) -> list[str]:
@@ -92,6 +94,8 @@ async def close_knowledge(runtime: KnowledgeRuntime, *, deadline_s: float = DEAD
         ("decisions", runtime.kb_decisions.aclose), ("agents", runtime.kb_agents.aclose),
         # 0.4.0: running Explore runs pause with ``app_exit``; repeat checks stop their background task.
         ("explore", runtime.kb_explore.aclose), ("repeats", runtime.kb_repeats.aclose),
+        # 0.4.0 B6: the weekly timer stops; a running weekly check pauses with ``app_exit``.
+        ("maintenance", runtime.kb_maintenance.aclose),
     ]
 
     async def close(name: str, closer: Callable[[], Awaitable[None]]) -> None:

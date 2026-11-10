@@ -75,6 +75,8 @@ def create_app(
             runtime.kb_chats.start()
             # 0.4.0 B2: Explore runs paused by the last Quit (``app_exit``) go on.
             await runtime.kb_explore.on_start()
+            # 0.4.0 B6: a weekly check paused by Quit goes on, a missed week runs, the weekly timer starts.
+            await runtime.kb_maintenance.on_start()
             yield
         finally:
             # Agents and llama-server first, then the wiki services, within Electron's grace.

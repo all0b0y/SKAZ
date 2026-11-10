@@ -23,6 +23,7 @@ from ..api.schemas_freshness import (
     KbLibraryDateQuery,
     KbLinkCheck,
     KbLinkCheckStart,
+    KbLinkObservation,
     KbMaterialPublication,
 )
 from ..api.schemas_repeats import KbMaterialRepeats
@@ -210,6 +211,10 @@ class FreshnessService:
                     self._store.save_publication(mid, UNKNOWN_PUBLICATION)
                 result[mid] = cached or UNKNOWN_PUBLICATION
         return result
+
+    def latest_observation(self, material_id: str) -> KbLinkObservation | None:
+        """Blocking: the latest "Check links" answer for one material, "couldn't check" included (B6)."""
+        return self._store.latest_observation(material_id)
 
     async def publication(self, material_id: str) -> KbMaterialPublication:
         await disk_call(self._ensure_ready)

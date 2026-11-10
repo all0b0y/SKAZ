@@ -212,6 +212,19 @@ class FreshnessStore:
             ).fetchall()
         return [self._row_to_observation(row) for row in rows]
 
+    def latest_observation(self, material_id: str) -> KbLinkObservation | None:
+        """The newest "Check links" answer for one material (B6's ``last_link_check``); served by
+        ``freshness_links_material(material_id, checked_at)``."""
+        with self._db.read() as conn:
+            row = conn.execute(
+                "SELECT material_id, url, outcome, reason, status_code, "
+                "checked_at, first_gone_at, confirm_after "
+                "FROM freshness_link_observations WHERE material_id = ? "
+                "ORDER BY checked_at DESC, rowid DESC LIMIT 1",
+                (material_id,),
+            ).fetchone()
+        return None if row is None else self._row_to_observation(row)
+
     def active_first_gone_at(self, material_id: str) -> datetime | None:
         """Return the ``first_gone_at`` timestamp of an unbroken gone streak for ``material_id``, if any."""
         with self._db.read() as conn:
