@@ -217,6 +217,12 @@ class Runtime:
         from .knowledge.freshness import build_freshness_service
         self.kb_freshness = build_freshness_service(self)
 
+        #: Funnel runs, novelty, findings (0.4.0 B2) and the one JobStore of every 0.4.0 job. Jobs left
+        #: running by the last process pause with ``app_exit``; ``kb_explore.science`` is B1's client.
+        from .knowledge.explore import build_explore
+        self.kb_jobs, self.kb_explore = build_explore(self)
+        self.kb_jobs.recover()
+
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
 
