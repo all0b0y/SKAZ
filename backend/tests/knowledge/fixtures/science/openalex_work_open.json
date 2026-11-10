@@ -1,0 +1,27 @@
+{
+  "_source": "Hand-written after the OpenAlex Work object: https://developers.openalex.org/api-entities/works/work-object",
+  "id": "https://openalex.org/W4400000001",
+  "doi": "https://doi.org/10.48550/arxiv.2401.01234",
+  "title": "Retrieval for long documents",
+  "display_name": "Retrieval for long documents",
+  "publication_year": 2024,
+  "publication_date": null,
+  "type": "preprint",
+  "primary_location": {
+    "is_oa": true, "landing_page_url": "http://arxiv.org/abs/2401.01234", "pdf_url": "http://arxiv.org/pdf/2401.01234",
+    "source": {"display_name": "arXiv (Cornell University)", "type": "repository"}
+  },
+  "locations": [
+    {"is_oa": true, "landing_page_url": "http://arxiv.org/abs/2401.01234", "pdf_url": "http://arxiv.org/pdf/2401.01234"},
+    {"is_oa": true, "landing_page_url": "https://repository.example.edu/handle/42", "pdf_url": null},
+    {"is_oa": true, "landing_page_url": "https://repository.example.edu/files/42.pdf", "pdf_url": null}
+  ],
+  "open_access": {"is_oa": true, "oa_status": "green"},
+  "authorships": [{"author": {"display_name": "Grace Hopper"}}],
+  "topics": [{"id": "https://openalex.org/T10028"}],
+  "referenced_works": [],
+  "cited_by_count": 3,
+  "is_retracted": false,
+  "has_content": {"pdf": true, "grobid_xml": false},
+  "abstract_inverted_index": null
+}

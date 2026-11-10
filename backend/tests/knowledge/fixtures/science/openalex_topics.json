@@ -1,0 +1,8 @@
+{
+  "_source": "Hand-written after the OpenAlex Topic object: https://developers.openalex.org/api-entities/topics",
+  "meta": {"count": 1, "per_page": 200, "next_cursor": null},
+  "results": [
+    {"id": "https://openalex.org/T10181", "display_name": "Natural Language Processing Techniques",
+     "subfield": {"id": "https://openalex.org/subfields/1702", "display_name": "Artificial Intelligence"}}
+  ]
+}

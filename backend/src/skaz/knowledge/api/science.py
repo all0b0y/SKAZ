@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from collections.abc import Awaitable
+from typing import Annotated, TypeVar, cast
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from ..science.protocols import ScienceService
-from .contract_routes import ERROR_RESPONSES, ContractRoute, service_for
+from ..science.protocols import ScienceConsentRequired, ScienceDailyLimit, ScienceService, ScienceStop
+from .contract_routes import ERROR_RESPONSES, ContractFailure, ContractRoute, service_for
 from .schemas_science import (
     KbOpenAlexKeyUpdate,
     KbScienceJournal,
@@ -19,6 +20,8 @@ from .schemas_science import (
     KbScienceWork,
 )
 
+T = TypeVar("T")
+
 router = APIRouter(prefix="/kb", tags=["kb-science"], route_class=ContractRoute, responses=ERROR_RESPONSES)
 
 
@@ -28,6 +31,18 @@ def get_service(request: Request) -> ScienceService:
 
 ServiceDep = Annotated[ScienceService, Depends(get_service)]
 EntityPath = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")]
+
+
+async def _honest(call: Awaitable[T]) -> T:
+    """A science stop becomes its contract code: 403 consent, 429 the OpenAlex day limit, else 502."""
+    try:
+        return await call
+    except ScienceConsentRequired as stop:
+        raise ContractFailure(403, "consent_required") from stop
+    except ScienceDailyLimit as stop:
+        raise ContractFailure(429, "openalex_daily_limit") from stop
+    except ScienceStop as stop:
+        raise ContractFailure(502, "provider_unavailable") from stop
 
 
 @router.get("/settings/science", response_model=KbScienceSettings)
@@ -47,17 +62,17 @@ async def set_key(body: KbOpenAlexKeyUpdate, service: ServiceDep) -> KbScienceSe
 
 @router.post("/science/search", response_model=KbScienceResults)
 async def search(body: KbScienceSearch, service: ServiceDep) -> KbScienceResults:
-    return await service.search(body)
+    return await _honest(service.search(body))
 
 
 @router.get("/science/works/{work_id}", response_model=KbScienceWork)
 async def work(work_id: EntityPath, service: ServiceDep) -> KbScienceWork:
-    return await service.work(work_id)
+    return await _honest(service.work(work_id))
 
 
 @router.post("/science/works/{work_id}/text", response_model=KbScienceText)
 async def read_text(work_id: EntityPath, service: ServiceDep) -> KbScienceText:
-    return await service.read_text(work_id)
+    return await _honest(service.read_text(work_id))
 
 
 @router.get("/science/journal", response_model=KbScienceJournal)

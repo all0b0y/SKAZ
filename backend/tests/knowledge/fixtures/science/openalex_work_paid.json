@@ -1,0 +1,39 @@
+{
+  "_source": "Hand-written after the OpenAlex Work object: https://developers.openalex.org/api-entities/works/work-object (has_content: https://developers.openalex.org/access/fulltext)",
+  "id": "https://openalex.org/W4391234567",
+  "doi": "https://doi.org/10.1234/Agents.2024.001",
+  "title": "Tool-using agents that verify their own claims",
+  "display_name": "Tool-using agents that verify their own claims",
+  "publication_year": 2024,
+  "publication_date": "2024-03-05",
+  "type": "article",
+  "ids": {"openalex": "https://openalex.org/W4391234567", "doi": "https://doi.org/10.1234/agents.2024.001"},
+  "primary_location": {
+    "is_oa": false,
+    "landing_page_url": "https://publisher.example.org/article/agents",
+    "pdf_url": null,
+    "source": {"id": "https://openalex.org/S1", "display_name": "Journal of Agents", "type": "journal"},
+    "version": "publishedVersion"
+  },
+  "locations": [
+    {"is_oa": false, "landing_page_url": "https://publisher.example.org/article/agents", "pdf_url": null,
+     "source": {"display_name": "Journal of Agents"}}
+  ],
+  "best_oa_location": null,
+  "open_access": {"is_oa": false, "oa_status": "closed", "oa_url": null, "any_repository_has_fulltext": false},
+  "authorships": [
+    {"author_position": "first", "author": {"id": "https://openalex.org/A1", "display_name": "Ada Lovelace"}},
+    {"author_position": "last", "author": {"id": "https://openalex.org/A2", "display_name": "Alan Turing"}}
+  ],
+  "topics": [
+    {"id": "https://openalex.org/T10181", "display_name": "Natural Language Processing Techniques", "score": 0.99,
+     "subfield": {"id": "https://openalex.org/subfields/1702", "display_name": "Artificial Intelligence"},
+     "field": {"id": "https://openalex.org/fields/17", "display_name": "Computer Science"},
+     "domain": {"id": "https://openalex.org/domains/3", "display_name": "Physical Sciences"}}
+  ],
+  "referenced_works": ["https://openalex.org/W100", "https://openalex.org/W200"],
+  "cited_by_count": 12,
+  "is_retracted": false,
+  "has_content": {"pdf": false, "grobid_xml": true},
+  "abstract_inverted_index": {"Agents": [0], "check": [1], "claims": [2, 6], "against": [3], "sources;": [4], "unsupported": [5], "are": [7], "flagged.": [8]}
+}

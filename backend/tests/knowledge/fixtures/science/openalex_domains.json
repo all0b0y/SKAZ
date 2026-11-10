@@ -1,0 +1,11 @@
+{
+  "_source": "Hand-written after the OpenAlex Domain object: https://developers.openalex.org/api-entities/domains",
+  "meta": {"count": 2, "per_page": 200, "next_cursor": null},
+  "results": [
+    {"id": "https://openalex.org/domains/3", "display_name": "Physical Sciences",
+     "fields": [{"id": "https://openalex.org/fields/17", "display_name": "Computer Science"},
+                {"id": "https://openalex.org/fields/31", "display_name": "Physics and Astronomy"}]},
+    {"id": "https://openalex.org/domains/2", "display_name": "Social Sciences",
+     "fields": [{"id": "https://openalex.org/fields/33", "display_name": "Social Sciences"}]}
+  ]
+}
