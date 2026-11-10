@@ -13,6 +13,7 @@ Sections: ``accounts`` (agents, keys), ``models`` (the decision layer),
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
@@ -24,6 +25,8 @@ from ..agents.registry import ENGINE_IDS, ENGINE_NAMES
 from ..errors import KnowledgeError, NotFound
 from .keys import KEY_PROVIDERS, LABELS, KeyChecks, KeyProvider
 from .speech import local_model
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover
     from ...runtime import Runtime
@@ -153,7 +156,20 @@ class SettingsHealth:
 
     def _key_problems(self) -> list[Problem]:
         problems = []
-        for status in self._keys.statuses():
+        statuses = []
+        for provider in KEY_PROVIDERS:
+            try:
+                statuses.append(self._keys.status(provider))
+            except Exception as error:  # an unreadable secret store is a problem to show, not a 500
+                logger.warning("key %s couldn't be read: %s", provider, type(error).__name__)
+                problems.append(Problem(
+                    f"key-{provider}-unreadable", "accounts", "warning",
+                    f"SKAZ couldn't read your {LABELS[provider]} key",
+                    "The secret store on this Mac didn't answer, so the key isn't used right now.",
+                    "Everything that doesn't use " + LABELS[provider] + " keeps working.",
+                    _key_stops(provider),
+                ))
+        for status in statuses:
             if status.configured and status.valid is False:
                 problems.append(Problem(
                     f"key-{status.id}", "accounts", "error", f"The {LABELS[status.id]} key didn't work",

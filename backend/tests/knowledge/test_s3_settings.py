@@ -387,3 +387,21 @@ async def test_an_unreadable_secret_store_is_a_problem_not_silently_keyless(
 
     monkeypatch.undo()
     assert problem(await health(api), "accounts", "key-openalex-unreadable") is None
+
+
+async def test_an_unreadable_key_never_breaks_the_problem_list(
+    api: httpx.AsyncClient, secrets: MemorySecretStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_get = secrets.get
+
+    def broken(name: str) -> str | None:
+        if name in ("soniox", "openai"):
+            raise OSError("keychain item unreadable")
+        return real_get(name)
+
+    monkeypatch.setattr(secrets, "get", broken)
+    sections = await health(api)  # was a 500 before 0.4.0
+    for provider in ("soniox", "openai"):
+        found = problem(sections, "accounts", f"key-{provider}-unreadable")
+        assert found is not None and found["severity"] == "warning", provider
+    assert problem(sections, "accounts", "key-openrouter-unreadable") is None
