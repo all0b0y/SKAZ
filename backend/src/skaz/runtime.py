@@ -217,6 +217,17 @@ class Runtime:
         from .knowledge.freshness import build_freshness_service
         self.kb_freshness = build_freshness_service(self)
 
+        #: N3 repeats: what a material repeats, and "Check older materials" (0.4.0 B7). The job routes answer
+        #: ``not_ready`` until B2's ``kb_jobs`` exists; it is passed only when it is already set here.
+        from .knowledge.repeats.service import RepeatsService
+
+        self.kb_repeats = RepeatsService(
+            self.kb,
+            areas=self.kb_areas.directory,
+            decisions=lambda: self.kb_decisions.layer(),
+            jobs=vars(self).get("kb_jobs"),
+        )
+
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
 
