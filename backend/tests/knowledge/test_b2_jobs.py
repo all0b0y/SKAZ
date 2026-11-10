@@ -11,17 +11,27 @@ from skaz.knowledge.explore.protocols import JobStore
 from skaz.knowledge.store.database import KnowledgeDatabase
 
 
-def _budget(used: int = 0, *, batch: int = 1, total: int | None = None, unit: str = "candidate") -> KbRunBudget:
+def _budget(
+    used: int = 0, *, batch: int = 1, total: int | None = None, unit: str = "candidate"
+) -> KbRunBudget:
     limit = 30 if unit == "candidate" else 100
     return KbRunBudget.model_validate(
-        {"unit": unit, "limit": limit, "used": used, "remaining": limit - used,
-         "total_used": used if total is None else total, "batch": batch, "free_only": False}
+        {
+            "unit": unit,
+            "limit": limit,
+            "used": used,
+            "remaining": limit - used,
+            "total_used": used if total is None else total,
+            "batch": batch,
+            "free_only": False,
+        }
     )
 
 
 def _counters(checked: int = 0) -> KbRunCounters:
-    return KbRunCounters(checked=checked, after_rules=0, decided=0, on_topic=0, novelty_checked=0, new=0,
-                         covered=0)
+    return KbRunCounters(
+        checked=checked, after_rules=0, decided=0, on_topic=0, novelty_checked=0, new=0, covered=0
+    )
 
 
 @pytest.fixture
@@ -57,13 +67,21 @@ def test_stop_maps_reasons_to_states_and_keeps_a_checkpoint_to_continue(store: S
     assert (paused.state, paused.stop_reason) == ("paused", "budget")
     # A paused job can always be continued: a checkpoint exists even if the caller saved none.
     assert paused.checkpoint is not None and paused.checkpoint.revision == 1
-    resumed = store.progress(job.id, stage="links", budget=_budget(unit="link", batch=2), counters=_counters())
+    resumed = store.progress(
+        job.id, stage="links", budget=_budget(unit="link", batch=2), counters=_counters()
+    )
     assert (resumed.state, resumed.stop_reason) == ("running", None)
     assert store.stop(job.id, "completed").state == "done"
     assert store.get(job.id).checkpoint is None  # type: ignore[union-attr]
-    for reason, state in (("cancelled", "cancelled"), ("failed", "error"), ("user_pause", "paused"),
-                          ("app_exit", "paused"), ("openalex_daily_limit", "paused"),
-                          ("science_consent_required", "paused"), ("provider_unavailable", "paused")):
+    for reason, state in (
+        ("cancelled", "cancelled"),
+        ("failed", "error"),
+        ("user_pause", "paused"),
+        ("app_exit", "paused"),
+        ("openalex_daily_limit", "paused"),
+        ("science_consent_required", "paused"),
+        ("provider_unavailable", "paused"),
+    ):
         other = store.create("explore", "x", "collect", _budget())
         assert store.stop(other.id, reason).state == state  # type: ignore[arg-type]
 
@@ -72,16 +90,24 @@ def test_decision_required_offers_both_choices_and_retry_at_is_kept(store: Sqlit
     job = store.create("explore", "x", "decision", _budget())
     stopped = store.stop(job.id, "decision_model_required")
     assert stopped.decision_choices == ["download_local", "openrouter_jev"]
-    limited = store.stop(store.create("explore", "y", "collect", _budget()).id, "openalex_daily_limit",
-                         retry_at="2026-11-11T00:00:00Z")
+    limited = store.stop(
+        store.create("explore", "y", "collect", _budget()).id,
+        "openalex_daily_limit",
+        retry_at="2026-11-11T00:00:00Z",
+    )
     assert limited.retry_at is not None and limited.retry_at.day == 11
-    assert store.progress(job.id, stage="decision", budget=_budget(), counters=_counters()).decision_choices == []
+    assert (
+        store.progress(job.id, stage="decision", budget=_budget(), counters=_counters()).decision_choices
+        == []
+    )
 
 
 def test_checkpoints_get_new_revisions(store: SqliteJobStore) -> None:
     job = store.create("explore", "x", "novelty", _budget())
     first = store.checkpoint(job.id, stage="novelty", cursor="w2", completed_ids=["w1"], pending_ids=["w2"])
-    second = store.checkpoint(job.id, stage="novelty", cursor=None, completed_ids=["w1", "w2"], pending_ids=[])
+    second = store.checkpoint(
+        job.id, stage="novelty", cursor=None, completed_ids=["w1", "w2"], pending_ids=[]
+    )
     assert (first.revision, second.revision) == (1, 2)
     assert first.id != second.id
     paused = store.stop(job.id, "user_pause")

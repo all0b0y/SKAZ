@@ -70,8 +70,9 @@ class SqliteJobStore:
     def create(self, owner: KbJobOwner, title: str, stage: KbRunStage, budget: KbRunBudget) -> KbExploreJob:
         job_id = new_id("job")
         now = utc_now_ms()
-        counters = KbRunCounters(checked=0, after_rules=0, decided=0, on_topic=0, novelty_checked=0, new=0,
-                                 covered=0)
+        counters = KbRunCounters(
+            checked=0, after_rules=0, decided=0, on_topic=0, novelty_checked=0, new=0, covered=0
+        )
         with self.db.write() as connection:
             connection.execute(
                 "INSERT INTO explore_jobs(id, owner, state, stage, title, budget_json, counters_json,"
@@ -115,24 +116,37 @@ class SqliteJobStore:
             if row is None:
                 raise JobNotFound("This job wasn't found.")
             connection.execute(
-                "UPDATE explore_jobs SET state = ?, stop_reason = ?, retry_at = ?, updated_at = ? WHERE id = ?",
+                "UPDATE explore_jobs SET state = ?, stop_reason = ?, retry_at = ?, updated_at = ?"
+                " WHERE id = ?",
                 (state, reason, retry_at if state == "paused" else None, utc_now_ms(), job_id),
             )
             if state == "paused" and self._latest(connection, job_id) is None:
                 # Continue needs a checkpoint to name: a stop without one still gets a first revision.
-                self._save_checkpoint(connection, job_id, stage=row["stage"], cursor=None, completed=[],
-                                      pending=[])
+                self._save_checkpoint(
+                    connection, job_id, stage=row["stage"], cursor=None, completed=[], pending=[]
+                )
         return self._require(job_id)
 
     def checkpoint(
-        self, job_id: str, *, stage: KbRunStage, cursor: str | None, completed_ids: Sequence[str],
+        self,
+        job_id: str,
+        *,
+        stage: KbRunStage,
+        cursor: str | None,
+        completed_ids: Sequence[str],
         pending_ids: Sequence[str],
     ) -> KbCheckpoint:
         with self.db.write() as connection:
             if connection.execute("SELECT 1 FROM explore_jobs WHERE id = ?", (job_id,)).fetchone() is None:
                 raise JobNotFound("This job wasn't found.")
-            return self._save_checkpoint(connection, job_id, stage=stage, cursor=cursor,
-                                         completed=list(completed_ids), pending=list(pending_ids))
+            return self._save_checkpoint(
+                connection,
+                job_id,
+                stage=stage,
+                cursor=cursor,
+                completed=list(completed_ids),
+                pending=list(pending_ids),
+            )
 
     def complete(self, job_id: str, candidate_id: str, stage: KbRunStage, result_json: str) -> None:
         try:
@@ -142,7 +156,8 @@ class SqliteJobStore:
         try:
             with self.db.write() as connection:
                 connection.execute(
-                    "INSERT INTO explore_completed_work(job_id, candidate_id, stage, result_json, completed_at)"
+                    "INSERT INTO explore_completed_work(job_id, candidate_id, stage, result_json,"
+                    " completed_at)"
                     " VALUES (?, ?, ?, ?, ?)",
                     (job_id, candidate_id, stage, result_json, utc_now_ms()),
                 )
@@ -166,7 +181,8 @@ class SqliteJobStore:
         now = utc_now_ms()
         with self.db.write() as connection:
             rows = connection.execute(
-                "SELECT id, stage FROM explore_jobs WHERE state IN ('running', 'queued') ORDER BY created_at, id"
+                "SELECT id, stage FROM explore_jobs WHERE state IN ('running', 'queued')"
+                " ORDER BY created_at, id"
             ).fetchall()
             for row in rows:
                 job_id = str(row["id"])
@@ -177,7 +193,8 @@ class SqliteJobStore:
                 )
                 latest = self._latest(connection, job_id)
                 self._save_checkpoint(
-                    connection, job_id,
+                    connection,
+                    job_id,
                     stage=latest.stage if latest is not None else row["stage"],
                     cursor=latest.cursor if latest is not None else None,
                     completed=latest.completed_ids if latest is not None else [],
@@ -222,8 +239,9 @@ class SqliteJobStore:
             ).fetchall()
         return {str(row[0]): str(row[1]) for row in rows}
 
-    def earlier_result(self, candidate_id: str, stage: KbRunStage, *, owners: Sequence[KbJobOwner],
-                       exclude_job: str) -> str | None:
+    def earlier_result(
+        self, candidate_id: str, stage: KbRunStage, *, owners: Sequence[KbJobOwner], exclude_job: str
+    ) -> str | None:
         """The newest verdict another job of these owners reached on the same work (open question 4)."""
         marks = ",".join("?" for _ in owners)
         with self.db.read() as connection:
@@ -237,7 +255,9 @@ class SqliteJobStore:
 
     def set_decision_provider(self, job_id: str, provider: DecisionProvider | None) -> None:
         with self.db.write() as connection:
-            connection.execute("UPDATE explore_jobs SET decision_provider = ? WHERE id = ?", (provider, job_id))
+            connection.execute(
+                "UPDATE explore_jobs SET decision_provider = ? WHERE id = ?", (provider, job_id)
+            )
 
     def delete(self, job_id: str) -> None:
         """Only for a run that never started (refused before any request left)."""
@@ -259,23 +279,45 @@ class SqliteJobStore:
         ).fetchone()
         if row is None:
             return None
-        return KbCheckpoint.model_validate({
-            "id": row["id"], "revision": row["revision"], "stage": row["stage"], "cursor": row["cursor"],
-            "completed_ids": json.loads(row["completed_ids_json"]),
-            "pending_ids": json.loads(row["pending_ids_json"]), "saved_at": row["saved_at"],
-        })
+        return KbCheckpoint.model_validate(
+            {
+                "id": row["id"],
+                "revision": row["revision"],
+                "stage": row["stage"],
+                "cursor": row["cursor"],
+                "completed_ids": json.loads(row["completed_ids_json"]),
+                "pending_ids": json.loads(row["pending_ids_json"]),
+                "saved_at": row["saved_at"],
+            }
+        )
 
     @classmethod
-    def _save_checkpoint(cls, connection: sqlite3.Connection, job_id: str, *, stage: str, cursor: str | None,
-                         completed: list[str], pending: list[str]) -> KbCheckpoint:
+    def _save_checkpoint(
+        cls,
+        connection: sqlite3.Connection,
+        job_id: str,
+        *,
+        stage: str,
+        cursor: str | None,
+        completed: list[str],
+        pending: list[str],
+    ) -> KbCheckpoint:
         latest = cls._latest(connection, job_id)
         revision = 1 if latest is None else latest.revision + 1
         checkpoint_id = new_id("cp")
         connection.execute(
             "INSERT INTO explore_checkpoints(id, job_id, revision, stage, cursor, completed_ids_json,"
             " pending_ids_json, saved_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (checkpoint_id, job_id, revision, stage, cursor, json.dumps(completed), json.dumps(pending),
-             utc_now_ms()),
+            (
+                checkpoint_id,
+                job_id,
+                revision,
+                stage,
+                cursor,
+                json.dumps(completed),
+                json.dumps(pending),
+                utc_now_ms(),
+            ),
         )
         saved = cls._latest(connection, job_id)
         assert saved is not None
@@ -286,13 +328,22 @@ class SqliteJobStore:
         state = cast(KbExploreJobState, row["state"])
         reason = row["stop_reason"]
         checkpoint = cls._latest(connection, row["id"]) if state in ACTIVE_STATES else None
-        return KbExploreJob.model_validate({
-            "id": row["id"], "owner": row["owner"], "state": state, "stage": row["stage"],
-            "stop_reason": reason,
-            "budget": json.loads(row["budget_json"]), "counters": json.loads(row["counters_json"]),
-            "checkpoint": checkpoint, "created_at": row["created_at"], "updated_at": row["updated_at"],
-            "decision_choices": _DECISION_CHOICES if state == "paused" and reason == "decision_model_required"
-            else [],
-            "decision_provider": row["decision_provider"],
-            "retry_at": row["retry_at"],
-        })
+        return KbExploreJob.model_validate(
+            {
+                "id": row["id"],
+                "owner": row["owner"],
+                "state": state,
+                "stage": row["stage"],
+                "stop_reason": reason,
+                "budget": json.loads(row["budget_json"]),
+                "counters": json.loads(row["counters_json"]),
+                "checkpoint": checkpoint,
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "decision_choices": _DECISION_CHOICES
+                if state == "paused" and reason == "decision_model_required"
+                else [],
+                "decision_provider": row["decision_provider"],
+                "retry_at": row["retry_at"],
+            }
+        )
