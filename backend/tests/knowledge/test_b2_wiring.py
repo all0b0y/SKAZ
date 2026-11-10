@@ -36,9 +36,9 @@ async def test_runtime_exposes_the_job_store_and_routes_go_live_with_a_library(
     assert (await kb_client.get("/kb/explore/exploring")).json() == {"items": []}
     missing = await kb_client.get("/kb/explore/findings/finding-missing")
     assert (missing.status_code, missing.json()) == (404, {"code": "not_found"})
-    # B1's science client isn't wired yet: a run can't start, and nothing is created.
+    # B1's science client is wired, but the integration is off: a run can't start, and nothing is created.
     response = await kb_client.post("/kb/explore/runs", json={"query": "agents"})
-    assert (response.status_code, response.json()) == (503, {"code": "not_ready"})
+    assert (response.status_code, response.json()) == (403, {"code": "consent_required"})
     assert [job.id for job in runtime.kb_jobs.active()] == [links.id]
 
 

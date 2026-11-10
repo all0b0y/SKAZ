@@ -217,10 +217,16 @@ class Runtime:
         from .knowledge.freshness import build_freshness_service
         self.kb_freshness = build_freshness_service(self)
 
+        #: Science bases (0.4.0 B1): OpenAlex (keyless; optional key in the secret store), arXiv, Crossref.
+        #: Consent gate, egress journal before each request, honest limits; B4/B5 read it as ``kb_science``.
+        from .knowledge.science import build_science
+        self.kb_science = build_science(self)
+
         #: Funnel runs, novelty, findings (0.4.0 B2) and the one JobStore of every 0.4.0 job. Jobs left
         #: running by the last process pause with ``app_exit``; ``kb_explore.science`` is B1's client.
         from .knowledge.explore import build_explore
         self.kb_jobs, self.kb_explore = build_explore(self)
+        self.kb_explore.science = self.kb_science
         self.kb_jobs.recover()
 
         #: N3 repeats: what a material repeats, and "Check older materials" (0.4.0 B7), on B2's JobStore.
