@@ -905,6 +905,16 @@ type Entry<R extends KbRoute> = readonly [Spec<R>['status'], Handler<R>];
 export type FakeRoutes = { [R in KbRoute]?: Entry<R> };
 
 const ROUTES: FakeRoutes = {
+  // -- 0.4.0 reads a material and a wiki page make on open (F5): the document world has nothing to show --
+  'GET /kb/materials/{material_id}/repeats': [200, (_w, { path }) => ({
+    material_id: path.material_id, status: 'not_checked', percent: null, repeated: 0, total: 0,
+    from_materials: [], paragraphs: [], checked_at: null,
+  })],
+  'GET /kb/materials/{material_id}/freshness': [200, () => ({ marks: [], last_link_check: null })],
+  'GET /kb/wiki/pages/{page_id}/freshness': [200, () => ({ marks: [], last_link_check: null })],
+  'GET /kb/materials/{material_id}/read-mark': [200, (_w, { path }) => ({
+    material_id: path.material_id, finding_id: null, value: null, updated_at: null,
+  })],
   // -- library, folders --
   'GET /kb/library': [200, (w) => w.library],
   'POST /kb/library': [200, (w, { body }) => {
