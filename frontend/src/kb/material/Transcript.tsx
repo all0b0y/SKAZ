@@ -8,6 +8,7 @@ import { useServices } from '../state/context';
 import { byPage, monologues, segmentText, speakerTone, translationBySeg, type TextPiece } from './segments';
 import { quoteAttrs } from '../ui/Selection';
 import { FragmentBlocks, type FragmentAttrs } from './FragmentBlocks';
+import { isFolded, RepeatFolded, RepeatLabel, type RepeatView } from './RepeatMarks';
 
 export type TranscriptView = 'original' | 'translation' | 'both';
 
@@ -116,6 +117,8 @@ export interface TranscriptProps {
   onCorrectionChanged: (change: KbCorrectionChange) => void;
   /** Segments the guard left out as instructions to an AI (decision 41): shown in place, marked. */
   excluded?: ReadonlySet<number>;
+  /** N3: passages the wiki already has (marked, and foldable with "Hide what you've read"). Not for speech. */
+  repeats?: RepeatView | null;
   /**
    * Live panel: speech after the fragments — final words of monologues not in the material yet
    * (stable, but not quotable: they have no fragment yet) and the words still being recognised (grey).
@@ -302,15 +305,24 @@ function fragmentAttrs(props: TranscriptProps) {
     const target = props.target.seg === f.seg ? ' is-target' : '';
     const base = { 'data-seg': f.seg, 'data-target-key': `seg-${f.seg}`, 'data-role': f.role ?? undefined };
     if (isExcluded(props, f.seg)) return { className: `kb-mtext__p kb-excluded${target}`, ...base, 'data-excluded': '' };
-    return { className: `kb-mtext__p${target}`, ...base, ...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg }) };
+    const spot = props.repeats?.bySeg.get(f.seg);
+    const folded = spot && props.repeats ? isFolded(props.repeats, spot, props.target.seg) : false;
+    const rep = spot ? { 'data-repeat': spot.paragraph.paragraph_id, ...(folded && !spot.first ? { 'data-repeat-hidden': '' } : {}) } : {};
+    return { className: `kb-mtext__p${spot ? ' kb-rep' : ''}${target}`, ...base, ...rep, ...quoteAttrs({ source: 'material', id: props.material.id, seg: f.seg }) };
   };
 }
 
 /** A fragment's text; an excluded one is preceded by its tag. */
 function fragmentText(props: TranscriptProps) {
-  return (f: KbFragment) => (isExcluded(props, f.seg)
-    ? <><ExcludedTag /><FragmentText fragment={f} props={props} /></>
-    : <FragmentText fragment={f} props={props} />);
+  return (f: KbFragment) => {
+    if (isExcluded(props, f.seg)) return <><ExcludedTag /><FragmentText fragment={f} props={props} /></>;
+    const spot = props.repeats?.bySeg.get(f.seg);
+    if (!spot || !props.repeats || !spot.first) return <FragmentText fragment={f} props={props} />;
+    if (isFolded(props.repeats, spot, props.target.seg)) {
+      return <RepeatFolded spot={spot} onShow={() => props.repeats!.show(spot.paragraph.paragraph_id)} />;
+    }
+    return <><RepeatLabel spot={spot} /><FragmentText fragment={f} props={props} /></>;
+  };
 }
 
 function PlainText(props: TranscriptProps) {

@@ -19,6 +19,7 @@ import {
 import { quoteAttrs, type QuoteSource } from '../ui/Selection';
 import { SourceMarks, SourcesProvider, SourcesRow } from '../cite/SourceMarks';
 import { indexSources } from '../cite/sources';
+import { OutdatedFootnote, PageFreshnessProvider } from '../material/OutdatedFootnote';
 import { useOpenInObsidian } from '../document/fileActions';
 import { DeletePageDialog, RenamePageDialog, type PageDialog } from './PageDialogs';
 import { DiagramPreviews } from '../ui/markdown/Diagram';
@@ -208,7 +209,10 @@ function Block({ pageId, block, label, actions }: { pageId: string; block: KbBlo
         <div className="kb-block__body">
           <BlockMarkdown block={block} quote={{ source: 'page', id: pageId, block_id: block.id }} />
           {block.citations.length > 0 && (
-            <span className="kb-block__cites"><SourceMarks citations={block.citations} /></span>
+            <span className="kb-block__cites">
+              <SourceMarks citations={block.citations} />
+              <OutdatedFootnote pageId={pageId} blockId={block.id} citations={block.citations} />
+            </span>
           )}
         </div>
       )}
@@ -274,6 +278,7 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
         <EmptyState icon="wiki" title="This page has no statements yet" compact />
       )}
       <SourcesProvider index={sources}>
+        <PageFreshnessProvider pageId={page.id}>
         {sections.map((section) => {
           const open = !collapsed.has(section.key);
           const title = section.title ?? (section.kind ? CLAIM_LABEL[section.kind] : 'Summary');
@@ -298,6 +303,7 @@ function PageBody({ page, actions, noteOpen, setNoteOpen, addNote }: {
             </section>
           );
         })}
+        </PageFreshnessProvider>
       </SourcesProvider>
       {noteOpen && (
         <section className="kb-psec kb-psec--user_note" aria-label="New note">

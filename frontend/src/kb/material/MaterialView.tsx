@@ -19,10 +19,14 @@ import { OverlapLine } from './OverlapLine';
 import { changeNote, Transcript, type TranscriptView } from './Transcript';
 import { useLiveMaterial } from '../recording/useLiveMaterial';
 import { useRecognitionRecheck } from './RecognitionRecheck';
+import { FreshnessNotice } from './FreshnessNotice';
+import { ReadMarks } from './ReadMarks';
+import { RepeatToggle, useMaterialRepeats, useRepeatView } from './RepeatMarks';
 
 const MATERIAL_GONE = 'This material is no longer in the library — it was deleted.';
 
 const SPEECH = new Set<KbMaterial['kind']>(['recording', 'audio', 'video', 'video_link']);
+const NO_FRAGMENTS: KbMaterial['fragments'] = [];
 
 interface MaterialData {
   material: KbMaterial;
@@ -149,6 +153,9 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hasTranslation = Boolean(material?.translation && material.translation.fragments.length > 0);
   const recheck = useRecognitionRecheck(material, data?.jobs ?? [], reload);
+  // N3: passages the wiki already has. Text materials only; speech is shown as spoken.
+  const repeatsData = useMaterialRepeats(target.id);
+  const repeatMarks = useRepeatView(material && SPEECH.has(material.kind) ? null : repeatsData, material?.fragments ?? NO_FRAGMENTS, target.id);
 
   // Decision 24: translation by default when the recording was made with one.
   useEffect(() => { setView('original'); setNote(null); }, [target.id]);
@@ -231,8 +238,11 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} />
               <OverlapLine overlap={material.overlap} />
+              {repeatMarks.foldable && <RepeatToggle hide={repeatMarks.hide} onChange={repeatMarks.setHide} />}
               <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />
             </div>
+            <FreshnessNotice materialId={material.id} originUrl={material.origin?.url ?? null}
+              onDelete={() => setDialog('delete')} onReplaced={reload} />
             {continuable && (
               <div className="kb-mat__actions">
                 <Button size="sm" variant="outline" icon="mic" onClick={() => void recording.getState().continueRecording(material.id)}>
@@ -258,7 +268,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             ) : (
               <Transcript material={material} corrections={data.corrections} view={hasTranslation ? view : 'original'}
                 sideBySide={expanded} target={{ seg: target.seg ?? null, quote: target.quote ?? null }}
-                excluded={guard.excludedSegs} onCorrectionChanged={onCorrection} />
+                excluded={guard.excludedSegs} repeats={repeatMarks.view} onCorrectionChanged={onCorrection} />
             )}
             {material.kind === 'web' && material.origin?.url && (
               <p className="kb-arturl">
@@ -270,6 +280,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
                 </a>
               </p>
             )}
+            {material.status === 'ready' && material.fragments.length > 0 && <ReadMarks materialId={material.id} />}
           </article>
         )}
       </div>

@@ -12,6 +12,8 @@ import { useMaterialSelection } from './materialBatch';
 import { StippleStrip } from '../fx/stipple';
 import { useSpotlight } from '../fx/spotlight';
 import { HalftoneArt } from '../fx/halftone/HalftoneArt';
+import { DateFilter } from './DateFilter';
+import { useDatedMaterials, type YearWindow } from './publicationWindow';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -90,6 +92,9 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   const [folderId, setFolderId] = useState('');
   const [sort, setSort] = useState<Sort>('newest');
   const [layout, setLayout] = useState<Layout>('table');
+  // N7-5: publication window ("Looking at 2024–2026"); materials with an unknown date are listed apart.
+  const [pubWindow, setPubWindow] = useState<YearWindow | null>(null);
+  const dated = useDatedMaterials(pubWindow);
   const { state, reload } = useLoad('all', async () => client.call('GET /kb/materials'));
   // The library list changed (added, recorded, deleted, renamed): read again, keeping the table on screen.
   useEffect(() => { reload(); }, [revision, reload]);
@@ -117,11 +122,15 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
 
   const rows = useMemo(() => {
     const kinds = type === 'all' ? null : TYPE_KINDS[type];
-    const out = all.filter((m) => (!kinds || kinds.includes(m.kind)) && (!folderId || m.folder_id === folderId));
+    const inside = dated.load === 'ready' ? dated.ids.inside : null;
+    const out = all.filter((m) => (!kinds || kinds.includes(m.kind)) && (!folderId || m.folder_id === folderId)
+      && (!inside || inside.has(m.id)));
     out.sort((a, b) => (sort === 'name' ? a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
       : sort === 'oldest' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
     return out;
-  }, [all, type, folderId, sort]);
+  }, [all, type, folderId, sort, dated]);
+  const unknownDate = useMemo(() => (dated.load === 'ready'
+    ? all.filter((m) => dated.ids.unknown.has(m.id) && (!folderId || m.folder_id === folderId)) : []), [all, dated, folderId]);
   const { sel, overlays, dragProps } = useMaterialSelection({
     rows, resetKey: `${type}|${folderId}|${layout}`, variant: 'full',
     onOpen: (id) => openDocument({ type: 'material', id }),
@@ -149,6 +158,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
       <div className="kb-allmat__body" {...sel.listProps}>
         <div className="kb-amf">
           <Segmented label="Type" size="sm" value={type} options={TYPE_OPTIONS} onChange={setType} />
+          <DateFilter window={pubWindow} onChange={setPubWindow} />
           <span className="kb-head__spacer" />
           <label className="kb-select kb-select--sm">
             <span className="kb-visually-hidden">Folder</span>
@@ -176,10 +186,13 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
         {state.load === 'error' && (
           <Banner tone="error" title="Couldn’t load materials." actions={<Button size="sm" icon="retry" onClick={reload}>Try again</Button>}>{state.error}</Banner>
         )}
+        {dated.load === 'error' && (
+          <p className="kb-inline-error" role="alert">Couldn’t filter by publication date. {dated.error}</p>
+        )}
         {state.value && rows.length === 0 && (
           <EmptyState icon="materials" art={all.length ? undefined : <HalftoneArt id="materials" />} title={all.length ? 'Nothing matches these filters' : 'No materials yet'}
             action={all.length ? undefined : <Button size="sm" variant="fill" icon="plus" onClick={() => setAddOpen(true)}>Add material</Button>}>
-            {all.length ? 'Choose another type or folder.' : 'Record, drop files or paste a link — everything lands here.'}
+            {all.length ? (pubWindow ? 'No material was published in this window. Choose another one.' : 'Choose another type or folder.') : 'Record, drop files or paste a link — everything lands here.'}
           </EmptyState>
         )}
         {rows.length > 0 && layout === 'table' && (
@@ -214,6 +227,18 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
           </table>
         )}
         {overlays}
+        {unknownDate.length > 0 && (
+          <section className="kb-amu" aria-label="Publication date unknown">
+            <h2 className="kb-amu__head">Publication date unknown · {unknownDate.length}</h2>
+            <ul>
+              {unknownDate.map((m) => (
+                <li key={m.id}>
+                  <button type="button" className="kb-amt__open" onClick={() => openDocument({ type: 'material', id: m.id })}>{m.title}</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {rows.length > 0 && layout === 'cards' && (
           <ul className="kb-amg" aria-label="Materials" {...sel.gridProps} {...spotlight}>
             {rows.map((m) => (
