@@ -440,7 +440,9 @@ class ExploreFunnel:
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
-    async def _drive(self, run_id: str, choice: DecisionChoice | None, *, free_steps_only: bool = False) -> None:
+    async def _drive(
+        self, run_id: str, choice: DecisionChoice | None, *, free_steps_only: bool = False
+    ) -> None:
         try:
             run = await disk_call(self._run_row, run_id)
             await self._collect(run)
@@ -706,7 +708,9 @@ class ExploreFunnel:
 
     # -- stage 3: decision ------------------------------------------------------------------------------
 
-    async def _decide(self, run: RunRow, choice: DecisionChoice | None, *, free_steps_only: bool = False) -> bool:
+    async def _decide(
+        self, run: RunRow, choice: DecisionChoice | None, *, free_steps_only: bool = False
+    ) -> bool:
         pending = await disk_call(self._pending_decisions, run.id)
         if not pending:
             return True
