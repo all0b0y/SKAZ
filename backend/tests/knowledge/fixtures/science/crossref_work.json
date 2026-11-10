@@ -1,0 +1,24 @@
+{
+  "_source": "Hand-written after the Crossref REST API work message (updated-by, relation): https://api.crossref.org/swagger-ui/index.html and https://www.crossref.org/documentation/retrieve-metadata/rest-api/",
+  "status": "ok",
+  "message-type": "work",
+  "message-version": "1.0.0",
+  "message": {
+    "DOI": "10.1234/agents.2024.001",
+    "type": "journal-article",
+    "title": ["Tool-using agents that verify their own claims"],
+    "author": [{"given": "Ada", "family": "Lovelace"}],
+    "container-title": ["Journal of Agents"],
+    "issued": {"date-parts": [[2024, 3]]},
+    "published": {"date-parts": [[2024, 3]]},
+    "is-referenced-by-count": 12,
+    "abstract": "<jats:p>Agents check claims.</jats:p>",
+    "relation": {"has-preprint": [{"id-type": "doi", "id": "10.48550/arXiv.2401.09999", "asserted-by": "subject"}]},
+    "updated-by": [
+      {"DOI": "10.1234/agents.2025.retraction", "type": "retraction", "label": "Retraction", "source": "retraction-watch",
+       "updated": {"date-parts": [[2025, 6, 1]], "date-time": "2025-06-01T00:00:00Z", "timestamp": 1748736000000}},
+      {"DOI": "10.1234/agents.2024.erratum", "type": "erratum", "label": "Erratum",
+       "updated": {"date-parts": [[2024, 9, 1]]}}
+    ]
+  }
+}

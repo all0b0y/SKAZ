@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written after GROBID TEI output served by https://content.openalex.org/works/{id}.grobid-xml
+     (https://developers.openalex.org/access/fulltext, https://grobid.readthedocs.io/en/latest/TEI-encoding-of-results/) -->
+<!DOCTYPE TEI [<!ENTITY secret SYSTEM "file:///etc/passwd">]>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader><fileDesc><titleStmt><title>Tool-using agents that verify their own claims</title></titleStmt></fileDesc></teiHeader>
+  <text>
+    <body>
+      <div><head n="1">Introduction</head>
+        <p>Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. Agents that use tools can check each claim against the sources they cite. </p>
+      </div>
+      <div><head n="2">Method</head>
+        <p>We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones. We compare the claims with retrieved passages and flag unsupported ones.  &secret;</p>
+      </div>
+    </body>
+    <back><div type="references"><listBibl><biblStruct><analytic><title>Reference title</title></analytic></biblStruct></listBibl></div></back>
+  </text>
+</TEI>

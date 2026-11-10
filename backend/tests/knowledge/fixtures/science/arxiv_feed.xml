@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Hand-written after the arXiv API Atom response: https://info.arxiv.org/help/api/user-manual.html#_details_of_atom_results_returned -->
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title type="html">ArXiv Query: id_list=2401.01234</title>
+  <id>http://arxiv.org/api/abc</id>
+  <updated>2024-05-02T00:00:00-04:00</updated>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>1</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/abs/2401.01234v3</id>
+    <updated>2024-05-01T12:00:00Z</updated>
+    <published>2024-01-03T18:00:00Z</published>
+    <title>Retrieval for
+      long documents</title>
+    <summary>  We study retrieval over long documents.  </summary>
+    <author><name>Grace Hopper</name></author>
+    <author><name>Edsger Dijkstra</name></author>
+    <arxiv:doi>10.1234/published.2024.7</arxiv:doi>
+    <link href="http://arxiv.org/abs/2401.01234v3" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2401.01234v3" rel="related" type="application/pdf"/>
+    <arxiv:primary_category term="cs.IR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.IR" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+</feed>

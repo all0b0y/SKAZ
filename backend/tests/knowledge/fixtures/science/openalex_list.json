@@ -1,0 +1,14 @@
+{
+  "_source": "Hand-written after the OpenAlex list response (meta + results, cursor paging): https://developers.openalex.org/how-to-use-the-api/get-lists-of-entities/paging",
+  "meta": {"count": 2, "db_response_time_ms": 21, "page": null, "per_page": 30, "next_cursor": "IlsxNjYwMDAwMDAwXSI="},
+  "results": [
+    {"id": "https://openalex.org/W5000000001", "doi": null, "display_name": "Agents citing your sources",
+     "publication_year": 2025, "publication_date": "2025-02-01", "type": "article",
+     "open_access": {"is_oa": true}, "primary_location": {"is_oa": true, "landing_page_url": "https://oa.example.org/a1"},
+     "locations": [{"is_oa": true, "landing_page_url": "https://oa.example.org/a1"}],
+     "topics": [{"id": "https://openalex.org/T10181"}], "cited_by_count": 0, "is_retracted": false},
+    {"id": "https://openalex.org/W4391234567", "doi": "https://doi.org/10.1234/agents.2024.001",
+     "display_name": "Tool-using agents that verify their own claims", "publication_year": 2024, "type": "article",
+     "open_access": {"is_oa": false}, "is_retracted": true}
+  ]
+}
