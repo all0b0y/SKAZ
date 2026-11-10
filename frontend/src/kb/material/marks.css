@@ -1,0 +1,65 @@
+/* F5: N3 repeat marks, read marks, N1 freshness blocks and the wiki "outdated" footnote (v4 states 15–24).
+   Quiet by design: one muted left rule, no colour; actions appear as plain outline buttons. */
+
+/* ---- N3 repeats -------------------------------------------------------------------------------- */
+.kb-rep__toggle {
+  display: inline-flex; align-items: center; gap: var(--kb-sp-8); font-size: var(--t-sm); color: var(--kb-text); cursor: pointer;
+}
+.kb-rep__link {
+  padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+}
+.kb-rep__link:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 2px; border-radius: var(--kb-r-xs); }
+.kb-rep__link:disabled { opacity: 0.6; cursor: default; }
+
+.kb-mtext__p.kb-rep,
+.kb-mtext__li.kb-rep { padding-inline-start: var(--kb-sp-12); border-inline-start: 2px solid var(--kb-line); }
+.kb-rep__label, .kb-rep__folded-head { display: block; font-size: var(--t-sm); color: var(--kb-muted); }
+.kb-rep__folded { display: flex; flex-direction: column; gap: var(--kb-sp-2); }
+.kb-rep__folded-head { color: var(--kb-muted-strong, var(--kb-muted)); }
+[data-repeat-hidden] { display: none; }
+
+/* ---- read marks (N4-11) ------------------------------------------------------------------------ */
+.kb-readmarks { margin-top: var(--kb-sp-16); }
+.kb-readmarks__row { display: flex; flex-wrap: wrap; gap: var(--kb-sp-8); }
+.kb-readmarks__mark {
+  font: inherit; font-size: var(--t-sm); color: var(--kb-muted-strong, var(--kb-muted)); background: transparent;
+  border: 1px solid var(--kb-line); border-radius: var(--kb-r-pill); padding: var(--kb-sp-4) var(--kb-sp-12); cursor: pointer;
+}
+.kb-readmarks__mark:hover { background: var(--kb-accent-soft); }
+.kb-readmarks__mark[aria-pressed='true'] { color: var(--kb-text); background: var(--kb-accent-soft); border-color: var(--kb-accent); }
+.kb-readmarks__mark:disabled { opacity: 0.6; cursor: default; }
+.kb-readmarks__mark:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+
+/* ---- N1 marks on a material ---------------------------------------------------------------------- */
+.kb-freshwrap { display: flex; flex-direction: column; gap: var(--kb-sp-8); margin: var(--kb-sp-8) 0; }
+.kb-freshwrap__bar { display: flex; align-items: center; justify-content: flex-end; gap: var(--kb-sp-12); font-size: var(--t-sm); color: var(--kb-muted); }
+.kb-fresh { display: flex; flex-direction: column; gap: var(--kb-sp-12); }
+.kb-fresh__block { border-inline-start: 2px solid var(--kb-line); padding-inline-start: var(--kb-sp-16); display: flex; flex-direction: column; gap: var(--kb-sp-6); }
+.kb-fresh__reason { margin: 0; font-weight: 600; color: var(--kb-text); }
+.kb-fresh__evidence { margin: 0; font-size: var(--t-sm); color: var(--kb-muted); }
+.kb-fresh__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kb-sp-8); margin-top: var(--kb-sp-4); }
+.kb-fresh__out { display: inline-flex; align-items: center; gap: var(--kb-sp-4); font-size: var(--t-sm); color: var(--kb-text); }
+.kb-fresh__claims { display: flex; flex-direction: column; gap: var(--kb-sp-6); }
+.kb-fresh__claims-head { margin: 0; font-size: var(--t-md, 1em); font-weight: 600; }
+.kb-fresh__claims ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--kb-sp-8); }
+.kb-fresh__claims li { display: flex; flex-direction: column; gap: var(--kb-sp-2); font-size: var(--t-sm); }
+.kb-fresh__claim-note { color: var(--kb-muted); }
+
+/* ---- wiki footnote "outdated" (v4 state 24) --------------------------------------------------------- */
+.kb-outdated { display: inline-flex; vertical-align: middle; margin-left: var(--kb-sp-4); }
+.kb-outdated__mark {
+  font: inherit; font-size: var(--t-xs); color: var(--kb-muted); background: transparent; border: 1px dashed var(--kb-line);
+  border-radius: var(--kb-r-pill); padding: 0 var(--kb-sp-6); cursor: help; height: 20px;
+}
+.kb-outdated__mark:hover, .kb-outdated__mark[aria-expanded='true'] { color: var(--kb-text); border-color: var(--kb-muted); }
+.kb-outdated__mark:focus-visible { outline: 2px solid var(--kb-accent); outline-offset: 1px; }
+.kb-outdatedpop { display: flex; flex-direction: column; gap: var(--kb-sp-4); padding: var(--kb-sp-8) var(--kb-sp-4); font-size: var(--t-sm); }
+.kb-outdatedpop__title { margin: 0; font-weight: 600; }
+.kb-outdatedpop__note { margin: 0; color: var(--kb-muted); }
+
+/* ---- library date filter (N7-5) ----------------------------------------------------------------------- */
+.kb-datefilter { display: inline-flex; align-items: center; }
+.kb-amu { margin-top: var(--kb-sp-16); display: flex; flex-direction: column; gap: var(--kb-sp-6); }
+.kb-amu__head { margin: 0; font-size: var(--t-sm); font-weight: 600; color: var(--kb-muted); }
+.kb-amu ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--kb-sp-4); }
