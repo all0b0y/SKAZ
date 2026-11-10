@@ -455,3 +455,17 @@ describe('F1 — ExploreSection UI & interactions', () => {
     });
   });
 });
+
+describe('B2-7 · a run paused by Quit', () => {
+  it('says the paid checks wait for Continue (user decision A)', async () => {
+    const kb = createFakeKb('no_decision_model');
+    const run = {
+      ...structuredClone(scenes.no_decision_model.run),
+      stop_reason: 'app_exit' as const,
+      checkpoint: structuredClone(CHECKPOINT),
+    };
+    render(<ExploreSection clients={kb} initial={{ run }} />);
+    expect(await screen.findByText(/paid checks wait for your Continue/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+  });
+});

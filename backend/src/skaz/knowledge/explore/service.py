@@ -322,7 +322,10 @@ class ExploreFunnel:
     # -- lifecycle -------------------------------------------------------------------------------------
 
     async def on_start(self) -> list[str]:
-        """App start: runs paused by Quit (``app_exit``, set by ``JobStore.recover``) go on by themselves."""
+        """App start: runs paused by Quit (``app_exit``, set by ``JobStore.recover``) go on by themselves with
+        their free steps only (user decision B2-7 A): collecting, rules, and decisions with a local model. A
+        paid step (cloud decisions, novelty, paid access checks) never starts without the user — the run
+        pauses again with ``app_exit`` and waits for Continue."""
         if self.science is None or self.kb.view().state == "not_configured":
             return []
         resumed: list[str] = []
@@ -335,7 +338,7 @@ class ExploreFunnel:
                 await disk_call(
                     self.job_store.progress, job.id, stage=job.stage, budget=job.budget, counters=job.counters
                 )
-                self._spawn(job.id)
+                self._spawn(job.id, free_steps_only=True)
                 resumed.append(job.id)
         return resumed
 
@@ -417,8 +420,12 @@ class ExploreFunnel:
 
     # -- the driver ------------------------------------------------------------------------------------
 
-    def _spawn(self, run_id: str, *, choice: DecisionChoice | None = None) -> asyncio.Task[None]:
-        task = asyncio.get_running_loop().create_task(self._drive(run_id, choice), name=f"explore-{run_id}")
+    def _spawn(
+        self, run_id: str, *, choice: DecisionChoice | None = None, free_steps_only: bool = False
+    ) -> asyncio.Task[None]:
+        task = asyncio.get_running_loop().create_task(
+            self._drive(run_id, choice, free_steps_only=free_steps_only), name=f"explore-{run_id}"
+        )
         self._tasks[run_id] = task
         task.add_done_callback(
             lambda done: self._tasks.pop(run_id, None) if self._tasks.get(run_id) is done else None
@@ -433,15 +440,18 @@ class ExploreFunnel:
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
-    async def _drive(self, run_id: str, choice: DecisionChoice | None) -> None:
+    async def _drive(self, run_id: str, choice: DecisionChoice | None, *, free_steps_only: bool = False) -> None:
         try:
             run = await disk_call(self._run_row, run_id)
             await self._collect(run)
             await self._rules(run)
-            if not await self._decide(run, choice):
+            if not await self._decide(run, choice, free_steps_only=free_steps_only):
                 return
             if run.request.get("free_only"):
                 await self._finish(run)
+                return
+            if free_steps_only:  # resumed after Quit: the paid steps wait for the user's Continue
+                await self._stop(run_id, "app_exit")
                 return
             if not await self._novelty(run):
                 return
@@ -696,12 +706,12 @@ class ExploreFunnel:
 
     # -- stage 3: decision ------------------------------------------------------------------------------
 
-    async def _decide(self, run: RunRow, choice: DecisionChoice | None) -> bool:
+    async def _decide(self, run: RunRow, choice: DecisionChoice | None, *, free_steps_only: bool = False) -> bool:
         pending = await disk_call(self._pending_decisions, run.id)
         if not pending:
             return True
         await self._progress(run, "decision")
-        free_only = bool(run.request.get("free_only"))
+        free_only = bool(run.request.get("free_only")) or free_steps_only
         if choice is not None and not free_only and not await self.deciders.choose(choice):
             await self._stop(run.id, "decision_model_required")
             return False

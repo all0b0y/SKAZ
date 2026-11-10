@@ -706,7 +706,16 @@ async def test_quit_pauses_with_app_exit_and_the_next_start_resumes(parts: Simpl
     await parts.funnel.aclose()
     assert (await parts.funnel.run(started.id)).stop_reason == "app_exit"
     parts.novelty.gate.set()
+    # User decision B2-7 (A): the next start goes on with free steps only; paid novelty waits for Continue.
     assert await parts.funnel.on_start() == [started.id]
+    paused = await parts.funnel.settled(started.id)
+    assert (paused.state, paused.stop_reason) == ("paused", "app_exit")
+    assert parts.novelty.checked == []
+    assert paused.checkpoint is not None
+    resumed = await parts.funnel.resume(
+        started.id, KbContinue(checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision)
+    )
+    assert resumed.state == "running"
     done = await parts.funnel.settled(started.id)
     assert done.state == "done" and parts.novelty.checked == ["work-1"]
 

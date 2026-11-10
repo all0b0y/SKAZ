@@ -26,6 +26,8 @@ import {
 
 afterEach(() => {
   vi.useRealTimers();
+  // Prefs persist here: a test that opens Explore must not leave the next one on the Explore section.
+  localStorage.clear();
 });
 
 /** A fake KB whose methods are spies, so a test can script an answer before it renders. */
@@ -466,7 +468,7 @@ describe('F2 · 03–05 · Research task states: running, paused, budget, done, 
     const exit = kb('research_paused');
     renderResearchOnly(exit, <ResearchTaskView initialTask={taskWith(paused, { stop_reason: 'app_exit' })} />);
     expect(await screen.findByText('Paused when SKAZ closed')).toBeInTheDocument();
-    expect(screen.getByText(/It resumes next time SKAZ starts/)).toBeInTheDocument();
+    expect(screen.getByText(/paid checks wait for your Continue/)).toBeInTheDocument();
   });
 
   it('a failed task has no Continue and says it stopped', async () => {

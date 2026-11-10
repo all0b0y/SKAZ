@@ -54,7 +54,7 @@ export function stopReasonCopyFor(reason: ResearchStopReason): string | null {
     case 'provider_unavailable':
       return 'The scientific database did not respond. Your previous findings are kept.';
     case 'app_exit':
-      return 'SKAZ was closed while this ran. It resumes next time SKAZ starts, or you can continue now.';
+      return 'SKAZ was closed while this ran. Free steps go on by themselves; paid checks wait for your Continue.';
     case 'failed':
       return 'The research task stopped because of an error.';
     default:

@@ -286,6 +286,12 @@ export function AreaColumn({
                 </>
               )}
 
+              {run.stop_reason === 'app_exit' && (
+                <div className="kb-explore-stop-box__title">
+                  Paused when SKAZ closed. Free steps go on by themselves; paid checks wait for your Continue.
+                </div>
+              )}
+
               {run.stop_reason === 'budget' && (
                 <>
                   <div className="kb-explore-stop-box__title">
