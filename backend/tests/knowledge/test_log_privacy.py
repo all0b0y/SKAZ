@@ -195,6 +195,7 @@ async def test_a_service_that_fails_to_close_logs_no_title(caplog: pytest.LogCap
         kb_wiki=SimpleNamespace(close=failing), kb_chats=SimpleNamespace(close=ok),
         kb_ingest=SimpleNamespace(close=ok), kb_codex=SimpleNamespace(close=ok),
         kb_decisions=SimpleNamespace(aclose=ok), kb_agents=SimpleNamespace(aclose=ok),
+        kb_explore=SimpleNamespace(aclose=ok), kb_repeats=SimpleNamespace(aclose=ok),
     )
     await close_knowledge(runtime, deadline_s=2)
     assert "wiki" in caplog.text and "OSError" in caplog.text

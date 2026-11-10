@@ -564,7 +564,7 @@ async def test_runtime_wires_kb_repeats_in_the_real_app(kb_client: object, kb_ap
     assert isinstance(runtime.kb_repeats, RepeatsService)
     # The decision layer is asked at call time (None while none is chosen), not captured at start.
     assert runtime.kb_repeats._decisions() is None
-    assert "kb_jobs" not in vars(runtime) and runtime.kb_repeats._jobs is None
+    assert runtime.kb_repeats._jobs is runtime.kb_jobs  # B2's JobStore, passed explicitly
     calls: list[tuple[str, str, dict[str, Any] | None]] = [
         ("GET", "/kb/materials/mat-1/repeats", None),
         ("POST", "/kb/explore/repeat-checks", {"area_id": "area-1"}),
@@ -577,13 +577,10 @@ async def test_runtime_wires_kb_repeats_in_the_real_app(kb_client: object, kb_ap
         response = await client.request(method, path, json=body)
         assert (response.status_code, response.json()) == (503, {"code": "not_ready"}), path
     runtime.kb.connect(None)
-    # Library, no job store yet: the job routes are still not_ready and start nothing; reading is a plain 404.
-    for method, path, body in calls[1:]:
+    # With a library and B2's JobStore the routes answer for real: unknown ids are plain 404s.
+    for method, path, body in calls:
         response = await client.request(method, path, json=body)
-        assert (response.status_code, response.json()) == (503, {"code": "not_ready"}), path
-    response = await client.get("/kb/materials/mat-1/repeats")
-    assert (response.status_code, response.json()) == (404, {"code": "not_found"})
-
+        assert (response.status_code, response.json()) == (404, {"code": "not_found"}), path
 
 async def test_older_means_before_04_first_opened_this_library_option_a(ready: KnowledgeService) -> None:
     # User decision (option A): the boundary is when 0.4.0 first opened the library, kept per library. A

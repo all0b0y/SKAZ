@@ -62,6 +62,10 @@ class KnowledgeRuntime(Protocol):
     def kb_decisions(self) -> _AsyncCloses: ...
     @property
     def kb_agents(self) -> _AsyncCloses: ...
+    @property
+    def kb_explore(self) -> _AsyncCloses: ...
+    @property
+    def kb_repeats(self) -> _AsyncCloses: ...
 
 
 def _still_running(runtime: KnowledgeRuntime) -> list[str]:
@@ -86,6 +90,8 @@ async def close_knowledge(runtime: KnowledgeRuntime, *, deadline_s: float = DEAD
         ("wiki", runtime.kb_wiki.close), ("chats", runtime.kb_chats.close),
         ("ingest", runtime.kb_ingest.close), ("codex", runtime.kb_codex.close),
         ("decisions", runtime.kb_decisions.aclose), ("agents", runtime.kb_agents.aclose),
+        # 0.4.0: running Explore runs pause with ``app_exit``; repeat checks stop their background task.
+        ("explore", runtime.kb_explore.aclose), ("repeats", runtime.kb_repeats.aclose),
     ]
 
     async def close(name: str, closer: Callable[[], Awaitable[None]]) -> None:

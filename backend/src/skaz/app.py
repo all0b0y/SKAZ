@@ -73,6 +73,8 @@ def create_app(
             runtime.kb_agents.start()
             # N6: agent sessions of deleted chats that an earlier run could not delete yet.
             runtime.kb_chats.start()
+            # 0.4.0 B2: Explore runs paused by the last Quit (``app_exit``) go on.
+            await runtime.kb_explore.on_start()
             yield
         finally:
             # Agents and llama-server first, then the wiki services, within Electron's grace.

@@ -241,4 +241,4 @@ class _Closes:
 
 class _Runtime:
     kb_wiki = kb_chats = kb_ingest = kb_codex = _Closes()
-    kb_decisions = kb_agents = _Closes()
+    kb_decisions = kb_agents = kb_explore = kb_repeats = _Closes()

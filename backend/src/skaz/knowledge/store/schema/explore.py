@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS explore_findings (
     run_id TEXT NOT NULL REFERENCES explore_runs(id) ON DELETE CASCADE,
     task_id TEXT,
     area_id TEXT,
-    work_id TEXT NOT NULL REFERENCES science_works(id),
+    -- The work as found is kept in details_json; B1's science_works cache is not a dependency (B2).
+    work_id TEXT NOT NULL,
     channel TEXT NOT NULL CHECK(channel IN ('continues','branches','search')),
     label TEXT NOT NULL CHECK(label IN ('new','extends','contradicts','branch','covered')),
     reason TEXT NOT NULL,
