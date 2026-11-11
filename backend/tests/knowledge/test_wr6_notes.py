@@ -129,7 +129,8 @@ async def test_correction_refresh_restores_existing_notes_when_automatic_notes_a
         assert len(wiki.turns(prompts.NOTES_SCHEMA_TITLE)) == 2
         text = (kb.library_root / note.rel_path).read_text()
         assert "Температура связана с энергией частиц." in text
-        assert "среднюю кинетичную энергию" in text and "среднюю кинетическую энергию" not in text
+        source = wiki.turns(prompts.NOTES_SCHEMA_TITLE)[-1].messages[0].content
+        assert "среднюю кинетичную энергию" in source and "среднюю кинетическую энергию" not in source
         assert ingest.settings().write_notes_automatically is False
     finally:
         await service.close()

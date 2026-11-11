@@ -743,6 +743,14 @@ class IngestRun:
         if record.status != "ready":
             raise IngestFailed("The material is not ready yet. Add it to the wiki when its processing "
                                "finishes.")
+        job = await disk_call(self.jobs.get, self.job_id)
+        if not self.write_notes and job is not None and job.kind == "refresh" and self.scope == "full":
+            existing_notes = await disk_call(lambda: self.kb.pages(kind="note"))
+            if any(self.material_id in page.sources for page in existing_notes):
+                # A correction may already have retracted stale citations from these Notes. The
+                # default-off setting controls creation, not silent loss of previously written work.
+                self.write_notes = True
+                await self._log("Existing Notes are being refreshed after the material's text changed.")
         library = self.kb.require()
         try:
             source = await disk_call(load_source, library, self.material_id, record.rel_dir, self.text_layer)
