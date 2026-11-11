@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell, systemPreferences, type Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, session, shell, systemPreferences, type Tray } from 'electron';
 import path from 'node:path';
 import { mkdirSync, realpathSync } from 'node:fs';
 import { migrateLegacyProfile, resolveStorageProfile } from './storageProfile';
@@ -18,6 +18,7 @@ import { registerUpdates } from './updateRuntime';
 import { TrayBehavior, trayPrefsStore } from './trayBehavior';
 import { registerCloseQuitsIpc, showFirstCloseHint, startTray } from './trayRuntime';
 import { trayStatus } from './trayStatus';
+import { BackgroundJobs } from './backgroundJobs';
 import type { BackendStatus } from '../frontend/src/api/bridge';
 
 // electron-vite injects ELECTRON_RENDERER_URL in dev.
@@ -49,6 +50,7 @@ let mainWindow: BrowserWindow | null = null;
 let nativeClient: NativeLiveClient | null = null;
 // Module-level so it is never garbage collected: a collected Tray disappears from the menu bar.
 let tray: Tray | null = null;
+let backgroundJobs: BackgroundJobs | null = null;
 // The window was closed into the tray. Tells a hidden window from one that hasn't appeared yet at launch.
 let hiddenToTray = false;
 
@@ -391,6 +393,27 @@ app.whenReady().then(() => {
     isMainFrame: event.senderFrame?.parent === null,
   }));
   tray = startTray(trayStatus, { open: openFromTray, quit: () => app.quit() });
+  // 0.4.0: a running background job (weekly check, Check links, Explore, research) keeps SKAZ from being
+  // suspended with the window hidden, and the tray names its kind.
+  backgroundJobs = new BackgroundJobs({
+    getJson: async (route) => {
+      const handle = manager.getHandle();
+      if (!handle) return null;
+      try {
+        const res = await fetch(`http://127.0.0.1:${handle.port}${route}`, {
+          headers: { Authorization: `Bearer ${handle.token}` }, signal: AbortSignal.timeout(10_000),
+        });
+        return res.ok ? await res.json() as unknown : null;
+      } catch {
+        return null;
+      }
+    },
+    blocker: { start: () => powerSaveBlocker.start('prevent-app-suspension'), stop: (id) => powerSaveBlocker.stop(id) },
+    tray: trayStatus,
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+  });
+  backgroundJobs.start();
   createWindow();
 
   // Start the backend after the window exists so status events reach the UI.
@@ -416,6 +439,7 @@ app.on('before-quit', (event) => {
 });
 
 app.on('will-quit', () => {
+  backgroundJobs?.stop();
   // Windows would otherwise leave a dead icon in the tray until the pointer passes over it.
   tray?.destroy();
   tray = null;
