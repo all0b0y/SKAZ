@@ -131,6 +131,7 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', pattern: /^\/kb\/corrections\/[^/]+\/(?:revert|accept|keep|reapply)$/ },
   { method: 'GET', pattern: /^\/kb\/jobs$/ },
   { method: 'GET', pattern: /^\/kb\/jobs\/[^/]+$/ },
+  { method: 'POST', pattern: /^\/kb\/jobs\/[^/]+\/(?:continue|cancel)$/ },
   { method: 'GET', pattern: /^\/kb\/graph$/ },
   { method: 'GET', pattern: /^\/kb\/recordings\/defaults$/ },
   { method: 'POST', pattern: /^\/kb\/recordings$/ },
