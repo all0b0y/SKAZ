@@ -66,6 +66,7 @@ def legacy_db(tmp_path: Path) -> Iterator[Database]:
 
 class Setup:
     def __init__(self, kb: KnowledgeService, legacy_db: Database, wiki: ScriptedWiki) -> None:
+        kb.settings.set("write_notes_automatically", True)  # WR6: exercise the Notes source guard.
         self.kb = kb
         self.legacy_db = legacy_db
         self.legacy = FakeLegacy(legacy_db)

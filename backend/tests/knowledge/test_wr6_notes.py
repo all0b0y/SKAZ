@@ -1,16 +1,18 @@
 """WR6 at the scripted engine seam: explicit Notes, durable scope, no sleeps."""
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
 import httpx
 import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, Failed
+from skaz.knowledge.agents.engine import AgentTurn, Failed, TextDelta
 from skaz.knowledge.agents.fake import FakeEngine, ScriptItem
 from skaz.knowledge.ingest import prompts
 from skaz.knowledge.ingest.service import IngestBusy, IngestService
+from skaz.knowledge.ingest.settings import WIKI_BUDGET
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.store.schema import ingest as ingest_schema
 
@@ -97,7 +99,7 @@ async def test_opt_in_writes_notes_and_off_keeps_existing_notes(kb: KnowledgeSer
     await ingest.close()
 
 
-async def test_write_notes_only_preserves_concepts_and_skips_recognition_and_followups(kb: KnowledgeService) -> None:
+async def test_write_notes_preserves_concepts_and_skips_other_steps(kb: KnowledgeService) -> None:
     ingest, wiki, material = await seed(kb)
     before = concept_bytes(kb)
     wiki.queues[prompts.NOTES_SCHEMA_TITLE] = [NOTES_OK]
@@ -114,7 +116,8 @@ async def test_write_notes_only_preserves_concepts_and_skips_recognition_and_fol
     await drain(ingest)
     assert ingest.job(job.id).scope == "notes"
     assert ingest.job(job.id).state == "done", ingest.job(job.id).error
-    assert [t.response_schema["title"] for t in wiki.engine.turns if t.response_schema] == [prompts.NOTES_SCHEMA_TITLE]
+    assert [t.response_schema["title"] for t in wiki.engine.turns
+            if t.response_schema] == [prompts.NOTES_SCHEMA_TITLE]
     assert concept_bytes(kb) == before
     assert len(kb.pages(kind="note")) == 1 and not calls
     note = (kb.library_root / kb.pages(kind="note")[0].rel_path).read_text()
@@ -156,7 +159,8 @@ async def test_notes_quota_continue_retains_scope_and_budget(kb: KnowledgeServic
     assert done.execution.root_job_id == paused.execution.root_job_id
     assert done.execution.budget_characters == paused.execution.budget_characters
     assert concept_bytes(kb) == before
-    assert all(t.response_schema and t.response_schema["title"] == prompts.NOTES_SCHEMA_TITLE for t in engine.turns)
+    assert all(t.response_schema and t.response_schema["title"] == prompts.NOTES_SCHEMA_TITLE
+               for t in engine.turns)
     await ingest.close()
 
 
@@ -182,6 +186,83 @@ async def test_retry_and_restart_recovery_keep_notes_scope(kb: KnowledgeService)
     assert concept_bytes(kb) == before
     assert not wiki.turns(prompts.CONCEPTS_SCHEMA_TITLE)
     await recovered.close()
+
+
+async def test_notes_checkpoint_survives_quota_restart_and_continues_sections(kb: KnowledgeService) -> None:
+    ingest, _, material = await seed(kb)
+    before = concept_bytes(kb)
+    ingest.update_settings(engine="codex", model="fake-model")
+    sections = json.loads(NOTES_OK)["sections"]
+    good = ScriptedWiki(notes=[json.dumps({"sections": sections[1:], "more": False})])
+    first = True
+
+    def answer(turn: AgentTurn) -> list[ScriptItem]:
+        nonlocal first
+        if first:
+            first = False
+            return [TextDelta("", '{"sections": [' + json.dumps(sections[0]) + ', {"title": "unfinished'),
+                    Failed("", "limit", "quota")]
+        return good._answer(turn)
+
+    engine = FakeEngine("codex", script=answer)
+    ingest.engines = lambda _: engine
+    job = await ingest.request_notes(material)
+    await drain(ingest)
+    assert ingest.job(job.id).state == "paused", ingest.job(job.id).error
+    with kb.db.read() as connection:
+        saved = connection.execute("SELECT response FROM wiki_checkpoint_answers WHERE material_id=?",
+                                   (material,)).fetchall()
+    assert saved and sections[0]["title"] in json.loads(saved[0][0])["sections"][0]["title"]
+    await ingest.close()
+    recovered = IngestService(kb, engines=lambda _: engine, detector=PatternDetector())
+    await recovered.continue_job(job.id)
+    await drain(recovered)
+    done = recovered.job(job.id)
+    assert done.state == "done" and done.scope == "notes", done.error
+    assert done.counters["notes_sections"] == 2
+    assert len(engine.turns) == 2
+    assert sections[0]["title"] in engine.turns[-1].messages[0].content
+    assert concept_bytes(kb) == before
+    await recovered.close()
+
+
+async def test_notes_budget_continue_grants_a_portion_without_concepts(kb: KnowledgeService) -> None:
+    ingest, wiki, material = await seed(kb)
+    before = concept_bytes(kb)
+    wiki.engine.turns.clear()
+    ingest.update_settings(engine="codex", model="fake-model")
+    kb.settings.set(WIKI_BUDGET, 10_000)
+    first_section = json.loads(NOTES_OK)["sections"][0]
+    first = True
+
+    def answer(turn: AgentTurn) -> list[ScriptItem]:
+        nonlocal first
+        if first:
+            first = False
+            return [TextDelta("", '{"sections": [' + json.dumps(first_section) + ', {"title": "unfinished'),
+                    TextDelta("", "x" * 20_000)]
+        return wiki._answer(turn)
+
+    engine = FakeEngine("codex", script=answer)
+    ingest.engines = lambda _: engine
+    paused = await ingest.request_notes(material)
+    await drain(ingest)
+    assert ingest.job(paused.id).error_code == "BUDGET_REACHED"
+    assert ingest.job(paused.id).state == "paused", ingest.job(paused.id).error
+    assert len(engine.turns) == 1
+    ingest.update_settings(budget=2_000_000)
+    wiki.queues[prompts.NOTES_SCHEMA_TITLE] = [NOTES_OK]
+    continued = await ingest.request_from_user(material)
+    await drain(ingest)
+    done = ingest.job(continued.id)
+    assert done.state == "done" and done.scope == "notes", done.error
+    assert done.execution is not None and done.execution.root_job_id != paused.id
+    assert done.execution.budget_characters == 2_000_000
+    assert len(engine.turns) == 2
+    assert all(turn.response_schema and turn.response_schema["title"] == prompts.NOTES_SCHEMA_TITLE
+               for turn in engine.turns)
+    assert concept_bytes(kb) == before
+    await ingest.close()
 
 
 async def test_notes_http_and_settings_contract(kb_app: Any, kb_client: httpx.AsyncClient) -> None:

@@ -72,6 +72,8 @@ def engine_with_limit(retry_at: datetime | None) -> FakeEngine:
 
 
 def service(kb: KnowledgeService, engine: FakeEngine, clock: Clock) -> IngestService:
+    # Quota fixtures exercise streamed Notes; WR6 requires explicit opt-in.
+    kb.settings.set("write_notes_automatically", True)
     ingest = IngestService(kb, engines=lambda _id: engine, detector=PatternDetector(),
                            clock=clock, schedule=clock.schedule)
     ingest.slots = lambda: 1  # type: ignore[method-assign]

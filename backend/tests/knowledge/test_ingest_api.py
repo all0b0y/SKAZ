@@ -26,6 +26,7 @@ async def test_wiki_settings_defaults_and_partial_updates(kb_client: httpx.Async
                         "auto_add_files_links": True, "auto_add_text": False,
                         # W2: background connections need the user's permission; corrections are automatic.
                         "background_connections": False, "auto_corrections": True,
+                        "write_notes_automatically": False,
                         # C1-d: provisional until measured on the user's real run.
                         "wiki_budget_characters": 2_000_000}
     updated = (await kb_client.put("/kb/settings/wiki", json={"wiki_language": "ru",

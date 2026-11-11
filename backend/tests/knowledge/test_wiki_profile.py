@@ -33,6 +33,7 @@ async def test_ingest_pins_wiki_profile_instead_of_following_a_later_setting(
 ) -> None:
     await kb_client.post("/kb/library", json={})
     runtime = kb_app.state.runtime
+    runtime.kb_ingest.update_settings(write_notes_automatically=True)  # full-profile accounting fixture
     gate = asyncio.Event()
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], gate=gate,
                         models=[ModelOption("profile-model", "Profile model", ("low", "high"), "low")])
@@ -139,6 +140,7 @@ async def test_provider_reported_usage_is_accounted_without_saving_source_text(
 ) -> None:
     await kb_client.post("/kb/library", json={})
     runtime = kb_app.state.runtime
+    runtime.kb_ingest.update_settings(write_notes_automatically=True)  # two calls: Notes + Concepts
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], usage=Usage(10, 5))
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()

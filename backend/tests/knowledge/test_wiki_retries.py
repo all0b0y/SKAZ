@@ -71,7 +71,8 @@ async def _run(kb_app: Any, kb_client: httpx.AsyncClient,
     runtime.kb_ingest.detector = PatternDetector()
     saved = await kb_client.put("/kb/settings/wiki", json={"wiki_engine": "codex",
                                                             "wiki_model": "retry-model",
-                                                            "wiki_effort": "low"})
+                                                            "wiki_effort": "low",
+                                                            "write_notes_automatically": True})
     assert saved.status_code == 200, saved.text
     material_id = add_material(runtime.kb, "Physics", title, kind="pdf")
     job = (await kb_client.post(f"/kb/materials/{material_id}/ingest")).json()

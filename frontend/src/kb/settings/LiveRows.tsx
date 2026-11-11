@@ -532,7 +532,7 @@ export function WikiSwitchRow({ field, label }: { field: WikiFlag; label: string
   if (!wiki.value) return wiki.error ? <Failed error={wiki.error} retry={() => void settings.getState().loadWiki()} /> : <Reading />;
   return (
     <>
-      <Switch label={label} checked={wiki.value[field]} onChange={async (v) => show(await settings.getState().updateWiki({ [field]: v }))} />
+      <Switch label={label} checked={wiki.value[field] ?? false} onChange={async (v) => show(await settings.getState().updateWiki({ [field]: v }))} />
       {result}
     </>
   );

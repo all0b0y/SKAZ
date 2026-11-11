@@ -72,7 +72,8 @@ async def _world(kb_app: Any, kb_client: httpx.AsyncClient, notes_answers: list[
                         models=models or [ModelOption("stream-model", "Stream", ("low",), "low")])
     runtime.kb_ingest.engines = lambda _engine: engine
     runtime.kb_ingest.detector = PatternDetector()
-    profile = {"wiki_engine": "codex", "wiki_model": "stream-model", "wiki_effort": "low"}
+    profile = {"wiki_engine": "codex", "wiki_model": "stream-model", "wiki_effort": "low",
+               "write_notes_automatically": True}
     saved = await kb_client.put("/kb/settings/wiki", json=profile)
     assert saved.status_code == 200, saved.text
     material_id = add_material(runtime.kb, "Physics", "Лекция 8", kind="pdf")

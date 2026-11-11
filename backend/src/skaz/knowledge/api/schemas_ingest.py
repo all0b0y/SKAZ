@@ -137,9 +137,9 @@ class KbWikiSettings(BaseModel):
 
 
 class KbWikiSettingsUpdate(BaseModel):
-    write_notes_automatically: bool | None = None
     """Only the fields present are changed; ``wiki_engine: null`` returns to the default agent."""
 
+    write_notes_automatically: bool | None = None
     model_config = ConfigDict(extra="forbid")
     wiki_language: str | None = Field(default=None, min_length=2, max_length=35)
     wiki_engine: KbEngineId | None = None

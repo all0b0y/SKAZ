@@ -2823,6 +2823,7 @@ export interface KbWikiSettings {
   wiki_budget_characters: number;
 }
 
+/** Only the fields present are changed; ``wiki_engine: null`` returns to the default agent. */
 export interface KbWikiSettingsUpdate {
   write_notes_automatically?: boolean | null;
   wiki_language?: string | null;

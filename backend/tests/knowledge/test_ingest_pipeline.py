@@ -68,6 +68,8 @@ CONCEPTS_OK = concepts(
 
 
 def service_for(kb: KnowledgeService, wiki: ScriptedWiki | None, **kwargs: object) -> IngestService:
+    # WR6: this legacy full-pipeline fixture explicitly includes Notes; the product defaults off.
+    kb.settings.set("write_notes_automatically", True)
     engine: AgentEngine | None = wiki.engine if wiki else None
     return IngestService(kb, engines=lambda _engine_id: engine, detector=PatternDetector(),
                          **kwargs)  # type: ignore[arg-type]
