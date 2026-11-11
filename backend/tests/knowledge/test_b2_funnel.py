@@ -905,3 +905,26 @@ async def test_a_too_long_search_line_is_rejected_before_a_run_exists(kb_app: An
     response = await kb_client.post("/kb/explore/runs", json={"query": "x" * 301, "channels": ["search"]})
     assert (response.status_code, response.json()) == (422, {"code": "invalid_request"})
     assert runtime.kb_explore.job_store.recent() == []
+
+
+async def test_add_to_wiki_keeps_the_known_area_and_topics(parts: SimpleNamespace) -> None:
+    """Review R1-09: the material is in its area at once, before (or without) any wiki model run."""
+    from skaz.knowledge.areas.signals import SignalStore
+    from skaz.knowledge.areas.store import AreasStore
+    from skaz.knowledge.science.protocols import TaxonomyNode
+
+    areas = AreasStore(parts.kb, SignalStore(parts.kb.db))
+    areas.sync_taxonomy_nodes(None, [TaxonomyNode("area-ai", None, "subfield", "AI", 1)])
+    areas.sync_taxonomy_nodes(None, [TaxonomyNode("subfields-9", None, "subfield", "Other", 1)])
+    areas.sync_taxonomy_nodes("subfields-9", [TaxonomyNode("T1", "subfields-9", "topic", "Agents", 0)])
+    finding = await _one_finding(parts)
+    assert finding.area_id == "area-ai"
+    parts.science.texts["work-1"] = KbScienceText(
+        work_id="work-1", kind="abstract_only", text="", source_url=None, access=finding.work.access
+    )
+    imported = await parts.funnel.add_to_wiki(finding.id, KbFindingImport(content="abstract_only"))
+    ((prepared, _folder, _to_wiki),) = parts.sources.prepared
+    origin = prepared.origin.model_dump()
+    assert (origin["area_id"], origin["topic_ids"]) == ("area-ai", ["T1"])
+    assert imported.material_id in areas.materials("area-ai")  # the area the run placed it in
+    assert imported.material_id in areas.materials("subfields-9")  # and where its own topic is
