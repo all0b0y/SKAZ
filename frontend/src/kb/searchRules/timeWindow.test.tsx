@@ -52,6 +52,8 @@ describe('«what now» answers (N7-5)', () => {
     await user.click(chip);
     const menu = await screen.findByRole('menu', { name: 'Time window' });
     const year = new Date().getFullYear();
+    // «This year and last» is two calendar years, the same as the library's date filter.
+    expect(within(menu).getByRole('menuitem', { name: new RegExp(`This year and last \\(${year - 1}–${year}\\)`) })).toBeInTheDocument();
     await user.click(within(menu).getByRole('menuitem', { name: new RegExp(`Last 5 years \\(${year - 4}–${year}\\)`) }));
     await waitFor(() => expect(fake.calls).toContainEqual(expect.objectContaining({
       method: 'POST', path: '/kb/chats/c60/messages', body: expect.objectContaining({ text: `Look at ${year - 4}–${year} instead.` }),

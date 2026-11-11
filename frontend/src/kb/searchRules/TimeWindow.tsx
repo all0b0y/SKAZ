@@ -50,7 +50,7 @@ export function TimeWindowChip({ window, disabled = false, now = new Date().getF
     };
   };
   const items: MenuItem[] = [
-    choice(1, 'This year and last'), choice(3, 'Last 3 years'), choice(5, 'Last 5 years'), choice(10, 'Last 10 years'),
+    choice(2, 'This year and last'), choice(3, 'Last 3 years'), choice(5, 'Last 5 years'), choice(10, 'Last 10 years'),
     { id: 'any', label: 'Any time', disabled, onSelect: () => void ask('Answer without a time window this time.') },
   ];
   return (
