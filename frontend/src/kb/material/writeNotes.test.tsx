@@ -44,4 +44,18 @@ describe('WR6 explicit Notes', () => {
     await within(doc).findByRole('button', { name: 'Open the notes' });
     expect(within(doc).queryByRole('button', { name: 'Write notes' })).not.toBeInTheDocument();
   });
+
+  it('a failed Notes attempt shows its reason and can retry despite an older budget pause', async () => {
+    const world = docWorld();
+    const material = world.materials.find((m) => m.id === 'm-lec8')!;
+    material.wiki = materialWiki('in_wiki', { concept_count: 14, note_page_id: null,
+      error: 'The Notes answer stopped. Retry continues from the finished sections.' });
+    const oldPause = world.jobs.find((j) => j.material_id === 'm-l5')!;
+    Object.assign(oldPause, { material_id: material.id, state: 'paused', error_code: 'BUDGET_REACHED' });
+    const { services } = renderKb({ world });
+    act(() => services.ui.getState().openDocument({ type: 'material', id: material.id }));
+    const doc = await screen.findByRole('complementary', { name: 'Document' });
+    expect(await within(doc).findByRole('button', { name: 'Write notes' })).toBeEnabled();
+    expect(within(doc).getByRole('alert')).toHaveTextContent('The Notes answer stopped.');
+  });
 });
