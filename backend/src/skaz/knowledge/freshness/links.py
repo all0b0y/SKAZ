@@ -14,7 +14,7 @@ from typing import Any, Literal
 import httpx
 
 from ..api.schemas_freshness import KbLinkObservation
-from ..sources.fetch import Fetched, FetchFailed, LinkRejected, SafeFetcher
+from ..sources.fetch import DnsFailed, Fetched, FetchFailed, LinkRejected, SafeFetcher
 from ..store.records import MaterialRecord
 
 LinkReason = Literal["http_404", "http_410", "no_domain", "http_403", "http_429", "timeout", "other"]
@@ -38,10 +38,12 @@ class _ProbeFetcher(SafeFetcher):
     async def _check_host(self, url: str, allow_vpn_fake_ip: bool) -> str | None:
         try:
             return await super()._check_host(url, allow_vpn_fake_ip)
-        except LinkRejected:
+        except DnsFailed as error:
+            # Only a resolver that answered "no such name" is evidence of a gone domain; offline or a DNS
+            # outage is "couldn't check" and never starts or confirms a gone mark (0.4.0 review R2-05).
+            if error.kind == "no_such_host":
+                raise _NoDomainError() from error
             raise
-        except FetchFailed as error:
-            raise _NoDomainError() from error
 
     @staticmethod
     async def _read(

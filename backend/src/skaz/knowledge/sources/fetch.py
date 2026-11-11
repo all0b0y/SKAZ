@@ -39,6 +39,7 @@ import re
 import socket
 from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -142,6 +143,32 @@ class FetchFailed(KnowledgeError):
     status_code = 502
 
 
+DnsFailureKind = Literal["no_such_host", "unavailable"]
+#: ``getaddrinfo`` answers that say the name has no address (NXDOMAIN, no data) rather than "try again".
+_NO_SUCH_HOST = frozenset(
+    code
+    for code in (getattr(socket, "EAI_NONAME", None), getattr(socket, "EAI_NODATA", None))
+    if code is not None
+)
+NOT_FOUND_MESSAGE = "SKAZ couldn't find this website. Check the address and the connection."
+
+
+class DnsFailed(FetchFailed):
+    """The host name did not resolve. ``kind``: ``no_such_host`` when the resolver answered that the name has
+    no address; ``unavailable`` when it could not answer (offline, DNS down, a temporary failure) — only the
+    first is evidence that a domain is gone (0.4.0 review R2-05)."""
+
+    def __init__(self, kind: DnsFailureKind) -> None:
+        super().__init__(NOT_FOUND_MESSAGE)
+        self.kind: DnsFailureKind = kind
+
+
+def _dns_failure_kind(error: BaseException) -> DnsFailureKind:
+    if isinstance(error, socket.gaierror) and error.errno in _NO_SUCH_HOST:
+        return "no_such_host"
+    return "unavailable"
+
+
 @dataclass(frozen=True)
 class Fetched:
     url: str
@@ -221,11 +248,9 @@ class SafeFetcher:
         try:
             addresses = await self.resolver(host)
         except (OSError, UnicodeError) as error:
-            raise FetchFailed(
-                "SKAZ couldn't find this website. Check the address and the connection."
-            ) from error
+            raise DnsFailed(_dns_failure_kind(error)) from error
         if not addresses:
-            raise FetchFailed("SKAZ couldn't find this website. Check the address and the connection.")
+            raise DnsFailed("no_such_host")
         checked: list[str] = []
         for raw in addresses:
             try:
@@ -239,7 +264,7 @@ class SafeFetcher:
                     raise LinkRejected(VPN_HIDDEN)
             checked.append(str(address))
         if not checked:
-            raise FetchFailed("SKAZ couldn't find this website. Check the address and the connection.")
+            raise DnsFailed("unavailable")
         return checked[0]
 
     async def fetch(

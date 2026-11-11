@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+import asyncio
+import socket
+import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
@@ -11,22 +14,18 @@ import pytest
 
 from skaz.knowledge.api.schemas_areas import KbReadMarkValue
 from skaz.knowledge.api.schemas_explore_common import (
-    KbCheckpoint,
+    KbContinue,
     KbDateWindow,
-    KbExploreJob,
-    KbJobOwner,
     KbMaterialRef,
     KbPublicationDate,
-    KbRunBudget,
-    KbRunCounters,
-    KbRunStage,
-    KbStopReason,
 )
 from skaz.knowledge.api.schemas_freshness import KbLibraryDateQuery, KbLinkCheckStart
 from skaz.knowledge.api.schemas_repeats import KbMaterialRepeats
 from skaz.knowledge.areas.protocols import AreaDirectory
-from skaz.knowledge.errors import NotFound
+from skaz.knowledge.errors import KnowledgeError, NotFound
+from skaz.knowledge.explore.jobs import SqliteJobStore
 from skaz.knowledge.freshness import FreshnessService
+from skaz.knowledge.freshness.store import FreshnessStore, LinkCheckScope, LinkTarget
 from skaz.knowledge.library.layout import SERVICE_DIR
 from skaz.knowledge.markdown.source import FragmentInput, Origin
 from skaz.knowledge.science.protocols import ScienceClient, ScienceConsentRequired, ScienceRef
@@ -55,143 +54,6 @@ class FakeScienceClient:
         return KbPublicationDate(
             year=None, date=None, month=None, precision="unknown", origin="unknown", evidence_url=None
         )
-
-
-class FakeJobStore:
-    """In-memory implementation of ``JobStore`` protocol for testing B5 in isolation."""
-
-    def __init__(self) -> None:
-        self.jobs: dict[str, KbExploreJob] = {}
-        self.completed_work: dict[tuple[str, str], dict[str, str]] = {}
-        self._seq = 0
-
-    def create(
-        self, owner: KbJobOwner, title: str, stage: KbRunStage, budget: KbRunBudget
-    ) -> KbExploreJob:
-        self._seq += 1
-        job_id = f"job-{self._seq}"
-        now = datetime(2026, 11, 9, 10, 0, tzinfo=UTC)
-        job = KbExploreJob(
-            id=job_id,
-            owner=owner,
-            state="running",
-            stage=stage,
-            stop_reason=None,
-            budget=budget,
-            counters=KbRunCounters(
-                checked=0,
-                after_rules=0,
-                decided=0,
-                on_topic=0,
-                novelty_checked=0,
-                new=0,
-                covered=0,
-            ),
-            checkpoint=None,
-            decision_provider="local",
-            decision_choices=[],
-            retry_at=None,
-            created_at=now,
-            updated_at=now,
-        )
-        self.jobs[job_id] = job
-        return job
-
-    def get(self, job_id: str) -> KbExploreJob | None:
-        return self.jobs.get(job_id)
-
-    def active(self) -> Sequence[KbExploreJob]:
-        return [j for j in self.jobs.values() if j.state in ("queued", "running", "paused")]
-
-
-    # 0.4.0 review round: the fix batch FX-B replaces this fake with the real SqliteJobStore (R2-09).
-    def claim_paused(self, job_id: str, *, checkpoint_id: str, revision: int,
-                     budget: KbRunBudget | None = None) -> KbExploreJob:
-        raise AssertionError("not used by these tests")
-
-    def advance(self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget,
-                counters: KbRunCounters) -> KbExploreJob:
-        raise AssertionError("not used by these tests")
-
-    def progress(
-        self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget, counters: KbRunCounters
-    ) -> KbExploreJob:
-        job = self.jobs[job_id]
-        updated = job.model_copy(
-            update={
-                "state": "running",
-                "stop_reason": None,
-                "stage": stage,
-                "budget": budget,
-                "counters": counters,
-                "updated_at": datetime(2026, 11, 9, 10, 5, tzinfo=UTC),
-            }
-        )
-        self.jobs[job_id] = updated
-        return updated
-
-    def stop(
-        self, job_id: str, reason: KbStopReason, *, retry_at: str | None = None
-    ) -> KbExploreJob:
-        job = self.jobs[job_id]
-        if reason == "completed":
-            state = "done"
-            checkpoint = None
-        elif reason == "cancelled":
-            state = "cancelled"
-            checkpoint = job.checkpoint
-        elif reason == "failed":
-            state = "error"
-            checkpoint = job.checkpoint
-        else:
-            state = "paused"
-            checkpoint = job.checkpoint
-        updated = job.model_copy(
-            update={
-                "state": state,
-                "stop_reason": reason,
-                "checkpoint": checkpoint,
-                "retry_at": retry_at,
-                "updated_at": datetime(2026, 11, 9, 10, 10, tzinfo=UTC),
-            }
-        )
-        self.jobs[job_id] = updated
-        return updated
-
-    def checkpoint(
-        self,
-        job_id: str,
-        *,
-        stage: KbRunStage,
-        cursor: str | None,
-        completed_ids: Sequence[str],
-        pending_ids: Sequence[str],
-    ) -> KbCheckpoint:
-        job = self.jobs[job_id]
-        rev = (job.checkpoint.revision + 1) if job.checkpoint is not None else 1
-        cp = KbCheckpoint(
-            id=f"cp-{job_id}-{rev}",
-            revision=rev,
-            stage=stage,
-            cursor=cursor,
-            completed_ids=list(completed_ids),
-            pending_ids=list(pending_ids),
-            saved_at=datetime(2026, 11, 9, 10, 6, tzinfo=UTC),
-        )
-        self.jobs[job_id] = job.model_copy(update={"checkpoint": cp})
-        return cp
-
-    def complete(self, job_id: str, candidate_id: str, stage: KbRunStage, result_json: str) -> None:
-        bucket = self.completed_work.setdefault((job_id, stage), {})
-        if candidate_id in bucket:
-            raise ValueError(f"Duplicate completed work: {candidate_id}")
-        bucket[candidate_id] = result_json
-
-    def completed(self, job_id: str, stage: KbRunStage) -> Collection[str]:
-        return set(self.completed_work.get((job_id, stage), {}).keys())
-
-    def recover(self) -> Sequence[str]:
-        return []
 
 
 class FakeMarkWriter:
@@ -257,6 +119,12 @@ def _add_material(
         skaz_dir.mkdir(parents=True, exist_ok=True)
         (skaz_dir / "original.html").write_text(html, encoding="utf-8")
     return created.manifest.id
+
+
+async def run_check(svc: FreshnessService, body: KbLinkCheckStart) -> Any:
+    """Start a check and wait for its background worker (the start answers at once, review R2-03)."""
+    started = await svc.check_links(body)
+    return await asyncio.wait_for(svc.settled(started.id), 10)
 
 
 async def test_publication_not_found_raises_404(ready: KnowledgeService) -> None:
@@ -655,7 +523,7 @@ async def test_link_check_outcomes_and_two_step_one_day_confirmation(
     )
     current_time = datetime(2026, 11, 9, 10, 0, tzinfo=UTC)
     marks = FakeMarkWriter()
-    jobs = FakeJobStore()
+    jobs = SqliteJobStore(ready.db)
     svc = FreshnessService(
         ready,
         job_store=jobs,
@@ -665,7 +533,7 @@ async def test_link_check_outcomes_and_two_step_one_day_confirmation(
     )
 
     # First check at T0: 404, 410, and no_domain are suspected_gone, NOT confirmed_gone!
-    check1 = await svc.check_links(KbLinkCheckStart(folder_id=folder))
+    check1 = await run_check(svc, KbLinkCheckStart(folder_id=folder))
     assert check1.state == "done"
     obs1 = {o.material_id: o for o in check1.observations}
 
@@ -705,9 +573,7 @@ async def test_link_check_outcomes_and_two_step_one_day_confirmation(
     # Second check 12 hours later (< 1 day): still suspected_gone, no marks written.
     t0 = current_time
     current_time = t0 + timedelta(hours=12)
-    check2 = await svc.check_links(
-        KbLinkCheckStart(material_ids=[mat_404, mat_410, mat_dns])
-    )
+    check2 = await run_check(svc, KbLinkCheckStart(material_ids=[mat_404, mat_410, mat_dns]))
     obs2 = {o.material_id: o for o in check2.observations}
     for mid in (mat_404, mat_410, mat_dns):
         assert obs2[mid].outcome == "suspected_gone"
@@ -717,9 +583,7 @@ async def test_link_check_outcomes_and_two_step_one_day_confirmation(
 
     # Third check 25 hours after T0 (>= 1 day): confirmed_gone and FreshnessMarkWriter.link_gone called!
     current_time = t0 + timedelta(hours=25)
-    check3 = await svc.check_links(
-        KbLinkCheckStart(material_ids=[mat_404, mat_410, mat_dns, mat_403])
-    )
+    check3 = await run_check(svc, KbLinkCheckStart(material_ids=[mat_404, mat_410, mat_dns, mat_403]))
     obs3 = {o.material_id: o for o in check3.observations}
     for mid in (mat_404, mat_410, mat_dns):
         assert obs3[mid].outcome == "confirmed_gone"
@@ -731,7 +595,7 @@ async def test_link_check_outcomes_and_two_step_one_day_confirmation(
     # Fourth check: mat_404 comes back (200 OK) -> link_back is called!
     status_by_host["gone404.example.org"] = 200
     current_time = t0 + timedelta(hours=26)
-    check4 = await svc.check_links(KbLinkCheckStart(material_ids=[mat_404]))
+    check4 = await run_check(svc, KbLinkCheckStart(material_ids=[mat_404]))
     assert check4.observations[0].outcome == "ok"
     assert mat_404 in marks.back_calls
 
@@ -772,15 +636,16 @@ async def test_link_check_batch_budget_pause_continue_and_http_routes(
         transport=httpx.MockTransport(lambda _req: httpx.Response(200, text="ok")),
         resolver=fake_resolver,
     )
-    jobs = FakeJobStore()
+    jobs = SqliteJobStore(kb.db)
     marks = FakeMarkWriter()
-    runtime.kb_freshness = FreshnessService(
+    freshness = FreshnessService(
         kb,
         job_store=jobs,
         mark_writer=marks,
         fetcher=fetcher,
         link_batch_limit=2,
     )
+    runtime.kb_freshness = freshness
 
     # 1. GET publication route
     pub_resp = await kb_client.get(f"/kb/materials/{m1}/publication")
@@ -803,8 +668,10 @@ async def test_link_check_batch_budget_pause_continue_and_http_routes(
     # 3. Start link check with batch limit 2 on 3 materials -> pauses after 2 links with stop_reason="budget"
     start_resp = await kb_client.post("/kb/freshness/link-checks", json={"folder_id": folder})
     assert start_resp.status_code == 200
-    check_data = start_resp.json()
-    check_id = check_data["id"]
+    check_id = start_resp.json()["id"]
+    assert start_resp.json()["state"] == "running"  # the start answers at once (review R2-03)
+    await asyncio.wait_for(freshness.settled(check_id), 10)
+    check_data = (await kb_client.get(f"/kb/freshness/link-checks/{check_id}")).json()
     assert check_data["state"] == "paused"
     assert check_data["stop_reason"] == "budget"
     assert check_data["budget"]["limit"] == 2
@@ -838,7 +705,9 @@ async def test_link_check_batch_budget_pause_continue_and_http_routes(
         json={"checkpoint_id": cp["id"], "revision": 1},
     )
     assert cont_resp.status_code == 200
-    done_data = cont_resp.json()
+    assert cont_resp.json()["state"] == "running"
+    await asyncio.wait_for(freshness.settled(check_id), 10)
+    done_data = (await kb_client.get(f"/kb/freshness/link-checks/{check_id}")).json()
     assert done_data["state"] == "done"
     assert done_data["stop_reason"] == "completed"
     assert done_data["budget"]["batch"] == 2
@@ -881,7 +750,7 @@ async def test_link_check_without_its_stores_is_not_ready_and_starts_nothing(
         requests.append(req)
         return httpx.Response(200, text="ok")
 
-    jobs = FakeJobStore()
+    jobs = SqliteJobStore(kb.db)
     wired: dict[str, Any] = {"job_store": jobs, "mark_writer": FakeMarkWriter()}
     wired.pop(missing)
     runtime.kb_freshness = FreshnessService(
@@ -894,4 +763,161 @@ async def test_link_check_without_its_stores_is_not_ready_and_starts_nothing(
     assert resp.status_code == 503
     assert resp.json()["code"] == "not_ready"
     assert requests == []
-    assert jobs.active() == []
+    assert [job for job in jobs.active() if job.owner == "links"] == []
+
+
+# -- 0.4.0 review round (R2-03, R2-04, R2-05, R2-06, R2-09) ------------------------------------------
+
+
+def _resolver(*, failing: dict[str, int] | None = None) -> Any:
+    async def resolve(host: str) -> list[str]:
+        code = (failing or {}).get(host)
+        if code is not None:
+            raise socket.gaierror(code, "resolver said no")
+        return ["93.184.216.34"]
+
+    return resolve
+
+
+class GatedTransport:
+    """Answers 200 to every probe, each one only after the test opens the gate."""
+
+    def __init__(self) -> None:
+        self.gate = asyncio.Event()
+        self.entered = asyncio.Event()
+        self.hosts: list[str] = []
+
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.hosts.append(request.headers.get("Host", request.url.host))
+        self.entered.set()
+        await self.gate.wait()
+        return httpx.Response(200, text="ok")
+
+
+def _linked(kb: KnowledgeService, count: int) -> tuple[str, list[str]]:
+    folder = kb.create_folder("Gated").id
+    ids = [
+        _add_material(kb, title=f"Link {n}", folder_id=folder,
+                      origin={"type": "url", "url": f"https://site{n}.example.org/doc"})
+        for n in range(count)
+    ]
+    return folder, ids
+
+
+def _gated_service(kb: KnowledgeService, transport: GatedTransport, *, limit: int = 100) -> FreshnessService:
+    return FreshnessService(
+        kb,
+        job_store=SqliteJobStore(kb.db),
+        mark_writer=FakeMarkWriter(),
+        fetcher=SafeFetcher(transport=httpx.MockTransport(transport), resolver=_resolver()),
+        link_batch_limit=limit,
+    )
+
+
+async def test_r2_03_the_start_answers_before_any_probe_finishes(ready: KnowledgeService) -> None:
+    folder, ids = _linked(ready, 2)
+    transport = GatedTransport()
+    svc = _gated_service(ready, transport)
+    started = await asyncio.wait_for(svc.check_links(KbLinkCheckStart(folder_id=folder)), 5)
+    assert (started.state, started.observations) == ("running", [])
+    await asyncio.wait_for(transport.entered.wait(), 5)
+    shown = await svc.link_check(started.id)
+    assert shown.state == "running"
+    transport.gate.set()
+    done = await asyncio.wait_for(svc.settled(started.id), 10)
+    assert done.state == "done" and [o.material_id for o in done.observations] == ids
+
+
+async def test_r2_04_a_pause_during_a_probe_stays_paused_after_the_probe_returns(
+    ready: KnowledgeService,
+) -> None:
+    folder, ids = _linked(ready, 3)
+    transport = GatedTransport()
+    svc = _gated_service(ready, transport)
+    started = await asyncio.wait_for(svc.check_links(KbLinkCheckStart(folder_id=folder)), 5)
+    await asyncio.wait_for(transport.entered.wait(), 5)
+    paused = await asyncio.wait_for(svc.pause(started.id), 5)
+    assert (paused.state, paused.stop_reason) == ("paused", "user_pause")
+    transport.gate.set()  # the probe that was in flight returns now
+    after = await asyncio.wait_for(svc.settled(started.id), 10)
+    assert (after.state, after.stop_reason) == ("paused", "user_pause")
+    assert len(transport.hosts) == 1  # the worker stopped after the unit it had started
+    assert [o.material_id for o in after.observations] == ids[:1]  # that unit is kept
+    assert after.checkpoint is not None
+    resumed = await svc.resume(
+        started.id, KbContinue(checkpoint_id=after.checkpoint.id, revision=after.checkpoint.revision)
+    )
+    assert resumed.state == "running"
+    done = await asyncio.wait_for(svc.settled(started.id), 10)
+    assert done.state == "done" and [o.material_id for o in done.observations] == ids
+    assert len(transport.hosts) == 3  # the kept unit was not probed again
+
+
+async def test_r2_06_two_continues_with_one_checkpoint_start_one_worker(ready: KnowledgeService) -> None:
+    folder, ids = _linked(ready, 3)
+    transport = GatedTransport()
+    transport.gate.set()
+    svc = _gated_service(ready, transport, limit=1)
+    started = await svc.check_links(KbLinkCheckStart(folder_id=folder))
+    paused = await asyncio.wait_for(svc.settled(started.id), 10)
+    assert (paused.state, paused.stop_reason) == ("paused", "budget") and paused.checkpoint is not None
+    body = KbContinue(checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision)
+    first, second = await asyncio.gather(
+        svc.resume(started.id, body), svc.resume(started.id, body), return_exceptions=True
+    )
+    outcomes = sorted(type(item).__name__ for item in (first, second))
+    lost = next(item for item in (first, second) if isinstance(item, BaseException))
+    assert isinstance(lost, KnowledgeError) and lost.status_code == 409, outcomes
+    after = await asyncio.wait_for(svc.settled(started.id), 10)
+    assert (after.state, after.stop_reason) == ("paused", "budget")
+    assert len(transport.hosts) == 2  # one batch of one link, not two
+    assert [o.material_id for o in after.observations] == ids[:2]
+
+
+@pytest.mark.parametrize(
+    ("code", "outcome", "reason"),
+    [
+        (socket.EAI_AGAIN, "could_not_check", "other"),  # offline / DNS server unreachable: temporary
+        (socket.EAI_FAIL, "could_not_check", "other"),
+        (socket.EAI_NONAME, "suspected_gone", "no_domain"),  # a definite "no such name"
+    ],
+)
+async def test_r2_05_only_a_definite_no_such_name_counts_as_gone(
+    ready: KnowledgeService, code: int, outcome: str, reason: str
+) -> None:
+    folder = ready.create_folder("Dns").id
+    mat = _add_material(ready, title="Dns", folder_id=folder,
+                        origin={"type": "url", "url": "https://flaky.example.org/doc"})
+    marks = FakeMarkWriter()
+    now = datetime(2026, 11, 9, 10, 0, tzinfo=UTC)
+    clock = [now]
+    svc = FreshnessService(
+        ready,
+        job_store=SqliteJobStore(ready.db),
+        mark_writer=marks,
+        fetcher=SafeFetcher(
+            transport=httpx.MockTransport(lambda _req: httpx.Response(200, text="ok")),
+            resolver=_resolver(failing={"flaky.example.org": code}),
+        ),
+        clock=lambda: clock[0],
+    )
+    first = await run_check(svc, KbLinkCheckStart(material_ids=[mat]))
+    assert (first.observations[0].outcome, first.observations[0].reason) == (outcome, reason)
+    clock[0] = now + timedelta(days=2)
+    second = await run_check(svc, KbLinkCheckStart(material_ids=[mat]))
+    if outcome == "could_not_check":
+        assert second.observations[0].outcome == "could_not_check" and marks.gone_calls == []
+    else:
+        assert second.observations[0].outcome == "confirmed_gone" and marks.gone_calls != []
+
+
+def test_r2_09_a_link_check_without_its_job_row_fails_closed(ready: KnowledgeService) -> None:
+    store = FreshnessStore(ready.db)
+    scope = LinkCheckScope(
+        check_id="job-missing", folder_id=None, material_ids=("m",), targets=(LinkTarget("m", "https://x.org"),)
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        store.save_link_check(scope)
+    with ready.db.read() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM freshness_link_checks").fetchone()[0] == 0
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
