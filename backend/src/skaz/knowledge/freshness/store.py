@@ -155,7 +155,7 @@ class FreshnessStore:
             "INSERT INTO freshness_link_checks (id, scope_json) VALUES (?, ?) "
             "ON CONFLICT(id) DO UPDATE SET scope_json = excluded.scope_json"
         )
-        self._execute_with_fk_fallback(sql, (scope.check_id, scope_json))
+        self._execute(sql, (scope.check_id, scope_json))
 
     def get_link_check(self, check_id: str) -> LinkCheckScope | None:
         with self._db.read() as conn:
@@ -200,7 +200,7 @@ class FreshnessStore:
             _format_iso_datetime(observation.first_gone_at),
             _format_iso_datetime(observation.confirm_after),
         )
-        self._execute_with_fk_fallback(sql, params)
+        self._execute(sql, params)
 
     def list_observations(self, check_id: str) -> list[KbLinkObservation]:
         with self._db.read() as conn:
@@ -241,24 +241,11 @@ class FreshnessStore:
                 return _parse_iso_datetime(str(row["first_gone_at"]))
         return None
 
-    def _execute_with_fk_fallback(self, sql: str, params: Sequence[Any]) -> None:
-        """Write to ``freshness_link_*``; when a test injects an in-memory ``JobStore`` fake
-        that does not populate ``explore_jobs``, fall back without touching ``explore_jobs``.
-        """
-        try:
-            with self._db.write() as conn:
-                conn.execute(sql, tuple(params))
-        except sqlite3.IntegrityError:
-            with self._db.read() as conn:
-                conn.execute("PRAGMA foreign_keys=OFF")
-                try:
-                    conn.execute(sql, tuple(params))
-                    conn.commit()
-                except BaseException:
-                    conn.rollback()
-                    raise
-                finally:
-                    conn.execute("PRAGMA foreign_keys=ON")
+    def _execute(self, sql: str, params: Sequence[Any]) -> None:
+        """One write. A missing parent job fails with ``sqlite3.IntegrityError``: a link check is only
+        stored for a durable ``explore_jobs`` row (no foreign-key bypass, 0.4.0 review R2-09)."""
+        with self._db.write() as conn:
+            conn.execute(sql, tuple(params))
 
     @staticmethod
     def _row_to_publication(row: sqlite3.Row) -> KbPublicationDate:

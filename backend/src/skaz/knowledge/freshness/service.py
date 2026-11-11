@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import logging
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,6 +22,7 @@ from ..api.schemas_explore_common import (
     KbPublicationDate,
     KbRunBudget,
     KbRunCounters,
+    KbStopReason,
 )
 from ..api.schemas_freshness import (
     KbDatedMaterials,
@@ -29,6 +35,7 @@ from ..api.schemas_freshness import (
 from ..api.schemas_repeats import KbMaterialRepeats
 from ..areas.protocols import AreaDirectory
 from ..errors import KnowledgeError, NameRejected, NotFound
+from ..explore.jobs import ClaimLost
 from ..explore.protocols import JobStore
 from ..maintenance.protocols import FreshnessMarkReader, FreshnessMarkWriter
 from ..markdown.source import MaterialKind
@@ -45,8 +52,10 @@ from .dates import (
     publication_in_window,
     publication_sort_key,
 )
-from .links import evaluate_observation, material_check_url, probe_link
+from .links import RawLinkProbe, evaluate_observation, material_check_url, probe_link
 from .store import FreshnessStore, LinkCheckScope, LinkTarget
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LINK_BATCH_LIMIT = 100
 MAX_PAGE_LIST = 200
@@ -110,7 +119,10 @@ class FreshnessService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._link_batch_limit = max(1, min(link_batch_limit, 500))
         self._runtime = runtime
-        self._pause_requested: set[str] = set()
+        #: The one background worker per running check, and the lock its transitions share (R2-03/04/06).
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._closing = False
 
     @property
     def _resolved_science(self) -> ScienceClient | None:
@@ -270,7 +282,11 @@ class FreshnessService:
         )
 
     async def check_links(self, body: KbLinkCheckStart) -> KbLinkCheck:
+        """Stores the job and its scope, starts ONE tracked background worker and answers at once with the
+        running job: a folder of slow links never holds the request (0.4.0 review R2-03)."""
         await disk_call(self._ensure_ready)
+        if self._closing:
+            raise ContractFailure(503, "not_ready")
         scope_ids, targets = await disk_call(self._resolve_link_targets, body)
         job_store = self._resolved_job_store
         self._resolved_mark_writer  # noqa: B018 (fail before a job exists, not halfway through)
@@ -294,7 +310,8 @@ class FreshnessService:
             checkpoint=None,
         )
         await disk_call(self._store.save_link_check, scope)
-        return await self._run_link_batch(job, scope, batch_number=1, prior_total_used=0)
+        self._spawn(job.id, batch_number=1, prior_total_used=0)
+        return await self.link_check(job.id)
 
     async def link_check(self, check_id: str) -> KbLinkCheck:
         await disk_call(self._ensure_ready)
@@ -302,54 +319,74 @@ class FreshnessService:
         observations = await disk_call(self._store.list_observations, check_id)
         return self._build_link_check(job, scope, observations)
 
+    async def settled(self, check_id: str) -> KbLinkCheck:
+        """Waits until the background worker of a check has stopped (tests, shutdown)."""
+        task = self._tasks.get(check_id)
+        if task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.shield(task)
+        return await self.link_check(check_id)
+
     async def pause(self, check_id: str) -> KbLinkCheck:
+        """Paused at once, with a checkpoint. A probe already in flight still finishes and is recorded; the
+        worker's progress write (``JobStore.advance``) never undoes the pause, and it stops there (R2-04)."""
         await disk_call(self._ensure_ready)
-        job, scope = await disk_call(self._load_check, check_id)
-        if job.state not in ("running", "queued"):
-            raise _Conflict("This link check is not running.")
-        self._pause_requested.add(check_id)
-        job_store = self._resolved_job_store
-        completed_set = set(await disk_call(job_store.completed, check_id, "links"))
-        all_target_ids = [t.material_id for t in scope.targets]
-        completed_ids = [mid for mid in all_target_ids if mid in completed_set]
-        pending_ids = [mid for mid in all_target_ids if mid not in completed_set]
-        cursor = pending_ids[0] if pending_ids else None
-        cp = await disk_call(
-            job_store.checkpoint,
-            check_id,
-            stage="links",
-            cursor=cursor,
-            completed_ids=completed_ids,
-            pending_ids=pending_ids,
-        )
-        stopped = await disk_call(job_store.stop, check_id, "user_pause")
-        updated_scope = LinkCheckScope(
-            check_id=scope.check_id,
-            folder_id=scope.folder_id,
-            material_ids=scope.material_ids,
-            targets=scope.targets,
-            checkpoint=cp,
-        )
-        await disk_call(self._store.save_link_check, updated_scope)
+        async with self._lock(check_id):
+            job, scope = await disk_call(self._load_check, check_id)
+            if job.state not in ("running", "queued"):
+                raise _Conflict("This link check is not running.")
+            stopped, updated_scope = await disk_call(self._checkpoint_and_stop, check_id, scope, "user_pause")
         observations = await disk_call(self._store.list_observations, check_id)
         return self._build_link_check(stopped, updated_scope, observations)
 
     async def resume(self, check_id: str, body: KbContinue) -> KbLinkCheck:
+        """Continue: claims the paused checkpoint atomically (``JobStore.claim_paused``) and starts the
+        worker only when the claim wins; a second Continue with the same checkpoint is 409 (R2-06)."""
         await disk_call(self._ensure_ready)
-        job, scope = await disk_call(self._load_check, check_id)
-        if job.state != "paused":
-            raise _Conflict("Only a paused link check can continue.")
-        cp = job.checkpoint or scope.checkpoint
-        if cp is None or cp.id != body.checkpoint_id or cp.revision != body.revision:
-            raise _Conflict("Checkpoint revision is out of date.")
-        self._pause_requested.discard(check_id)
-        next_batch = job.budget.batch + 1
-        return await self._run_link_batch(
-            job,
-            scope,
-            batch_number=next_batch,
-            prior_total_used=job.budget.total_used,
-        )
+        if self._closing:
+            raise ContractFailure(503, "not_ready")
+        # A worker paused mid-probe stops right after that probe: wait for it, never run two at once.
+        await self._wait_worker(check_id)
+        async with self._lock(check_id):
+            job, _scope = await disk_call(self._load_check, check_id)
+            if job.state != "paused":
+                raise _Conflict("Only a paused link check can continue.")
+            if self._running(check_id):
+                raise ClaimLost()
+            budget = KbRunBudget(
+                unit="link",
+                limit=job.budget.limit,
+                used=0,
+                remaining=job.budget.limit,
+                total_used=job.budget.total_used,
+                batch=job.budget.batch + 1,
+                free_only=True,
+            )
+            await disk_call(
+                partial(
+                    self._resolved_job_store.claim_paused,
+                    check_id,
+                    checkpoint_id=body.checkpoint_id,
+                    revision=body.revision,
+                    budget=budget,
+                )
+            )
+            self._spawn(check_id, batch_number=budget.batch, prior_total_used=budget.total_used)
+        return await self.link_check(check_id)
+
+    async def aclose(self) -> None:
+        """Quit: each worker stops; its check pauses with ``app_exit`` and a checkpoint (free work only, so
+        Continue may pick it up after the next start; ``JobStore.recover`` covers a crash)."""
+        self._closing = True
+        for check_id, task in list(self._tasks.items()):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            async with self._lock(check_id):
+                with contextlib.suppress(KnowledgeError):
+                    job, scope = await disk_call(self._load_check, check_id)
+                    if job.state in ("running", "queued"):
+                        await disk_call(self._checkpoint_and_stop, check_id, scope, "app_exit")
 
     async def _resolve_publication(self, record: MaterialRecord) -> KbPublicationDate:
         cached = await disk_call(self._store.get_publication, record.id)
@@ -464,86 +501,111 @@ class FreshnessService:
             raise NotFound("This link check wasn't found.")
         return job, scope
 
-    async def _run_link_batch(
-        self,
-        job: KbExploreJob,
-        scope: LinkCheckScope,
-        *,
-        batch_number: int,
-        prior_total_used: int,
-    ) -> KbLinkCheck:
+    # -- the worker ------------------------------------------------------------------------------
+
+    def _lock(self, check_id: str) -> asyncio.Lock:
+        """Pause, Continue and the worker's own final transitions of one check, one at a time."""
+        return self._locks.setdefault(check_id, asyncio.Lock())
+
+    def _running(self, check_id: str) -> bool:
+        task = self._tasks.get(check_id)
+        return task is not None and not task.done()
+
+    async def _wait_worker(self, check_id: str) -> None:
+        task = self._tasks.get(check_id)
+        if task is not None and not task.done():
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.shield(task)
+
+    def _spawn(self, check_id: str, *, batch_number: int, prior_total_used: int) -> None:
+        if self._running(check_id):
+            raise ClaimLost()  # never two workers for one check
+        task = asyncio.get_running_loop().create_task(
+            self._work(check_id, batch_number=batch_number, prior_total_used=prior_total_used),
+            name=f"link-check-{check_id}",
+        )
+        self._tasks[check_id] = task
+        task.add_done_callback(
+            lambda done: self._tasks.pop(check_id, None) if self._tasks.get(check_id) is done else None
+        )
+
+    def _checkpoint_and_stop(
+        self, check_id: str, scope: LinkCheckScope, reason: KbStopReason
+    ) -> tuple[KbExploreJob, LinkCheckScope]:
+        """Blocking: a checkpoint of what is done and pending, then the stop (paused for these reasons)."""
         job_store = self._resolved_job_store
+        completed_set = set(job_store.completed(check_id, "links"))
+        all_target_ids = [t.material_id for t in scope.targets]
+        completed_ids = [mid for mid in all_target_ids if mid in completed_set]
+        pending_ids = [mid for mid in all_target_ids if mid not in completed_set]
+        cp = job_store.checkpoint(
+            check_id,
+            stage="links",
+            cursor=pending_ids[0] if pending_ids else None,
+            completed_ids=completed_ids,
+            pending_ids=pending_ids,
+        )
+        stopped = job_store.stop(check_id, reason)
+        updated_scope = replace(scope, checkpoint=cp)
+        self._store.save_link_check(updated_scope)
+        return stopped, updated_scope
+
+    def _record(self, check_id: str, target: LinkTarget, probe: RawLinkProbe) -> None:
+        """Blocking: one finished link, all of it (observation, mark, finished work) in one thread call, so
+        a Quit that cancels the worker meanwhile never leaves half of a unit."""
+        checked_at = self._clock()
+        observation, mark_action = evaluate_observation(
+            material_id=target.material_id,
+            url=target.url,
+            probe=probe,
+            checked_at=checked_at,
+            prior_first_gone_at=self._store.active_first_gone_at(target.material_id),
+        )
+        self._store.add_observation(check_id, observation)
         mark_writer = self._resolved_mark_writer
+        if mark_action == "link_gone":
+            mark_writer.link_gone(target.material_id, target.url)
+        elif mark_action == "link_back":
+            mark_writer.link_back(target.material_id)
+        obs_json = json.dumps(observation.model_dump(mode="json"), separators=(",", ":"))
+        self._resolved_job_store.complete(check_id, target.material_id, "links", obs_json)
+
+    async def _work(self, check_id: str, *, batch_number: int, prior_total_used: int) -> None:
+        try:
+            await self._run_link_batch(check_id, batch_number=batch_number, prior_total_used=prior_total_used)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # ids only: a URL or a page never goes to the log
+            logger.error("Link check %s failed: %s", check_id, type(error).__name__)
+            with contextlib.suppress(Exception):
+                async with self._lock(check_id):
+                    job = await disk_call(self._resolved_job_store.get, check_id)
+                    if job is not None and job.state in ("running", "queued"):
+                        await disk_call(self._resolved_job_store.stop, check_id, "failed")
+
+    async def _run_link_batch(self, check_id: str, *, batch_number: int, prior_total_used: int) -> None:
+        """The one worker of a check: probes the pending links of this batch. Progress goes through
+        ``JobStore.advance``, which never undoes a Pause; the worker stops as soon as the job is no longer
+        running. Its own final transitions (budget, completed) happen under the check's lock."""
+        job_store = self._resolved_job_store
+        job, scope = await disk_call(self._load_check, check_id)
         limit = job.budget.limit
-        completed_set = set(await disk_call(job_store.completed, job.id, "links"))
+        completed_set = set(await disk_call(job_store.completed, check_id, "links"))
         pending_targets = [t for t in scope.targets if t.material_id not in completed_set]
 
-        used = 0
-        total_used = prior_total_used
-        budget = KbRunBudget(
-            unit="link",
-            limit=limit,
-            used=0,
-            remaining=limit,
-            total_used=total_used,
-            batch=batch_number,
-            free_only=True,
-        )
-        counters = _zero_counters(total_used)
-        job = await disk_call(
-            job_store.progress, job.id, stage="links", budget=budget, counters=counters
-        )
-
-        for idx, target in enumerate(pending_targets):
-            if job.id in self._pause_requested:
-                break
-            if used >= limit:
-                remaining_targets = pending_targets[idx:]
-                all_target_ids = [t.material_id for t in scope.targets]
-                completed_ids = [mid for mid in all_target_ids if mid in completed_set]
-                pending_ids = [t.material_id for t in remaining_targets]
-                cp = await disk_call(
-                    job_store.checkpoint,
-                    job.id,
-                    stage="links",
-                    cursor=pending_ids[0] if pending_ids else None,
-                    completed_ids=completed_ids,
-                    pending_ids=pending_ids,
-                )
-                job = await disk_call(job_store.stop, job.id, "budget")
-                updated_scope = LinkCheckScope(
-                    check_id=scope.check_id,
-                    folder_id=scope.folder_id,
-                    material_ids=scope.material_ids,
-                    targets=scope.targets,
-                    checkpoint=cp,
-                )
-                await disk_call(self._store.save_link_check, updated_scope)
-                observations = await disk_call(self._store.list_observations, job.id)
-                return self._build_link_check(job, updated_scope, observations)
-
+        for done_here, target in enumerate(pending_targets):
+            current = await disk_call(job_store.get, check_id)
+            if self._closing or current is None or current.state != "running":
+                return  # paused, cancelled or Quit: whoever stopped it wrote the state and checkpoint
+            if done_here >= limit:
+                async with self._lock(check_id):
+                    latest = await disk_call(job_store.get, check_id)
+                    if latest is not None and latest.state == "running":
+                        await disk_call(self._checkpoint_and_stop, check_id, scope, "budget")
+                return
             probe = await probe_link(self._fetcher, target.url)
-            checked_at = self._clock()
-            prior_first_gone = await disk_call(
-                self._store.active_first_gone_at, target.material_id
-            )
-            observation, mark_action = evaluate_observation(
-                material_id=target.material_id,
-                url=target.url,
-                probe=probe,
-                checked_at=checked_at,
-                prior_first_gone_at=prior_first_gone,
-            )
-            await disk_call(self._store.add_observation, job.id, observation)
-            if mark_action == "link_gone":
-                await disk_call(mark_writer.link_gone, target.material_id, target.url)
-            elif mark_action == "link_back":
-                await disk_call(mark_writer.link_back, target.material_id)
-
-            obs_json = json.dumps(observation.model_dump(mode="json"), separators=(",", ":"))
-            await disk_call(job_store.complete, job.id, target.material_id, "links", obs_json)
-            completed_set.add(target.material_id)
-            used = idx + 1
+            await disk_call(self._record, check_id, target, probe)
+            used = done_here + 1
             total_used = prior_total_used + used
             budget = KbRunBudget(
                 unit="link",
@@ -554,28 +616,24 @@ class FreshnessService:
                 batch=batch_number,
                 free_only=True,
             )
-            counters = _zero_counters(total_used)
             job = await disk_call(
-                job_store.progress, job.id, stage="links", budget=budget, counters=counters
+                partial(
+                    job_store.advance,
+                    check_id,
+                    stage="links",
+                    budget=budget,
+                    counters=_zero_counters(total_used),
+                )
             )
+            if job.state != "running":
+                return  # a Pause landed while the probe was in flight: it stays in force (R2-04)
 
-        if job.id in self._pause_requested:
-            self._pause_requested.discard(job.id)
-            latest_job, latest_scope = await disk_call(self._load_check, job.id)
-            observations = await disk_call(self._store.list_observations, job.id)
-            return self._build_link_check(latest_job, latest_scope, observations)
-
-        job = await disk_call(job_store.stop, job.id, "completed")
-        done_scope = LinkCheckScope(
-            check_id=scope.check_id,
-            folder_id=scope.folder_id,
-            material_ids=scope.material_ids,
-            targets=scope.targets,
-            checkpoint=None,
-        )
-        await disk_call(self._store.save_link_check, done_scope)
-        observations = await disk_call(self._store.list_observations, job.id)
-        return self._build_link_check(job, done_scope, observations)
+        async with self._lock(check_id):
+            latest = await disk_call(job_store.get, check_id)
+            if latest is None or latest.state != "running":
+                return
+            await disk_call(job_store.stop, check_id, "completed")
+            await disk_call(self._store.save_link_check, replace(scope, checkpoint=None))
 
     @staticmethod
     def _build_link_check(

@@ -14,6 +14,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 
 from ...native_io import disk_call
 from ..api.contract_routes import ContractFailure
@@ -154,13 +155,16 @@ class RepeatsService:
         job = await self._view(check_id)
         if job.state != "paused" or check_id in self._live:
             raise _Conflict("Only a paused check can continue.")
-        cp = job.checkpoint
-        if cp is None or cp.id != body.checkpoint_id or cp.revision != body.revision:
-            raise _Conflict("The checkpoint is out of date.")
-        run = await disk_call(self._store.run, check_id)
-        if run is None:
-            raise NotFound("This check wasn't found.")
-        self._launch(check_id, run.area_id)
+        # One write claims the paused checkpoint: of two Continues with it only one gets past, and only
+        # that one starts a run (0.4.0 review R2-06; a stale checkpoint is ``ClaimLost``, 409).
+        # A budget stop starts the next batch; any other stop goes on with the batch it interrupted.
+        budget = job.budget
+        if job.stop_reason == "budget":
+            budget = budget.model_copy(update={"used": 0, "remaining": self._limit, "limit": self._limit,
+                                               "batch": budget.batch + 1})
+        await disk_call(partial(self._job_store().claim_paused, check_id, checkpoint_id=body.checkpoint_id,
+                                revision=body.revision, budget=budget))
+        self._launch(check_id, job.area_id)
         return await self._view(check_id)
 
     async def join(self, check_id: str) -> None:
@@ -188,6 +192,8 @@ class RepeatsService:
     # -- the batch --------------------------------------------------------------------------
 
     def _launch(self, check_id: str, area_id: str) -> None:
+        if check_id in self._live:
+            raise _Conflict("This check is already running.")  # never two runs for one check
         live = _Live()
         self._live[check_id] = live
 
@@ -215,11 +221,16 @@ class RepeatsService:
         evidence = self._store.evidence(pending)
         plans = []
         for material_id in pending:
-            judged = evidence[material_id].judged if material_id in evidence else {}
-            statements = [(item.page_id, item.block_id) for item in material_statements(self._kb, material_id)
+            stored = evidence.get(material_id)
+            judged = stored.judged if stored is not None else {}
+            items = material_statements(self._kb, material_id)
+            # A verdict that no longer holds (its statement or the matched one changed) is asked again.
+            voided = self._reader.voided(material_id, items, stored)
+            statements = [(item.page_id, item.block_id) for item in items
                           if item.block_id.startswith(block_prefix(material_id))
                           and item.materials == {material_id}
-                          and (item.page_id, item.block_id) not in judged]
+                          and ((item.page_id, item.block_id) not in judged
+                               or (item.page_id, item.block_id) in voided)]
             plans.append(_Plan(material_id, statements))
         return plans
 
@@ -274,10 +285,9 @@ class RepeatsService:
         job = await disk_call(jobs.get, check_id)
         if job is None:
             return
-        # A budget stop starts the next batch; any other stop goes on with the batch it interrupted.
-        next_batch = job.stop_reason == "budget"
-        used = 0 if next_batch else job.budget.used
-        batch = job.budget.batch + (1 if next_batch else 0)
+        # The batch was chosen by whoever (re)started the job (``start``, or ``resume`` through its claim).
+        used = job.budget.used
+        batch = job.budget.batch
         total = job.budget.total_used
         counters = job.counters
         done_here: list[str] = []
@@ -291,7 +301,8 @@ class RepeatsService:
             return KbRunBudget(unit="claim_comparison", limit=self._limit, used=used,
                                remaining=self._limit - used, total_used=total, batch=batch, free_only=False)
 
-        job = await disk_call(jobs.progress, check_id, stage="repeats", budget=budget(), counters=counters)
+        job = await disk_call(partial(jobs.advance, check_id, stage="repeats", budget=budget(),
+                                      counters=counters))
         await disk_call(self._store.set_run, check_id, checked=already, remaining=len(plans))
         layer = self._decisions()
         if layer is None and any(plan.statements for plan in plans):
@@ -335,8 +346,9 @@ class RepeatsService:
                     await self._record(check_id, plan.material_id, outcome)
                     completed.add(candidate)
                     counters = _count(counters, outcome)
-                job = await disk_call(jobs.progress, check_id, stage="repeats", budget=budget(),
-                                      counters=counters)
+                # ``advance``: progress never rewrites the state (0.4.0 review R2-04 pattern).
+                job = await disk_call(partial(jobs.advance, check_id, stage="repeats", budget=budget(),
+                                              counters=counters))
             await self._flush(check_id, held)
             held = []
             await disk_call(self._save, plan.material_id, None, checked=True)

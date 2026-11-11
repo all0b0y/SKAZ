@@ -24,6 +24,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any, Literal, cast
 
 from ...native_io import disk_call
@@ -49,6 +50,7 @@ from ..api.schemas_maintenance import (
 )
 from ..areas.protocols import AreaDirectory
 from ..errors import KnowledgeError, NotFound
+from ..explore.jobs import ClaimLost
 from ..freshness.protocols import PublicationDates
 from ..ids import utc_now_ms
 from ..science.protocols import ScienceConsentRequired, ScienceRef, ScienceStop
@@ -225,26 +227,39 @@ class Maintenance:
 
     async def _replace(self, mark: MarkRow) -> KbFreshnessActionResult:
         """Replace with vN: the material's own arXiv link, at the new version, through the link intake; the
-        wiki takes it when it had the replaced copy. The old copy stays, marked, until the user deletes it."""
+        wiki takes it when it had the replaced copy. The old copy stays, marked, until the user deletes it.
+
+        Resumable (0.4.0 review R2-07): the downloaded copy is remembered (``replaced_by``) before the wiki
+        step, and "Replace with vN" stays offered until that step is durably queued. A retry after a failure
+        or Quit reuses the downloaded copy and only does the missing step."""
         record = await disk_call(self.kb.material_repo.get, mark.material_id)
         version = mark.evidence.get("version")
         link = versioned_link(record, str(version)) if record is not None and version else None
         if record is None or link is None:
             raise ContractFailure(409, "conflict")
         in_wiki = await disk_call(self._in_wiki, record.id)
-        added = await self.sources.add_link(link, record.folder_id, to_wiki=False)
-        material_id = str(added.material_id)
-        await disk_call(
-            self.store.update_evidence,
-            mark.id,
-            {"replaced_by": material_id, "actions": ["delete_source", "keep_marked"]},
-        )
+        material_id = await disk_call(self._downloaded_replacement, mark)
+        if material_id is None:
+            added = await self.sources.add_link(link, record.folder_id, to_wiki=False)
+            material_id = str(added.material_id)
+            await disk_call(self.store.update_evidence, mark.id, {"replaced_by": material_id})
         job_id: str | None = None
-        if in_wiki:
+        if in_wiki and not await disk_call(self._in_wiki, material_id):
             job = await self.ingest.request_ingest(material_id)
             job_id = str(job.id)
+        # Only now is the replacement complete (or its wiki job queued): the action is done.
+        await disk_call(
+            self.store.update_evidence, mark.id, {"actions": ["delete_source", "keep_marked"]}
+        )
         logger.info("Mark %s: replacement %s added (ingest %s)", mark.id, material_id, job_id or "none")
         return KbFreshnessActionResult(mark=await disk_call(self._model, mark.id), ingest_job_id=job_id)
+
+    def _downloaded_replacement(self, mark: MarkRow) -> str | None:
+        """The copy an earlier "Replace with vN" already downloaded, while it is still in the library."""
+        replaced_by = mark.evidence.get("replaced_by")
+        if not isinstance(replaced_by, str) or not replaced_by:
+            return None
+        return replaced_by if self.kb.material_repo.get(replaced_by) is not None else None
 
     def _in_wiki(self, material_id: str) -> bool:
         state = wiki_states(self.kb.db, [material_id]).get(material_id)
@@ -376,15 +391,21 @@ class Maintenance:
 
     async def resume(self, check_id: str, body: KbContinue) -> KbWeeklyCheck:
         self._ensure_ready()
-        job = await disk_call(self._job, check_id)
-        checkpoint = job.checkpoint
-        if job.state != "paused" or checkpoint is None:
+        await disk_call(self._job, check_id)
+        if self._running(check_id):
             raise ContractFailure(409, "conflict")
-        if (checkpoint.id, checkpoint.revision) != (body.checkpoint_id, body.revision):
-            raise ContractFailure(409, "conflict")
-        await disk_call(
-            self.jobs.progress, check_id, stage=job.stage, budget=job.budget, counters=job.counters
-        )
+        # One write claims the paused checkpoint: of two Continues with it only one gets past (R2-06).
+        try:
+            await disk_call(
+                partial(
+                    self.jobs.claim_paused,
+                    check_id,
+                    checkpoint_id=body.checkpoint_id,
+                    revision=body.revision,
+                )
+            )
+        except ClaimLost:
+            raise ContractFailure(409, "conflict") from None
         self._spawn(check_id)
         return await disk_call(self._snapshot, check_id)
 
@@ -396,10 +417,23 @@ class Maintenance:
         self._closing = False
         if self._configured():
             for job in await disk_call(self.jobs.active):
-                if job.owner == "weekly" and job.stop_reason == "app_exit" and job.id not in self._tasks:
-                    await disk_call(
-                        self.jobs.progress, job.id, stage=job.stage, budget=job.budget, counters=job.counters
-                    )
+                if (
+                    job.owner == "weekly"
+                    and job.stop_reason == "app_exit"
+                    and job.checkpoint is not None
+                    and not self._running(job.id)
+                ):
+                    try:
+                        await disk_call(
+                            partial(
+                                self.jobs.claim_paused,
+                                job.id,
+                                checkpoint_id=job.checkpoint.id,
+                                revision=job.checkpoint.revision,
+                            )
+                        )
+                    except ClaimLost:
+                        continue  # a Continue got there first
                     self._spawn(job.id)
             due = await disk_call(self._next_due)
             active = await disk_call(self._active_ids)
@@ -492,7 +526,13 @@ class Maintenance:
             self._spawn(job.id)
             return job.id
 
+    def _running(self, check_id: str) -> bool:
+        task = self._tasks.get(check_id)
+        return task is not None and not task.done()
+
     def _spawn(self, check_id: str) -> asyncio.Task[None]:
+        if self._running(check_id):
+            raise ContractFailure(409, "conflict")  # never two workers for one check
         task = asyncio.get_running_loop().create_task(self._drive(check_id), name=f"weekly-{check_id}")
         self._tasks[check_id] = task
         task.add_done_callback(
@@ -559,7 +599,8 @@ class Maintenance:
         done = self.jobs.completed(check_id, "collect")
         used = sum(1 for key in plan if key in done)
         checked = sum(1 for key in done if key.startswith("n1:"))
-        return self.jobs.progress(
+        # ``advance``: a Pause or Quit that landed meanwhile stays in force (0.4.0 review R2-04).
+        return self.jobs.advance(
             check_id, stage=stage, budget=_budget(used, len(plan)), counters=_counters(checked)
         )
 
