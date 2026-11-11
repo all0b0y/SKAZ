@@ -291,6 +291,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
     // 1. decision_model_required
     const kbNoModel = createFakeKb('no_decision_model');
     const stopped = { ...structuredClone(scenes.no_decision_model.run), checkpoint: structuredClone(CHECKPOINT) };
+    kbNoModel.explore.run = async () => structuredClone(stopped);
     const resumeSpy = vi.spyOn(kbNoModel.explore, 'resume').mockResolvedValue(structuredClone(scenes.searching.run));
     const { unmount } = render(<ExploreSection clients={kbNoModel} initial={{ run: stopped }} />);
 
@@ -426,6 +427,7 @@ describe('F1 — ExploreSection UI & interactions', () => {
     const kb = createFakeKb('area');
     const openSettings = vi.fn();
     const run = { ...structuredClone(scenes.searching.run), state: 'paused' as const, stop_reason: 'science_consent_required' as const };
+    kb.explore.run = async () => structuredClone(run);
     render(<ExploreSection clients={kb} initial={{ run }} onOpenSettings={openSettings} />);
     fireEvent.click(await screen.findByRole('button', { name: /Open Settings/i }));
     expect(openSettings).toHaveBeenCalledWith('search');
@@ -464,6 +466,7 @@ describe('B2-7 · a run paused by Quit', () => {
       stop_reason: 'app_exit' as const,
       checkpoint: structuredClone(CHECKPOINT),
     };
+    kb.explore.run = async () => structuredClone(run);
     render(<ExploreSection clients={kb} initial={{ run }} />);
     expect(await screen.findByText(/paid checks wait for your Continue/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();

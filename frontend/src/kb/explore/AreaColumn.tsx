@@ -42,8 +42,10 @@ export interface AreaColumnProps {
   onResumeRun: (answer?: ExploreResumeBody) => void;
   onCancelRun: () => void;
   onStartRepeats: () => void;
-  onPauseRepeats: () => void;
-  onResumeRepeats: () => void;
+  busy?: boolean;
+  loadingMore?: boolean;
+  onLoadMoreFindings?: () => void;
+  onLoadMoreMaterials?: () => void;
   openFinding: KbFinding | null;
   initialExploreMenuOpen?: boolean;
   onOpenFinding: (finding: KbFinding) => void;
@@ -106,8 +108,10 @@ export function AreaColumn({
   onResumeRun,
   onCancelRun,
   onStartRepeats,
-  onPauseRepeats,
-  onResumeRepeats,
+  busy = false,
+  loadingMore = false,
+  onLoadMoreFindings,
+  onLoadMoreMaterials,
   openFinding,
   initialExploreMenuOpen = false,
   onOpenFinding,
@@ -219,15 +223,12 @@ export function AreaColumn({
                     Sorting uses a small local model for free, or OpenRouter Jev.
                   </p>
                   <div className="kb-explore-stop-box__actions">
-                    {(run.decision_choices.length > 0
-                      ? run.decision_choices
-                      : (['download_local', 'openrouter_jev'] as const)
-                    ).map((choice) => (
+                    {run.decision_choices.map((choice) => (
                       <button
                         key={choice}
                         type="button"
                         className="kb-explore-btn kb-explore-btn--primary"
-                        disabled={!run.checkpoint}
+                        disabled={busy || !run.checkpoint}
                         onClick={() => onResumeRun({ decision_choice: choice })}
                       >
                         {choice === 'download_local'
@@ -235,7 +236,7 @@ export function AreaColumn({
                           : 'Use OpenRouter Jev'}
                       </button>
                     ))}
-                    <button type="button" className="kb-explore-btn" onClick={onCancelRun}>
+                    <button type="button" className="kb-explore-btn" disabled={busy} onClick={onCancelRun}>
                       Cancel
                     </button>
                   </div>
@@ -247,7 +248,7 @@ export function AreaColumn({
                   <div className="kb-explore-stop-box__title">OpenAlex daily limit reached</div>
                   <p className="kb-explore-stop-box__text">
                     {run.retry_at
-                      ? `Retry available at ${run.retry_at}. Your progress is saved.`
+                      ? `Continue after ${run.retry_at}, or after adding a key. Your progress is saved.`
                       : 'Your progress is saved and can continue when the daily limit resets.'}
                   </p>
                   <div className="kb-explore-stop-box__actions">
@@ -257,9 +258,6 @@ export function AreaColumn({
                       onClick={() => onOpenSettings?.('search')}
                     >
                       OpenAlex key in Settings
-                    </button>
-                    <button type="button" className="kb-explore-btn" onClick={onCancelRun}>
-                      Cancel
                     </button>
                   </div>
                 </>
@@ -301,12 +299,12 @@ export function AreaColumn({
                     <button
                       type="button"
                       className="kb-explore-btn kb-explore-btn--primary"
-                      disabled={!run.checkpoint}
+                      disabled={busy || !run.checkpoint}
                       onClick={() => onResumeRun()}
                     >
                       Continue · next 30
                     </button>
-                    <button type="button" className="kb-explore-btn" onClick={onCancelRun}>
+                    <button type="button" className="kb-explore-btn" disabled={busy} onClick={onCancelRun}>
                       Cancel
                     </button>
                   </div>
@@ -314,19 +312,17 @@ export function AreaColumn({
               )}
 
               {run.stop_reason !== 'decision_model_required' &&
-                run.stop_reason !== 'openalex_daily_limit' &&
-                run.stop_reason !== 'science_consent_required' &&
                 run.stop_reason !== 'budget' && (
                   <div className="kb-explore-stop-box__actions">
                     <button
                       type="button"
                       className="kb-explore-btn kb-explore-btn--primary"
-                      disabled={!run.checkpoint}
+                      disabled={busy || !run.checkpoint}
                       onClick={() => onResumeRun()}
                     >
                       Continue
                     </button>
-                    <button type="button" className="kb-explore-btn" onClick={onCancelRun}>
+                    <button type="button" className="kb-explore-btn" disabled={busy} onClick={onCancelRun}>
                       Cancel
                     </button>
                   </div>
@@ -369,7 +365,7 @@ export function AreaColumn({
           <span
             className={`kb-explore-tabs__count${newCount > 0 ? ' kb-explore-tabs__count--acc' : ''}`}
           >
-            {newCount}
+            {newCount}{findings?.next_cursor ? '+' : ''}
           </span>
         </button>
       </div>
@@ -383,50 +379,11 @@ export function AreaColumn({
                 : `${scopePages} wiki pages from ${sourcesCount} sources`}
             </div>
 
-            {repeatCheck &&
-            (repeatCheck.state === 'running' || repeatCheck.state === 'paused') ? (
-              <div className="kb-explore-repeats-box">
-                <div className="kb-explore-repeats-box__title">
-                  {repeatCheck.state === 'paused'
-                    ? 'Repeat check paused'
-                    : 'Checking older materials'}
-                </div>
-                <div className="kb-explore-repeats-box__meta">
-                  {repeatCheck.materials_checked} of{' '}
-                  {repeatCheck.materials_checked + repeatCheck.materials_remaining} materials
-                  checked
-                </div>
-                <div className="kb-explore-repeats-box__meta">
-                  Budget used: {repeatCheck.budget.used} of {repeatCheck.budget.limit} claim
-                  comparisons
-                </div>
-                <div className="kb-explore-repeats-box__actions">
-                  {repeatCheck.state === 'running' ? (
-                    <button type="button" className="kb-explore-btn" onClick={onPauseRepeats}>
-                      Pause
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="kb-explore-btn kb-explore-btn--primary"
-                      onClick={onResumeRepeats}
-                    >
-                      Continue
-                    </button>
-                  )}
-                </div>
+            {(!repeatCheck || !['queued', 'running', 'paused'].includes(repeatCheck.state)) && (materials?.not_checked_count ?? 0) > 0 && (
+              <div className="kb-explore-repeats-bar">
+                <span className="kb-explore-repeats-bar__text">{materials!.not_checked_count} older materials not checked for repeats</span>
+                <button type="button" className="kb-explore-btn" disabled={busy} onClick={onStartRepeats}>Check older materials</button>
               </div>
-            ) : (
-              (materials?.not_checked_count ?? 0) > 0 && (
-                <div className="kb-explore-repeats-bar">
-                  <span className="kb-explore-repeats-bar__text">
-                    {materials!.not_checked_count} older materials not checked for repeats
-                  </span>
-                  <button type="button" className="kb-explore-btn" onClick={onStartRepeats}>
-                    Check older materials
-                  </button>
-                </div>
-              )
             )}
 
             <div className="kb-explore-mat-list">
@@ -449,6 +406,8 @@ export function AreaColumn({
               ))}
             </div>
 
+            {materials?.next_cursor && <button type="button" className="kb-explore-btn" disabled={loadingMore}
+              onClick={onLoadMoreMaterials}>Load more materials</button>}
             <div className="kb-explore-foot">
               <button type="button" className="kb-explore-link" onClick={onOpenWiki}>
                 Open in Wiki
@@ -463,7 +422,7 @@ export function AreaColumn({
                 <strong>Done just now</strong>
                 <span className="kb-explore-muted">
                   {' '}
-                  · {newCount} new here · {coveredCount} repeat what you have
+                  · {newCount}{findings?.next_cursor ? '+' : ''} new here · {coveredCount} repeat what you have
                 </span>
               </div>
             ) : (
@@ -575,6 +534,8 @@ export function AreaColumn({
               </div>
             )}
 
+            {findings?.next_cursor && <button type="button" className="kb-explore-btn" disabled={loadingMore}
+              onClick={onLoadMoreFindings}>Load more findings</button>}
             {worthClosing.length > 0 && (
               <div className="kb-explore-closing">
                 <div className="kb-explore-section-title">Worth closing</div>

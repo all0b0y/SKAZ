@@ -4,6 +4,7 @@ import type { KbNotification } from '../../api/kb/types.gen';
 import { errorText } from '../api/client';
 import { exploreStart } from '../api/explore';
 import { maintenanceCheck } from '../api/maintenance';
+import { weeklySelection } from '../explore/weeklySelection';
 import { getResearchStore } from '../research/store';
 import type { KbServices } from '../state/context';
 
@@ -39,6 +40,11 @@ export async function runNavigation(
     go('chats');
     getResearchStore(services.client).getState().openTask(taskId);
     return { ok: true };
+  }
+  if (action === 'view_check') {
+    const checkId = (n.payload as { job_id?: unknown }).job_id;
+    if (typeof checkId !== 'string') return { ok: false, error: 'This check is no longer available.' };
+    weeklySelection(services.client).setState({ checkId });
   }
   if (action === 'check_novelty') {
     const checkId = (n.payload as { job_id?: unknown }).job_id;
