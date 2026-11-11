@@ -17,7 +17,7 @@ async function openPaused(options: { queued?: boolean; retryAt?: string | null }
     job_id: job.id, error: job.error, error_code: job.error_code,
   });
   material.wiki_state = options.queued ? 'queued' : 'paused';
-  const rendered = renderKb({ world });
+  const rendered = renderKb({ world, prefs: { section: 'materials' } });
   await screen.findByRole('navigation', { name: 'Sections' });
   act(() => rendered.services.ui.getState().openDocument({ type: 'material', id: material.id }));
   const doc = await screen.findByRole('complementary', { name: 'Document' });
@@ -63,5 +63,16 @@ describe('An engine quota pauses wiki work', () => {
       method: 'POST', path: `/kb/jobs/${job.id}/cancel`,
     })));
     await waitFor(() => expect(within(strip).queryByRole('button', { name: 'Stop' })).toBeNull());
+  });
+
+  it('marks the held queue row as Paused in All materials', async () => {
+    const user = userEvent.setup();
+    await openPaused({ queued: true });
+    await user.click(screen.getByTestId('all-materials'));
+    const center = await screen.findByRole('region', { name: 'All materials' });
+    const grid = await within(center).findByRole('grid');
+    const row = within(grid).getByRole('button', { name: 'Lecture 5 — ML' }).closest('tr')!;
+    expect(await within(row).findByTitle('Codex: usage limit reached — continue manually')).toHaveTextContent('Paused');
+    expect(within(row).queryByText('Queued')).toBeNull();
   });
 });
