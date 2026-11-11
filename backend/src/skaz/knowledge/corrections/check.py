@@ -57,6 +57,7 @@ from ..decisions.protocol import DecisionLayer, Undecided, YesNoAnswer, YesNoQue
 from ..errors import KnowledgeError, NotFound
 from ..ids import new_id, utc_now
 from ..ingest.checks import clean_text, flags_instructions
+from ..ingest.jobs import EngineLimited
 from ..ingest.model import AnswerInvalid, parse_answer
 from ..ingest.prompts import repair_message
 from ..ingest.protocols import IdentityTextLayer, InstructionDetector, RecognitionRequest
@@ -338,7 +339,9 @@ class RecognitionChecker:
         caller = AgentCaller(engine, f"{new_id('recog')}", model=choice.model, effort=choice.effort)
         try:
             entries = await self._check(replace(request, ask=caller.ask), force=False)
-        except WikiJobFailed as failure:
+        except (WikiJobFailed, EngineLimited) as failure:
+            # 0.4.0 WR5: a quota of the check's OWN agent skips this optional step like any other failure;
+            # only a quota of the wiki's engine (the branch above, the job's own turns) pauses the material.
             await request.log(
                 f"The recognition check stopped: {failure.message} The recognised text was used."
             )

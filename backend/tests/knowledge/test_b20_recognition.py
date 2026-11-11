@@ -68,6 +68,28 @@ async def test_a_chosen_agent_that_is_missing_is_never_replaced(ready: Knowledge
     assert "The recognition check was skipped: Hermes Agent" in journal(ingest, job_id)
 
 
+async def test_a_quota_on_the_chosen_check_agent_skips_the_check_not_the_material(
+    ready: KnowledgeService,
+) -> None:
+    """WR5 pauses the wiki queue on a quota of ITS engine; the optional recognition check on another agent
+    never pauses the material's notes: the step is skipped with its reason, as any failure of it was."""
+    from skaz.knowledge.agents.engine import Failed
+
+    material_id = add_material(ready, "Физика", "Лекция 8", SPEECH)
+    wiki = ScriptedWiki(notes=[NOTES], concepts=[CONCEPTS])
+    limited = FakeEngine(
+        "claude_code", script=lambda turn: [Failed(turn.run_id, "limit", "Usage limit reached.")]
+    )
+    ingest, service = wired(ready, wiki, decide)
+    ingest.engines = lambda engine_id: limited if engine_id == "claude_code" else wiki.engine
+    service.update_recognition(engine="claude_code", model="claude-sonnet-5", effort="low")
+    job_id = await ingest_done(ingest, material_id)
+    assert ingest.job(job_id).state == "done"
+    text = journal(ingest, job_id)
+    assert "The recognition check stopped: Claude Code: usage limit reached." in text
+    assert "The recognised text was used." in text
+
+
 def test_settings_rules(ready: KnowledgeService) -> None:
     wiki = ScriptedWiki()
     _ingest, service = wired(ready, wiki)

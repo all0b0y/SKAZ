@@ -63,7 +63,8 @@ class AuthoredWiki(ScriptedWiki):
     def __init__(self, author: Author | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.author: Author = author or (lambda _batch: [])
-        #: Connection turn numbers (1-based) that end with an authored model limit.
+        #: Connection turn numbers (1-based) that end with an authored stop (sign-in expired; since 0.4.0
+        #: WR5 a quota pauses the engine's queue instead of ending the job).
         self.fail_on: set[int] = set()
         self.connection_calls = 0
         #: Holds every connection answer until set (a connection run kept busy).
@@ -77,7 +78,7 @@ class AuthoredWiki(ScriptedWiki):
             return super()._answer(turn)
         self.connection_calls += 1
         if self.connection_calls in self.fail_on:
-            return [Failed("", "limit", "Authored fixture: the model limit was reached.")]
+            return [Failed("", "auth", "Authored fixture: the sign-in expired.")]
         if self.garbled:  # an answer that is not the expected JSON (the repair turn gets the same)
             return [TextDelta("", "Sorry, here are my thoughts instead of JSON."), Completed("")]
         found = self.author(Batch.read(turn.messages[0].content))
@@ -336,7 +337,7 @@ async def test_a_model_failure_keeps_finished_batches_and_the_rest_continues(
     await added(ingest, service, add_material(ready, "Физика", "Лекция 8"))
     [job] = connection_jobs(ingest)
     assert job.state == "failed"
-    assert job.error == "The agent stopped: Authored fixture: the model limit was reached."
+    assert job.error == "The agent stopped: Authored fixture: the sign-in expired."
     assert any("1 of 3" in entry.message for entry in job.journal)  # said plainly, not hidden
     assert len(wiki.turns(CONNECTIONS)) == 2  # it stopped at the failure: no third call, no other model
     first = asked(wiki)[0]

@@ -33,7 +33,10 @@ class Case:
 
 
 async def _failed_once(kb_app: Any, kb_client: httpx.AsyncClient, profile: dict[str, Any]) -> Case:
-    """The first ingest fails on Concepts with a model limit; Notes were already answered."""
+    """The first ingest stops on Concepts (sign-in expired); Notes were already answered.
+
+    0.4.0 WR5: a quota no longer ends the job — it pauses the engine's queue and Continue keeps the
+    checkpoint (test_wr5_engine_queue.py). A stop that ends the job is what Retry is for here."""
     await kb_client.post("/kb/library", json={})
     runtime = kb_app.state.runtime
     concept_attempts = 0
@@ -45,7 +48,7 @@ async def _failed_once(kb_app: Any, kb_client: httpx.AsyncClient, profile: dict[
         if title == prompts.CONCEPTS_SCHEMA_TITLE:
             concept_attempts += 1
             if concept_attempts == 1:
-                return [Failed("", "limit", "Authored fixture: this turn reached a model limit.")]
+                return [Failed("", "auth", "Authored fixture: the sign-in expired.")]
             result = CONCEPTS_OK
         elif title == prompts.NOTES_SCHEMA_TITLE:
             result = NOTES_OK

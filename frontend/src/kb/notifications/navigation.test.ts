@@ -4,12 +4,13 @@ import { NAVIGATION_ACTIONS, runNavigation } from './navigation';
 function services(call: (route: string, options?: unknown) => Promise<unknown>) {
   const set = vi.fn();
   const client = { call: vi.fn(call) };
-  return { set, client, svc: { client, prefs: { getState: () => ({ set }) } } as never };
+  const open = vi.fn();
+  return { set, client, open, svc: { client, prefs: { getState: () => ({ set }) }, chats: { getState: () => ({ open }) } } as never };
 }
 
 describe('navigation buttons of notifications (0.4.0 B2, B6)', () => {
   it('lists every navigation action the backend sends', () => {
-    expect([...NAVIGATION_ACTIONS].sort()).toEqual(['check_novelty', 'open_explore', 'review_updates', 'view_check']);
+    expect([...NAVIGATION_ACTIONS].sort()).toEqual(['check_novelty', 'open_explore', 'open_research_task', 'review_updates', 'view_check']);
   });
 
   it('Open in Explore and View check open Explore; Review source updates opens All materials; nothing is resolved', async () => {
@@ -44,5 +45,14 @@ describe('navigation buttons of notifications (0.4.0 B2, B6)', () => {
       .toEqual({ ok: false, error: 'This check wasn’t found.' });
     expect(await runNavigation(gone.svc, { payload: {} }, 'check_novelty'))
       .toEqual({ ok: false, error: 'This check is no longer available.' });
+  });
+
+  it('Open task opens the research task’s own chat', async () => {
+    const s = services(async () => { throw new Error('no call expected'); });
+    expect(await runNavigation(s.svc, { payload: { task_id: 't-1', chat_id: 'chat-7' } }, 'open_research_task')).toEqual({ ok: true });
+    expect(s.set).toHaveBeenLastCalledWith({ section: 'chats', sideOpen: true });
+    expect(s.open).toHaveBeenCalledWith('chat-7');
+    expect(await runNavigation(s.svc, { payload: {} }, 'open_research_task'))
+      .toEqual({ ok: false, error: 'This task is no longer available.' });
   });
 });

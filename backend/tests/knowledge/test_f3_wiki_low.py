@@ -10,7 +10,7 @@ import pytest
 
 from skaz.knowledge.agents.engine import Failed
 from skaz.knowledge.agents.fake import FakeEngine
-from skaz.knowledge.ingest.jobs import AGENT_UNAVAILABLE
+from skaz.knowledge.ingest.jobs import AGENT_UNAVAILABLE, EngineLimited
 from skaz.knowledge.markdown.page import Block, Cite, PageDocument, PageMeta
 from skaz.knowledge.markdown.source import FragmentInput
 from skaz.knowledge.service import KnowledgeService
@@ -28,9 +28,10 @@ async def test_an_agent_that_is_not_installed_could_not_start() -> None:
     assert failure.value.message == "The agent couldn't start: Codex is not installed."
     assert failure.value.code == AGENT_UNAVAILABLE
     limited = FakeEngine(script=lambda turn: [Failed(turn.run_id, "limit", "Usage limit reached.")])
-    with pytest.raises(WikiJobFailed) as stopped:
+    # 0.4.0 WR5: a quota is no longer a failure of the job but a pause of the engine's queue.
+    with pytest.raises(EngineLimited) as stopped:
         await AgentCaller(limited, "t").ask("x", [], {})
-    assert stopped.value.message == "The agent stopped: Usage limit reached."
+    assert stopped.value.message == "Codex: usage limit reached. The finished work is kept."
 
 
 async def test_a_new_note_of_two_paragraphs_becomes_two_notes_and_errors_are_plain(
