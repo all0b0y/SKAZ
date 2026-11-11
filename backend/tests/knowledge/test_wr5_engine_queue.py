@@ -14,8 +14,8 @@ import pytest
 from skaz.knowledge.agents.engine import AgentTurn, Failed, ModelOption, TextDelta
 from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.ingest.execution import ProcessingProfile, execution_scope, stored_scope
-from skaz.knowledge.ingest.jobs import JobRecord
-from skaz.knowledge.ingest.service import IngestService
+from skaz.knowledge.ingest.jobs import EngineLimited, JobRecord
+from skaz.knowledge.ingest.service import IngestBusy, IngestService
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiki.agent import AgentCaller
 from skaz.knowledge.wiki.jobs import JobContext, WikiJobs
@@ -391,3 +391,46 @@ async def test_continue_pins_the_new_model_before_releasing_the_engine_gate(
     assert ingest.job(jobs[0].id).state == "done"
     assert all(turn.model == "chosen-model" for turn in engine.turns[1:])
     await ingest.close()
+
+
+async def test_continue_on_another_paused_engine_releases_only_the_selected_engine(
+    ready: KnowledgeService,
+) -> None:
+    clock = Clock()
+    ingest, codex, jobs = await limited(ready, clock, None, count=1)
+    other = ScriptedWiki(notes=[NOTES_OK]).engine
+    other._id = "hermes"
+    ingest.engines = lambda selected: other if selected == "hermes" else codex
+    waiting = ingest.jobs.create(add_material(ready, "Quota", "Hermes queued", kind="pdf"),
+                                 profile=ProcessingProfile("hermes", None, None, "en"), state="queued")
+    ingest.jobs.pause(waiting.id, EngineLimited("hermes", None))
+    ingest.update_settings(engine="hermes")
+    await ingest.continue_job(jobs[0].id)
+    await drain(ingest)
+    assert ingest.job(jobs[0].id).state == "done" and ingest.job(waiting.id).state == "done"
+    assert set(ingest.jobs.engine_pauses()) == {"codex"} and len(codex.turns) == 1
+    await ingest.close()
+
+
+async def test_a_nonrecoverable_standalone_wiki_check_never_claims_to_have_continued(
+    ready: KnowledgeService,
+) -> None:
+    clock = Clock()
+    engine = engine_with_limit(None)
+    ingest = service(ready, engine, clock)
+    wiki = WikiJobs(ingest.jobs, profile=ingest.profile)
+
+    async def work(_context: JobContext) -> None:
+        await AgentCaller(engine, "standalone").ask("fixture", (), {})
+
+    job = await wiki.start("recheck", "page", "rechecking", work)
+    await wiki.wait(job.id)
+    await wiki.close()
+    await ingest.close()
+    restarted = service(ready, engine, clock)
+    next_wiki = WikiJobs(restarted.jobs, profile=restarted.profile)
+    with pytest.raises(IngestBusy, match="Start it again"):
+        await restarted.continue_job(job.id)
+    assert restarted.job(job.id).state == "paused" and len(engine.turns) == 1
+    await next_wiki.close()
+    await restarted.close()
