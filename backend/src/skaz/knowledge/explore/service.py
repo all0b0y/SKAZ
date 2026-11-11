@@ -74,7 +74,7 @@ from ..science.protocols import (
     ScienceUnavailable,
 )
 from ..service import KnowledgeService
-from .jobs import STATE_OF, SqliteJobStore
+from .jobs import STATE_OF, ClaimLost, SqliteJobStore
 from .novelty import (
     NoveltyUnavailable,
     WikiClaims,
@@ -134,6 +134,10 @@ class _Refused(Exception):
 
 class _Conflict(KnowledgeError):
     status_code = 409
+
+
+class _Halted(Exception):
+    """The run was paused or cancelled while its runner awaited: the runner returns, changing nothing."""
 
 
 def _now() -> datetime:
@@ -237,20 +241,27 @@ class ExploreFunnel:
         if (checkpoint.id, checkpoint.revision) != (body.checkpoint_id, body.revision):
             raise _Conflict("This run changed since; reload it.")
         self._client()
-        budget = job.budget
+        budget: KbRunBudget | None = None
         if job.stop_reason == "budget":
             budget = KbRunBudget(
                 unit="candidate",
                 limit=BUDGET_LIMIT,
                 used=0,
                 remaining=BUDGET_LIMIT,
-                total_used=budget.total_used,
-                batch=budget.batch + 1,
-                free_only=budget.free_only,
+                total_used=job.budget.total_used,
+                batch=job.budget.batch + 1,
+                free_only=job.budget.free_only,
             )
+        # One Continue wins: paused at exactly this checkpoint → running in one write; every other
+        # contender gets ClaimLost (409) and starts nothing (review R1-03).
         await disk_call(
-            self.job_store.progress, run_id, stage=job.stage, budget=budget, counters=job.counters
+            self.job_store.claim_paused,
+            run_id,
+            checkpoint_id=body.checkpoint_id,
+            revision=body.revision,
+            budget=budget,
         )
+        await self._ended(run_id)
         self._spawn(
             run_id, choice=body.decision_choice if job.stop_reason == "decision_model_required" else None
         )
@@ -338,9 +349,17 @@ class ExploreFunnel:
                 and job.stop_reason == "app_exit"
                 and await disk_call(self.store.run, job.id) is not None
             ):
-                await disk_call(
-                    self.job_store.progress, job.id, stage=job.stage, budget=job.budget, counters=job.counters
-                )
+                if job.checkpoint is None:
+                    continue
+                try:
+                    await disk_call(
+                        self.job_store.claim_paused,
+                        job.id,
+                        checkpoint_id=job.checkpoint.id,
+                        revision=job.checkpoint.revision,
+                    )
+                except ClaimLost:  # the user's Continue came first: that runner has it
+                    continue
                 self._spawn(job.id, free_steps_only=True)
                 resumed.append(job.id)
         return resumed
@@ -426,6 +445,10 @@ class ExploreFunnel:
     def _spawn(
         self, run_id: str, *, choice: DecisionChoice | None = None, free_steps_only: bool = False
     ) -> asyncio.Task[None]:
+        """The run's one runner; a caller first owns the run (``create``/``claim_paused``)."""
+        running = self._tasks.get(run_id)
+        if running is not None and not running.done():
+            raise _Conflict("This run is already running.")
         task = asyncio.get_running_loop().create_task(
             self._drive(run_id, choice, free_steps_only=free_steps_only), name=f"explore-{run_id}"
         )
@@ -434,6 +457,12 @@ class ExploreFunnel:
             lambda done: self._tasks.pop(run_id, None) if self._tasks.get(run_id) is done else None
         )
         return task
+
+    async def _ended(self, run_id: str) -> None:
+        """Wait for the runner that paused this run to return (it stops right after its last write)."""
+        task = self._tasks.get(run_id)
+        if task is not None and not task.done():
+            await asyncio.wait({task})  # its outcome is its own; this caller's cancellation still applies
 
     async def _halt(self, run_id: str) -> None:
         task = self._tasks.get(run_id)
@@ -462,7 +491,7 @@ class ExploreFunnel:
                 return
             await self._enrich(run)
             await self._finish(run)
-        except _Refused:
+        except (_Refused, _Halted):
             return
         except asyncio.CancelledError:
             raise
@@ -510,9 +539,12 @@ class ExploreFunnel:
     ) -> KbExploreJob:
         job = await disk_call(self._job, run.id)
         counters = await disk_call(self._counters, run.id)
-        return await disk_call(
-            self.job_store.progress, run.id, stage=stage, budget=budget or job.budget, counters=counters
+        job = await disk_call(
+            self.job_store.advance, run.id, stage=stage, budget=budget or job.budget, counters=counters
         )
+        if job.state != "running":  # a Pause/Cancel landed while this runner awaited: it stays
+            raise _Halted()
+        return job
 
     # -- stage 1: collect --------------------------------------------------------------------------------
 
@@ -821,17 +853,9 @@ class ExploreFunnel:
             works = [KbScienceWork.model_validate(collected[cid]["work"]) for cid in batch]
             theses = await self.novelty.check(works)
             for cid, work, found in zip(batch, works, theses, strict=True):
-                await disk_call(self._record_novelty, run, cid, work, list(found), False)
-            used = budget.used + len(batch)
-            budget = KbRunBudget(
-                unit="candidate",
-                limit=budget.limit,
-                used=used,
-                remaining=budget.limit - used,
-                total_used=budget.total_used + len(batch),
-                batch=budget.batch,
-                free_only=budget.free_only,
-            )
+                # Each result is saved with its budget charge in one write (review R1-04).
+                charged = await disk_call(self._record_novelty, run, cid, work, list(found), False)
+                budget = charged or budget
             await self._progress(run, "novelty", budget)
             pending = pending[len(batch) :]
         return True
@@ -865,7 +889,8 @@ class ExploreFunnel:
 
     def _record_novelty(
         self, run: RunRow, cid: str, work: KbScienceWork, theses: list[KbThesis], reused: bool
-    ) -> None:
+    ) -> KbRunBudget | None:
+        """A reused verdict is free; a new one is charged in the same write (the new budget is returned)."""
         data = self._candidates(run.id)[cid]
         channel = cast(KbFindingChannel, data["channel"])
         label = finding_label(theses, channel)
@@ -905,7 +930,10 @@ class ExploreFunnel:
             "pages": self.claims.fingerprints([ref.page_id for ref in refs]),
             "reused": reused,
         }
-        self.job_store.complete(run.id, cid, "novelty", _json(verdict))
+        if reused:
+            self.job_store.complete(run.id, cid, "novelty", _json(verdict))
+            return None
+        return self.job_store.complete_charged(run.id, cid, "novelty", _json(verdict))
 
     # -- stage 5: ready ---------------------------------------------------------------------------------
 

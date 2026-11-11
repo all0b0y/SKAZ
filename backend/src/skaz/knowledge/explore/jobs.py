@@ -219,6 +219,45 @@ class SqliteJobStore:
                 raise JobNotFound("This job wasn't found.") from error
             raise WorkAlreadyDone("This work is already done.") from error
 
+    def complete_charged(
+        self, job_id: str, candidate_id: str, stage: KbRunStage, result_json: str
+    ) -> KbRunBudget:
+        """``complete`` plus one budget unit, in ONE write: paid work is never recorded without its charge,
+        so a Pause, Quit or crash between the two can't hand out extra paid work on Continue (0.4.0 review
+        R1-04). The job's state is not touched (a Pause that landed meanwhile stays). Returns the budget."""
+        try:
+            json.loads(result_json)
+        except ValueError as error:
+            raise KnowledgeError("The result of finished work must be JSON.") from error
+        try:
+            with self.db.write() as connection:
+                row = connection.execute(
+                    "SELECT budget_json FROM explore_jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                if row is None:
+                    raise JobNotFound("This job wasn't found.")
+                connection.execute(
+                    "INSERT INTO explore_completed_work(job_id, candidate_id, stage, result_json,"
+                    " completed_at) VALUES (?, ?, ?, ?, ?)",
+                    (job_id, candidate_id, stage, result_json, utc_now_ms()),
+                )
+                budget = KbRunBudget.model_validate(json.loads(row["budget_json"]))
+                used = budget.used + 1
+                budget = budget.model_copy(
+                    update={
+                        "used": used,
+                        "remaining": max(0, budget.limit - used),
+                        "total_used": budget.total_used + 1,
+                    }
+                )
+                connection.execute(
+                    "UPDATE explore_jobs SET budget_json = ?, updated_at = ? WHERE id = ?",
+                    (_dump(budget), utc_now_ms(), job_id),
+                )
+        except sqlite3.IntegrityError as error:
+            raise WorkAlreadyDone("This work is already done.") from error
+        return budget
+
     def completed(self, job_id: str, stage: KbRunStage) -> Collection[str]:
         with self.db.read() as connection:
             rows = connection.execute(

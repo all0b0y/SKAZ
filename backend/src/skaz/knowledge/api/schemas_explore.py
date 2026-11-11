@@ -18,7 +18,7 @@ from .schemas_explore_common import (
     KbMaterialRef,
     KbReadMarkValue,
 )
-from .schemas_science import KbScienceWork
+from .schemas_science import SCIENCE_TOPIC_CHARS, KbScienceWork
 
 KbFindingLabel = Literal["new", "extends", "contradicts", "branch", "covered"]
 KbFindingChannel = Literal["continues", "branches", "search"]
@@ -26,7 +26,9 @@ KbFindingChannel = Literal["continues", "branches", "search"]
 
 class KbFunnelStart(KbContractRequest):
     area_id: KbEntityId | None = None
-    query: Annotated[str, Field(max_length=1000)] = ""
+    #: The search line leaves as one science topic (C0-1): the same limit, checked before a run exists
+    #: (review R1-12).
+    query: Annotated[str, Field(max_length=SCIENCE_TOPIC_CHARS)] = ""
     dates: KbDateWindow | None = None
     channels: list[KbFindingChannel] = Field(
         default_factory=lambda: cast(list[KbFindingChannel], ["continues", "branches", "search"])
