@@ -223,14 +223,13 @@ def _concept_titles(items: Sequence[Item]) -> list[str]:
 
 
 def _notes_follow_up(title: str, part: Sequence[Fragment], index: int, total: int, earlier: Sequence[str],
-                     items: Sequence[Item]) -> str:
+                     sections: Sequence[DraftSection]) -> str:
     """The continuation of a Notes part (WR2): the source from the highest fragment the finished
     sections cite, :data:`RESUME_OVERLAP` fragments earlier, with their titles and the last one in full."""
-    sections = [item for item in items if isinstance(item, SectionOut)]
     position = {fragment.seg: number for number, fragment in enumerate(part)}
-    cited = [cite.seg for section in sections for block in section.blocks for cite in block.cites
-             if cite.seg in position]
-    start = max(0, position[max(cited)] + 1 - RESUME_OVERLAP) if cited else 0
+    cited = [position[seg] for section in sections for block in section.blocks for seg in block.segs
+             if seg in position]
+    start = max(0, max(cited) + 1 - RESUME_OVERLAP) if cited else 0
     names = (clean_title(section.title) for section in sections)
     written = list(dict.fromkeys(name for name in names if name))
     last_title, last_texts = "", []
@@ -600,10 +599,13 @@ class IngestRun:
         for index, part in enumerate(parts, start=1):
             earlier = [section.title for section in sections]
             prompt = prompts.notes_prompt(source.title, part, index, len(parts), earlier)
+            accepted: list[DraftSection] = []
 
             def follow_up(items: Sequence[Item], part: Sequence[Fragment] = part, index: int = index,
                           earlier: Sequence[str] = earlier) -> str:
-                return _notes_follow_up(source.title, part, index, len(parts), earlier, items)
+                # _answers yields before asking for the next prompt: the consumer below has now
+                # checked the response. Rejected blocks/titles cannot advance the source cursor.
+                return _notes_follow_up(source.title, part, index, len(parts), earlier, accepted)
 
             answers = self._answers(operation, instructions, prompt, follow_up, prompts.NOTES_SCHEMA,
                                     NotesOut, live)
@@ -618,6 +620,9 @@ class IngestRun:
                         continue
                     checked = [found for found in (self._check(block, source, fragments, f"Notes · {title}")
                                                    for block in section.blocks) if found is not None]
+                    if not checked:
+                        continue
+                    accepted.append(DraftSection(title, checked))
                     key = match_key(title)
                     if sections and match_key(sections[-1].title) == key:
                         target = sections[-1]  # a section continued (next answer or part): one section

@@ -161,7 +161,7 @@ async def test_a_concepts_continuation_lists_the_written_titles_and_sends_the_sa
 async def test_a_notes_continuation_resumes_at_the_last_cited_fragment_with_an_overlap(
     kb_app: Any, kb_client: httpx.AsyncClient,
 ) -> None:
-    head = notes(("Начало", [block("from_source", "Энтропия не убывает.", cite(1, "не убывает"))]),
+    head = notes(("Начало", [block("from_source", "Энтропия не убывает.", cite(1, "второе начало"))]),
                  ("Газ", [block("from_source", "Температура и энергия частиц.", cite(2, "энергию частиц")),
                           block("from_source", "Теплоёмкость и нагрев.", cite(6, "нужно для нагрева"))]),
                  more=True)

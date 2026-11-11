@@ -12,6 +12,7 @@ of at least :data:`MIN_WORDS` words; a shorter one is the same only when its wor
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
@@ -21,9 +22,17 @@ NEAR = 0.9
 MIN_WORDS = 8
 #: Items in a row that add nothing new: a loop.
 LOOP_RUN = 3
-_WORD = re.compile(r"\w+", re.UNICODE)
+_WORD = re.compile(r"\w+(?:[.,]\d+)*", re.UNICODE)
 
-Mark = frozenset[str]
+
+@dataclass(frozen=True)
+class Mark:
+    wording: frozenset[str]
+    #: Mathematical punctuation must agree exactly, even when the prose is a near-duplicate.
+    notation: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.wording)
 
 
 class Looping(Exception):
@@ -46,17 +55,23 @@ def mark(text: str) -> Mark:
     """3-word shingles of a statement, or its whole wording when short; empty for no words."""
     words = _words(text)
     if not words:
-        return frozenset()
+        return Mark(frozenset())
+    # Ignore ordinary prose punctuation, but keep operators/signs and mathematical grouping.
+    # Em/en dashes remain prose punctuation; ASCII '-' also denotes subtraction or a negative root.
+    notation = tuple(char for char in text if unicodedata.category(char) == "Sm"
+                     or char in "+-*/^%=<>|~()[]{}")
     if len(words) < MIN_WORDS:
-        return frozenset({"=" + " ".join(words)})
-    return frozenset(" ".join(words[i:i + 3]) for i in range(len(words) - 2))
+        return Mark(frozenset({"=" + " ".join(words)}), notation)
+    return Mark(frozenset(" ".join(words[i:i + 3]) for i in range(len(words) - 2)), notation)
 
 
 def same(a: Mark, b: Mark) -> bool:
-    small, large = sorted((len(a), len(b)))
+    if a.notation != b.notation:
+        return False
+    small, large = sorted((len(a.wording), len(b.wording)))
     if not small or small < NEAR * large:  # Jaccard can't reach 0.9 with sizes this far apart
         return False
-    return len(a & b) / len(a | b) >= NEAR
+    return len(a.wording & b.wording) / len(a.wording | b.wording) >= NEAR
 
 
 @dataclass
