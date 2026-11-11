@@ -35,7 +35,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -84,7 +84,9 @@ log = logging.getLogger(__name__)
 
 MAX_PARALLEL_RUNS = 6
 #: The whole answer's deadline; time spent waiting for the user (permissions, questions) is not counted.
-RUN_TIMEOUT_S = 900.0
+RUN_TIMEOUT_S = 3600.0
+#: Any event for this run (including reasoning, usage and retries) renews this window.
+SILENCE_TIMEOUT_S = 600.0
 #: How often a run that may wait for the user re-checks its deadline.
 WAIT_POLL_S = 1.0
 #: Per-frame cap of the run's transport (the legacy default is 1 MiB; ingest chunks can be larger).
@@ -105,7 +107,8 @@ WITHOUT_TOOLS = "You have no tools: work only with the text given in this conver
 CODEX_SESSIONS = SessionSupport(live=True, revert=True)
 
 STOPPED = "The answer was stopped."
-TOO_LONG = "Codex took too long; the answer was stopped."
+TOO_LONG = "Codex hit the 60-minute ceiling; the answer was stopped."
+SILENT = "Codex went silent for 10 minutes; the answer was stopped."
 CRASHED = "Codex stopped unexpectedly."
 SESSION_LOST = "Codex couldn't continue this chat's conversation."
 #: Seconds a ``thread/delete`` of a chat's thread may take (its own short-lived process).
@@ -209,13 +212,17 @@ class _RunTools(CodexTools):
 class CodexEngine:
     def __init__(self, connection: CodexProcesses, registry: ToolRegistry | None, *,
                  max_parallel: int = MAX_PARALLEL_RUNS, run_timeout_s: float = RUN_TIMEOUT_S,
-                 status_max_age_s: float = STATUS_MAX_AGE_S, waits: RunWaits | None = None) -> None:
-        if max_parallel < 1 or run_timeout_s <= 0:
+                 status_max_age_s: float = STATUS_MAX_AGE_S, waits: RunWaits | None = None,
+                 silence_timeout_s: float = SILENCE_TIMEOUT_S,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        if max_parallel < 1 or run_timeout_s <= 0 or silence_timeout_s <= 0:
             raise ValueError("Invalid Codex engine limits")
         self._connection = connection
         self._registry = registry
         self._max_parallel = max_parallel
         self._run_timeout_s = run_timeout_s
+        self._silence_timeout_s = silence_timeout_s
+        self._clock = clock
         self._status_max_age_s = status_max_age_s
         self._status: EngineStatus | None = None
         self._status_at = 0.0
@@ -434,17 +441,27 @@ class CodexEngine:
             return
         if turn.session is not None and run.thread_id is not None and run.turn_id is not None:
             yield SessionBound(run_id, run.thread_id, run.turn_id)
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._run_timeout_s
         waits = self.waits
+
+        def elapsed() -> float:
+            # Keep P3: time spent waiting for the user is outside the model's deadlines.
+            return self._clock() - (waits.paused_s(run_id) if waits is not None else 0.0)
+
+        started = last_event = elapsed()
         while True:
             if waits is not None and waits.waiting(run_id):
                 remaining = WAIT_POLL_S  # waiting for the user: the deadline stands still
             else:
-                remaining = deadline + (waits.paused_s(run_id) if waits is not None else 0.0) - loop.time()
-                if remaining <= 0:
+                now = elapsed()
+                ceiling = self._run_timeout_s - (now - started)
+                silence = self._silence_timeout_s - (now - last_event)
+                if ceiling <= 0:
                     yield Failed(run_id, "other", TOO_LONG)
                     return
+                if silence <= 0:
+                    yield Failed(run_id, "other", SILENT)
+                    return
+                remaining = min(ceiling, silence)
                 if waits is not None:
                     remaining = min(remaining, WAIT_POLL_S)  # notice a wait that starts meanwhile
             try:
@@ -452,12 +469,15 @@ class CodexEngine:
             except TimeoutError:
                 continue
             if isinstance(item, ToolCall | ToolResult):
+                last_event = elapsed()
                 yield item
             elif isinstance(item, _Closed):
                 yield (Failed(run_id, "cancelled", STOPPED) if run.cancelled
                        else Failed(run_id, "other", CRASHED))
                 return
             elif isinstance(item, dict):
+                if _run_event(run, item):
+                    last_event = elapsed()
                 for event in await self._translate(run, item):
                     yield event
                     if isinstance(event, Completed | Failed):
@@ -601,6 +621,18 @@ class CodexEngine:
             return []
         if method == "error":
             error = params.get("error")
+            if params.get("willRetry") is True:
+                # Only application-owned words reach a wiki journal, never provider error text.
+                from ...native_io import disk_call
+                from ..ingest.execution import current_execution
+                from ..ingest.jobs import JobRepository
+
+                scope = current_execution()
+                if scope is not None:
+                    kind, _ = classify(error.get("codexErrorInfo") if isinstance(error, dict) else None)
+                    notice = ("Codex hit a rate limit and is retrying." if kind == "limit"
+                              else "Codex is retrying the answer.")
+                    await disk_call(JobRepository(scope.db).log, scope.job_id, notice)
             if isinstance(error, dict) and params.get("willRetry") is not True:
                 run.error_info = error.get("codexErrorInfo")
             return []
@@ -641,6 +673,20 @@ class CodexEngine:
         by_id = reply.get("rateLimitsByLimitId")
         candidates = [reply.get("rateLimits"), *(by_id.values() if isinstance(by_id, dict) else ())]
         return reset_time([snapshot for snapshot in candidates if isinstance(snapshot, dict)])
+
+
+def _run_event(run: _Run, message: dict[str, Any]) -> bool:
+    """Liveness is scoped to this thread and, when supplied, this turn; account traffic is not it."""
+    params = message.get("params")
+    if not isinstance(params, dict):
+        return False
+    thread = params.get("thread")
+    thread_id = params.get("threadId") or (thread.get("id") if isinstance(thread, dict) else None)
+    if thread_id is None or thread_id != run.thread_id:
+        return False
+    turn = params.get("turn")
+    turn_id = params.get("turnId") or (turn.get("id") if isinstance(turn, dict) else None)
+    return turn_id is None or turn_id == run.turn_id
 
 
 async def _pump(run: _Run, rpc: CodexRpc) -> None:
