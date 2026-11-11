@@ -75,7 +75,7 @@ class MaterialOverlap:
 
 
 @dataclass
-class _Statement:
+class OverlapStatement:
     page_id: str
     page_title: str
     block_id: str
@@ -83,7 +83,7 @@ class _Statement:
     segs: list[int] = field(default_factory=list)
 
 
-def _statements(kb: KnowledgeService, material_id: str) -> list[_Statement]:
+def material_statements(kb: KnowledgeService, material_id: str) -> list[OverlapStatement]:
     with kb.db.read() as connection:
         rows = connection.execute(
             "SELECT c.page_id, c.block_id, c.material_id, c.seg, p.title FROM citations c "
@@ -94,16 +94,18 @@ def _statements(kb: KnowledgeService, material_id: str) -> list[_Statement]:
             "ORDER BY p.title, b.ordinal, c.ordinal",
             (material_id,),
         ).fetchall()
-    found: dict[tuple[str, str], _Statement] = {}
+    found: dict[tuple[str, str], OverlapStatement] = {}
     for page_id, block_id, cited, seg, title in rows:
-        item = found.setdefault((page_id, block_id), _Statement(page_id, title, block_id))
+        item = found.setdefault((page_id, block_id), OverlapStatement(page_id, title, block_id))
         item.materials.add(cited)
         if cited == material_id:
             item.segs.append(int(seg))
     return list(found.values())
 
 
-def _merged_into(kb: KnowledgeService, material_id: str, items: list[_Statement]) -> set[tuple[str, str]]:
+def merged_into(
+    kb: KnowledgeService, material_id: str, items: list[OverlapStatement]
+) -> set[tuple[str, str]]:
     """``(page id, block id)`` of the statements the material's repeat was merged into — confirmed by
     the decision layer and recorded in the statement's marker (``ingest.merged``). Another source's
     statement that merely cites this material too (written with two sources) is not a repeat."""
@@ -124,7 +126,7 @@ def _merged_into(kb: KnowledgeService, material_id: str, items: list[_Statement]
     return {(item.page_id, item.block_id) for item in candidates} & found
 
 
-def _is_repeat(item: _Statement, merged: set[tuple[str, str]]) -> bool:
+def _is_repeat(item: OverlapStatement, merged: set[tuple[str, str]]) -> bool:
     return (item.page_id, item.block_id) in merged
 
 
@@ -162,11 +164,11 @@ def _section_of(segs: list[int], sections: list[tuple[str, set[int]]]) -> int | 
     return best[1] if best is not None else None
 
 
-def section_overlap(kb: KnowledgeService, material_id: str, statements: list[_Statement] | None = None,
+def section_overlap(kb: KnowledgeService, material_id: str, statements: list[OverlapStatement] | None = None,
                     merged: set[tuple[str, str]] | None = None) -> tuple[SectionOverlap, ...]:
     """Each section of the material's Notes with how many of its statements the wiki already had."""
-    items = statements if statements is not None else _statements(kb, material_id)
-    merged = merged if merged is not None else _merged_into(kb, material_id, items)
+    items = statements if statements is not None else material_statements(kb, material_id)
+    merged = merged if merged is not None else merged_into(kb, material_id, items)
     sections = _note_sections(kb, material_id)
     repeated = [0] * len(sections)
     total = [0] * len(sections)
@@ -182,12 +184,12 @@ def section_overlap(kb: KnowledgeService, material_id: str, statements: list[_St
 
 def material_overlap(kb: KnowledgeService, material_id: str) -> MaterialOverlap | None:
     """What of the material the wiki already had; ``None`` when none of its statements is in the wiki."""
-    items = _statements(kb, material_id)
+    items = material_statements(kb, material_id)
     if not items:
         return None
-    merged = _merged_into(kb, material_id, items)
+    merged = merged_into(kb, material_id, items)
     repeats = [item for item in items if _is_repeat(item, merged)]
-    by_page: dict[str, list[_Statement]] = defaultdict(list)
+    by_page: dict[str, list[OverlapStatement]] = defaultdict(list)
     for item in repeats:
         by_page[item.page_id].append(item)
     pages = sorted(

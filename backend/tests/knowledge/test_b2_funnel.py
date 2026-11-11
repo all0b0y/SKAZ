@@ -298,9 +298,7 @@ class FakeSources:
         self.kb = kb
         self.prepared: list[Any] = []
 
-    async def _publish_async(
-        self, prepared: Any, folder_id: str, title: str | None, to_wiki: bool | None = None
-    ) -> IntakeResult:
+    async def add_prepared(self, prepared: Any, folder_id: str, *, to_wiki: bool) -> IntakeResult:
         self.prepared.append((prepared, folder_id, to_wiki))
         files = self.kb.create_material(
             folder_id,

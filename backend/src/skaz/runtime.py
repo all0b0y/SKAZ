@@ -211,6 +211,8 @@ class Runtime:
             repeat_summaries=lambda: getattr(self, "kb_repeats", None),
             freshness_marks=lambda: getattr(self, "kb_maintenance", None),
             explore=lambda: getattr(self, "kb_explore", None),
+            # Exact per-area counts from B2 (built below; read at call time).
+            new_findings_by_area=lambda: self.kb_explore.new_by_area(),
         )
 
         #: Publication dates, N7-5 library date filter and manual link checks (0.4.0 B5).

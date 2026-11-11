@@ -369,6 +369,10 @@ class SourceService:
         state = wiki_states(self.kb.db, [material_id]).get(material_id)
         return state is None or state.state in _NOT_ADDED
 
+    async def add_prepared(self, prepared: Prepared, folder_id: str, *, to_wiki: bool) -> IntakeResult:
+        """Publish text another part of SKAZ already prepared (0.4.0 B2 Add to wiki keeps its DOI origin)."""
+        return await self._publish_async(prepared, folder_id, None, to_wiki)
+
     async def _publish_async(self, prepared: Prepared, folder_id: str, title: str | None,
                              to_wiki: bool | None = None) -> IntakeResult:
         return await disk_call(self._publish, prepared, folder_id, title, to_wiki)

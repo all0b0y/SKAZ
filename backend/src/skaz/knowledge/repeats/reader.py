@@ -26,7 +26,7 @@ from ..api.schemas_repeats import KbMaterialRepeats, KbParagraphRepeat
 from ..errors import NotFound
 from ..ingest.pages import block_prefix
 from ..service import KnowledgeService
-from ..wiki.overlap import _merged_into, _Statement, _statements
+from ..wiki.overlap import OverlapStatement, material_statements, merged_into
 from ..wiki.statements import statement_text
 from .store import Evidence, RepeatStore
 
@@ -136,8 +136,8 @@ class RepeatReader:
                 if detailed:
                     raise NotFound("This material wasn't found.")
                 continue
-            items = _statements(self._kb, material_id)
-            merged = _merged_into(self._kb, material_id, items)
+            items = material_statements(self._kb, material_id)
+            merged = merged_into(self._kb, material_id, items)
             repeats = self._marker_repeats(material_id, items, merged)
             stored = evidence.get(material_id)
             if stored is not None and stored.status == "checked":  # a run still in progress shows nothing
@@ -150,7 +150,7 @@ class RepeatReader:
         return built
 
     @staticmethod
-    def _marker_repeats(material_id: str, items: list[_Statement],
+    def _marker_repeats(material_id: str, items: list[OverlapStatement],
                         merged: set[tuple[str, str]]) -> list[_Repeat]:
         found = []
         for item in items:
@@ -162,7 +162,7 @@ class RepeatReader:
                                  (authors,) if authors else tuple(others[:1])))
         return found
 
-    def _stored_repeats(self, material_id: str, items: list[_Statement],
+    def _stored_repeats(self, material_id: str, items: list[OverlapStatement],
                         stored: Evidence | None) -> list[_Repeat]:
         if stored is None:
             return []
@@ -203,7 +203,7 @@ class RepeatReader:
             titles[material_id] = record.title if record else "A deleted material"
         return titles[material_id]
 
-    def _result(self, material_id: str, items: list[_Statement], repeats: list[_Repeat], checked: bool,
+    def _result(self, material_id: str, items: list[OverlapStatement], repeats: list[_Repeat], checked: bool,
                 stored: Evidence | None, detailed: bool, titles: dict[str, str]) -> KbMaterialRepeats:
         total = len(items)
         if not checked:
@@ -238,7 +238,7 @@ class RepeatReader:
             order.setdefault(block_id, set()).add(int(seg))
         return [(block_id, sorted(segs)) for block_id, segs in order.items()]
 
-    def _paragraphs(self, material_id: str, items: list[_Statement], repeats: list[_Repeat],
+    def _paragraphs(self, material_id: str, items: list[OverlapStatement], repeats: list[_Repeat],
                     titles: dict[str, str]) -> list[KbParagraphRepeat]:
         by_key = {(repeat.page_id, repeat.block_id): repeat for repeat in repeats}
         page_titles: dict[str, str] = {}

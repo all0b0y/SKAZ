@@ -72,9 +72,7 @@ class Chats(Protocol):
 class Sources(Protocol):
     """The existing intake (``SourceService``): stores a prepared text, starts ingest with ``to_wiki``."""
 
-    async def _publish_async(
-        self, prepared: Prepared, folder_id: str, title: str | None, to_wiki: bool | None = None
-    ) -> IntakeResult: ...
+    async def add_prepared(self, prepared: Prepared, folder_id: str, *, to_wiki: bool) -> IntakeResult: ...
 
 
 def science_failure(stop: ScienceStop) -> ContractFailure:
@@ -205,7 +203,7 @@ class ReadingDesk:
             prepared = prepare_text(text, origin=origin, title=sanitize_title(title), fallback="Paper")
             if prepared.failure:
                 raise KnowledgeError(prepared.failure)
-            result = await self.sources._publish_async(prepared, INBOX_ID, None, True)
+            result = await self.sources.add_prepared(prepared, INBOX_ID, to_wiki=True)
             material_id = result.material_id
         await disk_call(self.store.set_material, finding.id, material_id)
         await disk_call(self.store.update_details, finding.id, {"imported_content": content})

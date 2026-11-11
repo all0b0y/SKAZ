@@ -25,7 +25,7 @@ from ..errors import KnowledgeError, NotFound
 from ..explore.protocols import JobStore
 from ..ingest.pages import block_prefix
 from ..service import KnowledgeService
-from ..wiki.overlap import _statements
+from ..wiki.overlap import material_statements
 from ..wiki.statements import Statement, page_statements
 from .compare import Unanswered, compare
 from .reader import RepeatReader, stamp_marks_from, text_hash
@@ -216,7 +216,7 @@ class RepeatsService:
         plans = []
         for material_id in pending:
             judged = evidence[material_id].judged if material_id in evidence else {}
-            statements = [(item.page_id, item.block_id) for item in _statements(self._kb, material_id)
+            statements = [(item.page_id, item.block_id) for item in material_statements(self._kb, material_id)
                           if item.block_id.startswith(block_prefix(material_id))
                           and item.materials == {material_id}
                           and (item.page_id, item.block_id) not in judged]
