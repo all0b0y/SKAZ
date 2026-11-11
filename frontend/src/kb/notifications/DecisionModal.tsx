@@ -9,6 +9,7 @@ import { pendingDecisions } from '../state/notifications';
 import {
   DECISION_SCREENS, kindOf, LOCAL_ACTIONS, type KbDiscrepancyPayload, type KbDoubtfulPayload, type KbLinkFailedPayload,
 } from './kinds';
+import { NAVIGATION_ACTIONS, runNavigation } from './navigation';
 
 /** Actions after which the notification's material no longer exists (speech/link_failures.py). */
 const GONE_AFTER = new Set(['delete_material', 'fix_url']);
@@ -21,7 +22,8 @@ interface ExcludedItem { seg: number; found: string; location_label?: string; re
  * corrections, link failure, excluded instruction; other kinds show their text and actions.
  */
 export function DecisionModal() {
-  const { notifications, ui, chats, composer, library } = useServices();
+  const services = useServices();
+  const { notifications, ui, chats, composer, library } = services;
   const decisionId = useUi((s) => s.decisionId);
   const items = useNotifications((s) => s.items);
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +56,15 @@ export function DecisionModal() {
   const run = async (action: KbNotificationAction) => {
     if (!current) return;
     if (LOCAL_ACTIONS.has(action.id)) { openSubject(current); return; }
+    if (NAVIGATION_ACTIONS.has(action.id)) {
+      setBusy(action.id);
+      setError(null);
+      const res = await runNavigation(services, current, action.id);
+      setBusy(null);
+      if (!res.ok) { setError(res.error); return; }
+      close();
+      return;
+    }
     if (action.needs_text && textFor?.id !== action.id) {
       setTextFor(action);
       setText(action.id === 'fix_url' ? String((current.payload as Partial<KbLinkFailedPayload>).url ?? '') : '');

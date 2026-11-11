@@ -469,3 +469,20 @@ describe('B2-7 · a run paused by Quit', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
   });
 });
+
+describe('B6 · candidates the weekly check left waiting', () => {
+  it('offers Check novelty and starts one run over them only on the click', async () => {
+    const kb = createFakeKb();
+    vi.spyOn(kb.maintenance, 'settings').mockResolvedValue({
+      enabled: true, latest_check_id: 'check-1', candidates_waiting: 2, last_completed_at: null, next_due_at: null, missed: false,
+    });
+    vi.spyOn(kb.maintenance, 'check').mockResolvedValue({ ...(await kb.maintenance.check('check-1')), candidate_ids: ['c-1', 'c-2'] });
+    const startSpy = vi.spyOn(kb.explore, 'start');
+    render(<ExploreSection clients={kb} />);
+    const button = await screen.findByRole('button', { name: 'Check novelty' });
+    expect(screen.getByText(/2 candidates waiting/)).toBeInTheDocument();
+    expect(startSpy).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    await waitFor(() => expect(startSpy).toHaveBeenCalledWith({ candidate_ids: ['c-1', 'c-2'], channels: [] }));
+  });
+});

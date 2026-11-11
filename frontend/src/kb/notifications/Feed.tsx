@@ -8,6 +8,7 @@ import { useLibrary, useNotifications, useServices } from '../state/context';
 import { subjectRef } from '../state/document';
 import { pendingDecisions } from '../state/notifications';
 import { kindOf, quickAction } from './kinds';
+import { NAVIGATION_ACTIONS, runNavigation } from './navigation';
 
 type Filter = 'all' | 'decide';
 
@@ -33,7 +34,8 @@ export function useOpenNotification() {
  * a click (decision 18), never by itself.
  */
 export function NotificationsFeed() {
-  const { notifications, bridge } = useServices();
+  const services = useServices();
+  const { notifications, bridge } = services;
   const items = useNotifications((s) => s.items);
   const load = useNotifications((s) => s.load);
   const error = useNotifications((s) => s.error);
@@ -71,7 +73,9 @@ export function NotificationsFeed() {
   const quick = async (n: KbNotification, action: string) => {
     setBusy(n.id);
     setRowError(null);
-    const res = await notifications.getState().resolve(n.id, action);
+    const res = NAVIGATION_ACTIONS.has(action)
+      ? await runNavigation(services, n, action)
+      : await notifications.getState().resolve(n.id, action);
     setBusy(null);
     if (!res.ok) setRowError({ id: n.id, text: res.error });
   };

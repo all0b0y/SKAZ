@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { errorText } from '../api/client';
 import type {
   KbArea,
   KbAreaMap,
@@ -95,6 +96,9 @@ export function ExploreSection({
   const [exploringItems, setExploringItems] = useState<KbExploring[]>([]);
   const [keyHintDismissed, setKeyHintDismissed] = useState(false);
   const [weeklyDay, setWeeklyDay] = useState<string | null>(null);
+  // B6: what the last weekly check left waiting for the paid novelty step (runs only on the user's click).
+  const [waiting, setWaiting] = useState<{ checkId: string; count: number } | null>(null);
+  const [waitingError, setWaitingError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const runRef = useRef<KbFunnelRun | null>(null);
   runRef.current = run;
@@ -118,7 +122,10 @@ export function ExploreSection({
         void clients.maintenance
           .settings()
           .then((w) => {
-            if (!cancelled) setWeeklyDay(w.enabled ? weekdayShort(w.next_due_at) : null);
+            if (cancelled) return;
+            setWeeklyDay(w.enabled ? weekdayShort(w.next_due_at) : null);
+            setWaiting(w.latest_check_id && w.candidates_waiting > 0
+              ? { checkId: w.latest_check_id, count: w.candidates_waiting } : null);
           })
           .catch(() => undefined);
 
@@ -276,6 +283,21 @@ export function ExploreSection({
     },
     [clients, query, scopeId],
   );
+
+  const handleCheckNovelty = useCallback(async () => {
+    if (!waiting) return;
+    setWaitingError(null);
+    try {
+      const check = await clients.maintenance.check(waiting.checkId);
+      if (check.candidate_ids.length === 0) { setWaiting(null); return; }
+      const started = await clients.explore.start({ candidate_ids: check.candidate_ids.slice(0, 100), channels: [] });
+      setWaiting(null);
+      setOpenFinding(null);
+      setRun(started);
+    } catch (error) {
+      setWaitingError(errorText(error));
+    }
+  }, [clients, waiting]);
 
   const handleStopSearch = useCallback(async () => {
     if (!run) return;
@@ -448,6 +470,15 @@ export function ExploreSection({
                   Weekly · {weeklyDay}
                 </span>
               )}
+              {waiting && (
+                <span className="kb-explore-search__week">
+                  {waiting.count} {waiting.count === 1 ? 'candidate' : 'candidates'} waiting ·{' '}
+                  <button type="button" className="kb-link" onClick={() => void handleCheckNovelty()}>
+                    Check novelty
+                  </button>
+                </span>
+              )}
+              {waitingError && <span className="kb-inline-error kb-inline-error--flat" role="alert">{waitingError}</span>}
             </>
           )}
         </div>
