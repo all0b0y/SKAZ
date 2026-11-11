@@ -184,6 +184,24 @@ async def test_integration_off_sends_nothing(gateway: ScienceGateway, bases: Bas
     assert (await gateway.journal()).records == []
 
 
+async def test_consent_withdrawn_while_paced_sends_nothing(gateway: ScienceGateway, bases: Bases) -> None:
+    """Review R1-02: a request waiting in the arXiv pacing window re-checks consent before it leaves."""
+    await enable(gateway)
+    bases.on("export.arxiv.org", "/api/query", ok_bytes(fixture("arxiv_feed.xml"), "application/atom+xml"))
+    arxiv_search = KbScienceSearch(provider="arxiv", payload=KbSciencePayload(topics=["rag"]))
+    await gateway.search(arxiv_search)
+
+    async def withdraw_while_waiting(_seconds: float) -> None:
+        gateway.store.set_enabled(False, NOW)  # Settings → science off, during the 3 s wait
+
+    gateway.transport.sleep = withdraw_while_waiting
+    gateway.transport.monotonic = lambda: 0.0  # the second request comes at once, so it must wait
+    with pytest.raises(ScienceConsentRequired):
+        await gateway.search(arxiv_search)
+    assert len(bases.requests) == 1  # the paced second request never left
+    assert len((await gateway.journal()).records) == 1  # and was never journalled as sent
+
+
 async def test_enabling_records_consent_and_disabling_withdraws_it(gateway: ScienceGateway) -> None:
     settings = await gateway.settings()
     assert (settings.enabled, settings.consent_at, settings.openalex_key_configured) == (False, None, False)
