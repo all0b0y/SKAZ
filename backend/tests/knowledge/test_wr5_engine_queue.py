@@ -9,8 +9,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
+import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, Failed, TextDelta
+from skaz.knowledge.agents.engine import AgentTurn, Failed, ModelOption, TextDelta
 from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.ingest.execution import ProcessingProfile, execution_scope, stored_scope
 from skaz.knowledge.ingest.jobs import JobRecord
@@ -359,10 +360,34 @@ async def test_material_follow_ups_resume_after_restart_with_the_same_root_and_b
     clock.advance(3600)
     await drain(restarted)
     await next_wiki.jobs.idle("folder_overview")
-    continued = [job for job in restarted.jobs.list_all() if job.kind == "folder_overview" and job.id != follow.id]
+    continued = [job for job in restarted.jobs.list_all()
+                 if job.kind == "folder_overview" and job.id != follow.id]
     assert len(continued) == 1 and continued[0].state == "done"
     scope = stored_scope(ready.db, continued[0].id)
     assert scope is not None and scope.root_job_id == parent_scope.root_job_id
     assert scope.budget == parent_scope.budget and scope.profile == parent_scope.profile
     await next_wiki.jobs.close()
     await restarted.close()
+
+
+async def test_continue_pins_the_new_model_before_releasing_the_engine_gate(
+    ready: KnowledgeService, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = Clock()
+    ingest, engine, jobs = await limited(ready, clock, None, count=1)
+    engine._models = (ModelOption("chosen-model", "Chosen"),)
+    ingest.update_settings(engine="codex", model="chosen-model")
+    loop = asyncio.get_running_loop()
+    release = ingest.jobs.release_engine
+
+    def release_with_queue_race(engine_id: str) -> None:
+        release(engine_id)
+        # The queue may run as soon as the DB gate is released, before this disk call returns.
+        asyncio.run_coroutine_threadsafe(drain(ingest), loop).result(timeout=5)
+
+    monkeypatch.setattr(ingest.jobs, "release_engine", release_with_queue_race)
+    await ingest.continue_job(jobs[0].id)
+    await drain(ingest)
+    assert ingest.job(jobs[0].id).state == "done"
+    assert all(turn.model == "chosen-model" for turn in engine.turns[1:])
+    await ingest.close()
