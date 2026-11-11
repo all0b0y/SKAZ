@@ -24,6 +24,7 @@ from ..agents.engine import AgentTurn, EngineId, Failed, TurnMessage, collect
 from ..agents.prompting import untrusted_block
 from ..agents.registry import EngineRegistry
 from ..api.schemas_explore import KbFinding
+from ..api.schemas_science import SCIENCE_TOPIC_CHARS
 from ..errors import KnowledgeError
 from ..sources.guard.detector import detect_instruction
 from ..study.judge import parse_object
@@ -31,7 +32,10 @@ from ..study.judge import parse_object
 logger = logging.getLogger(__name__)
 
 MAX_TOPICS = 4
-TOPIC_CHARS = 80
+#: All the topics on the card leave as ONE search line ("A OR B OR C OR D", B3 decision 2) whose limit is
+#: ``SCIENCE_TOPIC_CHARS``; 4 x 72 + 3 x len(" OR ") = 300, so every topic the user allowed fits and none is
+#: dropped after the card (0.4.0 review round, FX-A).
+TOPIC_CHARS = (SCIENCE_TOPIC_CHARS - (MAX_TOPICS - 1) * len(" OR ")) // MAX_TOPICS
 TOPIC_WORDS = 8
 TITLE_CHARS = 80
 MAX_POINTS = 5

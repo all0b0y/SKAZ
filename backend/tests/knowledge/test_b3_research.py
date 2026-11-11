@@ -644,3 +644,15 @@ def test_stop_notes_are_honest_and_the_report_without_findings_says_so() -> None
     text = report_text(run, [], [], None)
     assert text == ("Research finished. Checked 5 · on topic 0 · new 0.\n\n"
                     "Nothing new for your wiki this time.")
+
+
+def test_every_topic_on_the_card_fits_the_one_search_line() -> None:
+    """Review round (FX-A): 4 topics of the longest allowed length joined with " OR " fit the science
+    topic limit, so nothing the user allowed is dropped after the card."""
+    from skaz.knowledge.api.schemas_science import SCIENCE_TOPIC_CHARS
+    from skaz.knowledge.research.agent import MAX_TOPICS, TOPIC_CHARS, clean_topic
+
+    longest = [("a" * (TOPIC_CHARS - 1)) + chr(ord("a") + i) for i in range(MAX_TOPICS)]
+    assert all(clean_topic(topic) == topic for topic in longest)
+    assert len(" OR ".join(longest)) <= SCIENCE_TOPIC_CHARS
+    assert clean_topic("a" * (TOPIC_CHARS + 1)) == ""

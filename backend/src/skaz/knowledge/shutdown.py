@@ -67,6 +67,8 @@ class KnowledgeRuntime(Protocol):
     @property
     def kb_repeats(self) -> _AsyncCloses: ...
     @property
+    def kb_freshness(self) -> _AsyncCloses: ...
+    @property
     def kb_research(self) -> _AsyncCloses: ...
     @property
     def kb_maintenance(self) -> _AsyncCloses: ...
@@ -98,6 +100,7 @@ async def close_knowledge(runtime: KnowledgeRuntime, *, deadline_s: float = DEAD
         # 0.4.0 B3: research tasks stop following their runs (the next start reports what happened).
         ("research", runtime.kb_research.aclose),
         ("explore", runtime.kb_explore.aclose), ("repeats", runtime.kb_repeats.aclose),
+        ("freshness", runtime.kb_freshness.aclose),
         # 0.4.0 B6: the weekly timer stops; a running weekly check pauses with ``app_exit``.
         ("maintenance", runtime.kb_maintenance.aclose),
     ]
