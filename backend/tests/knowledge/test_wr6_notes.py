@@ -137,7 +137,9 @@ async def test_correction_refresh_restores_existing_notes_when_automatic_notes_a
         await ingest.close()
 
 
-async def test_refresh_without_existing_notes_still_respects_automatic_notes_off(kb: KnowledgeService) -> None:
+async def test_refresh_without_existing_notes_still_respects_automatic_notes_off(
+    kb: KnowledgeService,
+) -> None:
     ingest, wiki, material = await seed(kb)
     try:
         wiki.queues[prompts.CONCEPTS_SCHEMA_TITLE] = [CONCEPTS_OK]
