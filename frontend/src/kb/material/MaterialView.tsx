@@ -240,11 +240,12 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} onJobChanged={reload} />
               {material.status === 'ready' && material.wiki?.state === 'in_wiki' && !material.wiki.note_page_id
-                && !data.jobs.some((j) => j.state === 'queued' || j.state === 'running' || j.state === 'paused') && (
+                && !data.jobs.some((j) => j.state === 'queued' || j.state === 'running') && (
                 <div className="kb-mat__actions">
                   <Button size="sm" variant="quiet" icon="pencil" disabled={adding} onClick={() => void addToWiki(true)}>
                     Write notes
                   </Button>
+                  {material.wiki.error && <p className="kb-inline-error" role="alert">{material.wiki.error}</p>}
                 </div>
               )}
               <OverlapLine overlap={material.overlap} />
