@@ -114,6 +114,8 @@ class KbWikiChoice(BaseModel):
 
 
 class KbWikiSettings(BaseModel):
+    #: WR6: Notes are written only on request unless the user opts in.
+    write_notes_automatically: bool = False
     wiki_language: str
     #: False while ``wiki_language`` is the built-in default (onboarding hasn't asked yet).
     wiki_language_chosen: bool
@@ -135,6 +137,7 @@ class KbWikiSettings(BaseModel):
 
 
 class KbWikiSettingsUpdate(BaseModel):
+    write_notes_automatically: bool | None = None
     """Only the fields present are changed; ``wiki_engine: null`` returns to the default agent."""
 
     model_config = ConfigDict(extra="forbid")

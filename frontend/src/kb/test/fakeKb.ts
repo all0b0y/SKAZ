@@ -995,6 +995,15 @@ const ROUTES: FakeRoutes = {
     m.wiki_state = 'processing';
     return job;
   }],
+  'POST /kb/materials/{material_id}/notes': [202, (w, { path }) => {
+    const m = findMaterial(w, path.material_id);
+    if (m.wiki?.state !== 'in_wiki' || m.wiki.note_page_id) fail(409, 'Notes are not available for this material.');
+    const job = newJob(w, 'ingest', m.id, 'running', 'Writing notes');
+    job.step = 'writing_notes';
+    m.wiki = { ...m.wiki!, state: 'processing', job_id: job.id };
+    m.wiki_state = 'processing';
+    return job;
+  }],
   'POST /kb/materials/text': [201, (w, { body }) => {
     const text = String(body.text ?? '');
     const title = body.title ?? `Pasted text: ${text.split('\n')[0]!.slice(0, 40)}`;

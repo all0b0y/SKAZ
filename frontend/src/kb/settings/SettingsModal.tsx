@@ -70,6 +70,7 @@ function RowControl({ row }: { row: RowDef }) {
     case 'wiki-language': return <WikiLanguageRow />;
     case 'auto-files': return <WikiSwitchRow field="auto_add_files_links" label={row.label} />;
     case 'auto-text': return <WikiSwitchRow field="auto_add_text" label={row.label} />;
+    case 'auto-notes': return <WikiSwitchRow field="write_notes_automatically" label={row.label} />;
     case 'auto-fix': return <WikiSwitchRow field="auto_corrections" label={row.label} />;
     case 'bg-links': return <BackgroundLinksRow label={row.label} />;
     case 'links-now': return <FindLinksNowRow />;

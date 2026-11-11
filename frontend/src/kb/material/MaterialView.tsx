@@ -169,12 +169,13 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
     setNote(changeNote(change));
     reload();
   };
-  const addToWiki = async () => {
+  const addToWiki = async (notesOnly = false) => {
     if (!material) return;
     setAdding(true);
     setAddError(null);
     try {
-      await client.call('POST /kb/materials/{material_id}/ingest', { path: { material_id: material.id } });
+      await client.call(notesOnly ? 'POST /kb/materials/{material_id}/notes' : 'POST /kb/materials/{material_id}/ingest',
+        { path: { material_id: material.id } });
       reload();
     } catch (e) {
       setAddError(errorText(e));
@@ -238,6 +239,14 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
               <h2 className="kb-doc__title">{material.title}</h2>
               <p className="kb-doc__meta">{metaLine(material)}</p>
               <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} onJobChanged={reload} />
+              {material.status === 'ready' && material.wiki?.state === 'in_wiki' && !material.wiki.note_page_id
+                && !data.jobs.some((j) => j.state === 'queued' || j.state === 'running' || j.state === 'paused') && (
+                <div className="kb-mat__actions">
+                  <Button size="sm" variant="quiet" icon="pencil" disabled={adding} onClick={() => void addToWiki(true)}>
+                    Write notes
+                  </Button>
+                </div>
+              )}
               <OverlapLine overlap={material.overlap} />
               {repeatMarks.foldable && <RepeatToggle hide={repeatMarks.hide} onChange={repeatMarks.setHide} />}
               <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />

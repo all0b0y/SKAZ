@@ -206,5 +206,6 @@ async def test_notes_http_and_settings_contract(kb_app: Any, kb_client: httpx.As
     assert ingest.job(response.json()["id"]).scope == "notes"
     assert ingest.job(response.json()["id"]).state == "done"
     assert (await kb_client.post(f"/kb/materials/{material}/notes")).status_code == 409
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=kb_app), base_url="http://test") as client:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=kb_app),
+                                 base_url="http://127.0.0.1:8765") as client:
         assert (await client.post(f"/kb/materials/{material}/notes")).status_code == 401

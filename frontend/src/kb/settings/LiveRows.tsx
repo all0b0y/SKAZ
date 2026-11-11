@@ -502,7 +502,7 @@ export function TranslationRow({ optionPrefix = '' }: { optionPrefix?: string } 
 
 // ---- Wiki ------------------------------------------------------------------------------------
 
-type WikiFlag = 'auto_add_files_links' | 'auto_add_text' | 'auto_corrections';
+type WikiFlag = 'auto_add_files_links' | 'auto_add_text' | 'auto_corrections' | 'write_notes_automatically';
 
 export function WikiLanguageRow() {
   const { settings } = useServices();

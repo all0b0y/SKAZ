@@ -51,6 +51,7 @@ def settings_view(settings: WikiSettings) -> KbWikiSettings:
         "auto_add_text": settings.auto_add_text, "background_connections": settings.background_connections,
         "auto_corrections": settings.auto_corrections,
         "wiki_budget_characters": settings.budget,
+        "write_notes_automatically": settings.write_notes_automatically,
     })
 
 
@@ -71,6 +72,15 @@ async def request_ingest(material_id: str, ingest: IngestDep) -> KbJob:
 async def retry_failed(ingest: IngestDep) -> list[KbJob]:
     """Queue again every material whose latest wiki job failed or was interrupted."""
     return [job_view(record) for record in await ingest.retry_failed()]
+
+
+@router.post("/kb/materials/{material_id}/notes", status_code=202)
+async def request_notes(material_id: str, ingest: IngestDep) -> KbJob:
+    """Write only Notes for a material already in the wiki, through the ingest queue."""
+    try:
+        return job_view(await ingest.request_notes(material_id))
+    except KnowledgeError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
 
 
 @router.get("/kb/jobs")
@@ -116,5 +126,6 @@ async def update_wiki_settings(body: KbWikiSettingsUpdate, ingest: IngestDep) ->
         auto_add_files_links=body.auto_add_files_links, auto_add_text=body.auto_add_text,
         background_connections=body.background_connections, auto_corrections=body.auto_corrections,
         budget=body.wiki_budget_characters,
+        write_notes_automatically=body.write_notes_automatically,
     )
     return settings_view(settings)

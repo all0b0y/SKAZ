@@ -2809,6 +2809,7 @@ export interface KbWikiProcessingProfile {
 }
 
 export interface KbWikiSettings {
+  write_notes_automatically?: boolean;
   wiki_language: string;
   wiki_language_chosen: boolean;
   wiki_engine: "codex" | "claude_code" | "hermes" | "opencode" | null;
@@ -2822,8 +2823,8 @@ export interface KbWikiSettings {
   wiki_budget_characters: number;
 }
 
-/** Only the fields present are changed; ``wiki_engine: null`` returns to the default agent. */
 export interface KbWikiSettingsUpdate {
+  write_notes_automatically?: boolean | null;
   wiki_language?: string | null;
   wiki_engine?: "codex" | "claude_code" | "hermes" | "opencode" | null;
   wiki_model?: string | null;
@@ -3802,6 +3803,13 @@ export interface KbEndpoints {
     status: 200;
   };
   "POST /kb/materials/{material_id}/ingest": {
+    path: { material_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
+  };
+  "POST /kb/materials/{material_id}/notes": {
     path: { material_id: string };
     query: Record<string, never>;
     body: never;

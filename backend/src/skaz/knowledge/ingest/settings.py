@@ -23,6 +23,7 @@ AUTO_ADD_FILES_LINKS = "auto_add_files_links"
 AUTO_ADD_TEXT = "auto_add_text"
 BACKGROUND_CONNECTIONS = "background_connections"
 AUTO_CORRECTIONS = "auto_corrections"
+WRITE_NOTES_AUTOMATICALLY = "write_notes_automatically"
 #: C1-d "Wiki budget per material": characters in + out of the model for one material.
 WIKI_BUDGET = "wiki_budget_characters"
 #: PROVISIONAL — replace with 3× the measured spend of a normal material once the user's real run
@@ -87,6 +88,8 @@ class WikiSettings:
     remembered: Mapping[str, tuple[str, str | None]] = field(default_factory=dict)
     #: C1-d: characters in + out one material's processing may use before it pauses for Continue.
     budget: int = PROVISIONAL_BUDGET_CHARACTERS
+    #: WR6: opt in for both new and existing libraries; explicit Notes is a separate request.
+    write_notes_automatically: bool = False
 
 
 def _remembered(raw: Any) -> dict[str, tuple[str, str | None]]:
@@ -119,6 +122,7 @@ def read_settings(repo: SettingsRepository) -> WikiSettings:
         auto_corrections=bool(repo.get(AUTO_CORRECTIONS, True)),
         remembered=_remembered(repo.get(WIKI_REMEMBERED)),
         budget=_budget(repo.get(WIKI_BUDGET)),
+        write_notes_automatically=bool(repo.get(WRITE_NOTES_AUTOMATICALLY, False)),
     )
 
 
@@ -134,7 +138,8 @@ def update_settings(repo: SettingsRepository, *, language: str | None = None, en
                     auto_add_text: bool | None = None, background_connections: bool | None = None,
                     auto_corrections: bool | None = None, model: str | None = None,
                     effort: str | None = None, clear_model: bool = False,
-                    clear_effort: bool = False, budget: int | None = None) -> WikiSettings:
+                    clear_effort: bool = False, budget: int | None = None,
+                    write_notes_automatically: bool | None = None) -> WikiSettings:
     current = read_settings(repo)
     if budget is not None and not MIN_BUDGET_CHARACTERS <= budget <= MAX_BUDGET_CHARACTERS:
         raise InvalidSetting(f"Choose a wiki budget from {MIN_BUDGET_CHARACTERS:,} to "
@@ -184,6 +189,8 @@ def update_settings(repo: SettingsRepository, *, language: str | None = None, en
         repo.set(AUTO_CORRECTIONS, auto_corrections)
     if budget is not None:
         repo.set(WIKI_BUDGET, budget)
+    if write_notes_automatically is not None:
+        repo.set(WRITE_NOTES_AUTOMATICALLY, write_notes_automatically)
     repo.set(WIKI_MODEL, next_model)
     repo.set(WIKI_EFFORT, next_effort)
     if next_engine in ENGINE_IDS:
