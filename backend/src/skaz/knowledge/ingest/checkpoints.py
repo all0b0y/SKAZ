@@ -2,7 +2,8 @@
 
 Only structurally parsed model answers are stored; every reuse still runs the
 usual source/citation/output checks. A changed source clears old answers.
-Deleting a material cascades through both tables. An unresolved default model is
+They survive the index rebuild of every app start (WR1): deleting the material deletes them,
+and a complete scan prunes those of a material that is gone. An unresolved default model is
 not cacheable: its actual configuration could change without SKAZ knowing.
 
 The processing choice (agent · model · reasoning) is not part of the revision

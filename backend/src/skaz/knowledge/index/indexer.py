@@ -50,6 +50,17 @@ def replace_index(db: KnowledgeDatabase, result: ScanResult, *, stop: StopCheck 
             if stop is not None and stop():
                 raise ScanStopped
             _put_page(connection, page)
+        if not result.unreadable:
+            _prune_checkpoints(connection)
+
+
+def _prune_checkpoints(connection: sqlite3.Connection) -> None:
+    """WR1: kept wiki answers of a material a COMPLETE scan no longer finds (deleted outside SKAZ).
+
+    They don't cascade from ``materials`` (the rebuild above deletes every row); after a partial scan
+    an unread material may come back, so nothing is pruned then. The answers go with their head.
+    """
+    connection.execute("DELETE FROM wiki_checkpoints WHERE material_id NOT IN (SELECT id FROM materials)")
 
 
 def clear_index(db: KnowledgeDatabase) -> None:

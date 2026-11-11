@@ -761,6 +761,8 @@ class SpeechService:
         shutil.rmtree(doomed, ignore_errors=True)
         with self.kb.db.write() as connection:
             connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+            # WR1: kept wiki answers don't cascade from the rebuilt index; they go with the material.
+            connection.execute("DELETE FROM wiki_checkpoints WHERE material_id = ?", (material_id,))
         self._forget_carrier(material_id)
 
     async def retry_import(self, material_id: str) -> SpeechView:
