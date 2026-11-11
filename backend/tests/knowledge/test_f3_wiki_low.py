@@ -31,7 +31,8 @@ async def test_an_agent_that_is_not_installed_could_not_start() -> None:
     # 0.4.0 WR5: a quota is no longer a failure of the job but a pause of the engine's queue.
     with pytest.raises(EngineLimited) as stopped:
         await AgentCaller(limited, "t").ask("x", [], {})
-    assert stopped.value.message == "Codex: usage limit reached. The finished work is kept."
+    # FX-C (review R4 M5): no blanket "finished work is kept" — it is false without checkpoints.
+    assert stopped.value.message == "Codex: usage limit reached."
 
 
 async def test_a_new_note_of_two_paragraphs_becomes_two_notes_and_errors_are_plain(
