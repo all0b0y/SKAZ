@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeKb } from '../api/fake';
 import { scenes } from '../api/fake/scenes';
+import { contractFixtures as f } from '../api/fake/fixtures';
 import type { KbResearchTask, KbResearchTasks } from '../../api/kb/types.gen';
 import { createServices } from '../state/context';
 import { createFakeBridge } from '../test/fakeBridge';
@@ -32,7 +33,7 @@ describe('FX-D research review regressions', () => {
   it.each(['detail', 'list'] as const)('R3-11 rejects an older %s response arriving after Continue', async (kind) => {
     const { api, store } = setup();
     const paused = { ...structuredClone(scenes.research_budget.task), run: { ...scenes.research_budget.task.run,
-      checkpoint: { id: 'checkpoint-old', revision: 1, stage: 'novelty' as const, created_at: '2026-11-09T10:00:00Z' } } };
+      checkpoint: { ...f.KbFunnelRun.checkpoint!, id: 'checkpoint-old', revision: 1 } } };
     const running: KbResearchTask = { ...paused, run: { ...paused.run, state: 'running', checkpoint: null, updated_at: '2026-11-09T10:00:01Z' } };
     store.getState().upsertTask(paused);
     const detail = deferred<KbResearchTask>();
