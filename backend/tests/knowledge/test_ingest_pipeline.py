@@ -631,7 +631,9 @@ async def test_engine_failure_is_reported_with_its_reason(ready: KnowledgeServic
     job = await ingest.request_ingest(material_id)
     record = await wait_finished(ingest, job.id)
     assert record.state == "paused"
-    assert record.error == "Codex: usage limit reached. The finished work is kept."
+    assert record.error == (
+        "Codex: usage limit reached. Continue starts this material over. "
+        "To keep finished parts, choose a wiki model in Settings → Models.")
     assert record.error_code == "ENGINE_LIMIT" and not record.can_retry
     await ingest.close()
 

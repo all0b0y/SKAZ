@@ -64,6 +64,9 @@ function EnginePauseNotice({ job, onChanged }: { job: KbJob; onChanged?: () => v
   const pause = job.engine_pause;
   if (!pause) return null;
   const text = enginePauseText(pause);
+  // This app-owned explanation is present only when the paused material has no checkpoints.
+  const restartAt = job.error?.indexOf('Continue starts this material over.') ?? -1;
+  const recovery = restartAt >= 0 ? job.error?.slice(restartAt) : null;
   const act = async (action: 'continue' | 'stop') => {
     setBusy(action);
     setError(null);
@@ -82,6 +85,7 @@ function EnginePauseNotice({ job, onChanged }: { job: KbJob; onChanged?: () => v
   };
   return <>
     <Pill tone="warn" icon="warning" wrap>{text}</Pill>
+    {recovery && <span className="kb-muted kb-pipe__why">{recovery}</span>}
     <Button size="sm" variant="outline" icon="play" busy={busy === 'continue'} disabled={busy !== null}
       onClick={() => void act('continue')}>Continue now</Button>
     <Button size="sm" variant="quiet" icon="close" busy={busy === 'stop'} disabled={busy !== null}

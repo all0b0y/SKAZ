@@ -1,15 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderKb } from '../test/renderKb';
 import { docWorld } from '../test/fixtures';
 import { materialWiki } from '../test/fakeKb';
+import { enginePauseText } from './enginePause';
 
-async function openPaused(options: { queued?: boolean; retryAt?: string | null } = {}) {
+async function openPaused(options: { queued?: boolean; retryAt?: string | null; error?: string } = {}) {
   const world = docWorld();
   const job = world.jobs.find((j) => j.material_id === 'm-l5')!;
   Object.assign(job, { state: options.queued ? 'queued' : 'paused', step: 'writing_notes',
-    label: 'Paused · usage limit reached', error: 'Codex: usage limit reached. The finished work is kept.',
+    label: 'Paused · usage limit reached', error: options.error ?? 'Codex: usage limit reached.',
     error_code: options.queued ? null : 'ENGINE_LIMIT', can_retry: false, step_started_at: null,
     engine_pause: { engine: 'codex', retry_at: options.retryAt ?? null } });
   const material = world.materials.find((m) => m.id === 'm-l5')!;
@@ -27,7 +28,9 @@ async function openPaused(options: { queued?: boolean; retryAt?: string | null }
 
 describe('An engine quota pauses wiki work', () => {
   it('shows the provider reset in local time and offers Continue now and Stop', async () => {
-    const at = '2026-11-11T14:30:00Z';
+    const today = new Date();
+    today.setHours(14, 30, 0, 0);
+    const at = today.toISOString();
     const { strip } = await openPaused({ retryAt: at });
     const time = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     expect(within(strip).getByText(`Codex: usage limit reached — continues at ${time}`)).toBeInTheDocument();
@@ -41,6 +44,27 @@ describe('An engine quota pauses wiki work', () => {
     const { strip } = await openPaused();
     expect(within(strip).getByText('Codex: usage limit reached — continue manually')).toBeInTheDocument();
     expect(within(strip).queryByText(/continues at/)).toBeNull();
+  });
+
+  it('explains that Continue restarts an uncheckpointed material and how to keep parts', async () => {
+    const hint = 'Continue starts this material over. To keep finished parts, choose a wiki model in Settings → Models.';
+    const { strip } = await openPaused({ error: `Codex: usage limit reached. ${hint}` });
+    expect(within(strip).getByText(hint)).toBeInTheDocument();
+    expect(within(strip).queryByText(/finished work is kept/)).toBeNull();
+  });
+
+  it('includes the date for a reset on another day, including a weekly limit', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-11-11T12:00:00'));
+      const reset = new Date('2026-11-18T14:00:00');
+      const date = reset.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      const time = reset.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      expect(enginePauseText({ engine: 'codex', retry_at: reset.toISOString() }))
+        .toBe(`Codex: usage limit reached — continues at ${date}, ${time}`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('continues the selected job through its explicit Continue now endpoint', async () => {

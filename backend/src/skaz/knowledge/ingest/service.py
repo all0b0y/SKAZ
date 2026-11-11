@@ -194,6 +194,8 @@ class IngestService:
         return record
 
     def list_jobs(self, *, material_id: str | None = None) -> list[JobRecord]:
+        # Polling after wake checks the wall deadline even if the monotonic alarm was asleep.
+        self._queue_changed()
         return self.jobs.list_all(material_id=material_id)
 
     async def request_ingest(self, material_id: str, *, kind: JobKind = "ingest",
@@ -283,8 +285,12 @@ class IngestService:
         if record.state == "paused" and active is not None and active.task is not None:
             await asyncio.shield(active.task)  # finish saving the pause before requeuing this row
             record = await disk_call(self.job, job_id)
+        if record.state == "interrupted" and record.kind not in QUEUED_KINDS and record.error:
+            raise IngestBusy(record.error)
         if record.state not in ("queued", "paused") or record.engine_pause is None:
             raise IngestBusy("This job is not waiting for an engine's usage limit.")
+        if record.kind not in QUEUED_KINDS and not await self._can_continue_wiki(record):
+            raise IngestBusy("This wiki check couldn't be restored after SKAZ closed. Start it again.")
         profile = self.profile()
         # Re-pin this job only. Other queued jobs retain the model the user started them with.
         await disk_call(self.jobs.reprofile, job_id, profile)
@@ -303,14 +309,24 @@ class IngestService:
             await asyncio.shield(self._pump_task)
         return await disk_call(self.job, job_id)
 
+    async def _can_continue_wiki(self, record: JobRecord) -> bool:
+        if self.jobs.can_resume_wiki is not None and self.jobs.can_resume_wiki(record.id):
+            return True
+        if record.kind not in ("connections", "folder_overview") or self.continue_follow_ups is None:
+            return False
+        scope = await disk_call(stored_scope, self.kb.db, record.id)
+        return (scope is not None and scope.material_id is not None
+                and await disk_call(self.kb.material_repo.get, scope.material_id) is not None)
+
     async def _continue_wiki(self, record: JobRecord) -> bool:
         if self.jobs.resume_wiki is not None and await self.jobs.resume_wiki(record.id):
             return True
         # After restart the Python closure is gone. Rebuild a material's follow-up work through
         # its existing continuer, inside the same root: quota resume grants no new budget portion.
         scope = await disk_call(stored_scope, self.kb.db, record.id)
-        if scope is None or scope.material_id is None or self.continue_follow_ups is None:
-            return False  # standalone work without a recoverable request stays honestly paused
+        if (record.kind not in ("connections", "folder_overview") or scope is None
+                or scope.material_id is None or self.continue_follow_ups is None):
+            return False
         with execution_scope(scope):
             continued = await self.continue_follow_ups(scope.material_id, [record.kind])
         if continued is not None:
@@ -321,12 +337,15 @@ class IngestService:
     async def _resume_ready(self) -> None:
         await disk_call(self.jobs.release_due)
         for record in await disk_call(self.jobs.ready_pauses):
-            if record.id in self._active:
-                continue  # a running job is still saving its pause
-            if record.kind in QUEUED_KINDS:
-                await disk_call(self.jobs.continue_paused, record.id)
-            else:
-                await self._continue_wiki(record)
+            try:
+                if record.id in self._active:
+                    continue  # a running job is still saving its pause
+                if record.kind in QUEUED_KINDS:
+                    await disk_call(self.jobs.continue_paused, record.id)
+                else:
+                    await self._continue_wiki(record)
+            except Exception as failure:
+                logger.error("wiki job %s could not resume: %s", record.id, error_note(failure))
 
     def _queue_changed(self) -> None:
         if self._loop is not None and not self._closing:
@@ -339,7 +358,7 @@ class IngestService:
         resets = [pause.retry_at for pause in (await disk_call(self.jobs.engine_pauses)).values()
                   if pause.retry_at is not None]
         if resets and not self._closing:
-            after = max(0.0, (min(resets) - self._clock()).total_seconds())
+            after = min(60.0, max(0.0, (min(resets) - self._clock()).total_seconds()))
             schedule = self._schedule or asyncio.get_running_loop().call_later
             self._alarm = schedule(after, self._kick)
 
@@ -379,12 +398,11 @@ class IngestService:
     async def _pump(self) -> None:
         while True:
             self._pump_again = False
-            try:
-                await self._resume_ready()
-                await self._start_queued()
-                await self._schedule_resume()
-            except Exception as failure:  # the queue stays; the next kick tries again
-                logger.error("ingest queue could not start a job: %s", error_note(failure))
+            for operation in (self._resume_ready, self._start_queued, self._schedule_resume):
+                try:
+                    await operation()
+                except Exception as failure:  # other work and the alarm still get their turn
+                    logger.error("ingest queue could not advance: %s", error_note(failure))
             if not self._pump_again:
                 return
 
@@ -533,6 +551,8 @@ class IngestService:
             # C1-d: finished work is in the checkpoints; nothing unfinished was published.
             state, error, code = "paused", reached.message, BUDGET_REACHED
         except EngineLimited as limited:
+            if active.run is not None and active.run.checkpoints is None:
+                limited = EngineLimited(limited.pause.engine, limited.pause.retry_at, restart_material=True)
             state, error, code = "paused", limited.message, ENGINE_LIMIT
             await disk_call(self.jobs.pause, job_id, limited)
         except asyncio.CancelledError:

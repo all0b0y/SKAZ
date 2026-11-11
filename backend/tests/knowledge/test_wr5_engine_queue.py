@@ -433,6 +433,7 @@ async def test_a_nonrecoverable_standalone_wiki_check_never_claims_to_have_conti
     next_wiki = WikiJobs(restarted.jobs, profile=restarted.profile)
     with pytest.raises(IngestBusy, match="Start it again"):
         await restarted.continue_job(job.id)
-    assert restarted.job(job.id).state == "paused" and len(engine.turns) == 1
+    assert restarted.job(job.id).state == "interrupted" and len(engine.turns) == 1
+    assert restarted.job(job.id).engine_pause is None
     await next_wiki.close()
     await restarted.close()
