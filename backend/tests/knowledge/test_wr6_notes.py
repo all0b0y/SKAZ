@@ -102,6 +102,52 @@ async def test_opt_in_writes_notes_and_off_keeps_existing_notes(kb: KnowledgeSer
     await ingest.close()
 
 
+async def test_correction_refresh_restores_existing_notes_when_automatic_notes_are_off(
+    kb: KnowledgeService,
+) -> None:
+    from skaz.knowledge.decisions.protocol import YesNoAnswer
+
+    from .test_corrections import CONCEPTS, NOTES, SPEECH
+    from .wiki_support import RECOGNITION, correction, corrections, ingest_done, settle_wiki, wired
+
+    corrected_notes = NOTES.replace("кинетическую", "кинетичную")
+    wiki = ScriptedWiki(notes=[NOTES, corrected_notes], concepts=[CONCEPTS, CONCEPTS],
+                        answers={RECOGNITION: [corrections(),
+                                              corrections(correction(2, "кинетическую", "кинетичную"))]})
+    ingest, service = wired(kb, wiki, lambda _: YesNoAnswer(0.95))
+    material = add_material(kb, "WR6", "Existing notes", SPEECH)
+    try:
+        await ingest_done(ingest, material)
+        await settle_wiki(service, ingest)
+        note = kb.pages(kind="note")[0]
+        assert "Температура связана с энергией частиц." in (kb.library_root / note.rel_path).read_text()
+        ingest.update_settings(write_notes_automatically=False)
+        job = await service.check_recognition_again(material)
+        await service.jobs.wait(job.id)
+        assert ingest.job(job.id).state == "done", ingest.job(job.id).error
+        await settle_wiki(service, ingest)
+        assert len(wiki.turns(prompts.NOTES_SCHEMA_TITLE)) == 2
+        text = (kb.library_root / note.rel_path).read_text()
+        assert "Температура связана с энергией частиц." in text
+        assert "среднюю кинетичную энергию" in text and "среднюю кинетическую энергию" not in text
+        assert ingest.settings().write_notes_automatically is False
+    finally:
+        await service.close()
+        await ingest.close()
+
+
+async def test_refresh_without_existing_notes_still_respects_automatic_notes_off(kb: KnowledgeService) -> None:
+    ingest, wiki, material = await seed(kb)
+    try:
+        wiki.queues[prompts.CONCEPTS_SCHEMA_TITLE] = [CONCEPTS_OK]
+        job = await ingest.request_ingest(material, kind="refresh")
+        await drain(ingest)
+        assert ingest.job(job.id).state == "done", ingest.job(job.id).error
+        assert not kb.pages(kind="note") and not wiki.turns(prompts.NOTES_SCHEMA_TITLE)
+    finally:
+        await ingest.close()
+
+
 async def test_write_notes_preserves_concepts_and_skips_other_steps(kb: KnowledgeService) -> None:
     ingest, wiki, material = await seed(kb)
     before = concept_bytes(kb)
