@@ -30,9 +30,9 @@ POLL_INTERVAL_S = 0.2
 OPEN_MATERIAL = ActionSpec("open_material", "Open material")
 #: Actions that only navigate; they never mark a notification resolved.
 #: Buttons that only navigate: the client carries them out; resolving one changes nothing and keeps the notice
-#: open. 0.4.0: B2 Open in Explore; B6 View check / Check novelty / Review source updates.
+#: open. 0.4.0: B2 Open in Explore; B3 Open task; B6 View check / Check novelty / Review source updates.
 NAVIGATION_ACTIONS = frozenset(
-    {OPEN_MATERIAL.id, "open_explore", "view_check", "check_novelty", "review_updates"}
+    {OPEN_MATERIAL.id, "open_explore", "open_research_task", "view_check", "check_novelty", "review_updates"}
 )
 ALREADY_RESOLVED = "This notification is already resolved."
 

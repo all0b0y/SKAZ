@@ -220,6 +220,8 @@ _TOOL_ACTIONS: dict[str, str] = {
     "skaz_ask_user": "Ask Question",
     "skaz_web_search": "Search Web",
     "skaz_web_read": "Read Web Page",
+    "skaz_research_start": "Start Research Task",
+    "skaz_explore_read": "Read Explore",
     "WebSearch": "Search Web",
 }
 

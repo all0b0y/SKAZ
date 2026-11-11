@@ -387,6 +387,7 @@ export interface KbChat {
   state: "idle" | "answering";
   unread: boolean;
   waiting_for_user?: boolean;
+  research_task_id?: string | null;
   messages: KbMessage[];
   cursor: number;
 }
@@ -477,6 +478,7 @@ export interface KbChatSummary {
   state: "idle" | "answering";
   unread: boolean;
   waiting_for_user?: boolean;
+  research_task_id?: string | null;
 }
 
 /** The chat's "Allow in this chat" for web search (the header chip; revoked with DELETE). */
@@ -1613,7 +1615,7 @@ export interface KbMessageInput {
   selection?: KbSelection | null;
 }
 
-export type KbMessagePart = KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart;
+export type KbMessagePart = KbKnowledgePart | KbTextPart | KbCitePart | KbPagePart | KbConnectionPart | KbToolPart | KbPermissionPart | KbQuestionPart | KbStudyPart | KbWebSearchPart | KbMemoryPart | KbAnswerBlockPart | KbWikiFixPart | KbResearchPermission;
 
 export interface KbModelChange {
   kind: "agent" | "provider" | "model" | "favorite" | "defaults" | "hide_all";

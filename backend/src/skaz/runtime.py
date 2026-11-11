@@ -258,6 +258,15 @@ class Runtime:
             ingest=self.kb_ingest,
         )
 
+        #: Research tasks (0.4.0 B3): each a chat of its own over B2's funnel; ``skaz_research_start`` behind
+        #: its card and ``skaz_explore_read`` join ``kb_tools``. Cards left waiting by the last process are
+        #: cancelled; the app lifespan calls ``on_start`` after B2's, ``close_knowledge`` ``aclose``.
+        from .knowledge.research import build_research
+
+        self.kb_research = build_research(self)
+        self.kb_research.recover()
+        self.kb_explore.task_chats = self.kb_research.chats_of
+
     def api_key(self, provider: str) -> str | None:
         return self.secrets.get(provider)
 
