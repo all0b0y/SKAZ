@@ -283,12 +283,24 @@ describe('FX-D review regressions', () => {
   it('R3-08 explains consent failure before a run exists and routes to Settings', async () => {
     const kb = createFakeKb('home');
     kb.explore.jobs = async () => ({ jobs: [] });
-    kb.explore.start = async () => { throw new KbApiError(403, 'untrusted payload', 'science_consent_required'); };
+    kb.explore.start = async () => { throw new KbApiError(403, 'untrusted payload', 'consent_required'); };
     const settings = vi.fn();
     render(<ExploreSection clients={kb} onOpenSettings={settings} />);
     await screen.findByRole('button', { name: /Physical Sciences/ });
     fireEvent.click(screen.getByRole('button', { name: /Find what's new/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/permission/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    expect(settings).toHaveBeenCalledWith('search');
+  });
+
+  it('R3-08 explains HTTP consent_required from the map and opens Settings → Search', async () => {
+    const kb = createFakeKb('home');
+    kb.explore.jobs = async () => ({ jobs: [] });
+    kb.areas.map = async () => { throw new KbApiError(403, 'untrusted map detail', 'consent_required'); };
+    const settings = vi.fn();
+    render(<ExploreSection clients={kb} onOpenSettings={settings} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/permission/i);
+    expect(screen.queryByText('Nothing new here yet.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
     expect(settings).toHaveBeenCalledWith('search');
   });
