@@ -39,6 +39,11 @@ RESTART_REASON = "SKAZ was closed before the answer finished."
 WIKI_STUDY_CHAT_ID = "chat-wiki-study"
 
 
+#: 0.4.0 B3: a research task's chat says so (``KbChatSummary.research_task_id``).
+_CHAT_SELECT = ("chat_threads.*, (SELECT research_tasks.id FROM research_tasks"
+                 " WHERE research_tasks.chat_id = chat_threads.id) AS research_task_id")
+
+
 def _chat(row: sqlite3.Row) -> Chat:
     return Chat(
         id=row["id"], title=row["title"], title_auto=bool(row["title_auto"]), pinned=bool(row["pinned"]),
@@ -46,6 +51,7 @@ def _chat(row: sqlite3.Row) -> Chat:
         recording_material_id=row["recording_material_id"], folder_ids=tuple(json.loads(row["folder_ids"])),
         unread=bool(row["unread"]), last_preview=row["last_preview"], created_at=row["created_at"],
         updated_at=row["updated_at"],
+        research_task_id=row["research_task_id"] if "research_task_id" in row.keys() else None  # noqa: SIM118,
     )
 
 
@@ -97,7 +103,8 @@ class ChatRepository:
 
     def get(self, chat_id: str) -> Chat | None:
         with self.db.read() as connection:
-            row = connection.execute("SELECT * FROM chat_threads WHERE id = ?", (chat_id,)).fetchone()
+            row = connection.execute(f"SELECT {_CHAT_SELECT} FROM chat_threads WHERE id = ?",
+                                     (chat_id,)).fetchone()
         return _chat(row) if row else None
 
     def list_all(self, *, pinned_only: bool = False, recording_only: bool = False,
@@ -119,7 +126,7 @@ class ChatRepository:
             clauses.append(f"id IN ({','.join('?' * len(wanted))})")
             args.extend(wanted)
         where = f" WHERE {' AND '.join(clauses)}"
-        sql = f"SELECT * FROM chat_threads{where} ORDER BY updated_at DESC, rowid DESC"
+        sql = f"SELECT {_CHAT_SELECT} FROM chat_threads{where} ORDER BY updated_at DESC, rowid DESC"
         if limit is not None:
             sql += " LIMIT ?"
             args.append(limit)

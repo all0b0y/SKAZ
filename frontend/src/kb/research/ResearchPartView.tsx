@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { errorText } from '../api/client';
-import type { AnyMessagePart } from '../api/permissions';
 import { useServices } from '../state/context';
 import { Button, Icon, Popover } from '../ui';
 import {
@@ -42,7 +41,7 @@ export function ResearchPartView({ chatId, part, onOpenTask }: ResearchPartViewP
     try {
       const updated = await store.getState().decidePermission(current.id, decision, chatId);
       setCurrent(updated);
-      chats.getState().applyPart(chatId, updated as unknown as AnyMessagePart);
+      chats.getState().applyPart(chatId, updated);
     } catch (err) {
       setError(errorText(err));
     } finally {

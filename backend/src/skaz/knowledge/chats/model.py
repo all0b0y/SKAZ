@@ -115,6 +115,14 @@ class WebSearchPart:
 
 
 @dataclass(frozen=True)
+class ResearchPart:
+    """0.4.0 B3: an agent's ``skaz_research_start`` card, then the compact pointer to its task; the part
+    reads the card by id (``research_permissions``)."""
+
+    permission_id: str
+
+
+@dataclass(frozen=True)
 class MemoryPart:
     """An agent's change of «Я» in this answer (N6 decision 7): a chip with Undo. Never sent to an agent,
     never in exports or previews; for the profile the summary carries no content (decision 3)."""
@@ -130,7 +138,7 @@ class MemoryPart:
 
 Part = (KnowledgePart | TextPart | CitePart | PagePart | ConnectionPart | ToolPart
         | PermissionPart | QuestionPart | StudyPart
-        | WebSearchPart | MemoryPart | BlockPart | WikiFixPart)
+        | WebSearchPart | MemoryPart | BlockPart | WikiFixPart | ResearchPart)
 
 
 def part_to_json(part: Part) -> dict[str, Any]:
@@ -155,6 +163,8 @@ def part_to_json(part: Part) -> dict[str, Any]:
         return {"type": "study", "id": part.study_id, "kind": part.kind, "title": part.title}
     if isinstance(part, WebSearchPart):
         return {"type": "web_search", "id": part.search_id}
+    if isinstance(part, ResearchPart):
+        return {"type": "research", "id": part.permission_id}
     if isinstance(part, MemoryPart):
         return {"type": "memory", "edit_id": part.edit_id, "skill_id": part.skill_id,
                 "skill_title": part.skill_title, "action": part.action, "summary": part.summary,
@@ -204,6 +214,8 @@ def part_from_json(data: Mapping[str, Any]) -> Part | None:
         return StudyPart(str(data["id"]), str(data.get("kind", "deck")), str(data.get("title", "")))
     if kind == "web_search":
         return WebSearchPart(str(data["id"]))
+    if kind == "research":
+        return ResearchPart(str(data["id"]))
     if kind == "memory":
         return MemoryPart(str(data["edit_id"]), str(data.get("skill_id", "")),
                           str(data.get("skill_title", "")), str(data.get("action", "append")),
@@ -410,3 +422,5 @@ class Chat:
     last_preview: str
     created_at: str
     updated_at: str
+    #: 0.4.0 B3: the research task this chat belongs to (read with the chat; never written through it).
+    research_task_id: str | None = None

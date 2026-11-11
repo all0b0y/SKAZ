@@ -14,6 +14,7 @@ from ..store.database import MAX_DB_INT
 from .schemas import KbCitation, KbPageRef
 from .schemas_agents import KbEngineId
 from .schemas_blocks import KbAnswerBlockPart
+from .schemas_research import KbResearchPermission
 from .schemas_search import KbChatSearchRulesUpdate
 from .schemas_study import KbStudyPart
 from .schemas_web import KbWebSearchPart
@@ -234,7 +235,7 @@ class KbMessagePart(RootModel[Annotated[KbKnowledgePart | KbTextPart | KbCitePar
                                         | KbConnectionPart | KbToolPart
                                         | KbPermissionPart | KbQuestionPart | KbStudyPart
                                         | KbWebSearchPart | KbMemoryPart
-                                        | KbAnswerBlockPart | KbWikiFixPart,
+                                        | KbAnswerBlockPart | KbWikiFixPart | KbResearchPermission,
                                         Field(discriminator="type")]]):
     pass
 
@@ -297,6 +298,8 @@ class KbChatSummary(BaseModel):
     #: An agent's permission request or question in this chat waits for the user ("Waiting for you").
     #: Always sent; the default only keeps 0.3.0 clients and fixtures that don't know it valid.
     waiting_for_user: bool = False
+    #: 0.4.0 B3: this chat is a research task's own chat (its id); ``null`` for every other chat.
+    research_task_id: str | None = None
 
 
 class KbChat(KbChatSummary):
