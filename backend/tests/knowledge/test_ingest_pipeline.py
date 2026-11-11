@@ -570,7 +570,10 @@ async def test_continuation_parts_and_guard_without_shortening(ready: KnowledgeS
     text = (wiki_dir(ready) / "Notes" / "Лекция 8.md").read_text(encoding="utf-8")
     assert text.count("## Энтропия") == 1 and "Первое." in text and "Второе." in text
     second = wiki.turns(prompts.NOTES_SCHEMA_TITLE)[1]
-    assert [message.role for message in second.messages] == ["user", "assistant", "user"]
+    # WR2: a continuation is one new request naming the written sections, never the old answer replayed.
+    assert [message.role for message in second.messages] == ["user"]
+    assert second.messages[0].content.startswith("Continue the Notes for part 1 of 1")
+    assert '"more": true' not in second.messages[0].content
 
     endless = [notes((f"Р{n}", [block("from_source", f"Ещё {n}.", cite(1, "мера беспорядка"))]), more=True)
                for n in range(10)]

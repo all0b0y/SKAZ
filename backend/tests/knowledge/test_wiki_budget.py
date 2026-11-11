@@ -164,8 +164,9 @@ async def test_reaching_the_budget_mid_answer_pauses_keeps_finished_sections_and
     assert done["state"] == "done", done["error"]
     assert done["execution"]["root_job_id"] == done["id"]
     resumed = world.turns(prompts.NOTES_SCHEMA_TITLE)[-1]
-    kept = json.loads(resumed.messages[1].content)
-    assert [s["title"] for s in kept["sections"]] == ["Энтропия", "Температура"] and kept["more"] is True
+    assert [m.role for m in resumed.messages] == ["user"]  # WR2: a new request, not the old answer
+    written = resumed.messages[0].content.split("Sections already written for this part")[1]
+    assert "Энтропия" in written and "Температура" in written
     assert len(world.turns(prompts.NOTES_SCHEMA_TITLE)) == 2
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
     assert (await _material_wiki(world, kb_client))["state"] == "in_wiki"

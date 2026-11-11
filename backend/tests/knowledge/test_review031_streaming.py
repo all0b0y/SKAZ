@@ -41,17 +41,34 @@ async def test_an_answer_invalid_twice_keeps_its_streamed_sections_and_says_so(
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
 
 
-async def test_a_repeated_previous_answer_is_not_kept_and_retry_asks_for_it_again(
+async def test_a_repeated_previous_answer_is_not_kept_and_skaz_asks_once_more(
+    kb_app: Any, kb_client: httpx.AsyncClient,
+) -> None:
+    """WR3: an answer that adds nothing new is not a section twice; one more continuation is asked."""
+    first = '{"sections": [' + section(ONE) + '], "more": true}'
+    world = await _world(kb_app, kb_client, [[*chunks(first), Completed("")], [*chunks(first), Completed("")],
+                                             [*chunks(REST), Completed("")]])
+    done = await _ingest(world, kb_client)
+    assert done["state"] == "done", done["error"]
+    assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
+    note = (wiki_dir(world.runtime.kb) / "Notes" / "Лекция 8.md").read_text(encoding="utf-8")
+    assert note.count("Энтропия определяется как мера беспорядка системы.") == 1
+    journal = " ".join(entry["message"] for entry in done["journal"])
+    assert "added nothing new; SKAZ asked once more" in journal
+
+
+async def test_an_answer_repeated_twice_in_a_row_fails_and_retry_asks_for_the_rest(
     kb_app: Any, kb_client: httpx.AsyncClient,
 ) -> None:
     first = '{"sections": [' + section(ONE) + '], "more": true}'
     world = await _world(kb_app, kb_client, [[*chunks(first), Completed("")], [*chunks(first), Completed("")],
-                                             [*chunks(REST), Completed("")]])
+                                             [*chunks(first), Completed("")], [*chunks(REST), Completed("")]])
     failed = await _ingest(world, kb_client)
     assert failed["state"] == "failed"
-    assert "repeated its previous answer" in failed["error"]
+    assert "without anything new" in failed["error"]
     assert "Nothing was saved" not in failed["error"]
-    assert "1 section before that is kept: Retry continues from it" in failed["error"]
+    assert "1 section before that is kept: Retry or another model in Settings → Models continues from it" in (
+        failed["error"])
     done = await _ingest(world, kb_client)
     assert done["state"] == "done", done["error"]
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
