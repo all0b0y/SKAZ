@@ -55,6 +55,16 @@ class JobNotFound(NotFound):
     pass
 
 
+class ClaimLost(KnowledgeError):
+    """Continue named a checkpoint that is no longer the paused one: another Continue won, the job moved
+    on, or it isn't paused (CONTRACT: a stale checkpoint is 409, never a second runner)."""
+
+    status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__("This job already continued or changed. Reload it and try again.")
+
+
 def _dump(model: KbRunBudget | KbRunCounters) -> str:
     return json.dumps(model.model_dump(mode="json"), separators=(",", ":"))
 
@@ -103,6 +113,49 @@ class SqliteJobStore:
             changed = connection.execute(
                 "UPDATE explore_jobs SET state = 'running', stage = ?, stop_reason = NULL, retry_at = NULL,"
                 " budget_json = ?, counters_json = ?, updated_at = ? WHERE id = ?",
+                (stage, _dump(budget), _dump(counters), utc_now_ms(), job_id),
+            ).rowcount
+        if not changed:
+            raise JobNotFound("This job wasn't found.")
+        return self._require(job_id)
+
+    def claim_paused(
+        self, job_id: str, *, checkpoint_id: str, revision: int, budget: KbRunBudget | None = None
+    ) -> KbExploreJob:
+        """Continue, atomically: the job must be paused at exactly this checkpoint; it becomes running in the
+        same write, so of two Continue requests with the same checkpoint only one gets past (0.4.0 review
+        R1-03, R2-06). ``budget`` replaces the stored one (a new batch) when given. Every other caller
+        gets :class:`ClaimLost` (409) and must not start a runner."""
+        with self.db.write() as connection:
+            row = connection.execute("SELECT state FROM explore_jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise JobNotFound("This job wasn't found.")
+            latest = self._latest(connection, job_id)
+            if row["state"] != "paused" or latest is None or (latest.id, latest.revision) != (
+                checkpoint_id,
+                revision,
+            ):
+                raise ClaimLost()
+            sql = ("UPDATE explore_jobs SET state = 'running', stop_reason = NULL, retry_at = NULL,"
+                   " updated_at = ?")
+            params: list[object] = [utc_now_ms()]
+            if budget is not None:
+                sql += ", budget_json = ?"
+                params.append(_dump(budget))
+            connection.execute(sql + " WHERE id = ? AND state = 'paused'", (*params, job_id))
+        return self._require(job_id)
+
+    def advance(
+        self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget, counters: KbRunCounters
+    ) -> KbExploreJob:
+        """Record progress of a running worker WITHOUT changing its state: a Pause/Cancel that landed while
+        the worker awaited (a link probe, a model call) stays in force (0.4.0 review R2-04). The worker
+        reads the returned state and stops when it isn't ``running``. Use :meth:`progress` only to
+        (re)start a job."""
+        with self.db.write() as connection:
+            changed = connection.execute(
+                "UPDATE explore_jobs SET stage = ?, budget_json = ?, counters_json = ?, updated_at = ?"
+                " WHERE id = ?",
                 (stage, _dump(budget), _dump(counters), utc_now_ms(), job_id),
             ).rowcount
         if not changed:

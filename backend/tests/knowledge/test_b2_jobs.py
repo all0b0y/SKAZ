@@ -157,3 +157,48 @@ def test_unknown_job_is_not_found(store: SqliteJobStore) -> None:
     with pytest.raises(KnowledgeError) as caught:
         store.stop("missing", "completed")
     assert caught.value.status_code == 404
+
+
+# -- 0.4.0 review round (R1-03, R2-06, R2-04): one Continue wins; a pause is never undone by progress -----
+
+def _paused(store: SqliteJobStore) -> tuple[str, str, int]:
+    job = store.create("explore", "Find what's new", "collect", _budget())
+    paused = store.stop(job.id, "user_pause")
+    assert paused.checkpoint is not None
+    return job.id, paused.checkpoint.id, paused.checkpoint.revision
+
+
+def test_claim_paused_lets_exactly_one_continue_through(store: SqliteJobStore) -> None:
+    from skaz.knowledge.explore.jobs import ClaimLost
+
+    job_id, checkpoint_id, revision = _paused(store)
+    claimed = store.claim_paused(job_id, checkpoint_id=checkpoint_id, revision=revision)
+    assert claimed.state == "running" and claimed.stop_reason is None
+    with pytest.raises(ClaimLost) as lost:  # the second request with the same, valid-looking checkpoint
+        store.claim_paused(job_id, checkpoint_id=checkpoint_id, revision=revision)
+    assert lost.value.status_code == 409
+
+
+def test_claim_paused_refuses_a_stale_checkpoint_and_a_job_that_is_not_paused(store: SqliteJobStore) -> None:
+    from skaz.knowledge.explore.jobs import ClaimLost, JobNotFound
+
+    job_id, checkpoint_id, revision = _paused(store)
+    store.checkpoint(job_id, stage="collect", cursor="c2", completed_ids=["a"], pending_ids=[])
+    with pytest.raises(ClaimLost):
+        store.claim_paused(job_id, checkpoint_id=checkpoint_id, revision=revision)
+    assert store.get(job_id) is not None and store.get(job_id).state == "paused"  # type: ignore[union-attr]
+    running = store.create("explore", "x", "collect", _budget())
+    with pytest.raises(ClaimLost):
+        store.claim_paused(running.id, checkpoint_id=checkpoint_id, revision=revision)
+    with pytest.raises(JobNotFound):
+        store.claim_paused("job-missing", checkpoint_id=checkpoint_id, revision=revision)
+
+
+def test_advance_never_resurrects_a_paused_job(store: SqliteJobStore) -> None:
+    job = store.create("links", "Check links", "links", _budget())
+    moved = store.advance(job.id, stage="links", budget=_budget(), counters=_counters(checked=3))
+    assert moved.state == "running" and moved.counters.checked == 3
+    store.stop(job.id, "user_pause")  # Pause lands while a probe is in flight
+    after = store.advance(job.id, stage="links", budget=_budget(), counters=_counters(checked=4))
+    assert after.state == "paused" and after.stop_reason == "user_pause"
+    assert after.counters.checked == 4  # the finished probe still counts

@@ -88,6 +88,16 @@ class JobStore(Protocol):
     def progress(
         self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget, counters: KbRunCounters
     ) -> KbExploreJob: ...
+    def claim_paused(
+        self, job_id: str, *, checkpoint_id: str, revision: int, budget: KbRunBudget | None = None
+    ) -> KbExploreJob:
+        """Continue: paused at exactly this checkpoint → running, atomically; else ``ClaimLost`` (409)."""
+        ...
+    def advance(
+        self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget, counters: KbRunCounters
+    ) -> KbExploreJob:
+        """Progress of a running worker that never undoes a Pause/Cancel which landed meanwhile."""
+        ...
     def stop(self, job_id: str, reason: KbStopReason, *, retry_at: str | None = None) -> KbExploreJob:
         """Paused, done, cancelled or error follows from the reason."""
         ...

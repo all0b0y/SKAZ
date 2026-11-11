@@ -103,6 +103,16 @@ class FakeJobStore:
     def active(self) -> Sequence[KbExploreJob]:
         return [j for j in self.jobs.values() if j.state in ("queued", "running", "paused")]
 
+
+    # 0.4.0 review round: the fix batch FX-B replaces this fake with the real SqliteJobStore (R2-09).
+    def claim_paused(self, job_id: str, *, checkpoint_id: str, revision: int,
+                     budget: KbRunBudget | None = None) -> KbExploreJob:
+        raise AssertionError("not used by these tests")
+
+    def advance(self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget,
+                counters: KbRunCounters) -> KbExploreJob:
+        raise AssertionError("not used by these tests")
+
     def progress(
         self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget, counters: KbRunCounters
     ) -> KbExploreJob:
