@@ -734,9 +734,9 @@ async def test_runtime_wires_kb_areas_in_real_app(kb_client: object, kb_app: obj
     assert res.json() == {"code": "not_ready"}
 
     runtime.kb.connect(None)
+    # Science integration off and no level loaded yet: the honest reason, not an empty map (review R1-08).
     res = await client.get("/kb/explore/map")
-    assert res.status_code == 200
-    assert res.json()["areas"] == []
+    assert (res.status_code, res.json()) == (403, {"code": "consent_required"})
 
     res = await client.post(
         "/kb/explore/areas",
@@ -802,3 +802,46 @@ async def test_placement_never_asks_again_about_off_topic_pages_and_caps_each_ca
     assert len(layer.asked) == 35  # the 30 off-topic answers are kept; only the 5 left are asked
     await service.map()
     assert len(layer.asked) == 35  # nothing is asked twice
+
+
+async def test_a_map_level_that_cannot_load_answers_its_honest_reason(ready: KnowledgeService) -> None:
+    """Review R1-08: consent, the day limit and a provider failure are not an empty map."""
+    from collections.abc import Sequence
+    from datetime import UTC, datetime
+
+    from skaz.knowledge.science.protocols import (
+        ScienceConsentRequired,
+        ScienceDailyLimit,
+        ScienceUnavailable,
+        TaxonomyNode,
+    )
+
+    class StoppedScience:
+        def __init__(self, stop: Exception) -> None:
+            self.stop = stop
+
+        async def taxonomy(self, parent_id: str | None = None) -> Sequence[TaxonomyNode]:
+            raise self.stop
+
+    cases = [
+        (ScienceConsentRequired(), 403, "consent_required"),
+        (ScienceDailyLimit(datetime(2026, 11, 11, tzinfo=UTC)), 429, "openalex_daily_limit"),
+        (ScienceUnavailable(), 502, "provider_unavailable"),
+    ]
+    for stop, status, code in cases:
+        service = ExploreAreasService(ready, science=StoppedScience(stop))  # type: ignore[arg-type]
+        with pytest.raises(ContractFailure) as caught:
+            await service.map()
+        assert (caught.value.status, caught.value.code) == (status, code)
+
+    unwired = ExploreAreasService(ready, science=lambda: None)
+    with pytest.raises(ContractFailure) as caught:
+        await unwired.map()
+    assert (caught.value.status, caught.value.code) == (503, "not_ready")
+
+    class Nested:  # a dependency is taken as given, never guessed from its attributes
+        client = StoppedScience(ScienceUnavailable())
+
+    nested = ExploreAreasService(ready, science=Nested())  # type: ignore[arg-type]
+    with pytest.raises((ContractFailure, AttributeError)):
+        await nested.map()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal, TypeVar, cast
@@ -25,6 +26,7 @@ from ..api.schemas_explore_common import KbAcknowledged, KbPublicationDate, KbRe
 from ..decisions.protocol import ChoiceAnswer, ChoiceQuestion, DecisionLayer, Undecided
 from ..errors import NotFound
 from ..markdown.source import MaterialKind
+from ..science.errors import stop_failure
 from ..science.protocols import ScienceClient, ScienceStop
 from ..service import KnowledgeService
 from .protocols import AreaDirectory, SignalDraft, SignalRecorder
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
     from ..maintenance.protocols import FreshnessMarkReader
     from ..repeats.protocols import RepeatSummaries
 
+logger = logging.getLogger(__name__)
 T = TypeVar("T")
 OFF_TOPIC_OPTION = "None of these: off-topic"
 #: One call to the map asks the decision model about at most this many pages (a batch, as in the funnel).
@@ -55,17 +58,10 @@ _UNKNOWN_PUBLICATION = KbPublicationDate(
 )
 
 
-def _resolve(provider: T | Callable[[], T | None] | None, attr: str | None = None) -> T | None:
-    obj: object = provider() if callable(provider) else provider
-    if obj is None:
-        return None
-    if attr is not None and not hasattr(obj, attr):
-        for nested in ("client", "store", "directory", "recorder", "reader"):
-            candidate = getattr(obj, nested, None)
-            if candidate is not None and hasattr(candidate, attr):
-                return cast(T, candidate)
-        return None
-    return cast(T, obj)
+def _given(provider: T | Callable[[], T | None] | None) -> T | None:
+    """An explicit dependency: the object itself, or a provider called now (wired later in the runtime).
+    Never guessed from attributes (Wave 2+ notes; review R1-08)."""
+    return cast("T | None", provider() if callable(provider) else provider)
 
 
 class ExploreAreasService:
@@ -138,9 +134,9 @@ class ExploreAreasService:
             parent_row = await disk_call(self.store.get_area_row, parent_id)
             if parent_row.level in ("topic", "custom"):
                 return
-        science = _resolve(self._science, "taxonomy")
+        science = _given(self._science)
         if science is None:
-            return
+            raise ContractFailure(503, "not_ready")
         try:
             if parent_row is None:
                 nodes = await science.taxonomy(None)
@@ -149,8 +145,15 @@ class ExploreAreasService:
                 nodes = await science.taxonomy(lookup_id)
                 if not nodes and parent_row.taxonomy_id and parent_row.taxonomy_id != parent_row.id:
                     nodes = await science.taxonomy(parent_row.id)
-        except ScienceStop:
-            return
+        except ScienceStop as stop:
+            # A level loaded before keeps its areas (the taxonomy changes rarely; nothing claims a
+            # refresh). A level never loaded has nothing true to show: its honest reason, never an empty
+            # map that looks like a result (review R1-08).
+            children = await disk_call(self.store.children_of, parent_id, include_hidden=True)
+            if any(child.taxonomy_id is not None for child in children):
+                logger.info("Taxonomy level not refreshed: %s", stop.stop_reason)
+                return
+            raise stop_failure(stop) from stop
         if nodes:
             await disk_call(self.store.sync_taxonomy_nodes, parent_id, nodes)
 
@@ -169,7 +172,7 @@ class ExploreAreasService:
         candidates = [c for c in children if c.level != "custom"]
         if not candidates:
             return
-        decisions = _resolve(self._decisions, "ask")
+        decisions = _given(self._decisions)
         if decisions is None:
             return
 
@@ -243,7 +246,7 @@ class ExploreAreasService:
     async def _fetch_publication_dates(
         self, material_ids: Sequence[str] | None = None
     ) -> Mapping[str, KbPublicationDate]:
-        pub_reader = _resolve(self._publication_dates, "dates")
+        pub_reader = _given(self._publication_dates)
         if pub_reader is None:
             return {}
         if material_ids is None:
@@ -256,7 +259,7 @@ class ExploreAreasService:
     async def _fetch_new_findings_counts(self) -> Mapping[str, int]:
         if self._new_findings_by_area is not None:
             return await disk_call(self._new_findings_by_area)
-        explore = _resolve(self._explore, "findings")
+        explore = _given(self._explore)
         if explore is None:
             return {}
         try:
@@ -277,7 +280,7 @@ class ExploreAreasService:
             if not exists:
                 raise NotFound("Finding not found.")
             return None
-        explore = _resolve(self._explore, "finding")
+        explore = _given(self._explore)
         if explore is not None:
             finding = await explore.finding(finding_id)
             return finding.material_id
@@ -358,7 +361,7 @@ class ExploreAreasService:
         has_more = (start_idx + limit) < len(all_material_ids)
         next_cursor = page_ids[-1] if has_more and page_ids else None
 
-        repeat_reader = _resolve(self._repeat_summaries, "summaries")
+        repeat_reader = _given(self._repeat_summaries)
         repeats_map: Mapping[str, KbMaterialRepeats] = (
             await disk_call(repeat_reader.summaries, all_material_ids)
             if repeat_reader is not None
@@ -373,7 +376,7 @@ class ExploreAreasService:
         )
 
         pub_dates = await self._fetch_publication_dates(page_ids)
-        freshness_reader = _resolve(self._freshness_marks, "mark_ids")
+        freshness_reader = _given(self._freshness_marks)
         freshness_map: Mapping[str, Sequence[str]] = (
             await disk_call(freshness_reader.mark_ids, page_ids)
             if freshness_reader is not None and page_ids
@@ -438,7 +441,7 @@ class ExploreAreasService:
 
     async def remove_finding_mark(self, finding_id: str) -> KbReadMark:
         self._ensure_ready()
-        has_provider = self._finding_exists is not None or _resolve(self._explore, "finding") is not None
+        has_provider = self._finding_exists is not None or _given(self._explore) is not None
         linked_material_id = await self._verify_finding_exists(finding_id)
         if linked_material_id is not None:
             return await disk_call(self.store.remove_material_read_mark, linked_material_id)
