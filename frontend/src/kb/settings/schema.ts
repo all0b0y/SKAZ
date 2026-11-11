@@ -85,6 +85,7 @@ export const ROWS: ReadonlyArray<RowDef> = [
   { id: 'wiki-language', section: 'wiki', group: 'Content', label: 'Wiki language', hint: 'Original terms stay in brackets', keywords: 'language' },
   { id: 'auto-files', section: 'wiki', group: 'Content', label: 'New files and links → wiki', keywords: 'automatic add' },
   { id: 'auto-text', section: 'wiki', group: 'Content', label: 'Pasted text → wiki', keywords: 'automatic add' },
+  { id: 'auto-notes', section: 'wiki', group: 'Content', label: 'Write notes automatically', hint: 'You can write notes later from the material', keywords: 'notes automatic write' },
   { id: 'auto-fix', section: 'wiki', group: 'Upkeep', label: 'Fix recognition automatically', hint: 'Doubtful places are only highlighted', keywords: 'corrections' },
   { id: 'bg-links', section: 'wiki', group: 'Upkeep', label: 'Find connections in the background', hint: 'When the app is idle, with your permission', keywords: 'links graph' },
   { id: 'links-now', section: 'wiki', group: 'Upkeep', label: 'Find connections now', keywords: 'links graph run' },

@@ -60,7 +60,8 @@ async def _failed_once(kb_app: Any, kb_client: httpx.AsyncClient, profile: dict[
                         models=[ModelOption("checkpoint-model", "Checkpoint model", ("low", "high"), "low")])
     runtime.kb_ingest.engines = lambda _engine: engine
     runtime.kb_ingest.detector = PatternDetector()
-    saved = await kb_client.put("/kb/settings/wiki", json={"wiki_engine": "codex", **profile})
+    saved = await kb_client.put("/kb/settings/wiki", json={"wiki_engine": "codex", **profile,
+                                                           "write_notes_automatically": True})
     assert saved.status_code == 200, saved.text
     material_id = add_material(runtime.kb, "Physics", "Checkpoint material", kind="pdf")
     first = (await kb_client.post(f"/kb/materials/{material_id}/ingest")).json()

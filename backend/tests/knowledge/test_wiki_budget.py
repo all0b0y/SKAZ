@@ -84,7 +84,8 @@ async def _world(kb_app: Any, kb_client: httpx.AsyncClient, *, notes_answers: li
                         models=[ModelOption("budget-model", "Budget", ("low",), "low")])
     runtime.kb_ingest.engines = lambda _engine: engine
     runtime.kb_ingest.detector = PatternDetector()
-    profile: dict[str, Any] = {"wiki_engine": "codex", "wiki_model": "budget-model", "wiki_effort": "low"}
+    profile: dict[str, Any] = {"wiki_engine": "codex", "wiki_model": "budget-model", "wiki_effort": "low",
+                               "write_notes_automatically": True}
     if budget is not None:
         profile["wiki_budget_characters"] = budget
     saved = await kb_client.put("/kb/settings/wiki", json=profile)

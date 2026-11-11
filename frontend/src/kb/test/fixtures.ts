@@ -114,7 +114,7 @@ function world(parts: Pick<FakeWorld, 'library' | 'folders' | 'materials'> & Par
     },
     wiki: {
       wiki_language: 'en', wiki_language_chosen: true, wiki_engine: null, wiki_model: null, wiki_effort: null, wiki_remembered: {}, auto_add_files_links: true, auto_add_text: false,
-      auto_corrections: true, background_connections: false, wiki_budget_characters: 2_000_000,
+      auto_corrections: true, background_connections: false, wiki_budget_characters: 2_000_000, write_notes_automatically: false,
     },
     decisions: {
       provider: 'openrouter_jev', cloud_consent: true, openrouter_key: true, cloud_model: 'jev', stats: { decided: 0, undecided: 0 },

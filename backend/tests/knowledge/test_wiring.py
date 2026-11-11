@@ -22,6 +22,7 @@ TEXT = (
 
 
 def wired(kb: KnowledgeService, wiki: ScriptedWiki) -> tuple[IngestService, SourceService]:
+    kb.settings.set("write_notes_automatically", True)  # WR6: authored Notes test fixtures opt in.
     ingest = IngestService(kb)
     sources = SourceService(kb)
     auto = wire(kb, ingest, sources, lambda: None, {"codex": wiki.engine})

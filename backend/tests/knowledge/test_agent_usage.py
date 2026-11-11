@@ -102,6 +102,7 @@ async def test_wiki_accounting_keeps_cache_and_reasoning_per_stage(kb_app: Any, 
     await kb_client.post("/kb/library", json={})
     runtime = kb_app.state.runtime
     usage = Usage(5_000, 200, cached_input_tokens=4_000, cache_write_tokens=500, reasoning_tokens=50)
+    runtime.kb_ingest.update_settings(write_notes_automatically=True)  # count Notes and Concepts
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], usage=usage)
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
@@ -129,6 +130,7 @@ async def test_wiki_accounting_marks_unreported_cache_as_unknown(kb_app: Any, kb
     await kb_client.post("/kb/library", json={})
     runtime = kb_app.state.runtime
     wiki = ScriptedWiki(notes=[NOTES_OK], concepts=[CONCEPTS_OK], usage=Usage(10, 5))
+    runtime.kb_ingest.update_settings(write_notes_automatically=True)  # count Notes and Concepts
     runtime.kb_ingest.engines = lambda _engine: wiki.engine
     runtime.kb_ingest.detector = PatternDetector()
     material_id = add_material(runtime.kb, "Physics", "No cache test", kind="pdf")

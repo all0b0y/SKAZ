@@ -112,7 +112,8 @@ async def _world(kb_app: Any, kb_client: httpx.AsyncClient, *, notes_answers: li
     runtime.kb_ingest.engines = lambda _engine: engine
     runtime.kb_ingest.detector = PatternDetector()
     saved = await kb_client.put("/kb/settings/wiki",
-                                json={"wiki_engine": "codex", "wiki_model": "wr-model", "wiki_effort": "low"})
+                                json={"wiki_engine": "codex", "wiki_model": "wr-model", "wiki_effort": "low",
+                                      "write_notes_automatically": True})
     assert saved.status_code == 200, saved.text
     material_id = add_material(runtime.kb, "Physics", "Термодинамика", FRAGMENTS, kind="pdf")
     return World(runtime, engine, material_id)

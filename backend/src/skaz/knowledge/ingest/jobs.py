@@ -29,6 +29,7 @@ from .settings import ENGINE_PAUSE_KEY, EnginePause, parse_engine_pause, read_en
 STEP_STARTED = "step_started_ms"
 
 JOB_KIND = "ingest"
+IngestScope = Literal["full", "notes"]
 JobKind = Literal["ingest", "refresh", "recheck", "connections", "folder_overview", "corrections", "export"]
 #: Every kind run by ingest (W1) and the wiki (W2); ``refresh`` re-ingests after a correction changed.
 JOB_KINDS: tuple[JobKind, ...] = (
@@ -106,6 +107,8 @@ class JobRecord:
     execution: ExecutionView | None = None
     #: A quota pause of this queued/paused job's engine; budget pauses never carry this.
     engine_pause: EnginePause | None = None
+    #: Durable work requested by the user; independent of progress and execution telemetry.
+    scope: IngestScope = "full"
 
     @property
     def finished(self) -> bool:
@@ -170,13 +173,15 @@ def _record(row: sqlite3.Row) -> JobRecord:
         journal=journal, kind=kind, target_id=row["target_id"], error_code=row["error_code"],
         execution=execution_view(row["execution"]),
         engine_pause=pause,
+        scope=row["scope"],
     )
 
 
 _KINDS_IN = "(" + ", ".join(f"'{kind}'" for kind in JOB_KINDS) + ")"
 _SELECT = (
     "SELECT j.*, COALESCE(d.counters, '{}') AS counters, COALESCE(d.journal, '[]') AS journal, "
-    "d.error_code AS error_code, e.data AS execution, p.value AS engine_pause "
+    "d.error_code AS error_code, COALESCE(d.scope, 'full') AS scope, "
+    "e.data AS execution, p.value AS engine_pause "
     "FROM jobs j LEFT JOIN ingest_jobs d ON d.job_id = j.id "
     "LEFT JOIN wiki_execution e ON e.job_id = j.id "
     "LEFT JOIN settings p ON p.key = 'wiki_engine_pause.' || "
@@ -198,7 +203,8 @@ class JobRepository:
     def create(self, material_id: str | None, *, kind: JobKind = "ingest",
                step: JobStep = "reading", state: Literal["running", "queued"] = "running",
                profile: ProcessingProfile | None = None, root_job_id: str | None = None,
-               budget: int | None = None, budget_material: str | None = None) -> JobRecord:
+               budget: int | None = None, budget_material: str | None = None,
+               scope: IngestScope = "full") -> JobRecord:
         """A new job; ``material_id`` is the target (a page for ``recheck``, a folder for overviews)."""
         job_id = new_id("job")
         now = utc_now()
@@ -208,7 +214,7 @@ class JobRepository:
                 "VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
                 (job_id, kind, material_id, state, step, now, now),
             )
-            connection.execute("INSERT INTO ingest_jobs(job_id) VALUES (?)", (job_id,))
+            connection.execute("INSERT INTO ingest_jobs(job_id, scope) VALUES (?, ?)", (job_id, scope))
             if profile is not None:
                 connection.execute("INSERT INTO wiki_execution(job_id, data, root_job_id) VALUES (?, ?, ?)",
                                    (job_id, new_execution(profile, job_id, root_job_id, budget=budget,

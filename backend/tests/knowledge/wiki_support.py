@@ -111,6 +111,8 @@ def wired(
     runtime: Any = None,
 ) -> tuple[IngestService, WikiService]:
     """Fresh services on ``kb``, or (``runtime``) the app's own, with the fakes put in their seams."""
+    # These authored W2 fixtures include Notes; WR6 makes that an explicit setting.
+    kb.settings.set("write_notes_automatically", True)
     decisions = FakeDecisions(answer) if answer is not None else None
     if runtime is not None:
         runtime.kb_ingest.engines = lambda _engine_id: wiki.engine

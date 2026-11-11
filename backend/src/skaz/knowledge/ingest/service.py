@@ -34,6 +34,7 @@ from .jobs import (
     INTERRUPTED_REASON,
     QUEUED_KINDS,
     EngineLimited,
+    IngestScope,
     JobKind,
     JobRecord,
     JobRepository,
@@ -175,12 +176,14 @@ class IngestService:
                         auto_add_text: bool | None = None, background_connections: bool | None = None,
                         auto_corrections: bool | None = None, model: str | None = None,
                         effort: str | None = None, clear_model: bool = False,
-                        clear_effort: bool = False, budget: int | None = None) -> WikiSettings:
+                        clear_effort: bool = False, budget: int | None = None,
+                        write_notes_automatically: bool | None = None) -> WikiSettings:
         return update_settings(self.kb.settings, language=language, engine=engine, clear_engine=clear_engine,
                                auto_add_files_links=auto_add_files_links, auto_add_text=auto_add_text,
                                background_connections=background_connections,
                                auto_corrections=auto_corrections, model=model, effort=effort,
-                               clear_model=clear_model, clear_effort=clear_effort, budget=budget)
+                               clear_model=clear_model, clear_effort=clear_effort, budget=budget,
+                               write_notes_automatically=write_notes_automatically)
 
     # -- jobs ---------------------------------------------------------------
 
@@ -193,7 +196,8 @@ class IngestService:
     def list_jobs(self, *, material_id: str | None = None) -> list[JobRecord]:
         return self.jobs.list_all(material_id=material_id)
 
-    async def request_ingest(self, material_id: str, *, kind: JobKind = "ingest") -> JobRecord:
+    async def request_ingest(self, material_id: str, *, kind: JobKind = "ingest",
+                             scope: IngestScope = "full") -> JobRecord:
         """Start adding a material to the wiki now; returns the running job.
 
         ``kind="refresh"`` is the same work started by SKAZ after a recognition
@@ -204,10 +208,11 @@ class IngestService:
         if any(active.material_id == material_id for active in self._active.values()):
             raise IngestBusy()
         profile = self.profile()
-        scope = current_execution()
-        root_job_id = scope.root_job_id if scope is not None else None
+        execution = current_execution()
+        root_job_id = execution.root_job_id if execution is not None else None
         # C1-d: a new root gets a fresh portion of the budget; work started inside a root shares it.
-        budget = scope.budget if scope is not None and scope.budget is not None else self.settings().budget
+        budget = (execution.budget if execution is not None and execution.budget is not None
+                  else self.settings().budget)
         reservation = _Active(material_id, kind)
         self._active[f"pending-{id(reservation)}"] = reservation
         try:
@@ -219,9 +224,11 @@ class IngestService:
                 raise NothingToAdd.of(record.kind)
             if await disk_call(self.jobs.pending_for, material_id) is not None:
                 raise IngestBusy()
+            if scope == "notes":
+                await disk_call(self._require_notes_missing, material_id)
             job = await disk_call(lambda: self.jobs.create(
                 material_id, kind=kind, state="queued", profile=profile, root_job_id=root_job_id,
-                budget=budget, budget_material=material_id))
+                budget=budget, budget_material=material_id, scope=scope))
         finally:
             self._active.pop(f"pending-{id(reservation)}", None)
         # A queued job is kept even when SKAZ is closing now: it continues at the next start. With a
@@ -230,6 +237,17 @@ class IngestService:
         if self._pump_task is not None and not self._pump_task.done():
             await asyncio.shield(self._pump_task)
         return await disk_call(self.job, job.id)
+
+    def _require_notes_missing(self, material_id: str) -> None:
+        pages = [page for page in self.kb.pages() if material_id in page.sources]
+        if any(page.kind == "note" for page in pages):
+            raise IngestBusy("This material already has Notes. Open its Notes page to read them.")
+        if not any(page.kind == "concept" for page in pages):
+            raise IngestBusy("Add this material to the wiki before writing Notes.")
+
+    async def request_notes(self, material_id: str) -> JobRecord:
+        """Explicit Notes uses the same durable queue, budget and quota gate as Add to wiki."""
+        return await self.request_ingest(material_id, scope="notes")
 
     async def request_from_user(self, material_id: str) -> JobRecord:
         """"Add to wiki", "Try again" or "Continue" on a material (C1-d).
@@ -241,6 +259,8 @@ class IngestService:
         latest = await disk_call(self.jobs.list_all, material_id=material_id)
         if latest and latest[0].error_code == ENGINE_LIMIT and latest[0].state == "paused":
             return await self.continue_job(latest[0].id)
+        if latest and latest[0].scope == "notes" and latest[0].state != "done":
+            return await self.request_notes(material_id)
         if self.continue_follow_ups is not None:
             def paused() -> list[JobKind]:
                 with self.kb.db.read() as connection:
@@ -328,7 +348,7 @@ class IngestService:
         queued: list[JobRecord] = []
         for material_id in await disk_call(self.jobs.latest_failed_materials):
             try:
-                queued.append(await self.request_ingest(material_id))
+                queued.append(await self.request_from_user(material_id))
             except KnowledgeError as error:  # gone, busy, nothing to add: the rest still retry
                 logger.info("retry of material %s did not queue: %s", material_id, error_note(error))
         return queued
@@ -498,6 +518,8 @@ class IngestService:
                 writer=self._writer, hook=self.hook, language=settings.language, limits=self.limits,
                 recognition=self.recognition,
                 model=settings.model, effort=settings.effort,
+                scope=(await disk_call(self.job, job_id)).scope,
+                write_notes_automatically=settings.write_notes_automatically,
             )
             active.run.cancel_requested = active.cancel_requested
             async with holding(engine):  # U1: an agent update waits for the whole build
@@ -547,6 +569,8 @@ class IngestService:
 
     def _tell_finished(self, record: JobRecord | None, material_id: str) -> None:
         """On the event loop: listeners start their own follow-up tasks (W2 overview, connections)."""
+        if record is not None and record.scope == "notes":
+            return  # Notes-only never starts concept checks, connections or folder overviews.
         for listener in list(self.finished_listeners):
             if record is None:
                 break

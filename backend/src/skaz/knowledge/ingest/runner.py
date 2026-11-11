@@ -38,7 +38,7 @@ from .execution import (
     retry_unsent,
     run_wiki_turn,
 )
-from .jobs import JobRepository, JobStep, agent_failure_code, agent_failure_text
+from .jobs import IngestScope, JobRepository, JobStep, agent_failure_code, agent_failure_text
 from .matching import (
     AgentNeeded,
     Candidate,
@@ -254,7 +254,8 @@ class IngestRun:
                  text_layer: TextLayer, writer: WikiWriter, hook: ConceptUpdateHook | None, language: str,
                  limits: Limits, recognition: RecognitionCheck | None = None,
                  model: str | None = None,
-                 effort: str | None = None) -> None:
+                 effort: str | None = None, scope: IngestScope = "full",
+                 write_notes_automatically: bool = False) -> None:
         self.kb = kb
         self.jobs = jobs
         self.job_id = job_id
@@ -270,6 +271,8 @@ class IngestRun:
         self.recognition = recognition
         self.model = model
         self.effort = effort
+        self.scope = scope
+        self.write_notes = scope == "notes" or write_notes_automatically
         self.checkpoints: Checkpoints | None = None
         self.report = RunReport()
         self.current_run: str | None = None
@@ -745,7 +748,7 @@ class IngestRun:
             raise IngestFailed(error.message) from error
         if source.excluded:
             await self._log(f"{len(source.excluded)} excluded fragment(s) were left out.")
-        if self.recognition is not None and record.kind in SPEECH_KINDS:
+        if self.scope != "notes" and self.recognition is not None and record.kind in SPEECH_KINDS:
             # Area W2: recognition errors are corrected (as a separate layer) before the notes are written.
             await self._step("checking_recognition")
             request = RecognitionRequest(self.material_id, record.kind, source.excluded, self._ask, self._log)
@@ -768,23 +771,34 @@ class IngestRun:
             await disk_call(self.checkpoints.prepare)
         await self._count(parts_total=len(parts), parts_done=0, fragments=len(source.fragments))
 
-        await self._step("writing_notes")
-        sections = await self._notes(source, parts)
-        if not any(block.kind == "from_source" for section in sections for block in section.blocks):
-            if self.checkpoints is not None:
-                await disk_call(self.checkpoints.clear)
-            raise IngestFailed("No statement of the notes passed the source check, so nothing was saved. "
-                               "Retry.")
+        sections: list[DraftSection] = []
+        if self.write_notes:
+            await self._step("writing_notes")
+            sections = await self._notes(source, parts)
+            if not any(block.kind == "from_source" for section in sections for block in section.blocks):
+                if self.checkpoints is not None:
+                    await disk_call(self.checkpoints.clear)
+                raise IngestFailed("No statement of the notes passed the source check, so nothing was saved. "
+                                   "Retry.")
 
-        await self._step("concepts")
-        drafts = await self._concepts(source, parts)
-        targets = await self._match(drafts)
+        targets: list[ConceptTarget] = []
+        if self.scope != "notes":
+            await self._step("concepts")
+            drafts = await self._concepts(source, parts)
+            if not self.write_notes and not any(block.kind == "from_source"
+                                               for draft in drafts for block in draft.blocks):
+                if self.checkpoints is not None:
+                    await disk_call(self.checkpoints.clear)
+                raise IngestFailed("No concept statement passed the source check, so nothing was saved. "
+                                   "Retry.")
+            targets = await self._match(drafts)
         if self.cancel_requested:
             raise IngestCancelled()
 
         await self._step("saving")
         self.writing = True
-        plan = WritePlan(self.material_id, record.rel_dir, self.language, sections, targets)
+        plan = WritePlan(self.material_id, record.rel_dir, self.language, sections, targets,
+                         write_notes=self.write_notes, scope=self.scope)
         result = await disk_call(self.writer.write, plan)
         self.report.result = result
         if self.checkpoints is not None:

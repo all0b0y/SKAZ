@@ -5,6 +5,14 @@ import { kbRouteRules, validateBridgeRequest } from '../../../electron/ipcPolicy
 import { FAKE_ROUTES } from '../kb/test/fakeKb';
 
 describe('Electron IPC policy — knowledge library (/kb) routes of the new interface', () => {
+  it('allows exactly the WR6 Notes POST and rejects its neighbours', () => {
+    expect(validateBridgeRequest({ method: 'POST', path: '/kb/materials/m1/notes' })).toBeNull();
+    for (const request of [
+      { method: 'PUT', path: '/kb/materials/m1/notes' },
+      { method: 'POST', path: '/kb/materials/m1/notes/extra' },
+      { method: 'POST', path: '/kb/materials/m1/notes-all' },
+    ]) expect(validateBridgeRequest(request)).not.toBeNull();
+  });
   it('allows exactly the library, folder, material and notification calls the shell makes', () => {
     const allowed: Array<[string, string]> = [
       ['GET', '/kb/library'], ['POST', '/kb/library'], ['POST', '/kb/library/retry'],

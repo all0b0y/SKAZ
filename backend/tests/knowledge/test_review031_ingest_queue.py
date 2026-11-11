@@ -32,6 +32,7 @@ NOTES_OK = notes(("Энтропия", [block("from_source", "Энтропия о
 
 
 def service_for(kb: KnowledgeService, wiki: ScriptedWiki) -> IngestService:
+    kb.settings.set("write_notes_automatically", True)  # WR6: this queue fixture writes Notes.
     return IngestService(kb, engines=lambda _engine_id: wiki.engine, detector=PatternDetector())
 
 

@@ -502,7 +502,7 @@ export function TranslationRow({ optionPrefix = '' }: { optionPrefix?: string } 
 
 // ---- Wiki ------------------------------------------------------------------------------------
 
-type WikiFlag = 'auto_add_files_links' | 'auto_add_text' | 'auto_corrections';
+type WikiFlag = 'auto_add_files_links' | 'auto_add_text' | 'auto_corrections' | 'write_notes_automatically';
 
 export function WikiLanguageRow() {
   const { settings } = useServices();
@@ -532,7 +532,7 @@ export function WikiSwitchRow({ field, label }: { field: WikiFlag; label: string
   if (!wiki.value) return wiki.error ? <Failed error={wiki.error} retry={() => void settings.getState().loadWiki()} /> : <Reading />;
   return (
     <>
-      <Switch label={label} checked={wiki.value[field]} onChange={async (v) => show(await settings.getState().updateWiki({ [field]: v }))} />
+      <Switch label={label} checked={wiki.value[field] ?? false} onChange={async (v) => show(await settings.getState().updateWiki({ [field]: v }))} />
       {result}
     </>
   );

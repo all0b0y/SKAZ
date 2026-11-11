@@ -28,6 +28,7 @@ from ..markdown.page import Block, PageDocument, PageFormatError, PageMeta, pars
 from ..service import KnowledgeService
 from .checks import CheckedBlock, connection_complete
 from .drafts import ConceptDraft, DraftSection, file_name
+from .jobs import IngestScope
 from .pages import (
     ConceptUpdate,
     NoteSection,
@@ -76,6 +77,8 @@ class WritePlan:
     language: str
     sections: list[DraftSection]
     concepts: list[ConceptTarget]
+    write_notes: bool = True
+    scope: IngestScope = "full"
 
 
 @dataclass
@@ -202,11 +205,12 @@ class WikiWriter:
         source = _source_ref(library, plan.material_id, plan.rel_dir)
         resolve = _Resolver(self.kb)
         concept_dir = library.page_directory("concept")
-        concept_dir.mkdir(parents=True, exist_ok=True)
+        if plan.scope != "notes":
+            concept_dir.mkdir(parents=True, exist_ok=True)
 
         # Final page for every concept: an existing page, or a new file name.
         targets: list[tuple[ConceptTarget, PageRef, Path]] = []
-        for target in plan.concepts:
+        for target in plan.concepts if plan.scope != "notes" else []:
             record = self.kb.page_repo.get(target.page_id) if target.page_id else None
             if record is not None:
                 path = library.root / record.rel_path
@@ -250,7 +254,7 @@ class WikiWriter:
 
         # Concept pages this material contributed to before but not in this run.
         written_ids = {ref.page_id for ref in written_refs}
-        for record in self.kb.pages(kind="concept"):
+        for record in self.kb.pages(kind="concept") if plan.scope != "notes" else []:
             if plan.material_id not in record.sources or record.id in written_ids:
                 continue
             path = library.root / record.rel_path
@@ -276,15 +280,22 @@ class WikiWriter:
             if blocks:
                 sections.append(NoteSection(section.title, tuple(blocks)))
                 result.blocks_written += len(blocks)
-        note_path, created = self._write_note(library, plan, source, sections, written_refs)
-        result.note_created = created
-        touched.append(note_path)
+        note_path: Path | None = None
+        if plan.write_notes:
+            note_refs = written_refs
+            if plan.scope == "notes":
+                note_refs = [PageRef(page.rel_path.removesuffix(".md"), page.title, page.id)
+                             for page in self.kb.pages(kind="concept")
+                             if plan.material_id in page.sources]
+            note_path, created = self._write_note(library, plan, source, sections, note_refs)
+            result.note_created = created
+            touched.append(note_path)
 
         for path in dict.fromkeys(touched):
             self._index_page(library, path)
         # Concept pages left with nothing — no source, no statement, no words of the user (QA C7):
         # they go, as on Delete, instead of staying as empty pages in the list and the graph.
-        for record in self.kb.pages(kind="concept"):
+        for record in self.kb.pages(kind="concept") if plan.scope != "notes" else []:
             if record.id in written_ids or record.sources:
                 continue
             path = library.root / record.rel_path
@@ -303,8 +314,9 @@ class WikiWriter:
                 connection.execute("DELETE FROM wiki_checked WHERE page_id = ?", (record.id,))
             result.removed.append(record.title)
 
-        note_record = next((page for page in self.kb.pages(kind="note")
+        note_record = (next((page for page in self.kb.pages(kind="note")
                             if page.rel_path == library.relative(note_path)), None)
+                       if note_path is not None else None)
         result.note_page_id = note_record.id if note_record else ""
         self._write_index(library, plan.language)
         self._append_log(library, plan.language, source, result)
@@ -398,7 +410,8 @@ class WikiWriter:
     def _append_log(self, library: Library, language: str, source: SourceRef, result: WriteResult) -> None:
         text = LOG_TEXT.get(language, LOG_TEXT["en"])
         stamp = utc_now().replace("T", " ").removesuffix("Z")[:16] + " UTC"
-        parts = [text["notes_new"] if result.note_created else text["notes_updated"]]
+        parts = ([text["notes_new"] if result.note_created else text["notes_updated"]]
+                 if result.note_page_id else [])
         if result.created:
             parts.append(f"{text['added']}: {', '.join(result.created)}")
         if result.updated:
