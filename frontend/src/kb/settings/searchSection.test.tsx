@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createFakeKb } from '../api/fake';
+import { contractFixtures } from '../api/fake/fixtures';
+import { createServices, KbServicesProvider } from '../state/context';
+import { createFakeBridge } from '../test/fakeBridge';
 import type { ScienceClient } from '../api/science';
 import type { MaintenanceClient } from '../api/maintenance';
 import type { KbScienceEgress } from '../../api/kb/types.gen';
@@ -13,6 +16,33 @@ import {
   ScienceSwitchRow,
   WeeklyCheckRow,
 } from './SearchSection';
+
+describe('R3-01 — Search settings through the default services', () => {
+  it('keeps all three stateful rows loaded across renders without client overrides', async () => {
+    const base = createFakeBridge();
+    base.requestMock.mockImplementation(async (req) => ({
+      ok: true, status: 200,
+      data: req.path === '/kb/settings/weekly-check'
+        ? { ...contractFixtures.KbWeeklySettings, enabled: false }
+        : { ...contractFixtures.KbScienceSettings, enabled: false, openalex_key_configured: true },
+    }));
+    const services = createServices(base.bridge, null, { capture: null });
+    const tree = () => (
+      <KbServicesProvider services={services}>
+        <ScienceSwitchRow label="Scientific papers & preprints" />
+        <OpenAlexKeyRow label="OpenAlex key" />
+        <WeeklyCheckRow label="Weekly check" />
+      </KbServicesProvider>
+    );
+    const view = render(tree());
+    expect(await screen.findByRole('switch', { name: 'Scientific papers & preprints' })).not.toBeChecked();
+    expect(await screen.findByRole('switch', { name: 'Weekly check' })).not.toBeChecked();
+    expect(await screen.findByText('Configured')).toBeInTheDocument();
+    view.rerender(tree());
+    expect(screen.queryByText('Reading…')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Replace…' })).toBeInTheDocument();
+  });
+});
 
 describe('Settings → Search schema registration (F4)', () => {
   it('registers science-enabled, openalex-key, science-journal and weekly-check in section search', () => {
