@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { KbAreaMaterials, KbFindings, KbFunnelRun, KbJobSummary } from '../../api/kb/types.gen';
+import type { KbAreaMap, KbAreaMaterials, KbExploreJob, KbFindings, KbJobSummary } from '../../api/kb/types.gen';
 import { KbApiError } from '../api/client';
 import { createFakeKb } from '../api/fake';
 import { contractFixtures as f } from '../api/fake/fixtures';
@@ -26,7 +26,7 @@ function deferred<T>() {
 }
 const emptyFindings: KbFindings = { ...f.KbFindings, groups: [], next_cursor: null };
 const checkpoint = f.KbFunnelRun.checkpoint!;
-const summary = (job: KbFunnelRun | typeof f.KbRepeatCheck | typeof f.KbWeeklyCheck): KbJobSummary => ({
+const summary = (job: KbExploreJob): KbJobSummary => ({
   ...f.KbJobs.jobs[0]!, ...job, task_id: null, chat_id: null, area_id: 'area-ai',
 });
 
@@ -361,6 +361,26 @@ describe('FX-D review regressions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Unpin area from weekly discovery' }));
     expect(await screen.findByRole('button', { name: 'Pin area for weekly discovery' })).toHaveAttribute('aria-pressed', 'false');
     expect(update).toHaveBeenLastCalledWith(area.id, { pinned: false });
+  });
+
+  it('R3-10 keeps a saved pin when a map refresh started before PATCH returns late', async () => {
+    vi.useFakeTimers();
+    const kb = createFakeKb('area');
+    let changed = false;
+    kb.explore.jobs = async () => ({ jobs: changed ? [{ ...summary(scenes.searching.run), owner: 'research' }] : [] });
+    const lateMap = deferred<KbAreaMap>();
+    vi.spyOn(kb.areas, 'map').mockResolvedValueOnce(scenes.area.map).mockImplementation(() => lateMap.promise);
+    const area = scenes.area.map.breadcrumbs.at(-1)!;
+    kb.areas.update = async () => ({ ...area, pinned: true });
+    render(<ExploreSection clients={kb} />);
+    await flush();
+    changed = true;
+    await tick();
+    fireEvent.click(screen.getByRole('button', { name: 'Pin area for weekly discovery' }));
+    await flush();
+    expect(screen.getByRole('button', { name: 'Unpin area from weekly discovery' })).toBeInTheDocument();
+    await act(async () => { lateMap.resolve(scenes.area.map); });
+    expect(screen.getByRole('button', { name: 'Unpin area from weekly discovery' })).toBeInTheDocument();
   });
 
   it('R3-12 honors Shell hiding Explore when a document expands with its actual CSS', async () => {
