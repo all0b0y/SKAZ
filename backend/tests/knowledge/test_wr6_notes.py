@@ -48,7 +48,10 @@ def test_upgrade_keeps_old_jobs_full() -> None:
     connection = sqlite3.connect(":memory:")
     connection.executescript("CREATE TABLE ingest_jobs(job_id TEXT PRIMARY KEY, counters TEXT, "
                              "journal TEXT, error_code TEXT); INSERT INTO ingest_jobs(job_id) VALUES('old');")
-    connection.executescript(ingest_schema.UPGRADES[3])
+    step = ingest_schema.UPGRADES[3]
+    assert callable(step)
+    step(connection)
+    step(connection)  # idempotent: a start cut before the version row runs it again (review R2-02)
     assert connection.execute("SELECT scope FROM ingest_jobs").fetchone() == ("full",)
     assert ingest_schema.VERSION == 3
 

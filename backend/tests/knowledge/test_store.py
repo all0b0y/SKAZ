@@ -77,7 +77,39 @@ def test_an_ingest_v1_database_gains_the_job_error_code(tmp_path: Path) -> None:
         with db.read() as connection:
             row = connection.execute("SELECT job_id, error_code FROM ingest_jobs").fetchone()
         assert tuple(row) == ("job-1", None)
-        assert db.schema_versions()["ingest"] == ingest.VERSION == 2
+        assert db.schema_versions()["ingest"] == ingest.VERSION
+    finally:
+        db.close()
+
+
+def test_an_ingest_upgrade_cut_before_its_version_row_finishes_on_the_next_start(tmp_path: Path) -> None:
+    """0.4.0 review R2-02: the v3 ALTER committed, the start died before the version row; the next start
+    must not fail on \"duplicate column\" and must keep the jobs."""
+    import sqlite3
+
+    from skaz.knowledge.store.schema import ingest
+
+    path = tmp_path / "knowledge.sqlite3"
+    v2 = SimpleNamespace(NAME="ingest", VERSION=2, SQL=(
+        "CREATE TABLE IF NOT EXISTS ingest_jobs (job_id TEXT PRIMARY KEY REFERENCES jobs(id) "
+        "ON DELETE CASCADE, counters TEXT NOT NULL DEFAULT '{}', journal TEXT NOT NULL DEFAULT '[]', "
+        "error_code TEXT);"))
+    old = KnowledgeDatabase(path, modules=tuple(v2 if module is ingest else module for module in MODULES))
+    with old.write() as connection:
+        connection.execute("INSERT INTO jobs(id, kind, target_id, state, created_at, updated_at) "
+                           "VALUES ('job-1', 'ingest', 'mat-1', 'failed', 't', 't')")
+        connection.execute("INSERT INTO ingest_jobs(job_id) VALUES ('job-1')")
+    old.close()
+    raw = sqlite3.connect(path)
+    raw.execute("ALTER TABLE ingest_jobs ADD COLUMN scope TEXT NOT NULL DEFAULT 'full'")  # the cut start
+    raw.commit()
+    raw.close()
+    db = KnowledgeDatabase(path)
+    try:
+        with db.read() as connection:
+            row = connection.execute("SELECT job_id, scope FROM ingest_jobs").fetchone()
+        assert tuple(row) == ("job-1", "full")
+        assert db.schema_versions()["ingest"] == ingest.VERSION
     finally:
         db.close()
 

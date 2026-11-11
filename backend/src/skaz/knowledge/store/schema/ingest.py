@@ -7,6 +7,9 @@ the text of a source or of a rejected block.
 """
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Callable
+
 NAME = "ingest"
 VERSION = 3
 
@@ -21,7 +24,21 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
 );
 """
 
+
+def _add_missing(name: str, kind: str) -> Callable[[sqlite3.Connection], None]:
+    """Add the column unless it is there: an ALTER commits on its own, so a start that stopped before the
+    version row was written re-runs the step (0.4.0 review R2-02); it must finish, not fail."""
+
+    def step(connection: sqlite3.Connection) -> None:
+        present = {row[1] for row in connection.execute("PRAGMA table_info(ingest_jobs)")}
+        if name not in present:
+            connection.execute(f"ALTER TABLE ingest_jobs ADD COLUMN {name} {kind}")
+
+    return step
+
+
+#: v2 (G4): the machine-readable failure kind. v3 (0.4.0 WR6): ``full`` | ``notes`` (Write notes only).
 UPGRADES = {
-    2: "ALTER TABLE ingest_jobs ADD COLUMN error_code TEXT;\n",
-    3: "ALTER TABLE ingest_jobs ADD COLUMN scope TEXT NOT NULL DEFAULT 'full';\n",
+    2: _add_missing("error_code", "TEXT"),
+    3: _add_missing("scope", "TEXT NOT NULL DEFAULT 'full'"),
 }
