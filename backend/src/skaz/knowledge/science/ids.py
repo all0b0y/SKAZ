@@ -37,6 +37,25 @@ CHILD_LEVEL: dict[str, tuple[str, TaxonomyLevel]] = {
 PARENT_FILTER = {"domains": "domain.id", "fields": "field.id", "subfields": "subfield.id"}
 
 
+#: A work's place in the hierarchy (help.openalex.org/data/topics): any of its topics under this node.
+WORK_SCOPE_FILTER = {
+    "domains": "topics.domain.id",
+    "fields": "topics.field.id",
+    "subfields": "topics.subfield.id",
+}
+
+
+def scope_filter(value: str) -> tuple[str, str] | None:
+    """A taxonomy id as the works filter that covers it: ``fields-17`` → ``("topics.field.id", "17")``,
+    ``T10181`` → ``("topics.id", "T10181")``; ``None`` for anything else (free text)."""
+    if is_topic_id(value):
+        return "topics.id", value
+    match = _LEVEL_ID.match(value)
+    if match is None:
+        return None
+    return WORK_SCOPE_FILTER[match.group(1)], match.group(2)
+
+
 def short_openalex(value: str | None) -> str | None:
     """``https://openalex.org/W1`` → ``W1``; ``None`` for anything else."""
     if not value:

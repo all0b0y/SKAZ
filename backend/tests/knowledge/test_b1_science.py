@@ -582,6 +582,27 @@ async def test_citing_and_neighbours(gateway: ScienceGateway, bases: Bases) -> N
     assert operations == [("search", [], ["T10181"]), ("citations", ["W4391234567"], [])]
 
 
+async def test_a_parent_area_is_searched_by_its_hierarchy_filter(
+    gateway: ScienceGateway, bases: Bases
+) -> None:
+    """Review R1-05: a domain/field/subfield id is an OpenAlex hierarchy filter, never search prose."""
+    await enable(gateway)
+    bases.on("api.openalex.org", "/works", ok_json(fixture_json("openalex_list.json")))
+    await gateway.search(search("domains-3"))
+    params = bases.requests[-1].url.params
+    assert params["filter"] == "topics.domain.id:3" and "search" not in params
+    await gateway.neighbours([], ["fields-17"])
+    assert bases.requests[-1].url.params["filter"].startswith("topics.field.id:17")
+    # Different levels are separate filters, which OpenAlex would AND: one request each, results merged.
+    before = len(bases.requests)
+    found = await gateway.search(search("T10181", "subfields-1702"))
+    filters = sorted(r.url.params["filter"] for r in bases.requests[before:])
+    assert filters == ["topics.id:T10181", "topics.subfield.id:1702"]
+    assert [w.id for w in found.works] == ["W5000000001", "W4391234567"]  # merged without duplicates
+    records = (await gateway.journal()).records
+    assert sorted(r.payload.topics[0] for r in records[:2]) == ["T10181", "subfields-1702"]
+
+
 async def test_taxonomy_one_level_at_a_time_and_cached(gateway: ScienceGateway, bases: Bases) -> None:
     await enable(gateway)
     bases.on("api.openalex.org", "/domains", ok_json(fixture_json("openalex_domains.json")))

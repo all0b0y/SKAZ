@@ -128,7 +128,9 @@ def test_areas_store_directory_custom_areas_and_read_marks(ready: KnowledgeServi
         "Artificial Intelligence",
         "Retrieval-augmented generation",
     ]
-    assert list(directory.topics("area-ai")) == ["topic-rag", "topic-agents"]
+    # A subfield's scope is its own id (a hierarchy filter), not the leaves loaded so far (review R1-05).
+    assert list(directory.topics("area-ai")) == ["area-ai"]
+    assert list(directory.topics("topic-rag")) == ["topic-rag"]
     assert directory.area_for_topics(["unknown", "topic-rag"]) == "topic-rag"
 
     # Rename, pin, hide on taxonomy area
@@ -845,3 +847,18 @@ async def test_a_map_level_that_cannot_load_answers_its_honest_reason(ready: Kno
     nested = ExploreAreasService(ready, science=Nested())  # type: ignore[arg-type]
     with pytest.raises((ContractFailure, AttributeError)):
         await nested.map()
+
+
+def test_a_parent_area_scope_is_its_own_hierarchy_id(ready: KnowledgeService) -> None:
+    """Review R1-05: the same scope before and after one child is expanded."""
+    from skaz.knowledge.science.protocols import TaxonomyNode
+
+    store = AreasStore(ready, SignalStore(ready.db))
+    store.sync_taxonomy_nodes(None, [TaxonomyNode("domains-3", None, "domain", "Physical Sciences", 2)])
+    assert list(store.topics("domains-3")) == ["domains-3"]
+    store.sync_taxonomy_nodes("domains-3", [TaxonomyNode("fields-17", "domains-3", "field", "CS", 1)])
+    store.sync_taxonomy_nodes("fields-17", [TaxonomyNode("subfields-1702", "fields-17", "subfield", "AI", 1)])
+    store.sync_taxonomy_nodes("subfields-1702", [TaxonomyNode("T10181", "subfields-1702", "topic", "RAG", 0)])
+    assert list(store.topics("domains-3")) == ["domains-3"]
+    assert list(store.topics("subfields-1702")) == ["subfields-1702"]
+    assert list(store.topics("T10181")) == ["T10181"]

@@ -397,14 +397,16 @@ class AreasStore:
         direct = self._topics_by_area(areas)
         if area.level in ("topic", "custom"):
             return tuple(direct.get(area_id, []))
+        if area.taxonomy_id:
+            # A domain/field/subfield is its own hierarchy id: the science query covers every topic below
+            # it, not only the leaves this map happened to load (review R1-05).
+            return (area.taxonomy_id,)
         subtrees = self._subtree_map(areas)
         result: list[str] = []
         for sub_id in sorted(subtrees.get(area_id, {area_id}), key=lambda x: list(areas).index(x)):
             for tid in direct.get(sub_id, ()):
                 if tid not in result:
                     result.append(tid)
-        if not result and area.taxonomy_id:
-            result.append(area.taxonomy_id)
         return tuple(result)
 
     def materials(self, area_id: str) -> Sequence[str]:

@@ -19,6 +19,7 @@ from .ids import (
     is_topic_id,
     mapping,
     normalize_doi,
+    scope_filter,
     short_openalex,
     split_arxiv,
     taxonomy_id,
@@ -241,15 +242,39 @@ def _clean_topic(text: str) -> str:
     return " ".join(text.replace('"', " ").replace("(", " ").replace(")", " ").split())
 
 
-def search_request(body: KbScienceSearch, openalex_ids: Sequence[str]) -> tuple[dict[str, str], float]:
-    """Query parameters and cost: free-text topics are a search ($0.001), filters only are a list."""
+def scopes(values: Sequence[str], *, limit: int = 30) -> list[tuple[str, list[str]]]:
+    """Taxonomy ids grouped by their works filter, each group one request: OpenAlex ANDs separate
+    filters, so a domain and a topic must not share one request (review R1-05)."""
+    groups: dict[str, list[str]] = {}
+    for value in values:
+        found = scope_filter(value)
+        if found is not None and value not in groups.setdefault(found[0], []):
+            groups[found[0]].append(value)
+    return [(name, ids[:limit]) for name, ids in groups.items()]
+
+
+def scope_expression(name: str, ids: Sequence[str]) -> str:
+    """``topics.field.id:17|22`` from the taxonomy ids of one group."""
+    values = [found[1] for value in ids if (found := scope_filter(value)) is not None]
+    return f"{name}:" + "|".join(values)
+
+
+def search_words(topics: Sequence[str]) -> list[str]:
+    """Free-text topics (taxonomy ids are filters, never prose)."""
+    return [clean for topic in topics if scope_filter(topic) is None and (clean := _clean_topic(topic))]
+
+
+def search_request(
+    body: KbScienceSearch, openalex_ids: Sequence[str], scope: tuple[str, Sequence[str]] | None = None
+) -> tuple[dict[str, str], float]:
+    """Query parameters and cost: free-text topics are a search ($0.001), filters only are a list.
+
+    ``scope`` is one group from :func:`scopes`; the caller makes one request per group.
+    """
     filters: list[str] = []
-    words = [
-        clean for topic in body.payload.topics if not is_topic_id(topic) and (clean := _clean_topic(topic))
-    ]
-    topic_ids = [topic for topic in body.payload.topics if is_topic_id(topic)]
-    if topic_ids:
-        filters.append("topics.id:" + "|".join(topic_ids))
+    words = search_words(body.payload.topics)
+    if scope is not None:
+        filters.append(scope_expression(*scope))
     if body.payload.dois:
         dois = [
             doi for d in body.payload.dois if (doi := normalize_doi(d)) and "," not in doi and "|" not in doi
