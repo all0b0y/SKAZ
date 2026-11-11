@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { KbExploring, KbFinding, KbScienceSettings } from '../../../api/kb/types.gen';
 import { errorText } from '../../api/client';
 import { useServices } from '../../state/context';
+import { getResearchStore } from '../../research/store';
 import { Banner, Button, Chip, Icon, IconButton, Menu, Spinner, type MenuItem } from '../../ui';
 import { useFindingClients } from './clients';
 import {
@@ -24,7 +25,7 @@ type Busy = 'explore' | 'add' | 'mark' | null;
 
 export function FindingDetail({ findingId, onClose }: FindingDetailProps) {
   const { explore, areas, science } = useFindingClients();
-  const { chats, ui } = useServices();
+  const { chats, ui, prefs, client } = useServices();
 
   const [finding, setFinding] = useState<KbFinding | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -92,8 +93,11 @@ export function FindingDetail({ findingId, onClose }: FindingDetailProps) {
     ui.getState().openDocument({ type: 'page', id: page.page_id, block_id: page.block_id ?? null });
 
   const openChat = (chatId: string) => {
-    chats.getState().open(chatId);
+    getResearchStore(client).getState().close();
+    prefs.getState().set({ section: 'chats', sideOpen: true });
+    if (ui.getState().docExpanded) ui.getState().toggleDocExpanded();
     ui.getState().showCenter('chat');
+    void chats.getState().open(chatId);
   };
 
   const startExplore = async (mode: ExploreMode) => {

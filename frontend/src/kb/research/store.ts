@@ -116,24 +116,38 @@ function getApi(client: KbClient): ResearchApi {
 
 function createResearchStore(client: KbClient): StoreApi<ResearchState> {
   return createStore<ResearchState>((set, get) => {
+  const generations = new Map<string, number>();
+  const reads = new Map<string, number>();
+  const actions = new Set<string>();
+  let listRead = 0;
+  const generation = (id: string) => generations.get(id) ?? 0;
+  const invalidate = (id: string) => generations.set(id, generation(id) + 1);
+  const isOlder = (task: KbResearchTask, current?: KbResearchTask) => current !== undefined
+    && Date.parse(task.run.updated_at) < Date.parse(current.run.updated_at);
   // Pause / Continue / Cancel: the server's answer is the new state, nothing is guessed locally.
   const runTaskAction = async (
     taskId: string,
     call: (api: ResearchApi) => Promise<KbResearchTask>,
   ): Promise<KbResearchTask | null> => {
+    if (actions.has(taskId)) return null;
+    actions.add(taskId);
+    invalidate(taskId);
+    let failed = false;
     set({ busy: true, error: null });
     try {
       const task = await call(getApi(client));
-      set((s) => ({
-        busy: false,
-        tasks: mergeTaskList(s.tasks, task),
-        tasksById: { ...s.tasksById, [task.id]: task },
-      }));
+      invalidate(taskId);
+      get().upsertTask(task);
       return task;
     } catch (err) {
-      set({ busy: false, error: errorText(err) });
-      void get().loadTask(taskId);
+      failed = true;
+      invalidate(taskId);
+      set({ error: errorText(err) });
       return null;
+    } finally {
+      actions.delete(taskId);
+      set({ busy: actions.size > 0 });
+      if (failed) void get().loadTask(taskId);
     }
   };
   return {
@@ -180,6 +194,7 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
     },
 
     upsertTask: (task) => {
+      if (isOlder(task, get().tasksById[task.id])) return;
       set((s) => ({
         tasks: mergeTaskList(s.tasks, task),
         tasksById: { ...s.tasksById, [task.id]: task },
@@ -187,24 +202,48 @@ function createResearchStore(client: KbClient): StoreApi<ResearchState> {
     },
 
     loadTasks: async () => {
+      const request = ++listRead;
+      const versions = new Map(generations);
       try {
-        const res = await getApi(client).research.tasks();
-        const byId: Record<string, KbResearchTask> = { ...get().tasksById };
-        for (const t of res.tasks) byId[t.id] = t;
-        set({ tasks: res.tasks, tasksById: byId });
-        return res.tasks;
-      } catch {
+        let res = await getApi(client).research.tasks();
+        const tasks = [...res.tasks];
+        const seen = new Set<string>();
+        while (res.next_cursor) {
+          const cursor = res.next_cursor;
+          if (seen.has(cursor)) throw new Error('Couldn’t load the remaining tasks. Try again.');
+          seen.add(cursor);
+          res = await getApi(client).research.tasks({ cursor });
+          tasks.push(...res.tasks);
+        }
+        if (request !== listRead) return get().tasks;
+        const byId = { ...get().tasksById };
+        for (const task of tasks) {
+          if (!actions.has(task.id) && (versions.get(task.id) ?? 0) === generation(task.id) && !isOlder(task, byId[task.id])) byId[task.id] = task;
+        }
+        const ids = [...new Set(tasks.map((task) => task.id))];
+        const listed = ids.flatMap((id) => byId[id] ? [byId[id]!] : []);
+        const extras = get().tasks.filter((task) => !ids.includes(task.id));
+        set({ tasks: [...extras, ...listed], tasksById: byId });
+        return get().tasks;
+      } catch (err) {
+        if (request === listRead) set({ error: errorText(err) });
         return get().tasks;
       }
     },
 
     loadTask: async (taskId) => {
+      const version = generation(taskId);
+      const request = (reads.get(taskId) ?? 0) + 1;
+      reads.set(taskId, request);
       try {
         const task = await getApi(client).research.task(taskId);
+        if (version !== generation(taskId) || request !== reads.get(taskId) || actions.has(taskId)) {
+          return get().tasksById[taskId] ?? null;
+        }
         get().upsertTask(task);
-        return task;
+        return get().tasksById[taskId] ?? null;
       } catch (err) {
-        set({ error: errorText(err) });
+        if (version === generation(taskId) && request === reads.get(taskId) && !actions.has(taskId)) set({ error: errorText(err) });
         return null;
       }
     },
