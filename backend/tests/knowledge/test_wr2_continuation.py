@@ -181,6 +181,28 @@ async def test_a_notes_continuation_resumes_at_the_last_cited_fragment_with_an_o
     assert '"sections"' not in content
 
 
+async def test_notes_continue_from_accepted_blocks_only_not_a_rejected_high_citation(
+    kb_app: Any, kb_client: httpx.AsyncClient,
+) -> None:
+    head = notes(
+        ("Начало", [block("from_source", "Энтропия не убывает.", cite(1, "второе начало"))]),
+        ("Газ", [block("from_source", "Температура и энергия частиц.", cite(2, "энергию частиц")),
+                 block("from_source", "REJECTED BLOCK", cite(8, "quote absent from source"))]),
+        ("Rejected section", [block("from_source", "ALSO REJECTED", cite(8, "another absent quote"))]),
+        more=True)
+    tail = notes(("Работа", [block("from_source", "Работа при расширении.", cite(8, "при расширении"))]))
+    world = await _world(kb_app, kb_client, notes_answers=[head, tail])
+    done = await _ingest(world, kb_client)
+    assert done["state"] == "done", done["error"]
+    content = world.turns(prompts.NOTES_SCHEMA_TITLE)[1].messages[0].content
+    assert all(f"[seg-{n}] " in content for n in range(1, 9))
+    written = content.split("Sections already written for this part")[1].split("The last section")[0]
+    assert "Начало" in written and "Газ" in written and "Rejected section" not in written
+    last = content.split("The last section written, in full")[1]
+    assert "Температура и энергия частиц." in last
+    assert "REJECTED" not in content
+
+
 # -- WR3: the duplicate filter ------------------------------------------------------------------
 
 

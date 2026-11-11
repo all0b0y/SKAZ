@@ -137,3 +137,22 @@ def test_notes_drop_a_short_statement_written_again_for_the_same_fragments() -> 
     again: list[CheckedBlock] = []
     assert place_block(again, _block("Lasso: L1.", 3), [kept, again], exact_short=False) is False
     assert again == [] and kept[0].segs == (3,)
+
+
+@pytest.mark.parametrize(("first", "second"), [
+    ("Accept when p < 0.05.", "Accept when p > 0.05."),
+    ("The root is +2.", "The root is -2."),
+    ("The root is 2.", "The root is −2."),
+    ("Accept when p < 0.05.", "Accept when p < 0.5."),
+    ("For this long statement accept the measured result only when p < 0.05 in the test.",
+     "For this long statement accept the measured result only when p > 0.05 in the test."),
+])
+def test_distinct_formulae_keep_their_own_statements_and_citations(first: str, second: str) -> None:
+    draft = ConceptDraft("Criterion", None, blocks=[_block(first, 1)])
+    assert draft.add(_block(second, 2)) is True
+    assert [(block.text, block.segs, block.quotes) for block in draft.blocks] == [
+        (first, (1,), ((1, "quote 1"),)), (second, (2,), ((2, "quote 2"),))]
+    detector = LoopDetector()
+    assert detector.take(["criterion"], [first])
+    assert detector.take(["criterion"], [second])
+    assert not detector.take(["criterion"], [second])
