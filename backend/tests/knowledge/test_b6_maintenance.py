@@ -594,7 +594,8 @@ async def test_replace_goes_to_the_wiki_when_the_old_copy_was_there(ready: Knowl
         paper: [ScienceUpdate(paper, "new_version", None, "arXiv", version="v2")]
     }
     service = world.service()
-    service._in_wiki = lambda material_id: True  # type: ignore[method-assign]
+    # The replaced copy is in the wiki; the new one is not yet (a copy already there is not sent again).
+    service._in_wiki = lambda material_id: material_id == paper  # type: ignore[method-assign]
     await service.settled((await service.start()).id)
     mark = (await service.marks(paper)).marks[0]
     result = await service.act(mark.id, KbFreshnessAction(action="replace_version"))
@@ -894,3 +895,71 @@ async def test_runtime_wires_maintenance_and_b5_writes_its_marks_here(
     response = await kb_client.get("/kb/freshness/weekly-checks/job-missing")
     assert (response.status_code, response.json()) == (404, {"code": "not_found"})
     assert {"weekly_check_started", "weekly_check_finished"} <= set(runtime.kb.notification_actions.kinds)
+
+
+# -- 0.4.0 review round (R2-06, R2-07) -------------------------------------------------------------------
+
+
+def _status(error: BaseException) -> int | None:
+    return getattr(error, "status", None) or getattr(error, "status_code", None)
+
+
+async def test_r2_06_two_continues_with_one_checkpoint_start_one_worker(ready: KnowledgeService) -> None:
+    world = World(ready)
+    service = world.service()
+    papers = [_material(ready, f"P{i}", doi=f"10.1000/p{i}") for i in range(2)]
+    world.science.error = ScienceDailyLimit(retry_at=datetime(2026, 11, 11, tzinfo=UTC))
+    check = await service.settled((await service.start()).id)
+    assert (check.state, check.stop_reason) == ("paused", "openalex_daily_limit")
+    assert check.checkpoint is not None
+    gate = asyncio.Event()
+    original = world.science.updates
+
+    async def slow(refs: Sequence[ScienceRef], *, run_id: str | None = None) -> list[ScienceUpdate]:
+        await gate.wait()
+        return await original(refs, run_id=run_id)
+
+    world.science.updates = slow  # type: ignore[method-assign]
+    world.science.calls.clear()
+    body = KbContinue(checkpoint_id=check.checkpoint.id, revision=check.checkpoint.revision)
+    first, second = await asyncio.gather(
+        service.resume(check.id, body), service.resume(check.id, body), return_exceptions=True
+    )
+    errors = [item for item in (first, second) if isinstance(item, BaseException)]
+    assert len(errors) == 1 and _status(errors[0]) == 409, errors
+    gate.set()
+    done = await service.settled(check.id)
+    await asyncio.sleep(0.05)  # a second worker, if one had started, would still be asking
+    assert done.state == "done" and done.counters.checked == len(papers)
+    assert len(world.science.calls) == 1  # the paused batch was asked once, by one worker
+
+
+async def test_r2_07_replace_keeps_its_action_until_the_wiki_job_is_queued(ready: KnowledgeService) -> None:
+    world = World(ready)
+    paper = _material(ready, "Paper", url="https://arxiv.org/abs/2401.01234v1")
+    world.science.updates_by_material = {
+        paper: [ScienceUpdate(paper, "new_version", None, "arXiv", version="v2")]
+    }
+    service = world.service()
+    service._in_wiki = lambda material_id: material_id == paper  # type: ignore[method-assign]
+    await service.settled((await service.start()).id)
+    mark = (await service.marks(paper)).marks[0]
+
+    async def failing(material_id: str) -> Any:
+        world.ingest.calls.append(material_id)
+        raise ContractFailure(503, "not_ready")  # e.g. Quit/crash before the wiki job exists
+
+    world.ingest.request_ingest = failing  # type: ignore[method-assign]
+    with pytest.raises(ContractFailure):
+        await service.act(mark.id, KbFreshnessAction(action="replace_version"))
+    # The new copy is downloaded, but not in the wiki yet: the mark still offers the action that finishes it.
+    still = (await service.marks(paper)).marks[0]
+    assert "replace_version" in still.actions
+    assert len(world.sources.calls) == 1
+
+    del world.ingest.request_ingest  # the real fake again
+    result = await service.act(mark.id, KbFreshnessAction(action="replace_version"))
+    assert len(world.sources.calls) == 1  # the downloaded copy is reused, not downloaded twice
+    assert world.ingest.calls[0] == world.ingest.calls[1]  # the same new material goes to the wiki
+    assert result.ingest_job_id == "ingest-1"
+    assert result.mark.actions == ["delete_source", "keep_marked"]
