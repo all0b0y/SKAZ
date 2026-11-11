@@ -184,6 +184,24 @@ async def test_integration_off_sends_nothing(gateway: ScienceGateway, bases: Bas
     assert (await gateway.journal()).records == []
 
 
+async def test_consent_withdrawn_while_paced_sends_nothing(gateway: ScienceGateway, bases: Bases) -> None:
+    """Review R1-02: a request waiting in the arXiv pacing window re-checks consent before it leaves."""
+    await enable(gateway)
+    bases.on("export.arxiv.org", "/api/query", ok_bytes(fixture("arxiv_feed.xml"), "application/atom+xml"))
+    arxiv_search = KbScienceSearch(provider="arxiv", payload=KbSciencePayload(topics=["rag"]))
+    await gateway.search(arxiv_search)
+
+    async def withdraw_while_waiting(_seconds: float) -> None:
+        gateway.store.set_enabled(False, NOW)  # Settings → science off, during the 3 s wait
+
+    gateway.transport.sleep = withdraw_while_waiting
+    gateway.transport.monotonic = lambda: 0.0  # the second request comes at once, so it must wait
+    with pytest.raises(ScienceConsentRequired):
+        await gateway.search(arxiv_search)
+    assert len(bases.requests) == 1  # the paced second request never left
+    assert len((await gateway.journal()).records) == 1  # and was never journalled as sent
+
+
 async def test_enabling_records_consent_and_disabling_withdraws_it(gateway: ScienceGateway) -> None:
     settings = await gateway.settings()
     assert (settings.enabled, settings.consent_at, settings.openalex_key_configured) == (False, None, False)
@@ -562,6 +580,27 @@ async def test_citing_and_neighbours(gateway: ScienceGateway, bases: Bases) -> N
     assert (await gateway.neighbours([], ["free text only"])).works == []
     operations = [(r.operation, r.payload.ids, r.payload.topics) for r in (await gateway.journal()).records]
     assert operations == [("search", [], ["T10181"]), ("citations", ["W4391234567"], [])]
+
+
+async def test_a_parent_area_is_searched_by_its_hierarchy_filter(
+    gateway: ScienceGateway, bases: Bases
+) -> None:
+    """Review R1-05: a domain/field/subfield id is an OpenAlex hierarchy filter, never search prose."""
+    await enable(gateway)
+    bases.on("api.openalex.org", "/works", ok_json(fixture_json("openalex_list.json")))
+    await gateway.search(search("domains-3"))
+    params = bases.requests[-1].url.params
+    assert params["filter"] == "topics.domain.id:3" and "search" not in params
+    await gateway.neighbours([], ["fields-17"])
+    assert bases.requests[-1].url.params["filter"].startswith("topics.field.id:17")
+    # Different levels are separate filters, which OpenAlex would AND: one request each, results merged.
+    before = len(bases.requests)
+    found = await gateway.search(search("T10181", "subfields-1702"))
+    filters = sorted(r.url.params["filter"] for r in bases.requests[before:])
+    assert filters == ["topics.id:T10181", "topics.subfield.id:1702"]
+    assert [w.id for w in found.works] == ["W5000000001", "W4391234567"]  # merged without duplicates
+    records = (await gateway.journal()).records
+    assert sorted(r.payload.topics[0] for r in records[:2]) == ["T10181", "subfields-1702"]
 
 
 async def test_taxonomy_one_level_at_a_time_and_cached(gateway: ScienceGateway, bases: Bases) -> None:

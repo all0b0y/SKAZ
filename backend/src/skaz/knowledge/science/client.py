@@ -45,10 +45,10 @@ from .ids import (
     arxiv_of_work_id,
     arxiv_work_id,
     is_openalex_work,
-    is_topic_id,
     mapping,
     normalize_doi,
     parent_query,
+    scope_filter,
     split_arxiv,
 )
 from .protocols import ScienceRef, ScienceUnavailable, ScienceUpdate, TaxonomyNode
@@ -290,13 +290,21 @@ class ScienceGateway:
         found = [cached[work_id] for work_id in payload.ids if work_id in cached]
         if not payload.topics and not payload.dois and not openalex_ids:
             return _results(await self._keep(found), None)  # every id is known here: nothing leaves
-        sent = KbSciencePayload(topics=payload.topics, dois=payload.dois, ids=openalex_ids)
-        params, cost = openalex.search_request(body, openalex_ids)
-        data = await self._json(
-            Call("openalex", "search", f"{openalex.API}/works", sent, params=params, cost=cost), run_id
-        )
-        works, cursor = openalex.parse_list(data) if isinstance(data, dict) else ([], None)
-        return _results(await self._keep(found + works), cursor)
+        words = [topic for topic in payload.topics if scope_filter(topic) is None]
+        groups: list[tuple[str, list[str]] | None] = list(openalex.scopes(payload.topics)) or [None]
+        cursor: str | None = None
+        for scope in groups:
+            sent = KbSciencePayload(
+                topics=words + (scope[1] if scope else []), dois=payload.dois, ids=openalex_ids
+            )
+            params, cost = openalex.search_request(body, openalex_ids, scope)
+            data = await self._json(
+                Call("openalex", "search", f"{openalex.API}/works", sent, params=params, cost=cost), run_id
+            )
+            works, cursor = openalex.parse_list(data) if isinstance(data, dict) else ([], None)
+            found += [work for work in works if work.id not in {known.id for known in found}]
+        # Several groups are several lists: there is no one cursor to go on with.
+        return _results(await self._keep(found), cursor if len(groups) == 1 else None)
 
     async def _search_arxiv(self, body: KbScienceSearch, run_id: str | None) -> KbScienceResults:
         ids = [
@@ -433,38 +441,40 @@ class ScienceGateway:
     ) -> KbScienceResults:
         """Works related to the seeds (OpenAlex ``related_to``), else works in the given topics."""
         ids = [work_id for work_id in dict.fromkeys(work_ids) if is_openalex_work(work_id)][:MAX_IDS]
-        topics = [topic for topic in dict.fromkeys(topic_ids) if is_topic_id(topic)][:MAX_IDS]
+        requests: list[tuple[list[str], KbSciencePayload, str]] = []
         if ids:
-            filters, payload, operation = (
-                ["related_to:" + "|".join(ids)],
-                KbSciencePayload(ids=ids),
-                "citations",
-            )
-        elif topics:
-            filters, payload, operation = (
-                ["topics.id:" + "|".join(topics)],
-                KbSciencePayload(topics=topics),
-                "search",
-            )
+            requests.append((["related_to:" + "|".join(ids)], KbSciencePayload(ids=ids), "citations"))
         else:
+            # A topic, or a domain/field/subfield by its hierarchy filter (review R1-05); one request per
+            # filter kind, since OpenAlex ANDs separate filters.
+            for name, group in openalex.scopes(list(dict.fromkeys(topic_ids)), limit=MAX_IDS):
+                requests.append(
+                    ([openalex.scope_expression(name, group)], KbSciencePayload(topics=group), "search")
+                )
+        if not requests:
             return _results([], None)
-        if since is not None:
-            filters.append(f"from_publication_date:{since.isoformat()}")
-        data = await self._json(
-            Call(
-                "openalex",
-                cast(Any, operation),
-                f"{openalex.API}/works",
-                payload,
-                params=openalex.list_request(
-                    filters, limit=PAGE_LIMIT, cursor=cursor, sort="publication_date:desc"
+        found: list[KbScienceWork] = []
+        next_cursor: str | None = None
+        for filters, payload, operation in requests:
+            if since is not None:
+                filters.append(f"from_publication_date:{since.isoformat()}")
+            data = await self._json(
+                Call(
+                    "openalex",
+                    cast(Any, operation),
+                    f"{openalex.API}/works",
+                    payload,
+                    params=openalex.list_request(
+                        filters, limit=PAGE_LIMIT, cursor=cursor, sort="publication_date:desc"
+                    ),
+                    cost=openalex.COST_LIST,
                 ),
-                cost=openalex.COST_LIST,
-            ),
-            run_id,
-        )
-        works, next_cursor = openalex.parse_list(data) if isinstance(data, dict) else ([], None)
-        return _results(await self._keep([w for w in works if w.id not in ids]), next_cursor)
+                run_id,
+            )
+            works, next_cursor = openalex.parse_list(data) if isinstance(data, dict) else ([], None)
+            seen = {work.id for work in found} | set(ids)
+            found += [work for work in works if work.id not in seen]
+        return _results(await self._keep(found), next_cursor if len(requests) == 1 else None)
 
     async def resolve(self, ref: ScienceRef, *, run_id: str | None = None) -> KbScienceWork | None:
         doi = normalize_doi(ref.doi)

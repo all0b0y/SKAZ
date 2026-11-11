@@ -24,7 +24,7 @@ from ..errors import KnowledgeError
 from ..ids import new_id
 from ..store.database import KnowledgeDatabase
 from ..store.repositories import SettingsRepository
-from .protocols import TaxonomyNode
+from .protocols import ScienceConsentRequired, TaxonomyNode
 
 ENABLED = "science.enabled"
 CONSENT_AT = "science.consent_at"
@@ -139,9 +139,17 @@ class ScienceStore:
         run_id: str | None,
         now: datetime,
     ) -> str:
-        """Written BEFORE the request leaves (outcome ``sent``)."""
+        """Written BEFORE the request leaves (outcome ``sent``), in the same write as the consent check.
+
+        This is the dispatch boundary: a request whose row is written had consent at that moment; once
+        Settings turns the integration off, no row is written and the request does not leave
+        (``ScienceConsentRequired``), even if it passed the earlier gate and then waited (arXiv pacing).
+        """
         record_id = new_id("egress")
         with self.db.write() as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (ENABLED,)).fetchone()
+            if row is None or json.loads(row["value"]) is not True:
+                raise ScienceConsentRequired()
             conn.execute(
                 "INSERT INTO science_egress(id, requested_at, provider, operation, destination_host, "
                 "topics_json, dois_json, ids_json, outcome, status_code, run_id) "

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -201,9 +202,11 @@ class WikiClaims:
                     f" WHERE blocks_fts MATCH ? AND {WIKI_PAGES_ONLY} ORDER BY rank LIMIT ?",
                     (expression, limit),
                 ).fetchall()
-            except Exception as error:  # a broken index is "no claims found", logged without text
+            except sqlite3.Error as error:
+                # Not "no claims found": comparing with an empty wiki would call covered work new and
+                # keep that verdict. The run pauses and Continue tries the same works again (review R1-07).
                 logger.warning("Wiki claims lookup failed: %s", type(error).__name__)
-                return []
+                raise NoveltyUnavailable("Your wiki's search index couldn't be read.") from error
         return [
             Claim(row["page_id"], row["title"], row["block_id"], " ".join(row["text"].split())[:CLAIM_CHARS])
             for row in rows

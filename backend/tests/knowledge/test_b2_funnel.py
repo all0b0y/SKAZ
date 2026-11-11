@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from skaz.knowledge.api.contract_routes import ContractFailure
 from skaz.knowledge.api.schemas_areas import KbReadMark
@@ -31,6 +32,7 @@ from skaz.knowledge.api.schemas_explore_common import (
 from skaz.knowledge.api.schemas_science import (
     KbPaidAccess,
     KbScienceLocation,
+    KbSciencePayload,
     KbScienceResults,
     KbScienceSearch,
     KbScienceText,
@@ -41,7 +43,7 @@ from skaz.knowledge.decisions.protocol import ChoiceAnswer, ChoiceQuestion, Unde
 from skaz.knowledge.errors import KnowledgeError, NotFound
 from skaz.knowledge.explore import register_notifications
 from skaz.knowledge.explore.jobs import SqliteJobStore
-from skaz.knowledge.explore.novelty import WikiClaims
+from skaz.knowledge.explore.novelty import NoveltyUnavailable, WikiClaims
 from skaz.knowledge.explore.reading import ReadingDesk
 from skaz.knowledge.explore.service import OFF_TOPIC, ExploreFunnel
 from skaz.knowledge.markdown.source import FragmentInput, Origin
@@ -353,6 +355,7 @@ def parts(ready: KnowledgeService) -> SimpleNamespace:
         claims=WikiClaims(ready.db),
         search_rules=lambda: rules["rules"],
         reading=ReadingDesk(ready, chats=chats, sources=sources, move_mark=move),
+        area_scope=lambda area_id: (area_id,),
         science=science,
         today=lambda: TODAY,
     )
@@ -417,6 +420,7 @@ async def test_no_science_client_or_no_library_is_not_ready(parts: SimpleNamespa
         reading=ReadingDesk(
             service, chats=FakeChats(), sources=FakeSources(service), move_mark=lambda f, m: None
         ),
+        area_scope=lambda area_id: (area_id,),
         science=FakeScience(),
     )
     for call in (funnel.jobs(), funnel.findings(), funnel.exploring(), funnel.run("job-x")):
@@ -788,3 +792,163 @@ async def test_exploring_with_add_to_wiki_attaches_the_material(parts: SimpleNam
     reading = await parts.funnel.explore(finding.id, KbExploreStart(mode="notes", add_to_wiki=True))
     assert reading.material_id is not None
     assert parts.chats.sent[-1][1].attachments == (reading.material_id,)
+
+
+# -- review fixes (FX-A) -------------------------------------------------------------------------------------
+
+
+async def _paused_by_daily_limit(parts: SimpleNamespace, works: int = 1) -> Any:
+    parts.science.search_works = [work(n, topics=["T1"]) for n in range(1, works + 1)]
+    parts.science.error = ScienceDailyLimit(datetime(2026, 11, 11, 0, 0))
+    first = await parts.funnel.start(KbFunnelStart(query="agents", channels=["search"]))
+    paused = await parts.funnel.settled(first.id)
+    assert (paused.state, paused.stop_reason) == ("paused", "openalex_daily_limit")
+    parts.science.error = None
+    return paused
+
+
+async def test_two_concurrent_continues_start_one_runner(parts: SimpleNamespace) -> None:
+    """Review R1-03: the same checkpoint continued twice at once (two clients, a double click)."""
+    paused = await _paused_by_daily_limit(parts)
+    assert paused.checkpoint is not None
+    body = KbContinue(checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision)
+    parts.novelty.gate = asyncio.Event()
+    outcomes = await asyncio.gather(
+        parts.funnel.resume(paused.id, body), parts.funnel.resume(paused.id, body), return_exceptions=True
+    )
+    lost = [o for o in outcomes if isinstance(o, BaseException)]
+    assert len(lost) == 1 and isinstance(lost[0], KnowledgeError) and lost[0].status_code == 409
+    parts.novelty.gate.set()
+    done = await parts.funnel.settled(paused.id)
+    assert (done.state, done.counters.novelty_checked) == ("done", 1)
+    assert parts.novelty.checked == ["work-1"]  # the paid comparison ran once
+    assert parts.science.count("search") == 2  # the refused first try and one Continue
+
+
+async def test_continue_waits_for_the_stopping_runner_and_never_runs_two(parts: SimpleNamespace) -> None:
+    """Review R1-03: one runner per run id, even when Continue lands while the old runner is ending."""
+    paused = await _paused_by_daily_limit(parts)
+    assert paused.checkpoint is not None
+    ending = asyncio.get_running_loop().create_future()
+    parts.funnel._tasks[paused.id] = ending  # the runner that paused is still finishing
+    body = KbContinue(checkpoint_id=paused.checkpoint.id, revision=paused.checkpoint.revision)
+    resuming = asyncio.ensure_future(parts.funnel.resume(paused.id, body))
+    await asyncio.sleep(0.05)
+    assert not resuming.done() and parts.science.count("search") == 1  # no second runner yet
+    ending.set_result(None)
+    await resuming
+    done = await parts.funnel.settled(paused.id)
+    assert done.state == "done" and parts.novelty.checked == ["work-1"]
+
+
+class _Crash(BaseException):
+    """The process dies here (power loss, kill): nothing after this line runs."""
+
+
+async def test_crash_after_novelty_results_never_grants_extra_paid_work(parts: SimpleNamespace) -> None:
+    """Review R1-04: completed novelty work and its budget charge are one write."""
+    parts.science.search_works = [work(n, topics=["T1"]) for n in range(1, 41)]
+    names = ("complete", "complete_charged")
+    real = {name: getattr(parts.jobs, name) for name in names if hasattr(parts.jobs, name)}
+    written = {"novelty": 0}
+
+    def crashing(name: str) -> Any:
+        def call(*args: Any, **kwargs: Any) -> Any:
+            result = real[name](*args, **kwargs)
+            stage = args[2] if len(args) > 2 else kwargs.get("stage")
+            if stage == "novelty":
+                written["novelty"] += 1
+                if written["novelty"] == 30:
+                    raise _Crash()  # right after the 30th result row is saved
+            return result
+
+        return call
+
+    for name in real:
+        setattr(parts.jobs, name, crashing(name))
+    started = await parts.funnel.start(KbFunnelStart(query="agents", channels=["search"]))
+    with pytest.raises(_Crash):
+        await parts.funnel.settled(started.id)
+    for name, method in real.items():
+        setattr(parts.jobs, name, method)
+    assert parts.jobs.recover() == [started.id]  # next launch
+    crashed = await parts.funnel.run(started.id)
+    assert crashed.checkpoint is not None
+    await parts.funnel.resume(
+        started.id, KbContinue(checkpoint_id=crashed.checkpoint.id, revision=crashed.checkpoint.revision)
+    )
+    paused = await parts.funnel.settled(started.id)
+    assert (paused.state, paused.stop_reason) == ("paused", "budget")
+    assert (paused.budget.used, paused.budget.remaining, paused.budget.total_used) == (30, 0, 30)
+    assert len(parts.novelty.checked) == 30 and paused.counters.novelty_checked == 30
+
+
+async def test_a_broken_wiki_index_pauses_instead_of_comparing_with_nothing(ready: KnowledgeService) -> None:
+    """Review R1-07: a failed claims lookup is not "no claims found"."""
+    claims = WikiClaims(ready.db)
+    with ready.db.write() as connection:
+        connection.execute("DROP TABLE blocks_fts")
+    with pytest.raises(NoveltyUnavailable):
+        claims.for_text("retrieval augmented agents")
+    assert claims.for_text("a b c") == []  # nothing to look for is an honest empty answer
+
+
+def test_the_search_line_limit_is_the_science_topic_limit() -> None:
+    """Review R1-12: a query the funnel accepts always fits the science payload."""
+    longest = KbFunnelStart(query="x" * 300)
+    assert KbSciencePayload(topics=[longest.query]).topics == [longest.query]
+    with pytest.raises(ValidationError):
+        KbFunnelStart(query="x" * 301)
+
+
+async def test_a_too_long_search_line_is_rejected_before_a_run_exists(kb_app: Any, kb_client: Any) -> None:
+    runtime = kb_app.state.runtime
+    runtime.kb.connect(None)
+    response = await kb_client.post("/kb/explore/runs", json={"query": "x" * 301, "channels": ["search"]})
+    assert (response.status_code, response.json()) == (422, {"code": "invalid_request"})
+    assert runtime.kb_explore.job_store.recent() == []
+
+
+async def test_add_to_wiki_keeps_the_known_area_and_topics(parts: SimpleNamespace) -> None:
+    """Review R1-09: the material is in its area at once, before (or without) any wiki model run."""
+    from skaz.knowledge.areas.signals import SignalStore
+    from skaz.knowledge.areas.store import AreasStore
+    from skaz.knowledge.science.protocols import TaxonomyNode
+
+    areas = AreasStore(parts.kb, SignalStore(parts.kb.db))
+    areas.sync_taxonomy_nodes(None, [TaxonomyNode("area-ai", None, "subfield", "AI", 1)])
+    areas.sync_taxonomy_nodes(None, [TaxonomyNode("subfields-9", None, "subfield", "Other", 1)])
+    areas.sync_taxonomy_nodes("subfields-9", [TaxonomyNode("T1", "subfields-9", "topic", "Agents", 0)])
+    finding = await _one_finding(parts)
+    assert finding.area_id == "area-ai"
+    parts.science.texts["work-1"] = KbScienceText(
+        work_id="work-1", kind="abstract_only", text="", source_url=None, access=finding.work.access
+    )
+    imported = await parts.funnel.add_to_wiki(finding.id, KbFindingImport(content="abstract_only"))
+    ((prepared, _folder, _to_wiki),) = parts.sources.prepared
+    origin = prepared.origin.model_dump()
+    assert (origin["area_id"], origin["topic_ids"]) == ("area-ai", ["T1"])
+    assert imported.material_id in areas.materials("area-ai")  # the area the run placed it in
+    assert imported.material_id in areas.materials("subfields-9")  # and where its own topic is
+
+
+async def test_a_parent_or_custom_area_lists_the_findings_its_tile_counts(parts: SimpleNamespace) -> None:
+    """Review R1-06: the findings list of a scope is the set the map counts (descendants / collected)."""
+    from skaz.knowledge.api.schemas_areas import KbAreaCreate
+    from skaz.knowledge.areas.signals import SignalStore
+    from skaz.knowledge.areas.store import AreasStore
+    from skaz.knowledge.science.protocols import TaxonomyNode
+
+    areas = AreasStore(parts.kb, SignalStore(parts.kb.db))
+    areas.sync_taxonomy_nodes(None, [TaxonomyNode("domains-1", None, "domain", "Sciences", 1)])
+    areas.sync_taxonomy_nodes("domains-1", [TaxonomyNode("area-ai", "domains-1", "subfield", "AI", 0)])
+    custom = areas.create_custom(KbAreaCreate(name="Mine", topic_ids=["area-ai"]))
+    parts.funnel.area_scope = areas.scope_ids
+    parts.novelty.labels = {"Old news": "covered"}
+    parts.science.search_works = [work(1, topics=["T1"]), work(2, title="Old news", topics=["T1"])]
+    await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    assert parts.funnel.new_by_area() == {"area-ai": 1}
+    for scope in ("domains-1", custom.id, "area-ai"):
+        shown = await parts.funnel.findings(area_id=scope)
+        assert [f.work.id for g in shown.groups for f in g.findings] == ["work-1"], scope
+        assert shown.covered_count == 1, scope

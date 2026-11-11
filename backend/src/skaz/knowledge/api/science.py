@@ -7,8 +7,9 @@ from typing import Annotated, TypeVar, cast
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 
-from ..science.protocols import ScienceConsentRequired, ScienceDailyLimit, ScienceService, ScienceStop
-from .contract_routes import ERROR_RESPONSES, ContractFailure, ContractRoute, service_for
+from ..science.errors import stop_failure
+from ..science.protocols import ScienceService, ScienceStop
+from .contract_routes import ERROR_RESPONSES, ContractRoute, service_for
 from .schemas_science import (
     KbOpenAlexKeyUpdate,
     KbScienceJournal,
@@ -37,12 +38,8 @@ async def _honest(call: Awaitable[T]) -> T:
     """A science stop becomes its contract code: 403 consent, 429 the OpenAlex day limit, else 502."""
     try:
         return await call
-    except ScienceConsentRequired as stop:
-        raise ContractFailure(403, "consent_required") from stop
-    except ScienceDailyLimit as stop:
-        raise ContractFailure(429, "openalex_daily_limit") from stop
     except ScienceStop as stop:
-        raise ContractFailure(502, "provider_unavailable") from stop
+        raise stop_failure(stop) from stop
 
 
 @router.get("/settings/science", response_model=KbScienceSettings)

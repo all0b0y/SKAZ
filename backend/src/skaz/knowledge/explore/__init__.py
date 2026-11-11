@@ -93,5 +93,6 @@ def build_explore(runtime: Any) -> tuple[SqliteJobStore, ExploreFunnel]:
             sources=runtime.kb_sources,
             move_mark=areas.move_finding_mark_to_material,
         ),
+        area_scope=areas.store.scope_ids,
     )
     return jobs, funnel

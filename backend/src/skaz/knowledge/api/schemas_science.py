@@ -10,10 +10,12 @@ from pydantic import BaseModel, Field, SecretStr, model_validator
 from .schemas_explore_common import KbContractRequest, KbDateWindow, KbEntityId, KbPublicationDate
 
 KbScienceProvider = Literal["openalex", "arxiv", "crossref"]
+#: The longest topic that may leave SKAZ; the Explore search line (one topic) has the same limit.
+SCIENCE_TOPIC_CHARS = 300
 
 
 class KbSciencePayload(KbContractRequest):
-    topics: list[Annotated[str, Field(min_length=1, max_length=300)]] = Field(
+    topics: list[Annotated[str, Field(min_length=1, max_length=SCIENCE_TOPIC_CHARS)]] = Field(
         default_factory=list, max_length=30
     )
     dois: list[Annotated[str, Field(pattern=r"^10\.\d{4,9}/\S+$", max_length=512)]] = Field(

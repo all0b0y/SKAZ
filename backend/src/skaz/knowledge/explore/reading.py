@@ -197,6 +197,10 @@ class ReadingDesk:
                     "arxiv_id": work.arxiv_id,
                     "explore_finding_id": finding.id,
                     "content": content,
+                    # Science works carry their place (B4): the material is in its area at once, not
+                    # only after a wiki model run that may queue, pause or fail (review R1-09).
+                    "area_id": finding.area_id,
+                    "topic_ids": list(work.topic_ids),
                 }
             )
             title = work.title if content == "full_text" else f"{work.title} (abstract only)"

@@ -130,6 +130,8 @@ class ScienceTransport:
     async def _open(self, call: Call, run_id: str | None, key: str | None = None) -> str:
         await self._gate(call, key)
         await self._pace(call.provider)
+        # Pacing can wait seconds: ``journal_open`` re-checks consent in the same write as the journal row,
+        # right before the request leaves (review R1-02).
         return await disk_call(
             self.store.journal_open,
             call.provider,
