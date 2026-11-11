@@ -6,6 +6,7 @@ import { plural } from '../document/text';
 import { useServices, useUi } from '../state/context';
 import { isWithoutSpeech, NO_SPEECH_REASON } from './NoSpeech';
 import { StippleStrip } from '../fx/stipple';
+import { enginePauseText } from './enginePause';
 
 const STEP_LABEL: Record<string, string> = {
   reading: 'Reading the material',
@@ -55,6 +56,40 @@ const AGENT_UNAVAILABLE = 'AGENT_UNAVAILABLE';
 /** The pill of a material whose wiki budget is used up (also explained in the wiki legend). */
 export const BUDGET_PAUSED_LABEL = 'Paused · budget reached';
 
+/** A provider pause holds queued work too. Its time is displayed in the user's local timezone. */
+function EnginePauseNotice({ job, onChanged }: { job: KbJob; onChanged?: () => void }) {
+  const { client } = useServices();
+  const [busy, setBusy] = useState<'continue' | 'stop' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pause = job.engine_pause;
+  if (!pause) return null;
+  const text = enginePauseText(pause);
+  const act = async (action: 'continue' | 'stop') => {
+    setBusy(action);
+    setError(null);
+    try {
+      if (action === 'continue') {
+        await client.call('POST /kb/jobs/{job_id}/continue', { path: { job_id: job.id } });
+      } else {
+        await client.call('POST /kb/jobs/{job_id}/cancel', { path: { job_id: job.id } });
+      }
+      onChanged?.();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return <>
+    <Pill tone="warn" icon="warning" wrap>{text}</Pill>
+    <Button size="sm" variant="outline" icon="play" busy={busy === 'continue'} disabled={busy !== null}
+      onClick={() => void act('continue')}>Continue now</Button>
+    <Button size="sm" variant="quiet" icon="close" busy={busy === 'stop'} disabled={busy !== null}
+      onClick={() => void act('stop')}>Stop</Button>
+    {error && <span className="kb-muted kb-pipe__why" role="alert">{error}</span>}
+  </>;
+}
+
 export function Pill({ tone, icon, children, onClick, label, wrap }: {
   tone: 'done' | 'run' | 'todo' | 'error' | 'warn';
   icon?: IconName;
@@ -102,11 +137,12 @@ function StopImport({ materialId }: { materialId: string }) {
 }
 
 /** Processing strip (v10, decision 24): what is done, what runs now, links into the wiki. */
-export function StatusChips({ material, jobs, onAddToWiki, adding }: {
+export function StatusChips({ material, jobs, onAddToWiki, adding, onJobChanged }: {
   material: KbMaterial;
   jobs: KbJob[];
   onAddToWiki: () => void;
   adding: boolean;
+  onJobChanged?: () => void;
 }) {
   const openDocument = useUi((s) => s.openDocument);
   const openSettings = useUi((s) => s.openSettings);
@@ -114,6 +150,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   const speech = SPEECH.includes(material.kind);
   const first = speech ? 'Recognised' : material.kind === 'web' ? 'Text cleaned' : material.kind === 'text' ? 'Text saved' : 'Text extracted';
   const running = jobs.find((j) => j.state === 'running');
+  const quota = jobs.find((j) => (j.state === 'queued' || j.state === 'paused') && j.engine_pause);
   // Package-1 backends have no `wiki`: then nothing is claimed about the wiki.
   const wiki = material.wiki as KbMaterialWiki | undefined;
   const counts = material.correction_counts;
@@ -121,7 +158,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
   // Any running status in this strip: one indeterminate dot strip in its own row (no percentages
   // exist). It is the only progress indicator: the running pills carry no spinner (FX B2).
   const inProgress = material.status === 'recording' || material.status === 'processing' || !!running
-    || wiki?.state === 'processing' || wiki?.state === 'queued';
+    || wiki?.state === 'processing' || (wiki?.state === 'queued' && !quota);
 
   return (
     <div className="kb-pipe" aria-label="Processing">
@@ -136,7 +173,8 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
       {speech && counts.doubtful > 0 && <Pill tone="warn" icon="warning">{`${counts.doubtful} doubtful`}</Pill>}
       {running && <RunningPill job={running} />}
       {!running && wiki?.state === 'processing' && <Pill tone="run">Adding to the wiki</Pill>}
-      {!running && wiki?.state === 'queued' && <Pill tone="run">Queued for the wiki</Pill>}
+      {!running && wiki?.state === 'queued' && !quota && <Pill tone="run">Queued for the wiki</Pill>}
+      {quota && <EnginePauseNotice job={quota} onChanged={onJobChanged} />}
       {wiki?.state === 'in_wiki' && wiki.note_page_id && (
         <Pill tone="done" icon="pdf" label="Open the notes" onClick={() => openDocument({ type: 'page', id: wiki.note_page_id! })}>Notes</Pill>
       )}
@@ -159,7 +197,7 @@ export function StatusChips({ material, jobs, onAddToWiki, adding }: {
           )}
         </>
       )}
-      {wiki?.state === 'paused' && (
+      {wiki?.state === 'paused' && !quota && (
         <>
           {/* C1-d: the material's wiki budget is used up. Finished work is kept and nothing
               unfinished is shown as done; Continue picks up from the checkpoint. */}

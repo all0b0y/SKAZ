@@ -74,6 +74,12 @@ class KbWikiExecution(BaseModel):
     budget_characters: int | None = None
 
 
+class KbEnginePause(BaseModel):
+    engine: KbEngineId
+    #: ISO 8601 UTC; null when the provider did not report a reset (manual Continue only).
+    retry_at: str | None
+
+
 class KbJob(BaseModel):
     id: str
     kind: KbJobKind
@@ -98,6 +104,8 @@ class KbJob(BaseModel):
     updated_at: str
     #: When the current step began, while the job runs (the live "3:20" on the material, C1-f).
     step_started_at: str | None = None
+    #: Engine quota pause, including queued jobs held behind it. Null for a material budget pause.
+    engine_pause: KbEnginePause | None = None
 
 
 class KbWikiChoice(BaseModel):

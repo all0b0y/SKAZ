@@ -99,7 +99,8 @@ export function useMaterialData(materialId: string) {
   const { material, followed } = useLiveMaterial(materialId, data?.material ?? null, loader.reload);
   const busy = data !== null && !followed && (data.material.status === 'processing' || data.material.status === 'recording'
     || data.material.wiki?.state === 'processing' || data.material.wiki?.state === 'queued'
-    || data.jobs.some((j) => j.state === 'running' || j.state === 'queued'));
+    || data.jobs.some((j) => j.state === 'running' || j.state === 'queued'
+      || (j.state === 'paused' && j.engine_pause?.retry_at)));
   // The next read starts 2 s after the previous one answered (the interval stops while one runs).
   useInterval(busy && loader.state.load !== 'loading', 2000, loader.reload);
   const state = useMemo(
@@ -236,7 +237,7 @@ export function MaterialView({ target, nonce }: { target: DocTarget; nonce: numb
             <div className="kb-mat__head">
               <h2 className="kb-doc__title">{material.title}</h2>
               <p className="kb-doc__meta">{metaLine(material)}</p>
-              <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} />
+              <StatusChips material={material} jobs={data.jobs} onAddToWiki={() => void addToWiki()} adding={adding} onJobChanged={reload} />
               <OverlapLine overlap={material.overlap} />
               {repeatMarks.foldable && <RepeatToggle hide={repeatMarks.hide} onChange={repeatMarks.setHide} />}
               <ExcludedFragments materialId={material.id} count={material.excluded_count} guard={guard} onRestored={reload} />

@@ -1,6 +1,7 @@
 """Wiki jobs (``recheck``, ``connections``, ``folder_overview``): rows of the shared ``jobs`` table.
 
-No queue: each job is its own asyncio task, like ingest. A job left running by
+Each active job is its own task; a quota pause retains its work for Continue.
+A material's follow-ups can be reconstructed after restart by ingest. A job left running by
 a previous process is marked interrupted at the next start (``JobRepository.
 interrupt_running``); closing the app interrupts running jobs the same way.
 """
@@ -25,7 +26,9 @@ from ..ingest.execution import (
 )
 from ..ingest.jobs import (
     AGENT_UNAVAILABLE,
+    ENGINE_LIMIT,
     WIKI_INTERRUPTED_REASON,
+    EngineLimited,
     JobKind,
     JobRecord,
     JobRepository,
@@ -65,6 +68,25 @@ class WikiJobs:
         self.profile = profile
         self._tasks: dict[str, tuple[JobKind, str | None, asyncio.Task[None]]] = {}
         self._closing = False
+        self._paused_work: dict[str, Work] = {}
+        self.jobs.resume_wiki = self.resume_paused
+
+    async def resume_paused(self, job_id: str) -> bool:
+        work = self._paused_work.get(job_id)
+        if work is None or self._closing:
+            return False
+        entry = self._tasks.get(job_id)
+        if entry is not None:
+            await asyncio.shield(entry[2])  # pause persistence may still be finishing
+        if not await disk_call(self.jobs.continue_paused, job_id, state="running"):
+            self._paused_work.pop(job_id, None)
+            return False
+        self._paused_work.pop(job_id, None)
+        job = await disk_call(self.jobs.get, job_id)
+        assert job is not None
+        task = asyncio.create_task(self._run(job_id, work), name=f"wiki-{job.kind}-{job_id}")
+        self._tasks[job_id] = (job.kind, job.target_id, task)
+        return True
 
     def running(self, kind: JobKind | None = None, target: str | None = None) -> bool:
         return any(
@@ -112,6 +134,11 @@ class WikiJobs:
         try:
             # Inside the ``try``: a cancel while the snapshot is read still finishes the job.
             scoped.enter_context(execution_scope(await disk_call(stored_scope, self.jobs.db, job_id)))
+            scope = current_execution()
+            if scope is not None and scope.profile.engine is not None:
+                pause = (await disk_call(self.jobs.engine_pauses)).get(scope.profile.engine)
+                if pause is not None:
+                    raise EngineLimited(pause.engine, pause.retry_at)
             await work(JobContext(self.jobs, job_id))
             state, error = "done", None
         except asyncio.CancelledError:
@@ -120,6 +147,10 @@ class WikiJobs:
             # C1-d: the material's budget is used up; Continue on the material runs this work again.
             state, error = ("paused" if reached.progressed else "failed"), reached.message
             code = BUDGET_REACHED if reached.progressed else None
+        except EngineLimited as limited:
+            state, error, code = "paused", limited.message, ENGINE_LIMIT
+            self._paused_work[job_id] = work
+            await disk_call(self.jobs.pause, job_id, limited)
         except WikiJobFailed as failure:
             error, code = failure.message, failure.code
         except EngineUnavailable as failure:
@@ -137,6 +168,8 @@ class WikiJobs:
                     job_id, state, error=error, error_code=code if state in ("failed", "paused") else None))
             finally:
                 self._tasks.pop(job_id, None)
+                if state == "paused" and code == ENGINE_LIMIT and self.jobs.changed is not None:
+                    self.jobs.changed()
 
     async def wait(self, job_id: str) -> None:
         entry = self._tasks.get(job_id)
@@ -151,6 +184,7 @@ class WikiJobs:
 
     async def close(self) -> None:
         self._closing = True
+        self._paused_work.clear()
         tasks = [task for _kind, _target, task in self._tasks.values()]
         for task in tasks:
             task.cancel()

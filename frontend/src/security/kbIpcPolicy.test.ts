@@ -104,6 +104,7 @@ describe('Electron IPC policy — U3 screens (wiki page, material, all materials
       ['POST', '/kb/corrections/c1/revert'], ['POST', '/kb/corrections/c1/accept'],
       ['POST', '/kb/corrections/c1/keep'], ['POST', '/kb/corrections/c1/reapply'],
       ['GET', '/kb/jobs'], ['GET', '/kb/jobs/j1'], ['GET', '/kb/graph'], ['GET', '/kb/settings/wiki'],
+      ['POST', '/kb/jobs/j1/continue'], ['POST', '/kb/jobs/j1/cancel'],
       ['GET', '/kb/recordings/defaults'], ['POST', '/kb/recordings'],
       ['POST', '/kb/recordings/mat_1/stop'], ['POST', '/kb/recordings/mat_1/pause'], ['POST', '/kb/recordings/mat_1/resume'],
       // F2: the material of a stopped recording reads its state to offer "Continue recording".

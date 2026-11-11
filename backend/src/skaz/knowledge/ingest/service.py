@@ -16,7 +16,8 @@ import logging
 import threading
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import cast
+from datetime import datetime
+from typing import Protocol, cast
 
 from ...native_io import disk_call
 from ..agents.registry import EngineUnavailable
@@ -29,12 +30,15 @@ from .budget import BUDGET_REACHED, BudgetReached, paused_follow_ups
 from .execution import ProcessingProfile, current_execution, execution_scope, stored_scope
 from .jobs import (
     AGENT_UNAVAILABLE,
+    ENGINE_LIMIT,
     INTERRUPTED_REASON,
     QUEUED_KINDS,
+    EngineLimited,
     JobKind,
     JobRecord,
     JobRepository,
     JobState,
+    wall_clock,
 )
 from .protocols import (
     ConceptUpdateHook,
@@ -61,6 +65,10 @@ STOPPED = "Stopped. Nothing from this run was saved."
 #: (``agents/codex.py``); ingest takes 4 of them so chats still answer while a large batch runs.
 ENGINE_SLOTS: dict[str, int] = {"codex": 4, "claude_code": 3, "hermes": 2}
 DEFAULT_SLOTS = 2
+
+
+class Alarm(Protocol):
+    def cancel(self) -> None: ...
 
 
 class IngestBusy(KnowledgeError):
@@ -104,9 +112,15 @@ class IngestService:
     def __init__(self, kb: KnowledgeService, *, engines: EngineResolver | None = None,
                  detector: InstructionDetector | None = None, decisions: DecisionLayer | None = None,
                  text_layer: TextLayer | None = None, hook: ConceptUpdateHook | None = None,
-                 limits: Limits | None = None) -> None:
+                 limits: Limits | None = None, clock: Callable[[], datetime] = wall_clock,
+                 schedule: Callable[[float, Callable[[], None]], Alarm] | None = None) -> None:
         self.kb = kb
-        self.jobs = JobRepository(kb.db)
+        self.jobs = JobRepository(kb.db, clock=clock)
+        self.jobs.changed = self._queue_changed
+        self._clock = clock
+        self._schedule = schedule
+        self._alarm: Alarm | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         #: Wired by the runtime: the engine registry (A2), detector (S1), decisions (D1), corrections and
         #: discrepancy hook (W2). Assignable so the composition root can fill them after construction.
         self.engines = engines
@@ -224,6 +238,9 @@ class IngestService:
         budget, only that work runs again, with another budget portion; otherwise the material is
         (re)queued and continues from its checkpoint.
         """
+        latest = await disk_call(self.jobs.list_all, material_id=material_id)
+        if latest and latest[0].error_code == ENGINE_LIMIT and latest[0].state == "paused":
+            return await self.continue_job(latest[0].id)
         if self.continue_follow_ups is not None:
             def paused() -> list[JobKind]:
                 with self.kb.db.read() as connection:
@@ -236,6 +253,75 @@ class IngestService:
                 if record is not None:
                     return record
         return await self.request_ingest(material_id)
+
+    async def continue_job(self, job_id: str) -> JobRecord:
+        """Continue now: explicit model choices apply immediately; other engines stay paused."""
+        if self._closing:
+            raise IngestBusy("SKAZ is closing. Retry after it starts again.")
+        record = await disk_call(self.job, job_id)
+        active = self._active.get(job_id)
+        if record.state == "paused" and active is not None and active.task is not None:
+            await asyncio.shield(active.task)  # finish saving the pause before requeuing this row
+            record = await disk_call(self.job, job_id)
+        if record.state not in ("queued", "paused") or record.engine_pause is None:
+            raise IngestBusy("This job is not waiting for an engine's usage limit.")
+        profile = self.profile()
+        # Re-pin this job only. Other queued jobs retain the model the user started them with.
+        await disk_call(self.jobs.reprofile, job_id, profile)
+        if profile.engine is not None:
+            await disk_call(self.jobs.release_engine, profile.engine)
+        if record.state == "queued":
+            self._kick()
+        elif record.kind in QUEUED_KINDS:
+            await disk_call(self.jobs.continue_paused, job_id)
+            self._kick()
+        else:
+            if not await self._continue_wiki(record):
+                raise IngestBusy("This wiki check couldn't be restored after SKAZ closed. Start it again.")
+            self._kick()
+        if self._pump_task is not None:
+            await asyncio.shield(self._pump_task)
+        return await disk_call(self.job, job_id)
+
+    async def _continue_wiki(self, record: JobRecord) -> bool:
+        if self.jobs.resume_wiki is not None and await self.jobs.resume_wiki(record.id):
+            return True
+        # After restart the Python closure is gone. Rebuild a material's follow-up work through
+        # its existing continuer, inside the same root: quota resume grants no new budget portion.
+        scope = await disk_call(stored_scope, self.kb.db, record.id)
+        if scope is None or scope.material_id is None or self.continue_follow_ups is None:
+            return False  # standalone work without a recoverable request stays honestly paused
+        with execution_scope(scope):
+            continued = await self.continue_follow_ups(scope.material_id, [record.kind])
+        if continued is not None:
+            await disk_call(self.jobs.cancel_waiting, record.id, "Continued in another job.")
+            return True
+        return False
+
+    async def _resume_ready(self) -> None:
+        await disk_call(self.jobs.release_due)
+        for record in await disk_call(self.jobs.ready_pauses):
+            if record.id in self._active:
+                continue  # a running job is still saving its pause
+            if record.kind in QUEUED_KINDS:
+                await disk_call(self.jobs.continue_paused, record.id)
+            else:
+                await self._continue_wiki(record)
+
+    def _queue_changed(self) -> None:
+        if self._loop is not None and not self._closing:
+            self._loop.call_soon_threadsafe(self._kick)
+
+    async def _schedule_resume(self) -> None:
+        if self._alarm is not None:
+            self._alarm.cancel()
+            self._alarm = None
+        resets = [pause.retry_at for pause in (await disk_call(self.jobs.engine_pauses)).values()
+                  if pause.retry_at is not None]
+        if resets and not self._closing:
+            after = max(0.0, (min(resets) - self._clock()).total_seconds())
+            schedule = self._schedule or asyncio.get_running_loop().call_later
+            self._alarm = schedule(after, self._kick)
 
     async def retry_failed(self) -> list[JobRecord]:
         """Queue again every material whose latest ingest failed or was interrupted (one click)."""
@@ -267,13 +353,16 @@ class IngestService:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
+        self._loop = loop
         self._pump_task = loop.create_task(self._pump(), name="ingest-queue")
 
     async def _pump(self) -> None:
         while True:
             self._pump_again = False
             try:
+                await self._resume_ready()
                 await self._start_queued()
+                await self._schedule_resume()
             except Exception as failure:  # the queue stays; the next kick tries again
                 logger.error("ingest queue could not start a job: %s", error_note(failure))
             if not self._pump_again:
@@ -281,9 +370,14 @@ class IngestService:
 
     async def _start_queued(self) -> None:
         while not self._closing:
-            running = sum(1 for active in self._active.values() if active.task is not None)
-            if running >= await disk_call(self.slots):
+            slots = await disk_call(self.slots)
+            if slots <= 0:
                 return
+            settings = read_settings(self.kb.settings)
+            engine = self.engines(settings.engine) if self.engines is not None else None
+            self.jobs.queue_slots = dict(ENGINE_SLOTS.items())
+            self.jobs.queue_slots[None] = DEFAULT_SLOTS
+            self.jobs.queue_slots[engine.id if engine is not None else None] = slots
             job = await disk_call(self.jobs.claim_next)
             if job is None:
                 return
@@ -298,6 +392,8 @@ class IngestService:
     async def cancel(self, job_id: str) -> JobRecord:
         record = await disk_call(self.job, job_id)
         active = self._active.get(job_id)
+        if record.state == "paused" and await disk_call(self.jobs.cancel_waiting, job_id, STOPPED):
+            return await disk_call(self.job, job_id)
         if record.state == "queued" and active is None:
             # Compare-and-set: the queue may claim the job between the read above and this write.
             if await disk_call(self.jobs.cancel_queued, job_id, CANCELLED_QUEUED):
@@ -324,6 +420,9 @@ class IngestService:
     async def close(self) -> None:
         """App shutdown: running model calls are stopped and their jobs go back to the queue."""
         self._closing = True
+        if self._alarm is not None:
+            self._alarm.cancel()
+            self._alarm = None
         if self._pump_task is not None and not self._pump_task.done():
             self._pump_task.cancel()
         tasks = []
@@ -390,6 +489,9 @@ class IngestService:
             engine = self.engines(settings.engine) if self.engines is not None else None
             if engine is None:
                 raise IngestFailed(NO_ENGINE, AGENT_UNAVAILABLE)
+            pause = (await disk_call(self.jobs.engine_pauses)).get(engine.id)
+            if pause is not None:
+                raise EngineLimited(pause.engine, pause.retry_at)
             active.run = IngestRun(
                 kb=self.kb, jobs=self.jobs, job_id=job_id, material_id=active.material_id, engine=engine,
                 detector=self.detector, decisions=self.decisions, text_layer=self.text_layer,
@@ -408,6 +510,9 @@ class IngestService:
         except BudgetReached as reached:
             # C1-d: finished work is in the checkpoints; nothing unfinished was published.
             state, error, code = "paused", reached.message, BUDGET_REACHED
+        except EngineLimited as limited:
+            state, error, code = "paused", limited.message, ENGINE_LIMIT
+            await disk_call(self.jobs.pause, job_id, limited)
         except asyncio.CancelledError:
             state, error = self._stopped(active) or ("interrupted", INTERRUPTED_REASON)
         except IngestFailed as failure:

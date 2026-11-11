@@ -325,6 +325,10 @@ class IngestRun:
             if terminal.retry_at is not None:
                 when = f" It should work again after {terminal.retry_at.isoformat()}."
             reason = agent_failure_text(terminal.kind, terminal.message) + when
+            if terminal.kind == "limit":
+                from .jobs import EngineLimited
+
+                raise EngineLimited(self.engine.id, terminal.retry_at)
             if terminal.kind in STOP_KINDS:
                 raise IngestFailed(reason, agent_failure_code(terminal.kind))
             if never_sent(terminal):

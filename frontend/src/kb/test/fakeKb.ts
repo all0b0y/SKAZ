@@ -1049,6 +1049,27 @@ const ROUTES: FakeRoutes = {
   })],
   'GET /kb/jobs': [200, (w, { query }) => w.jobs.filter((j) => !query.material_id || j.material_id === query.material_id)],
   'GET /kb/jobs/{job_id}': [200, (w, { path }) => w.jobs.find((j) => j.id === path.job_id) ?? fail(404, 'Job not found.')],
+  'POST /kb/jobs/{job_id}/continue': [202, (w, { path }) => {
+    const job = w.jobs.find((j) => j.id === path.job_id) ?? fail(404, 'Job not found.');
+    if (!job.engine_pause) fail(409, 'This job is not waiting for an engine’s usage limit.');
+    Object.assign(job, { state: 'queued', label: 'Queued', engine_pause: null, error: null, error_code: null });
+    const material = w.materials.find((m) => m.id === job.material_id);
+    if (material) {
+      material.wiki = materialWiki('queued', { job_id: job.id });
+      material.wiki_state = 'queued';
+    }
+    return job;
+  }],
+  'POST /kb/jobs/{job_id}/cancel': [200, (w, { path }) => {
+    const job = w.jobs.find((j) => j.id === path.job_id) ?? fail(404, 'Job not found.');
+    Object.assign(job, { state: 'cancelled', label: 'Cancelled', engine_pause: null, error: null, error_code: null });
+    const material = w.materials.find((m) => m.id === job.material_id);
+    if (material) {
+      material.wiki = materialWiki('not_in_wiki');
+      material.wiki_state = 'not_in_wiki';
+    }
+    return job;
+  }],
 
   // -- wiki --
   // Decks and tests are not in the wiki's list unless asked by kind (N4-7).

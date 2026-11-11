@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { KbMaterialSummary } from '../../api/kb/types.gen';
+import type { KbEnginePause, KbMaterialSummary } from '../../api/kb/types.gen';
 import type { KbWikiState } from '../api/names';
 import { Banner, Button, EmptyState, Icon, IconButton, Segmented, Spinner } from '../ui';
 import { KIND_ICON, KIND_LABEL } from '../library/materialMeta';
@@ -14,6 +14,7 @@ import { useSpotlight } from '../fx/spotlight';
 import { HalftoneArt } from '../fx/halftone/HalftoneArt';
 import { DateFilter } from './DateFilter';
 import { useDatedMaterials, type YearWindow } from './publicationWindow';
+import { enginePauseText } from '../material/enginePause';
 
 type TypeFilter = 'all' | 'recordings' | 'documents' | 'links' | 'text';
 type Sort = 'newest' | 'oldest' | 'name';
@@ -46,12 +47,12 @@ export function addedLabel(iso: string, now = new Date()): string {
 }
 
 /** Wiki column (decision 25): processing state honestly, no invented counts. */
-export function WikiCell({ material }: { material: KbMaterialSummary }) {
+export function WikiCell({ material, enginePause }: { material: KbMaterialSummary; enginePause?: KbEnginePause }) {
   type Shown = KbWikiState | 'reading' | 'unknown';
   // A package-1 backend has no wiki_state: show a dash, not a guess.
   const known = material.wiki_state as KbWikiState | undefined;
   const state: Shown = material.status === 'processing' || material.status === 'recording'
-    ? 'reading' : material.status === 'failed' ? 'failed' : known ?? 'unknown';
+    ? 'reading' : material.status === 'failed' ? 'failed' : enginePause ? 'paused' : known ?? 'unknown';
   const view: Record<Shown, { icon: 'check' | 'close' | 'warning' | null; text: string; tone: string }> = {
     in_wiki: { icon: 'check', text: 'In wiki', tone: 'ok' },
     queued: { icon: null, text: 'Queued', tone: 'run' },
@@ -65,7 +66,7 @@ export function WikiCell({ material }: { material: KbMaterialSummary }) {
   };
   const v = view[state];
   return (
-    <span className={`kb-wk kb-wk--${v.tone}${v.tone === 'run' ? ' kb-wk--strip' : ''}`} title={v.text}>
+    <span className={`kb-wk kb-wk--${v.tone}${v.tone === 'run' ? ' kb-wk--strip' : ''}`} title={enginePause ? enginePauseText(enginePause) : v.text}>
       <span className="kb-stx" aria-hidden="true">{v.icon && <Icon name={v.icon} size={11} />}</span>
       <span className="kb-wk__text">{v.text}</span>
       {/* Queued / Processing… / Recording…: no percentages exist, so an endless dot strip — instead of
@@ -95,13 +96,22 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
   // N7-5: publication window ("Looking at 2024–2026"); materials with an unknown date are listed apart.
   const [pubWindow, setPubWindow] = useState<YearWindow | null>(null);
   const dated = useDatedMaterials(pubWindow);
-  const { state, reload } = useLoad('all', async () => client.call('GET /kb/materials'));
+  const { state, reload } = useLoad('all', async () => {
+    const [materials, jobs] = await Promise.all([
+      client.call('GET /kb/materials'), client.call('GET /kb/jobs').catch(() => []),
+    ]);
+    return { materials, jobs };
+  });
   // The library list changed (added, recorded, deleted, renamed): read again, keeping the table on screen.
   useEffect(() => { reload(); }, [revision, reload]);
   const gone = useLibrary((s) => s.gone);
-  const all = useMemo(() => (state.value ?? []).filter((m) => !gone.includes(m.id)), [state.value, gone]);
+  const all = useMemo(() => (state.value?.materials ?? []).filter((m) => !gone.includes(m.id)), [state.value, gone]);
+  const enginePauses = useMemo(() => new Map((state.value?.jobs ?? [])
+    .flatMap((job) => job.material_id && job.engine_pause && (job.state === 'queued' || job.state === 'paused')
+      ? [[job.material_id, job.engine_pause] as const] : [])), [state.value]);
   const busy = all.some((m) => m.status === 'processing' || m.status === 'recording'
-    || m.wiki_state === 'processing' || m.wiki_state === 'queued');
+    || m.wiki_state === 'processing' || m.wiki_state === 'queued')
+    || [...enginePauses.values()].some((pause) => pause.retry_at !== null);
   useInterval(busy && !hidden, 3000, reload);
   const failedCount = all.filter((m) => m.wiki_state === 'failed' && m.status !== 'failed').length;
   const [retrying, setRetrying] = useState(false);
@@ -220,7 +230,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
                   </td>
                   <td className="kb-amt__folder-col"><span className="kb-amt__folder"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" /><span className="kb-amt__cell">{folderName(m)}</span></span></td>
                   <td className="kb-amt__added kb-muted"><span className="kb-amt__cell">{addedLabel(m.created_at)}</span></td>
-                  <td><WikiCell material={m} /></td>
+                  <td><WikiCell material={m} enginePause={enginePauses.get(m.id)} /></td>
                 </tr>
               ))}
             </tbody>
@@ -245,7 +255,7 @@ export function AllMaterials({ hidden }: { hidden: boolean }) {
               <li key={m.id} {...sel.rowProps(m.id)} {...dragProps(m)}>
                 <div role="gridcell">
                 <button type="button" className={`kb-amc kb-spot${openedId === m.id ? ' is-current' : ''}`} onClick={() => openDocument({ type: 'material', id: m.id })}>
-                  <span className="kb-amc__top"><SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} /><Icon name={KIND_ICON[m.kind]} size={16} label={KIND_LABEL[m.kind]} /><span className="kb-head__spacer" /><WikiCell material={m} /></span>
+                  <span className="kb-amc__top"><SelectionCheckbox checked={sel.selected.has(m.id)} reason={sel.reasonOf(m.id)} /><Icon name={KIND_ICON[m.kind]} size={16} label={KIND_LABEL[m.kind]} /><span className="kb-head__spacer" /><WikiCell material={m} enginePause={enginePauses.get(m.id)} /></span>
                   <span className="kb-amc__title">{m.title}</span>
                   <span className="kb-amc__meta"><span className="kb-fdot" style={{ background: tone(m.folder_id) ?? 'var(--kb-line)' }} aria-hidden="true" />{folderName(m)}</span>
                   <span className="kb-amc__meta kb-muted">{addedLabel(m.created_at)}</span>
