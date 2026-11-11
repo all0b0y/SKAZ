@@ -140,12 +140,13 @@ class RepeatReader:
             merged = merged_into(self._kb, material_id, items)
             repeats = self._marker_repeats(material_id, items, merged)
             stored = evidence.get(material_id)
-            if stored is not None and stored.status == "checked":  # a run still in progress shows nothing
+            ran = stored is not None and stored.status == "checked"  # a run still in progress shows nothing
+            # A verdict whose statement or matched statement changed since no longer holds (R2-08): the
+            # material shows no number until a check asks again, instead of a stale one.
+            voided = bool(self.voided(material_id, items, stored)) if ran else False
+            if ran and not voided:
                 repeats += self._stored_repeats(material_id, items, stored)
-            checked = (
-                (stored is not None and stored.status == "checked") or bool(repeats)
-                or not self._older(record.created_at)
-            )
+            checked = not self._older(record.created_at) or (not voided and (ran or bool(repeats)))
             built[material_id] = self._result(material_id, items, repeats, checked, stored, detailed, titles)
         return built
 
@@ -162,12 +163,59 @@ class RepeatReader:
                                  (authors,) if authors else tuple(others[:1])))
         return found
 
+    def voided(self, material_id: str, items: list[OverlapStatement],
+               stored: Evidence | None) -> set[tuple[str, str]]:
+        """Keys of stored verdicts that no longer hold: the material's statement was edited, or the statement
+        it repeated says something else now (or its fingerprint was never stored). A statement or counterpart
+        that is gone is not "voided": it simply isn't a repeat any more."""
+        if stored is None:
+            return set()
+        own = self._own(material_id, items)
+        judged = [item for item in stored.judged.values() if item.key in own]
+        wanted = [item.key for item in judged]
+        wanted += [(item.match.page_id, item.match.block_id) for item in judged
+                   if item.verdict == "repeat" and item.match is not None]
+        hashes = self._hashes(wanted)
+        found: set[tuple[str, str]] = set()
+        for item in judged:
+            current = hashes.get(item.key)
+            if current is None:
+                continue
+            if current != item.text_hash:
+                found.add(item.key)
+            elif item.verdict == "repeat" and item.match is not None:
+                other = hashes.get((item.match.page_id, item.match.block_id))
+                if other is not None and other != item.match.text_hash:
+                    found.add(item.key)
+        return found
+
+    @staticmethod
+    def _own(material_id: str, items: list[OverlapStatement]) -> set[tuple[str, str]]:
+        return {(item.page_id, item.block_id) for item in items
+                if item.block_id.startswith(block_prefix(material_id)) and item.materials == {material_id}}
+
+    def _hashes(self, keys: Sequence[tuple[str, str]]) -> dict[tuple[str, str], str]:
+        """Current text hashes of statements, one read per page."""
+        by_page: dict[str, list[str]] = defaultdict(list)
+        for page_id, block_id in dict.fromkeys(keys):
+            by_page[page_id].append(block_id)
+        found: dict[tuple[str, str], str] = {}
+        with self._kb.db.read() as connection:
+            for page_id, block_ids in by_page.items():
+                for start in range(0, len(block_ids), 500):
+                    chunk = block_ids[start:start + 500]
+                    rows = connection.execute(
+                        "SELECT block_id, text FROM blocks WHERE page_id = ? "
+                        f"AND block_id IN ({','.join('?' * len(chunk))})", (page_id, *chunk)).fetchall()
+                    for block_id, text in rows:
+                        found[(page_id, block_id)] = text_hash(text)
+        return found
+
     def _stored_repeats(self, material_id: str, items: list[OverlapStatement],
                         stored: Evidence | None) -> list[_Repeat]:
         if stored is None:
             return []
-        own = {(item.page_id, item.block_id) for item in items
-               if item.block_id.startswith(block_prefix(material_id)) and item.materials == {material_id}}
+        own = self._own(material_id, items)
         found = []
         for judged in stored.judged.values():
             if judged.verdict != "repeat" or judged.match is None or judged.key not in own:

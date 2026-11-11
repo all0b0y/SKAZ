@@ -21,6 +21,9 @@ VERDICTS: tuple[Verdict, ...] = ("repeat", "new", "unsure")
 class StatementRef:
     page_id: str
     block_id: str
+    #: Hash of the matched statement's text when it was compared: once that statement says something else,
+    #: the verdict no longer holds (0.4.0 review R2-08). ``None``: evidence written before the fingerprint.
+    text_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,8 +65,8 @@ def _now() -> str:
 
 def _encode(judged: dict[tuple[str, str], Judged]) -> str:
     rows = [{"page": item.page_id, "block": item.block_id, "hash": item.text_hash, "verdict": item.verdict,
-             "match": ({"page": item.match.page_id, "block": item.match.block_id}
-                       if item.match is not None else None)}
+             "match": ({"page": item.match.page_id, "block": item.match.block_id,
+                        "hash": item.match.text_hash} if item.match is not None else None)}
             for item in judged.values()]
     return json.dumps({"version": 1, "statements": rows}, separators=(",", ":"))
 
@@ -82,7 +85,8 @@ def _decode(raw: str) -> dict[tuple[str, str], Judged]:
                 continue
             match = row.get("match")
             item = Judged(str(row["page"]), str(row["block"]), str(row["hash"]), cast(Verdict, verdict),
-                          StatementRef(str(match["page"]), str(match["block"])) if match else None)
+                          StatementRef(str(match["page"]), str(match["block"]),
+                                       str(match["hash"]) if match.get("hash") else None) if match else None)
         except (KeyError, TypeError, AttributeError):
             continue
         found[item.key] = item

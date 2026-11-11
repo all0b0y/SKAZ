@@ -105,7 +105,7 @@ async def compare(layer: DecisionLayer, statement: Statement, others: list[State
     if not isinstance(confirmed, YesNoAnswer):
         return Unanswered("the decision layer gave no usable answer")
     if confirmed.p_yes >= CONFIDENT:
-        found = StatementRef(match.page_id, match.block_id)
+        found = StatementRef(match.page_id, match.block_id, text_hash(match.text))
         return Judged(own.page_id, own.block_id, own.text_hash, "repeat", found)
     if confirmed.p_yes <= 1 - CONFIDENT:
         return own

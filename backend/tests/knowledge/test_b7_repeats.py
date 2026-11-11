@@ -1,15 +1,15 @@
 """0.4.0 B7 — N3 repeats: what a material repeats, and "Check older materials" with the decision model only.
 
-Fakes only: the decision layer is scripted (never a real model) and ``JobStore`` is a fake that, like B2's,
-writes the ``explore_jobs`` row the run table points at. The N2 fixtures (``test_n2_repeats``) provide a real
-wiki with merged repeats.
+The decision layer is scripted (never a real model); the job store is B2's real ``SqliteJobStore`` on the
+same library database (0.4.0 review R2-09: no in-memory job fake). The N2 fixtures (``test_n2_repeats``)
+provide a real wiki with merged repeats.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -17,14 +17,7 @@ import pytest
 
 from skaz.knowledge.api.contract_routes import ContractFailure
 from skaz.knowledge.api.schemas_explore_common import (
-    KbCheckpoint,
     KbContinue,
-    KbExploreJob,
-    KbJobOwner,
-    KbRunBudget,
-    KbRunCounters,
-    KbRunStage,
-    KbStopReason,
 )
 from skaz.knowledge.api.schemas_repeats import KbRepeatCheck, KbRepeatCheckStart
 from skaz.knowledge.decisions.protocol import (
@@ -36,6 +29,7 @@ from skaz.knowledge.decisions.protocol import (
     YesNoAnswer,
 )
 from skaz.knowledge.errors import NotFound
+from skaz.knowledge.explore.jobs import SqliteJobStore
 from skaz.knowledge.repeats.compare import NONE_OPTION
 from skaz.knowledge.repeats.reader import RepeatReader, text_hash
 from skaz.knowledge.repeats.service import RepeatsService
@@ -55,86 +49,11 @@ AREA = "area-1"
 # -- fakes -------------------------------------------------------------------------------------
 
 
-class FakeJobStore:
-    """``JobStore`` in memory; writes ``explore_jobs`` rows like B2 (the run table points at them)."""
-
-    def __init__(self, kb: KnowledgeService) -> None:
-        self.kb = kb
-        self.jobs: dict[str, KbExploreJob] = {}
-        self.work: dict[tuple[str, str], dict[str, str]] = {}
-        self.created = 0
-
-    def create(self, owner: KbJobOwner, title: str, stage: KbRunStage, budget: KbRunBudget) -> KbExploreJob:
-        self.created += 1
-        job_id = f"job-{self.created}"
-        now = datetime(2026, 11, 9, 10, 0, tzinfo=UTC)
-        counters = KbRunCounters(checked=0, after_rules=0, decided=0, on_topic=0, novelty_checked=0, new=0,
-                                 covered=0)
-        job = KbExploreJob(
-            id=job_id, owner=owner, state="running", stage=stage, stop_reason=None, budget=budget,
-            counters=counters, checkpoint=None, created_at=now, updated_at=now, decision_choices=[],
-            decision_provider=None, retry_at=None)
-        with self.kb.db.write() as connection:
-            connection.execute(
-                "INSERT INTO explore_jobs(id, owner, state, stage, title, budget_json, counters_json, "
-                "created_at, updated_at) VALUES (?, ?, 'running', ?, ?, '{}', '{}', ?, ?)",
-                (job_id, owner, stage, title, now.isoformat(), now.isoformat()))
-        self.jobs[job_id] = job
-        return job
-
-    def get(self, job_id: str) -> KbExploreJob | None:
-        return self.jobs.get(job_id)
-
-    def active(self) -> Sequence[KbExploreJob]:
-        return [job for job in self.jobs.values() if job.state in ("queued", "running", "paused")]
-
-
-    # 0.4.0 review round: the fix batch FX-B replaces this fake with the real SqliteJobStore (R2-09).
-    def claim_paused(self, job_id: str, *, checkpoint_id: str, revision: int,
-                     budget: KbRunBudget | None = None) -> KbExploreJob:
-        raise AssertionError("not used by these tests")
-
-    def advance(self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget,
-                counters: KbRunCounters) -> KbExploreJob:
-        raise AssertionError("not used by these tests")
-
-    def progress(self, job_id: str, *, stage: KbRunStage, budget: KbRunBudget,
-                 counters: KbRunCounters) -> KbExploreJob:
-        job = self.jobs[job_id].model_copy(update={"state": "running", "stop_reason": None, "stage": stage,
-                                                    "budget": budget, "counters": counters,
-                                                    "decision_choices": []})
-        self.jobs[job_id] = job
-        return job
-
-    def stop(self, job_id: str, reason: KbStopReason, *, retry_at: str | None = None) -> KbExploreJob:
-        state = {"completed": "done", "cancelled": "cancelled", "failed": "error"}.get(reason, "paused")
-        choices = ["download_local", "openrouter_jev"] if reason == "decision_model_required" else []
-        job = self.jobs[job_id].model_copy(update={"state": state, "stop_reason": reason,
-                                                    "decision_choices": choices})
-        self.jobs[job_id] = job
-        return job
-
-    def checkpoint(self, job_id: str, *, stage: KbRunStage, cursor: str | None, completed_ids: Sequence[str],
-                   pending_ids: Sequence[str]) -> KbCheckpoint:
-        job = self.jobs[job_id]
-        revision = job.checkpoint.revision + 1 if job.checkpoint else 1
-        saved = KbCheckpoint(id=f"cp-{job_id}-{revision}", revision=revision, stage=stage, cursor=cursor,
-                             completed_ids=list(completed_ids), pending_ids=list(pending_ids),
-                             saved_at=datetime(2026, 11, 9, 10, 1, tzinfo=UTC))
-        self.jobs[job_id] = job.model_copy(update={"checkpoint": saved})
-        return saved
-
-    def complete(self, job_id: str, candidate_id: str, stage: KbRunStage, result_json: str) -> None:
-        bucket = self.work.setdefault((job_id, stage), {})
-        if candidate_id in bucket:
-            raise ValueError("the same work twice")
-        bucket[candidate_id] = result_json
-
-    def completed(self, job_id: str, stage: KbRunStage) -> Collection[str]:
-        return set(self.work.get((job_id, stage), {}))
-
-    def recover(self) -> Sequence[str]:
-        return []
+def created_jobs(kb: KnowledgeService) -> int:
+    """How many repeat checks the real ``SqliteJobStore`` holds."""
+    with kb.db.read() as connection:
+        row = connection.execute("SELECT COUNT(*) FROM explore_jobs WHERE owner = 'repeats'").fetchone()
+    return int(row[0])
 
 
 class Layer:
@@ -207,10 +126,10 @@ def age(kb: KnowledgeService, lecture: str, textbook: str) -> None:
                                (f"2026-10-{day}T10:00:00+00:00", material_id))
 
 
-def service_for(case: Case, layer: Layer | None, *, jobs: FakeJobStore | None = None, limit: int = 30,
-                n2_from: datetime | None = FUTURE) -> tuple[RepeatsService, FakeJobStore, Layer | None]:
+def service_for(case: Case, layer: Layer | None, *, jobs: SqliteJobStore | None = None, limit: int = 30,
+                n2_from: datetime | None = FUTURE) -> tuple[RepeatsService, SqliteJobStore, Layer | None]:
     age(case.kb, case.lecture, case.textbook)
-    store = jobs or FakeJobStore(case.kb)
+    store = jobs or SqliteJobStore(case.kb.db)
     service = RepeatsService(case.kb, areas=Directory([case.lecture, case.textbook]), decisions=lambda: layer,
                              jobs=store, batch_limit=limit, n2_from=n2_from)
     return service, store, layer
@@ -300,7 +219,7 @@ def page_text(case: Case) -> str:
 async def test_a_check_finds_the_repeat_and_changes_no_page(ready: KnowledgeService) -> None:
     case = await _case(ready, p_yes=0.05, textbook_notes=TWO_SECTIONS)  # N2 merged nothing
     layer = Layer()
-    service, jobs, _ = service_for(case, layer)
+    service, _jobs, _ = service_for(case, layer)
     before = page_text(case)
     check = await service.start(KbRepeatCheckStart(area_id=AREA))
     assert check.owner == "repeats" and check.budget.unit == "claim_comparison" and check.budget.limit == 30
@@ -321,7 +240,7 @@ async def test_a_check_finds_the_repeat_and_changes_no_page(ready: KnowledgeServ
     assert paragraph.fragment_ids == [1] and paragraph.repeated_statements == 1
     assert (await service.material(case.lecture)).repeated == 0
     assert all(item.status == "checked" for item in service.summaries([case.lecture, case.textbook]).values())
-    assert jobs.created == 1
+    assert created_jobs(ready) == 1
 
 
 async def test_the_decision_layer_is_asked_with_untrusted_text_and_candidates_of_the_page(
@@ -378,7 +297,7 @@ async def test_the_budget_pauses_after_30_and_continue_never_repeats_work(ready:
     assert (check.state, check.stop_reason) == ("done", "completed")
     assert check.budget.batch == 2 and check.budget.total_used == 2
     assert layer.choices == first_batch + 1  # the statement done in batch 1 was not asked again
-    assert len(jobs.work[(check.id, "repeats")]) == 5
+    assert len(jobs.completed(check.id, "repeats")) == 5
     assert (await service.material(case.textbook)).status == "checked"
 
 
@@ -425,12 +344,12 @@ async def test_a_second_check_of_a_running_area_is_a_conflict(ready: KnowledgeSe
     case = await _case(ready, p_yes=0.05)
     gate = asyncio.Event()
     layer = Layer(gate=gate)
-    service, jobs, _ = service_for(case, layer)
+    service, _jobs, _ = service_for(case, layer)
     first = await service.start(KbRepeatCheckStart(area_id=AREA))
     await asyncio.wait_for(layer.entered.wait(), 5)
     with pytest.raises(Exception) as caught:
         await service.start(KbRepeatCheckStart(area_id=AREA))
-    assert getattr(caught.value, "status_code", None) == 409 and jobs.created == 1
+    assert getattr(caught.value, "status_code", None) == 409 and created_jobs(ready) == 1
     gate.set()
     await finish(service, first)
 
@@ -459,12 +378,13 @@ async def test_a_layer_that_does_not_answer_stops_and_records_nothing(
                            (case.textbook,))
         connection.execute("UPDATE materials SET created_at = '2026-10-02T10:00:00+00:00' WHERE id = ?",
                            (case.lecture,))
-    await finish(service, await service.start(KbRepeatCheckStart(area_id=AREA)))
-    check = await service.check("job-1")
+    started = await service.start(KbRepeatCheckStart(area_id=AREA))
+    await finish(service, started)
+    check = await service.check(started.id)
     assert (check.state, check.stop_reason) == ("paused", "provider_unavailable")
     assert layer.choices == 2 and (await service.material(case.lecture)).status == "not_checked"
     # Only the lecture's statement with nothing to compare (decided without the model) was recorded.
-    assert len(jobs.work.get(("job-1", "repeats"), {})) == 1
+    assert len(jobs.completed(started.id, "repeats")) == 1
 
 
 async def test_not_confident_is_a_verdict_not_an_outage(ready: KnowledgeService) -> None:
@@ -479,20 +399,20 @@ async def test_not_confident_is_a_verdict_not_an_outage(ready: KnowledgeService)
 async def test_an_earlier_verdict_is_reused_by_a_later_run(ready: KnowledgeService) -> None:
     case = await _case(ready, p_yes=0.05)
     layer = Layer()
-    service, jobs, _ = service_for(case, layer)
+    service, _jobs, _ = service_for(case, layer)
     await finish(service, await service.start(KbRepeatCheckStart(area_id=AREA)))
     calls = len(layer.calls)
     second = await finish(service, await service.start(KbRepeatCheckStart(area_id=AREA)))
     assert second.state == "done" and len(layer.calls) == calls and second.materials_checked == 0
-    assert jobs.created == 2
+    assert created_jobs(ready) == 2
 
 
 async def test_unknown_area_not_found_and_no_job_without_the_job_store(ready: KnowledgeService) -> None:
     case = await _case(ready, p_yes=0.05)
-    service, jobs, _ = service_for(case, Layer())
+    service, _jobs, _ = service_for(case, Layer())
     with pytest.raises(NotFound):
         await service.start(KbRepeatCheckStart(area_id="nope"))
-    assert jobs.created == 0
+    assert created_jobs(ready) == 0
     unwired = RepeatsService(ready, areas=Directory([case.lecture]), decisions=lambda: None, jobs=None)
     with pytest.raises(ContractFailure) as caught:
         await unwired.start(KbRepeatCheckStart(area_id=AREA))
@@ -514,7 +434,7 @@ def stored_case(case: Case, *, text_digest: str | None = None,
     other = next(block for block in case.kb.page_repo.blocks(case.page_id)
                  if block.text.startswith("Мера беспорядка"))
     judged = Judged(case.page_id, own.block_id, text_digest or text_hash(own.text), "repeat",
-                    StatementRef(case.page_id, match_block or other.block_id))
+                    StatementRef(case.page_id, match_block or other.block_id, text_hash(other.text)))
     store.save(Evidence(case.textbook, "checked", datetime(2026, 11, 9, tzinfo=UTC), {judged.key: judged}))
     return RepeatReader(case.kb, store, n2_from=FUTURE)
 
@@ -557,7 +477,7 @@ async def test_paragraph_fragment_ids_are_segment_numbers(ready: KnowledgeServic
     unit = next(block for block in blocks if block.text.startswith("Единица измерения"))
     other = next(block for block in blocks if block.text.startswith("Энтропия газа"))
     judged = Judged(case.page_id, unit.block_id, text_hash(unit.text), "repeat",
-                    StatementRef(case.page_id, other.block_id))
+                    StatementRef(case.page_id, other.block_id, text_hash(other.text)))
     store = RepeatStore(ready.db)
     store.save(Evidence(case.textbook, "checked", datetime(2026, 11, 9, tzinfo=UTC), {judged.key: judged}))
     result = RepeatReader(ready, store, n2_from=FUTURE).material(case.textbook)
@@ -610,3 +530,72 @@ async def test_older_means_before_04_first_opened_this_library_option_a(ready: K
     first = stamp_marks_from(ready)
     assert first is not None and ready.settings.get(key) == first.isoformat()
     assert stamp_marks_from(ready) == first
+
+
+# -- 0.4.0 review round (R2-06, R2-08) ---------------------------------------------------------
+
+
+async def test_r2_06_two_continues_with_one_checkpoint_start_one_run(ready: KnowledgeService) -> None:
+    case = await _case(ready, p_yes=0.05, textbook_notes=TWO_SECTIONS)
+    layer = Layer()
+    service, _jobs, _ = service_for(case, layer, limit=1)
+    check = await finish(service, await service.start(KbRepeatCheckStart(area_id=AREA)))
+    assert (check.state, check.stop_reason) == ("paused", "budget")
+    asked = layer.choices
+    body = continue_with(check)
+    first, second = await asyncio.gather(service.resume(check.id, body), service.resume(check.id, body),
+                                         return_exceptions=True)
+    errors = [item for item in (first, second) if isinstance(item, BaseException)]
+    assert len(errors) == 1 and getattr(errors[0], "status_code", None) == 409, errors
+    after = await finish(service, check)
+    await asyncio.sleep(0.05)
+    assert (after.state, after.stop_reason) == ("done", "completed")
+    assert layer.choices == asked + 1  # one run asked the one statement left, not two runs
+
+
+def _block(case: Case, prefix: str) -> Any:
+    return next(block for block in case.kb.page_repo.blocks(case.page_id) if block.text.startswith(prefix))
+
+
+def _rewrite(case: Case, block_id: str, text: str) -> None:
+    with case.kb.db.write() as connection:
+        connection.execute("UPDATE blocks SET text = ? WHERE page_id = ? AND block_id = ?",
+                           (text, case.page_id, block_id))
+
+
+async def test_r2_08_an_edited_counterpart_voids_the_repeat_and_asks_for_a_recheck(
+        ready: KnowledgeService) -> None:
+    case = await _case(ready, p_yes=0.05)
+    reader = stored_case(case)
+    assert reader.material(case.textbook).repeated == 1
+    # The user corrects the earlier statement A: same block id, same citation, another claim.
+    _rewrite(case, _block(case, "Мера беспорядка").block_id, "Совсем другое утверждение о температуре.")
+    result = reader.material(case.textbook)
+    assert (result.repeated, result.percent, result.paragraphs) == (0, None, [])
+    assert result.status == "not_checked"  # no stale number: the material can be checked again
+    assert reader.needs_check([case.textbook]) == [case.textbook]
+
+
+async def test_r2_08_a_recheck_asks_again_only_about_the_voided_statement(ready: KnowledgeService) -> None:
+    case = await _case(ready, p_yes=0.05, textbook_notes=TWO_SECTIONS)
+    layer = Layer()
+    service, _jobs, _ = service_for(case, layer)
+    await finish(service, await service.start(KbRepeatCheckStart(area_id=AREA)))
+    assert (await service.material(case.textbook)).repeated == 1
+    asked = layer.choices
+    _rewrite(case, _block(case, "Мера беспорядка").block_id, "Совсем другое утверждение о температуре.")
+    assert (await service.material(case.textbook)).status == "not_checked"
+    again = await finish(service, await service.start(KbRepeatCheckStart(area_id=AREA)))
+    assert again.state == "done" and layer.choices == asked + 1
+    textbook = await service.material(case.textbook)
+    assert (textbook.status, textbook.repeated) == ("checked", 0)
+
+
+def test_r2_08_evidence_keeps_the_fingerprint_of_the_matched_statement(ready: KnowledgeService) -> None:
+    store = RepeatStore(ready.db)
+    judged = Judged("page-1", "c-1", "abc", "repeat", StatementRef("page-2", "c-2", "def"))
+    store.save(Evidence("mat-x", "checked", None, {judged.key: judged}))
+    with ready.db.read() as connection:
+        raw = connection.execute("SELECT evidence_json FROM material_repeat_checks").fetchone()[0]
+    assert json.loads(raw)["statements"][0]["match"] == {"page": "page-2", "block": "c-2", "hash": "def"}
+    assert store.evidence(["mat-x"])["mat-x"].judged[judged.key] == judged
