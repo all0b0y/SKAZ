@@ -122,7 +122,9 @@ async def test_wall_clock_deadline_is_rechecked_within_a_minute_and_on_poll(read
         await ingest.close()
 
 
-async def test_failed_continue_leaves_profiles_gates_and_other_jobs_untouched(ready: KnowledgeService) -> None:
+async def test_failed_continue_leaves_profiles_gates_and_other_jobs_untouched(
+    ready: KnowledgeService,
+) -> None:
     clock = Clock()
     ingest, engine, jobs = await limited(ready, clock, None)
     ingest.slots = lambda: 0  # type: ignore[method-assign]

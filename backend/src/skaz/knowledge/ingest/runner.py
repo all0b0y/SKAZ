@@ -602,7 +602,7 @@ class IngestRun:
             accepted: list[DraftSection] = []
 
             def follow_up(items: Sequence[Item], part: Sequence[Fragment] = part, index: int = index,
-                          earlier: Sequence[str] = earlier) -> str:
+                          earlier: Sequence[str] = earlier, accepted: list[DraftSection] = accepted) -> str:
                 # _answers yields before asking for the next prompt: the consumer below has now
                 # checked the response. Rejected blocks/titles cannot advance the source cursor.
                 return _notes_follow_up(source.title, part, index, len(parts), earlier, accepted)

@@ -62,10 +62,13 @@ def wall_clock() -> datetime:
 class EngineLimited(Exception):
     """A provider quota: finished checkpoint items stay kept; the engine's queue must wait."""
 
-    def __init__(self, engine: str, retry_at: datetime | None) -> None:
+    def __init__(self, engine: str, retry_at: datetime | None, *, restart_material: bool = False) -> None:
         self.pause = EnginePause(engine, retry_at)
         label = ENGINE_LABELS.get(engine, engine)
-        self.message = f"{label}: usage limit reached. The finished work is kept."
+        self.message = f"{label}: usage limit reached."
+        if restart_material:
+            self.message += (" Continue starts this material over. To keep finished parts, choose a wiki "
+                             "model in Settings → Models.")
         super().__init__(self.message)
 
 
@@ -199,6 +202,7 @@ class JobRepository:
         #: Queue composition hooks; disk mutations notify the service on its owning event loop.
         self.changed: Callable[[], None] | None = None
         self.resume_wiki: Callable[[str], Awaitable[bool]] | None = None
+        self.can_resume_wiki: Callable[[str], bool] | None = None
 
     def create(self, material_id: str | None, *, kind: JobKind = "ingest",
                step: JobStep = "reading", state: Literal["running", "queued"] = "running",
@@ -473,4 +477,27 @@ class JobRepository:
                 f"WHERE kind IN {_KINDS_IN} AND state = 'running'",
                 (INTERRUPTED_REASON, WIKI_INTERRUPTED_REASON, utc_now()),
             )
+            # Quota-paused Python closures are gone after restart. Only material follow-ups have
+            # a durable request the composition root can rebuild; standalone checks must end.
+            paused = connection.execute(
+                "SELECT j.id, j.kind, e.data FROM jobs j "
+                "JOIN ingest_jobs d ON d.job_id = j.id "
+                "LEFT JOIN wiki_execution e ON e.job_id = j.id "
+                "WHERE j.state = 'paused' AND d.error_code = ?", (ENGINE_LIMIT,)).fetchall()
+            for row in paused:
+                if row["kind"] in QUEUED_KINDS:
+                    continue
+                try:
+                    data = json.loads(row["data"] or "{}")
+                    recoverable = (row["kind"] in ("connections", "folder_overview")
+                                   and isinstance(data.get("material_id"), str)
+                                   and execution_view(row["data"]) is not None)
+                except (ValueError, TypeError, AttributeError):
+                    recoverable = False
+                if recoverable:
+                    continue
+                connection.execute("UPDATE jobs SET state = 'interrupted', error = ?, updated_at = ? "
+                                   "WHERE id = ?", (WIKI_INTERRUPTED_REASON, utc_now(), row["id"]))
+                connection.execute("UPDATE ingest_jobs SET error_code = NULL WHERE job_id = ?", (row["id"],))
+                ids.append(row["id"])
         return ids

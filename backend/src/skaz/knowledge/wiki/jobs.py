@@ -69,7 +69,12 @@ class WikiJobs:
         self._tasks: dict[str, tuple[JobKind, str | None, asyncio.Task[None]]] = {}
         self._closing = False
         self._paused_work: dict[str, Work] = {}
+        self._work_locks: dict[tuple[JobKind, str | None], asyncio.Lock] = {}
         self.jobs.resume_wiki = self.resume_paused
+        self.jobs.can_resume_wiki = self.can_resume_paused
+
+    def can_resume_paused(self, job_id: str) -> bool:
+        return not self._closing and job_id in self._paused_work
 
     async def resume_paused(self, job_id: str) -> bool:
         work = self._paused_work.get(job_id)
@@ -134,12 +139,22 @@ class WikiJobs:
         try:
             # Inside the ``try``: a cancel while the snapshot is read still finishes the job.
             scoped.enter_context(execution_scope(await disk_call(stored_scope, self.jobs.db, job_id)))
-            scope = current_execution()
-            if scope is not None and scope.profile.engine is not None:
-                pause = (await disk_call(self.jobs.engine_pauses)).get(scope.profile.engine)
-                if pause is not None:
-                    raise EngineLimited(pause.engine, pause.retry_at)
-            await work(JobContext(self.jobs, job_id))
+            kind, target, _task = self._tasks[job_id]
+            async with contextlib.AsyncExitStack() as work_scope:
+                # Resume bypasses WikiService's start guards. Hold the same resource across the
+                # whole work, including resumed and freshly started runs, never just registration.
+                if kind in ("connections", "folder_overview"):
+                    key = (kind, None if kind == "connections" else target)
+                    lock = self._work_locks.setdefault(key, asyncio.Lock())
+                    await work_scope.enter_async_context(lock)
+                scope = current_execution()
+                # Export is local; recognition chooses its own agent. AgentCaller gates the
+                # actual engine at dispatch for those checks instead of inheriting the wiki gate.
+                if kind not in ("export", "corrections") and scope is not None and scope.profile.engine:
+                    pause = (await disk_call(self.jobs.engine_pauses)).get(scope.profile.engine)
+                    if pause is not None:
+                        raise EngineLimited(pause.engine, pause.retry_at)
+                await work(JobContext(self.jobs, job_id))
             state, error = "done", None
         except asyncio.CancelledError:
             state, error = "interrupted", WIKI_INTERRUPTED_REASON

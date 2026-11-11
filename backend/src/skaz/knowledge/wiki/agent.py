@@ -16,11 +16,13 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from ...native_io import disk_call
 from ..agents.engine import AgentEngine, AgentTurn, Failed, TurnMessage
 from ..ingest.execution import (
     RETRY_DELAYS_S,
     STOP_KINDS,
     UNSENT_RETRIES,
+    current_execution,
     never_sent,
     retry_unsent,
     run_wiki_turn,
@@ -28,6 +30,8 @@ from ..ingest.execution import (
 from ..ingest.jobs import EngineLimited, agent_failure_code, agent_failure_text
 from ..ingest.model import AnswerInvalid, parse_answer
 from ..ingest.prompts import repair_message
+from ..ingest.settings import read_engine_pauses
+from ..store.repositories import SettingsRepository
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -79,6 +83,12 @@ class AgentCaller:
 
     async def _once(self, instructions: str, messages: Sequence[TurnMessage],
                     schema: dict[str, Any]) -> tuple[Failed | None, str]:
+        scope = current_execution()
+        if scope is not None:
+            pauses = await disk_call(read_engine_pauses, SettingsRepository(scope.db))
+            pause = pauses.get(self.engine.id)
+            if pause is not None:
+                raise EngineLimited(pause.engine, pause.retry_at)
         self._runs += 1
         run_id = f"{self.prefix}-{self._runs}"
         turn = AgentTurn(
