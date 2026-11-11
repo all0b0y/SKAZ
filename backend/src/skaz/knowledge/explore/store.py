@@ -12,6 +12,11 @@ from ..ids import new_id, utc_now_ms
 from ..store.database import KnowledgeDatabase
 
 
+def _marks(values: Sequence[str]) -> str:
+    """``?`` placeholders for an ``IN`` list; an empty scope matches nothing."""
+    return ",".join("?" for _ in values) or "NULL"
+
+
 @dataclass(frozen=True)
 class RunRow:
     id: str
@@ -113,16 +118,16 @@ class ExploreStore:
             ).fetchall()
         return {row["task_id"]: row["id"] for row in rows}
 
-    def latest_checked(self, *, area_id: str | None, task_id: str | None) -> str | None:
-        """When the newest finished run of this scope finished."""
+    def latest_checked(self, *, area_ids: Sequence[str] | None, task_id: str | None) -> str | None:
+        """When the newest finished run of this scope (any of ``area_ids``) finished."""
         sql = (
             "SELECT max(j.updated_at) FROM explore_runs r JOIN explore_jobs j ON j.id = r.id"
             " WHERE j.state = 'done'"
         )
         params: list[str] = []
-        if area_id is not None:
-            sql += " AND r.area_id = ?"
-            params.append(area_id)
+        if area_ids is not None:
+            sql += f" AND r.area_id IN ({_marks(area_ids)})"
+            params.extend(area_ids)
         if task_id is not None:
             sql += " AND r.task_id = ?"
             params.append(task_id)
@@ -196,10 +201,19 @@ class ExploreStore:
         return [_finding(row) for row in rows]
 
     def findings(
-        self, *, area_id: str | None, task_id: str | None, include_covered: bool, offset: int, limit: int
+        self,
+        *,
+        area_ids: Sequence[str] | None,
+        task_id: str | None,
+        include_covered: bool,
+        offset: int,
+        limit: int,
     ) -> tuple[list[FindingRow], bool, int]:
-        """A page of findings (newest first), whether more follow, and the covered ones in scope."""
-        where, params = self._scope(area_id, task_id)
+        """A page of findings (newest first), whether more follow, and the covered ones in scope.
+
+        ``area_ids`` is the whole scope of an area (itself and below, or what a custom area collects), the
+        same set its tile counts (review R1-06)."""
+        where, params = self._scope(area_ids, task_id)
         shown = where + ("" if include_covered else " AND label != 'covered'")
         with self.db.read() as connection:
             rows = connection.execute(
@@ -241,11 +255,12 @@ class ExploreStore:
             )
 
     @staticmethod
-    def _scope(area_id: str | None, task_id: str | None) -> tuple[str, list[str]]:
-        where, params = "1 = 1", []
-        if area_id is not None:
-            where += " AND area_id = ?"
-            params.append(area_id)
+    def _scope(area_ids: Sequence[str] | None, task_id: str | None) -> tuple[str, list[str]]:
+        where = "1 = 1"
+        params: list[str] = []
+        if area_ids is not None:
+            where += f" AND area_id IN ({_marks(area_ids)})"
+            params.extend(area_ids)
         if task_id is not None:
             where += " AND task_id = ?"
             params.append(task_id)

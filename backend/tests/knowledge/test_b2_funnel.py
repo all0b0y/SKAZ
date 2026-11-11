@@ -355,6 +355,7 @@ def parts(ready: KnowledgeService) -> SimpleNamespace:
         claims=WikiClaims(ready.db),
         search_rules=lambda: rules["rules"],
         reading=ReadingDesk(ready, chats=chats, sources=sources, move_mark=move),
+        area_scope=lambda area_id: (area_id,),
         science=science,
         today=lambda: TODAY,
     )
@@ -419,6 +420,7 @@ async def test_no_science_client_or_no_library_is_not_ready(parts: SimpleNamespa
         reading=ReadingDesk(
             service, chats=FakeChats(), sources=FakeSources(service), move_mark=lambda f, m: None
         ),
+        area_scope=lambda area_id: (area_id,),
         science=FakeScience(),
     )
     for call in (funnel.jobs(), funnel.findings(), funnel.exploring(), funnel.run("job-x")):
@@ -928,3 +930,25 @@ async def test_add_to_wiki_keeps_the_known_area_and_topics(parts: SimpleNamespac
     assert (origin["area_id"], origin["topic_ids"]) == ("area-ai", ["T1"])
     assert imported.material_id in areas.materials("area-ai")  # the area the run placed it in
     assert imported.material_id in areas.materials("subfields-9")  # and where its own topic is
+
+
+async def test_a_parent_or_custom_area_lists_the_findings_its_tile_counts(parts: SimpleNamespace) -> None:
+    """Review R1-06: the findings list of a scope is the set the map counts (descendants / collected)."""
+    from skaz.knowledge.api.schemas_areas import KbAreaCreate
+    from skaz.knowledge.areas.signals import SignalStore
+    from skaz.knowledge.areas.store import AreasStore
+    from skaz.knowledge.science.protocols import TaxonomyNode
+
+    areas = AreasStore(parts.kb, SignalStore(parts.kb.db))
+    areas.sync_taxonomy_nodes(None, [TaxonomyNode("domains-1", None, "domain", "Sciences", 1)])
+    areas.sync_taxonomy_nodes("domains-1", [TaxonomyNode("area-ai", "domains-1", "subfield", "AI", 0)])
+    custom = areas.create_custom(KbAreaCreate(name="Mine", topic_ids=["area-ai"]))
+    parts.funnel.area_scope = areas.scope_ids
+    parts.novelty.labels = {"Old news": "covered"}
+    parts.science.search_works = [work(1, topics=["T1"]), work(2, title="Old news", topics=["T1"])]
+    await run_to_end(parts, KbFunnelStart(query="agents", channels=["search"]))
+    assert parts.funnel.new_by_area() == {"area-ai": 1}
+    for scope in ("domains-1", custom.id, "area-ai"):
+        shown = await parts.funnel.findings(area_id=scope)
+        assert [f.work.id for g in shown.groups for f in g.findings] == ["work-1"], scope
+        assert shown.covered_count == 1, scope

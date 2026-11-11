@@ -409,6 +409,16 @@ class AreasStore:
                     result.append(tid)
         return tuple(result)
 
+    def scope_ids(self, area_id: str) -> tuple[str, ...]:
+        """The areas a tile counts: a taxonomy area and everything below it, or what a custom area collects
+        (the same sets ``build_map`` sums over). An unknown id is only itself."""
+        areas = self.all_area_rows()
+        if area_id not in areas:
+            return (area_id,)
+        order = list(areas)
+        inside = self._subtree_map(areas).get(area_id, {area_id})
+        return tuple(sorted(inside, key=order.index))
+
     def materials(self, area_id: str) -> Sequence[str]:
         areas = self.all_area_rows()
         if area_id not in areas:

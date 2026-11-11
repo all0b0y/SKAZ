@@ -61,7 +61,7 @@ _UNKNOWN_PUBLICATION = KbPublicationDate(
 def _given(provider: T | Callable[[], T | None] | None) -> T | None:
     """An explicit dependency: the object itself, or a provider called now (wired later in the runtime).
     Never guessed from attributes (Wave 2+ notes; review R1-08)."""
-    return cast("T | None", provider() if callable(provider) else provider)
+    return provider() if callable(provider) else provider
 
 
 class ExploreAreasService:

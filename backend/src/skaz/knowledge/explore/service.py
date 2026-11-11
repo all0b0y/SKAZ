@@ -173,6 +173,7 @@ class ExploreFunnel:
         claims: WikiClaims,
         search_rules: Callable[[], ActiveRules | None],
         reading: ReadingDesk,
+        area_scope: Callable[[str], Sequence[str]],
         science: ScienceClient | None = None,
         today: Callable[[], date] = lambda: datetime.now(UTC).date(),
     ) -> None:
@@ -189,6 +190,8 @@ class ExploreFunnel:
         self.claims = claims
         self.search_rules = search_rules
         self.reading = reading
+        #: Blocking: an area id → the area ids its tile counts (B4 ``AreasStore.scope_ids``).
+        self.area_scope = area_scope
         self._today = today
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._gates: dict[str, asyncio.Future[bool]] = {}
@@ -1133,8 +1136,9 @@ class ExploreFunnel:
     def _findings(
         self, area_id: str | None, task_id: str | None, include_covered: bool, offset: int, limit: int
     ) -> KbFindings:
+        area_ids = list(self.area_scope(area_id)) if area_id is not None else None
         rows, more, covered = self.store.findings(
-            area_id=area_id, task_id=task_id, include_covered=include_covered, offset=offset, limit=limit
+            area_ids=area_ids, task_id=task_id, include_covered=include_covered, offset=offset, limit=limit
         )
         findings = self._findings_of(rows)
         task_ids = list(dict.fromkeys(row.task_id for row in rows if row.task_id is not None))
@@ -1154,7 +1158,7 @@ class ExploreFunnel:
                 groups[finding.task_id] = group
             group.findings.append(finding)
         hint = sum(1 for finding in findings if _needs_key(finding))
-        checked = self.store.latest_checked(area_id=area_id, task_id=task_id)
+        checked = self.store.latest_checked(area_ids=area_ids, task_id=task_id)
         return KbFindings(
             groups=list(groups.values()),
             covered_count=covered,
