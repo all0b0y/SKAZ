@@ -188,6 +188,9 @@ class ExploreFunnel:
         self._today = today
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._gates: dict[str, asyncio.Future[bool]] = {}
+        #: B3 (wired at W4: ``runtime.kb_explore.task_chats = kb_research.chats_of``): research task id →
+        #: its chat, for ``KbJobSummary.chat_id``. Blocking.
+        self.task_chats: Callable[[Sequence[str]], Mapping[str, str]] | None = None
 
     # -- readiness ------------------------------------------------------------------------------------
 
@@ -1035,6 +1038,8 @@ class ExploreFunnel:
     def _summaries(self, active: bool) -> KbJobs:
         jobs = list(self.job_store.active()) if active else list(self.job_store.recent(limit=50))
         runs = self.store.runs([job.id for job in jobs])
+        task_ids = [run.task_id for run in runs.values() if run.task_id is not None]
+        chats = self.task_chats(task_ids) if self.task_chats is not None and task_ids else {}
         summaries = []
         for job in jobs:
             run = runs.get(job.id)
@@ -1048,7 +1053,7 @@ class ExploreFunnel:
                     stop_reason=job.stop_reason,
                     budget=job.budget,
                     task_id=run.task_id if run else None,
-                    chat_id=None,
+                    chat_id=chats.get(run.task_id) if run is not None and run.task_id else None,
                     area_id=run.area_id if run else None,
                     updated_at=job.updated_at,
                 )

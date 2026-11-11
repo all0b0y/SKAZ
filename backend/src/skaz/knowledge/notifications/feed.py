@@ -29,7 +29,8 @@ MAX_WAIT_S = 25.0
 POLL_INTERVAL_S = 0.2
 OPEN_MATERIAL = ActionSpec("open_material", "Open material")
 #: Actions that only navigate; they never mark a notification resolved.
-NAVIGATION_ACTIONS = frozenset({OPEN_MATERIAL.id, "open_explore"})  # 0.4.0 B2: Open in Explore
+#: 0.4.0: B2 "Open in Explore", B3 "Open task".
+NAVIGATION_ACTIONS = frozenset({OPEN_MATERIAL.id, "open_explore", "open_research_task"})
 ALREADY_RESOLVED = "This notification is already resolved."
 
 
