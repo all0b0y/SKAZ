@@ -1,90 +1,129 @@
-"""Stop a wiki answer that goes round in circles (C1-f, decided 2026-10-20).
+"""A wiki answer that goes round in circles (WR3, decision 9c; replaces the C1-f guard of 2026-10-20).
 
-Two signs, either one stops the answer: (1) a section (or concept) title repeats within one part —
-continuing the item just written, as a new answer may, is allowed; (2) three paragraphs nearly
-identical (≥90 % after normalisation) to ones already written, within one part. One or two repeats
-are allowed: lectures repeat a thought on purpose. Paragraphs shorter than ``MIN_WORDS`` (labels such
-as "Example:") are no sign at all. Items kept from an earlier answer are remembered but never stop
-the run themselves.
+Repeats themselves are not a fault: lectures restate a thought on purpose, a concept comes back in a
+later part, related concepts share a quote. The duplicate filter (``drafts.place_block``) merges them
+and never stops a job. What stops an answer is a loop: :data:`LOOP_RUN` items IN A ROW of one answer
+that add nothing new — every statement already kept for the same concept (or same-titled Notes
+section) in this run, or no statement at all. Scattered repeats between useful items are no loop.
+
+"The same" is the metric the C1-f guard used: 3-word shingles, Jaccard ≥ :data:`NEAR`, for statements
+of at least :data:`MIN_WORDS` words; a shorter one is the same only when its words are identical.
 """
 from __future__ import annotations
 
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-
-from .pages import match_key
+from typing import Generic, TypeVar
 
 NEAR = 0.9
-MAX_NEAR_REPEATS = 3
-#: Shorter paragraphs ("Пример:", "Formula:") repeat in healthy notes; they are never compared.
+#: Statements shorter than this are compared word for word, never by shingles.
 MIN_WORDS = 8
+#: Items in a row that add nothing new: a loop.
+LOOP_RUN = 3
 _WORD = re.compile(r"\w+", re.UNICODE)
 
-
-class Repeating(Exception):
-    """The answer started repeating itself; ``reason`` says which sign."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
+Mark = frozenset[str]
 
 
-def _shingles(text: str) -> frozenset[str]:
-    words = _WORD.findall(text.casefold())
-    if len(words) < MIN_WORDS:
+class Looping(Exception):
+    """An answer wrote :data:`LOOP_RUN` items in a row that add nothing new; ``titles`` are theirs."""
+
+    def __init__(self, titles: Sequence[str]) -> None:
+        super().__init__(f"{len(titles)} items in a row added nothing new")
+        self.titles = list(titles)
+
+
+def _words(text: str) -> list[str]:
+    return _WORD.findall(text.casefold())
+
+
+def is_short(text: str) -> bool:
+    return len(_words(text)) < MIN_WORDS
+
+
+def mark(text: str) -> Mark:
+    """3-word shingles of a statement, or its whole wording when short; empty for no words."""
+    words = _words(text)
+    if not words:
         return frozenset()
+    if len(words) < MIN_WORDS:
+        return frozenset({"=" + " ".join(words)})
     return frozenset(" ".join(words[i:i + 3]) for i in range(len(words) - 2))
 
 
+def same(a: Mark, b: Mark) -> bool:
+    small, large = sorted((len(a), len(b)))
+    if not small or small < NEAR * large:  # Jaccard can't reach 0.9 with sizes this far apart
+        return False
+    return len(a & b) / len(a | b) >= NEAR
+
+
 @dataclass
-class RepeatGuard:
-    _titles: set[str] = field(default_factory=set)
-    _last_title: str | None = None
-    _paragraphs: list[frozenset[str]] = field(default_factory=list)
-    near_repeats: int = 0
+class LoopDetector:
+    """What one Notes/Concepts operation already has, per concept (any of its names) or section title."""
 
-    def snapshot(self) -> tuple[frozenset[str], str | None, int, int]:
-        return frozenset(self._titles), self._last_title, len(self._paragraphs), self.near_repeats
+    _entries: list[list[Mark]] = field(default_factory=list)
+    _by_key: dict[str, int] = field(default_factory=dict)
 
-    def restore(self, state: tuple[frozenset[str], str | None, int, int]) -> None:
+    def snapshot(self) -> tuple[tuple[tuple[Mark, ...], ...], dict[str, int]]:
+        return tuple(tuple(entry) for entry in self._entries), dict(self._by_key)
+
+    def restore(self, state: tuple[tuple[tuple[Mark, ...], ...], dict[str, int]]) -> None:
         """Forget what an answer that is asked again (a structure repair) brought."""
-        titles, self._last_title, paragraphs, self.near_repeats = state
-        self._titles = set(titles)
-        del self._paragraphs[paragraphs:]
+        entries, by_key = state
+        self._entries = [list(entry) for entry in entries]
+        self._by_key = dict(by_key)
 
-    def new_part(self) -> None:
-        """Titles and near repeats count per part; paragraphs are compared with the whole operation."""
-        self._titles = set()
-        self.near_repeats = 0
-
-    def remember(self, title: str, texts: Sequence[str]) -> None:
-        self._take(title, texts, strict=False)
-
-    def check(self, title: str, texts: Sequence[str]) -> None:
-        """Raises :class:`Repeating` when this item makes the answer go round in circles."""
-        self._take(title, texts, strict=True)
-
-    def _take(self, title: str, texts: Sequence[str], *, strict: bool) -> None:
-        key = match_key(title)
-        if strict and key and key in self._titles and key != self._last_title:
-            raise Repeating(f"the title “{title.strip()[:80]}” came again in the same part")
+    def take(self, keys: Sequence[str], texts: Sequence[str]) -> bool:
+        """Remember an item; ``True`` when it adds a statement not already kept under its name."""
+        names = [key for key in keys if key]
+        index = next((self._by_key[key] for key in names if key in self._by_key), None)
+        if index is None:
+            index = len(self._entries)
+            self._entries.append([])
+        for key in names:
+            self._by_key.setdefault(key, index)
+        entry = self._entries[index]
+        added = False
         for text in texts:
-            shingles = _shingles(text)
-            if not shingles:
+            marked = mark(text)
+            if not marked or any(same(marked, seen) for seen in entry):
                 continue
-            if strict and any(self._near(shingles, seen) for seen in self._paragraphs):
-                self.near_repeats += 1
-                if self.near_repeats >= MAX_NEAR_REPEATS:
-                    raise Repeating(f"{MAX_NEAR_REPEATS} paragraphs repeated ones already written")
-            self._paragraphs.append(shingles)
-        if key:
-            self._titles.add(key)
-            self._last_title = key
+            entry.append(marked)
+            added = True
+        return added
 
-    @staticmethod
-    def _near(a: frozenset[str], b: frozenset[str]) -> bool:
-        small, large = sorted((len(a), len(b)))
-        if not large or small < NEAR * large:  # Jaccard can't reach 0.9 with sizes this far apart
-            return False
-        return len(a & b) / len(a | b) >= NEAR
+
+T = TypeVar("T")
+
+
+@dataclass
+class AnswerRun(Generic[T]):
+    """The items of one answer as they stream: ``kept`` (useful ones and the scattered repeats before
+    them) and the current run of items that add nothing. :data:`LOOP_RUN` of those raise
+    :class:`Looping`; the answer is then cut before the run, which is never kept."""
+
+    detector: LoopDetector
+    kept: list[T] = field(default_factory=list)
+    useful: int = 0
+    _run: list[tuple[T, str]] = field(default_factory=list)
+
+    def add(self, item: T, title: str, keys: Sequence[str], texts: Sequence[str]) -> bool:
+        """``True`` when the item is kept now (it moved the answer on)."""
+        if self.detector.take(keys, texts):
+            self.kept.extend(pending for pending, _title in self._run)
+            self._run = []
+            self.kept.append(item)
+            self.useful += 1
+            return True
+        self._run.append((item, title))
+        if len(self._run) >= LOOP_RUN:
+            raise Looping([name for _item, name in self._run])
+        return False
+
+    def close(self) -> list[T]:
+        """The answer ended: a shorter run at its end is scattered repeats, kept for the filter."""
+        self.kept.extend(pending for pending, _title in self._run)
+        self._run = []
+        return self.kept

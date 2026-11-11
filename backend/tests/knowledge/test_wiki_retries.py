@@ -122,7 +122,8 @@ async def test_a_crash_mid_answer_continues_once_from_the_finished_sections_then
     assert failed["state"] == "failed"
     assert len(turns) == 2
     # The retry continued from the finished section instead of starting over.
-    assert json.loads(turns[1].messages[1].content)["sections"][0]["title"] == "Энтропия"
+    assert [m.role for m in turns[1].messages] == ["user"]  # WR2: a new request, not the old answer
+    assert "Энтропия" in turns[1].messages[0].content.split("Sections already written for this part")[1]
     assert "Retry continues from them" in failed["error"]
 
 

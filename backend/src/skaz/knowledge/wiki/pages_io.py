@@ -73,6 +73,8 @@ def forget_material(db: KnowledgeDatabase, material_id: str) -> None:
     with db.write() as connection:
         connection.execute("DELETE FROM materials WHERE id = ?", (material_id,))
         connection.execute("DELETE FROM corrections WHERE material_id = ?", (material_id,))
+        # WR1: kept wiki answers don't cascade from the rebuilt index; they go with the material.
+        connection.execute("DELETE FROM wiki_checkpoints WHERE material_id = ?", (material_id,))
 
 
 def is_user_part(part: object) -> bool:

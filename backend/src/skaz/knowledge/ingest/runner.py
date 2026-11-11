@@ -28,7 +28,7 @@ from . import prompts
 from .budget import BudgetReached
 from .checkpoints import Checkpoints, profile_label, source_fingerprint, step_key
 from .checks import CheckedBlock, CheckStats, check_statement, clean_text, clean_title, flags_instructions
-from .drafts import ConceptDraft, DraftSection
+from .drafts import ConceptDraft, DraftSection, place_block
 from .execution import (
     RETRY_DELAYS_S,
     STOP_KINDS,
@@ -61,7 +61,7 @@ from .model import (
 )
 from .pages import match_key
 from .protocols import ConceptUpdateHook, InstructionDetector, RecognitionCheck, RecognitionRequest, TextLayer
-from .repetition import RepeatGuard, Repeating
+from .repetition import AnswerRun, LoopDetector, Looping
 from .sources import DEFAULT_PART_BUDGET, ExclusionsUnreadable, IngestSource, load_source, split_parts
 from .stream import ItemStream
 from .writer import ConceptTarget, WikiWriter, WritePlan, WriteResult
@@ -71,6 +71,8 @@ BLOCKED_KIND = "blocked_output"
 # same way. Its finished items stay in the checkpoint, so Retry continues from them.
 SPEECH_KINDS = frozenset({"recording", "audio", "video", "video_link"})
 EXCERPT_CHARS = 300
+#: Fragments sent again before the resume point of a Notes continuation (WR2), for a smooth seam.
+RESUME_OVERLAP = 3
 
 
 class IngestCancelled(Exception):
@@ -106,40 +108,69 @@ class _Operation:
     chars: int = 0
     #: Items (sections / concepts) of the answers already taken.
     kept: int = 0
+    #: Of those, items of answers now in the checkpoint (an answer that added nothing is not kept).
+    stored: int = 0
 
 
 Item = SectionOut | ConceptOut
 
 
-def _words(item: Item) -> tuple[str, list[str]]:
+def _title(item: Item) -> str:
+    title = item.title if isinstance(item, SectionOut) else item.title_in_wiki_language
+    return clean_title(title)[:80]
+
+
+def _names(item: Item) -> list[str]:
+    """What makes two items the same concept (any of its names) or the same Notes section (its title)."""
     if isinstance(item, SectionOut):
-        return item.title, [block.text for block in item.blocks]
-    return item.title_in_wiki_language, [block.text for block in item.definition_blocks]
+        return [match_key(item.title)]
+    return [match_key(name) for name in (item.title_in_wiki_language, item.original or "", *item.aliases)]
+
+
+def _texts(item: Item) -> list[str]:
+    blocks = item.blocks if isinstance(item, SectionOut) else item.definition_blocks
+    return [block.text for block in blocks]
 
 
 @dataclass
 class _Live:
     """One answer of a Notes/Concepts operation, read while it streams (C1-f): every finished item
-    is checked for going round in circles, kept in the checkpoint at once and counted for the
-    progress line. ``synthetic()`` is the answer so far as one that says there is ``more``."""
+    that moves the answer on is kept in the checkpoint at once and counted for the progress line;
+    items that add nothing wait in :class:`AnswerRun` and, three in a row, cut the answer (WR3).
+    ``synthetic()`` is the answer so far as one that says there is ``more``."""
 
     unit: str
     item_model: type[SectionOut] | type[ConceptOut]
-    guard: RepeatGuard
+    detector: LoopDetector
     progress: Callable[[int], Awaitable[None]]
     operation: _Operation
     save: Callable[[str], Awaitable[None]] | None = None
-    items: list[dict[str, Any]] = field(default_factory=list)
+    run: AnswerRun[dict[str, Any]] | None = None
     stream: ItemStream | None = None
+    #: Items the stream returned (valid or not), so the parsed answer adds only the ones it didn't.
+    streamed: int = 0
     #: Items of this step now in its checkpoint (the latest ``save``), for an honest failure text.
     saved: int = 0
 
     def reset(self) -> None:
         self.stream = ItemStream(self.unit)
-        self.items = []
+        self.run = AnswerRun(self.detector)
+        self.streamed = 0
+
+    @property
+    def items(self) -> list[dict[str, Any]]:
+        return self.run.kept if self.run is not None else []
+
+    @property
+    def useful(self) -> int:
+        return self.run.useful if self.run is not None else 0
 
     def synthetic(self) -> str:
         return json.dumps({self.unit: self.items, "more": True}, ensure_ascii=False)
+
+    def cut(self, model: type[NotesOut] | type[ConceptsOut]) -> NotesOut | ConceptsOut:
+        """The answer up to the loop, as one that says there is ``more``."""
+        return model.model_validate({self.unit: self.items, "more": True})
 
     def parsed_items(self, answer: NotesOut | ConceptsOut) -> list[Item]:
         return list(answer.sections) if isinstance(answer, NotesOut) else list(answer.concepts)
@@ -147,17 +178,67 @@ class _Live:
     async def feed(self, text: str) -> None:
         assert self.stream is not None
         for raw in self.stream.feed(text):
+            self.streamed += 1
             try:
                 data = json.loads(raw)
                 item = self.item_model.model_validate(data)
             except (ValueError, ValidationError):
                 continue  # the whole answer is parsed at the end and repaired as usual
-            self.guard.check(*_words(item))
-            self.items.append(data)
-            if self.save is not None:
-                await self.save(self.synthetic())
-                self.saved = len(self.items)
-            await self.progress(self.operation.kept + len(self.items))
+            await self._take(data, item)
+
+    async def finish(self, answer: NotesOut | ConceptsOut) -> None:
+        """The answer arrived whole: items the stream didn't show finished, then any short run of
+        repeats at its end (scattered, not a loop) is kept for the duplicate filter."""
+        for item in self.parsed_items(answer)[self.streamed:]:
+            await self._take(item.model_dump(), item)
+        assert self.run is not None
+        self.run.close()
+
+    async def _take(self, data: dict[str, Any], item: Item) -> None:
+        assert self.run is not None
+        if not self.run.add(data, _title(item), _names(item), _texts(item)):
+            return
+        if self.save is not None:
+            await self.save(self.synthetic())
+            self.saved = len(self.items)
+        await self.progress(self.operation.kept + len(self.items))
+
+    def remember(self, items: Sequence[Item]) -> int:
+        """Items of a kept answer: what they add is known now. Returns how many add something."""
+        return sum(1 for item in items if self.detector.take(_names(item), _texts(item)))
+
+
+def _concept_titles(items: Sequence[Item]) -> list[str]:
+    """Finished concepts of a part for its continuation: the wiki-language title and the original."""
+    titles: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, ConceptOut):
+            continue
+        title = clean_title(item.title_in_wiki_language)
+        original = clean_title(item.original or "")
+        if title and match_key(title) not in titles:
+            same = not original or match_key(original) == match_key(title)
+            titles[match_key(title)] = title if same else f"{title} ({original})"
+    return list(titles.values())
+
+
+def _notes_follow_up(title: str, part: Sequence[Fragment], index: int, total: int, earlier: Sequence[str],
+                     items: Sequence[Item]) -> str:
+    """The continuation of a Notes part (WR2): the source from the highest fragment the finished
+    sections cite, :data:`RESUME_OVERLAP` fragments earlier, with their titles and the last one in full."""
+    sections = [item for item in items if isinstance(item, SectionOut)]
+    position = {fragment.seg: number for number, fragment in enumerate(part)}
+    cited = [cite.seg for section in sections for block in section.blocks for cite in block.cites
+             if cite.seg in position]
+    start = max(0, position[max(cited)] + 1 - RESUME_OVERLAP) if cited else 0
+    names = (clean_title(section.title) for section in sections)
+    written = list(dict.fromkeys(name for name in names if name))
+    last_title, last_texts = "", []
+    if sections:
+        last_title = clean_title(sections[-1].title)
+        last_texts = [text for text in (clean_text(block.text) for block in sections[-1].blocks) if text]
+    return prompts.notes_continue_prompt(title, part[start:], index, total, earlier, written, last_title,
+                                         last_texts)
 
 
 @dataclass
@@ -198,6 +279,8 @@ class IngestRun:
         self._counters: dict[str, int] = {}
         #: Failures in a row of calls that may have reached the model (one automatic retry).
         self._sent_failures = 0
+        #: Statements the duplicate filter merged into kept ones (WR3), for the journal.
+        self._duplicates = 0
 
     # -- bookkeeping --------------------------------------------------------
 
@@ -306,42 +389,56 @@ class IngestRun:
             return terminal, ""
         return None, result.text
 
-    async def _answers(self, operation: _Operation, instructions: str, prompt: str, schema: dict[str, Any],
+    async def _answers(self, operation: _Operation, instructions: str, prompt: str,
+                       follow_up: Callable[[Sequence[Item]], str], schema: dict[str, Any],
                        model: type[NotesOut] | type[ConceptsOut],
                        live: _Live) -> AsyncIterator[NotesOut | ConceptsOut]:
         """Answers for one part until ``more`` is false; one structure repair per answer. Each answer
-        is read while it streams (``live``, C1-f)."""
-        messages = [TurnMessage("user", prompt)]
-        previous: str | None = None
+        is read while it streams (``live``, C1-f).
+
+        A continuation is a NEW short request that ``follow_up`` builds from the items of this part so
+        far (WR2) — never the previous answer replayed as the model's own turn — so Retry, and another
+        model after a stop, ask exactly for what is left, and each request is its own checkpoint key.
+        An answer cut at a loop, or one that brought nothing new, gets one more continuation; a second
+        such answer in a row ends the job honestly (WR3)."""
+        part_items: list[Item] = []
+        #: The previous answer of this part was cut at a loop or brought nothing new.
+        stalled = False
         while True:
-            parsed = None
+            messages = [TurnMessage("user", prompt)]
+            cache_key = step_key(instructions, messages, schema)
+            parsed: NotesOut | ConceptsOut | None = None
             text = ""
-            logical_messages = list(messages)
-            cache_key = step_key(instructions, logical_messages, schema)
+            useful = 0
             cached = False
+            looped: Looping | None = None
             if self.checkpoints is not None:
                 entry = await disk_call(self.checkpoints.entry, cache_key)
-                saved = entry.response if entry is not None else None
-                if entry is not None and saved is not None:
+                if entry is not None:
                     try:
-                        parsed = parse_answer(saved, model)
+                        parsed = parse_answer(entry.response, model)
                     except AnswerInvalid:
+                        parsed = None
                         await disk_call(self.checkpoints.discard, cache_key)
                     else:
-                        text, cached = saved, True
-                        await self._kept_from(entry.profile, operation, live, len(live.parsed_items(parsed)))
-                        for item in live.parsed_items(parsed):
-                            live.guard.remember(*_words(item))
-                        operation.answers += 1
-                        if operation.answers > self.limits.max_answers:
-                            raise IngestFailed("The checkpoint exceeds the answer limit; split the material.")
-                        if previous is not None and text.strip() == previous.strip():
+                        before = live.detector.snapshot()
+                        useful = live.remember(live.parsed_items(parsed))
+                        if not useful and parsed.more:
+                            # It moved nothing on: continuing from it would ask the same again.
+                            live.detector.restore(before)
                             await disk_call(self.checkpoints.discard, cache_key)
-                            raise IngestFailed("A checkpoint repeated the previous answer; retry this step.")
-                        scope = current_execution()
-                        if scope is not None:
-                            await disk_call(scope.cache_hit, str(schema["title"]))
-            live.items = []
+                            parsed = None
+                        else:
+                            text, cached = entry.response, True
+                            await self._kept_from(entry.profile, operation, live,
+                                                  len(live.parsed_items(parsed)))
+                            operation.answers += 1
+                            if operation.answers > self.limits.max_answers:
+                                raise IngestFailed("The checkpoint exceeds the answer limit; split the "
+                                                   "material.")
+                            scope = current_execution()
+                            if scope is not None:
+                                await disk_call(scope.cache_hit, str(schema["title"]))
             live.save = self._saver(cache_key)
             live.saved = 0
             for attempt in range(0 if cached else 2):
@@ -350,46 +447,52 @@ class IngestRun:
                     raise IngestFailed(
                         f"The {operation.name} needed more than {self.limits.max_answers} answers, the "
                         "technical limit for one material. Nothing was saved; split the material and retry.")
-                before = live.guard.snapshot()
+                before = live.detector.snapshot()
                 try:
                     text = await self._ask(instructions, messages, schema, live)
                     parsed = parse_answer(text, model)
-                    for item in live.parsed_items(parsed)[len(live.items):]:
-                        live.guard.check(*_words(item))  # items the stream didn't show finished
-                except Repeating as error:
-                    raise self._repeating(operation, live, error) from error
+                    await live.finish(parsed)
+                except Looping as error:
+                    looped = error
+                    parsed = live.cut(model)
+                    text = live.synthetic()
                 except AnswerInvalid as error:
-                    live.guard.restore(before)
+                    live.detector.restore(before)
                     parsed = None
                     if attempt == 1:
                         raise IngestFailed(f"The agent's answer for the {operation.name} was not in the "
                                            "expected format, twice. "
                                            f"{self._kept_note(operation.kept + live.saved, live.unit)}"
                                            ) from error
-                    messages += [TurnMessage("assistant", text, self.engine.id),
-                                 TurnMessage("user", prompts.repair_message(str(error)))]
+                    messages = [*messages, TurnMessage("assistant", text, self.engine.id),
+                                TurnMessage("user", prompts.repair_message(str(error)))]
                     continue
-                if previous is not None and text.strip() == previous.strip():
-                    if self.checkpoints is not None:  # what streamed of it is the repeat: not kept
-                        await disk_call(self.checkpoints.discard, cache_key)
-                    raise IngestFailed(f"The agent repeated its previous answer while writing the "
-                                       f"{operation.name}. {self._kept_note(operation.kept, live.unit)}")
+                useful = live.useful
                 break
             assert parsed is not None
-            # A continuation needs the valid answer, not failed JSON/repair history. This also
-            # makes its checkpoint key identical when resuming from a repaired cached answer.
-            messages = logical_messages
-            previous = text
-            operation.kept += len(live.parsed_items(parsed))
+            items = live.parsed_items(parsed)
+            if looped is not None or (parsed.more and not useful):
+                if stalled and not useful:
+                    raise IngestFailed(self._stuck(operation, live.unit, looped))
+                finished = len(part_items) + len(items)
+                await self._log(self._stalled_note(operation, live.unit, looped, finished))
+                stalled = True
+            else:
+                stalled = False
+            operation.kept += len(items)
+            part_items.extend(items)
             await live.progress(operation.kept)
             yield parsed
             # The consumer has now applied the normal source/output checks to this response.
-            if self.checkpoints is not None and not cached:
-                await disk_call(self.checkpoints.put, cache_key, text)
+            if useful or not parsed.more:
+                operation.stored += len(items)
+                if self.checkpoints is not None and not cached:
+                    await disk_call(self.checkpoints.put, cache_key, text)
+            elif self.checkpoints is not None and not cached:  # nothing in it moves a Retry on
+                await disk_call(self.checkpoints.discard, cache_key)
             if not parsed.more:
                 return
-            messages += [TurnMessage("assistant", text, self.engine.id),
-                         TurnMessage("user", prompts.CONTINUE_MESSAGE)]
+            prompt = follow_up(part_items)
 
     async def _kept_from(self, writer: str | None, operation: _Operation, live: _Live, count: int) -> None:
         """Journal: kept answers another choice wrote (C1-f item 4 — which model wrote what)."""
@@ -418,22 +521,41 @@ class IngestRun:
             return f"The 1 {unit[:-1]} before that is kept: Retry continues from it."
         return f"The {kept} {unit} before that are kept: Retry continues from them."
 
-    def _repeating(self, operation: _Operation, live: _Live, error: Repeating) -> IngestFailed:
-        kept = operation.kept + len(live.items)
-        unit = live.unit if kept != 1 else live.unit[:-1]
+    @staticmethod
+    def _quoted(titles: Sequence[str]) -> str:
+        return ", ".join(f"“{title}”" for title in titles)
+
+    def _stalled_note(self, operation: _Operation, unit: str, looped: Looping | None, finished: int) -> str:
+        """Journal (counts and titles only): an answer cut at a loop, or one that brought nothing new."""
+        if looped is None:
+            return (f"The answer for the {operation.name} added nothing new; SKAZ asked once more for the "
+                    "rest of the part.")
+        return (f"The model started repeating itself while writing the {operation.name}: "
+                f"{len(looped.titles)} {unit} in a row added nothing new ({self._quoted(looped.titles)}). "
+                f"They were left out, and SKAZ asked it to continue after the {finished} finished {unit} "
+                "of this part.")
+
+    def _stuck(self, operation: _Operation, unit: str, looped: Looping | None) -> str:
+        kept = operation.stored
         if self.checkpoints is not None and kept:
-            rest = (f"The {kept} {unit} before that are kept: Retry or another model in Settings → Models "
-                    "continues from them.")
+            noun = unit if kept != 1 else unit[:-1]
+            pronoun = "them" if kept != 1 else "it"
+            verb = "are" if kept != 1 else "is"
+            rest = (f"The {kept} {noun} before that {verb} kept: Retry or another model in Settings → Models "
+                    f"continues from {pronoun}.")
         else:
             rest = "Nothing was saved; retry, or choose another model in Settings → Models."
-        return IngestFailed(f"The model started repeating itself while writing the {operation.name} "
-                            f"({error.reason}). {rest}")
+        if looped is None:
+            return (f"The model kept answering without anything new while writing the {operation.name}, "
+                    f"twice in a row. {rest}")
+        return (f"The model kept repeating itself while writing the {operation.name}: asked to continue, "
+                f"it again wrote {len(looped.titles)} {unit} in a row that added nothing new. {rest}")
 
     def _live(self, operation: _Operation, unit: str, item_model: type[SectionOut] | type[ConceptOut],
-              guard: RepeatGuard, counter: str) -> _Live:
+              counter: str) -> _Live:
         async def progress(count: int) -> None:
             await self._count(**{counter: count})
-        return _Live(unit, item_model, guard, progress, operation)
+        return _Live(unit, item_model, LoopDetector(), progress, operation)
 
     def _spend(self, operation: _Operation, blocks: Sequence[BlockOut]) -> None:
         operation.chars += sum(len(block.text) for block in blocks)
@@ -467,13 +589,17 @@ class IngestRun:
         operation = _Operation("notes")
         instructions = prompts.instructions_for(prompts.NOTES_INSTRUCTIONS, self.language)
         sections: list[DraftSection] = []
-        guard = RepeatGuard()
-        live = self._live(operation, "sections", SectionOut, guard, "notes_sections")
+        live = self._live(operation, "sections", SectionOut, "notes_sections")
         for index, part in enumerate(parts, start=1):
-            guard.new_part()
-            prompt = prompts.notes_prompt(source.title, part, index, len(parts),
-                                          [section.title for section in sections])
-            answers = self._answers(operation, instructions, prompt, prompts.NOTES_SCHEMA, NotesOut, live)
+            earlier = [section.title for section in sections]
+            prompt = prompts.notes_prompt(source.title, part, index, len(parts), earlier)
+
+            def follow_up(items: Sequence[Item], part: Sequence[Fragment] = part, index: int = index,
+                          earlier: Sequence[str] = earlier) -> str:
+                return _notes_follow_up(source.title, part, index, len(parts), earlier, items)
+
+            answers = self._answers(operation, instructions, prompt, follow_up, prompts.NOTES_SCHEMA,
+                                    NotesOut, live)
             async for answer in answers:
                 assert isinstance(answer, NotesOut)
                 for section in answer.sections:
@@ -485,10 +611,17 @@ class IngestRun:
                         continue
                     checked = [found for found in (self._check(block, source, fragments, f"Notes · {title}")
                                                    for block in section.blocks) if found is not None]
-                    if sections and match_key(sections[-1].title) == match_key(title):
-                        sections[-1].blocks.extend(checked)
-                    else:
-                        sections.append(DraftSection(title, checked))
+                    key = match_key(title)
+                    if sections and match_key(sections[-1].title) == key:
+                        target = sections[-1]  # a section continued (next answer or part): one section
+                    else:  # the same title later in the lecture stays its own section (order matters)
+                        target = DraftSection(title)
+                        sections.append(target)
+                    # Duplicate filter (WR3): a statement nearly repeating one of a same-titled section.
+                    same = [known.blocks for known in sections if match_key(known.title) == key]
+                    for statement in checked:
+                        if not place_block(target.blocks, statement, same, exact_short=False):
+                            self._duplicates += 1
             await self._count(parts_done=index, notes_answers=operation.answers)
         return [section for section in sections if section.blocks]
 
@@ -498,14 +631,18 @@ class IngestRun:
         operation = _Operation("concepts")
         instructions = prompts.instructions_for(prompts.CONCEPTS_INSTRUCTIONS, self.language)
         drafts: list[ConceptDraft] = []
-        guard = RepeatGuard()
-        live = self._live(operation, "concepts", ConceptOut, guard, "concepts_streamed")
+        live = self._live(operation, "concepts", ConceptOut, "concepts_streamed")
         for index, part in enumerate(parts, start=1):
-            guard.new_part()
-            prompt = prompts.concepts_prompt(source.title, part, index, len(parts),
-                                             [draft.display_title for draft in drafts])
-            async for answer in self._answers(operation, instructions, prompt, prompts.CONCEPTS_SCHEMA,
-                                              ConceptsOut, live):
+            known = [draft.display_title for draft in drafts]
+            prompt = prompts.concepts_prompt(source.title, part, index, len(parts), known)
+
+            def follow_up(items: Sequence[Item], part: Sequence[Fragment] = part, index: int = index,
+                          known: Sequence[str] = known) -> str:
+                return prompts.concepts_continue_prompt(source.title, part, index, len(parts), known,
+                                                        _concept_titles(items))
+
+            async for answer in self._answers(operation, instructions, prompt, follow_up,
+                                              prompts.CONCEPTS_SCHEMA, ConceptsOut, live):
                 assert isinstance(answer, ConceptsOut)
                 for concept in answer.concepts:
                     self._spend(operation, concept.definition_blocks)
@@ -521,17 +658,19 @@ class IngestRun:
                         self.report.stats.dropped["concept_bad_name"] += 1
                         continue
                     original = clean_title(concept.original or "") or None
-                    checked = (self._check(block, source, fragments, f"Concept · {title}")
-                               for block in concept.definition_blocks)
                     draft = ConceptDraft(
                         title=title, original=original,
                         aliases=[alias for alias in (clean_title(item) for item in concept.aliases) if alias],
-                        blocks=[found for found in checked if found is not None],
                         related=[name for name in (clean_title(item) for item in concept.related) if name],
                     )
+                    for given in concept.definition_blocks:
+                        found = self._check(given, source, fragments, f"Concept · {title}")
+                        if found is not None and not draft.add(found):
+                            self._duplicates += 1
+                    # Duplicate filter (WR3): a concept listed again merges into its draft.
                     same = next((known for known in drafts if known.keys() & draft.keys()), None)
                     if same is not None:
-                        same.absorb(draft)
+                        self._duplicates += same.absorb(draft)
                     else:
                         drafts.append(draft)
                     await self._count(concepts_found=len(drafts))
@@ -668,6 +807,9 @@ class IngestRun:
             line += f" Left out by the source check: {stats.dropped_total} ({reasons})."
         if stats.blocked:
             line += f" Blocked as instructions to an AI: {stats.blocked}."
+        if self._duplicates:
+            line += (f" Repeats merged into statements already kept: {self._duplicates} (their sources were "
+                     "added to the kept ones).")
         return line
 
     async def _run_hooks(self, result: WriteResult) -> None:

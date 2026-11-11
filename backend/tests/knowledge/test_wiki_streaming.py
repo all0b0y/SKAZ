@@ -1,8 +1,9 @@
 """C1-f over HTTP and the model seam, with authored model events only (no real model).
 
 The Notes answer is read while it streams: finished sections are kept at once, a broken answer
-continues from them, a model that goes round in circles is stopped, and the job shows how many
-sections are written. Decided 2026-10-20 after a real 12-minute Notes answer was lost.
+continues from them with a new short request (WR2), a model that goes round in circles is cut and
+continued once, then stopped (WR3), and the job shows how many sections are written. Decided
+2026-10-20 after a real 12-minute Notes answer was lost; continuation and loop rules 2026-11-10.
 """
 from __future__ import annotations
 
@@ -91,6 +92,16 @@ def _headings(world: World) -> list[str]:
     return [line[3:] for line in note.splitlines() if line.startswith("## ") and line != "## Concepts"]
 
 
+def _continues_after(turn: AgentTurn, *titles: str) -> None:
+    """WR2: a continuation is one new user request naming what is written — never the old JSON."""
+    assert [m.role for m in turn.messages] == ["user"]
+    content = turn.messages[0].content
+    assert content.startswith("Continue the Notes for part 1 of 1")
+    written = content.split("Sections already written for this part")[1].split("The last section")[0]
+    assert all(title in written for title in titles)
+    assert '"sections"' not in content and '"more": true' not in content
+
+
 async def test_a_broken_answer_keeps_its_finished_sections_and_continues_from_them(
     kb_app: Any, kb_client: httpx.AsyncClient,
 ) -> None:
@@ -104,48 +115,58 @@ async def test_a_broken_answer_keeps_its_finished_sections_and_continues_from_th
     assert done["state"] == "done", done["error"]
     first, second = world.notes_turns()
     # The second call continues after the two finished sections instead of starting over.
-    assert [m.role for m in second.messages] == ["user", "assistant", "user"]
-    kept = json.loads(second.messages[1].content)
-    assert [s["title"] for s in kept["sections"]] == ["Энтропия", "Температура"] and kept["more"] is True
-    assert second.messages[2].content == prompts.CONTINUE_MESSAGE
-    assert second.messages[0].content == first.messages[0].content
+    _continues_after(second, "Энтропия", "Температура")
+    assert "Write the Notes for part 1 of 1" in first.messages[0].content
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
     assert done["progress"]["notes_sections"] == 3
     journal = " ".join(entry["message"] for entry in done["journal"])
     assert "continuing from the 2 finished sections" in journal
 
 
-async def test_a_model_going_round_in_circles_is_stopped_and_retry_continues_from_kept_sections(
+LOOP = '{"sections": [' + ", ".join(section(item) for item in (ONE, TWO, ONE, TWO, ONE)) + "]}"
+LOOP_AGAIN = '{"sections": [' + ", ".join([section(TWO), section(ONE), section(TWO)]) + "]}"
+REST = json.dumps({"sections": [json.loads(section(THREE))], "more": False}, ensure_ascii=False)
+
+
+async def test_a_model_going_round_in_circles_is_cut_and_continued_once(
     kb_app: Any, kb_client: httpx.AsyncClient,
 ) -> None:
-    looping = '{"sections": [' + ", ".join([section(ONE), section(TWO), section(ONE), section(TWO)]) + "]}"
+    world = await _world(kb_app, kb_client, [[*chunks(LOOP), Completed("")], [*chunks(REST), Completed("")]])
+    done = await _ingest(world, kb_client)
+    assert done["state"] == "done", done["error"]
+    assert len(world.notes_turns()) == 2
+    _continues_after(world.notes_turns()[1], "Энтропия", "Температура")
+    assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
+    journal = " ".join(entry["message"] for entry in done["journal"])
+    assert ("3 sections in a row added nothing new (“Энтропия”, “Температура”, “Энтропия”)" in journal)
+    assert "мера беспорядка" not in journal  # titles and counts only, never source text
+
+
+async def test_a_second_loop_right_away_fails_and_retry_continues_from_kept_sections(
+    kb_app: Any, kb_client: httpx.AsyncClient,
+) -> None:
     world = await _world(kb_app, kb_client, [
-        [*chunks(looping), Completed("")],
-        [*chunks(json.dumps({"sections": [json.loads(section(THREE))], "more": False}, ensure_ascii=False)),
-         Completed("")],
+        [*chunks(LOOP), Completed("")], [*chunks(LOOP_AGAIN), Completed("")], [*chunks(REST), Completed("")],
     ])
     failed = await _ingest(world, kb_client)
     assert failed["state"] == "failed"
-    assert failed["error"].startswith("The model started repeating itself while writing the notes")
+    assert failed["error"].startswith("The model kept repeating itself while writing the notes")
     assert "2 sections before that are kept" in failed["error"]
+    assert "paragraphs" not in failed["error"]
     assert failed["can_retry"] is True
     # Retry: the kept sections come from the checkpoint; only the rest is asked for.
     done = await _ingest(world, kb_client)
     assert done["state"] == "done", done["error"]
-    retry = world.notes_turns()[-1]
-    assert json.loads(retry.messages[1].content)["sections"][1]["title"] == "Температура"
-    assert len(world.notes_turns()) == 2
+    assert len(world.notes_turns()) == 3
+    _continues_after(world.notes_turns()[-1], "Энтропия", "Температура")
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
 
 
 async def test_after_the_model_repeated_itself_another_model_continues_from_the_kept_sections(
     kb_app: Any, kb_client: httpx.AsyncClient,
 ) -> None:
-    looping = '{"sections": [' + ", ".join([section(ONE), section(TWO), section(ONE), section(TWO)]) + "]}"
     world = await _world(kb_app, kb_client, [
-        [*chunks(looping), Completed("")],
-        [*chunks(json.dumps({"sections": [json.loads(section(THREE))], "more": False}, ensure_ascii=False)),
-         Completed("")],
+        [*chunks(LOOP), Completed("")], [*chunks(LOOP_AGAIN), Completed("")], [*chunks(REST), Completed("")],
     ], models=[ModelOption("stream-model", "Stream", ("low",), "low"),
                ModelOption("other-model", "Other", ("low",), "low")])
     failed = await _ingest(world, kb_client)
@@ -159,8 +180,8 @@ async def test_after_the_model_repeated_itself_another_model_continues_from_the_
     assert done["state"] == "done", done["error"]
     retry = world.notes_turns()[-1]
     assert retry.model == "other-model"
-    kept = json.loads(retry.messages[1].content)["sections"]
-    assert [s["title"] for s in kept] == ["Энтропия", "Температура"]
+    # The other model never sees the first model's text as its own turn: one new request.
+    _continues_after(retry, "Энтропия", "Температура")
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
     journal = " ".join(entry["message"] for entry in done["journal"])
     assert "2 sections written by Codex · stream-model · low" in journal
@@ -180,8 +201,7 @@ async def test_a_limit_mid_answer_fails_the_job_but_keeps_the_sections_for_retry
     assert failed["state"] == "failed" and "usage limit" in failed["error"]
     done = await _ingest(world, kb_client)
     assert done["state"] == "done", done["error"]
-    retry = world.notes_turns()[-1]
-    assert [s["title"] for s in json.loads(retry.messages[1].content)["sections"]] == ["Энтропия"]
+    _continues_after(world.notes_turns()[-1], "Энтропия")
     assert _headings(world) == ["Энтропия", "Температура", "Рост энтропии"]
 
 
