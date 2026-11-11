@@ -2,24 +2,26 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-import pytest
 
-from skaz.knowledge.agents.engine import AgentTurn, Failed
-from skaz.knowledge.agents.fake import FakeEngine, ScriptItem
+from skaz.knowledge.agents.engine import AgentTurn, Failed, TextDelta
+from skaz.knowledge.agents.fake import FakeEngine, Gate, ScriptItem
 from skaz.knowledge.ingest.execution import ProcessingProfile, execution_scope, stored_scope
 from skaz.knowledge.ingest.jobs import JobRecord
 from skaz.knowledge.ingest.service import IngestService
 from skaz.knowledge.service import KnowledgeService
 from skaz.knowledge.wiki.agent import AgentCaller
 from skaz.knowledge.wiki.jobs import JobContext, WikiJobs
+from skaz.knowledge.wiki.service import WikiService
+from skaz.knowledge.wiring import follow_up_continuer
 
-from .ingest_support import PatternDetector, ScriptedWiki, add_material
+from .ingest_support import PatternDetector, ScriptedWiki, add_material, block, cite, notes
 from .test_ingest_pipeline import NOTES_OK
 
 
@@ -191,7 +193,7 @@ async def test_explicit_model_switch_continues_on_the_new_engine_without_unlocki
 
 async def test_a_follow_up_waits_without_sending_and_continues_at_the_reset(ready: KnowledgeService) -> None:
     clock = Clock()
-    ingest, engine, parents = await limited(ready, clock, clock.now + timedelta(hours=1), count=1)
+    ingest, _engine, parents = await limited(ready, clock, clock.now + timedelta(hours=1), count=1)
     wiki = WikiJobs(ingest.jobs, profile=ingest.profile)
     calls: list[str] = []
 
@@ -244,3 +246,123 @@ async def test_http_pause_metadata_continue_and_stop(kb_app: Any, kb_client: htt
     await drain(ingest)
     assert ingest.job(jobs[0].id).state == "done"
     await ingest.close()
+
+
+async def test_stale_reset_does_not_spin_or_automatically_spend_again(ready: KnowledgeService) -> None:
+    clock = Clock()
+    ingest, engine, jobs = await limited(ready, clock, clock.now - timedelta(minutes=1))
+    assert len(engine.turns) == 1 and ingest.job(jobs[0].id).state == "paused"
+    pause = ingest.job(jobs[0].id).engine_pause
+    assert pause is not None and pause.retry_at is None
+    await ingest.close()
+
+
+async def test_running_jobs_reach_their_own_limit_and_the_latest_reset_wins(ready: KnowledgeService) -> None:
+    clock = Clock()
+    gates = [asyncio.Event(), asyncio.Event()]
+    both_started = asyncio.Event()
+    answers = ScriptedWiki(notes=[NOTES_OK] * 4)
+    calls = 0
+
+    def answer(turn: AgentTurn) -> list[ScriptItem]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            both_started.set()
+        if calls <= 2:
+            return [Gate(gates[calls - 1]), Failed("", "limit", "fixture",
+                                                  clock.now + timedelta(hours=calls))]
+        return answers._answer(turn)
+
+    engine = FakeEngine("codex", script=answer)
+    ingest = service(ready, engine, clock)
+    ingest.slots = lambda: 2  # type: ignore[method-assign]
+    jobs = [await ingest.request_ingest(add_material(ready, "Quota", f"Running {n}", kind="pdf"))
+            for n in range(3)]
+    first_task = ingest._active[jobs[0].id].task
+    second_task = ingest._active[jobs[1].id].task
+    assert first_task is not None and second_task is not None
+    await asyncio.wait_for(both_started.wait(), 5)
+    gates[0].set()
+    await asyncio.shield(first_task)
+    assert [ingest.job(job.id).state for job in jobs] == ["paused", "running", "queued"]
+    assert len(engine.turns) == 2
+    gates[1].set()
+    await asyncio.shield(second_task)
+    await drain(ingest)
+    clock.advance(3600)
+    await drain(ingest)
+    assert [ingest.job(job.id).state for job in jobs] == ["paused", "paused", "queued"]
+    clock.advance(3600)
+    await drain(ingest)
+    assert [ingest.job(job.id).state for job in jobs] == ["done", "done", "done"]
+    await ingest.close()
+
+
+async def test_finished_streamed_sections_stay_in_the_checkpoint_at_a_quota_pause(
+    ready: KnowledgeService,
+) -> None:
+    clock = Clock()
+    one = json.loads(NOTES_OK)["sections"][0]
+    second = notes(("Температура", [block("from_source", "Температура показывает энергию частиц.",
+                                           cite(2, "среднюю кинетическую энергию частиц"))]))
+    wiki = ScriptedWiki(notes=[second])
+    first = True
+
+    def answer(turn: AgentTurn) -> list[ScriptItem]:
+        nonlocal first
+        if first:
+            first = False
+            return [TextDelta("", '{"sections": [' + json.dumps(one) + ', {"title": "unfinished'),
+                    Failed("", "limit", "fixture")]
+        return wiki._answer(turn)
+
+    engine = FakeEngine("codex", script=answer)
+    ingest = service(ready, engine, clock)
+    material = add_material(ready, "Quota", "Checkpoint", kind="pdf")
+    ingest.update_settings(engine="codex", model="fake-model")
+    job = await ingest.request_ingest(material)
+    await drain(ingest)
+    assert ingest.job(job.id).state == "paused"
+    with ready.db.read() as connection:
+        saved = connection.execute("SELECT response FROM wiki_checkpoint_answers WHERE material_id = ?",
+                                   (material,)).fetchall()
+    assert saved and "Энтропия" in saved[0][0]
+    await ingest.continue_job(job.id)
+    await drain(ingest)
+    assert ingest.job(job.id).state == "done" and ingest.job(job.id).counters["notes_sections"] == 2
+    await ingest.close()
+
+
+async def test_material_follow_ups_resume_after_restart_with_the_same_root_and_budget(
+    ready: KnowledgeService,
+) -> None:
+    clock = Clock()
+    ingest, engine, parents = await limited(ready, clock, clock.now + timedelta(hours=1), count=1)
+    wiki = WikiService(ready, ingest)
+    parent_scope = stored_scope(ready.db, parents[0].id)
+    assert parent_scope is not None
+    material = ready.material_repo.get(parents[0].material_id or "")
+    assert material is not None
+    with execution_scope(parent_scope):
+        follow = await wiki.write_overview(material.folder_id)
+    await wiki.jobs.wait(follow.id)
+    assert ingest.job(follow.id).state == "paused"
+    await wiki.jobs.close()
+    await ingest.close()
+
+    restarted = service(ready, engine, clock)
+    next_wiki = WikiService(ready, restarted)
+    restarted.continue_follow_ups = follow_up_continuer(next_wiki)
+    restarted.resume()
+    await drain(restarted)
+    clock.advance(3600)
+    await drain(restarted)
+    await next_wiki.jobs.idle("folder_overview")
+    continued = [job for job in restarted.jobs.list_all() if job.kind == "folder_overview" and job.id != follow.id]
+    assert len(continued) == 1 and continued[0].state == "done"
+    scope = stored_scope(ready.db, continued[0].id)
+    assert scope is not None and scope.root_job_id == parent_scope.root_job_id
+    assert scope.budget == parent_scope.budget and scope.profile == parent_scope.profile
+    await next_wiki.jobs.close()
+    await restarted.close()
