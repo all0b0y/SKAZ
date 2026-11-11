@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useState,
   type ReactNode,
 } from 'react';
@@ -26,7 +27,7 @@ import type {
   KbWeeklySettings,
   KbWeeklySettingsUpdate,
 } from '../../api/kb/types.gen';
-import { useOptionalServices, useServices } from '../state/context';
+import { useOptionalServices } from '../state/context';
 import type { KbServices } from '../state/context';
 import { Button, Icon, Modal, Switch } from '../ui';
 import { clockOrDate, shortTime } from '../ui/time';
@@ -56,18 +57,24 @@ export function useFakeKb(): FakeKbOverride | null {
 
 function useResolvedScienceClient(override?: ScienceClient): ScienceClient {
   const fake = useFakeKb();
-  if (override) return override;
-  if (fake?.science) return fake.science;
-  const services = useServices();
-  return createScienceClient(services.client);
+  const client = useOptionalServices()?.client;
+  return useMemo(() => {
+    if (override) return override;
+    if (fake?.science) return fake.science;
+    if (!client) throw new Error('KbServicesProvider is missing');
+    return createScienceClient(client);
+  }, [override, fake?.science, client]);
 }
 
 function useResolvedMaintenanceClient(override?: MaintenanceClient): MaintenanceClient {
   const fake = useFakeKb();
-  if (override) return override;
-  if (fake?.maintenance) return fake.maintenance;
-  const services = useServices();
-  return createMaintenanceClient(services.client);
+  const client = useOptionalServices()?.client;
+  return useMemo(() => {
+    if (override) return override;
+    if (fake?.maintenance) return fake.maintenance;
+    if (!client) throw new Error('KbServicesProvider is missing');
+    return createMaintenanceClient(client);
+  }, [override, fake?.maintenance, client]);
 }
 
 // ---- Science settings store ------------------------------------------------------------------
