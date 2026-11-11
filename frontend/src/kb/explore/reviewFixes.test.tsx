@@ -88,7 +88,9 @@ describe('FX-D review regressions', () => {
     kb.explore.jobs = async () => ({ jobs: done ? [] : [summary(scenes.searching.run)] });
     kb.explore.run = async () => structuredClone(done ? scenes.done.run : scenes.searching.run);
     kb.explore.findings = async () => structuredClone(done ? scenes.home.findings : emptyFindings);
-    const map = vi.spyOn(kb.areas, 'map');
+    const map = vi.spyOn(kb.areas, 'map').mockImplementation(async () => ({ ...scenes.area.map,
+      areas: scenes.area.map.areas.map((area) => ({ ...area, new_findings: done ? 99 : 0 })),
+    }));
     render(<ExploreSection clients={kb} />);
     await flush();
     const calls = map.mock.calls.length;
@@ -97,6 +99,8 @@ describe('FX-D review regressions', () => {
     expect(screen.getByText('Done just now')).toBeInTheDocument();
     expect(screen.getByText('Claim-level grounding for long-lived agent memory')).toBeInTheDocument();
     expect(map.mock.calls.length).toBeGreaterThan(calls);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /Artificial Intelligence/ }));
+    expect(screen.getByRole('tooltip')).toHaveTextContent('99 new');
   });
 
   it('R3-03 refreshes findings when a research job leaves the active list', async () => {
@@ -133,6 +137,32 @@ describe('FX-D review regressions', () => {
     await flush();
     expect(resume).toHaveBeenCalledWith(paused.id, { checkpoint_id: checkpoint.id, revision: checkpoint.revision, decision_choice: 'download_local' });
     expect(materials.mock.calls.length).toBeGreaterThan(count);
+  });
+
+  it('R3-04 polls a started check through its budget pause and reattaches after reopening', async () => {
+    vi.useFakeTimers();
+    const kb = createFakeKb('topic');
+    let started = false;
+    let paused = false;
+    const check = () => ({ ...f.KbRepeatCheck, area_id: 'topic-rag', state: paused ? 'paused' as const : 'running' as const,
+      stop_reason: paused ? 'budget' as const : null, checkpoint: paused ? checkpoint : null, materials_checked: paused ? 3 : 1 });
+    kb.explore.jobs = async () => ({ jobs: started ? [summary(check())] : [] });
+    kb.repeats.check = async () => check();
+    kb.repeats.start = async () => { started = true; return check(); };
+    const view = render(<ExploreSection clients={kb} initial={{ topicId: 'topic-rag' }} />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Check older materials' }));
+    await flush();
+    paused = true;
+    await tick();
+    expect(screen.getByText('Repeat check paused')).toBeInTheDocument();
+    expect(screen.getByText(/3 of .* materials checked/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
+    view.unmount();
+    render(<ExploreSection clients={kb} initial={{ topicId: 'topic-rag' }} />);
+    await flush();
+    expect(screen.getByText('Repeat check paused')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
   });
 
   it('R3-05 preserves the notified weekly check id and allows checkpoint recovery', async () => {
@@ -226,6 +256,30 @@ describe('FX-D review regressions', () => {
     expect(await screen.findByRole('button', { name: /Physical Sciences/ })).toBeInTheDocument();
   });
 
+  it('R3-08 retries the failed parent scope without substituting the root', async () => {
+    const kb = createFakeKb('area');
+    kb.explore.jobs = async () => ({ jobs: [] });
+    const map = vi.spyOn(kb.areas, 'map').mockRejectedValueOnce(new KbApiError(503, 'private', 'not_ready'));
+    render(<ExploreSection clients={kb} initial={{ parentId: 'field-cs' }} />);
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByRole('button', { name: /Artificial Intelligence/ });
+    expect(map).toHaveBeenLastCalledWith({ parent_id: 'field-cs' });
+  });
+
+  it.each(['pause', 'cancel', 'resume'] as const)('R3-08 catches %s provider failures without exposing provider detail', async (action) => {
+    const kb = createFakeKb('home');
+    kb.explore.jobs = async () => ({ jobs: [] });
+    const run = { ...scenes.searching.run, state: action === 'pause' ? 'running' as const : 'paused' as const,
+      stop_reason: 'user_pause' as const, checkpoint };
+    kb.explore.run = async () => run;
+    kb.explore[action] = async () => { throw new KbApiError(502, 'private provider text', 'provider_unavailable'); };
+    render(<ExploreSection clients={kb} initial={{ run }} />);
+    fireEvent.click(await screen.findByRole('button', { name: action === 'pause' ? 'Stop' : action === 'cancel' ? 'Cancel' : 'Continue' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/provider is unavailable/i);
+    expect(screen.queryByText('private provider text')).toBeNull();
+  });
+
   it('R3-08 explains consent failure before a run exists and routes to Settings', async () => {
     const kb = createFakeKb('home');
     kb.explore.jobs = async () => ({ jobs: [] });
@@ -265,6 +319,22 @@ describe('FX-D review regressions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load more findings' }));
     expect(await screen.findByText('Page two finding')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load more findings' })).toBeNull();
+  });
+
+  it('R3-09 keeps loaded pages when job progress refreshes the current scope', async () => {
+    vi.useFakeTimers();
+    const kb = createFakeKb('topic');
+    let changed = false;
+    kb.explore.jobs = async () => ({ jobs: changed ? [{ ...summary(scenes.searching.run), owner: 'research' }] : [] });
+    kb.areas.materials = async (_, q) => ({ ...scenes.topic.materials, next_cursor: q?.cursor ? null : 'next', materials: q?.cursor
+      ? [{ ...scenes.topic.materials.materials[0]!, material_id: 'later', title: 'Still on page two' }] : scenes.topic.materials.materials });
+    render(<ExploreSection clients={kb} initial={{ topicId: 'topic-rag' }} />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Load more materials' }));
+    await flush();
+    changed = true;
+    await tick();
+    expect(screen.getByText('Still on page two')).toBeInTheDocument();
   });
 
   it('R3-10 pins and unpins the active area using the saved PATCH response', async () => {
