@@ -713,6 +713,11 @@ export interface KbDisagreementSide {
   text: string;
 }
 
+export interface KbEnginePause {
+  engine: "codex" | "claude_code" | "hermes" | "opencode";
+  retry_at: string | null;
+}
+
 export interface KbExcludedFragment {
   seg: number;
   id: string;
@@ -1186,6 +1191,7 @@ export interface KbJob {
   created_at: string;
   updated_at: string;
   step_started_at?: string | null;
+  engine_pause?: KbEnginePause | null;
 }
 
 export interface KbJobLogEntry {
@@ -3652,6 +3658,13 @@ export interface KbEndpoints {
     body: never;
     response: KbJob;
     status: 200;
+  };
+  "POST /kb/jobs/{job_id}/continue": {
+    path: { job_id: string };
+    query: Record<string, never>;
+    body: never;
+    response: KbJob;
+    status: 202;
   };
   "GET /kb/library": {
     path: Record<string, never>;

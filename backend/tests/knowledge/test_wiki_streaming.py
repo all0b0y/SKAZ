@@ -167,7 +167,7 @@ async def test_after_the_model_repeated_itself_another_model_continues_from_the_
     assert "continues with Codex · other-model · low" in journal
 
 
-async def test_a_limit_mid_answer_fails_the_job_but_keeps_the_sections_for_retry(
+async def test_a_limit_mid_answer_pauses_the_job_and_keeps_the_sections_for_continue(
     kb_app: Any, kb_client: httpx.AsyncClient,
 ) -> None:
     broken = '{"sections": [' + section(ONE) + ', {"title": "Темп'
@@ -177,7 +177,8 @@ async def test_a_limit_mid_answer_fails_the_job_but_keeps_the_sections_for_retry
                              "more": False}, ensure_ascii=False)), Completed("")],
     ])
     failed = await _ingest(world, kb_client)
-    assert failed["state"] == "failed" and "usage limit" in failed["error"]
+    assert failed["state"] == "paused" and "usage limit" in failed["error"]
+    assert failed["error_code"] == "ENGINE_LIMIT" and not failed["can_retry"]
     done = await _ingest(world, kb_client)
     assert done["state"] == "done", done["error"]
     retry = world.notes_turns()[-1]

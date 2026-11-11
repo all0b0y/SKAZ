@@ -1,6 +1,7 @@
 """Codex liveness over a scripted event stream and an injected clock; no model or sleeps."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -50,7 +51,7 @@ def scripted(monkeypatch: pytest.MonkeyPatch, connection: FakeConnection,
         clock.now += timeout
         raise TimeoutError
 
-    monkeypatch.setattr(codex.asyncio, "wait_for", wait)
+    monkeypatch.setattr(asyncio, "wait_for", wait)
     return engine, clock
 
 
@@ -95,7 +96,8 @@ async def test_steady_run_events_keep_it_alive_until_the_absolute_ceiling(
 
 async def test_a_lively_long_answer_can_finish(monkeypatch: pytest.MonkeyPatch,
                                                connection: FakeConnection) -> None:
-    script = [(at, event("item/reasoning/textDelta")) for at in range(500, 3500, 500)]
+    script: list[tuple[float, dict[str, Any]]] = [
+        (at, event("item/reasoning/textDelta")) for at in range(500, 3500, 500)]
     script.append((3500, event("turn/completed", turn={"id": "turn", "status": "completed"})))
     engine, clock = scripted(monkeypatch, connection, script)
     result = await collect(engine.run(turn()))

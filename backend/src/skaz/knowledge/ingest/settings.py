@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from ..errors import KnowledgeError
@@ -34,6 +35,30 @@ MAX_BUDGET_CHARACTERS = 1_000_000_000
 DEFAULT_LANGUAGE = "en"
 ENGINE_IDS = ("codex", "claude_code", "hermes", "opencode")
 _LANGUAGE = re.compile(r"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
+#: Operational queue state, separate from the user's model choices; persisted across restart.
+ENGINE_PAUSE_KEY = "wiki_engine_pause."
+
+
+@dataclass(frozen=True)
+class EnginePause:
+    engine: str
+    retry_at: datetime | None
+
+
+def parse_engine_pause(engine: str, raw: Any) -> EnginePause | None:
+    if engine not in ENGINE_IDS or not isinstance(raw, dict):
+        return None
+    reset = raw.get("retry_at")
+    try:
+        at = datetime.fromisoformat(reset) if isinstance(reset, str) else None
+    except ValueError:
+        at = None  # an unreadable reset is unknown, never permission to send
+    return EnginePause(engine, at.replace(tzinfo=UTC) if at is not None and at.tzinfo is None else at)
+
+
+def read_engine_pauses(repo: SettingsRepository) -> dict[str, EnginePause]:
+    return {engine: pause for engine in ENGINE_IDS
+            if (pause := parse_engine_pause(engine, repo.get(ENGINE_PAUSE_KEY + engine))) is not None}
 
 
 class InvalidSetting(KnowledgeError):

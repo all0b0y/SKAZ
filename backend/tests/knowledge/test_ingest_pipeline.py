@@ -606,6 +606,7 @@ async def test_missing_detector_or_engine_fails_honestly(ready: KnowledgeService
     no_engine = service_for(ready, None)
     job = await no_engine.request_ingest(material_id)
     assert (await wait_finished(no_engine, job.id)).error == NO_ENGINE
+    await no_engine.close()
 
     wiki = ScriptedWiki(notes=[NOTES_OK])
     no_detector = IngestService(ready, engines=lambda _engine_id: wiki.engine)
@@ -624,8 +625,10 @@ async def test_engine_failure_is_reported_with_its_reason(ready: KnowledgeServic
     ingest = IngestService(ready, engines=lambda _engine_id: engine, detector=PatternDetector())
     job = await ingest.request_ingest(material_id)
     record = await wait_finished(ingest, job.id)
-    assert record.state == "failed" and record.error == "The agent stopped: Usage limit reached."
-    assert record.error_code is None  # a limit is not fixed in Settings: retry later
+    assert record.state == "paused"
+    assert record.error == "Codex: usage limit reached. The finished work is kept."
+    assert record.error_code == "ENGINE_LIMIT" and not record.can_retry
+    await ingest.close()
 
 
 @pytest.mark.parametrize("kind", ["auth", "incompatible"])

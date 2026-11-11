@@ -30,7 +30,7 @@ from .corrections.offer import AutoFixesOffer
 from .decisions.protocol import Answer, DeciderId, DecisionLayer, Question, Undecided
 from .decisions.service import DecisionService
 from .ids import new_id
-from .ingest.execution import ExecutionScope, execution_scope
+from .ingest.execution import ExecutionScope, current_execution, execution_scope
 from .ingest.jobs import JobKind, JobRecord
 from .ingest.service import IngestService
 from .logsafe import error_note
@@ -228,8 +228,9 @@ def follow_up_continuer(
             return None
         ingest = wiki.ingest
         root = new_id("job")  # the root of this portion; its jobs carry it, it has no row of its own
-        scope = ExecutionScope(wiki.kb.db, root, root, ingest.profile(), budget=ingest.settings().budget,
-                               material_id=material_id)
+        scope = current_execution() or ExecutionScope(
+            wiki.kb.db, root, root, ingest.profile(), budget=ingest.settings().budget,
+            material_id=material_id)
         started: JobRecord | None = None
         # Each kind on its own: one busy with another run (a wiki-wide connection run, this folder's
         # overview) starts right after it in the background instead of refusing Continue.

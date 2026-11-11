@@ -34,6 +34,10 @@ def job_view(record: JobRecord) -> KbJob:
         "journal": [KbJobLogEntry(at=entry.at, message=entry.message) for entry in record.journal],
         "created_at": record.created_at, "updated_at": record.updated_at,
         "step_started_at": record.step_started_at,
+        "engine_pause": {"engine": record.engine_pause.engine,
+                         "retry_at": (record.engine_pause.retry_at.isoformat()
+                                      if record.engine_pause.retry_at is not None else None)}
+                        if record.engine_pause is not None else None,
     })
 
 
@@ -83,6 +87,14 @@ async def read_job(job_id: str, ingest: IngestDep) -> KbJob:
 async def cancel_job(job_id: str, ingest: IngestDep) -> KbJob:
     try:
         return job_view(await ingest.cancel(job_id))
+    except KnowledgeError as error:
+        raise HTTPException(status_code=error.status_code, detail=error.message) from error
+
+
+@router.post("/kb/jobs/{job_id}/continue", status_code=202)
+async def continue_job(job_id: str, ingest: IngestDep) -> KbJob:
+    try:
+        return job_view(await ingest.continue_job(job_id))
     except KnowledgeError as error:
         raise HTTPException(status_code=error.status_code, detail=error.message) from error
 

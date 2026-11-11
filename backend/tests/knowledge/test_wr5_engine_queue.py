@@ -398,7 +398,7 @@ async def test_continue_on_another_paused_engine_releases_only_the_selected_engi
 ) -> None:
     clock = Clock()
     ingest, codex, jobs = await limited(ready, clock, None, count=1)
-    other = ScriptedWiki(notes=[NOTES_OK]).engine
+    other = ScriptedWiki(notes=[NOTES_OK, NOTES_OK]).engine
     other._id = "hermes"
     ingest.engines = lambda selected: other if selected == "hermes" else codex
     waiting = ingest.jobs.create(add_material(ready, "Quota", "Hermes queued", kind="pdf"),

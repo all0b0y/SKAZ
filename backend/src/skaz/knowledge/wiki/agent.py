@@ -25,7 +25,7 @@ from ..ingest.execution import (
     retry_unsent,
     run_wiki_turn,
 )
-from ..ingest.jobs import agent_failure_code, agent_failure_text
+from ..ingest.jobs import EngineLimited, agent_failure_code, agent_failure_text
 from ..ingest.model import AnswerInvalid, parse_answer
 from ..ingest.prompts import repair_message
 
@@ -62,6 +62,8 @@ class AgentCaller:
                 f" It should work again after {terminal.retry_at.isoformat()}." if terminal.retry_at else ""
             )
             reason = agent_failure_text(terminal.kind, terminal.message) + when
+            if terminal.kind == "limit":
+                raise EngineLimited(self.engine.id, terminal.retry_at)
             delays = self.retry_delays_s
             if terminal.kind not in STOP_KINDS and retry_unsent(terminal) and unsent < UNSENT_RETRIES:
                 await asyncio.sleep(delays[min(unsent, len(delays) - 1)])
